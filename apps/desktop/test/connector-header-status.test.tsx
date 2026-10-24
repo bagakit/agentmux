@@ -37,11 +37,11 @@ const effects = () => f.platformCalls.filter(call => call.url?.endsWith('/messag
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 8000 }) }
 async function open() { await act(async () => { trigger()!.focus(); trigger()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) }); await wait(() => expect(menu()).not.toBeNull()) }
 async function check() { await act(async () => [...menu().querySelectorAll<HTMLElement>('button')].find(node => node.textContent === 'Refresh observations')!.click()) }
-async function bind(shared = false) {
+async function bind(shared?: boolean) {
   await f.mount(); await f.journey('existing'); await f.fill('Existing group ID', 'oc_header_status')
-  if (shared) {
+  if (shared !== undefined) {
     await act(async () => { const select = document.querySelector<HTMLElement>('[aria-label="Group sharing content"]')!; select.focus(); select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
-    await act(async () => document.querySelector<HTMLElement>('[role="menuitemradio"][data-value="future-shared-conversation"]')!.click())
+    await act(async () => document.querySelector<HTMLElement>(`[role="menuitemradio"][data-value="${shared ? 'future-shared-conversation' : 'future-native-user-facing'}"]`)!.click())
   }
   await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click())
   await f.button('Connect group'); await wait(() => expect(f.services.bindings!.listActive()).toHaveLength(1))
@@ -353,4 +353,38 @@ it('a disabled platform action opens the exact bot settings on its original Host
   expect(f.settings).toHaveBeenCalledWith({ sessionId: f.session.id, hostId: target.executionHostId, agentSessionId: target.agentSessionId, hostingTarget: f.hostingTarget,
     connection: { connectionId: binding.connectionId, adapterId: f.config.adapterId, application: binding.application } })
   expect((await f.forward('connection.service.get', { adapterId: f.config.adapterId })).enabled).toBe(false)
+}, 30_000)
+
+
+it('the actual header explains an unsupported message without blaming member access or losing delivered replies', async () => {
+  const binding = await bind(false); await wait(() => expect(f.ingressTransport!.sockets).toHaveLength(1))
+  await f.forward('connection.grant', { operationId: 'header-supported-member', bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: 'supported-member-input', expectedRevision: null,
+    actor: { application: f.config.application, idType: 'open_id', userId: 'original-external-user' }, capabilities: ['input', 'answer', 'permission'], state: 'active' })
+  await appendFile(f.original.transcript, row('supported-original-reply', 'assistant'))
+  await wait(() => expect(speech(binding).at(-1)?.state).toBe('confirmed'))
+  const originalReply = speech(binding).at(-1)!, originalEffects = effects()
+  const payload = feishuPayload({ message_id: 'header-unsupported-image', chat_id: binding.externalConversationId, message_type: 'image', content: JSON.stringify({ image_key: 'PRIVATE original image' }) })
+  payload.header.event_id = 'header-unsupported-image-event'
+  await f.ingressTransport!.receive(payload)
+  await vi.waitFor(async () => {
+    const report = await f.forward('connection.diagnose', { ...target, bindingId: binding.bindingId, bindingRevision: binding.revision })
+    const group = report.groups.value!.items[0]!
+    expect(group.binding.value).toMatchObject({ activeInputGrants: 1, activeAnswerGrants: 1, activePermissionGrants: 1 })
+    expect(group.incoming.value?.rows[0]).toMatchObject({ state: 'refused', code: 'INGRESS_CONTENT_UNSUPPORTED', inputOperationId: null, recording: { state: 'refused' } })
+  }, { timeout: 8000 })
+  await open(); await wait(() => expect(menu().textContent).toContain('Message type not supported'))
+  const incoming = menu().querySelector('[data-direction="incoming"]')!
+  expect(incoming.textContent).toContain('Message type not supported')
+  expect(menu().querySelector('[data-direction="outgoing"]')!.textContent).toMatch(/delivered/)
+  expect(menu().querySelector('[data-problem-kind="recording-unconfirmed"]')).toBeNull()
+  expect(menu().querySelector('[data-problem-kind="member-access"]')).toBeNull()
+  expect(menu().querySelector('[data-connection-action="members"]')).toBeNull()
+  expect(menu().textContent).toContain('Try a text message')
+  expect(menu().textContent).toContain('Message not recorded')
+  expect(menu().textContent).not.toContain('PRIVATE original image')
+  expect(menu().querySelector('.connector-header-menu__item small')?.getAttribute('title')).toContain('User and Agent-to-Agent messages are not shared')
+  expect(speech(binding).find(value => value.operationId === originalReply.operationId)).toEqual(originalReply)
+  expect(effects()).toBe(originalEffects)
+  const before = writes(); await check(); await wait(() => expect(menu().textContent).toContain('Message type not supported'))
+  expect(writes()).toBe(before)
 }, 30_000)

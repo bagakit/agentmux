@@ -5,13 +5,14 @@ const { app, BrowserWindow } = require('electron')
 const { nativeRendererInput } = require('../settings-connections/native-input.cjs')
 const [html, privateRoot, evidence] = process.argv.slice(2)
 const popoverClarity = process.argv.includes('--popover-clarity')
+const refusalClarity = process.argv.includes('--refusal-clarity')
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { passed: false, frames: [], scenes: [], interactions: [], hoverGeometry: {}, boundary: 'Actual production Workbench, split Regions, channel contributions, header/menu, original group form and CSS; controlled typed public connection/diagnosis/member/retained-link DTOs. Native pointer/keyboard operates the original components. No IPC/SDK, live account, delivery, installed App or healthy-Agent qualification.' }
 let win
 app.whenReady().then(async () => {
   try {
     win = new BrowserWindow({ width: 1380, height: 980, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
-    await win.loadFile(html, { query: { 'header-status': '1', ...(popoverClarity ? { 'popover-clarity': '1' } : {}) } })
+    await win.loadFile(html, { query: { 'header-status': '1', ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}) } })
     const { read, until, settle, click, press } = nativeRendererInput(win, result.interactions, '')
     const region = '[data-workbench-region-id="channel-preview-region"]'
     const entry = adapter => region + ' [data-channel-entry="' + adapter + '"]'
@@ -75,6 +76,20 @@ app.whenReady().then(async () => {
     await until('window.channelEntryProof?.ready && document.querySelector(' + JSON.stringify(entry('discord')) + ')')
     await read('window.__connectionsTrustedEvents=[];for(const type of ["click","keydown","input","mousemove"])document.addEventListener(type,event=>window.__connectionsTrustedEvents.push({type,trusted:event.isTrusted,key:event.key}),true)')
     win.showInactive(); win.focus(); win.webContents.focus(); await until('document.hasFocus()')
+    if (refusalClarity) {
+      await read('window.channelEntryProof.setScenario("unsupported")')
+      for (const narrow of [false, true]) {
+        await layout(narrow); await open('feishu')
+        await until('document.querySelector(' + JSON.stringify(menu) + ')?.textContent.includes("Message type not supported")')
+        const report = await read('window.channelEntryProof.lastDiagnosis'), group = report.groups.value.items[0]
+        assert.equal(group.incoming.value.rows[0].code, 'INGRESS_CONTENT_UNSUPPORTED')
+        assert.equal(group.outgoing.value.deliveries[0].receipt, 'confirmed')
+        assert.equal(group.binding.value.activeInputGrants > 0, true)
+        await capture(narrow ? 'unsupported-narrow' : 'unsupported-wide')
+      }
+      result.passed = true
+      return
+    }
     if (popoverClarity) {
       // Reuse this native-input consumer; the original eight-scene journey below is not rerun.
       async function hoverAcross(label) {
