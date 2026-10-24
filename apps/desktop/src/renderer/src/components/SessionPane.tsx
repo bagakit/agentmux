@@ -18,7 +18,7 @@ import type { AgentMuxRunExitReason, AgentSessionUserMessage, AgentSessionHistor
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { nativeSourceUnconfirmed, projectNativeSourceFacts } from '../../../shared/agent-native-source'
-import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
+import { CONNECTION_UNRECOVERABLE_DETAIL, pendingAgentLaunchStorageWait } from '../lib/session-state'
 import { originalFrontendRecovery } from '../lib/session-original-recovery'
 import { sessionExitPresentation, sessionFrontendPresentation, sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
 import { currentContinuitySupervision } from '../lib/continuity-supervision'
@@ -159,6 +159,7 @@ export function SessionPane({
   const session = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.pendingAgentLaunches[sessionId])
+  const storageWait = !session ? pendingAgentLaunchStorageWait(pendingLaunch, sessionId) : undefined
   const pendingTerminal = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => {
     const surface = linkOrigin.tabId && linkOrigin.regionId ? state.tabs[linkOrigin.tabId]?.regions[linkOrigin.regionId] : undefined
     return surface?.kind === 'terminal' && surface.phase === 'launching' && surface.sessionId === sessionId
@@ -642,8 +643,19 @@ export function SessionPane({
     finally { if (observationActive.current) setRefreshing(false) }
   }
 
-  const unobservedActionsAt = (origin = mailboxOrigin, displayId: string | null = null) => projectionPolicy.allowsRecovery && unobservedIdentity ? <>
-    {unobservedReadError || unobservedReference?.issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+  const unobservedActionsAt = (origin = mailboxOrigin, displayId: string | null = null) => <>
+    {storageWait ? <ServiceWindowNotice summary={{
+      step: 'Waiting for storage',
+      mode: 'Agent has not started. The original request and initial prompt are kept.',
+      restore: 'Free storage to continue automatically.' + (unobservedReadError ? ' Latest check unavailable; see details.' : '')
+    }} notice={{ kind: 'indeterminate', notice: {
+      step: storageWait.message,
+      mode: 'The Agent has not started. The original Session, request and initial prompt are retained.',
+      restore: 'Free storage on this host. This original request will continue automatically.' +
+        (unobservedReadError ? ` Latest read: ${unobservedReadError}` : '')
+    } }} /> : null}
+    {projectionPolicy.allowsRecovery && unobservedIdentity ? <>
+    {!storageWait && (unobservedReadError || unobservedReference?.issue) ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
       step: unobservedReadError ?? unobservedReference!.issue!,
       mode: 'The original Region and drafts are retained. Current Session facts are not confirmed.',
       restore: 'Re-read this original owner. This action does not start a Run or send input.'
@@ -653,7 +665,8 @@ export function SessionPane({
       : <button type="button" className="small-button" disabled={refreshing} onClick={() => void refreshUnobserved()}>
         <ThemeActionRefreshIcon size={12} /> {refreshing ? 'Reading…' : 'Check original identity'}
       </button>}
-  </> : null
+    </> : null}
+  </>
 
   const unobservedActions = unobservedActionsAt()
 

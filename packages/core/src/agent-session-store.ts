@@ -7,6 +7,7 @@ import { MAX_STORED_TEXT_BYTES, parsePromptSubmissionRecord, normalizePromptComp
 export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from './prompt-submission-record.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
+import { agentCreationNotAppliedError, finishAgentCreationCleanup } from './agent-creation-failure.js'
 import { observeRead } from './observation-read.js'
 import { parseCumulativeUsage } from './agent-usage-transcript.js'
 import { parseAgentForkSource } from './agent-fork.js'
@@ -2521,7 +2522,13 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       [...this.sessions.values()],
       this.retiredAgentSessions
     )
-    this.reservations.set(reservation.agentSessionId, structuredClone(reservation))
+    try { this.reservations.set(reservation.agentSessionId, structuredClone(reservation)) }
+    catch (error) {
+      if (reservation.kind !== 'create') throw error
+      const failure = agentCreationNotAppliedError(error, reservation.operationId)
+      await finishAgentCreationCleanup(failure, [async () => { await this.releaseLifecycle(reservation) }])
+      throw failure
+    }
   }
 
   async readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null> {
@@ -3115,8 +3122,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async reserveLifecycle(value: AgentMuxLifecycleReservation): Promise<void> {
-    await this.enqueue(async () => {
-      const reservation = lifecycleReservation(value)
+    const reservation = lifecycleReservation(value)
+    let admissionChecked = false
+    try { await this.enqueue(async () => {
       const document = await this.read()
       const current = document.reservations.find(item => item.agentSessionId === reservation.agentSessionId)
       if (current && !canSupersedeRestartWithStop(current, reservation)) {
@@ -3127,13 +3135,21 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         document.sessions,
         document.retiredAgentSessions
       )
+      // Only this locked new reservation has proved there is no existing owner.
+      // Lock/open/read and competing operation failures cannot make this claim.
+      admissionChecked = reservation.kind === 'create'
       await this.write({
         ...document,
         reservations: current
           ? document.reservations.map(item => item.agentSessionId === reservation.agentSessionId ? reservation : item)
           : [...document.reservations, reservation]
       })
-    })
+    }) } catch (error) {
+      if (!admissionChecked) throw error
+      const failure = agentCreationNotAppliedError(error, reservation.operationId)
+      await finishAgentCreationCleanup(failure, [async () => { await this.releaseLifecycle(reservation) }])
+      throw failure
+    }
   }
 
   async readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null> {
