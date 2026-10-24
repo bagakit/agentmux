@@ -15,7 +15,9 @@ assuming the current Tab contains every resource or Agent.
 
 app window ls observes the original client windows and their opaque document generations.
 app window open moves one exact discovered Tab/Region occurrence; it does not clone content,
-change the Core graph, start a Run or change execution cwd. app window focus/return require
+change the Core graph, start a Run or change execution cwd. Use --background when opening
+only a presentation, preserving native input focus; without it, open requests window focus.
+app window focus/return require
 the exact window and document generation. Returning closes only its shell after the original
 workface has returned. Retain the original operation ID: query it with app window ls after
 an unknown result, without automatically opening another window. A recorded acknowledgement
