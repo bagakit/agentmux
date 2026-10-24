@@ -1,14 +1,28 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
-import { tmpdir } from 'node:os'
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
-const tests = ['packages/core/test/capsule-runtime.test.ts', 'packages/core/test/capsule-terminal-preparation.test.ts']
+const tests = ['packages/core/test/capsule-runtime.test.ts', 'packages/core/test/capsule-terminal-preparation.test.ts', 'packages/core/test/prepared-creation-observation.test.ts']
 const mutations = [
+  { id: 'original-query-scans-inventory', file: 'packages/core/src/ctxmux-run-adapter.ts',
+    from: 'const { observation } = await this.requireClient().observeCreation(createOperationKey(operationKey))',
+    to: 'await this.requireClient().list(); const { observation } = await this.requireClient().observeCreation(createOperationKey(operationKey))',
+    assertion: 'observes one exact creation without consulting' },
+  { id: 'original-query-retargeted', file: 'packages/core/src/ctxmux-run-adapter.ts',
+    from: 'observeCreation(createOperationKey(operationKey))', to: "observeCreation(createOperationKey('foreign-creation'))",
+    assertion: 'observes one exact creation without consulting' },
+  { id: 'original-query-ignores-frozen-spec', file: 'packages/core/src/ctxmux-run-adapter.ts',
+    from: 'if (!isDeepStrictEqual(observation.run.spec, request))', to: 'if (false)',
+    assertion: 'refuses a retained original key whose complete frozen launch differs' },
+  { id: 'not-retained-repeats-start', file: 'packages/core/src/ctxmux-run-adapter.ts',
+    from: "if (observation.outcome === 'not_retained') return null",
+    to: "if (observation.outcome === 'not_retained') return await this.startPrepared(request, operationKey)",
+    assertion: 'keeps not-retained unknown and inspects the same operation' },
   { id: 'observed-terminal-start-blocked', file: 'packages/core/src/capsule-run-manager.ts',
     from: "if (b.launchPhase === 'dispatched' && !original || !terminalRun(original))",
     to: "if (b.launchPhase === 'dispatched' || !terminalRun(original))",
@@ -60,14 +74,16 @@ const mutationIndex = process.argv.indexOf('--mutation')
 const selectedMutations = mutationIndex < 0 ? mutations : mutations.filter(mutation => mutation.id === process.argv[mutationIndex + 1])
 if (mutationIndex >= 0) assert.equal(selectedMutations.length, 1, '--mutation requires one known source mutation ID')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
-const directory = await mkdtemp(join(tmpdir(), 'amux-capsule-runtime-unit-'))
+await mkdir(join(root, '.tmp'), { recursive: true })
+const directory = await mkdtemp(join(root, '.tmp', 'capsule-runtime-unit-'))
 await symlink(join(root, 'node_modules'), join(directory, 'node_modules'), 'dir')
 const receipt = { schema: 'agentmux.capsule-runtime-unit-proof.v1', passed: false,
   boundary: 'Focused real management source with controlled Native outcomes; the companion runtime proof consumes actual compiled Core, CLI, ctxmux and service processes.',
-  inputs: {}, baseline: null, mutations: [] }
+  evidenceDirectory: directory, inputs: {}, sdkInputs: {}, baseline: null, mutations: [] }
 
 async function run(name, mutation) {
   const report = join(directory, `${name}.json`), config = join(directory, `${name}.config.mts`)
+  const witness = join(directory, `${name}.loaded.json`)
   let plugin = ''
   if (mutation) {
     const source = await readFile(join(root, mutation.file), 'utf8')
@@ -76,10 +92,10 @@ async function run(name, mutation) {
     assert.notEqual(sha(source), sha(transformed))
     receipt.inputs[mutation.file] = sha(source)
     // Vite mutates the actual owning implementation as loaded, never shared source or dist.
-    plugin = `plugins:[{name:'capsule-source-mutation',enforce:'pre',transform(code,id){if(id.split('?')[0]===${JSON.stringify(resolve(root, mutation.file))}){if(code.split(${JSON.stringify(mutation.from)}).length!==2)throw new Error('Mutation source anchor unavailable');return {code:code.replace(${JSON.stringify(mutation.from)},${JSON.stringify(mutation.to)}),map:null}}}}],`
+    plugin = `plugins:[{name:'capsule-source-mutation',enforce:'pre',transform(code,id){if(id.split('?')[0]===${JSON.stringify(resolve(root, mutation.file))}){if(code.split(${JSON.stringify(mutation.from)}).length!==2)throw new Error('Mutation source anchor unavailable');const next=code.replace(${JSON.stringify(mutation.from)},${JSON.stringify(mutation.to)});writeFileSync(${JSON.stringify(witness)},JSON.stringify({original:sha(code),loaded:sha(next)}));return {code:next,map:null}}}}],`
     mutation.loadedSha256 = sha(transformed)
   }
-  await writeFile(config, `import base from ${JSON.stringify(join(root, 'packages/core/test/capsule-runtime.config.mts'))};export default {...base,root:${JSON.stringify(root)},${plugin}test:{...base.test,passWithNoTests:false,maxWorkers:1}};\n`)
+  await writeFile(config, `import { writeFileSync } from 'node:fs';import { createHash } from 'node:crypto';const sha=v=>createHash('sha256').update(v).digest('hex');import base from ${JSON.stringify(join(root, 'packages/core/test/capsule-runtime.config.mts'))};export default {...base,root:${JSON.stringify(root)},${plugin}test:{...base.test,passWithNoTests:false,maxWorkers:1}};\n`)
   const result = await new Promise((resolveRun, reject) => {
     const args = [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config, '--reporter=json', '--outputFile', report]
     if (mutation) args.push('-t', mutation.assertion)
@@ -92,17 +108,20 @@ async function run(name, mutation) {
   let data
   try { data = JSON.parse(await readFile(report, 'utf8')) }
   catch { throw new Error(`${name}: no valid test report; infrastructure failure is not semantic RED. ${result.output.slice(-4000)}`) }
+  await writeFile(join(directory, name + '.log'), result.output)
   const assertions = data.testResults.flatMap(suite => suite.assertionResults)
   assert.ok(assertions.length > 0, 'An empty suite is not proof')
   assert.equal(data.numRuntimeErrorTestSuites ?? 0, 0, result.output.slice(-4000))
   const failures = assertions.filter(item => item.status === 'failed')
   if (mutation) {
+    const loaded = JSON.parse(await readFile(witness, 'utf8'))
+    assert.equal(loaded.original, receipt.inputs[mutation.file]); assert.equal(loaded.loaded, mutation.loadedSha256)
     assert.equal(result.code, 1, `${name}: source mutation must fail. ${result.output.slice(-4000)}`)
     assert.ok(failures.some(item => item.fullName.includes(mutation.assertion) && item.failureMessages.some(message => message.includes('AssertionError') || message.includes('promise resolved') || message.includes('promise rejected'))),
       `${name}: designated business assertion must fail, not collection/preparation. ${result.output.slice(-4000)}`)
   } else {
     assert.equal(result.code, 0, result.output.slice(-4000)); assert.equal(data.numFailedTests, 0)
-    assert.equal(data.numPassedTests, 30, 'Both management and actual Client/adapter suites must execute')
+    assert.equal(data.numPassedTests, 36, 'Management, Client/adapter and actual SDK wire suites must execute')
   }
   return { exitCode: result.code, passed: data.numPassedTests, failed: data.numFailedTests,
     reportSha256: sha(await readFile(report)), ...(mutation ? { id: mutation.id, source: mutation.file,
@@ -110,6 +129,11 @@ async function run(name, mutation) {
 }
 
 try {
+  const sdk = resolve(process.env.CTXMUX_TEST_SDK_SOURCE ?? createRequire(import.meta.url).resolve('@ctxmux/sdk'))
+  for (const name of await readdir(dirname(sdk), { recursive: true })) {
+    if (name.endsWith('.js')) { const path = join(dirname(sdk), name); receipt.sdkInputs[path] = sha(await readFile(path)) }
+  }
+  assert.ok(Object.keys(receipt.sdkInputs).length > 0, 'Actual SDK output must be source-bound')
   for (const path of [...tests, 'packages/core/src/capsule-runtime.ts', 'packages/core/src/capsule-run-manager.ts',
     'packages/core/src/client.ts', 'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/terminal-preparation.ts',
     'packages/core/test/capsule-runtime.config.mts', 'packages/core/scripts/verify-capsule-runtime-unit.mjs'])
@@ -119,7 +143,11 @@ try {
     for (const mutation of selectedMutations) receipt.mutations.push(await run(mutation.id, mutation))
   for (const [path, digest] of Object.entries(receipt.inputs))
     assert.equal(sha(await readFile(join(root, path))), digest, `Concurrent source changed; rerun evidence: ${path}`)
+  for (const [path, digest] of Object.entries(receipt.sdkInputs)) assert.equal(sha(await readFile(path)), digest, `SDK output changed: ${path}`)
   receipt.passed = true
+} catch (error) {
+  receipt.error = error instanceof Error ? error.message : String(error)
+  throw error
 } finally {
   const targetIndex = process.argv.indexOf('--output')
   if (targetIndex >= 0) {
@@ -127,6 +155,5 @@ try {
     assert.ok(path, '--output requires an evidence file')
     await writeFile(resolve(path), JSON.stringify(receipt, null, 2) + '\n')
   }
-  await rm(directory, { recursive: true, force: true })
 }
 process.stdout.write(JSON.stringify(receipt) + '\n')
