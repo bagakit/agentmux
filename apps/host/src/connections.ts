@@ -1,6 +1,6 @@
 import { AgentMuxError, AgentMuxSpatialStateStore, spatialCatalog, type AgentMuxHeadlessRuntime, type AgentMuxClient } from '@agentmux/core'
 import { createHash } from 'node:crypto'
-import { displayLabel } from '@agentmux/core/spatial-graph'
+import { displayLabel, type AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import { createConnectionServices, createPublicationConversationPort, createHostedIngressCorePort, type ConnectionServices } from '@agentmux/connectors'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ConnectionPort } from '@agentmux/core/connections'
@@ -11,8 +11,26 @@ import { createCredentialAdministration } from './credential-administration.js'
 import { createHostMoteConnections } from './mote-connections.js'
 import { createHostMoteAvatarRead } from './mote-avatar-read.js'
 import { createMoteChatResources, readMoteResourceConfiguration } from './mote-resources.js'
+import { homeZoneId } from './mote-model.js'
 
 type ExecutionClient = AgentMuxClient | AgentMuxHostedClient
+
+/** Current display affiliation only; it never changes the original Session author or execution. */
+function groupSpeakerMote(graph: AgentMuxSpatialGraph, reference: { hostId: string; agentSessionId: string }) {
+  const candidates = new Map<string, { spaceId: string; zoneId: string; workspaceId: string }>()
+  for (const region of graph.regions) if (region.kind === 'agent' && region.agentSessionId === reference.agentSessionId) {
+    const tab = graph.tabs.find(tab => tab.tabId === region.tabId && tab.regionIds.includes(region.regionId))
+    const zone = tab && graph.zones.find(zone => zone.zoneId === tab.zoneId && zone.hostId === reference.hostId)
+    if (zone) for (const binding of graph.bindings) if (binding.zoneId === zone.zoneId) {
+      const space = graph.spaces.find(space => space.spaceId === binding.spaceId && space.kind === 'mote' && space.hostId === reference.hostId)
+      const home = space && graph.zones.find(home => home.zoneId === homeZoneId(space.spaceId) && home.kind === 'home' && home.hostId === reference.hostId)
+      if (space && home && graph.bindings.some(binding => binding.spaceId === space.spaceId && binding.zoneId === home.zoneId))
+        candidates.set(space.spaceId, { spaceId: space.spaceId, zoneId: home.zoneId, workspaceId: home.workspaceId })
+    }
+  }
+  return candidates.size === 1 ? candidates.values().next().value : undefined
+}
+
 export type HostConnectionOptions = Pick<Parameters<typeof createConnectionServices>[0], 'directory' | 'adapters' | 'moteChat'> & {
   spatial?: AgentMuxSpatialStateStore
   /** Original profile/workspace configuration; read on demand, never a copied Host snapshot. */
@@ -89,10 +107,12 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
         const client = matches[0]!.client, session = await client.readAgentSession(reference.agentSessionId)
         if (!session || session.agentSessionId !== reference.agentSessionId || session.hostId !== 'local' && session.hostId !== reference.hostId) return {}
         const result: import('@agentmux/connectors').PublicationSpeakerDetails = {}
+        let affiliation: ReturnType<typeof groupSpeakerMote>
         try {
           if (reference.hostId === 'local') {
             const original = await spatial.readForLayout(), label = original && displayLabel(original.graph, { kind: 'agent-session', id: session.agentSessionId })
             if (label?.value) { result.name = label.value; result.nameRevision = label.nameRevision }
+            if (!mote && original) affiliation = groupSpeakerMote(original.graph, reference)
           } else if ('forwardRpc' in client && client.forwardRpc) {
             const original = await client.forwardRpc('agent.inspect', { target: { kind: 'agent-session', agentSessionId: session.agentSessionId } }, { signal })
             if (original.routeHostId === 'local' && original.session.agentSessionId === session.agentSessionId && original.displayName.availability === 'observed' && original.displayName.override) {
@@ -100,11 +120,19 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
             }
           }
         } catch { signal.throwIfAborted() /* Original role remains known without a display label. */ }
-        if (!mote || !resources || !avatars) return result
+        if (!resources || !avatars) return result
         try {
-          const original = await resources.read(mote)
-          result.name = original.topic.title; result.mote = mote
-          const target = { workspaceId: original.workspace.id, topicId: original.topic.id, objectKey: mote.spaceId }
+          let portrait = mote
+          if (!portrait && affiliation) {
+            const configuration = await readMoteResourceConfiguration(options.moteConfigurationPath!, affiliation)
+            if (configuration.workspace) portrait = { spaceId: affiliation.spaceId, zoneId: affiliation.zoneId,
+              expectedResource: { hostId: reference.hostId, workspaceId: configuration.workspace.id, workspacePath: configuration.workspace.path } }
+          }
+          if (!portrait) return result
+          const original = await resources.read(portrait)
+          if (mote) result.name = original.topic.title
+          result.mote = portrait
+          const target = { workspaceId: original.workspace.id, topicId: original.topic.id, objectKey: portrait.spaceId }
           result.avatar = { target, observation: 'unavailable' }
           try {
             const avatar = await avatars.read(target)
