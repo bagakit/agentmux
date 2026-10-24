@@ -274,6 +274,9 @@ importers:
       '@agentmux/capsule':
         specifier: workspace:*
         version: link:../../packages/capsule
+      '@agentmux/client-ui':
+        specifier: workspace:*
+        version: link:../../packages/client-ui
       '@agentmux/connectors':
         specifier: workspace:*
         version: link:../../packages/connectors

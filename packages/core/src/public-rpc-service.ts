@@ -176,6 +176,11 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   schedules?: AgentMuxRpcSchedulesOwner
   nativeDesktop?: AgentMuxRpcNativeDesktopOwner
   spatialState?: AgentMuxSpatialStateStore
+  /** Read only original host metadata; topology and execution remain with their Core owners. */
+  spatialPresentation?(input: { graph: import('./spatial-graph.js').AgentMuxSpatialGraph;
+    catalog: import('./space-control.js').AgentMuxSpaceCatalog; target: import('./space-control.js').AgentMuxSpaceSelector; imageSpaceId?: string },
+    context: AgentMuxRpcCallContext): Promise<Pick<import('./space-control.js').AgentMuxSpaceCatalog,
+      'agentPresentation' | 'motePresentation' | 'appearance' | 'survey'>>
   /** Optional host aggregation of original named owners; Core interprets no host target kinds. */
   nameHistory?(query: import('./display-label.js').AgentMuxNameHistoryQuery): Promise<import('./display-label.js').AgentMuxNameHistoryPage>
   /** Borrow the original Host configuration owner; no configuration is stored by this service. */
@@ -1452,13 +1457,21 @@ export class AgentMuxRpcService {
       if (method === 'toolkit.run' || method === 'toolkit.action' || method === 'toolkit.evaluate') {
         await this.assertToolkitExecutionAuthority(p.toolId, context)
       }
-      if (this.ports.spatialState && !this.ports.execute &&
-          (method === 'space.ls' || method === 'space.inspect') && p.presentation !== true) {
+      if (this.ports.spatialState && (method === 'space.ls' || method === 'space.inspect')) {
         const target = rpcRecord(p.target)
         if (!Object.hasOwn(target, 'operationId') && !Object.hasOwn(target, 'requestId') &&
             target.regionId !== 'self' && target.tabId !== 'self') {
           const request = rpcControlRequest(method, params)
-          return rpcControlResult(method, await this.execute(request)) as AgentMuxRpcResult<M>
+          // Desktop borrows the original Host for domain reads even while its screen is present.
+          if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', method, params, context)
+          const state = await this.spatial.readForLayout()
+          if (!state) throw new AgentMuxError('No durable spatial graph has been registered.', 'SPATIAL_STATE_ABSENT')
+          const selector = request.operation === 'space.ls' || request.operation === 'space.inspect' ? request.target as import('./space-control.js').AgentMuxSpaceSelector : {}
+          const catalog = spatialCatalog(state.graph, selector)
+          if (p.presentation === true && this.ports.spatialPresentation) Object.assign(catalog,
+            await this.ports.spatialPresentation({ graph: state.graph, catalog, target: selector,
+              ...(method === 'space.inspect' && typeof target.spaceId === 'string' ? { imageSpaceId: target.spaceId } : {}) }, context))
+          return rpcControlResult(method, { operation: method, catalog }) as AgentMuxRpcResult<M>
         }
       }
       if (this.ports.forwardControl) return await this.ports.forwardControl(method, params, context)
@@ -2272,10 +2285,7 @@ export class AgentMuxRpcService {
           .filter(activity => p.since === undefined || activity.createdAt >= Number(p.since)).slice(-limit), diskDurability: 'confirmed' }; break
       }
       case 'app.snapshot': {
-        if (this.ports.forwardControl) {
-          try { return await this.ports.forwardControl(method, params, context) }
-          catch (error) { if (!(error instanceof AgentMuxError) || error instanceof AgentMuxRpcError || error.code !== 'CONTROL_UNAVAILABLE') throw error }
-        }
+        if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', method, params, context)
         result = await this.snapshot(p); break
       }
       case 'system.subscription.cancel': throw new AgentMuxError('A subscription belongs to its transport connection.', 'INVALID_CONTROL_REQUEST')
