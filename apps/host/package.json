@@ -20,7 +20,8 @@
     "fs-native-extensions": "1.5.1",
     "@agentmux/client-ui": "workspace:*",
     "luxon": "3.7.2",
-    "@agentmux/demand": "workspace:*"
+    "@agentmux/demand": "workspace:*",
+    "@resvg/resvg-js": "2.6.2"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
