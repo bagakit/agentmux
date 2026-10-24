@@ -3,8 +3,80 @@ import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import * as core from '@agentmux/core'
 import { moteChatDiagnosisKey } from '@agentmux/core/mote-chat'
+import type { ConnectionDelivery, ConnectionDeliveryResultMap } from '@agentmux/core/connections'
 import { MoteChatStore } from '../src/mote-chat-store.js'
 import { moteChatJourneyFixture as fixture } from './fixtures/mote-chat-journey.js'
+
+it('reads frozen runtime and one bounded generation publication window through the real CLI without exposing private history', async () => {
+  const f = await fixture(1, 60_000, 'headless')
+  const status = f.inner.kernel.status as (id: string) => Promise<ReturnType<typeof f.run>>
+  f.inner.kernel.status = async (id: string) => ({ ...await status(id), acceptedInputBytes: f.run(id).acceptedInputBytes })
+  expect(await f.wire.post(f.message('first'))).toBe(202); const first = await f.claimed('first')
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+  expect(await f.wire.post(f.message('second'))).toBe(202); const second = await f.claimed('second')
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledTimes(2))
+  const store = new MoteChatStore(f.services.database!), admission = store.admissionByIngress(first.ingressId)!, generation = store.generation(admission.generationId)!, binding = generation.binding!
+  expect(store.admissionByIngress(second.ingressId)?.generationId).toBe(admission.generationId)
+  const originalList = f.services.publication!.list.bind(f.services.publication!)
+  let mode: 'original' | 'source-failure' | 'effects' | 'unavailable' = 'original'
+  const list = vi.spyOn(f.services.publication!, 'list').mockImplementation(async input => {
+    expect(input).toEqual({ connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision, order: 'newest', limit: 5 })
+    const original = await originalList(input)
+    if (mode === 'original') return original
+    if (mode === 'unavailable') throw Error('PRIVATE_PUBLICATION_EXCEPTION')
+    if (mode === 'source-failure') return { ...original, observation: { state: 'unavailable', reason: 'source-unconfirmed' },
+      sourceObservation: { state: 'unavailable', reason: 'source-unconfirmed', code: 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE', codeRecorded: true, checkpointKey: 'a'.repeat(64) },
+      coverage: { state: 'incomplete', gaps: [{ gapId: 'PRIVATE_GAP', reason: 'source-gap', code: 'PRIVATE_NATIVE_CAUSE' }], nextContent: 'PRIVATE_CURSOR', origins: [] } }
+    const base: ConnectionDelivery = { operationId: 'PRIVATE_OPERATION', projectionId: 'PRIVATE_PROJECTION', sourceRevision: 'b'.repeat(64), bindingId: binding.bindingId, bindingRevision: binding.revision,
+      reference: { hostId: generation.generation.executionHostId, agentSessionId: generation.generation.agentSessionId, source: { kind: 'native', providerId: 'claude', nativeSessionId: 'PRIVATE_NATIVE', recordId: 'PRIVATE_RECORD' } },
+      target: { connectionId: binding.connectionId, application: binding.application, externalConversationId: binding.externalConversationId }, effect: 'upsert', fragment: { ordinal: 0, count: 1 },
+      state: 'unknown', reason: 'effect-unconfirmed', receipt: { state: 'unknown', reason: 'effect-unconfirmed' } }
+    const { reason: _reason, ...confirmed } = base
+    const page: ConnectionDeliveryResultMap['connection.delivery.ls'] = { ...original, deliveries: [base,
+      { ...confirmed, operationId: 'PRIVATE_CONFIRMED', state: 'confirmed', mapping: { messageId: 'PRIVATE_PLATFORM_ID' }, receipt: { state: 'confirmed', mapping: { messageId: 'PRIVATE_PLATFORM_ID' } } },
+      { ...base, operationId: 'PRIVATE_FEEDBACK', reference: { ...base.reference, source: { kind: 'ingress', ingressId: first.ingressId } }, queryFeedback: { stage: 'received', ingressId: first.ingressId, messageId: first.externalMessageId } }], next: null,
+      effectObservation: { state: 'unknown', reason: 'effect-unconfirmed' } }
+    return page
+  })
+  const runtime = vi.spyOn(f.services.ingress!, 'inspectInputRuntime'), rejoin = vi.spyOn(f.client, 'rejoinAgentInputWaiting')
+  const inspect = f.services.ingress!.inspect.bind(f.services.ingress!)
+  const inspectSpy = vi.spyOn(f.services.ingress!, 'inspect')
+  const report = await f.cli('diagnose', { target: f.target }, f.credentials(0))
+  expect(list).toHaveBeenCalledOnce(); expect(runtime).toHaveBeenCalledOnce()
+  expect(report.incoming.rows).toHaveLength(2)
+  for (const row of report.incoming.rows) expect(row.input).toMatchObject({ status: 'terminal-confirmed', runtime: { target: 'original', state: 'running', exitCode: null } })
+  expect(report.publications).toHaveLength(1)
+  expect(report.publications[0]).toMatchObject({ intakeKeys: report.incoming.rows.map((row: { key: string }) => row.key), reading: 'observed', effects: [], more: false })
+  mode = 'source-failure'
+  const failed = await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
+  expect(failed.publications[0]).toMatchObject({ reading: 'observed', sourceObservation: { state: 'unavailable', code: 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE' },
+    coverage: { state: 'incomplete', more: true, gaps: [{ reason: 'source-gap', code: null, codeRecorded: true }] }, effects: [] })
+  mode = 'effects'
+  const effects = await f.cli('diagnose', { target: f.target }, f.credentials(0))
+  expect(effects.publications[0].effects).toEqual([
+    { kind: 'conversation', effect: 'upsert', state: 'unknown', receipt: { state: 'unknown', reason: 'effect-unconfirmed' }, resourceUpload: null },
+    { kind: 'conversation', effect: 'upsert', state: 'confirmed', receipt: { state: 'confirmed', reason: null }, resourceUpload: null },
+    { kind: 'query-feedback', effect: 'upsert', state: 'unknown', receipt: { state: 'unknown', reason: 'effect-unconfirmed' }, resourceUpload: null }
+  ])
+  mode = 'unavailable'
+  const unavailable = await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
+  expect(unavailable.publications[0]).toMatchObject({ reading: 'unavailable', effects: null, observation: null, sourceObservation: null })
+  expect(unavailable.incoming!.rows[0]!.input.status).toBe('terminal-confirmed')
+  inspectSpy.mockImplementation(async input => { const original = await inspect(input); return { ...original, ...(original.inputReceipt ? { inputReceipt: { ...original.inputReceipt, status: 'admitted' as const } } : {}) } })
+  runtime.mockClear()
+  const admitted = await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
+  expect(admitted.incoming!.rows[0]!.input).toMatchObject({ status: 'admitted', runtime: { target: 'original', state: 'running' } }); expect(runtime).toHaveBeenCalledOnce()
+  const serialized = JSON.stringify([report, failed, effects, unavailable, admitted])
+  for (const value of [f.root, f.creator.userId, first.body, first.ingressId, first.externalMessageId, first.externalConversationId, binding.bindingId,
+    generation.generation.generationId, generation.generation.agentSessionId, generation.generation.createOperationId, first.input!.expectedRun.runId,
+    'PRIVATE_OPERATION', 'PRIVATE_PROJECTION', 'PRIVATE_CONFIRMED', 'PRIVATE_FEEDBACK', 'PRIVATE_PLATFORM_ID', 'PRIVATE_GAP', 'PRIVATE_CURSOR', 'PRIVATE_NATIVE_CAUSE', 'PRIVATE_NATIVE', 'PRIVATE_RECORD', 'PRIVATE_PUBLICATION_EXCEPTION']) expect(serialized).not.toContain(value)
+  store.saveGeneration({ ...generation, generation: { ...generation.generation, target: { ...generation.generation.target, zoneId: 'other-private-zone' } } })
+  list.mockClear(); runtime.mockClear()
+  const other = await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
+  expect(other.publications).toEqual([]); expect(other.incoming!.rows.every(row => row.preparation === 'other-route' && row.input.status === null)).toBe(true)
+  expect(list).not.toHaveBeenCalled(); expect(runtime).not.toHaveBeenCalled(); expect(rejoin).not.toHaveBeenCalled()
+  expect(f.inner.kernel.input).toHaveBeenCalledTimes(2); expect(f.start).toHaveBeenCalledOnce(); expect(f.wire.effects).toHaveLength(0)
+}, 20_000)
 
 it('diagnoses retained private preparation through authenticated CLI without granting management and recovers the same admission', async () => {
   const f = await fixture(1, 60_000, 'headless')
@@ -66,6 +138,7 @@ it('distinguishes an unconfirmed creation response from present readiness and pr
   expect(before).toMatchObject({ readiness: { state: 'ready', code: null }, incoming: { rows: [
     { preparation: 'creation-dispatched', code: 'MOTE_CHAT_CONTEXT_UNCONFIRMED', input: { observation: 'not-started' } }
   ] } })
+  expect(before.publications).toHaveLength(1); expect(before.publications[0]).toMatchObject({ reading: 'not-started', effects: null })
   expect(JSON.stringify(before)).not.toContain('private exception')
   expect(create).toHaveBeenCalledOnce()
   expect(f.inner.kernel.input).not.toHaveBeenCalled()

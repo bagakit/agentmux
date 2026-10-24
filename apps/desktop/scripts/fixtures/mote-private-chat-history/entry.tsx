@@ -32,7 +32,7 @@ api.moteChat.call = async (method, input, target) => {
     values: { ...MOTE_CHAT_DEFAULT_VALUES, enabled: true, connection } }
   if (method === 'space.mote.chat.inspect') return { configuration, operation: null } as never
   if (method === 'space.mote.chat.diagnose') return { targetKey: moteChatDiagnosisKey(chatTarget!), limit: 5,
-    configuration: { revision: 1, enabled: true, connection }, readiness: { state: 'ready', code: null }, service: { enabled: true, revision: 1 }, adapterService: { enabled: true, revision: 1 }, connection: null, issues: [],
+    configuration: { revision: 1, enabled: true, connection }, readiness: { state: 'ready', code: null }, service: { enabled: true, revision: 1 }, adapterService: { enabled: true, revision: 1 }, connection: null, publications: [], issues: [],
     incoming: { more: false, rows: [{ key: 'a'.repeat(64), state: 'claimed', code: null, codeRecorded: false, preparation: 'ready', input: {
       status: inputStatus, observation: 'observed', controlState: inputStatus === 'waiting' ? 'enabled' : 'dispatch-authorized', receiptObservation: inputStatus === 'waiting' ? 'rejoin-needed' : 'closed',
       waiting: inputStatus === 'waiting' ? { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin' } : null,
