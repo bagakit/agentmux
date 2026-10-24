@@ -5,6 +5,7 @@ import { ClientUiProvider, type ClientUiPlatform } from '../../../../../packages
 import { AgentProviderIcon } from '../../../../../packages/client-ui/src/components/AgentProviderIcon'
 import { ConversationMessage } from '../../../../../packages/client-ui/src/components/ConversationMessage'
 import { ConversationCapsule } from '../../../src/renderer/src/components/ConversationCapsule'
+import { CapsuleQuestionEditorsContext, type CapsuleQuestionEditor, type CapsuleQuestionEditorPort } from '../../../src/renderer/src/lib/capsule-question-editors'
 import { WorkbenchDocumentContext } from '../../../src/renderer/src/lib/workbench-document'
 import { ConversationReadingRuler } from '../../../src/renderer/src/components/ConversationReadingRuler'
 import { conversationMessageSourceKey } from '../../../../../packages/client-ui/src/lib/conversation-message-location'
@@ -22,6 +23,20 @@ import '../../../src/renderer/src/styles/conversation-axis.css'
 import '../../../src/renderer/src/styles/chrome.css'
 import '../../../../../packages/client-ui/src/styles/index.css'
 import '../../../../../packages/client-ui/src/styles/conversation-capsule.css'
+// A narrow in-memory host port tests presentation lifetime only. The original Workbench
+// writer and disk restore are separately consumed by capsule-question-editors.test.tsx.
+const editors = new Map<string, CapsuleQuestionEditor>(), editorListeners = new Set<() => void>()
+const editorPort: CapsuleQuestionEditorPort = {
+  get: key => editors.get(key),
+  compareAndSwap(key, expected, value) {
+    if (editors.get(key) !== expected) return false
+    if (value) editors.set(key, value); else editors.delete(key)
+    for (const changed of editorListeners) changed()
+    return true
+  },
+  subscribe(changed) { editorListeners.add(changed); return () => editorListeners.delete(changed) },
+  flush: async () => {}
+}
 const root = createRoot(document.getElementById('root')!)
 mountThemeRuntime(window, { appAppearance: 'dark' })
 document.body.style.cssText = 'margin:0;padding:24px;background:var(--surface-0);color:var(--text);font:14px/1.55 system-ui;box-sizing:border-box;overflow:hidden'
@@ -50,7 +65,7 @@ function Feed({ content, visible }: { content: string; visible: boolean }) {
   async set(content: string, visible = true, theme = 'dark') {
     const originalWindow = await (window as any).capsuleProbe.call('window')
     updateThemeSelection({ appAppearance: theme })
-    root.render(<WorkbenchDocumentContext.Provider value={{ document, window: originalWindow }}><ClientUiProvider platform={platform}><Feed content={content} visible={visible} /></ClientUiProvider></WorkbenchDocumentContext.Provider>)
+    root.render(<WorkbenchDocumentContext.Provider value={{ document, window: originalWindow }}><CapsuleQuestionEditorsContext.Provider value={editorPort}><ClientUiProvider platform={platform}><Feed content={content} visible={visible} /></ClientUiProvider></CapsuleQuestionEditorsContext.Provider></WorkbenchDocumentContext.Provider>)
   },
   unmount() { root.render(null) },
   click(text: string) { [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === text)?.click() },

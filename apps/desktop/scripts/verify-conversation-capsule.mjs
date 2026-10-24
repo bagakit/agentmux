@@ -20,6 +20,7 @@ const sources = ['packages/client-ui/src/components/AgentMarkdown.tsx', 'package
   'apps/desktop/src/renderer/src/lib/workbench-document.tsx', 'apps/desktop/src/main/workbench-windows.ts', 'apps/desktop/src/main/workbench-window-store.ts',
   'apps/desktop/src/renderer/src/components/ConversationReadingRuler.tsx', 'apps/desktop/src/renderer/src/components/ConversationAxis.tsx', 'apps/desktop/src/renderer/src/lib/use-conversation-keyframes.ts',
   'apps/desktop/src/renderer/src/components/CapsuleInteractionChrome.tsx', 'apps/desktop/src/renderer/src/components/CapsuleQuestionReply.tsx',
+  'apps/desktop/src/renderer/src/lib/capsule-question-editors.tsx',
   'apps/desktop/src/shared/contracts.ts', 'packages/core/guides/modules/capsule.md', 'packages/core/src/generated/agentmux-guides.ts',
   'apps/desktop/test/conversation-capsule.test.tsx', 'apps/desktop/test/conversation-capsule.config.mts',
   'apps/desktop/test/capsule-chrome.test.tsx', 'apps/desktop/test/capsule-partial-recovery.test.tsx',
