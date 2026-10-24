@@ -11,6 +11,7 @@ import { feishuPayload } from '../../../packages/connectors/test/fixtures/feishu
 import { api } from '../src/renderer/src/lib/api'
 import { invalidateConnectorTarget } from '../src/renderer/src/lib/connector-room-intent'
 import { ConnectorHeaderLinks } from '../src/renderer/src/components/ConnectorHeaderLinks'
+import { ConnectorDeliveryDetails } from '../src/renderer/src/components/ConnectorDeliveryDetails'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { settingsCatalog } from '../src/renderer/src/components/settings/settings-modules'
 import { connectorGroupDiagnostics, connectorGroupSummary } from '../src/renderer/src/lib/connector-group-status'
@@ -197,4 +198,32 @@ it('hidden headers add no diagnosis work and a multi-group projection is explici
   expect(menu().textContent).toContain('Only the first 5 groups are checked here')
   expect(menu().querySelectorAll('.connector-header-menu__snapshot')[5]!.textContent).toContain('Not checked')
   expect(f.calls.filter(call => call.method === 'connection.diagnose').slice(reads).every(call => (call.input as typeof target).agentSessionId === target.agentSessionId)).toBe(true)
+}, 30_000)
+
+it('application access observation stays separate from a healthy source and saved local rights through the public header and detail readers', async () => {
+  const binding = await bind()
+  await f.forward('connection.grant', { operationId: 'access-observation-local', bindingId: binding.bindingId, expectedBindingRevision: binding.revision,
+    grantId: 'access-observation-member', expectedRevision: null, actor: { application: binding.application, idType: 'open_id', userId: 'original-external-user' }, state: 'active', capabilities: ['input', 'permission'] })
+  const read = f.services.bindings!.effectiveGrants.bind(f.services.bindings!)
+  // The original access reader has a partial application observation. The original
+  // source reader, saved local grants and platform receipts remain independently real.
+  vi.spyOn(f.services.bindings!, 'effectiveGrants').mockImplementation((...args) => ({ ...read(...args), issue: 'application-unconfirmed' }))
+  f.services.publication!.refresh()
+  await wait(() => expect(f.services.publication!.observation(binding.bindingId, binding.revision).reason).toBe('access-unconfirmed'))
+  const before = { writes: writes(), effects: effects() }
+  await open(); await check()
+  await wait(() => expect(menu().querySelector('[data-problem-kind="access-unconfirmed"]')?.textContent ?? '').toContain('Member access check unavailable'))
+  expect(menu().querySelector('[data-problem-kind="source-unconfirmed"]')).toBeNull()
+  expect(menu().querySelector('[data-problem-kind="member-access"]')).toBeNull()
+  expect(menu().textContent).toContain('Read confirmed')
+  expect(menu().textContent).toContain('Application permissions could not be checked; saved decisions are kept')
+  await f.dom.render(<ConnectorDeliveryDetails binding={binding} hostingTarget={f.hostingTarget} />)
+  await wait(() => expect(document.querySelector('[aria-label="Group delivery"]')?.textContent).toContain('Member access check unavailable'))
+  const details = document.querySelector('[aria-label="Group delivery"] details')!
+  expect(details.textContent).toContain('Application permissions could not be checked; saved decisions are kept')
+  expect(details.textContent).not.toContain('Source observation: unavailable')
+  const report = await f.forward('connection.diagnose', { ...target, bindingId: binding.bindingId, bindingRevision: binding.revision })
+  expect(report.groups.value!.items[0]!.binding.value).toMatchObject({ activeInputGrants: 1, activePermissionGrants: 1 })
+  expect(report.groups.value!.items[0]!.outgoing.value?.sourceObservation?.state).toBe('ready')
+  expect({ writes: writes(), effects: effects() }).toEqual(before)
 }, 30_000)
