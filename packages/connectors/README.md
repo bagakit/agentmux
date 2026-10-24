@@ -374,7 +374,11 @@ actor `idType` and actor `userId`. Its own revision is separate from the Binding
 revision. `input`, `answer` and `permission` are independent capabilities; neither
 membership nor attribution grants them. Publication authority comes from the
 trusted user or device that authorized this Binding. Grant changes keep immutable
-prior revisions, and a later Binding revision does not inherit old actor grants.
+prior revisions. A later Binding revision carries current member decisions only for
+the same application, group, execution Host/Runtime, Agent Session and input target.
+Explicit trigger or publication changes preserve these decisions, including revocations;
+changing authorization subjects never transfers grants. Original frozen references
+remain bound to their original revisions.
 
 This package's binding owner authorizes boundaries only. Intake, external
 publication and original Core question or permission execution remain separate

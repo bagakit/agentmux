@@ -245,7 +245,10 @@ the Agent: member input grants and the Binding trigger scope govern execution se
 Use connection binding pause, resume or detach with operationId, bindingId and expectedRevision.
 Pause keeps the relationship and member decisions. Resume retains the exact application, group,
 Session and sharing rules, captures a fresh source cut and never backfills the paused interval.
-A relink carries member decisions only when the audience and sharing rules remain unchanged.
+A relink carries member decisions when the application, group, execution Host/Runtime,
+Agent Session and input target remain unchanged, including explicitly saved changes to
+message triggers or publication scope. Original capabilities and revocations persist;
+old Binding/grant references remain tied to their original revisions.
 Detach ends current routing, retains original revisions and receipts, and never stops the Agent
 or deletes the platform group. Its original operation stays inspectable after the live list changes.
 Applied lifecycle operations reference independent notice deliveryOperationIds. Inspect or list those
