@@ -27,8 +27,8 @@ vi.mock('../src/renderer/src/store', () => ({
 vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({
   renderCommittedLayer: fixture.committed, renderScreenshotScene: fixture.paint
 }))
-vi.mock('../src/renderer/src/components/browser-screenshot/compose', async importOriginal => ({
-  ...await importOriginal<typeof import('../src/renderer/src/components/browser-screenshot/compose')>(),
+vi.mock('../src/renderer/src/components/image-annotation/compose', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/renderer/src/components/image-annotation/compose')>(),
   composeScreenshot: fixture.compose
 }))
 vi.mock('../src/renderer/src/lib/browser-stage-geometry', () => ({

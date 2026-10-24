@@ -92,7 +92,7 @@ await mkdir(out, { recursive: true }); await rm(join(out, 'receipt.json'), { for
 const directories = [component, host].map(directory => directory.replace(/\/$/, ''))
 const inputs = [...tests, ...(slice === 'documents' ? [component + 'document.ts', component + 'drawing-model.ts', component + 'types.ts', host + 'document-files.ts',
   adapter, component + 'ImageAnnotationEditor.tsx', component + 'AnnotationNotes.tsx', component + 'AnnotationToolbar.tsx', component + 'AnnotationOriginalMenu.tsx', component + 'view.ts', component + 'selection-geometry.ts', component + 'image-annotation.css',
-  'apps/desktop/src/renderer/src/components/BrowserPane.tsx', host + 'context.ts', host + 'compose.ts',
+  'apps/desktop/src/renderer/src/components/BrowserPane.tsx', host + 'context.ts', component + 'compose.ts',
   host + 'AnnotationFileDialog.tsx', 'apps/desktop/src/renderer/src/components/WindowOverlayHost.tsx', 'apps/desktop/test/helpers/client-ui-render.tsx',
   'apps/desktop/src/main/workspace-files.ts', 'apps/host/native/workspace-move.c', 'apps/desktop/scripts/build-workspace-move-helper.mjs',
   'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/shared/workspace-file-bytes.ts'] : [adapter, 'apps/desktop/src/renderer/src/components/BrowserPane.tsx',

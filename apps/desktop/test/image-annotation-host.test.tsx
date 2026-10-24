@@ -13,8 +13,8 @@ compose: vi.fn(), committed: vi.fn(), scene: vi.fn() }))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
   { getState: () => fixture.state, setState: vi.fn(), subscribe: () => () => {} }) }))
 vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer: fixture.committed, renderScreenshotScene: fixture.scene }))
-vi.mock('../src/renderer/src/components/browser-screenshot/compose', async importOriginal => ({
-  ...await importOriginal<typeof import('../src/renderer/src/components/browser-screenshot/compose')>(), composeScreenshot: fixture.compose
+vi.mock('../src/renderer/src/components/image-annotation/compose', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/renderer/src/components/image-annotation/compose')>(), composeScreenshot: fixture.compose
 }))
 vi.mock('../src/renderer/src/lib/browser-stage-geometry', () => ({ observeBrowserStageGeometry(_stage: HTMLElement, update: () => void, active: boolean) { if (active) update(); return () => {} } }))
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane'

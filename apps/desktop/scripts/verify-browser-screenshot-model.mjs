@@ -14,7 +14,7 @@ const sourcePaths = {
   'selection-geometry.ts': 'apps/desktop/src/renderer/src/components/image-annotation/selection-geometry.ts',
   'canvas-render.ts': 'apps/desktop/src/renderer/src/components/image-annotation/canvas-render.ts',
   'drawing-renderer.ts': 'apps/desktop/src/renderer/src/components/image-annotation/drawing-renderer.ts',
-  'compose.ts': 'apps/desktop/src/renderer/src/components/browser-screenshot/compose.ts'
+  'compose.ts': 'apps/desktop/src/renderer/src/components/image-annotation/compose.ts'
 }
 const output = resolve('.local/browser-screenshot-workface/model-proof'), work = await mkdtemp(join(tmpdir(), 'amx-screenshot-model-'))
 await mkdir(output, { recursive: true })
