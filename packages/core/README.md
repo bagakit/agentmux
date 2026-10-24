@@ -55,6 +55,8 @@ Codex 保存的 JSONL 历史与原生 indexed history 复用同一完整问题�
 
 原助手公开 text（非工具／思考内容）中的 Markdown 图片沿同一 `agent.history.resource`／`agent.native.history.resource` 和对应 CLI 读取，使用 `representation: "image"` 与 `markdownImage: { index, textSha256 }`。`index` 是标准 Markdown AST 中图片节点的顺序，`textSha256` 是完整原 text 的 UTF-8 SHA-256；可用同一子路径导出的 `markdownImageReferences(text)` 取得节点。普通 text 的 `expectedReference` 比较该节点原 URL；延迟 text 保留原 signed reference。Core 从准确原来源重新定位记录与 part，核对文本版本、节点及引用后才读取已记录的图片；用户正文仅授权原文共享，不能凭其中路径新增文件读取；既有 Provider typed resource 的原读取资格保持。signed text 也核对原记录作者，而非只凭签名字节授权。代码围栏、行内代码和转义示例不产生资源读取。原图片字节预算、格式与取消合同保持不变，远程或无法定位的引用返回具体 unavailable，不能借调用者路径扩大读取范围。
 
+Host 已持有的派生图片字节可复用 `readSessionHistoryImageBytes(bytes, maxBytes, declaredMime?)` 与 `SESSION_HISTORY_IMAGE_MAX_PIXELS`／`SESSION_HISTORY_IMAGE_MAX_DIMENSION`，沿同一格式及解码预算校验。该纯函数不读取文件、不证明来源或授予共享权限；原内容资格、记录版本和投递事实仍由原 owner 保持。图表引擎属于 Host 呈现，Core 不依赖浏览器或平台 SDK。
+
 CLI/RPC 历史分页复用原 `agent history` / `agent.history`；Native Resume 仍通过 Core Session 生命周期完成。Hook、Permission、Usage 和问题回答是各自独立声明的能力，不能因 history reader 可用而冒充已接入。
 
 ## Runtime 边界
