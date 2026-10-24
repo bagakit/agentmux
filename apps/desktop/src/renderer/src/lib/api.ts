@@ -455,7 +455,7 @@ const mockApi: AgentMuxDesktopApi = {
         reason: 'Git repository sources cannot be observed in the web preview.' }
     }
   },
-  spatial:{read:async()=>structuredClone(mockSpatialState),commit:async input=>{
+  spatial:{openAgent:async()=>{throw new Error('Agent creation requires the original semantic Host.')},read:async()=>structuredClone(mockSpatialState),commit:async input=>{
     if((mockSpatialState?.revision??0)!==input.expectedRevision) throw new Error('Spatial state changed.')
     mockSpatialState={schemaVersion:1,revision:input.expectedRevision+1,graph:structuredClone(input.graph)}
     for(const listener of mockSpatialListeners)listener(structuredClone(mockSpatialState));return structuredClone(mockSpatialState)

@@ -9,6 +9,8 @@ import { defaultAgentMuxStateDirectory } from './runtime-paths.js';
 import type { AgentMuxSpaceBindingTarget } from './space-control.js';
 import { addTabOccurrence, removeTab } from './spatial-layout.js';
 import { parseAgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit } from './spatial-graph.js';
+import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, admitSpatialAgentOpen, spatialAgentOpenRecord } from './spatial-agent-open.js';
+export * from './spatial-agent-open.js';
 import { AGENTMUX_DISPLAY_LABEL_RESOURCE, displayLabelDocument, setDisplayLabelDocument, projectSpatialState, nameTargetKey, validateNameIntent,
   type AgentMuxNameTarget, type AgentMuxNameContext, type AgentMuxNameChangeIntent, type AgentMuxNameChangeRecord,
   type AgentMuxNameChangeAdmission, type AgentMuxNameChangeSettlement, type AgentMuxDisplayLabelMutation, type AgentMuxDisplayLabelResult } from './display-label.js';
@@ -143,6 +145,27 @@ export class AgentMuxSpatialStateStore {
     const state = await this.read();
     if (!state) throw new AgentMuxError('The original spatial document is not ready. Keep original names and retry this change after restoring storage.', 'SPATIAL_STATE_ABSENT');
     return state;
+  }
+  async admitAgentOpen(input: Parameters<typeof admitSpatialAgentOpen>[1]) {
+    return this.locked(async () => {
+      const current = await this.requiredState(), admission = admitSpatialAgentOpen(current.graph, input);
+      if (!admission.admitted) return { ...admission, state: projectSpatialState(current) };
+      const state = await this.writeLocked(current, parseAgentMuxSpatialGraph(admission.graph));
+      return { ...admission, state: projectSpatialState(state) };
+    });
+  }
+  /** The exact Session receipt fills its reserved Region; a changed binding is never replaced. */
+  async settleAgentOpen(requestId: string, session: { agentSessionId: string; run: { runId: string } }, regionResource: import('./spatial-graph.js').SpatialJson) {
+    return this.locked(async () => {
+      const current = await this.requiredState(), record = spatialAgentOpenRecord(current.graph, requestId);
+      if (!record || record.agentSessionId !== session.agentSessionId) throw new AgentMuxError('The original creation receipt names another reserved Session.', 'SPATIAL_CREATION_UNCONFIRMED');
+      const graph = structuredClone(current.graph), region = graph.regions.find(region => region.regionId === record.address.regionId && region.tabId === record.address.tabId);
+      if (!region || region.agentSessionId !== session.agentSessionId || region.kind !== 'agent') return { state: projectSpatialState(current), attached: false };
+      const descriptor = graph.resources['region:' + region.regionId];
+      if (region.runId === session.run.runId && JSON.stringify(descriptor) === JSON.stringify(regionResource)) return { state: projectSpatialState(current), attached: true };
+      region.runId = session.run.runId; graph.resources['region:' + region.regionId] = structuredClone(regionResource);
+      return { state: projectSpatialState(await this.writeLocked(current, parseAgentMuxSpatialGraph(graph))), attached: true };
+    });
   }
   /** An external owner records intent; this method never edits its actual object. */
   async beginNameChange(input: AgentMuxNameChangeIntent): Promise<AgentMuxNameChangeAdmission> {
@@ -309,6 +332,10 @@ export class AgentMuxSpatialStateStore {
       // All writers, including public full-graph callers, share this lock. A layout
       // snapshot cannot become a name writer or erase the durable name history.
       if (current) {
+        const resource = AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, originalCreation = current.graph.resources[resource];
+        if (graph.resources[resource] !== undefined && JSON.stringify(graph.resources[resource]) !== JSON.stringify(originalCreation))
+          throw new AgentMuxError('Spatial creation associations belong to their original Core owner. Refresh this graph and preserve the layout edit.', 'SPATIAL_CREATION_AUTHORITY_CONFLICT');
+        if (originalCreation !== undefined) graph.resources[resource] = originalCreation;
         const proposed = displayLabelDocument(graph), original = displayLabelDocument(current.graph);
         if (JSON.stringify(proposed.labels) !== JSON.stringify(original.labels) ||
             (proposed.records.length > 0 && JSON.stringify(proposed.records) !== JSON.stringify(original.records)))
@@ -335,6 +362,8 @@ export class AgentMuxSpatialStateStore {
       }
       else if (Object.hasOwn(graph.resources, AGENTMUX_DISPLAY_LABEL_RESOURCE))
         throw new AgentMuxError('Initial layout registration cannot manufacture name history. Retain observed names through their owner.', 'NAME_AUTHORITY_CONFLICT');
+      if (!current && Object.hasOwn(graph.resources, AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE))
+        throw new AgentMuxError('Initial layout registration cannot manufacture spatial creation associations.', 'SPATIAL_CREATION_AUTHORITY_CONFLICT');
       if (input.allowEntityRemoval !== true && current) {
         for (const [kind, key] of [['spaces', 'spaceId'], ['zones', 'zoneId'], ['tabs', 'tabId'], ['regions', 'regionId']] as const) {
           const nextIds = new Set(graph[kind].map(entry => (entry as unknown as Record<string, string>)[key]));

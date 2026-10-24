@@ -1,3 +1,4 @@
+import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE } from '@agentmux/core/spatial-graph';
 import { AGENTMUX_DISPLAY_LABEL_RESOURCE, type AgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit, type SpatialJson } from '@agentmux/core/spatial-graph';
 import { spatialSources, type SpaceZoneBindings } from '../../../shared/space-addresses';
 import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics';
@@ -227,7 +228,7 @@ export function reconcileSpatialGraphs(base: AgentMuxSpatialGraph, local: AgentM
   }
   for (const field of ['layouts', 'tabLayouts', 'resources'] as const) {
     for (const id of new Set([...Object.keys(base[field]), ...Object.keys(local[field]), ...Object.keys(intermediate[field])])) {
-      if (field === 'resources' && id === AGENTMUX_DISPLAY_LABEL_RESOURCE) continue;
+      if (field === 'resources' && (id === AGENTMUX_DISPLAY_LABEL_RESOURCE || id === AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE)) continue;
       const before = base[field][id], after = local[field][id], middle = intermediate[field][id];
       if (same(before, after) && same(middle, after))
         continue;

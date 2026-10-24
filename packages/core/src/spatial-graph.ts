@@ -243,3 +243,4 @@ export function resolveSpatialRegion(graph: AgentMuxSpatialGraph, target: AgentM
 }
 
 export { AgentMuxSpatialTargetError, exactSpatialDisplayLayout, selectSpatialCatalog, spatialDestination, type AgentMuxSpatialDestination } from './spatial-destination.js';
+export * from './spatial-agent-open-contract.js';

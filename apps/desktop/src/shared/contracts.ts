@@ -1581,6 +1581,7 @@ export type AgentMuxDesktopApi = {
   notebooks: import('@agentmux/core/notebook-catalog').NotebookApi & import('./notebook-observation').NotebookObservationApi
   notesStorage: import('@agentmux/core/notebook-store').NotesStorageApi
   spatial: {
+    openAgent(input: AgentMuxRpcParams<'agent.open'>): Promise<AgentMuxRpcResult<'agent.open'>>
     read(): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null>
     commit(input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState>
     renameLabel(input:import('@agentmux/core/spatial-graph').AgentMuxDisplayLabelMutation): Promise<import('@agentmux/core/spatial-graph').AgentMuxDisplayLabelResult>
