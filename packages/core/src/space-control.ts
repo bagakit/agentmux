@@ -96,6 +96,12 @@ export type AgentMuxAgentPresentation = {
   group: string; state: string; providerId: string
   recap: { text: string; source: string } | null
   avatar?: { tint?: string; badge?: string }
+  /** Original client presentation, not control or execution authority. */
+  stateMark?: 'error' | 'attention' | 'working' | 'results' | 'unknown' | 'interrupted' | 'recovery' | 'idle'
+  stateLabel?: string
+  presenceUnknown?: boolean
+  projectGroup?: { key: string; projectId: string; hostId: string; name: string; spaceId: string | null }
+
 }
 /** Original Mote preferences observed by its client owner, never a Core preference store. */
 export type AgentMuxMoteConversationReference = {

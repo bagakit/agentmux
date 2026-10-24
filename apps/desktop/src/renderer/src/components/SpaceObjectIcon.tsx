@@ -7,7 +7,7 @@ import { isMoteFace, type MoteAvatarImage, type MoteAvatarRef } from '../../../s
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
-import { projectMonogram } from '../lib/project-monogram'
+import { projectMonogram } from '@agentmux/client-ui/project-monogram'
 import { MoteIcon } from './MoteIcon'
 import { ProjectIcon } from './ProjectIcon'
 import { MoteFace, type MoteExpression } from './MoteFace'

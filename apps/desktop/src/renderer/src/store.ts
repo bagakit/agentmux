@@ -5995,7 +5995,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         motePresentation: (catalog, topics) => readMotePresentation(get(), catalog, topics),
         surveyPresentation: catalog => readSurveyPresentation(get(), catalog),
         appearance: (catalog, imageSpaceId, topics) => readSpatialAppearance(get(), catalog, imageSpaceId, topics,
-          (target, choice) => api.scratch.readMoteAvatar(target.workspaceId, target.topicId, choice, target.objectKey)),
+          (target, choice) => api.scratch.readMoteAvatar(target.workspaceId, target.topicId, choice, target.objectKey),
+          workspaceId => api.workspaces.appearance(workspaceId)),
         patch: patch => set(state => {
           const choice = state.workbenchSpaceSelection, held = state.retainedSpatialFocus
           if (!patch.tabs || !choice || !held || choice.workspaceId !== held.displayWorkspaceId ||

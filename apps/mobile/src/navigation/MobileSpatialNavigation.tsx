@@ -9,6 +9,7 @@ import type { OpenHttpLink } from '@agentmux/client-ui/components/AgentMarkdown'
 import { AgentAvatarBadgeIcon, type AgentAvatarBadge } from '@agentmux/client-ui/components/AgentAvatarBadgeIcon'
 import { AgentEnamelFilter } from '@agentmux/client-ui/components/AgentEnamelFilter'
 import { AgentProviderIcon } from '@agentmux/client-ui/components/AgentProviderIcon'
+import { FocusStateMark } from '@agentmux/client-ui/components/FocusStateMark'
 import { MobileIdentity, type MobileObjectIdentity } from './MobileIdentity'
 import { MobileRegionContent } from './MobileRegionContent'
 import type { MobileHome } from './home-preference'
@@ -121,12 +122,19 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     return <li key={key}><button onClick={() => openSession(session.agentSessionId, object)}>
       <span className="mobile-executor-avatar">{row?.avatar?.tint ? <AgentEnamelFilter id={`${avatarFilterId}-${session.agentSessionId}`} tint={row.avatar.tint} className="mobile-executor-mark">{providerMark}</AgentEnamelFilter> : providerMark}{row?.avatar?.badge && ['spark', 'bolt', 'shield', 'flame'].includes(row.avatar.badge) && <small aria-label={row.avatar.badge}><AgentAvatarBadgeIcon badge={row.avatar.badge as AgentAvatarBadge} size={8} /></small>}</span>
       <span className="mobile-session-copy"><span className="mobile-session-project">{object.project}</span><strong>{object.name !== '名称未确认' ? object.name : tabName || object.name}</strong>{tabName && tabName !== object.name && object.name !== '名称未确认' && <small className="mobile-session-location">{tabName}</small>}{row && <small className="mobile-session-recap" title={row.recap ? `${row.recap.source} · ${row.recap.text}` : row.detail}>{row.recap?.text ?? '暂无已确认摘要'}</small>}{context && <small className="mobile-session-location" title={`${context.displayWorkspaceId} / ${context.groupId}`}>{context.displayWorkspaceId} · {context.groupId}</small>}</span>
-      <span className="mobile-session-state" data-state={status}><span>{{ working: '执行中', waiting: '等待输入', blocked: '需要处理', done: '已完成', error: '出错', exited: '已结束', starting: '启动中', running: '状态未确认', disconnected: '断开' }[status] ?? '状态未确认'}</span><small>{row?.providerId ?? session.providerId ?? '元信息未确认'}</small></span>
+      <span className="mobile-session-state" data-state={status}>{row?.stateMark && <FocusStateMark kind={row.stateMark} presenceUnknown={row.presenceUnknown} size={16} />}<span>{row?.stateLabel ?? { working: '执行中', waiting: '等待输入', blocked: '需要处理', done: '已完成', error: '出错', exited: '已结束', starting: '启动中', running: '状态未确认', disconnected: '断开' }[status] ?? '状态未确认'}</span><small>{row?.providerId ?? session.providerId ?? '元信息未确认'}</small></span>
     </button>{candidates.length > 1 && <details className="mobile-session-locations"><summary>{candidates.length} 个原展示位置</summary>{candidates.map(place => <button type="button" key={JSON.stringify(place)} onClick={() => openSession(session.agentSessionId, identity(session, place))}>
       {spaces.find(value => value.spaceId === place.spaceId)?.name ?? 'Space 未确认'} · {catalog?.tabs.find(value => value.tabId === place.tabId)?.name ?? 'Tab'} · {place.displayWorkspaceId} / {place.groupId}
     </button>)}</details>}</li>
   }
   const rows = catalog?.agentPresentation ?? []
+  const projectRows = new Map<string, { project: NonNullable<Catalog['agentPresentation']>[number]['projectGroup']; values: SessionReference[] }>()
+  for (const row of rows) {
+    const key = row.projectGroup?.key ?? 'unconfirmed-projects'
+    let entry = projectRows.get(key)
+    if (!entry) { entry = { project: row.projectGroup, values: [] }; projectRows.set(key, entry) }
+    entry.values.push(sessionById.get(row.agentSessionId) ?? { agentSessionId: row.agentSessionId, providerId: row.providerId })
+  }
   const presentationIssues = catalog?.spaces.filter(owner => home === 'mote' ? owner.kind === 'mote' : home === 'space' ? owner.kind !== 'mote' : true).flatMap(owner => {
     const moteIssue = catalog.motePresentation?.find(value => value.spaceId === owner.spaceId)?.issue
     const messages = [...new Set([owner.issue, moteIssue, catalog.appearance?.find(value => value.spaceId === owner.spaceId)?.issue].filter((value): value is string => Boolean(value)))]
@@ -208,11 +216,10 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     <MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
     {home === 'focus' ? <>
-      {(['attention', 'working', 'results', 'idle', 'disconnected'] as const).map(group => {
-        const values = rows.filter(row => row.group === group).map(row => sessionById.get(row.agentSessionId) ?? { agentSessionId: row.agentSessionId, providerId: row.providerId })
+      {[...projectRows].map(([key, { project, values }]) => {
         const matchingValues = filteredSessions(values)
         if (!matchingValues.length) return null
-        return <section key={group}><h2 className="mobile-spatial-subheading">{{ attention: '需要处理', working: '正在执行', results: '结果', idle: '空闲 / 未知', disconnected: '断开' }[group]} <span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session))}</ul></section>
+        return <section className="mobile-focus-project" key={key} data-project-key={key} data-project-confirmed={Boolean(project)}><h2 className="mobile-spatial-subheading">{project?.spaceId && <MobileIdentity appearanceRevision={revision} objectSpaceId={project.spaceId} appearance={catalog?.appearance?.find(value => value.spaceId === project.spaceId)} identity={{ name: project.name, project: project.name, ...(spaces.find(owner => owner.spaceId === project.spaceId)?.kind === 'mote' ? { mote: moteIdentity(spaces.find(owner => owner.spaceId === project.spaceId)!) } : {}) }} client={client} connected={connected} visible={visible} size={20} />}<strong>{project?.name ?? '项目未确认'}</strong>{project?.hostId && project.hostId !== 'local' && <small>{project.hostId}</small>}<span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session))}</ul></section>
       })}
       {!rows.length && <p className="mobile-spatial-empty">Focus 呈现尚未确认；原会话保留。</p>}
       {catalog?.agentPresentation === undefined && sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(sessions.filter(session => !rows.some(row => row.agentSessionId === session.agentSessionId))).map(session => sessionRow(session))}</ul></details>}
@@ -226,7 +233,7 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
       {spaceId && !space && <p className="mobile-spatial-notice" role="status">原空间绑定尚未重新确认，原引用与工作面保留；可刷新原目录。</p>}
       {catalog ? <MobileSpaceDirectory key={home} catalog={catalog} home={home === 'mote' ? 'mote' : 'space'} query={query} selectedSpaceId={spaceId}
         onSelect={owner => { setContext(owner ? { spaceId: owner.spaceId, tabId: null, regionId: null } : EMPTY_CONTEXT); setSelectedKey(null) }}
-        renderIdentity={owner => <MobileIdentity identity={spaceIdentity(owner)} client={client} connected={connected} visible={visible} size={28} />}
+        renderIdentity={owner => <MobileIdentity appearanceRevision={revision} objectSpaceId={owner.spaceId} appearance={catalog.appearance?.find(value => value.spaceId === owner.spaceId)} identity={spaceIdentity(owner)} client={client} connected={connected} visible={visible} size={28} />}
         renderContents={renderSpaceContents} /> : <p className="mobile-spatial-empty">{pending ? '正在读取 Mac 上的空间…' : '空间目录尚未核实，可在 Focus 中继续原会话。'}</p>}
     </>}
     {visited.map(target => <div key={target.key} hidden={home === 'focus' || target.key !== selectedKey || !context.regionId}>

@@ -3,7 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { projectMonogram } from '../lib/project-monogram'
+import { projectMonogram } from '@agentmux/client-ui/project-monogram'
 import { folderIconRecency } from '../lib/space-folder-icon-recency'
 import { speakerColorHue } from '../lib/conversation-avatar-color'
 
