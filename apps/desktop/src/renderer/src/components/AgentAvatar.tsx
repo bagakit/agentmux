@@ -12,12 +12,12 @@ import { useAppStore } from '../store'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { observeAgentSession } from '../lib/agent-observation'
 import { attentionAccentFor } from '../lib/attention-event'
-import { PRESENCE_MARK_CORNERS } from '../lib/presence-mark-corner'
+import { PRESENCE_MARK_CORNERS } from '@agentmux/client-ui/presence-mark-corner'
 import { AgentAvatarBadgeIcon } from './AgentAvatarBadgeIcon'
-import { AgentEnamelFilter } from './AgentEnamelFilter'
+import { AgentAvatarFace as AgentAvatarArtwork } from '@agentmux/client-ui/components/AgentAvatarFace'
 import { AgentEnamelFilterDefinition } from '@agentmux/client-ui/components/AgentEnamelFilter'
 import { AgentProviderArtwork } from '@agentmux/client-ui/components/AgentProviderIcon'
-import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
+import { agentProviderLabel } from './AgentProviderIcon'
 import { SettingsNavigation } from './SettingsNavigation'
 import { SemanticIcon } from './semantic-icons'
 import { describeAgentDisplayState } from '../../../shared/agent-state-presentation'
@@ -49,17 +49,9 @@ function AgentAvatarFace({ provider, displayState, avatar, count, size, mark, ti
   provider?: AgentProviderId | undefined; displayState?: AgentDisplayState | undefined
   avatar?: AgentAvatarAppearance | undefined; count?: number | undefined; size: number; mark?: ReactNode; tintMark?: boolean; active?: boolean
 }) {
-  const filterId = useId().replace(/:/g, '')
   const attention = displayState ? attentionAccentFor(displayState) : null
-  const artwork = <>{mark ?? <AgentProviderIcon {...(provider ? { providerId: provider } : {})} size={Math.max(10, size - 4)} />}
-    {avatar?.badge ? <span className="agent-avatar__badge" data-corner={PRESENCE_MARK_CORNERS.badge} data-avatar-badge={avatar.badge}>
-      <AgentAvatarBadgeIcon badge={avatar.badge} size={6} />
-    </span> : null}</>
   return <>
-    <span className="agent-avatar__contour" aria-hidden="true">
-      {avatar?.tint && tintMark ? <AgentEnamelFilter id={filterId} tint={avatar.tint} className="agent-avatar__mark" filterClassName="agent-avatar__filters">{artwork}</AgentEnamelFilter>
-        : <span className="agent-avatar__mark">{artwork}</span>}
-    </span>
+    <AgentAvatarArtwork providerId={provider} appearance={avatar} size={size} mark={mark} tintMark={tintMark} />
     {displayState === 'working'
       ? <span className="agent-avatar__status agent-avatar__status--working" data-corner={PRESENCE_MARK_CORNERS.status} aria-label="Working" role="img"><SemanticIcon name="status.working" animation={active ? 'work' : 'none'} size={10} strokeWidth={2.4} /></span>
       : attention !== null || displayState === 'disconnected' ? <span className="agent-avatar__status status__dot" data-corner={PRESENCE_MARK_CORNERS.status} aria-hidden="true" /> : null}
