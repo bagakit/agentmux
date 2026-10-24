@@ -3,7 +3,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Terminal as BrowserTerminal } from '@xterm/xterm'
-import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
+import { afterAll, afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import type { RuntimeEvent, AppConfig, SessionAttachResult, SessionSnapshot } from '../src/shared/contracts'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api'
@@ -21,6 +21,9 @@ const fixture = vi.hoisted(() => ({
   focus: vi.fn(), writes: [] as Uint8Array[], grids: [] as Array<{cols:number;rows:number}>,
   boundaryReads: 0, composeCalls: 0
 }))
+const OriginalMessageChannel = globalThis.MessageChannel
+const channels: MessageChannel[] = []
+afterAll(() => { for (const channel of channels) { channel.port1.close(); channel.port2.close() } })
 vi.mock('@xterm/xterm', async () => {
   const { Terminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
   return { Terminal: class extends Terminal {
@@ -89,6 +92,9 @@ async function ready(result: SessionAttachResult) {
 }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubGlobal('MessageChannel', class {
+    constructor() { const channel = new OriginalMessageChannel(); channels.push(channel); return channel }
+  })
   fixture.terminals.length = 0; fixture.writes.length = 0; fixture.grids.length = 0; fixture.focus.mockClear()
   fixture.boundaryReads = 0; fixture.composeCalls = 0
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
@@ -172,7 +178,9 @@ it.each([128,256])('admits %i real held-parser items with linear boundary work a
   expect(fixture.terminals).toEqual([terminal])
   expect(recover).not.toHaveBeenCalled()
   await act(async()=>terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user', {
+    observerId: expect.any(String), source: 'user', sequence: expect.any(Number)
+  })
 })
 
 it('composes a normal nonempty same-turn batch only once through the mounted consumer', async () => {
@@ -186,5 +194,30 @@ it('composes a normal nonempty same-turn batch only once through the mounted con
   expect(fixture.composeCalls).toBe(1)
   expect(fixture.writes.at(-1)).toEqual(new TextEncoder().encode('NORMAL-TAIL'))
   expect(fixture.terminals).toEqual([terminal])
+  expect(recover).not.toHaveBeenCalled()
+})
+
+it('reuses terminal task ports across sequential real live writes without changing bytes or input', async () => {
+  const terminal = await ready(replay(repaint))
+  const initialChannels = channels.length
+  let text = '', cursor = repaint.length
+  for (let index = 0; index < 6; index++) {
+    const next = `M${index}`
+    text += next
+    await act(async () => {
+      receive(output(cursor, next))
+      await vi.waitFor(() => expect(contents(terminal)).toContain('Private screen' + text))
+    })
+    cursor += next.length
+  }
+  expect(channels.length - initialChannels).toBe(0)
+  expect(fixture.writes.slice(-6).map(bytes => new TextDecoder().decode(bytes))).toEqual(
+    Array.from({ length: 6 }, (_, index) => `M${index}`))
+  expect(readTerminalViewObservation({ regionId: origin.regionId, sessionId: session.id,
+    runId: session.control.run.runId })).toMatchObject({ liveReady: true })
+  await act(async () => terminal.input('z'))
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control, 'z', 'user', {
+    observerId: expect.any(String), source: 'user', sequence: expect.any(Number)
+  })
   expect(recover).not.toHaveBeenCalled()
 })
