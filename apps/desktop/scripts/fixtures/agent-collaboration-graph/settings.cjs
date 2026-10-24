@@ -2,7 +2,7 @@ const assert = require('node:assert/strict')
 
 /** Original settings and Map, driven by Chromium input. Reads never assign a
  * control value, camera transform, world coordinate or product identity. */
-module.exports = async function settings({ win, result, read, click, key, move, frame, check, intact, closeReader, locate, pause, until, matrix }) {
+module.exports = async function settings({ win, result, read, click, key, move, frame, check, intact, closeDetails, locate, pause, until, matrix }) {
   const evidence = { phases: [], hitTests: [], boundary: 'Original App/Focus settings/ConfigOwner and original Graph/Reader; controlled platform facts only. No real user configuration, Session or Run touched.' }
   const profile = () => read('window.graphCapture.preferences()?.map')
   const layout = () => read('window.graphCapture.deliveredLayout().boxes')
@@ -34,7 +34,6 @@ module.exports = async function settings({ win, result, read, click, key, move, 
     await until('original Focus durable save completes', () => read(`document.querySelector('[data-settings-pane="focus"] [data-settings-save-bar]').textContent.includes('Changes saved')`))
   }
   async function close() { await click('[aria-label="Close settings"]'); await until('original settings closes', () => read(`!document.querySelector('.settings-page:not([hidden])')`)); await settled() }
-  async function closeDetails() { await closeReader(); if (await read(`Boolean(document.querySelector('[aria-label="Close map details"]'))`)) await click('[aria-label="Close map details"]') }
   await check('settings-original-edit-save-reopen-and-map-consumers', async () => {
     await closeDetails(); await settled()
     const before = { profile: await profile(), boxes: await layout(), camera: await matrix(), jobs: await read('window.graphCapture.workerSamples().length') }
