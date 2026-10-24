@@ -77,6 +77,7 @@ it('actual App uses one shared filter entry, all real projects and four task gro
     expect([...f.menu().querySelectorAll('[data-focus-project]')].map(node=>[node.getAttribute('data-focus-project'),node.querySelector('.focus-filter-menu__name')?.textContent])).toEqual([['all','All projects'],[JSON.stringify([f.alpha.hostId,'alpha']),f.alpha.name],[JSON.stringify([f.alpha.hostId,'beta']),'Beta']])
     const counts=[...f.menu().querySelectorAll('[data-focus-state]')].map(node=>[node.querySelector('.focus-filter-menu__name')?.textContent,node.querySelector('.focus-filter-menu__count')?.textContent??null])
     expect(counts).toEqual([['All states',null],['Attention','1'],['Working','2'],['Results','1'],['Idle / Recovery','3'],['Activity unknown','2'],['Needs recovery','1']])
+    expect([...f.menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent)).toEqual(['Clear filters', 'Search all retained conversation text', 'Done'])
     expect(f.menu().querySelectorAll('[aria-checked="true"]')).toHaveLength(3)
     await f.escape(); expect(f.ids()).toEqual(['attention','beta-agent','healthy-lost','idle','offline','results','working'])
   } finally {await f.close()}
@@ -153,7 +154,7 @@ it('combines projects and states with OR within each dimension and keeps types a
   } finally { await f.close() }
 })
 
-it('searches menu options without changing filters, and quick states preserve project, type and text', async () => {
+it('searches menu options without changing filters, and state selection preserves project, type and text', async () => {
   const f = await fixture(); try {
     await f.choose('project', 'alpha'); await f.query('parser'); await f.open()
     const input = f.menu().querySelector<HTMLInputElement>('[aria-label="Find Focus filter options"]')!
@@ -161,7 +162,9 @@ it('searches menu options without changing filters, and quick states preserve pr
     expect(f.ids()).toEqual(['working']); expect(f.search().value).toBe('parser')
     expect([...f.menu().querySelectorAll('[data-focus-type]')].map(node=>node.getAttribute('data-focus-type'))).toEqual(['all','project'])
     const type = f.menu().querySelector<HTMLElement>('[data-focus-type="project"]')!; await act(async()=>type.click())
-    const needs = [...f.menu().querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node=>node.textContent==='Needs you')!;expect(needs).not.toBeNull();await act(async()=>needs.click())
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Attention');input.dispatchEvent(new Event('input', {bubbles:true}))})
+    const attention = f.menu().querySelector<HTMLElement>('[data-focus-state="attention"]')!;expect(attention).not.toBeNull();await act(async()=>attention.click())
+    expect(f.menu()).not.toBeNull();expect(attention.getAttribute('aria-checked')).toBe('true')
     expect(f.ids()).toEqual([]);expect(f.search().value).toBe('parser')
     expect(f.trigger().getAttribute('aria-description')).toBe(`${f.alpha.name} · Attention · Project`)
   } finally { await f.close() }

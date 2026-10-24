@@ -23,7 +23,9 @@ const mutations: Record<string, [string, string, string]> = {
   'drop-coordination': [targets[3]!, 'const coordinationResults = filtering ? matched.filter(row => !executionIds.has(row.id)) : []', 'const coordinationResults = []'],
   'read-coordination-body': [targets[4]!, 'agentContextWithConversation(session, undefined, name, workspace, topicId, focusConversationFacts(undefined))', 'agentContextForSession(session, timeline, name, workspace, topicId)'],
   'recap-read': [targets[5]!, 'if (!summary || context.recap !== undefined) return', 'if (!summary) return'],
-  'wrong-mote-scope': [targets[3]!, "if (!topicId || focusLaneForSession(topicId, scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)) !== 'pmo') {", 'if (!topicId) {']
+  'wrong-mote-scope': [targets[3]!, "if (!topicId || focusLaneForSession(topicId, scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)) !== 'pmo') {", 'if (!topicId) {'],
+  'duplicate-state-actions': [targets[0]!, '        <Menu.Item className="tab-context-menu__item" onSelect={() => { onChange(EMPTY_FOCUS_FILTERS); onClear() }}>Clear filters</Menu.Item>', `        <div><Menu.Item onSelect={() => onChange({ ...value, states: ['attention'] })}>Needs you</Menu.Item><Menu.Item onSelect={() => onChange({ ...value, states: ['results'] })}>Results</Menu.Item></div>
+        <Menu.Item className="tab-context-menu__item" onSelect={() => { onChange(EMPTY_FOCUS_FILTERS); onClear() }}>Clear filters</Menu.Item>`]
 }
 export default defineConfig({
   ...source,
