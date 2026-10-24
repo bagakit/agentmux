@@ -1,1 +1,1 @@
-export { saveObjectAvatarFile, readObjectAvatarFile } from '../../../src/main/object-avatar-files'
+export { saveObjectAvatarFile, readObjectAvatarFile } from '@agentmux/host/object-avatar-files'
