@@ -189,6 +189,45 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     expect(button(ui.element, '将 screen.png 加入消息')).toBeDefined()
   })
 
+  it('explicitly cancels attachment preparation without sending the body or losing the original uploads', async () => {
+    const f = boundFixture(), gate = deferred<void>(), originalForward = f.forward.getMockImplementation()!
+    f.forward.mockImplementation(async (method, params) => { const result = await originalForward(method, params); if (method === 'file.upload') await gate.promise; return result })
+    const pick = pickFiles([{ name: 'first.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, 'Original body'); await click(button(ui.element, 'Reference files for the Agent to read'))
+    pick.mockResolvedValue({ files: [{ name: 'second.txt', mimeType: 'text/plain', size: 4, blob: new NodeBlob(['next']) as Blob }] })
+    await click(button(ui.element, 'Reference files for the Agent to read')); await click(button(ui.element, 'Send')); await settled('sending')
+    const original = structuredClone(getDeviceWorkface().snapshot().record.fileUploads![0]!.identity)
+    await click(button(ui.element, '取消发送准备'))
+    expect(f.submit).not.toHaveBeenCalled(); expect(editor(ui.element).textContent).toBe('Original body')
+    expect(ui.element.textContent).toContain('本次发送准备已取消')
+    await act(async () => { gate.resolve(); await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe('uploaded')) })
+    expect(f.submit).not.toHaveBeenCalled()
+    expect(f.calls.filter(call => call.method === 'file.upload')).toHaveLength(1)
+    expect(getDeviceWorkface().snapshot().record.fileUploads![0]!.identity).toEqual(original)
+    expect(ui.element.querySelector('.mobile-attachment[data-phase="selected"]')?.textContent).toContain('second.txt')
+    expect(button(ui.element, '将 first.png 加入消息')).toBeDefined()
+  })
+
+  it('can cancel after upload while attachment commit is still pending, before Core input', async () => {
+    const f = boundFixture(), gate = deferred<void>(), owner = getDeviceWorkface(), retain = owner.retainFileUpload.bind(owner), entered = vi.fn()
+    vi.spyOn(owner, 'retainFileUpload').mockImplementation((upload, recordId, original) => {
+      if (upload.phase === 'inserted') { entered(); return gate.promise.then(() => retain(upload, recordId, original)) }
+      return retain(upload, recordId, original)
+    })
+    pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, 'Original body'); await click(button(ui.element, 'Reference files for the Agent to read')); await click(button(ui.element, 'Send'))
+    await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
+    const original = structuredClone(owner.snapshot().record.fileUploads![0]!.identity)
+    await click(button(ui.element, '取消发送准备'))
+    expect(f.submit).not.toHaveBeenCalled(); expect(editor(ui.element).textContent).toContain('Original body')
+    await act(async () => { gate.resolve(); await vi.waitFor(() => expect(owner.snapshot().record.conversation.attempts[0]?.[1].phase).toBe('rejected')) })
+    expect(f.submit).not.toHaveBeenCalled()
+    expect(owner.snapshot().record.fileUploads![0]!.identity).toEqual(original)
+    expect(editor(ui.element).textContent).toContain('Original body')
+  })
+
   it('body-only stops the old preparation before another selected file uploads while retaining its in-flight first operation', async () => {
     const f = boundFixture(), gate = deferred<void>(), originalForward = f.forward.getMockImplementation()!
     f.forward.mockImplementation(async (method, params) => { const result = await originalForward(method, params); if (method === 'file.upload') await gate.promise; return result })
