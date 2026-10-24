@@ -139,11 +139,7 @@
 .wf-agent--compact { min-width: 0; }
 
 /* Real recorded steps use the same disclosure family without workflow statistics. */
-.wf-card--observation { margin-block: var(--sp-2); padding: 0; border: 0; border-radius: var(--radius); background: color-mix(in srgb, var(--surface-1) 45%, transparent); }
-.wf-card--observation > .wf-head { display: flex; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4); min-height: 28px; }
 .wf-card--observation .wf-chip { padding-inline: 0; border-radius: 0; background: transparent; }
-.wf-card--observation .log-fold__label { flex: 1; }
-.wf-observation__body { margin: var(--sp-1) var(--sp-3) var(--sp-2) var(--sp-4); border-left: 0; padding-left: 0; }
 .wf-observation__recorded { color: var(--text-3); font-size: var(--fs-micro); }
 .wf-observation__summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); padding: 0 var(--sp-4) var(--sp-2); color: var(--text-2); font-size: var(--fs-micro); }
 .wf-observation__caption { margin-right: auto; color: var(--text-3); }
@@ -159,17 +155,15 @@
 .wf-tool-row--observation .log-row__chip { display: inline-flex; align-items: center; gap: var(--sp-1); padding-inline: 0; border-radius: 0; background: transparent; }
 .wf-tool-row--observation .log-row__source { font-size: var(--fs-micro); }
 @media (max-width: 560px) {
-  .wf-card--observation > .wf-head { flex-wrap: nowrap; padding-inline: var(--sp-3); gap: var(--sp-2); }
   .wf-tool-row--observation { grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: var(--sp-2); padding-inline: var(--sp-3); }
   .wf-tool-row--observation > .log-row__time { grid-column: 2; grid-row: 2; padding-block: var(--sp-1); text-align: left; }
   .wf-tool-row--observation > .log-row__title { grid-column: 2; grid-row: 1; }
   .wf-tool-row--observation > .log-row__meta { grid-column: 3; grid-row: 1 / 3; flex-wrap: wrap; justify-content: flex-end; max-width: 96px; }
   .wf-tool-row--observation .log-row__source { display: none; }
-  .wf-observation__body { margin-inline: var(--sp-3); }
   .wf-observation__summary { padding-inline: var(--sp-3); gap: var(--sp-2) var(--sp-3); }
   .wf-observation__caption { width: 100%; }
 }
-@media (pointer: coarse) { .wf-tool-row--observation[data-expandable], .wf-card--observation > .wf-head { min-height: 44px; } }
+@media (pointer: coarse) { .wf-tool-row--observation[data-expandable] { min-height: 44px; } }
 
 /* Recorded native process uses real timestamps only; no empty clock track. */
 .wf-tool-row--observation[data-recorded-time='false'] { grid-template-columns: 20px minmax(0, 1fr) auto; }

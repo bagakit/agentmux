@@ -223,12 +223,12 @@
 .log-turn__location { color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
 
 /* Public progress keeps the shared reading body, with a quiet conversational face. */
-.log-turn[data-message-phase='progress'] { grid-template-columns: 32px minmax(0, 1fr); column-gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); margin: var(--sp-1) 0; border: 0; border-radius: 0; background: transparent; }
-.log-turn[data-message-phase='progress'] > .log-turn__node { width: 32px; height: 32px; background: transparent; }
+.log-turn[data-message-phase='progress'] { grid-template-columns: 32px minmax(0, 1fr); column-gap: var(--sp-3); width: min(calc(100% - var(--sp-4)), 760px); padding: var(--sp-2) var(--sp-4); margin: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface-1) 45%, transparent); }
+.log-turn[data-message-phase='progress'] > .log-turn__node { --conversation-message-avatar-size: 32px; width: 32px; height: 32px; background: transparent; }
 .log-turn[data-message-phase='progress'] > .log-turn__body,
 .log-turn[data-message-phase='progress'] > .message-disclosure > .message-disclosure__body > .log-turn__body,
 .log-turn[data-message-phase='progress'] > .log-turn__system-body > .log-turn__body,
-.log-turn[data-message-phase='progress'] > .log-turn__collaboration-content > .log-turn__body { width: fit-content; max-width: 100%; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); }
+.log-turn[data-message-phase='progress'] > .log-turn__collaboration-content > .log-turn__body { width: fit-content; max-width: 100%; padding: var(--sp-2) 0; color: var(--text-2); }
 .log-turn[data-message-phase='progress'] > .log-turn__body > .log-turn__text > .md .md-paragraph,
 .log-turn[data-message-phase='progress'] > .log-turn__body > .log-turn__text > .conversation-progressive-body > .md .md-paragraph,
 .log-turn[data-message-phase='progress'] > .message-disclosure > .message-disclosure__body > .log-turn__body > .log-turn__text > .md .md-paragraph,
@@ -311,7 +311,7 @@
 .log-turn[data-trace-only='true'] > .log-turn__body { grid-column: 1; }
 .log-turn .wf-card--observation { margin-block: var(--sp-2); border-radius: var(--radius-sm); }
 .log-turn .wf-card--observation > .wf-head { padding-inline: var(--sp-3); gap: var(--sp-3); }
-.log-turn .wf-observation__body { margin-inline: var(--sp-3); }
+.log-turn .wf-card--observation > .wf-observation__body { margin-inline: var(--sp-3); }
 
 .observation-sample--conversation, .observation-sample--full { min-width: 0; }
 
@@ -416,14 +416,29 @@
 .log-turn__id-copy:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
 .log-turn__sender-id[data-copy-state='copied'] .log-turn__id-copy { color: var(--success); }
 .log-turn__id-copy-error { position: absolute; z-index: 1; inset-inline-start: 0; top: 100%; padding: 2px var(--sp-2); white-space: nowrap; color: var(--red-text); background: var(--surface-2); border-radius: var(--radius-sm); font-size: var(--fs-micro); }
+/* A narrow card gives its exact address the full heading width, beside its own Copy. */
+@container conversation-reading (max-width: 440px) {
+  .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+  .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) > .log-turn__identity,
+  .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) .log-turn__title { display: contents; }
+  .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) .log-turn__who { grid-column: 1; grid-row: 1; align-self: start; padding-block-start: var(--sp-1); line-height: 20px; }
+  .log-turn__sender-id { grid-column: 1 / -1; grid-row: 2; justify-self: start; width: fit-content; flex-wrap: nowrap; align-items: flex-start; }
+  .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) .log-turn__identity > .log-turn__time { grid-column: 2; grid-row: 1; }
+  .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) > .log-turn__actions { grid-column: 3; }
+  .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) > .conversation-input-details > .conversation-input-details__toggle { grid-column: 4; }
+  .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) .log-turn__title > :not(.log-turn__sender) { justify-self: start; }
+  .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) .log-turn__title > :not(.log-turn__sender),
+  .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) > .conversation-input-details > .conversation-input-details__body { grid-column: 1 / -1; grid-row: auto; }
+}
 .conversation-reply-observation { min-width: 0; }
-.conversation-reply-observation__controls { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
-.conversation-reply-observation__toggle { display: flex; flex: 1; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 28px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.conversation-reply-observation__toggle > :is(svg, time, .conversation-source-labels) { flex-shrink: 0; }
+.conversation-reply-observation__controls { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
+.conversation-reply-observation__toggle { display: flex; flex: 1; align-items: center; gap: var(--sp-3); min-width: 0; min-height: 28px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.conversation-reply-observation__node { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; }
+.conversation-reply-observation__toggle > :is(time, .conversation-source-labels) { flex-shrink: 0; }
 .conversation-reply-observation__toggle .conversation-source-labels { flex-wrap: nowrap; }
 .conversation-reply-observation__toggle time { font-variant-numeric: tabular-nums; }
 .conversation-reply-observation__toggle:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
-.conversation-reply-observation__toggle[aria-expanded='true'] > svg { transform: rotate(90deg); }
+.conversation-reply-observation__toggle[aria-expanded='true'] > .conversation-reply-observation__node > svg { transform: rotate(90deg); }
 .conversation-reply-observation__controls [data-status='failed'] { color: var(--red-text); }
 .conversation-submissions { flex-basis: 100%; display: grid; gap: var(--sp-1); min-width: 0; color: var(--text-3); }
 .conversation-submission { min-width: 0; overflow-wrap: anywhere; }
