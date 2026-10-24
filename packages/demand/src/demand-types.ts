@@ -183,7 +183,7 @@ export type DemandNameChangePage = {
   nextOffset: number | null
 }
 
-export type DemandStoreListener = (snapshot: DemandStoreSnapshot) => void
+export type DemandStoreListener = (snapshot: DemandStoreSnapshot, changedDemandIds: readonly string[]) => void
 
 export function isDemandStatus(value: unknown): value is DemandStatus {
   return typeof value === 'string' && (DEMAND_STATUSES as readonly string[]).includes(value)
