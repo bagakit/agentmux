@@ -10,7 +10,7 @@
 .workbench-region:has(> .workbench-region__close) { --agent-region-close-clearance: calc(var(--region-close-size) + 2 * var(--sp-2)); }
 .agent-region-header-home .agent-region-header { position: relative; align-items: flex-start; padding-top: var(--sp-1); pointer-events: none; }
 /* The independently themed Terminal need not match the UI palette: back only the quiet glyph band. */
-.agent-region-header-home .agent-region-header::before { content: ''; position: absolute; z-index: -1; inset: 0 0 auto; height: 18px; border-bottom-left-radius: var(--radius-sm); background: var(--surface-2); pointer-events: none; }
+.agent-region-header-home .agent-region-header::before { content: ''; position: absolute; z-index: -1; inset: 0 0 auto; height: 16px; border-bottom-left-radius: var(--radius-sm); background: var(--surface-2); pointer-events: none; }
 .agent-region-header-home :is(.agent-region-header__name, .agent-region-header__execution, .agent-region-header__mode, .agent-region-header__more, .session-result-review__trigger) { pointer-events: auto; }
 .agent-region-header-home .agent-region-header__name, .agent-region-header-home .agent-region-header__mode { line-height: 14px; }
 .agent-region-header-home .agent-region-header__more { align-items: flex-start; }
@@ -18,7 +18,7 @@
 .agent-region-header-home .session-result-review__trigger { align-items: flex-start; }
 /* A reading inset clears the padded local paint; moving controls to Focus releases it. */
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) { --agent-region-reading-inset: calc(var(--sp-6) + var(--sp-2)); }
-.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) .terminal-view__xterm { margin-top: var(--agent-region-reading-inset); height: calc(100% - var(--agent-region-reading-inset)); }
+.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) .terminal-view__xterm { --agent-region-reading-inset: calc(var(--sp-6) + var(--region-focus-ring-width)); margin-top: var(--agent-region-reading-inset); height: calc(100% - var(--agent-region-reading-inset)); }
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .agent-launch-notice > .service-window,
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .service-window { padding-top: var(--agent-region-reading-inset); }
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .agent-body[data-observation-surface='workflow'] { box-sizing: border-box; padding-top: var(--agent-region-reading-inset); }
@@ -53,15 +53,13 @@
 .agent-native-source__review { display: grid; gap: var(--sp-1); padding-top: var(--sp-2); color: var(--text-2); }
 .agent-native-source strong { font-size: var(--fs-meta); font-weight: 500; }
 
-/* One fixed quiet glyph band; hit geometry never changes on hover, focus or open. */
+/* Quiet glyphs retain the larger transparent hitbox in every state. */
 .agent-region-header__connector { display: inline-flex; align-items: flex-start; justify-content: center; position: relative; isolation: isolate; flex: none; width: 22px; height: 22px; min-height: 22px; max-width: none; padding: 0; border: 0; border-radius: var(--radius-sm); pointer-events: auto; background: transparent; color: var(--text-3); }
-.agent-region-header__connector::before { content: ''; position: absolute; z-index: -1; inset: 0 0 auto; height: 16px; border-radius: var(--radius-sm); background: transparent; pointer-events: none; }
 .agent-region-header__connector:is(:hover, :focus-visible, [data-state='open']) { background: transparent; color: var(--text); }
-.agent-region-header__connector:is(:hover, :focus-visible, [data-state='open'])::before { background: var(--surface-3); }
 .agent-region-header__connector > img { opacity: .8; }
 .agent-region-header__connector:is([data-channel-state='unbound'], [data-channel-state='off']) > img { filter: grayscale(1); opacity: .6; }
-.agent-region-header__connector-marker { display: inline-flex; position: absolute; right: -2px; top: 8px; border-radius: 50%; color: var(--text-2); background: var(--surface-2); }
-.agent-region-header__connector-marker > svg { width: 10px; height: 10px; }
+.agent-region-header__connector-marker { display: inline-flex; position: absolute; right: 0; top: 6px; border-radius: 50%; color: var(--text-2); background: var(--surface-2); }
+.agent-region-header__connector-marker > svg { width: 8px; height: 8px; }
 .agent-region-header__connector:is([data-channel-state='attention'], [data-channel-state='unknown']) .agent-region-header__connector-marker { color: var(--amber-text); }
 .connector-header-menu { width: 352px; min-width: 0; max-width: calc(100vw - 16px); max-height: var(--radix-dropdown-menu-content-available-height); overflow-y: auto; padding: var(--sp-3); }
 .connector-header-menu__title { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-1) var(--sp-2) var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
