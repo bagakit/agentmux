@@ -3,7 +3,7 @@ export type ScreenshotShortcutTarget = { capture(): Promise<void> }
 let selected: ScreenshotShortcutTarget | null = null
 let pending: Promise<void> | null = null
 
-export function selectScreenshotTarget(target: ScreenshotShortcutTarget): void { selected = target }
+export function selectScreenshotTarget(target: ScreenshotShortcutTarget | null): void { selected = target }
 export function releaseScreenshotTarget(target: ScreenshotShortcutTarget): void { if (selected === target) selected = null }
 
 /** Pin synchronously: the original editor captures its bookmark before native selection starts. */
