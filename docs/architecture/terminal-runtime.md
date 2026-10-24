@@ -129,7 +129,7 @@ lineage，但只有 AgentMux Provider 可以解释这些证据。
 | Core Provider handshake（终端能力握手） | `AgentMuxClient` | `ensureTerminalHandshake` |
 | Desktop OSC 10/11 capability reply（Agent 无 Renderer 时） | `RuntimeController`（Main） | `publish` / `replyToAgentColorQuery` |
 | Desktop OSC 10/11 capability reply（普通 terminal，Renderer 在场） | Renderer（xterm parser handler） | [terminal-capability-replies.ts](../../apps/desktop/src/renderer/src/lib/terminal-capability-replies.ts)、TerminalView |
-| OSC 查询回复所用的前景/背景色 | Desktop shared palette，经 `setTerminalViewColors` 注入 Main | RuntimeController / IPC、[terminal-palettes.ts](../../apps/desktop/src/shared/terminal-palettes.ts) |
+| OSC 查询回复所用的前景/背景色 | client-ui shared palette，经 `setTerminalViewColors` 注入 Main | RuntimeController / IPC、[terminal-palettes.ts](../../packages/client-ui/src/theme/terminal-palettes.ts) |
 | xterm theme（终端外观 `ITheme`） | Renderer，源自 shared palette | [terminal-theme.ts](../../apps/desktop/src/renderer/src/lib/terminal-theme.ts)、shared palette |
 | App chrome（产品外框视觉） | Desktop 应用外框（与终端外观分离） | 同一 theme 文件的边界说明 |
 
@@ -193,7 +193,7 @@ Core 的 `localProcessEnvironment()` 为 daemon 启动及每次本地 Run 创建
 
 ### 4.1 palette 结构
 
-终端外观由一份完整的 `ITheme` 决定，SSOT 在 `apps/desktop/src/shared/terminal-palettes.ts`。
+终端外观由一份完整的 `ITheme` 决定，SSOT 在 `packages/client-ui/src/theme/terminal-palettes.ts`。
 `TerminalPalette` 类型要求 22 个键：`background`、`foreground`、
 `cursor`、`cursorAccent`、`selection*`，以及 16 个 ANSI 角色（`black`…`brightWhite`）。
 `apps/desktop/test/terminal-theme.test.ts` 断言每个 catalog palette 恰好 22 个键，杜绝残缺 palette。

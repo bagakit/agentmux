@@ -66,7 +66,7 @@ amux system diagnostics inspect --input mote-context-query.json
 通知面板的事实使用 `client.notifications`，默认列当前问题与该 client 保留的活动，不读取 A2A Inbox 或全局日志档案。可按 current／activity、类别及未读筛选，沿返回的 notificationId 精查；原文须显式 `--include-raw`。同一页序列保留原筛选、limit 与 cursor，expired 时重新列举；不要把新旧快照拼成完整结果。查看 coverage 与 omissions，原 client 不可用或加载中不能当作空列表。查询使用同一通知 owner，不打开面板、不标读，也不执行通知中描述的恢复动作；字段、范围与游标合同见[原领域类型](../../packages/core/src/client-notifications.ts)和[诊断协议](../specs/diagnostic-evidence-protocol.md)。
 ## 客户端故障档案与原来源引用
 
-`client.incident` 由宿主显式注入 [Main archive](../../apps/desktop/src/main/client-incident-archive.ts)，保留自动报告的有限阶段、计数、原尝试和来源身份。先用 `--recent` 在当前 archive Host 发现候选，再以返回的原 `recordRef.logId` 和 authority 精查；archive 路线与报告中的执行 Host 分别保真。recent 的 coverage、persistence 和 cursor 均沿 [公共类型](../../packages/core/src/client-incident.ts)，空结果不能证明此前没有异常。`--include-raw` 不会给事件记录添加终端正文、错误文本、路径或截图。
+`client.incident` 由宿主显式注入 [共享 archive 实现](../../apps/host/src/client-incident-archive.ts)，保留自动报告的有限阶段、计数、原尝试和来源身份。先用 `--recent` 在准确 archive Host 发现候选，或以 `--authority` 限定原档案，再以返回的原 `recordRef.logId` 和 authority 精查；无 authority 的已知来源与 partial 合同见[手机网页的有限观察](../design/diagnostic-evidence.md#手机网页的有限观察)。archive 路线与报告中的执行 Host 分别保真。recent 的 coverage、persistence 和 cursor 均沿 [公共类型](../../packages/core/src/client-incident.ts)，空结果不能证明此前没有异常。`--include-raw` 不会给事件记录添加终端正文、错误文本、路径或截图。
 
 报告只在原 owner 已有准确 typed 引用时填写 `references`。默认查询沿 [引用投影](../../packages/core/src/client-incident-evidence.ts) 将这些声明交给原 Delivery、Toolkit、Scene reader，继续使用同一查询预算、实际在途槽、权限和安全投影。引用原 logId、executionId 或 captureId，不迁移原件，不按相近时刻、同 Session 或文案补关联；Toolkit/Scene 没有原 logId，读回仍为 `recordRef=null`。读取成功只表示准确目标可读，不升级为 owner-confirmed 因果。
 
