@@ -15,6 +15,8 @@ export type ToolkitMetricsSnapshot = {
   run: { hostId: string; runId: string } | null; state: ToolkitState; reason: string | null
   startedAt: number | null; observedAt: number | null; observation: MetricsObservation | null; document: ToolkitResultDocument | null
   diagnostics: ToolkitPerformanceDiagnostics
+  /** Original state remains independently readable through toolkit.get with this ID. */
+  previousUnknownExecutionId?: string
   manual: boolean; consumerCount: number; sequence: number
   trend: { observedAt: number; appCpuPercent: number | null; appRssKib: number | null }[]
 }
@@ -61,6 +63,8 @@ export type ToolkitToolDefinition = ToolkitToolInput & { revision: string; packa
 export type ToolkitRunInput = {
   invocationId: string; expectedRevision: string; expectedLatestExecutionId: string | null
 }
+/** A new read-only observation, never a retry of the expected unknown execution. */
+export type ToolkitPerformanceRecoveryInput = { invocationId: string; expectedExecutionId: string }
 /** The baseline belongs to the independent display lane, never the action result. */
 export type ToolkitEvaluateInput = ToolkitRunInput
 export type ToolkitActionInput = {
@@ -110,9 +114,9 @@ type Envelope = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; request
 export type ToolkitRequest = Envelope & (
   | { operation: 'toolkit.list' }
   | { operation: 'toolkit.script'; toolId: string }
-  | { operation: 'toolkit.get'; toolId: string; includeFailureEvidence?: true }
+  | { operation: 'toolkit.get'; toolId: string; includeFailureEvidence?: true; executionId?: string }
   | { operation: 'toolkit.watch'; toolId: string; captureFailure?: true; includeFailureEvidence?: true; evaluateOnDisplay?: boolean }
-  | { operation: 'toolkit.run'; toolId: string; input?: ToolkitRunInput }
+  | { operation: 'toolkit.run'; toolId: string; input?: ToolkitRunInput | ToolkitPerformanceRecoveryInput }
   | { operation: 'toolkit.evaluate'; toolId: string; input?: ToolkitEvaluateInput }
   | { operation: 'toolkit.action'; toolId: string; actionId: string; input: ToolkitActionInput }
   | { operation: 'toolkit.stop'; toolId: string; executionId?: string | null }
@@ -311,6 +315,12 @@ export function parseToolkitRunInput(value: unknown, code = 'INVALID_CONTROL_REQ
   if (r.expectedLatestExecutionId !== null) identity(r.expectedLatestExecutionId, code)
   return r as ToolkitRunInput
 }
+export function parseToolkitPerformanceRecoveryInput(value: unknown, code = 'INVALID_CONTROL_REQUEST'): ToolkitPerformanceRecoveryInput {
+  const r = record(value, ['invocationId', 'expectedExecutionId'], [], code)
+  identity(r.invocationId, code); identity(r.expectedExecutionId, code)
+  if (r.invocationId === r.expectedExecutionId) invalid(code)
+  return r as ToolkitPerformanceRecoveryInput
+}
 export function parseToolkitActionInput(value: unknown, code = 'INVALID_CONTROL_REQUEST'): ToolkitActionInput {
   const r = record(value, ['invocationId', 'expectedRevision', 'sourceExecutionId', 'expectedAdmissionExecutionId'], [], code)
   identity(r.invocationId, code); identity(r.expectedRevision, code); identity(r.sourceExecutionId, code)
@@ -345,7 +355,7 @@ function execution(value: unknown, confirmed: boolean): ToolkitAdmission | Toolk
 export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
   const source = settingsResourceEnvelope(value, ['schema', 'kind', 'toolId', 'configuration', 'reason', 'retained',
     'definition', 'state', 'admission', 'latestConfirmed', 'consumerCount', 'sequence', 'display',
-    'executionId', 'run', 'startedAt', 'observedAt', 'observation', 'document', 'manual', 'trend', 'diagnostics'], 'CONTROL_PROTOCOL_ERROR')
+    'executionId', 'run', 'startedAt', 'observedAt', 'observation', 'document', 'manual', 'trend', 'diagnostics', 'previousUnknownExecutionId'], 'CONTROL_PROTOCOL_ERROR')
   if (source.schema !== 'agentmux.toolkit.v1') invalid()
   if (source.kind === 'package-unavailable') {
     const r = record(source, ['schema', 'kind', 'toolId', 'configuration', 'reason', 'retained'])
@@ -389,9 +399,10 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
     }
     return { ...r, definition, admission, latestConfirmed } as ToolkitScriptSnapshot
   }
-  const r = envelope(source, ['schema', 'kind', 'toolId', 'executionId', 'run', 'state', 'reason', 'startedAt', 'observedAt', 'observation', 'document', 'manual', 'consumerCount', 'sequence', 'trend', 'diagnostics'])
+  const r = envelope(source, ['schema', 'kind', 'toolId', 'executionId', 'run', 'state', 'reason', 'startedAt', 'observedAt', 'observation', 'document', 'manual', 'consumerCount', 'sequence', 'trend', 'diagnostics'], ['previousUnknownExecutionId'])
   if (r.kind !== 'metrics' || r.toolId !== 'performance' || !TOOLKIT_STATES.includes(r.state as ToolkitState) || typeof r.manual !== 'boolean') invalid()
   nullable(r.executionId, identity); nullable(r.reason, text); nullable(r.startedAt, time); nullable(r.observedAt, time)
+  if (r.previousUnknownExecutionId !== undefined) identity(r.previousUnknownExecutionId)
   count(r.consumerCount); count(r.sequence); runRef(r.run)
   parseToolkitPerformanceDiagnostics(r.diagnostics)
   if (r.observation !== null) {
@@ -471,7 +482,7 @@ export function parseToolkitResult(operation: ToolkitOperation, value: unknown):
   return { operation, snapshot }
 }
 /** A valid result must still belong to the tool the caller actually requested. */
-export function assertToolkitResultTarget(request: { operation: string; toolId?: string }, result: ToolkitResult): void {
+export function assertToolkitResultTarget(request: { operation: string; toolId?: string; executionId?: string | null; input?: unknown }, result: ToolkitResult): void {
   if (request.operation !== result.operation) throw new AgentMuxError('Toolkit operation mismatch.', 'CONTROL_PROTOCOL_ERROR')
   let toolId: string
   switch (result.operation) {
@@ -482,6 +493,15 @@ export function assertToolkitResultTarget(request: { operation: string; toolId?:
     default: toolId = result.snapshot.toolId
   }
   if (toolId !== request.toolId) throw new AgentMuxError('Toolkit result belongs to another tool.', 'CONTROL_PROTOCOL_ERROR')
+  if (request.operation === 'toolkit.get' && request.executionId !== undefined && 'snapshot' in result &&
+      (result.snapshot.kind !== 'metrics' || result.snapshot.executionId !== request.executionId)) {
+    throw new AgentMuxError('Toolkit result belongs to another execution.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  if (request.operation === 'toolkit.run' && request.toolId === 'performance' && request.input !== undefined && 'snapshot' in result) {
+    const input = parseToolkitPerformanceRecoveryInput(request.input)
+    if (result.snapshot.kind !== 'metrics' || result.snapshot.executionId !== input.invocationId)
+      throw new AgentMuxError('Toolkit recovery result belongs to another invocation.', 'CONTROL_PROTOCOL_ERROR')
+  }
 }
 export function parseToolkitRequest(value: unknown): ToolkitRequest {
   const code = 'INVALID_CONTROL_REQUEST', source = settingsResourceRecord(value, code)
@@ -503,7 +523,11 @@ export function parseToolkitRequest(value: unknown): ToolkitRequest {
       break
     }
     case 'toolkit.remove': record(source, base, ['expected'], code); if (Object.hasOwn(source, 'expected')) parseToolkitConfigurationFields(source.expected, false, code); break
-    case 'toolkit.run': record(source, source.toolId === 'performance' ? base : [...base, 'input'], [], code); if (source.toolId !== 'performance') parseToolkitRunInput(source.input, code); break
+    case 'toolkit.run':
+      record(source, source.toolId === 'performance' ? base : [...base, 'input'], source.toolId === 'performance' ? ['input'] : [], code)
+      if (source.toolId === 'performance') { if (source.input !== undefined) parseToolkitPerformanceRecoveryInput(source.input, code) }
+      else parseToolkitRunInput(source.input, code)
+      break
     case 'toolkit.evaluate':
       if (source.toolId === 'performance') invalid(code)
       record(source, base, ['input'], code); if (source.input !== undefined) parseToolkitRunInput(source.input, code); break
@@ -515,7 +539,11 @@ export function parseToolkitRequest(value: unknown): ToolkitRequest {
     case 'toolkit.stop': record(source, source.toolId === 'performance' ? base : [...base, 'executionId'], [], code); if (source.toolId !== 'performance' && source.executionId !== null) identity(source.executionId, code); break
     case 'toolkit.get':
     case 'toolkit.watch':
-      record(source, base, source.operation === 'toolkit.watch' ? ['captureFailure', 'includeFailureEvidence', 'evaluateOnDisplay'] : ['includeFailureEvidence'], code)
+      record(source, base, source.operation === 'toolkit.watch' ? ['captureFailure', 'includeFailureEvidence', 'evaluateOnDisplay'] : ['includeFailureEvidence', 'executionId'], code)
+      if (Object.hasOwn(source, 'executionId')) {
+        if (source.toolId !== 'performance') invalid(code)
+        identity(source.executionId, code)
+      }
       if (Object.hasOwn(source, 'evaluateOnDisplay') && typeof source.evaluateOnDisplay !== 'boolean') invalid(code)
       for (const key of ['captureFailure', 'includeFailureEvidence']) {
         if (Object.hasOwn(source, key) && (source.toolId !== 'performance' || source[key] !== true)) invalid(code)
