@@ -8,12 +8,12 @@ import type { SessionSnapshot } from '../src/shared/contracts'
 import { AgentRegionHeader } from '../src/renderer/src/components/AgentRegionHeader'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import { composerDOM } from './helpers/composer-dom-fixture'
+import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 const dom = composerDOM(), initial = useAppStore.getState(); let cleanup: () => void
 const old = { kind: 'provider' as const, providerId: 'codex' as const, sessionId: 'original-native', transcriptPath: _reshape_fixturePath("private/tmp/original-native.jsonl") }
 const candidate = { ...old, sessionId: 'candidate-native', transcriptPath: _reshape_fixturePath("private/tmp/candidate-native.jsonl") }
 const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'same-session', run: { runId: 'same-run' } }
-const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: control.agentSessionId, kind: 'agent', providerId: 'codex', executorId: 'private', hostId: 'local', workspacePath: _reshape_fixturePath("private/tmp/theme-icon-proof"), label: 'Private Agent', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 50), agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 50), capabilities: {}, control, processState: 'running', latestOutputBytes: 0, status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, nativeHandle: old, nativeSourceObservation: { state: 'ambiguous', candidates: [old, candidate], run: control.run, observedAt: _reshape_fixtureEpoch(0, 0, 100), reason: 'Authoritative current candidate differs.' } }
+const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: control.agentSessionId, kind: 'agent', providerId: 'codex', executorId: 'private', hostId: 'local', workspacePath: _reshape_fixturePath("private/tmp/theme-icon-proof"), label: 'Private Agent', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 50), agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 50), capabilities: composerSession().capabilities, control, processState: 'running', latestOutputBytes: 0, status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, nativeHandle: old, nativeSourceObservation: { state: 'ambiguous', candidates: [old, candidate], run: control.run, observedAt: _reshape_fixtureEpoch(0, 0, 100), reason: 'Authoritative current candidate differs.' } }
 beforeEach(() => { cleanup = mountThemeRuntime(window); useAppStore.setState({ sessions: [session] }) })
 afterEach(() => { cleanup(); useAppStore.setState(initial, true); vi.restoreAllMocks() })
 const action = (label: string) => {
