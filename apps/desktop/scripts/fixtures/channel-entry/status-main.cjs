@@ -4,13 +4,14 @@ const path = require('node:path')
 const { app, BrowserWindow } = require('electron')
 const { nativeRendererInput } = require('../settings-connections/native-input.cjs')
 const [html, privateRoot, evidence] = process.argv.slice(2)
+const popoverClarity = process.argv.includes('--popover-clarity')
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { passed: false, frames: [], scenes: [], interactions: [], hoverGeometry: {}, boundary: 'Actual production Workbench, split Regions, channel contributions, header/menu, original group form and CSS; controlled typed public connection/diagnosis/member/retained-link DTOs. Native pointer/keyboard operates the original components. No IPC/SDK, live account, delivery, installed App or healthy-Agent qualification.' }
 let win
 app.whenReady().then(async () => {
   try {
     win = new BrowserWindow({ width: 1380, height: 980, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
-    await win.loadFile(html, { query: { 'header-status': '1' } })
+    await win.loadFile(html, { query: { 'header-status': '1', ...(popoverClarity ? { 'popover-clarity': '1' } : {}) } })
     const { read, until, settle, click, press } = nativeRendererInput(win, result.interactions, '')
     const region = '[data-workbench-region-id="channel-preview-region"]'
     const entry = adapter => region + ' [data-channel-entry="' + adapter + '"]'
@@ -19,7 +20,7 @@ app.whenReady().then(async () => {
     const action = (label, selector = '.connector-header-menu [role="menuitem"]') => 'js:[...document.querySelectorAll(' + JSON.stringify(selector) + ')].find(node=>node.textContent.trim()===' + JSON.stringify(label) + ')'
     const geometry = adapter => read(`(() => {const region=document.querySelector(${JSON.stringify(region)}),button=region.querySelector(${JSON.stringify('[data-channel-entry="' + adapter + '"]')}),header=region.querySelector('.agent-region-header');
       const rect=node=>node?.getBoundingClientRect().toJSON();const paint=(node,pseudo)=>{const s=getComputedStyle(node,pseudo);return Object.fromEntries(['content','display','position','width','height','top','left','right','bottom','padding','borderWidth','boxSizing','backgroundColor','borderRadius','lineHeight','transform','outlineWidth','outlineOffset'].map(key=>[key,s[key]]))};
-      return {rects:{button:rect(button),header:rect(header),neighbors:[...header.querySelectorAll('.agent-region-header__name,.agent-region-header__more,[data-channel-entry]')].map(node=>({identity:node.dataset.channelEntry??node.className,rect:rect(node)}))},
+      return {rects:{button:rect(button),glyph:rect(button.querySelector(':scope > :is(img,svg)')),header:rect(header),neighbors:[...header.querySelectorAll('.agent-region-header__name,.agent-region-header__more,[data-channel-entry]')].map(node=>({identity:node.dataset.channelEntry??node.className,rect:rect(node)}))},menu:rect(document.querySelector(${JSON.stringify(menu)})),
       paint:{button:paint(button),before:paint(button,'::before'),after:paint(button,'::after'),headerBefore:paint(header,'::before')},hover:button.matches(':hover'),focus:document.activeElement===button,open:button.dataset.state==='open'};})()`)
     const facts = () => read(`(() => {const region=document.querySelector(${JSON.stringify(region)}),menu=document.querySelector(${JSON.stringify(menu)});return {
       viewport:{width:innerWidth,height:innerHeight},region:region?.getBoundingClientRect().toJSON(),regionCount:document.querySelectorAll('[data-workbench-region-id]').length,
@@ -74,6 +75,85 @@ app.whenReady().then(async () => {
     await until('window.channelEntryProof?.ready && document.querySelector(' + JSON.stringify(entry('discord')) + ')')
     await read('window.__connectionsTrustedEvents=[];for(const type of ["click","keydown","input","mousemove"])document.addEventListener(type,event=>window.__connectionsTrustedEvents.push({type,trusted:event.isTrusted,key:event.key}),true)')
     win.showInactive(); win.focus(); win.webContents.focus(); await until('document.hasFocus()')
+    if (popoverClarity) {
+      // Reuse this native-input consumer; the original eight-scene journey below is not rerun.
+      async function hoverAcross(label) {
+        await close()
+        const bounds = await read('document.querySelector(' + JSON.stringify(region) + ').getBoundingClientRect().toJSON()')
+        win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + 150) })
+        await settle()
+        const before = await geometry('feishu'), r = before.rects.button
+        const previous = await read('window.__connectionsTrustedEvents.length')
+        const x = Math.round(r.x + r.width / 2), y = Math.round(r.y + r.height / 2)
+        win.webContents.sendInputEvent({ type: 'mouseMove', x, y })
+        await until(exists(menu)); await settle()
+        const opened = await geometry('feishu')
+        result.hoverGeometry[label] = { before, opened }
+        assert.deepEqual(opened.rects, before.rects, 'Native hover disclosure preserves glyph, trigger, header and adjacent controls')
+        assert.equal(opened.rects.glyph.width, 12); assert.equal(opened.rects.glyph.height, 12)
+        const triggerGap = opened.menu.top - opened.rects.button.bottom, glyphGap = opened.menu.top - opened.rects.glyph.bottom
+        assert.ok(triggerGap >= 0 && triggerGap <= 2.5, 'Actual popover sits within 2 DIP of its original trigger')
+        const previousDeclaredGlyphGap = opened.rects.button.bottom - opened.rects.glyph.bottom + 6
+        assert.ok(glyphGap > 0 && glyphGap < previousDeclaredGlyphGap, 'Measured glyph gap is below the previous source-declared 6 DIP offset plus the unchanged transparent hitbox inset')
+        const path = []
+        for (let nextY = y + 2; nextY <= opened.menu.top + 12; nextY += 2) {
+          win.webContents.sendInputEvent({ type: 'mouseMove', x, y: Math.round(nextY) })
+          await settle()
+          const retained = await read('!!document.querySelector(' + JSON.stringify(menu) + ')')
+          path.push({ x, y: Math.round(nextY), retained }); assert.equal(retained, true, 'Native pointer crossing keeps the original popover open')
+        }
+        const events = await read('window.__connectionsTrustedEvents.slice(' + previous + ')')
+        assert.ok(events.some(event => event.type === 'mousemove' && event.trusted))
+        // A real click enters the original trigger's keyboard mode; Escape returns there.
+        await click(entry('feishu')); await until(exists(menu)); await close()
+        assert.equal(await read('document.activeElement===document.querySelector(' + JSON.stringify(entry('feishu')) + ')'), true)
+        const closed = await geometry('feishu')
+        assert.deepEqual(closed.rects, before.rects, 'Closing preserves original neighboring controls')
+        await press('Down'); await until(exists(menu)); await press('Escape'); await until('!' + exists(menu))
+        assert.equal(await read('document.activeElement===document.querySelector(' + JSON.stringify(entry('feishu')) + ')'), true, 'Native keyboard return reaches the exact invoking channel')
+        result.hoverGeometry[label] = { before, opened, closed, path, events, triggerGap, glyphGap, previousDeclaredGlyphGap,
+          previousDeclaredSideOffset: 6, comparisonBoundary: 'Previous 6 DIP is the reviewed source declaration, not an earlier native rect. Current geometry is measured.' }
+      }
+      async function mixed() {
+        await until(exists(menu + ' [data-direction="outgoing"]') + ' && ' + exists(menu + ' [data-direction="incoming"]') + ' && ' + exists(menu + ' [data-connection-action="activity"]'))
+        await until('document.querySelector(' + JSON.stringify(menu + ' [data-direction="outgoing"]') + ')?.dataset.tone==="neutral" && !!document.querySelector(' + JSON.stringify(menu + ' .connector-traffic-summary__retained') + ')')
+        const directions = await read('[...document.querySelectorAll(' + JSON.stringify(menu + ' [data-direction]') + ')].map(node=>({direction:node.dataset.direction,tone:node.dataset.tone,text:node.textContent}))')
+        const report = await read('window.channelEntryProof.lastDiagnosis'), group = report.groups.value.items[0]
+        assert.equal(group.outgoing.value.deliveries.length, 5)
+        assert.ok(group.outgoing.value.deliveries.every(item => item.receipt === 'confirmed'))
+        assert.equal(group.outgoing.value.effectObservation.state, 'unknown')
+        assert.equal(group.incoming.value.rows[0].coreStatus, 'bytes-accepted')
+        assert.equal(group.incoming.value.rows[0].nativeAdoption, 'unknown')
+        assert.deepEqual(directions.map(item => item.direction), ['outgoing', 'incoming'])
+        assert.ok(directions.every(item => item.tone === 'neutral'), 'Confirmed sends and unconfirmed adoption do not become an actionable warning')
+        assert.equal(await read('document.querySelectorAll(' + JSON.stringify(menu + ' [data-connection-action]') + ').length'), 1, 'The exact group has one primary action')
+        result.interactions.push({ kind: 'mixed-direction-observation', directions, report })
+      }
+      await read('window.channelEntryProof.setScenario("mixed")')
+      await until('document.querySelector(' + JSON.stringify(entry('feishu')) + ')?.dataset.channelState!=="unbound"')
+      await hoverAcross('mixed-wide'); await open('feishu'); await mixed(); await capture('popover-mixed-wide')
+      await layout(true); await hoverAcross('mixed-narrow'); await open('feishu'); await mixed(); await capture('popover-mixed-narrow')
+      await click(menu + ' .connector-header-menu__diagnostics summary')
+      await until(exists(menu + ' .connector-header-menu__diagnostics[open]'))
+      await capture('popover-details-narrow')
+      await click(menu + ' [data-connection-action="activity"]')
+      await until(exists('.agent-connector-dialog [data-connection-section="activity"]'))
+      result.primaryAction = await read('({dialog:document.querySelector(".agent-connector-dialog").outerHTML,requests:window.channelEntryProof.requests})')
+      await click('[aria-label="Close group setup"]'); await until('!' + exists('.agent-connector-dialog'))
+      assert.equal(await read('document.activeElement===document.querySelector(' + JSON.stringify(entry('feishu')) + ')'), true, 'Group details returns to its exact original channel')
+      await read('window.channelEntryProof.setScenario("unbound")'); await state('unbound'); await open('feishu')
+      await capture('popover-unbound-narrow'); await close()
+      result.facts = await read('({calls:window.channelEntryProof.calls,requests:window.channelEntryProof.requests,targets:window.channelEntryProof.targets,errors:window.channelEntryProof.errors,draft:window.channelEntryProof.draft(),trusted:window.__connectionsTrustedEvents})')
+      assert.deepEqual(result.facts.errors, [])
+      const readMethods = new Set(['connection.ls', 'connection.inspect', 'connection.service.get', 'connection.binding.ls', 'connection.binding.inspect', 'connection.diagnose', 'connection.room.get', 'connection.room.ls', 'connection.room.members', 'connection.metadata.get', 'connection.metadata.ls', 'connection.profile.get'])
+      result.zeroWrite = { checkedCalls: result.facts.calls.length, unexpectedMethods: [...new Set(result.facts.calls.filter(method => !readMethods.has(method)))] }
+      assert.deepEqual(result.zeroWrite.unexpectedMethods, [], 'Every observed connection call is an explicit read; no writes, sends, grants or unknown replay')
+      const reads = result.facts.requests.filter(request => request.method === 'connection.diagnose')
+      assert.ok(reads.length > 0 && reads.every(request => request.owner?.runtimeId === 'preview-original-runtime' && request.input.bindingId === 'preview-original-binding-0' && request.input.bindingRevision === 1), 'The original public diagnosis consumer retains exact hosting and binding identity')
+      assert.equal(result.frames.length, 4)
+      result.passed = true
+      return
+    }
     await state('unbound')
     await inspectHover('feishu', 'wide')
     // Both contributions are actually opened; Escape returns focus to the exact original trigger.

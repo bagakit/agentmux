@@ -32,9 +32,10 @@ mountThemeRuntime(window, config.appearance)
 
 // Controlled typed facts only. The real IPC/SDK/binding and App route are proven by the consumer tests.
 const conversationSharing = new URLSearchParams(location.search).has('conversation-sharing')
+const popoverClarity = new URLSearchParams(location.search).has('popover-clarity')
 const memberAccess = new URLSearchParams(location.search).has('member-access')
 const applicationAccess = new URLSearchParams(location.search).has('application-access'), memberScenario = memberAccess || applicationAccess
-const feishuScenario = memberScenario || conversationSharing
+const feishuScenario = memberScenario || conversationSharing || popoverClarity
 const connection: ConnectionRecord = { config: { connectionId: feishuScenario ? 'preview-feishu' : 'preview-discord', adapterId: feishuScenario ? 'feishu' : 'discord', application: feishuScenario ? { domain: 'open.feishu.cn', appId: 'cli_original_members' } : { domain: 'discord.com', appId: '123456789012345678' },
   label: conversationSharing ? 'Lark research bot' : 'Research discussion', enabled: true, credentialRef: 'preview-secure-reference' }, revision: 1,
   capabilities: { roomDiscovery: true, roomCreation: false, roomLink: true },
@@ -44,14 +45,15 @@ let bindings: RoomBinding[] = []
 const hostingTarget: ConnectionHostingTarget = { hostId: 'preview-bot-host', runtimeId: 'preview-original-runtime' }
 const target = { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
 const headerStatus = new URLSearchParams(location.search).has('header-status')
-type Scenario = 'unbound' | 'owner-failure' | 'attention'
+type Scenario = 'unbound' | 'owner-failure' | 'attention' | 'mixed'
 const proof = { ready: false, omitOriginal: false, accessUnavailable: false, status: 'normal' as 'normal' | 'attention' | 'unavailable', scenario: 'unbound' as Scenario,
+  lastDiagnosis: null as ConnectionDiagnosis | null,
   calls: [] as string[], targets: [] as (ConnectionHostingTarget | undefined)[], errors: [] as string[],
   requests: [] as { method: string; input: unknown; owner: ConnectionHostingTarget | undefined }[],
   hostingReads: 0, routes: [] as string[], channelSections: Object.fromEntries(settingsCatalog.channelEntries.map(entry => [entry.adapterId, entry.section])),
   setScenario(value: Scenario) {
     proof.scenario = value; proof.status = value === 'attention' ? 'attention' : 'normal'
-    bindings = value === 'attention' ? [0, 1].map((index): RoomBinding => ({ ...target, regionAnchor: { regionId: 'channel-preview-region' }, bindingId: 'preview-original-binding-' + index,
+    bindings = value === 'attention' || value === 'mixed' ? (value === 'mixed' ? [0] : [0, 1]).map((index): RoomBinding => ({ ...target, regionAnchor: { regionId: 'channel-preview-region' }, bindingId: 'preview-original-binding-' + index,
       revision: 1, state: 'active', connectionId: connection.config.connectionId, application: connection.config.application,
       externalConversationId: index ? '456789012345678901' : room.externalConversationId,
       scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' }, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } })) : []
@@ -90,7 +92,7 @@ const previewMemberAccess = (binding: RoomBinding): ConnectionMemberAccess[] => 
     effective: local ? { actor, state: local.state, capabilities: local.capabilities, source: { kind: 'room', grantId: local.grantId, revision: local.revision } }
       : app ? { actor, state: app.state, capabilities: app.capabilities, source: { kind: 'application', grantId: app.grantId, revision: app.revision } } : null }
 })
-const grantsFor = (binding: RoomBinding): ConnectionGrant[] => memberScenario ? structuredClone(memberGrants.filter(grant => grant.bindingId === binding.bindingId && grant.bindingRevision === binding.revision)) : binding.externalConversationId === room.externalConversationId ? [] : [{
+const grantsFor = (binding: RoomBinding): ConnectionGrant[] => memberScenario ? structuredClone(memberGrants.filter(grant => grant.bindingId === binding.bindingId && grant.bindingRevision === binding.revision)) : !popoverClarity && binding.externalConversationId === room.externalConversationId ? [] : [{
   grantId: 'preview-original-member-grant', revision: 1, bindingId: binding.bindingId, bindingRevision: binding.revision,
   connectionId: binding.connectionId, externalConversationId: binding.externalConversationId, state: 'active', capabilities: ['input', 'answer'],
   actor: { application: binding.application, idType: members[0]!.idType, userId: members[0]!.userId }
@@ -121,10 +123,11 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   if (method === 'connection.diagnose') {
     if (proof.status === 'unavailable') throw Error('Controlled unavailable local status read')
     const binding = bindings.find(binding => binding.bindingId === input.bindingId && binding.revision === input.bindingRevision)
+    const mixed = popoverClarity && proof.scenario === 'mixed'
     const attention = proof.status === 'attention', sourceGap = attention && binding?.externalConversationId === room.externalConversationId
-    const unknownEffect = attention && !sourceGap
+    const unknownEffect = mixed || attention && !sourceGap
     const effective = binding && applicationAccess ? previewMemberAccess(binding).flatMap(member => member.effective?.state === 'active' ? [member.effective] : []) : null
-    return { target: input, service: { value: { enabled: true, revision: 1 }, issue: null }, groups: { issue: null, value: { nextBindingId: null, items: binding ? [{
+    const report = { target: input, service: { value: { enabled: true, revision: 1 }, issue: null }, groups: { issue: null, value: { nextBindingId: null, items: binding ? [{
       target: groupTarget(binding), window: {}, limit: 5,
       adapterService: { value: { adapterId: connection.config.adapterId, enabled: true, revision: 0 }, issue: null },
       connection: { value: { revision: connection.revision, enabled: true, ...connection.observation }, issue: null },
@@ -133,22 +136,24 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
         observation: proof.accessUnavailable ? { state: 'unavailable', reason: 'access-unconfirmed' } : sourceGap ? { state: 'unavailable', reason: 'content-unconfirmed' } : unknownEffect ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'ready' },
         sourceObservation: { state: 'ready', code: null, codeRecorded: false, checkpointKey: null },
         effectObservation: unknownEffect ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'ready' },
-        deliveries: unknownEffect ? [1, 2].map(i => ({ kind: 'conversation' as const, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-original-' + i, state: 'unknown' as const, receipt: 'unknown' as const, platformMessageId: null, reason: 'effect-unconfirmed' as const, resourceUpload: null })) : [],
+        deliveries: mixed ? [1, 2, 3, 4, 5].map(i => ({ kind: 'conversation' as const, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-recent-confirmed-' + i, state: 'confirmed' as const, receipt: 'confirmed' as const, platformMessageId: 'preview-platform-message-' + i, reason: null, resourceUpload: null })) : unknownEffect ? [1, 2].map(i => ({ kind: 'conversation' as const, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-original-' + i, state: 'unknown' as const, receipt: 'unknown' as const, platformMessageId: null, reason: 'effect-unconfirmed' as const, resourceUpload: null })) : [],
         coverage: { state: sourceGap ? 'incomplete' : 'complete', nextContent: null, originCount: 0, omittedGapCount: 0, gaps: sourceGap ? [1, 2, 3].map(i => ({ gapKey: 'preview-gap-' + i, reason: 'source-gap' as const, code: null, codeRecorded: false, sourceKind: null, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null } })) : [] }
-      } }, incoming: { issue: null, value: { beforeIngressId: null, next: null, rows: attention ? [{
+      } }, incoming: { issue: null, value: { beforeIngressId: null, next: null, rows: attention || mixed ? [{
         ingressId: 'preview-original-intake-' + binding.bindingId, sourceConnectionId: binding.connectionId, kind: 'message', state: sourceGap ? 'refused' : 'claimed',
         code: sourceGap ? 'INGRESS_ACTOR_NOT_AUTHORIZED' : null, codeRecorded: sourceGap, bindingId: binding.bindingId, bindingRevision: binding.revision,
         targetConnectionId: binding.connectionId, scope: 'current-binding', inputOperationId: sourceGap ? null : 'preview-original-agent-input',
-        recording: { state: 'recorded' }, coreStatus: sourceGap ? null : 'admitted', coreObservation: sourceGap ? 'not-started' : 'observed', nativeAdoption: sourceGap ? null : 'unknown', waiting: null
+        recording: { state: 'recorded' }, coreStatus: sourceGap ? null : mixed ? 'bytes-accepted' : 'admitted', coreObservation: sourceGap ? 'not-started' : 'observed', nativeAdoption: sourceGap ? null : 'unknown', waiting: null
       }] : [] } }
     }] : [] } } } satisfies ConnectionDiagnosis
+    if (popoverClarity) proof.lastDiagnosis = structuredClone(report)
+    return report
   }
   if (method === 'connection.binding.inspect') {
     const operation = input.operationId ? memberOperations.get(input.operationId) ?? null : null
     const binding = input.operationId ? operation?.state === 'applied' ? operation.binding : null : bindings.find(item => item.bindingId === input.bindingId) ?? null
     return { binding, current: binding ? bindings.find(item => item.bindingId === binding.bindingId) ?? null : null, operation, grants: binding ? grantsFor(binding) : [], ...(applicationAccess && binding && !input.operationId && input.revision === undefined ? { access: previewMemberAccess(binding) } : {}) }
   }
-  if (memberScenario && method === 'connection.profile.get') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application,
+  if ((memberScenario || popoverClarity) && method === 'connection.profile.get') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application,
     language: 'en_us', state: 'observed', profile: { name: 'Research discussion' }, metadata: null, creator: { idType: members[0]!.idType, userId: members[0]!.userId },
     botId: 'preview-original-bot', onlineVersionId: null, reviewingVersionId: null, version: null }
   if (applicationAccess && method === 'connection.application.access.get') return { connectionId: connection.config.connectionId, connectionRevision: 1, adapterId: connection.config.adapterId, application: connection.config.application, grants: structuredClone(applicationGrants) }
