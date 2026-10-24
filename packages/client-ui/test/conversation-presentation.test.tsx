@@ -9,6 +9,7 @@ import { NativeProcessObservation } from '../src/components/NativeProcessObserva
 import * as coreConversation from '@agentmux/core/conversation'
 import * as sequenceModule from '../src/lib/conversation-record-sequence'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform'
+import type { ConversationPresentationController } from '../src/lib/use-conversation-record-layout'
 
 const source = { providerId: 'recorded-provider', nativeSessionId: 'original-native' }
 const platform: ClientUiPlatform = { copyText: async () => true, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
@@ -139,6 +140,53 @@ it('does no frame or geometry work for ordinary scrolling while watching selecti
   expect(viewportRect).not.toHaveBeenCalled(); expect(recordRect).not.toHaveBeenCalled(); expect(released).not.toHaveBeenCalled()
   await act(async () => document.dispatchEvent(new Event('selectionchange')))
   expect(released).toHaveBeenCalledOnce(); expect(projected).not.toHaveBeenCalled(); expect(viewportRect).not.toHaveBeenCalled(); expect(recordRect).not.toHaveBeenCalled()
+})
+
+it.each(['body', 'outside-composer'])('avoids protection scans with no selection and %s focus', async mode => {
+  const controller: { current: ConversationPresentationController | null } = { current: null }
+  const presentation = { controller, pending: false, onRelease: vi.fn() }
+  const readingGeometry = { viewport: () => host, following: () => true, pinToBottom: vi.fn() }
+  const initial = frame(page(item('original'))), next = frame(page(item('replacement')))
+  await draw(initial, { presentation, readingGeometry })
+  const composer = document.createElement('textarea'); document.body.append(composer)
+  try {
+    if (mode === 'outside-composer') composer.focus()
+    else (document.activeElement as HTMLElement)?.blur()
+    const focused = document.activeElement
+    expect(focused).toBe(mode === 'outside-composer' ? composer : document.body)
+    expect(host.querySelector('[data-conversation-layout-key]')).not.toBeNull()
+    expect(getSelection()?.isCollapsed).toBe(true)
+    const queries = vi.spyOn(Element.prototype, 'querySelectorAll')
+    // The real precommit port runs protection alone; shell mounting and anchor
+    // geometry are separate work and must not be mistaken for this scan.
+    expect(controller.current).not.toBeNull()
+    expect(controller.current!.canPresent(next)).toBe(true)
+    expect(queries.mock.calls.filter(([selector]) => selector === '[data-conversation-layout-key]')).toEqual([])
+    await draw(next, { presentation, readingGeometry })
+    expect(host.querySelector('[data-native-record-id="replacement"]')).not.toBeNull()
+    expect(host.querySelector('[data-native-record-id="original"]')).toBeNull()
+    expect(document.activeElement).toBe(focused)
+  } finally { composer.remove() }
+})
+
+it('still retains a changed record with local focus and releases after focus leaves', async () => {
+  const controller: { current: ConversationPresentationController | null } = { current: null }
+  const presentation = { controller, pending: false, onRelease: vi.fn() }
+  const readingGeometry = { viewport: () => host, following: () => true, pinToBottom: vi.fn() }
+  const renderRecordActions = () => <button>Original record action</button>
+  const extra = { presentation, readingGeometry, renderRecordActions }
+  await draw(frame(page(item('original'))), extra)
+  const action = host.querySelector<HTMLButtonElement>('.log-turn button')!
+  expect(action).not.toBeNull(); await act(async () => action.focus())
+  const next = frame(page(item('replacement')))
+  expect(controller.current!.canPresent(next)).toBe(false)
+  await draw(next, extra)
+  expect(action.isConnected).toBe(true); expect(document.activeElement).toBe(action)
+  expect(host.querySelector('[data-native-record-id="replacement"]')).toBeNull()
+  await act(async () => action.blur())
+  expect(controller.current!.canPresent(next)).toBe(true)
+  await draw(next, extra)
+  expect(host.querySelector('[data-native-record-id="replacement"]')).not.toBeNull()
 })
 
 it('does not pull a new selection to the tail before its scroll event arrives', async () => {
