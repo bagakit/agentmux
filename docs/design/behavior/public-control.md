@@ -309,6 +309,10 @@ Toolkit 的设备列表只列原 Host 已确认连接中的设备，不铺离线
 设备工作面采用明确的持久来源和可导出保全记录。同源多个页面的草稿与意图按准确 key 更新，不能以旧页面快照覆盖其他会话或未知原请求；同 key 冲突保全原请求和双方正文，供用户核对与复制。导航、附件与目标意图和草稿共享原存储 owner 的跨页面原子更新，导入备份切换记录身份，迟到回执不能据旧页面状态改写新工作面。存储不可用时保留当前内存和导出能力，持续说明刷新保障不足，不因此关闭健康 Agent。重启与卸载后的存储条件分别说明，不假定密钥跨卸载必存。身份丢失后打开原 Mac 链接登记新设备，不创建替代 Host Session。iPhone 与 Android 保留同能力范围，未执行真机验收不得据构建成功宣称两类设备验收通过。
 
 ### 手机对象身份与工作面
+手机网页与 App 共享同一对象可达和业务能力：Mote、Topic、Space 里的原 Agent 即使尚未出现在手机 SDK 元信息目录，也保留原 SID、准确位置与打开/读取原会话入口，元信息未知就地说明，不把观察缺口当成未启动。明确新建 Agent 在已选原空间/Zone 中沿原 `agent.open` 完成 Executor、执行资源与展示目标选择，保留创建 operation、真实回执与查询原操作的恢复路径；不自动重放 unknown，不因打开目录或重连创建 Agent。
+
+手机 Focus 按 App 原项目分组 owner 的准确 Host/Project 事实组织，组内沿原 Agent 呈现 owner 保名称、recap 与状态；不按同名项目合并、不按 cwd 或显示文字推业务归属。项目/对象图标和已完成、待输入、执行中等状态图标消费 App 同一外观与语义呈现来源，呈现未知不改变运行或输入资格。
+
 手机 Mote 的日常入口围绕同一个原对象组织：进入原主对话、阅读进展、继续输入、回应事项与查看结果。主对话及合作资料消费原保存配置与业务 owner；主对话未确认时保留原对话候选和手动继续能力。同一 Session 在多处呈现时，入口保留此次 Space／Zone／Tab／Region 与 occurrence，不从 SID 的首个位置推导 Mote 身份。头像揭示该对象的 Profile、当前工作和就近动作。
 
 Mote 目录根行点击就地展开该对象的原二级 Tabs，不自动跳入主会话；Tab 行包含原 Agent 呈现 owner 的 recap。选择单 Agent 的 Tab 可进入其准确 Region 的已有 Session；包含多个 Region 的 Tab 保留各原工作面供明确选择，不任取一个 Session。展开目录与阅读 recap 不启动 Agent、不发送输入，也不增加操作授权。
@@ -316,6 +320,8 @@ Mote 目录根行点击就地展开该对象的原二级 Tabs，不自动跳入�
 手机 Topics 在同一目录中展开或收起 Category 下的原 Topic 子项，分类和成员由准确身份及原绑定确定；选择 Topic 仍进入原 Topic／Zone／Tab 工作面，讨论、知识及管理保持可达。对象和来源沿[《Topics 知识库的层级与沉淀》](spaces-and-layout.md#topics-知识库的层级与沉淀)，同屏展开只改变手机呈现，不另造分类或改写 Desktop 的导航范围。
 
 手机 Space 与 Desktop 共用原项目分组和目录树的呈现规则，沿[《Project 与 Workspace》](spaces-and-layout.md#project-与-workspace)消费原 Project、手动分组与 Host 事实；目录派生分组只表达呈现。Zone／worktree、Tab 和 Region 的归属仍由原资源和绑定确认，不按路径猜 Session 的业务归属或执行资源。目录发现或呈现读取未确认时保留已知目录与原可用工作面，说明失败步骤和观察范围并提供原目标的读取／恢复；折叠说明和改变密度不判定健康、身份或操作资格。
+
+手机所有原 Agent 对话都可显式复制由原 SID 生成的 `amux://agent/<SID>` 身份地址；名称、Run 和展示位置不替代原身份。复制失败保留可选的完整链接。查看尚未恢复或状态未确认的 Agent 时，保留原历史和输入草稿，并可显式请求 Core 恢复原 Session。恢复绑定原 Runtime、设备记录、Session、Run 与 operation；目录元信息缺失时沿原 `agent.inspect` 点读，不冒充死亡。未知结果保原恢复意图，只核对同一操作或明确继续该操作；重连、切页或刷新不自动重放，也不以新建或 Level A 重启代替语义恢复。复用 Hosted `ensureAgentContinuity`、公共 `agent.inspect` 与同 owner 的 `agent resume`，不新增同义 RPC／CLI。
 
 手机返回一次只离开当前最上层呈现：面板、来源或详情、终端／结果、对话、目录逐层返回。非顶层工作面提供直接可达的返回动作，不能要求先打开菜单才能返回，也不以回到默认主页代替原上一层。网页和原生包装遵守同一语义；切换主入口、打开资料与返回保留挂载的 Composer、原草稿、阅读位置和未确认操作。本设备保存呈现引用，原 Host 或目录迟到不得替换用户后来选择的工作面。
 
@@ -331,9 +337,9 @@ Mote 目录根行点击就地展开该对象的原二级 Tabs，不自动跳入�
 
 手机 Focus 行同时展示已确认的项目、Agent 名称与语义状态。项目关系消费公共事实，不以 cwd 猜空间归属；显示名沿原名称解析链；事实不可读时标记未确认并保留原工作面。Mote 使用原保存头像及动画；会话顶部仅呈头像，身份与状态按需查看，不以不透明标题栏遮挡对话。辅助菜单揭示侧栏并保留工作面；连接与设备设置位于侧栏，菜单不代替当前层的直接返回。
 
-`space.ls` / `space.inspect` 的只读 `presentation: true` 由 client 原呈现 owner 返回空间的 `catalog.appearance`，仅传有界 glyph、parts、图片引用版本与已选空间 PNG。Core 不解释头像外观，不保存新 identity。图片字节按选中 Space 的 inspect 读取；列表不批量传图片。现有 JSON-RPC／CLI raw RPC 可消费同一参数和回执，手机导航与头像为生产调用者。无新增写操作。
+`space.ls` / `space.inspect` 的只读 `presentation: true` 由 client 原呈现 owner 返回空间的 `catalog.appearance`，仅传有界 glyph、parts、图片引用版本与已选空间的原 App 图片（PNG、JPEG、GIF、WebP、SVG 或图标格式）。Core 不解释头像外观，不保存新 identity。图片字节按选中 Space 的 inspect 读取；列表不批量传图片。现有 JSON-RPC／CLI raw RPC 可消费同一参数和回执，手机导航与头像为生产调用者。无新增写操作。
 
-Mobile 的 Mote 外观沿原耐久身份 target，图片／图标／捏脸自定义及原动画完整消费；主身份默认龙不用于其他对象。Focus 的原显示名、项目、Executor头像、recap和状态分组由现有呈现owner返回，不能用手动名称override代替显示名，不能在手机复制分类推断。缺事实沿服务窗保原可用会话。只读 presentation catalog 传有界 agentPresentation 事实，RPC与CLI raw可消费，无新增写操作。
+Mobile 的 Mote 外观沿原耐久身份 target，图片／图标／捏脸自定义及原动画完整消费；主身份默认龙不用于其他对象。Focus 的原显示名、项目、Executor头像、recap、项目分组和状态由现有呈现owner返回，不能用手动名称override代替显示名，不能在手机复制分类推断。缺事实沿服务窗保原可用会话。只读 presentation catalog 传有界 agentPresentation 事实，RPC与CLI raw可消费，无新增写操作。
 
 手机目录完整消费原呈现 owner 的名称、项目、详情和 recap，不另加任意字段长度限制或截断正常数据。传输容量沿既有公共消息预算，不用重复的更小字段预算阻断原可用目录。中文／emoji 不能导致整个 Focus、Mote 目录失效；验收包含原呈现生产者到实际公共 codec 的链路及原内容保真。
 
