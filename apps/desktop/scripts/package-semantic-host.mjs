@@ -176,6 +176,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && pro
     const value = await rpc.call('runtime.bootstrap', { consumerId, ...(fence ? { fence } : {}) })
     process.stdout.write(JSON.stringify({ hostProcessId: value.hostProcessId, storePath: value.storePath }))
   } finally {
-    try { await rpc.call('runtime.release-consumer', { consumerId, ...(fence ? { fence } : {}) }) } finally { await rpc.dispose() }
+    await rpc.dispose()
   }
 }
