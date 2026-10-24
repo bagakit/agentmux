@@ -57,7 +57,7 @@ export function refineCollaborationNeighborhood(input: CollaborationLayoutInput,
   // Nearby survivors can reclaim a deleted/shrunken member's old space even without an edge.
   for (const [areaId, points] of focus) {
     const members = areas.get(areaId)?.members ?? []
-    for (const point of points) for (const id of members.filter(id => !changed.has(id) && placed.get(id)?.kind === 'agent')
+    for (const point of points) for (const id of members.filter(id => id !== anchor && !changed.has(id) && placed.get(id)?.kind === 'agent')
       .sort((a, b) => squared(center(placed.get(a)!), point) - squared(center(placed.get(b)!), point) || a.localeCompare(b)).slice(0, 2)) movable.add(id)
   }
   movable.delete(anchor ?? '')
@@ -81,13 +81,18 @@ export function refineCollaborationNeighborhood(input: CollaborationLayoutInput,
       const original = previous?.kind === 'agent' && previous.areaId === node.areaId ? center(previous) : current
       const origin = origins.get(node.areaId) ?? current, edges = incident.get(id) ?? [], displacement = previous?.areaId === node.areaId ? 4 : .25
       const compactness = reclaim.has(node.areaId) ? 4 : .35
+      const budget = Math.max(box.width, box.height, 184) * 2 + gap
+      // The same Huber distance owns the target gradient and candidate cost.
+      // A remote weak relation keeps its direction and weight without an
+      // unbounded squared-distance pull overwhelming the local neighborhood.
+      const springScale = (distance: number) => Math.min(1, budget / distance)
       let total = displacement + compactness, x = displacement * original.x + compactness * origin.x, y = displacement * original.y + compactness * origin.y
       for (const spring of edges) {
         const peer = placed.get(spring.source === id ? spring.target : spring.source)
         if (!peer) continue
-        const point = center(peer); total += spring.weight; x += point.x * spring.weight; y += point.y * spring.weight
+        const point = center(peer), weight = spring.weight * springScale(Math.hypot(point.x - current.x, point.y - current.y))
+        total += weight; x += point.x * weight; y += point.y * weight
       }
-      const budget = Math.max(box.width, box.height, 184) * 2 + gap
       const clamp = (point: CollaborationLayoutPoint) => {
         const distance = Math.hypot(point.x - original.x, point.y - original.y), factor = previous?.areaId === node.areaId && distance > budget ? budget / distance : 1
         return { x: original.x + (point.x - original.x) * factor, y: original.y + (point.y - original.y) * factor }
@@ -109,7 +114,12 @@ export function refineCollaborationNeighborhood(input: CollaborationLayoutInput,
       }
       const cost = (point: CollaborationLayoutPoint) => {
         let value = displacement * squared(point, original) + compactness * squared(point, origin)
-        for (const spring of edges) { const peer = placed.get(spring.source === id ? spring.target : spring.source); if (peer) value += spring.weight * squared(point, center(peer)) }
+        for (const spring of edges) {
+          const peer = placed.get(spring.source === id ? spring.target : spring.source)
+          if (!peer) continue
+          const target = center(peer), distance = Math.hypot(point.x - target.x, point.y - target.y), radius = distance * springScale(distance)
+          value += spring.weight * radius * (2 * distance - radius)
+        }
         return value
       }
       let best = current, score = cost(current)
