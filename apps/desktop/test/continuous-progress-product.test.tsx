@@ -4,14 +4,15 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AGENTMUX_AGENT_MESSAGING_ENTRY, AgentMuxClient, AgentMuxMemoryAgentSessionStore, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { AGENTMUX_AGENT_MESSAGING_ENTRY, AgentMuxClient, AgentMuxMemoryAgentSessionStore, AgentMuxRpcService, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { createHostGoals } from '../../host/src/goals.js'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../src/shared/contracts'
@@ -22,7 +23,7 @@ const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invok
   handlers: new Map<string, (...args: any[]) => any>(), renderer: new Map<string, Set<(...args: any[]) => any>>(),
   main: new Map<string, Set<(...args: any[]) => any>>(), sender: null as any,
   deliver: (channel: string, ...args: any[]) => {}, reply: (channel: string, ...args: any[]) => {} }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => { bridge.api = api; Object.assign(window, { [name]: api }) } },
   ipcRenderer: { invoke: bridge.invoke,
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.renderer.get(channel) ?? new Set(); set.add(fn); bridge.renderer.set(channel, set) },
@@ -34,10 +35,10 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.main.get(channel) ?? new Set(); set.add(fn); bridge.main.set(channel, set) },
     off: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn),
     removeListener: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn) },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath, getAppPath: () => join(process.cwd(), 'apps/desktop'), isPackaged: false },
+  globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() },
+  webFrame: { getZoomFactor: () => 1 }, app: { once: vi.fn(), getPath: () => bridge.storagePath, getAppPath: () => join(process.cwd(), 'apps/desktop'), isPackaged: false },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: {}
 }))
-vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [], subscribe: () => () => {} }) }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
@@ -51,26 +52,24 @@ import { RuntimeController } from '../src/main/runtime-controller'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { registerIpc } from '../src/main/ipc'
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store'
-import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager'
+import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
-import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { privateTracker } from './helpers/continuous-progress-tracker'
-import { CONTINUOUS_PROGRESS_CHANGED } from '../src/shared/contracts'
-import { CONTROL_REQUEST_CHANNEL } from '../src/shared/contracts'
 import { NotesStorageOwner } from '../src/main/notes-storage-owner'
 
-// Target product owners run: Composer → leaf → preload → registered IPC → Main loop → public
-// Core ingress; Store initialize installs its actual request handler. Electron transport, startup
-// Browser services and Native I/O/screen wait are isolated. No PTY, private renderer or user Run.
+// Actual Composer → preload → registered Main IPC → public Core service → original Host
+// Goal/loop owner → original Core input ingress. Electron, Browser and Native I/O are
+// private controlled seams; the Desktop has no independent automatic-input owner.
 const initial = useAppStore.getState()
 let directory: string, client: AgentMuxClient, runtime: RuntimeController, manager: ContinuousProgressLoopManager
+let hostGoals: ReturnType<typeof createHostGoals>
+let hostService: AgentMuxRpcService
 let disposeIpc: (() => Promise<void>) | undefined, disposeStore: (() => void) | undefined
 let root: Root, container: HTMLDivElement, config: AppConfig, session: AgentMuxStoredAgentSession
-let writes: string[], cursor: number | null, requests: any[], observations: string[], now: number
-let afterInputObservation: (() => Promise<void>) | undefined, corruptReply: boolean, dropReply: boolean
+let writes: string[], cursor: number | null, requests: any[], observations: string[]
 let snapshot: Extract<SessionSnapshot, { kind: 'agent' }>, ended: boolean
 let notesReady: Promise<unknown>[]
 const initializeNotes = NotesStorageOwner.prototype.initialize
@@ -80,16 +79,14 @@ beforeEach(async () => {
     const pending = initializeNotes.call(this); notesReady.push(pending); return pending
   })
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  // The actual calendar route uses Main's Unix socket; Darwin's sockaddr_un
-  // cannot represent the long system tmpdir plus /runtime/control.sock.desktop.
-  directory = await mkdtemp(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'amx-progress-product-'))
+  // Short fixture names keep Main's Unix socket within the platform address limit.
+  directory = await mkdtemp(join(await realpath(tmpdir()), 'cp-'))
   bridge.storagePath = join(directory, 'chromium')
   await mkdir(join(bridge.storagePath, 'Local Storage', 'leveldb'), { recursive: true })
   await mkdir(join(directory, 'home'))
-  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'runtime'))
-  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
-  writes = []; requests = []; observations = []; cursor = 0; now = _reshape_fixtureEpoch(0, 0, 0); ended = false
-  corruptReply = false; dropReply = false; afterInputObservation = undefined
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'r'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'r', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
+  writes = []; requests = []; observations = []; cursor = 0; ended = false
   const store = new AgentMuxMemoryAgentSessionStore(), timestamp = Date.now()
   session = { kind: 'agent', agentSessionId: 'progress-agent', hostId: 'local', providerId: 'codex', executorId: 'codex',
     workspacePath: directory, run: { runId: 'progress-run' }, retiredRuns: [], createdAt: timestamp, updatedAt: timestamp,
@@ -114,38 +111,39 @@ beforeEach(async () => {
     cursor! += Buffer.byteLength(input.data)
     return { run: projection(), appliedByteRange: { startByte: input.expectedByte, endByte: cursor } }
   }
+  const originalStatus = client.statusAgent.bind(client)
+  vi.spyOn(client, 'statusAgent').mockImplementation(async (...args) => { observations.push(args[0]); return originalStatus(...args) })
   vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(0)
   runtime = new RuntimeController(store, localRuntimeConnector)
   runtime.commit({ hosts: [{ id: 'local', config: { id: 'local', name: 'Private local', kind: 'local' }, client, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: [] }, workspaces: [{ id: '__scratch__', name: 'Owned topics', hostId: 'local', path: directory, kind: 'folder' }] }
-  manager = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(directory, 'loops.json')),
-    (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
-    () => now, (loop, tickId, time, signal) => runtime.observeContinuousProgress(loop, tickId, time, signal),
-    { saveFutureIntent: (loop, active, context) => runtime.saveFutureIntent(loop, active, context),
-      authorizeFutureIntent: (target, context) => runtime.authorizeFutureIntent(target, context) })
+  hostGoals = createHostGoals({ configurationPath: join(directory, 'config.json'), projects: async () => [],
+    runtime: () => ({ client, ownerIdentity: () => ({ ownerInstanceId: 'original-progress-owner' }) }) as never,
+    coreCall: (hostId, method, params, context) => { expect(hostId).toBe('local'); return hostService.call(method, params, context) } })
+  manager = hostGoals.schedules
+  hostService = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client }], goalControl: hostGoals.execute, goalChanges: hostGoals.goalChanges,
+    progress: hostGoals.progress, schedules: hostGoals.schedules, automaticInput: hostGoals.automaticInput })
+  const originalCore = runtime.callOriginalCore.bind(runtime)
+  vi.spyOn(runtime, 'callOriginalCore').mockImplementation((hostId, method, params, context) => {
+    if (method === 'runtime.owner.identity') return Promise.resolve({ owner: { ownerInstanceId: 'original-progress-owner' } }) as never
+    if (method.startsWith('goal.') || method.startsWith('schedule.') || method.startsWith('agent.progress.') || method.startsWith('agent.automation.')) return hostService.call(method, params, context)
+    return originalCore(hostId, method, params, context)
+  })
   bridge.sender = Object.assign(new EventEmitter(), { id: 7891, isDestroyed: () => false,
     send: (channel: string, ...args: any[]) => bridge.deliver(channel, ...args), session: { flushStorageData: vi.fn(), getStoragePath: () => bridge.storagePath } })
   bridge.deliver = (channel, ...args) => {
-    if (channel === CONTROL_REQUEST_CHANNEL) {
-      observations.push(args[0].control.agentSessionId)
-      if (dropReply) return
-    }
     for (const fn of bridge.renderer.get(channel) ?? []) fn({}, ...args)
   }
   bridge.reply = (channel, ...args) => {
     args = structuredClone(args)
-    const response = args[0]
-    if (corruptReply && response?.ok && response.result?.operation === 'continuous-progress.observeInput') response.result.control.run.runId = 'wrong-run'
     const send = () => { for (const fn of bridge.main.get(channel) ?? []) fn({ sender: bridge.sender }, ...args) }
-    if (response?.ok && response.result?.operation === 'continuous-progress.observeInput' && afterInputObservation) {
-      const once = afterInputObservation; afterInputObservation = undefined; void once().then(send)
-    } else send()
+    send()
   }
   const configStore = new ConfigStore(join(directory, 'config.json')); config = await configStore.save(config)
   disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
-    runtime, progressLoops: manager, configStore,
+    runtime, configStore,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     applicationAccess: {} as Parameters<typeof registerIpc>[0]['applicationAccess'],
     scratchTopics: new ScratchTopics(), workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as unknown as WorkspaceFiles })
@@ -172,7 +170,7 @@ afterEach(async () => {
   useAppStore.setState(initial, true)
   window.dispatchEvent(new Event('pagehide'))
   await api.ui.requestStorageFlush()
-  const cleanup = await Promise.allSettled([manager?.stop(), disposeIpc?.(), runtime?.dispose()])
+  const cleanup = await Promise.allSettled([hostGoals?.dispose(), hostService?.dispose(), disposeIpc?.(), runtime?.dispose()])
   disposeIpc = undefined
   bridge.main.clear(); bridge.renderer.clear(); bridge.handlers.clear(); bridge.invoke.mockReset()
   vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(directory, { recursive: true, force: true })
@@ -183,15 +181,15 @@ async function create() { return await api.continuousProgress.create(target(), 6
 async function click(label: string) {
   const button = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`); expect(button).not.toBeNull()
   await vi.waitFor(() => expect(button!.disabled).toBe(false))
-  await act(async () => button!.click())
+  const action = vi.spyOn(api.continuousProgress, 'action'), before = action.mock.calls.length
+  await act(async () => {
+    button!.click()
+    await vi.waitFor(() => expect(action.mock.calls.length).toBe(before + 1))
+    await action.mock.results[before]!.value
+  })
 }
 it('mounts the existing Composer leaf and real create/pause/resume/check/stop routes, with no second target work', async () => {
   const mailbox = container.querySelector<HTMLElement>('.composer-mailbox')!; expect(mailbox).not.toBeNull()
-  // Happy DOM lacks native popover toggling; only its browser state event is supplied here.
-  const opened = new Event('toggle'); Object.defineProperty(opened, 'newState', { value: 'open' })
-  await act(async () => mailbox.dispatchEvent(opened))
-  const progress = mailbox.querySelector<HTMLButtonElement>('[aria-label="Automation"]')!; expect(progress).not.toBeNull()
-  await act(async () => progress.click())
   const page = mailbox.querySelector<HTMLElement>('[role="region"][aria-label="Automation settings"]')!; expect(page.hidden).toBe(false)
   const form = page.querySelector('[data-progress-details="interval"] form'); expect(form).not.toBeNull()
   const textarea = form!.querySelector<HTMLTextAreaElement>('textarea')!
@@ -206,7 +204,7 @@ it('mounts the existing Composer leaf and real create/pause/resume/check/stop ro
   await act(async () => {
     enable.click()
     expect(created).toHaveBeenCalledExactlyOnceWith(target(), 1_800_000, 'continue the assigned work', undefined)
-    await created.mock.results[0]!.value
+    await expect(created.mock.results[0]!.value).resolves.toMatchObject({ status: 'active', agentSessionId: session.agentSessionId })
   })
   expect(manager.list()).toHaveLength(1)
   expect(page.textContent).toContain('active')
@@ -254,7 +252,7 @@ it('saved defaults reach both original Composer creation routes and durable task
   })
   await vi.waitFor(() => expect(manager.list().find(loop => loop.calendar)).toMatchObject({ ...target(), calendar: { timezone: 'Europe/Berlin' }, prompt: 'One explicit calendar question',
     checkIn: { silenceMs: 7200000, minIntervalMs: 10800000, dailyBudget: 2, quiet: { start: new Date(_batchFixtureEpoch(0, 23 * 60 * 60 + 15 * 60)).toISOString().slice(11, 16), end: new Date(_batchFixtureEpoch(0, 7 * 60 * 60 + 45 * 60)).toISOString().slice(11, 16) } } }))
-  const disk = await new ContinuousProgressLoopStore(join(directory, 'loops.json')).load()
+  const disk = await ContinuousProgressLoopStore.forUserData(directory).load()
   expect(disk).toHaveLength(2); expect(disk.find(loop => loop.calendar)?.checkIn?.dailyBudget).toBe(2)
   expect(writes).toEqual([])
   const original = manager.list().find(loop => !loop.calendar)!
@@ -262,7 +260,8 @@ it('saved defaults reach both original Composer creation routes and durable task
     const before = await api.config.get()
     await api.config.save({ ...before, automation: { ...before.automation, progressIntervalMs: 660000, progressPrompt: 'A later new task default', checkInDailyBudget: 3 } }, before)
     useAppStore.setState({ config: await api.config.get() })
-    await api.continuousProgress.action(target(), original.loopId, 'stop')
+    await api.continuousProgress.action(target(), original.loopId, 'stop', original, 'stop-original-defaults-loop')
+    document.dispatchEvent(new Event('visibilitychange'))
   })
   await vi.waitFor(() => expect(progress.querySelector<HTMLTextAreaElement>('form textarea')?.value).toBe('A later new task default'))
   expect(progress.querySelector<HTMLInputElement>('form input[type="number"]')!.value).toBe('11')
@@ -272,7 +271,8 @@ it('saved defaults reach both original Composer creation routes and durable task
 })
 it('keeps an unconfirmed continuation composition through an independent loop notification and submits only the final text', async () => {
   const existing = await create()
-  const stopped = await api.continuousProgress.action(target(), existing.loopId, 'stop')
+  const stopped = await api.continuousProgress.action(target(), existing.loopId, 'stop', existing, 'stop-original-composition-loop')
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
   await vi.waitFor(() => expect(container.querySelector('[data-progress-details="interval"] form')).not.toBeNull())
   const form = container.querySelector<HTMLFormElement>('[data-progress-details="interval"] form')!
   const textarea = form.querySelector<HTMLTextAreaElement>('textarea')!
@@ -289,9 +289,9 @@ it('keeps an unconfirmed continuation composition through an independent loop no
     setValue.call(textarea, 'unconfirmed candidate')
     textarea.dispatchEvent(new CompositionEvent('compositionupdate', { bubbles: true, data: 'unconfirmed candidate' }))
   })
-  await act(async () => bridge.deliver(CONTINUOUS_PROGRESS_CHANGED,
-    { ...stopped, lastDecision: 'Fresh stopped-loop observation' }))
-  expect(container.textContent).toContain('Fresh stopped-loop observation')
+  const reading = vi.spyOn(api.continuousProgress, 'list')
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+  expect(reading).toHaveBeenCalledWith(target())
   expect(form.querySelector('textarea')).toBe(textarea)
   expect(textarea.value).toBe('unconfirmed candidate')
   expect(created).not.toHaveBeenCalled()
@@ -311,44 +311,55 @@ it('keeps an unconfirmed continuation composition through an independent loop no
   expect(useAppStore.getState().agentSteerQueues).toEqual(queues)
   expect(writes).toEqual([])
 })
-it('keeps an existing draft and queue owned by Store, rejects enabling and pauses an active loop without any Native delivery', async () => {
+it('the actual explicit-input signal pauses automatic work without moving its draft into Host eligibility or blocking explicit resume', async () => {
   const loop = await create()
   await act(async () => useAppStore.getState().setAgentComposerDraft(session.agentSessionId, 'my draft'))
   await vi.waitFor(() => expect(manager.list()[0]!.status).toBe('paused'))
-  await expect(api.continuousProgress.action(target(), loop.loopId, 'resume')).rejects.toThrow(/draft|queued/)
+  await api.continuousProgress.action(target(), loop.loopId, 'resume', manager.list()[0]!, 'explicit-resume-original-loop')
   await manager.check(1_000_000)
   expect(writes).toEqual([]); expect(useAppStore.getState().agentComposerDrafts[session.agentSessionId]).toBe('my draft')
-  useAppStore.setState({ agentComposerDrafts: {}, agentSteerQueues: { [session.agentSessionId]: [{ operationId: 'owned-message', text: 'my queued message', enqueuedAt: _reshape_fixtureEpoch(0, 0, 1), status: 'queued', promptCondition: null }] } })
-  await expect(api.continuousProgress.action(target(), loop.loopId, 'resume')).rejects.toThrow(/queued/)
+  expect(manager.list()[0]!.status).toBe('active')
+  expect(useAppStore.getState().agentSteerQueues).toEqual({})
   expect(writes).toEqual([])
 })
 it('rejects a new automatic claim when real public raw input follows its observation; manual input and its cursor remain intact', async () => {
   const loop = await create()
-  afterInputObservation = async () => { await client.writeAgent({ agentSessionId: session.agentSessionId, expectedRun: session.run, source: 'user', data: 'manual raw' }) }
+  const status = client.statusAgent.bind(client)
+  vi.mocked(client.statusAgent).mockImplementationOnce(async (...args) => {
+    const observed = await status(...args)
+    await client.writeAgent({ agentSessionId: session.agentSessionId, expectedRun: session.run, source: 'user', data: 'manual raw' })
+    return observed
+  })
   await act(async () => manager.checkNow(loop.loopId))
   expect(writes).toEqual(['manual raw']); expect(cursor).toBe(Buffer.byteLength('manual raw'))
   expect(manager.list()[0]).toMatchObject({ lastOutcome: 'skipped' })
   expect(client.agentSession(session.agentSessionId).promptCompletionAdmission).toBeUndefined()
 })
-it('cancels automatic observation on manual input without waiting for a dropped reply, while keeping raw input usable', async () => {
-  const loop = await create(); dropReply = true
+it('cancels a pending original Core observation without delaying healthy manual input', async () => {
+  const loop = await create()
+  let release!: () => void
+  let entered = false
+  const blocked = new Promise<void>(resolve => { release = resolve }), status = client.statusAgent.bind(client)
+  vi.mocked(client.statusAgent).mockImplementationOnce(async (...args) => { entered = true; await blocked; return status(...args) })
   const checking = manager.checkNow(loop.loopId)
-  await vi.waitFor(() => expect(observations.length).toBeGreaterThan(1))
-  await api.sessions.write(snapshot.control, 'still healthy', 'user')
-  expect(writes).toEqual(['still healthy']); expect(manager.list()[0]!.status).toBe('paused')
-  await checking
+  try {
+    await vi.waitFor(() => expect(entered).toBe(true))
+    await api.sessions.write(snapshot.control, 'still healthy', 'user')
+    expect(writes).toEqual(['still healthy'])
+    await vi.waitFor(() => expect(manager.list()[0]!.status).toBe('paused'))
+  } finally { release(); await checking }
   expect(writes).toEqual(['still healthy']); expect(manager.list()[0]!.lastOutcome).toBe('unknown')
 })
-it('rejects another Run reply and unknown Native cursor only for automatic admission; no false zero or human failure', async () => {
-  const loop = await create(); corruptReply = true
-  await manager.checkNow(loop.loopId)
-  expect(writes).toEqual([]); expect(manager.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown' })
-  corruptReply = false
-  await api.continuousProgress.action(target(), loop.loopId, 'resume'); cursor = null
+it('an unknown original Native cursor admits no automatic input or false zero and recovers on the same Session', async () => {
+  const loop = await create(); cursor = null
+  expect((await client.statusAgent(session.agentSessionId)).run.acceptedInputBytes).toBeNull()
   await manager.checkNow(loop.loopId)
   expect(writes).toEqual([])
-  expect(manager.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown' })
-  expect(manager.list()[0]!.lastDecision).toMatch(/cursor|input/i)
+  expect(manager.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'skipped' })
+  expect(manager.list()[0]!.lastDecision).toBeTruthy()
+  cursor = 0
+  await client.writeAgent({ agentSessionId: session.agentSessionId, expectedRun: session.run, source: 'user', data: 'manual after observation recovery' })
+  expect(writes).toEqual(['manual after observation recovery']); expect(client.agentSession(session.agentSessionId).run).toEqual(session.run)
 })
 
 it('keeps a late create result on its original workspace while the same Session Composer target has an enabled, empty form', async () => {
