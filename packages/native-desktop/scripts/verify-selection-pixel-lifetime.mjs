@@ -8,10 +8,9 @@ import { fileURLToPath } from 'node:url'
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const args = process.argv.slice(2)
 if (args.includes('--help')) {
-  console.log('verify-selection-pixel-lifetime.mjs --source [--output DIRECTORY]\nCompiles only Core ownership and exact extracted production capture/SCK/BlockingAsync methods against controlled IO. Preserves the production ten-second observer timeout. Runs non-cooperative pixel lifetime assertions and two source-loaded mutants. No AppKit/UI, actual screenshot, permission prompt, App assembly, signing or installation.')
+  console.log('verify-selection-pixel-lifetime.mjs [--source] [--output DIRECTORY]\nRuns source verification by default. Compiles only Core ownership and exact extracted production capture/SCK/BlockingAsync methods against controlled IO. Preserves the production ten-second observer timeout. Runs non-cooperative pixel lifetime assertions and two source-loaded mutants. No AppKit/UI, actual screenshot, permission prompt, App assembly, signing or installation.')
   process.exit(0)
 }
-assert(args.includes('--source'), 'Choose --source')
 let output = join(repository, '.local/state/screenshot-experience/pixel-lifetime')
 for (let index = 0; index < args.length; index++) {
   if (args[index] === '--source') continue
