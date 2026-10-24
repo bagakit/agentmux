@@ -204,9 +204,6 @@ export function ConversationMessage({
     : body
   const collaborationPreview = useMemo(() => nativeCollaboration ? conversationReplyPreview(parts.flatMap(part => part.kind === 'text'
     ? [sessionHistoryTextForReading(part)] : []).join('\n\n')).slice(0, 180) : '', [content, Boolean(nativeCollaboration)])
-  const parentAvatarSpeaker: ConversationSpeaker | undefined = nativeCollaboration && conversationSessionId
-    ? { role: 'agent', id: conversationSessionId } : undefined
-  const parentAvatar = parentAvatarSpeaker ? describeSpeaker?.(parentAvatarSpeaker) : undefined
   const collaborationHasResources = nativeCollaboration ? parts.some(part => part.kind === 'resource') : false
   const collaborationOriginal = nativeCollaboration ? <ConversationCollaborationOriginal parts={parts} identity={readingIdentity} hasResources={collaborationHasResources} /> : null
   const hasQuestionAnswers = Boolean(questionAnswers?.length)
@@ -346,8 +343,8 @@ export function ConversationMessage({
 
   const metadataInDetails = detailsOnlyMetadata || continuation || Boolean(nativeCollaboration && !sources?.submissions?.length && !located)
   const card = {
-    avatar: described?.channelProfile?.profile?.avatarUrl ? <ChannelProfileAvatar url={described.channelProfile.profile.avatarUrl}>{platform.renderMessageAvatar({ speaker: avatarSpeaker!, name: displayName })}</ChannelProfileAvatar>
-      : parentAvatarSpeaker ? parentAvatar?.avatar ?? platform.renderMessageAvatar({ speaker: parentAvatarSpeaker, name: parentAvatar?.name ?? 'Agent', providerId: parentAvatar?.providerId ?? providerId, project: parentAvatar?.project }) : avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12),
+    avatar: nativeCollaboration ? null : described?.channelProfile?.profile?.avatarUrl ? <ChannelProfileAvatar url={described.channelProfile.profile.avatarUrl}>{platform.renderMessageAvatar({ speaker: avatarSpeaker!, name: displayName })}</ChannelProfileAvatar>
+      : avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12),
     badges: <>
       {isPeerAgent && !detailsOnlyMetadata ? <span className="log-turn__sender-kind">Agent</span> : null}
       {recordTitle && !isSystemContext && !nativeCollaboration ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}
@@ -383,7 +380,6 @@ export function ConversationMessage({
       className={primaryNotice ? "conversation-a2a-notice" : "log-turn"}
       data-compact={compact || undefined}
       data-native-collaboration={nativeCollaboration ? true : undefined}
-      data-collaboration-empty={nativeCollaboration && !collaborationPreview && !collaborationHasResources || undefined}
       data-conversation-event-id={conversationEvent?.id}
       data-conversation-event-revision={conversationEvent?.revision}
       data-conversation-role={conversationEvent?.role}
