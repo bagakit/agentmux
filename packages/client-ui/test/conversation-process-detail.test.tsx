@@ -45,6 +45,14 @@ async function eventually(assertion: () => void) {
   throw failure
 }
 async function click(host: HTMLElement, selector: string) { const button = host.querySelector<HTMLButtonElement>(selector); expect(button).not.toBeNull(); await act(async () => button!.click()) }
+it('releases an offline reader without an observed client or retained view', async () => {
+  const { host, render } = surface()
+  function OfflineReader() { useConversationView(null, undefined, true); return <p>Original reader offline</p> }
+  await render(<OfflineReader />)
+  expect(host.textContent).toContain('Original reader offline')
+  await render(null)
+  expect(host.textContent).toBe('')
+})
 it('real shared reader requests deferred process bodies and expands both original native and captured source owners', async () => {
   const f = await fixture(), { host, render } = surface(), calls = vi.spyOn(f.client, 'readAgentConversation')
   function Consumer() {
