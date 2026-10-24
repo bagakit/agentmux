@@ -67,9 +67,11 @@ async function fixture(mode: 'native' | 'waiting' | 'terminal' = 'native') {
   const opened: connectors.ConnectionServices[] = [], factory = connectors.createConnectionServices
   vi.spyOn(connectors, 'createConnectionServices').mockImplementation(async options => { const result = await factory(options); opened.push(result); return result })
   const packets: NativePacket[] = []
+  let executionClient: core.AgentMuxClient
   let host: Awaited<ReturnType<typeof startAgentMuxHost>> | undefined, rpc: Awaited<ReturnType<typeof core.connectAgentMuxRpc>> | undefined
   const start = async () => {
     const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function (this: core.AgentMuxClient) {
+      executionClient = this
       const inner = this as unknown as typeof original.inner
       await inner.registry.load('local'); inner.connected = true
       for (const key of ['isConnected', 'identity', 'input', 'observeOutput', 'attach', 'detach', 'stop']) inner.kernel[key] = original.inner.kernel[key]
@@ -129,8 +131,38 @@ async function fixture(mode: 'native' | 'waiting' | 'terminal' = 'native') {
   const reply = async (text: string, turnId = packets.at(-1)?.turnId ?? 'unrelated-turn') => await appendFile(transcript, row({ type: 'response_item', payload: { type: 'message', id: 'reply-' + text, role: 'assistant', phase: 'final_answer', turn_id: turnId, content: [{ type: 'output_text', text }] } }))
   const reactionPosts = (messageId: string) => remote.calls.filter(call => call.method === 'POST' && call.path === '/open-apis/im/v1/messages/' + messageId + '/reactions')
   return { original, source, transcript, desktop, socket, packets, controls, reactions, remote, sdk, config, binding: binding.binding, receive, feedback, deliveries, expectStages, adopt, complete, reply, row, reactionPosts,
+    get executionClient() { return executionClient },
     get rpc() { return rpc! }, get service() { return opened.at(-1)! }, reopen: async () => { await stop(); await start(); await vi.waitFor(() => expect(sdk.sockets.length).toBeGreaterThan(1)) } }
 }
+
+it('default Host reports current native cursor failure while original input and received reactions remain usable', async () => {
+  const f = await fixture(), first = await f.receive('native-coverage-original')
+  await f.expectStages('native-coverage-original', ['received'])
+  await vi.waitFor(() => expect(f.packets).toHaveLength(1))
+  const originalFeedback = (await f.feedback('native-coverage-original'))[0]!
+  const provider = f.executionClient.providers.get('codex'), changes = provider.readConversationChanges!.bind(provider)
+  const failure = vi.spyOn(provider, 'readConversationChanges').mockImplementation(input => input.after !== undefined
+    ? Promise.reject(new core.AgentMuxError('PRIVATE original native cursor detail', 'AGENT_SESSION_HISTORY_TIMEOUT')) : changes(input))
+  const list = () => f.rpc.call('connection.delivery.ls', { connectionId: f.config.connectionId, bindingId: f.binding.bindingId, bindingRevision: 1 })
+  f.service.publication!.refresh()
+  await vi.waitFor(async () => expect((await list()).sourceObservation).toMatchObject({ state: 'unavailable', reason: 'source-gap', code: 'AGENT_SESSION_HISTORY_TIMEOUT' }))
+  expect(failure).toHaveBeenCalled()
+  const second = await f.receive('native-coverage-independent')
+  await f.expectStages('native-coverage-independent', ['received'])
+  await vi.waitFor(() => expect(f.packets).toHaveLength(2))
+  expect((await f.rpc.call('connection.ingress.inspect', { ingressId: first.ingressId })).inputReceipt?.status).toBe('admitted')
+  expect((await f.rpc.call('connection.ingress.inspect', { ingressId: second.ingressId })).inputReceipt?.status).toBe('admitted')
+  expect((await f.feedback('native-coverage-original'))[0]).toEqual(originalFeedback)
+  expect((await list()).sourceObservation).toMatchObject({ state: 'unavailable', code: 'AGENT_SESSION_HISTORY_TIMEOUT' })
+  failure.mockRestore(); f.service.publication!.refresh()
+  await vi.waitFor(async () => expect((await list()).sourceObservation?.state).toBe('ready'))
+  await f.reply('Independent default Host answer after exact source recovery')
+  await vi.waitFor(() => expect(JSON.stringify(f.remote.calls)).toContain('Independent default Host answer after exact source recovery'))
+  expect(f.reactionPosts('native-coverage-original')).toHaveLength(1)
+  expect(f.reactionPosts('native-coverage-independent')).toHaveLength(1)
+  expect((await f.feedback('native-coverage-original'))[0]).toEqual(originalFeedback)
+  expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
+}, 25_000)
 
 it('default Host attaches cumulative feedback only to the exact original adopted query and completed native turn, including late off-page completion', async () => {
   const f = await fixture()

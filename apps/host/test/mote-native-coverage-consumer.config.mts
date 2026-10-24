@@ -26,4 +26,4 @@ export default defineConfig({ ...original, cacheDir: resolve(root, '.cache/mote-
     return source === loaded ? undefined : { code: loaded, map: null }
   }
 }, ...original.plugins!], test: { ...original.test, include: ['apps/host/test/mote-native-coverage-consumer.test.ts',
-  'packages/connectors/test/native-content-eligibility-consumer.test.ts'], testTimeout: 30_000 } })
+  'packages/connectors/test/native-content-eligibility-consumer.test.ts', 'apps/host/test/query-feedback-consumer.test.ts'], testTimeout: 30_000 } })
