@@ -21,7 +21,7 @@ import { collaborationAreaNode } from '../../../src/renderer/src/lib/collaborati
 import '../../../src/renderer/src/styles/index.css'
 
 // Transparent instrumentation: actual browser Workers and original context code execute.
-const nativeWorkers: Array<{ request?: { type: CollaborationLayoutRequest['type']; id: string; queuedAt: number; sentAt?: number; delayMS: number; connectionIds: string[] }; errors?: Array<Extract<CollaborationLayoutResponse, { type: 'error' }> & { at: number }>; retainedPathIds?: string[]; input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number>; areas: Array<{ id: string; members: number }>; edges: Array<{ id: string; source: string; target: string; kind: string }> }; boxes?: { agents: number; ids: string[]; areas: Array<{ id: string; width: number; height: number }> }; geometry?: readonly CollaborationLayoutBox[]; pathIds?: string[]; responses?: Array<{ type: CollaborationLayoutResponse['type']; at: number }>; complete?: boolean; terminated?: boolean; observerMS: number }> = []
+const nativeWorkers: Array<{ request?: { type: CollaborationLayoutRequest['type']; id: string; queuedAt: number; sentAt?: number; delayMS: number; connectionIds: string[] }; errors?: Array<Extract<CollaborationLayoutResponse, { type: 'error' }> & { at: number }>; retainedPathIds?: string[]; input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number>; areas: Array<{ id: string; members: number; parentId?: string | null }>; edges: Array<{ id: string; source: string; target: string; kind: string; strength?: number }> }; boxes?: { agents: number; ids: string[]; areas: Array<{ id: string; width: number; height: number }> }; geometry?: readonly CollaborationLayoutBox[]; pathIds?: string[]; responses?: Array<{ type: CollaborationLayoutResponse['type']; at: number }>; complete?: boolean; terminated?: boolean; observerMS: number }> = []
 let delayedRoute: { milliseconds: number; sender: string; recipient: string } | undefined
 const OriginalWorker = window.Worker
 class ObservedWorker extends OriginalWorker {
@@ -47,7 +47,7 @@ class ObservedWorker extends OriginalWorker {
     if ((request?.type === 'arrange' || request?.type === 'reconcile') && Array.isArray(request.input?.nodes) && Array.isArray(request.input?.connections)) {
       const sizes: Record<string, number> = {}
       for (const node of request.input.nodes) { const size = `${node.width}x${node.height}`; sizes[size] = (sizes[size] ?? 0) + 1 }
-      this.sample.input = { nodes: request.input.nodes.length, connections: request.input.connections.length, ids: request.input.nodes.map(node => node.id), sizes, areas: request.input.areas.map(area => ({ id: area.id, members: area.members.length })), edges: request.input.connections.map(({ id, source, target, kind }) => ({ id, source, target, kind })) }
+      this.sample.input = { nodes: request.input.nodes.length, connections: request.input.connections.length, ids: request.input.nodes.map(node => node.id), sizes, areas: request.input.areas.map(area => ({ id: area.id, members: area.members.length, parentId: area.parentId })), edges: request.input.connections.map(({ id, source, target, kind, strength }) => ({ id, source, target, kind, strength })) }
     }
     const subject = (id: string) => JSON.parse(id)[1] as string
     const delayMS = request?.type === 'route' && delayedRoute && request.connections.some(connection => connection.kind === 'communication' &&
@@ -117,7 +117,12 @@ const background = Array.from({ length: 8 }, (_, index): WorkspaceRecord => ({ i
 const emptyProjects = Array.from({ length: scenario === 'perception' ? 6 : 60 }, (_, index): WorkspaceRecord => ({ id: 'fixture-empty-' + index, hostId, name: index % 3 ? 'Unassigned project ' + (index + 1) : '归档与材料 ' + (index + 1), path: fixturePath('private/graph/empty/' + index), kind: 'folder' }))
 const singletonProjects = Array.from({ length: 12 }, (_, index): WorkspaceRecord => ({ id: 'fixture-singleton-' + index, hostId, name: 'Independent contributor ' + (index + 1), path: fixturePath('private/graph/singleton/' + index), kind: 'folder' }))
 if (perception) Object.assign(emptyProjects[0]!, { hostId: 'fixture-remote', name: 'Remote · 模型评测服务' })
-projects.push(...background, ...singletonProjects, ...emptyProjects)
+const terrainProjects: WorkspaceRecord[] = scenario === 'perception-scale' ? [
+  { id: 'fixture-terrain-root', hostId, name: '协作地形', path: projects[0]!.path + '/terrain', kind: 'folder' },
+  { id: 'fixture-terrain-tools', hostId, name: '消息工具', path: projects[0]!.path + '/terrain/tools', kind: 'folder' },
+  { id: 'fixture-terrain-deep', hostId, name: '渲染与交互', path: projects[0]!.path + '/terrain/tools/rendering', kind: 'folder' }
+] : []
+projects.push(...background, ...singletonProjects, ...emptyProjects, ...terrainProjects)
 const category = { categoryId: '11111111-1111-4111-8111-111111111111', hostId,
   spaceId: directoryIdentity(hostId, fixturePath('private/graph/categories/quality')), directoryPath: fixturePath('private/graph/categories/quality'), title: 'Product quality', revision: null }
 const topics: ScratchTopicSnapshot[] = [
@@ -163,7 +168,14 @@ const extraSessions: Array<Extract<SessionSnapshot, { kind: 'agent' }>> = Array.
 })
 // Keep the four original workfaces separate from a realistic, uneven map catalog.
 // Empty Projects never acquire members during the later 240/480 growth scenes.
-const initialSessions = [...originalSessions, ...extraSessions.slice(0, 88)]
+const terrainSessions = terrainProjects.length ? ['fixture-terrain-tool', 'fixture-terrain-a', 'fixture-terrain-b'].map((id, index) => {
+  const original = extraSessions[index * 4]!, run = { runId: 'fixture-run-' + id }, nativeSessionId = 'native-' + id
+  return { ...original, id, label: ['消息路由', 'LOD 绘制', '交互评审'][index]!, workspacePath: terrainProjects[index === 0 ? 1 : 2]!.path,
+    control: { ...original.control, agentSessionId: id, run }, nativeSessionId,
+    nativeHandle: { kind: 'provider' as const, providerId: original.providerId, sessionId: nativeSessionId },
+    currentActivity: { ...original.currentActivity!, run, nativeSessionId, nativeTurnId: 'turn-' + id, sourceId: 'source-' + id, hookReceiptId: 'receipt-' + id } }
+}) : []
+const initialSessions = [...originalSessions, ...terrainSessions, ...extraSessions.slice(0, 88)]
 sessions = initialSessions
 const retired: AgentSessionHistoryDescriptor[] = Array.from({ length: 4 }, (_, index) => ({ agentSessionId: 'fixture-retired-' + index, hostId, state: 'retired', retiredAt: now - (index + 1) * 86400000, history: { providerId: 'codex', executorId: 'codex', workspacePath: projects[0]!.path, createdAt: now - (index + 3) * 86400000 } }))
 const timelines: Record<string, AgentTimelineSnapshot> = Object.fromEntries(identities.map(([id, label]) => {
@@ -247,7 +259,7 @@ api.conversation.observeConversation = async input => {
 }
 api.conversation.releaseConversationView = async input => ({ hostId, agentSessionId: input.agentSessionId, sourceHostId: hostId, viewId: input.view, released: true })
 const reference = (messageId: string, senderSessionId: string, recipientSessionId: string) => ({ messageId, senderSessionId, recipientSessionId, threadId: messageId, replyTo: null })
-const refs = [reference('fixture-request', 'fixture-ui', 'fixture-core'), reference('fixture-review-request', 'fixture-core', 'fixture-review'), reference('fixture-design-question', 'fixture-ui', 'fixture-design'), reference('fixture-return-report', 'fixture-core', 'fixture-ui')]
+const refs = [reference('fixture-request', 'fixture-ui', 'fixture-core'), reference('fixture-review-request', 'fixture-core', 'fixture-review'), reference('fixture-design-question', 'fixture-ui', 'fixture-design'), reference('fixture-return-report', 'fixture-core', 'fixture-ui'), ...terrainSessions.flatMap((session, index) => [reference('fixture-terrain-message-' + index, session.id, index === 0 ? 'fixture-terrain-a' : index === 1 ? 'fixture-terrain-b' : 'fixture-core')])]
 const events: AgentMuxMessageEvent[] = [
   { sequence: 1, kind: 'message', at: now - 9000, messages: [refs[0]!] },
   { sequence: 2, kind: 'message', at: now - 8000, messages: [refs[1]!] },
@@ -379,8 +391,8 @@ Object.assign(window, { graphCapture: {
   grow(total: 240 | 480) {
     const start = performance.now()
     if (total !== 240 && total !== 480) throw Error('Use one declared finite size')
-    const added = extraSessions.slice(0, total - originalSessions.length - retired.length)
-    sessions = [...originalSessions, ...added]
+    const added = extraSessions.slice(0, total - originalSessions.length - terrainSessions.length - retired.length)
+    sessions = [...originalSessions, ...terrainSessions, ...added]
     for (let index = 0; index + 1 < added.length; index += 12) {
       const messageId = 'fixture-sparse-' + index
       if (refs.some(ref => ref.messageId === messageId)) continue
@@ -395,6 +407,7 @@ Object.assign(window, { graphCapture: {
     for (const listener of listeners) listener({ type: 'core', hostId, event: { type: 'agent-session', session } })
     return { expectedWorldAgents: sessions.length + retired.length, expectedAgentKeys: [...sessions.map(session => JSON.stringify([session.hostId, session.kind === 'agent' ? session.control.agentSessionId : session.id])), ...retired.map(source => JSON.stringify([source.hostId, source.agentSessionId]))], snapshotMembers: sessions.length, retiredMembers: retired.length, unassociatedMembers: added.filter(session => !refs.some(ref => ref.senderSessionId === session.id || ref.recipientSessionId === session.id)).length, nativeActivityCounts: { active: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'active').length, idle: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'idle').length, unknown: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'unknown').length, exited: sessions.filter(session => session.processState === 'exited').length }, fixtureMutationMS: performance.now() - start }
   },
+  terrain() { return { areas: terrainProjects.map(project => ({ id: directoryIdentity(hostId, project.path), name: project.name })), agents: terrainSessions.map(session => ({ id: session.id, name: session.label })) } },
   prepare() {
     useAppStore.setState({ activeWorkspaceId: projects[0]!.id, mainSurface: 'workbench', toolsOpen: true, projectRailOpen: true,
       ...(perception ? { spaceObjectIcons: { ...useAppStore.getState().spaceObjectIcons, [topicSpaceIconTarget(scratch, topics[1]!, bindings)!.key]: { ...DEFAULT_MOTE_FACE, palette: 'peach' as const, accessory: 'glasses' as const } } } : {}),
