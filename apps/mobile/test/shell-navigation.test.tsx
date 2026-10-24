@@ -143,6 +143,7 @@ describe('actual Relay mobile shell and shared conversation caller', () => {
     const original = localStorage.getItem(STORAGE), f = clientFixture()
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     const write = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('device storage unavailable') })
+    await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
     await click(view.element.querySelector('.mobile-session-list button')!)
     expect(write).toHaveBeenCalledWith(STORAGE, expect.stringContaining('session-original'))
     expect(view.element.textContent).toContain('仅临时采用')

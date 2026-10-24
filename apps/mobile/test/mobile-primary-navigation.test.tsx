@@ -278,7 +278,7 @@ describe('actual phone primary workfaces', () => {
     f.submit.mockRejectedValueOnce(new Error('original acknowledgement unknown'))
     await click(button(view.element, 'Send'))
     const original = f.submit.mock.calls[0]![0]
-    await click(button(view.element, '当前对话操作')); await click(button(overlay, '目标与结果'))
+    await click(button(view.element.querySelector<HTMLElement>('.mobile-conversation__floating-tools')!, '目标与结果'))
     await click(view.element.querySelector('.mobile-mote-heading')!)
     await click(button(overlay, '合作方式 · BEHAVIOR.md'))
     expect(overlay.textContent).toContain('原依据保留')
@@ -327,6 +327,9 @@ describe('actual phone primary workfaces', () => {
     // A new app instance reads the same device record, not a reseeded route.
     const restored = await mount(<MobileApp client={null} connection={{ state: 'disconnected', message: '原 Host 未连接' }} platform={platform} />)
     expect(current(restored.element)).toBe('Mote')
+    expect(restored.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
+    expect(getDeviceWorkface().snapshot().record.presentation?.profile?.sourcePath).toBe('BEHAVIOR.md')
+    await click(button(restored.element, '返回 Mote'))
     expect(overlay.querySelector('.mobile-mote-source h3')?.textContent).toBe('BEHAVIOR.md')
     expect(editor(restored.element).textContent).toBe('刷新之前的原草稿')
     const rpc = f.client.forwardRpc as ReturnType<typeof vi.fn>; rpc.mockClear()
