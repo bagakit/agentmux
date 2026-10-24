@@ -1812,7 +1812,7 @@ export type AgentMuxDesktopApi = {
     onSpatialLinkIssue(listener: (message: string) => void): () => void
     captureScreenshot(): Promise<string | null>
     screenshotShortcutStatus(): Promise<import('./screenshot-shortcut').ScreenshotShortcutStatus>
-    onScreenshotShortcut(listener: () => void): () => void
+    onScreenshotIssue(listener: (message: string) => void): () => void
     listAgentSkills(sessionId: string): Promise<import('@agentmux/core').AgentSkill[]>
     listWorkspaceSkills(workspaceId: string, providerId: string): Promise<import('@agentmux/core').AgentSkill[]>
     readClipboardText(): Promise<string>

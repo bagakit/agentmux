@@ -454,10 +454,10 @@ const api: AgentMuxPreloadApi = {
     },
     captureScreenshot: () => ipcRenderer.invoke('ui:captureScreenshot'),
     screenshotShortcutStatus: () => ipcRenderer.invoke('ui:screenshotShortcutStatus'),
-    onScreenshotShortcut: listener => {
-      const receive = () => listener()
-      ipcRenderer.on('ui:screenshotShortcut', receive)
-      return () => { ipcRenderer.removeListener('ui:screenshotShortcut', receive) }
+    onScreenshotIssue: listener => {
+      const receive = (_event: Electron.IpcRendererEvent, message: string) => listener(message)
+      ipcRenderer.on('ui:screenshotIssue', receive)
+      return () => { ipcRenderer.removeListener('ui:screenshotIssue', receive) }
     },
     listAgentSkills: (sessionId: string) => ipcRenderer.invoke('ui:listAgentSkills', sessionId),
     listWorkspaceSkills: (workspaceId: string, providerId: string) => ipcRenderer.invoke('ui:listWorkspaceSkills', workspaceId, providerId),

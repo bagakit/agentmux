@@ -121,6 +121,9 @@ import { executeBrowserTaskControl } from './browser-task-control.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
 import { registerNativeDesktopIpc } from './native-desktop-ipc.js'
 import { registerScreenshotShortcut } from './screenshot-shortcut.js'
+import { ScreenCapture } from './screen-capture.js'
+import { GlobalScreenshot } from './global-screenshot.js'
+import { SystemScreenshotEditor } from './system-screenshot-editor.js'
 import { getDesktopNativeUiOwner, getNativeDesktopOwner } from './native-desktop-owner.js'
 import { createNativeDesktopPublicOwner } from './native-desktop-public.js'
 import { readBookmark } from './bookmark-file.js'
@@ -136,8 +139,9 @@ import {
   ipcMain,
   nativeImage,
   nativeTheme,
+  Notification,
   shell,
-  type BrowserWindow,
+  BrowserWindow,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
   type WebContents
@@ -1566,7 +1570,21 @@ export async function registerIpc(args: {
         { transport: 'unix', principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, signal }))
     args.webLinks?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
   })
-  registerNativeDesktopIpc({ home: app.getPath('home'), native: getDesktopNativeUiOwner,
+  const screenshotEditor = new SystemScreenshotEditor(() => config.appearance)
+  const reportScreenshotIssue = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn('Screen capture:', error)
+    try { if (!contents.isDestroyed()) contents.send('ui:screenshotIssue', message) }
+    catch (deliveryError) { console.warn('Screenshot issue delivery is unconfirmed:', deliveryError) }
+    if (!BrowserWindow.getFocusedWindow() && Notification.isSupported())
+      new Notification({ title: 'Screen capture needs attention', body: message }).show()
+  }
+  const screenCapture = new ScreenCapture({ home: app.getPath('home'), native: getDesktopNativeUiOwner,
+    edit: (image, attachToDraft, complete, initialIssue) => screenshotEditor.edit(image, attachToDraft, complete, initialIssue), reportIssue: reportScreenshotIssue })
+  const globalScreenshot = new GlobalScreenshot({ contents, focusedWindow: () => BrowserWindow.getFocusedWindow(),
+    windowForDocument: document => args.workbenchWindows.windowForDocument(document),
+    capture: attachToDraft => screenCapture.capture(attachToDraft), reportIssue: reportScreenshotIssue })
+  registerNativeDesktopIpc({ capture: () => screenCapture.capture(true), native: getDesktopNativeUiOwner,
     handle: handleWithEvent, trust: requireTrustedSender })
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, contents, rawUrl)
@@ -2500,10 +2518,7 @@ export async function registerIpc(args: {
   const disposeThemeBootstrap = registerThemeBootstrap(ipcMain, args.window, () => config.appearance, () => nativeTheme.shouldUseDarkColors)
   const disposeTerminalBrightness = observeTerminalBrightness(nativeTheme, updateTerminalBrightness)
   const screenshotShortcut = registerScreenshotShortcut({ platform: process.platform, shortcuts: globalShortcut,
-    request: () => {
-      try { if (!contents.isDestroyed()) contents.send('ui:screenshotShortcut') }
-      catch (error) { console.warn('Screenshot shortcut delivery is unconfirmed; the original work remains:', error) }
-    } })
+    request: () => { void globalScreenshot.run().catch(reportScreenshotIssue) } })
   handleWithEvent('ui:screenshotShortcutStatus', event => {
     requireTrustedSender('ui:screenshotShortcutStatus', event)
     return screenshotShortcut.status
@@ -2512,6 +2527,7 @@ export async function registerIpc(args: {
     acceptingControl = false
     await runOwnerDisposals([
       { owner: 'screenshot-shortcut', dispose: () => screenshotShortcut.dispose() },
+      { owner: 'screenshot-editor', dispose: () => screenshotEditor.dispose() },
       { owner: 'client-incident-runtime', dispose: () => runtimeIncidents?.dispose() },
       { owner: 'terminal-brightness', dispose: disposeTerminalBrightness },
       { owner: 'spatial', dispose: () => disposeSpatial() },

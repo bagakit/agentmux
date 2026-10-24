@@ -2,7 +2,7 @@
 export const SCREENSHOT_SHORTCUT = {
   id: 'capture.screen',
   label: 'Capture a screen region',
-  description: 'System-wide on macOS. Focus a local Message Tool first; the capture returns to that draft.',
+  description: 'System-wide on macOS. Copies to the clipboard; also attaches when a local message input is focused.',
   chord: { key: '2', primary: true, shift: true, alt: false }
 } as const
 
