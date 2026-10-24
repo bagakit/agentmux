@@ -29,9 +29,11 @@ export function MobileZoneWorkface({ client, zoneId, name, visible, openSession,
       <h2 className="mobile-spatial-subheading">{tab.name || '讨论'}</h2>
       {catalog.regions.filter(region => region.tabId === tab.tabId && (!regionId || region.regionId === regionId)).map(region => {
         const agent = catalog.agentPresentation?.find(value => value.agentSessionId === region.agentSessionId)
-        return region.agentSessionId ? <button key={region.regionId} className="mobile-menu-row" onClick={() => openSession(region.agentSessionId!, { name: agent?.name ?? tab.name ?? name, project: name })}>
+        const occurrences = catalog.locations.filter(place => place.tabId === tab.tabId && place.regionId === region.regionId)
+        const identity = (context?: typeof occurrences[number]): MobileObjectIdentity => ({ name: agent?.name ?? tab.name ?? name, project: agent?.project ?? name, ...(context ? { context } : {}) })
+        return region.agentSessionId ? <div key={region.regionId}><button className="mobile-menu-row" onClick={() => openSession(region.agentSessionId!, identity(occurrences.length === 1 ? occurrences[0] : undefined))}>
           <span>{agent?.name ?? tab.name ?? name}<small>{agent?.recap?.text ?? agent?.detail ?? '打开原对话'}</small></span>
-        </button> : region.kind === 'file' || region.kind === 'browser' ? <MobileRegionContent visible={visible} key={region.regionId} client={client} tabId={tab.tabId} regionId={region.regionId} kind={region.kind} browserId={region.browserId} file={region.file} zoneId={zoneId ?? tab.zoneId} />
+        </button>{occurrences.length > 1 && <details className="mobile-session-locations"><summary>{occurrences.length} 个原展示位置</summary>{occurrences.map(place => <button type="button" key={JSON.stringify(place)} onClick={() => openSession(region.agentSessionId!, identity(place))}>{catalog.spaces.find(space => space.spaceId === place.spaceId)?.name ?? name} · {place.displayWorkspaceId} / {place.groupId}</button>)}</details>}</div> : region.kind === 'file' || region.kind === 'browser' ? <MobileRegionContent visible={visible} key={region.regionId} client={client} tabId={tab.tabId} regionId={region.regionId} kind={region.kind} browserId={region.browserId} file={region.file} zoneId={zoneId ?? tab.zoneId} />
           : <p key={region.regionId} className="mobile-spatial-notice">{region.kind === 'launcher' ? '此讨论尚未启动 Agent。' : '终端工作面'}</p>
       })}
     </section>)}
