@@ -1,6 +1,6 @@
 import { AgentMuxError, spatialCatalog, type AgentMuxHeadlessRuntime, type AgentMuxSpatialStateStore } from '@agentmux/core'
 import { createMoteChatAgents } from './mote-chat-agents.js'
-import { createMoteChatResources, readMoteConfiguredExecutor, readMoteResourceConfiguration } from './mote-resources.js'
+import { createMoteChatResources, readConfiguredExecutor, readMoteResourceConfiguration } from './mote-resources.js'
 
 /** Read the saved Mote's original configuration; no configuration or environment goes on RPC. */
 export function createHostMoteChat(options: {
@@ -21,7 +21,7 @@ export function createHostMoteChat(options: {
     executors: {
       resolve: async (hostId, executorId, workspacePath) => {
         exact(hostId)
-        const config = await readMoteConfiguredExecutor(options.configurationPath, executorId)
+        const config = await readConfiguredExecutor(options.configurationPath, executorId)
         return { providerId: config.providerId, launch: {
           commandOverride: config.command, args: [...config.args],
           env: { ...config.env, AGENTMUX_WIKI_DIR: workspacePath }, injectAgentMuxGuide: config.injectAgentMuxGuide
