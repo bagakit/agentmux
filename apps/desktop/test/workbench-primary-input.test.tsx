@@ -5,7 +5,7 @@ import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { StableWorkbenchView } from '../src/renderer/src/components/StableWorkbenchView'
 import { committedPrimaryWorkbenchTarget, committedSecondaryWorkbenchTarget, focusedPrimaryWorkbenchTarget, type WorkbenchViewTarget } from '../src/renderer/src/lib/workbench-presentation'
-import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { addWorkbenchRegion, createWorkbenchTab, removeWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs'
 import { workbenchRegionProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
 
 const tab = createWorkbenchTab('opaque-tab', { kind: 'agent', phase: 'attached', workspaceId: 'resource', regionId: 'original-region', sessionId: 'original-session' })
@@ -56,6 +56,28 @@ it('keeps a primary Tab occurrence when its selected sibling caret changes', () 
   const siblingTarget = { ...target, active: true, reference: { ...reference, regionId: 'sibling-region' } }
   expect(committedPrimaryWorkbenchTarget(split, [siblingTarget])).toBe(siblingTarget)
   expect(committedPrimaryWorkbenchTarget(split, [siblingTarget, { ...siblingTarget }])).toBeUndefined()
+})
+it('keeps the original Tab host after its committed caret closes, while input remains exact', () => {
+  const split = addWorkbenchRegion(tab, 'original-region', 'right', { kind: 'agent', phase: 'attached', workspaceId: 'resource', regionId: 'sibling-region', sessionId: 'sibling-session' })
+  const remaining = removeWorkbenchRegion(split, 'original-region')!
+  const siblingTarget = { ...target, active: true, reference: { ...reference, regionId: 'sibling-region' } }
+  expect(committedPrimaryWorkbenchTarget(remaining, [siblingTarget])).toBe(siblingTarget)
+  expect(focusedPrimaryWorkbenchTarget(remaining, [siblingTarget])).toBeUndefined()
+  expect(destination.querySelector('textarea')).toBe(input)
+  expect(input.value).toBe('Existing draft')
+})
+
+it('rejects malformed or foreign machine markers instead of borrowing another occurrence', () => {
+  const active = { ...target, active: true }
+  const host = destination.querySelector<HTMLElement>('[data-workbench-primary-tab-id]')!
+  for (const marker of ['primary:not-json', 'view:' + JSON.stringify(Object.values(reference)),
+    ...[null, {}, [], ['exact-display', 'exact-group', tab.id], ['exact-display', 'exact-group', tab.id, 'original-region', 'extra'],
+      ['exact-display', 'exact-group', tab.id, ''], ['exact-display', 'exact-group', tab.id, null],
+      ['foreign-display', 'exact-group', tab.id, 'original-region'], ['exact-display', 'foreign-group', tab.id, 'original-region'],
+      ['exact-display', 'exact-group', 'foreign-tab', 'original-region']].map(address => 'primary:' + JSON.stringify(address))]) {
+    host.dataset.workbenchPrimaryReference = marker
+    expect(committedPrimaryWorkbenchTarget(tab, [active]), marker).toBeUndefined()
+  }
 })
 it('rejects a different display, Group, Tab, Region or host and unknown presentation visibility', () => {
   const unknownVisible = { ...target }; delete unknownVisible.visible
@@ -111,18 +133,25 @@ it('keeps the unique committed home when logical selection changes to a valid si
   try {
     expect(committedSecondaryWorkbenchTarget(split, secondaryTarget, target.hostId, homeReference)).toBe(secondaryTarget)
     expect(homeHost.dataset.workbenchPrimaryReference).toBe(workbenchRegionProjectionSlotId('primary', reference))
-    for (const invalid of [{ ...reference, regionId: 'missing-region' }, { ...reference, groupId: 'another-group' },
+    for (const invalid of [{ ...reference, groupId: 'another-group' },
       { ...reference, displayWorkspaceId: 'another-display' }]) {
       homeHost.dataset.workbenchPrimaryReference = workbenchRegionProjectionSlotId('primary', invalid)
       expect(committedSecondaryWorkbenchTarget(split, secondaryTarget, target.hostId, homeReference)).toBeUndefined()
     }
     homeHost.dataset.workbenchPrimaryReference = workbenchRegionProjectionSlotId('primary', reference)
-    for (const invalid of [{ ...reference, regionId: 'missing-region' }, { ...reference, groupId: 'another-group' },
+    for (const invalid of [{ ...reference, groupId: 'another-group' },
       { ...reference, displayWorkspaceId: 'another-display' }]) {
       secondary.dataset.workbenchViewReference = workbenchRegionProjectionSlotId('view', invalid)
       expect(committedSecondaryWorkbenchTarget(split, secondaryTarget, target.hostId, homeReference)).toBeUndefined()
     }
     secondary.dataset.workbenchViewReference = workbenchRegionProjectionSlotId('view', reference)
+    // Both physical Tab hosts retain their original occurrence after the old
+    // caret closes. Current target/home Regions are still required to exist.
+    const remaining = removeWorkbenchRegion(split, 'original-region')!
+    const remainingTarget = { ...secondaryTarget, reference: homeReference }
+    expect(committedSecondaryWorkbenchTarget(remaining, remainingTarget, target.hostId, homeReference)).toBe(remainingTarget)
+    expect(committedSecondaryWorkbenchTarget(remaining, secondaryTarget, target.hostId, homeReference)).toBeUndefined()
+    expect(committedSecondaryWorkbenchTarget(remaining, remainingTarget, target.hostId, reference)).toBeUndefined()
     const duplicate = homeHost.cloneNode(false); destination.append(duplicate)
     expect(committedSecondaryWorkbenchTarget(split, secondaryTarget, target.hostId, homeReference)).toBeUndefined(); destination.removeChild(duplicate)
     secondaryHome.hidden = true
