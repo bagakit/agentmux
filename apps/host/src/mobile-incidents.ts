@@ -12,7 +12,7 @@ export function createHostMobileIncidents(options: { directory: string; original
     const port: AgentMuxClientIncidentPort = { hostId: archive.hostId, async read(target, bounds) {
       const unavailable = (code: Parameters<typeof unavailableDiagnosticEvidence>[1]) => unavailableDiagnosticEvidence<AgentMuxClientIncidentTarget, AgentMuxClientIncidentEvidence>(target, code)
       if (!target.authority) {
-        if (!('recent' in target)) return unavailable('DIAGNOSTIC_EVIDENCE_AUTHORITY_UNVERIFIABLE')
+        if (!('recent' in target)) return { ...unavailable('DIAGNOSTIC_EVIDENCE_AUTHORITY_UNVERIFIABLE'), authorityStatus: 'unconfirmed' }
         const local = await archive.read(target, bounds)
         // This interval describes this Host's known mobile archive only. The
         // original Main history was not observed, independent of Main liveness.
