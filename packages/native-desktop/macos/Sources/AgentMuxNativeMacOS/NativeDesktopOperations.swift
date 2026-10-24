@@ -78,11 +78,14 @@ enum NativeDesktopOperations {
             } else if let data = clipboard.data(forType: .png) {
                 _ = try validatedPNG(data)
                 value = data.base64EncodedString()
-            } else if let image = NSImage(pasteboard: clipboard),
-                      let image = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-                value = try pngData(image).base64EncodedString()
             } else {
-                value = nil
+                let supported = Set(CGImageSourceCopyTypeIdentifiers() as? [String] ?? [])
+                let type = clipboard.types?.first { supported.contains($0.rawValue) }
+                if let type, let data = clipboard.data(forType: type) {
+                    value = try pngData(validatedRaster(data)).base64EncodedString()
+                } else {
+                    value = nil
+                }
             }
             return ["format": format, "data": value as Any? ?? NSNull(), "state": value == nil ? "empty" : "read", "changeCount": clipboard.changeCount]
         } }
@@ -132,6 +135,25 @@ enum NativeDesktopOperations {
               NativeImageLimits.permits(width: width.doubleValue, height: height.doubleValue),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw ProviderError.coded("invalid_png", "clipboard image is not a readable single PNG")
+        }
+        return image
+    }
+
+    private static func validatedRaster(_ data: Data) throws -> CGImage {
+        guard data.count <= NativeImageLimits.maxRasterSourceBytes else {
+            throw ProviderError.coded("image_too_large", "clipboard raster source exceeds the native per-image byte budget")
+        }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) > 0,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let width = properties[kCGImagePropertyPixelWidth as String] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight as String] as? NSNumber else {
+            throw ProviderError.coded("image_decode_failed", "macOS did not provide readable clipboard raster metadata")
+        }
+        guard NativeImageLimits.permits(width: width.doubleValue, height: height.doubleValue) else {
+            throw ProviderError.coded("image_too_large", "clipboard raster pixels exceed the native per-image allocation budget")
+        }
+        guard let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCache as String: false] as CFDictionary) else {
+            throw ProviderError.coded("image_decode_failed", "macOS could not decode the bounded clipboard raster")
         }
         return image
     }

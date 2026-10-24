@@ -673,9 +673,6 @@ final class Provider: @unchecked Sendable {
         let snapshot = try currentSnapshot(params: params)
         let record = try element(snapshot, try requiredInteger(params, "elementIndex"))
         let expected = try requiredStringAllowingEmpty(params, "value")
-        guard isSettable(record.element, kAXValueAttribute as String) else {
-            throw ProviderError.coded("value_not_settable", "element \(record.index) is not settable")
-        }
         let current = rawAttributeValue(record.element, kAXValueAttribute as String)
         let coercion = AttributeValueCoercion(existingValue: current, requested: expected)
         let result: AXError
@@ -689,8 +686,9 @@ final class Provider: @unchecked Sendable {
         case let .boolean(value):
             result = AXUIElementSetAttributeValue(record.element, kAXValueAttribute as CFString, value ? kCFBooleanTrue : kCFBooleanFalse)
         }
-        guard result == .success else {
-            throw ProviderError.coded("accessibility_error", "AXUIElementSetAttributeValue failed with \(result.rawValue)")
+        guard NativeAXReply.classify(result) == .accepted else {
+            let code = NativeAXReply.classify(result) == .unsupported ? "value_not_settable" : "action_outcome_unknown"
+            throw ProviderError.coded(code, "AXUIElementSetAttributeValue returned \(result.rawValue); the original write will not be replayed")
         }
         let verification: [String: Any]
         switch coercion.compare(readback: rawAttributeValue(record.element, kAXValueAttribute as String)) {
@@ -789,12 +787,12 @@ final class Provider: @unchecked Sendable {
             guard let point = center(record.localFrame, in: snapshot.windowBounds) else {
                 throw ProviderError.coded("element_not_found", "element \(record.index) has no scrollable frame")
             }
-            try Input.scroll(pid: snapshot.app.pid, at: point, direction: direction, pages: pages)
-            return actionMetadata(path: "synthetic", fallbackReason: "actionUnsupported")
+            try Input.scroll(targetWindow: snapshot, at: point, direction: direction, pages: pages)
+            return actionMetadata(path: "synthetic", fallbackReason: "actionUnsupported", verification: unverifiedAction(reason: "synthetic_input"))
         }
         let point = try coordinatePoint(params: params, xKey: "x", yKey: "y", snapshot: snapshot)
-        try Input.scroll(pid: snapshot.app.pid, at: point, direction: direction, pages: pages)
-        return actionMetadata(path: "synthetic")
+        try Input.scroll(targetWindow: snapshot, at: point, direction: direction, pages: pages)
+        return actionMetadata(path: "synthetic", verification: unverifiedAction(reason: "synthetic_input"))
     }
 
     private func drag(params: [String: JSONValue]) throws -> [String: Any] {
@@ -816,8 +814,8 @@ final class Provider: @unchecked Sendable {
             start = try coordinatePoint(params: params, xKey: "fromX", yKey: "fromY", snapshot: snapshot)
             end = try coordinatePoint(params: params, xKey: "toX", yKey: "toY", snapshot: snapshot)
         }
-        try Input.drag(pid: snapshot.app.pid, from: start, to: end)
-        return actionMetadata(path: "synthetic")
+        try Input.drag(targetWindow: snapshot, from: start, to: end)
+        return actionMetadata(path: "synthetic", verification: unverifiedAction(reason: "synthetic_input"))
     }
 
     private func element(_ snapshot: Snapshot, _ index: Int) throws -> ElementRecord {
@@ -1316,7 +1314,6 @@ private func actions(_ element: AXUIElement) -> [String] {
 }
 
 private func performAction(_ element: AXUIElement, _ action: String) throws -> Bool {
-    guard actions(element).contains(action) else { return false }
     let status = AXUIElementPerformAction(element, action as CFString)
     switch NativeAXReply.classify(status) {
     case .accepted: return true
@@ -2247,36 +2244,46 @@ private enum Input {
         }
     }
 
-    static func scroll(pid: pid_t, at point: CGPoint, direction: String, pages: Double) throws {
+    static func scroll(targetWindow: Snapshot, at point: CGPoint, direction: String, pages: Double) throws {
         guard let delta = boundedInteger(max(1, (12 * pages).rounded()), as: Int32.self) else {
             throw ProviderError.coded("invalid_argument", "pages is out of range")
         }
         let wheel1: Int32 = direction == "up" ? delta : direction == "down" ? -delta : 0
         let wheel2: Int32 = direction == "left" ? delta : direction == "right" ? -delta : 0
         guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2, wheel1: wheel1, wheel2: wheel2, wheel3: 0) else {
-            throw ProviderError.coded("accessibility_error", "failed to create scroll event")
+            throw ProviderError.coded("accessibility_error", "failed to create scroll event before any event was posted")
         }
+        try requireMouseRecipient(targetWindow, at: point, deliveredEvents: 0)
         event.location = point
-        event.postToPid(pid)
+        event.postToPid(targetWindow.app.pid)
     }
 
-    static func drag(pid: pid_t, from start: CGPoint, to end: CGPoint) throws {
+    static func drag(targetWindow: Snapshot, from start: CGPoint, to end: CGPoint) throws {
         guard let source = CGEventSource(stateID: .combinedSessionState) else {
-            throw ProviderError.coded("accessibility_error", "failed to create event source")
+            throw ProviderError.coded("accessibility_error", "failed to create drag source before any event was posted")
         }
-        try mouse(.mouseMoved, source: source, point: start, button: .left, pid: pid)
-        try mouse(.leftMouseDown, source: source, point: start, button: .left, pid: pid)
+        var delivered = 0
+        var buttonDown = false
+        var lastPoint = start
+        defer {
+            // Release only the original live process's outstanding press. Focus
+            // changes never authorize replaying the drag in another window.
+            if buttonDown, originalProcessIsLive(targetWindow),
+               let release = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: lastPoint, mouseButton: .left) {
+                release.postToPid(targetWindow.app.pid)
+            }
+        }
+        try mouse(.mouseMoved, source: source, point: start, button: .left, targetWindow: targetWindow, delivered: &delivered)
+        try mouse(.leftMouseDown, source: source, point: start, button: .left, targetWindow: targetWindow, delivered: &delivered)
+        buttonDown = true
         for step in 1...10 {
             let progress = CGFloat(step) / 10
-            try mouse(
-                .leftMouseDragged,
-                source: source,
-                point: CGPoint(x: start.x + (end.x - start.x) * progress, y: start.y + (end.y - start.y) * progress),
-                button: .left,
-                pid: pid
-            )
+            let point = CGPoint(x: start.x + (end.x - start.x) * progress, y: start.y + (end.y - start.y) * progress)
+            try mouse(.leftMouseDragged, source: source, point: point, button: .left, targetWindow: targetWindow, delivered: &delivered)
+            lastPoint = point
         }
-        try mouse(.leftMouseUp, source: source, point: end, button: .left, pid: pid)
+        try mouse(.leftMouseUp, source: source, point: end, button: .left, targetWindow: targetWindow, delivered: &delivered)
+        buttonDown = false
     }
 
     private static func originalProcessIsLive(_ snapshot: Snapshot) -> Bool {
@@ -2290,6 +2297,15 @@ private enum Input {
         guard originalProcessIsLive(snapshot), isTargetWindowFocused(snapshot) else {
             let code = deliveredEvents == 0 ? "window_not_focused" : "action_outcome_unknown"
             throw ProviderError.coded(code, "original keyboard recipient changed after \(deliveredEvents) posted event(s); no remaining input was delivered or replayed")
+        }
+    }
+
+    private static func requireMouseRecipient(_ snapshot: Snapshot, at point: CGPoint, deliveredEvents: Int) throws {
+        try requireRecipient(snapshot, deliveredEvents: deliveredEvents)
+        let expected = syntheticClickRecipient(pid: snapshot.app.pid, windowId: snapshot.windowId)
+        guard currentSyntheticClickRecipient(snapshot: snapshot, point: point) == .focused(expected) else {
+            throw ProviderError.coded(deliveredEvents == 0 ? "window_not_focused" : "action_outcome_unknown",
+                                      "original mouse recipient changed after \(deliveredEvents) posted event(s); the remainder was not replayed")
         }
     }
 
@@ -2383,18 +2399,16 @@ private enum Input {
     }
 
     private static func mouse(
-        _ type: CGEventType,
-        source: CGEventSource,
-        point: CGPoint,
-        button: CGMouseButton,
-        flags: CGEventFlags = [],
-        pid: pid_t
+        _ type: CGEventType, source: CGEventSource, point: CGPoint,
+        button: CGMouseButton, targetWindow: Snapshot, delivered: inout Int
     ) throws {
         guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button) else {
-            throw ProviderError.coded("accessibility_error", "failed to create mouse event")
+            throw ProviderError.coded(delivered == 0 ? "accessibility_error" : "action_outcome_unknown",
+                                      "drag event allocation failed after \(delivered) posted event(s)")
         }
-        event.flags = flags
-        event.postToPid(pid)
+        try requireMouseRecipient(targetWindow, at: point, deliveredEvents: delivered)
+        event.postToPid(targetWindow.app.pid)
+        delivered += 1
     }
 
     private static func keyEvent(_ keyCode: CGKeyCode, down: Bool, flags: CGEventFlags, pid: pid_t) throws {
