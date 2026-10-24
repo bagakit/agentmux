@@ -466,7 +466,11 @@ conversation. Rendering adds no RPC, queue or credential store: existing
 `connection.delivery.inspect`, `connection.delivery.ls` and content coverage
 expose the original image upload, delivery and any unresolved resource gap.
 
-Public `connection.delivery.inspect` and bounded `connection.delivery.ls` expose the original safe receipt and exact source reference, excluding body, prepared wire and credentials. The scoped list can report a source gap before any effect exists. Source replacement retains its old frontier for explicit relinking; storage or authority uncertainty retains the original work and reports the failed service step. Closing this publication owner releases only its readers and external-effect observation, preserving original Agents and durable operations.
+Public `connection.delivery.inspect` and bounded `connection.delivery.ls` expose the original safe receipt and exact source reference, excluding body, prepared wire and credentials.
+
+Query reactions use an `ingress` source reference and `queryFeedback` with the original ingress/message identity and milestone. Their native `mapping.reactionId` is distinct from `mapping.messageId`, which remains the user's original query. Feishu uses its native received, started and completed reactions; the semantic contract is defined in [Conversation behavior](../../docs/design/behavior/conversation-mode.md#共同来源与双向交付). These observations reuse the existing SDK, RPC and CLI delivery reads rather than introducing a separate reaction command. New Feishu setup permission reviews include `im:message.reactions:write_only`; existing application grants are not changed automatically. Missing reaction permission leaves an inspectable local delivery failure while input and ordinary replies continue.
+
+The scoped list can report a source gap before any effect exists. Source replacement retains its old frontier for explicit relinking; storage or authority uncertainty retains the original work and reports the failed service step. Closing this publication owner releases only its readers and external-effect observation, preserving original Agents and durable operations.
 
 ## Durable external intake
 
