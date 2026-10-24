@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../macos')
@@ -37,7 +37,41 @@ if (bare) {
 } else {
 const appPath = resolve(option('--output') ?? join(binDirectory, 'AgentMux Native.app'))
 const executablePath = join(appPath, 'Contents', 'MacOS', 'agentmux-native-macos')
-// Compilation succeeded. Replace only this planned output, including any old signature.
+// Resolve existing ancestors too: a symlinked output parent must not hide an
+// overlap with the source or compiler output that this operation will consume.
+const canonical = path => {
+  const tail = []
+  let ancestor = path
+  while (!existsSync(ancestor)) {
+    if (dirname(ancestor) === ancestor) throw new Error(`Cannot resolve output ancestor: ${path}`)
+    tail.unshift(basename(ancestor))
+    ancestor = dirname(ancestor)
+  }
+  return resolve(realpathSync(ancestor), ...tail)
+}
+const contains = (container, target) => {
+  const distance = relative(container, target)
+  return distance === '' || (!isAbsolute(distance) && distance !== '..' && !distance.startsWith(`..${sep}`))
+}
+if (basename(appPath) !== 'AgentMux Native.app') throw new Error('Application output must be named AgentMux Native.app')
+const canonicalApp = canonical(appPath)
+for (const input of [binaryPath, packageDirectory]) {
+  if (contains(canonicalApp, canonical(input))) throw new Error('Application output contains a build input')
+}
+for (const source of ['Sources', 'Tests', 'Verification']) {
+  const sourcePath = canonical(join(packageDirectory, source))
+  if (contains(sourcePath, canonicalApp) || contains(canonicalApp, sourcePath)) throw new Error('Application output overlaps native source')
+}
+if (existsSync(appPath)) {
+  const info = lstatSync(appPath)
+  const plist = join(appPath, 'Contents', 'Info.plist')
+  if (!info.isDirectory() || info.isSymbolicLink() || !existsSync(plist) ||
+      !lstatSync(plist).isFile() || lstatSync(plist).isSymbolicLink() ||
+      run('/usr/bin/plutil', ['-extract', 'CFBundleIdentifier', 'raw', '--', plist], true) !== 'dev.agentmux.native') {
+    throw new Error('Existing application output is not an owned AgentMux Native app; preserving it')
+  }
+}
+// Compilation succeeded and the exact output has a known product identity.
 rmSync(appPath, { recursive: true, force: true })
 mkdirSync(dirname(executablePath), { recursive: true })
 mkdirSync(join(appPath, 'Contents', 'Resources'), { recursive: true })
