@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import type { AgentMuxAgentSession, AgentMuxAgentRuntimeStatus, AgentMuxClientEvent, AgentMuxClientEventListener } from '@agentmux/core'
 import { createGoalRuntime, type GoalExecutionClient } from '../src/goal-runtime.js'
 
@@ -85,4 +85,19 @@ it('releases removed leases and every observer when this Goal owner closes', asy
   f.change([{ hostId: 'remote', client: f.firstRemote.client }])
   f.local.emit('agent-session', true); f.firstRemote.emit('agent-session', true)
   expect(f.events).toEqual([]); expect(f.firstRemote.listeners.size).toBe(0)
+})
+
+it('rejects a late creation inspection after the exact Host lease changes without borrowing the same local SID', async () => {
+  const f = fixture()
+  let release!: (value: AgentMuxAgentSession) => void
+  const inspect = vi.fn(() => new Promise<AgentMuxAgentSession>(resolve => { release = resolve }))
+  Object.assign(f.firstRemote.client, { inspectAgentCreation: inspect })
+  f.change([{ hostId: 'remote', client: f.firstRemote.client }])
+  const pending = f.runtime.agentCreation('remote', 'shared-session-id')
+  f.change([{ hostId: 'remote', client: f.replacement.client }])
+  release(f.firstRemote.client.agentSession('shared-session-id'))
+  await expect(pending).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+  expect(inspect).toHaveBeenCalledExactlyOnceWith('shared-session-id')
+  expect((await f.runtime.observeGoalAgent('local', 'shared-session-id')).session.run.runId).toBe('local-run')
+  expect((await f.runtime.observeGoalAgent('remote', 'shared-session-id')).session.run.runId).toBe('remote-replacement-run')
 })
