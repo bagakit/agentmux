@@ -10,14 +10,15 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 import { aliases, browserInstalledDependency, desktopRequire, root } from './fixtures/settings-connections/environment.mjs'
 
 const fixture = resolve(root, 'apps/desktop/scripts/fixtures/channel-entry')
-const applicationAccess = process.argv.includes('--application-access'), memberAccess = process.argv.includes('--member-access'), headerStatus = process.argv.includes('--header-status'), focused = headerStatus || memberAccess || applicationAccess
-const main = applicationAccess ? 'application-main.cjs' : memberAccess ? 'member-main.cjs' : headerStatus ? 'status-main.cjs' : 'main.cjs'
-const evidenceRoot = applicationAccess ? '.local/member-access/application-visual' : memberAccess ? '.local/member-access/visual' : headerStatus ? '.local/group-readiness/connection-surface-visual' : '.local/channel-protocol/channel-entry'
+const conversationSharing = process.argv.includes('--conversation-sharing')
+const applicationAccess = process.argv.includes('--application-access'), memberAccess = process.argv.includes('--member-access'), headerStatus = process.argv.includes('--header-status'), focused = headerStatus || memberAccess || applicationAccess || conversationSharing
+const main = conversationSharing ? 'sharing-main.cjs' : applicationAccess ? 'application-main.cjs' : memberAccess ? 'member-main.cjs' : headerStatus ? 'status-main.cjs' : 'main.cjs'
+const evidenceRoot = conversationSharing ? '.local/channel-protocol/T-021/visual' : applicationAccess ? '.local/member-access/application-visual' : memberAccess ? '.local/member-access/visual' : headerStatus ? '.local/group-readiness/connection-surface-visual' : '.local/channel-protocol/channel-entry'
 const evidence = resolve(root, evidenceRoot, 'runs', randomUUID()), temporary = await mkdtemp(resolve(tmpdir(), 'amux-channel-entry-'))
 await mkdir(evidence, { recursive: true })
 const sha = value => createHash('sha256').update(value).digest('hex')
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), inputs: {}, loadedTransforms: {},
-  scope: applicationAccess ? 'Original saved-bot and group application/member access through native input with synthetic typed access/profile/operation leaves. Public authorization is qualified separately; no live grants.' : memberAccess ? 'Original group Member access through native input and complete Renderer, with synthetic typed original Binding/grant/operation leaves. Real public Host/CLI authorization is qualified separately; no live grants.' : headerStatus ? 'Original channel header, popover and group details; controlled public DTOs and native pointer/keyboard. Header narrow uses an actual split Region; details narrow uses the actual narrow window.' : 'Original controlled channel-entry journey.' }
+  scope: conversationSharing ? 'Original AgentConnectorDialog partial saved scope and explicit whole-conversation confirmation, synthetic typed original Lark/Discord audiences, native controls and zero authorization/platform writes. Actual owner/SDK propagation is qualified separately.' : applicationAccess ? 'Original saved-bot and group application/member access through native input with synthetic typed access/profile/operation leaves. Public authorization is qualified separately; no live grants.' : memberAccess ? 'Original group Member access through native input and complete Renderer, with synthetic typed original Binding/grant/operation leaves. Real public Host/CLI authorization is qualified separately; no live grants.' : headerStatus ? 'Original channel header, popover and group details; controlled public DTOs and native pointer/keyboard. Header narrow uses an actual split Region; details narrow uses the actual narrow window.' : 'Original controlled channel-entry journey.' }
 const env = { ...process.env, pnpm_config_verify_deps_before_run: 'false' }; delete env.ELECTRON_RUN_AS_NODE
 try {
   for (const path of ['apps/desktop/scripts/capture-channel-entry.mjs', ...['entry.tsx', main, 'index.html', 'scenario.md'].map(name => 'apps/desktop/scripts/fixtures/channel-entry/' + name)]) receipt.inputs[path] = sha(await readFile(resolve(root, path)))
@@ -48,7 +49,7 @@ try {
   await writeFile(resolve(visual, 'capture.log'), lines.join('\n'))
   const render = JSON.parse(await readFile(resolve(visual, 'render.json'), 'utf8'))
   assert.equal(execution.exitCode, 0, JSON.stringify(render.failure)); assert.equal(render.passed, true)
-  assert.equal(render.frames.length, applicationAccess ? 5 : memberAccess ? 4 : 8)
+  assert.equal(render.frames.length, conversationSharing ? 4 : applicationAccess ? 5 : memberAccess ? 4 : 8)
   receipt.render = render; receipt.images = Object.fromEntries(await Promise.all(render.frames.map(async file => [file, sha(await readFile(resolve(visual, file)))])))
   for (const [file, expected] of Object.entries(receipt.inputs)) assert.equal(sha(await readFile(resolve(root, file))), expected, 'A loaded source changed during capture: ' + file)
   receipt.passed = true

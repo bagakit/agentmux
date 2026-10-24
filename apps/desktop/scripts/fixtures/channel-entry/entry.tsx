@@ -31,12 +31,15 @@ useAppStore.setState({ config, loading: false, sessions: [session], tabs: { [tab
 mountThemeRuntime(window, config.appearance)
 
 // Controlled typed facts only. The real IPC/SDK/binding and App route are proven by the consumer tests.
+const conversationSharing = new URLSearchParams(location.search).has('conversation-sharing')
 const memberAccess = new URLSearchParams(location.search).has('member-access')
 const applicationAccess = new URLSearchParams(location.search).has('application-access'), memberScenario = memberAccess || applicationAccess
-const connection: ConnectionRecord = { config: { connectionId: memberScenario ? 'preview-feishu' : 'preview-discord', adapterId: memberScenario ? 'feishu' : 'discord', application: memberScenario ? { domain: 'open.feishu.cn', appId: 'cli_original_members' } : { domain: 'discord.com', appId: '123456789012345678' },
-  label: 'Research discussion', enabled: true, credentialRef: 'preview-secure-reference' }, revision: 1,
+const feishuScenario = memberScenario || conversationSharing
+const connection: ConnectionRecord = { config: { connectionId: feishuScenario ? 'preview-feishu' : 'preview-discord', adapterId: feishuScenario ? 'feishu' : 'discord', application: feishuScenario ? { domain: 'open.feishu.cn', appId: 'cli_original_members' } : { domain: 'discord.com', appId: '123456789012345678' },
+  label: conversationSharing ? 'Lark research bot' : 'Research discussion', enabled: true, credentialRef: 'preview-secure-reference' }, revision: 1,
   capabilities: { roomDiscovery: true, roomCreation: false, roomLink: true },
   observation: { authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } } }
+const secondConnection: ConnectionRecord = { ...connection, config: { ...connection.config, connectionId: 'preview-second-discord', adapterId: 'discord', application: { domain: 'discord.com', appId: '234567890123456789' }, label: 'Discord project bot' } }
 let bindings: RoomBinding[] = []
 const hostingTarget: ConnectionHostingTarget = { hostId: 'preview-bot-host', runtimeId: 'preview-original-runtime' }
 const target = { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
@@ -108,10 +111,11 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   proof.requests.push({ method, input: structuredClone(input), owner: owner ? structuredClone(owner) : undefined })
   if (owner && JSON.stringify(owner) !== JSON.stringify(hostingTarget)) throw Error('The preview cannot read a different bot hosting target')
   const subject = { kind: 'conversation', externalConversationId: input.subject?.externalConversationId ?? room.externalConversationId }
-  const meta = { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application,
+  const sourceConnection = conversationSharing && input.connectionId === secondConnection.config.connectionId ? secondConnection : connection
+  const meta = { connectionId: sourceConnection.config.connectionId, connectionRevision: 1, application: sourceConnection.config.application,
     entry: { subject, cacheRevision: 'preview-cache', observation: { subject, state: 'observed', freshness: 'current', profile: { name: room.name, observedAt: Date.now() }, checkedAt: Date.now() } } }
-  if (method === 'connection.ls') return { connections: proof.omitOriginal ? [] : [connection] }
-  if (method === 'connection.inspect') return { connection, operation: null }
+  if (method === 'connection.ls') return { connections: proof.omitOriginal ? [] : conversationSharing ? [connection, secondConnection] : [connection] }
+  if (method === 'connection.inspect') return { connection: sourceConnection, operation: null }
   if (method === 'connection.service.get') return input.adapterId ? { adapterId: input.adapterId, enabled: true, revision: 0 } : { enabled: true, revision: 1 }
   if (method === 'connection.binding.ls') return { bindings: structuredClone(bindings) }
   if (method === 'connection.diagnose') {
@@ -221,6 +225,14 @@ if (memberScenario) {
     unavailable() { proof.accessUnavailable = true; invalidateConnectorTarget(target) },
     facts: () => ({ grants: structuredClone(applicationGrants), operations: [...applicationOperations.values()].map(item => structuredClone(item)), memberGrants: structuredClone(memberGrants), drafts: structuredClone(useAppStore.getState().manualConnectionIntents), groupDrafts: structuredClone(useAppStore.getState().connectorRoomDrafts) })
   } })
+}
+if (conversationSharing) {
+  bindings = [{ ...target, regionAnchor: { regionId: 'channel-preview-region' }, bindingId: 'preview-partial-lark', revision: 1, state: 'active',
+    connectionId: connection.config.connectionId, application: connection.config.application, externalConversationId: room.externalConversationId,
+    scope: { input: 'mentions-and-replies', publication: 'future-native-user-facing' }, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } },
+  { ...target, bindingId: 'preview-whole-discord', revision: 1, state: 'active', connectionId: secondConnection.config.connectionId, application: secondConnection.config.application,
+    externalConversationId: '456789012345678901', scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' }, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } }]
+  Object.assign(proof, { sharing: { facts: () => ({ bindings: structuredClone(bindings), drafts: structuredClone(useAppStore.getState().connectorRoomDrafts) }) } })
 }
 Object.assign(window, { channelEntryProof: proof })
 window.addEventListener('error', event => proof.errors.push(event.message))
