@@ -1499,8 +1499,12 @@ export class AgentMuxRpcService {
       return parseMotePreferencesSaveResult(result, input) as AgentMuxRpcResult<M>
     }
     if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
+      const internalCaller: AgentMuxControlCaller | undefined = caller
+        ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined
       const originalControlOperation = AGENTMUX_RPC_CONTROL_METHODS[method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS]
       const originalSpatialRequest = method === 'agent.open' || method === 'space.inspect' ? rpcControlRequest(method, params) : null
+      const originalResumeRequest = method === 'agent.resume' ? rpcControlRequest(method, params, internalCaller) : null
+      const independentResume = originalResumeRequest?.operation === 'resume' && !originalResumeRequest.text.trim()
       let independentSpatial = originalSpatialRequest && (isBackgroundLocalAgentOpen(originalSpatialRequest) ||
         originalSpatialRequest.operation === 'space.inspect' && 'requestId' in originalSpatialRequest.target)
       if (independentSpatial && originalSpatialRequest?.operation === 'agent.open') independentSpatial =
@@ -1531,7 +1535,7 @@ export class AgentMuxRpcService {
           return rpcControlResult(method, { operation: method, catalog }) as AgentMuxRpcResult<M>
         }
       }
-      if (this.ports.forwardControl && !(this.ports.spatialAgentControl && independentSpatial) && !(this.ports.goalControl && method.startsWith('goal.') && method !== 'goal.focus')) return await this.ports.forwardControl(method, params, context)
+      if (this.ports.forwardControl && !independentResume && !(this.ports.spatialAgentControl && independentSpatial) && !(this.ports.goalControl && method.startsWith('goal.') && method !== 'goal.focus')) return await this.ports.forwardControl(method, params, context)
       let body = p
       if (method === 'space.inspect') {
         const target = rpcRecord(p.target)
@@ -1590,9 +1594,7 @@ export class AgentMuxRpcService {
             expectedLatestExecutionId: snapshot?.admission?.executionId ?? snapshot?.latestConfirmed?.executionId ?? null }
           : { executionId: snapshot?.admission?.executionId ?? null } }
       }
-      const internalCaller: AgentMuxControlCaller | undefined = caller
-        ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined
-      const request = rpcControlRequest(method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS, body, internalCaller)
+      const request = originalResumeRequest ?? rpcControlRequest(method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS, body, internalCaller)
       const nameContext: AgentMuxNameContext = {
         actor: caller ? { kind: 'agent', id: caller.agentSessionId, verified: true }
           : context.principal ? { kind: context.transport === 'unix' && context.principal.kind === 'user' ? 'device' : context.principal.kind,
