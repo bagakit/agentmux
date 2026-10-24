@@ -33,13 +33,14 @@ const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
 /** Actual Core resume lifecycle; Runtime and native protocol are deterministic private I/O ports. */
-async function fixture() {
+async function fixture(selected = false) {
   const h = await rpcOwnerFixture(['sender', 'recipient', 'other']); cleanup.push(h.close)
   const events: import('../src/types.js').AgentMuxClientEvent[] = []; h.client.onEvent(event => { events.push(event) })
   const queue = Reflect.get(h.client, 'messageQueue') as import('../src/agent-global-message-queue.js').DurableAgentMuxMessageQueue
   const notifications = Reflect.get(h.client, 'messageNotifications') as import('../src/agent-message-notifications.js').AgentMuxMessageNotifications
   const old = (await h.store.readMetadata('recipient'))!, nativeHandle = { kind: 'provider' as const, providerId: 'codex', sessionId: 'original-native' }
-  await h.store.compareAndSwapMetadata(old, { ...old, nativeHandle, updatedAt: Date.now() }); await h.inner.registry.load('local')
+  await h.store.compareAndSwapMetadata(old, { ...old, nativeHandle, updatedAt: Date.now(),
+    ...(selected ? { nativeBinding: { source: 'user-selected' as const, run: old.run, observedAt: old.updatedAt } } : {}) }); await h.inner.registry.load('local')
   let currentRun = old.run.runId, serial = 0, availableIdle = false, unknownNative = false, refuseNative = false
   const ended = new Set<string>()
   const run = (id: string) => ({ ...h.run(id), pid: 1234, state: id === currentRun && !ended.has(id) ? { type: 'running' as const } : { type: 'exited' as const, code: 0, signal: null } })
@@ -51,14 +52,18 @@ async function fixture() {
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   inner.ensureManagedHooks = async () => {}; inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
   const providers = Reflect.get(h.client, 'providers') as AgentProviderRegistry, builtin = providers.get('codex')
+  const { discoverNativeSession: _discovery, observeSessionStatus: _status, ...provider } = builtin
+  const terminalInput = h.inner.kernel.input
+  if (!vi.isMockFunction(terminalInput)) throw new Error('The private Runtime input port must record its exact writes')
   const native = vi.fn(async (_wire: string, plan: AgentNativePromptInputPlan) => {
-    const key = nativeInputCorrelationKey(plan.clientCorrelation!)!
+    const key = nativeInputCorrelationKey(plan.clientCorrelation!)
+    if (key?.kind !== 'prompt') throw new Error('The original notification requires its typed prompt key')
     expect(key.expectedRun.runId).toBe(currentRun)
     if (unknownNative) throw new Error('Original private native ACK lost')
     if (refuseNative) return { outcome: 'not-applied' as const, errorCode: -32602 }
     return { outcome: 'admitted' as const, queuedSubmissionId: 'private-' + key.submissionId }
   })
-  providers.replace({ ...builtin, discoverNativeSession: undefined, observeSessionStatus: undefined,
+  providers.replace({ ...provider,
     readPromptExecutionEvidence: async () => ({ state: availableIdle ? 'idle' : 'working', sourceId: 'private-native-source', id: 'private-evidence-' + currentRun }),
     async prepareNativeInput(_context, target) {
       return { plan: { kind: 'native-rpc', protocolId: 'private-inbox-protocol', sourceId: JSON.stringify([target.providerId, target.nativeSessionId]),
@@ -75,7 +80,7 @@ async function fixture() {
     ended.add(currentRun)
     const result = await h.client.resumeAgent({ agentSessionId: 'recipient', operationId, prompt: 'Explicit private resume task' })
     expect(result.continuity).toMatchObject({ kind: 'resumed', previousRun: { runId: serial === 1 ? old.run.runId : 'resumed-' + (serial - 1) }, newRun: result.run, nativeTarget: nativeHandle })
-    expect(result.nativeBinding).toMatchObject({ source: 'semantic-resume-target', run: result.run })
+    expect(result.nativeBinding).toMatchObject({ source: selected ? 'user-selected' : 'semantic-resume-target', run: result.run })
     return result
   }
   const settled = async () => {
@@ -94,7 +99,7 @@ async function fixture() {
     expect(result.code, result.stderr + result.stdout).toBe(0)
     return JSON.parse(result.stdout).result
   }
-  return { ...h, old, nativeHandle, queue, notifications, append, resume, settled, native, start, rpc, managed, cli, events,
+  return { ...h, old, nativeHandle, queue, notifications, append, resume, settled, native, terminalInput, start, rpc, managed, cli, events,
     idle: () => { availableIdle = true }, loseNative: () => { unknownNative = true }, refuseNative: () => { refuseNative = true } }
 }
 
@@ -109,7 +114,7 @@ it('source CLI freezes a new explicit notification on the resumed persistent rec
   expect(() => parseRpcNativeResult('message.read', read, { hostId: 'local', messageId: 'historical-a' })).not.toThrow()
   const listed = await f.rpc.call('message.ls', { hostId: 'local', participantSessionId: 'recipient', direction: 'incoming' })
   expect(listed.messages[0]!.notification?.key?.expectedRun).toEqual(resumed.run)
-  const before = await f.queue.readJournal(), writes = vi.mocked(f.inner.kernel.input).mock.calls.length
+  const before = await f.queue.readJournal(), writes = f.terminalInput.mock.calls.length
   const inspected = await f.cli(['message', 'notify', 'inspect', '--host', 'local', '--operation-id', 'explicit-on-b'])
   expect(inspected.notification).toEqual(result.notification); expect(inspected.input).toBeTruthy()
   expect(await f.queue.readJournal()).toEqual(before); expect(f.inner.kernel.input).toHaveBeenCalledTimes(writes)
@@ -119,7 +124,7 @@ it('source CLI freezes a new explicit notification on the resumed persistent rec
 it('coalesces different historical Runs of the same recipient and keeps a retained operation on its original key after another recovery', async () => {
   const f = await fixture(), a = await f.append('a'); await f.resume(); const b = await f.append('b')
   const first = await f.rpc.call('message.notify', { hostId: 'local', operationId: 'frozen-b', messageIds: ['a', 'b'] })
-  const oldKey = first.notification.key, writes = vi.mocked(f.inner.kernel.input).mock.calls.length
+  const oldKey = first.notification.key, writes = f.terminalInput.mock.calls.length
   await f.resume()
   const repeated = await f.rpc.call('message.notify', { hostId: 'local', operationId: 'frozen-b', messageIds: ['a', 'b'] }).then(value => ({ value }), error => ({ error }))
   expect(repeated).not.toHaveProperty('error'); expect('value' in repeated && repeated.value.notification.key).toEqual(oldKey)
@@ -130,8 +135,8 @@ it('coalesces different historical Runs of the same recipient and keeps a retain
   await expect(f.rpc.call('message.notify', { hostId: 'local', operationId: 'wrong-target', messageIds: ['a', 'wrong-recipient'] })).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
 })
 
-it('automatically selects untouched historical references only through the actual Core Level B recovery chain', async () => {
-  const f = await fixture(), a = await f.append('a'); await f.resume(); const b = await f.append('b'); const current = await f.resume()
+it.each([false, true])('automatically selects untouched historical references through the actual Core Level B recovery chain (selected=%s)', async selected => {
+  const f = await fixture(selected), a = await f.append('a'); await f.resume(); const b = await f.append('b'); const current = await f.resume()
   expect(messageNotificationSourceRuns(current)).toEqual([current.run.runId, 'resumed-1', f.old.run.runId])
   f.idle(); await f.notifications.restore(); await f.settled()
   expect(f.native).toHaveBeenCalledTimes(1)
@@ -171,7 +176,7 @@ it('retains an unknown original notice across recovery and notifies a distinct n
 
 it('does not automatically reassign a manually attempted unknown MID while a new MID retains its independent notification and original byte guard', async () => {
   const f = await fixture(); await f.append('manual-unknown'); await f.resume()
-  const write = vi.mocked(f.inner.kernel.input).mockRejectedValue(new Error('Original terminal write response lost'))
+  const write = f.terminalInput.mockRejectedValue(new Error('Original terminal write response lost'))
   await f.client.notifyMessages({ operationId: 'original-manual', messageIds: ['manual-unknown'] })
   await vi.waitFor(() => expect(write).toHaveBeenCalled())
   const original = (await f.queue.readNotification('original-manual'))!
@@ -261,7 +266,8 @@ it('promotes a producer-qualified input ACK in a read-only notice copy without w
   expect(result.notification?.state).toBe('submitted'); expect(await f.queue.readNotification('ack-copy-op')).toEqual(retained)
   expect(await f.queue.readJournal()).toEqual(before)
   const altered = structuredClone(result.input!)
-  altered.admission!.intent.message = { userContent: 'Ordinary prompt with the same operation name' }
+  if (!altered.admission?.intent) throw new Error('Missing the original notification input intent')
+  altered.admission.intent.message = { userContent: 'Ordinary prompt with the same operation name' }
   vi.spyOn(f.client, 'inspectAgentPromptSubmission').mockResolvedValue(altered)
   const inspected = await f.client.inspectMessageNotification({ operationId: 'ack-copy-op' }).then(value => ({ value }), error => ({ error }))
   expect(inspected).toHaveProperty('error.code', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -296,7 +302,8 @@ it('validates the public read receipt Host, operation and platform producer rath
   for (const changed of [{ ...result, hostId: 'elsewhere' }, { ...result, notification: { ...result.notification, notificationId: 'another-op' } },
     { ...result, notification: null }]) expect(() => parseRpcNativeResult('message.notify.inspect', changed, input)).toThrow()
   const ordinary = structuredClone(result.input!)
-  ordinary.admission!.intent.message = { userContent: 'ordinary' }
+  if (!ordinary.admission?.intent) throw new Error('Missing the original notification input intent')
+  ordinary.admission.intent.message = { userContent: 'ordinary' }
   expect(() => parseRpcNativeResult('message.notify.inspect', { ...result, input: ordinary }, input)).toThrow()
 })
 
@@ -317,7 +324,9 @@ it('exposes the original read through the actual Hosted SDK and owner dispatcher
   const service = new AgentMuxHostedRuntimeService(f.client, f.store.path, () => hostedTestOwner(f.client))
   const sdk = await connectHostedAgentMux({ rpc: {
     call: async (method, params, options) => await service.call(method, structuredClone(params), { ...options, principal: { kind: 'user', id: 'private-user' } }) as never,
-    subscribe: async (method, params, handlers) => {
+    subscribe: async (method: string, params: unknown, handlers: {
+      onInitial(value: unknown): void; onEvent(value: unknown): void
+    }) => {
       const subscription = await service.subscribe(method, structuredClone(params), value => { handlers.onEvent(structuredClone(value)) }, { principal: { kind: 'user', id: 'private-user' } })
       handlers.onInitial(structuredClone(subscription.initial)); await subscription.start?.()
       return { dispose: () => subscription.dispose() }

@@ -156,6 +156,31 @@ it('admits an exact Provider initial idle without inventing a completed turn', a
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
+it.each(['idle', 'changed-evidence', 'changed-input'] as const)('keeps a user-selected target subject to its original automatic input boundary: %s', async boundary => {
+  const f = await fixture('admitted', false, true), before = (await f.store.readMetadata('recipient'))!
+  await f.store.compareAndSwapMetadata(before, { ...before,
+    nativeBinding: { source: 'user-selected', run: before.run, observedAt: before.updatedAt },
+    nativeSourceObservation: { state: 'ambiguous', run: before.run, observedAt: before.updatedAt, reason: 'frontend-selection-unconfirmed' } })
+  await f.inner.registry.load('local')
+  if (boundary === 'changed-evidence') f.beforePrepare(async () => f.changeEvidence({ state: 'idle', sourceId: 'other-native-source', id: 'initial-idle-evidence' }))
+  if (boundary === 'changed-input') {
+    const original = f.readEvidence.getMockImplementation()!
+    f.readEvidence.mockImplementationOnce(original).mockImplementationOnce(async () => { f.changeByte(); return await original() })
+  }
+  if (boundary === 'idle') {
+    await expect(f.submit()).resolves.toEqual(f.message)
+    expect(f.prepare).toHaveBeenCalledWith(expect.anything(), { ...source, idleOnly: true })
+    expect((await f.read())?.admission?.native).toMatchObject({ outcome: 'admitted', plan: { operation: 'queue-idle', threadId: source.nativeSessionId } })
+    expect(f.send).toHaveBeenCalledTimes(1)
+  } else {
+    await expect(f.submit()).rejects.toMatchObject({ code: boundary === 'changed-input' ? 'AGENT_PROMPT_INPUT_NOT_APPLIED' : 'AGENT_TURN_END_UNCONFIRMED' })
+    expect(f.send).not.toHaveBeenCalled()
+    if (boundary === 'changed-input') expect((await f.read())?.admission).toMatchObject({ native: { outcome: 'not-applied' }, notApplied: true })
+    else expect(await f.read()).toBeNull()
+  }
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
 it.each(['source', 'identity', 'working', 'unknown'] as const)('rejects only the notice when its native idle %s changes before claim', async change => {
   const f = await fixture('admitted', false, true)
   f.beforePrepare(async () => f.changeEvidence(change === 'unknown' ? null : { state: change === 'working' ? 'working' : 'idle',

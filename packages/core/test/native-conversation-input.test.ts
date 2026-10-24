@@ -8,11 +8,11 @@ import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import type { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentMuxRpcService as SourceRpcService } from '../src/public-rpc-service.js'
-const AgentMuxRpcService = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
-  ? (await import('../dist/public-rpc-service.js')).AgentMuxRpcService : SourceRpcService
-import { cloneSession } from '../src/agent-session-identity.js'
+const AgentMuxRpcService: typeof SourceRpcService = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
+  ? (await import(new URL('../dist/public-rpc-service.js', import.meta.url).href)).AgentMuxRpcService : SourceRpcService
+import { agentTurnCompletionIdentity, cloneSession } from '../src/agent-session-identity.js'
 import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
-import { validateAgentPromptAdmissionIntent, validateAgentPromptInputBinding, type AgentPromptInputKey } from '../src/agent-prompt-condition.js'
+import { agentPromptCondition, validateAgentPromptAdmissionIntent, validateAgentPromptInputBinding, type AgentPromptInputKey } from '../src/agent-prompt-condition.js'
 import { parseAgentInputMailboxPage } from '../src/agent-input-mailbox-codec.js'
 import { AgentMuxError } from '../src/errors.js'
 
@@ -37,13 +37,13 @@ async function owner(outcome: 'admitted' | 'unknown' | 'not-applied' = 'admitted
     expect(plan.clientCorrelation).toMatch(/^amux-input-v1\./u); expect(token.nonce).toHaveLength(32)
     if (outcome === 'unknown') throw new Error('The native request ACK was lost after send')
     if (outcome === 'not-applied') return { outcome, errorCode: -32600 }
-    return { outcome, turnId: 'original-native-turn' }
+    return { outcome, ...(plan.operation === 'queue-idle' ? { queuedSubmissionId: 'original-native-queue-item' } : { turnId: 'original-native-turn' }) }
   })
   const prepare = vi.fn<NonNullable<AgentProvider['prepareNativeInput']>>(async (context, selected) => {
     expect(context.nativeActor).toEqual(actor); expect(context.processId).toBe(1234)
     if (selected.providerId !== target.providerId || selected.nativeSessionId !== target.nativeSessionId) throw new AgentMuxError('Exact source is not loaded by this original actor', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
     return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([selected.providerId, selected.nativeSessionId]), actorId: actor.actorId,
-      threadId: selected.nativeSessionId, ...(selected.expectedTurnId ? { operation: 'steer', expectedTurnId: selected.expectedTurnId } : { operation: 'start-or-steer' }) }, assertCurrent: vi.fn(async () => {}), send, dispose: vi.fn() }
+      threadId: selected.nativeSessionId, ...(selected.idleOnly ? { operation: 'queue-idle' } : selected.expectedTurnId ? { operation: 'steer', expectedTurnId: selected.expectedTurnId } : { operation: 'start-or-steer' }) }, assertCurrent: vi.fn(async () => {}), send, dispose: vi.fn() }
   })
   inner.providers.get('codex').prepareNativeInput = prepare
   // Deterministic Provider byte port for coordinator tests; the native binary E2E uses its real TUI renderer.
@@ -212,6 +212,133 @@ it.each(['no-source', 'source-unknown', 'source-ambiguous', 'changed-source', 'o
   const rpc = new AgentMuxRpcService({ coreClients: h.coreClients })
   await rpc.call('agent.send', { operationId: 'unqualified-' + missing, target: { kind: 'agent-session' as const, agentSessionId: 'recipient' }, text: 'Original terminal message' }, { principal: { kind: 'user', id: 'local' } })
   expect(h.send).not.toHaveBeenCalled(); expect(h.prepare).not.toHaveBeenCalled(); expect(h.inner.kernel.input).toHaveBeenCalledTimes(1)
+})
+
+it.each(['unknown', 'ambiguous', 'changed'] as const)('routes a user-selected target through its exact native transport while frontend selection is %s', async state => {
+  const h = await owner(), before = (await h.store.readMetadata('recipient'))!
+  const observation = { state, run: before.run, observedAt: before.updatedAt, reason: 'frontend-selection-unconfirmed' }
+  await h.store.compareAndSwap(before, { ...before,
+    nativeHandle: { kind: 'provider', providerId: target.providerId, sessionId: target.nativeSessionId },
+    nativeBinding: { source: 'user-selected', run: before.run, observedAt: before.updatedAt },
+    nativeSourceObservation: observation,
+    ...(state === 'changed' ? { observedNativeHandle: { kind: 'provider' as const, providerId: target.providerId, sessionId: 'other-frontend-thread' } } : {}) })
+  await h.inner.registry.load('local')
+  const rpc = new AgentMuxRpcService({ coreClients: h.coreClients })
+  const packet = { operationId: 'selected-message-' + state, target: { kind: 'agent-session' as const, agentSessionId: 'recipient' }, text: 'Original selected target message' }
+  const result: any = await rpc.call('agent.send', packet, { principal: { kind: 'user', id: 'local' } })
+  const messageKey = { kind: 'message' as const, agentSessionId: 'recipient', expectedRun: before.run, messageId: result.messageId }
+  expect((await settledNative(h, messageKey, 'admitted'))?.admission).toMatchObject({ transport: 'native', native: { plan: { threadId: target.nativeSessionId } } })
+  expect(h.prepare).toHaveBeenCalledWith(expect.objectContaining({ nativeHandle: expect.objectContaining({ sessionId: target.nativeSessionId }) }), target)
+  expect(h.send).toHaveBeenCalledTimes(1); expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  expect((await h.store.readMetadata('recipient'))?.nativeSourceObservation).toEqual(observation)
+})
+
+it.each(['missing-port', 'failed-verification'] as const)('never substitutes terminal input for an unavailable user-selected target: %s', async unavailable => {
+  const h = await owner(), before = (await h.store.readMetadata('recipient'))!
+  await h.store.compareAndSwap(before, { ...before,
+    nativeHandle: { kind: 'provider', providerId: target.providerId, sessionId: target.nativeSessionId },
+    nativeBinding: { source: 'user-selected', run: before.run, observedAt: before.updatedAt },
+    nativeSourceObservation: { state: 'unknown', run: before.run, observedAt: before.updatedAt, reason: 'frontend-selection-unconfirmed' } })
+  await h.inner.registry.load('local')
+  const provider = Reflect.get(h.client, 'providers').get('codex') as AgentProvider
+  if (unavailable === 'missing-port') delete provider.prepareNativeInput
+  else h.prepare.mockRejectedValue(new AgentMuxError('Exact selected target transport is unavailable', 'AGENT_NATIVE_INPUT_UNAVAILABLE'))
+  const rpc = new AgentMuxRpcService({ coreClients: h.coreClients }), context = { principal: { kind: 'user' as const, id: 'local' } }
+  const packet = { operationId: 'selected-unavailable-' + unavailable, messageId: 'selected-unavailable-message-' + unavailable,
+    target: { kind: 'agent-session' as const, agentSessionId: 'recipient' }, text: 'Retain the selected target' }
+  await expect(rpc.call('agent.send', packet, context)).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
+  expect(await h.client.inspectAgentPromptSubmission({ kind: 'message', agentSessionId: 'recipient', expectedRun: before.run, messageId: packet.messageId })).toBeNull()
+  expect(h.send).not.toHaveBeenCalled(); expect(h.inner.kernel.input).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+  const manual: any = await rpc.call('agent.send', { ...packet, operationId: 'selected-manual-' + unavailable,
+    messageId: 'selected-manual-message-' + unavailable, execution: 'immediate' }, context)
+  await expect.poll(async () => (await h.client.inspectAgentInput({ key: manual.inputReceipt.key }))?.status).toBe('terminal-confirmed')
+  expect(h.inner.kernel.input).toHaveBeenCalledTimes(1); expect(h.prepare).toHaveBeenCalledTimes(unavailable === 'missing-port' ? 0 : 1)
+})
+
+it.each(['completion', 'future'] as const)('directs an automatic %s prompt to the user-selected target and retains its original admission', async kind => {
+  const h = await owner(), before = (await h.store.readMetadata('recipient'))!
+  await h.store.compareAndSwap(before, { ...before,
+    nativeHandle: { kind: 'provider', providerId: target.providerId, sessionId: target.nativeSessionId },
+    nativeBinding: { source: 'user-selected', run: before.run, observedAt: before.updatedAt },
+    nativeSourceObservation: { state: 'ambiguous', run: before.run, observedAt: before.updatedAt, reason: 'frontend-selection-unconfirmed' },
+    semanticStatus: { state: 'done', source: 'native-hook', observedAt: before.updatedAt } })
+  await h.inner.registry.load('local')
+  const selected = h.client.agentSession('recipient'), prompt = 'Original automatic selected prompt'
+  const completionId = agentTurnCompletionIdentity(selected)!
+  const future = { intentId: 'selected-schedule', occurrenceAt: fixtureEpoch(0, 2) }
+  if (kind === 'future') await h.client.saveAgentFuturePromptIntent({ agentSessionId: 'recipient', intentId: future.intentId,
+    operationId: 'save-selected-schedule', prompt, active: true })
+  const request = { agentSessionId: 'recipient', operationId: 'selected-automatic-' + kind, ...agentPromptCondition(selected),
+    prompt, expectedInputByte: 0, ...(kind === 'future' ? { expectedFutureIntent: future } : { expectedCompletionId: completionId }) }
+  await h.client.submitAgentPrompt(request)
+  const record = await settledNative(h, key(request.operationId), 'admitted')
+  expect(record?.admission).toMatchObject({ transport: 'native', native: { plan: { operation: 'queue-idle', threadId: target.nativeSessionId } },
+    ...(kind === 'future' ? { futureIntent: future } : { completionId }) })
+  expect(h.prepare).toHaveBeenCalledWith(expect.anything(), { ...target, idleOnly: true })
+  await h.client.submitAgentPrompt(request)
+  expect(h.send).toHaveBeenCalledTimes(1); expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  if (kind === 'future') expect(await h.client.readAgentFuturePromptIntent('recipient', future.intentId)).toMatchObject({
+    lastOccurrenceAt: future.occurrenceAt, lastOperationId: request.operationId })
+  const repeated = { ...request, ...agentPromptCondition(h.client.agentSession('recipient')), operationId: request.operationId + '-duplicate' }
+  await expect(h.client.submitAgentPrompt(repeated)).rejects.toMatchObject({ code: kind === 'future' ? 'AGENT_FUTURE_INTENT_CHANGED' : 'AGENT_COMPLETION_CHANGED' })
+  expect(h.send).toHaveBeenCalledTimes(1); expect(h.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it.each([false, true])('directs a default typed prompt to the user-selected target and preserves its private idle restriction: %s', async nativeIdleOnly => {
+  const h = await owner(), before = (await h.store.readMetadata('recipient'))!
+  await h.store.compareAndSwap(before, { ...before,
+    nativeHandle: { kind: 'provider', providerId: target.providerId, sessionId: target.nativeSessionId },
+    nativeBinding: { source: 'user-selected', run: before.run, observedAt: before.updatedAt },
+    nativeSourceObservation: { state: 'ambiguous', run: before.run, observedAt: before.updatedAt, reason: 'frontend-selection-unconfirmed' } })
+  await h.inner.registry.load('local')
+  // The recovery input owner submits this public typed shape after its own
+  // original operation, Provider evidence and input-byte qualifications.
+  const request = { agentSessionId: 'recipient', operationId: 'selected-default-typed', expectedRun: before.run,
+    afterSubmissionId: null, prompt: 'Original typed selected prompt', signal: new AbortController().signal }
+  const control = nativeIdleOnly ? { nativeIdleOnly: true as const } : undefined
+  await h.client.submitAgentPrompt(request, control)
+  expect((await settledNative(h, key(request.operationId), 'admitted'))?.admission).toMatchObject({
+    inputKey: key(request.operationId), transport: 'native', native: { plan: {
+      threadId: target.nativeSessionId, operation: nativeIdleOnly ? 'queue-idle' : 'start-or-steer' } } })
+  await h.client.submitAgentPrompt(request, control)
+  expect(h.send).toHaveBeenCalledTimes(1); expect(h.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it('rechecks the original automatic input byte after preparing the user-selected target', async () => {
+  const h = await owner(), before = (await h.store.readMetadata('recipient'))!
+  await h.store.compareAndSwap(before, { ...before,
+    nativeHandle: { kind: 'provider', providerId: target.providerId, sessionId: target.nativeSessionId },
+    nativeBinding: { source: 'user-selected', run: before.run, observedAt: before.updatedAt },
+    nativeSourceObservation: { state: 'ambiguous', run: before.run, observedAt: before.updatedAt, reason: 'frontend-selection-unconfirmed' },
+    semanticStatus: { state: 'done', source: 'native-hook', observedAt: before.updatedAt } })
+  await h.inner.registry.load('local')
+  const selected = h.client.agentSession('recipient'), prepare = h.prepare.getMockImplementation()!
+  h.prepare.mockImplementation(async (...args) => {
+    const prepared = await prepare(...args)
+    h.inner.kernel.status = vi.fn(async (runId: string) => ({ ...h.run(runId), pid: 1234, acceptedInputBytes: 1 }))
+    return prepared
+  })
+  const request = { agentSessionId: 'recipient', operationId: 'selected-automatic-final-byte', ...agentPromptCondition(selected),
+    prompt: 'Original automatic selected prompt', expectedInputByte: 0, expectedCompletionId: agentTurnCompletionIdentity(selected)! }
+  await expect(h.client.submitAgentPrompt(request)).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_NOT_APPLIED' })
+  expect((await h.client.inspectAgentPromptSubmission(key(request.operationId)))?.admission).toMatchObject({
+    transport: 'native', notApplied: true, native: { outcome: 'not-applied', plan: { operation: 'queue-idle' } } })
+  expect(h.send).not.toHaveBeenCalled(); expect(h.inner.kernel.input).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it.each(['completion', 'input-byte'] as const)('does not let a selected target bypass the original automatic %s fence', async changed => {
+  const h = await owner(), before = (await h.store.readMetadata('recipient'))!
+  await h.store.compareAndSwap(before, { ...before,
+    nativeHandle: { kind: 'provider', providerId: target.providerId, sessionId: target.nativeSessionId },
+    nativeBinding: { source: 'user-selected', run: before.run, observedAt: before.updatedAt },
+    nativeSourceObservation: { state: 'ambiguous', run: before.run, observedAt: before.updatedAt, reason: 'frontend-selection-unconfirmed' },
+    semanticStatus: { state: 'done', source: 'native-hook', observedAt: before.updatedAt } })
+  await h.inner.registry.load('local')
+  const selected = h.client.agentSession('recipient')
+  await expect(h.client.submitAgentPrompt({ agentSessionId: 'recipient', operationId: 'selected-automatic-fence-' + changed,
+    ...agentPromptCondition(selected), prompt: 'Original automatic selected prompt', expectedInputByte: changed === 'input-byte' ? 1 : 0,
+    expectedCompletionId: changed === 'completion' ? 'other-completion' : agentTurnCompletionIdentity(selected)! })).rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
+  expect(h.send).not.toHaveBeenCalled(); expect(h.inner.kernel.input).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 it.each(['source', 'actor', 'predecessor'] as const)('rechecks the original default user message %s after native preparation and sends nothing on a changed target', async changed => {
