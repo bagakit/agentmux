@@ -2,6 +2,13 @@ import type { ConnectionActor, ConnectionApplication } from './connections-contr
 import type { AgentExternalMessageAuthor, AgentExternalInteractionAuthor } from './external-author.js'
 import type { AgentInputSubmissionReceipt } from './agent-input-wait.js'
 
+/** A current observation of the frozen input target, never a retry or lifecycle decision. */
+export type ConnectionIngressRuntimeObservation = {
+  target: 'original' | 'changed' | 'missing' | 'unavailable'
+  state: import('./types.js').AgentMuxRunState | 'unavailable'
+  exitCode: number | null
+}
+
 /** A platform parent reference is retained even while its application author is unknown. */
 export type ConnectionIngressAddressing = { replyToMessageId: string } & (
   | { state: 'confirmed'; selection: 'reply' | 'message' }

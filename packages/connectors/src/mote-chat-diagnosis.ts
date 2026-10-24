@@ -12,7 +12,7 @@ export type MoteChatDiagnosisOwner = {
   connections: ConnectionHost
   assertTarget(target: MoteChatTarget): Promise<void>
   assertReady?(target: MoteChatTarget): Promise<void>
-  ingress?(): Pick<DurableIngressHost, 'listDirect' | 'inspect'> | undefined
+  ingress?(): Pick<DurableIngressHost, 'listDirect' | 'inspect' | 'inspectInputRuntime'> | undefined
 }
 const safeCode = (error: unknown) => moteChatDiagnosisCode(error instanceof AgentMuxError ? error.code : undefined)
 
@@ -65,6 +65,7 @@ export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteC
   try {
     const page = ingress.listDirect(ref.application, moteChatDiagnosisWindowLimit)
     const rows: NonNullable<MoteChatDiagnosis['incoming']>['rows'] = []
+    const runtimes = new Map<string, ReturnType<DurableIngressHost['inspectInputRuntime']>>()
     for (const record of page.ingresses) {
       let preparation: NonNullable<MoteChatDiagnosis['incoming']>['rows'][number]['preparation'] = 'not-admitted'
       const admission = owner.store.admissionByIngress(record.ingressId)
@@ -76,7 +77,7 @@ export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteC
       }
       let input: NonNullable<MoteChatDiagnosis['incoming']>['rows'][number]['input'] = {
         status: null, observation: record.input ? 'unavailable' : 'not-started',
-        controlState: null, receiptObservation: null, waiting: null, preparationReason: null, failureCode: null
+        controlState: null, receiptObservation: null, waiting: null, preparationReason: null, failureCode: null, runtime: null
       }
       if (record.input && preparation !== 'other-route') {
         try {
@@ -87,7 +88,14 @@ export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteC
               controlState: receipt?.control.state ?? null, receiptObservation: receipt?.observation ?? null,
               waiting: waiting ? { phase: waiting.phase, reason: waiting.reason, wake: waiting.wake } : null,
               preparationReason: receipt ? moteChatPreparationReason(receipt) : null,
-              failureCode: receipt ? moteChatInputFailureCode(receipt) : null }
+              failureCode: receipt ? moteChatInputFailureCode(receipt) : null, runtime: null }
+            if (receipt?.status === 'waiting') {
+              const key = JSON.stringify([record.input.hostId, record.input.author.authoritySource?.executionRuntimeId ?? null,
+                record.input.agentSessionId, record.input.expectedRun.runId])
+              let pending = runtimes.get(key)
+              if (!pending) { pending = ingress.inspectInputRuntime(record.ingressId); runtimes.set(key, pending) }
+              input.runtime = await pending
+            }
           }
         } catch { /* The original saved input remains visible without claiming its Core outcome. */ }
       }

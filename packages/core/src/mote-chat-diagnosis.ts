@@ -8,6 +8,7 @@ import { parseConnectionObservation } from './connection-record-codec.js'
 import type { ConnectionObservation } from './connections-contract.js'
 import { AgentMuxError } from './errors.js'
 import type { MoteChatTarget } from './mote-chat-contract.js'
+import type { ConnectionIngressRuntimeObservation } from './ingress-contract.js'
 import { parseMoteConnectionValues, parseMotePreferencesTarget, type MoteConnectionRef } from './mote-preferences.js'
 import { rpcRecord } from './rpc-data.js'
 
@@ -51,7 +52,8 @@ export type MoteChatDiagnosisIntake = {
     /** Last retained reason, not proof of an active await or permission to retry. */
     waiting: ConnectionDiagnosisIntake['waiting']
     preparationReason: AgentPromptPreparationWaitReason | null
-    failureCode: MoteChatInputFailureCode | null }
+    failureCode: MoteChatInputFailureCode | null
+    runtime: ConnectionIngressRuntimeObservation | null }
 }
 function originalInputFailure(receipt: AgentInputSubmissionReceipt) {
   const waiting = receipt.control.waiting
@@ -136,7 +138,7 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
   const incoming = nullable(p.incoming, value => {
     const page = fields(value, ['rows', 'more'])
     const rows = array(page.rows, value => {
-      const row = fields(value, ['key', 'state', 'code', 'codeRecorded', 'preparation', 'input']), i = fields(row.input, ['status', 'observation', 'controlState', 'receiptObservation', 'waiting', 'preparationReason', 'failureCode'])
+      const row = fields(value, ['key', 'state', 'code', 'codeRecorded', 'preparation', 'input']), i = fields(row.input, ['status', 'observation', 'controlState', 'receiptObservation', 'waiting', 'preparationReason', 'failureCode', 'runtime'])
       const code = nullable(row.code, value => member(value, moteChatDiagnosisCodes)), codeRecorded = bool(row.codeRecorded)
       const preparation = member(row.preparation, ['not-admitted', 'reserved', 'prepared', 'creation-dispatched', 'ready', 'other-route'] as const)
       const observation = member(i.observation, ['not-started', 'observed', 'unavailable'] as const)
@@ -145,6 +147,14 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
       const receiptObservation = nullable(i.receiptObservation, value => member(value, ['owned', 'rejoin-needed', 'closed'] as const))
       const preparationReason = nullable(i.preparationReason, value => member(value, ['context-compaction', 'native-busy'] as const))
       const failureCode = nullable(i.failureCode, value => member(value, moteChatInputFailureCodes))
+      const runtime = nullable(i.runtime, value => {
+        const r = fields(value, ['target', 'state', 'exitCode'])
+        const target = member(r.target, ['original', 'changed', 'missing', 'unavailable'] as const)
+        const state = member(r.state, ['running', 'exited', 'interrupted', 'unavailable'] as const)
+        if (r.exitCode !== null && (!Number.isSafeInteger(r.exitCode) || state !== 'exited')) fail()
+        return { target, state, exitCode: r.exitCode as number | null }
+      })
+      if (runtime !== null && status !== 'waiting') fail()
       let waiting: ConnectionDiagnosisIntake['waiting']
       try { waiting = parseConnectionDiagnosisWaiting(i.waiting) } catch { return fail() }
       if (code !== null && !codeRecorded || status !== null && (observation !== 'observed' || preparation === 'other-route')) fail()
@@ -157,7 +167,7 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
       if ((preparationReason !== null || failureCode !== null) && waiting === null) fail()
       if (preparationReason !== null && failureCode !== null) fail()
       return { key: key(row.key), state: member(row.state, ['received', 'refused', 'claimed'] as const), code, codeRecorded,
-        preparation, input: { status, observation, controlState, receiptObservation, waiting, preparationReason, failureCode } }
+        preparation, input: { status, observation, controlState, receiptObservation, waiting, preparationReason, failureCode, runtime } }
     }, moteChatDiagnosisWindowLimit)
     if (new Set(rows.map(row => row.key)).size !== rows.length) fail()
     return { rows, more: bool(page.more) }

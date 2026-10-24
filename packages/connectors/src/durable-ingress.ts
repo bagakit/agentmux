@@ -8,6 +8,7 @@ import { CONNECTION_INGRESS_AUTHORITY_CODES, connectionDiagnosisIntakeCodes, par
 import type { ConnectionHost } from './connection-host.js'
 import { parseChannelTranscriptQuote, type ChannelQuoteRange, type ChannelTranscriptQuote, type AgentSessionHistorySource } from '@agentmux/core'
 import { IngressContextPositions, unavailableChannelQuote } from './ingress-context.js'
+import type { ConnectionIngressRuntimeObservation } from '@agentmux/core/connections'
 
 /** Returned only by a Host-registered adapter after verifying the original transport proof. */
 export type VerifiedIngressMessage = {
@@ -40,7 +41,7 @@ export interface IngressAuthenticator {
   /** Native history is quoted data, never another authenticated input or grant. */
   readHistory?(config: ConnectionConfig, input: { externalConversationId: string; range: ChannelQuoteRange; knownThreadIds?: string[]; assertCurrent?(): void }, credential: string, signal: AbortSignal): Promise<ChannelTranscriptQuote>
 }
-export type DurableIngressCore = Pick<AgentMuxClient, 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'> & Partial<Pick<AgentMuxClient, 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission'>> & {
+export type DurableIngressCore = Pick<AgentMuxClient, 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'> & Partial<Pick<AgentMuxClient, 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission' | 'runtimeSubject'>> & {
   readAgentSession(id: string, expectedRuntimeId?: string): ReturnType<AgentMuxClient['readAgentSession']>
   providers?: { get(id: string): { catalog: import('@agentmux/core').AgentCatalogEntry } }
 }
@@ -578,6 +579,27 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
         ? error.code as ConnectionIngressAuthorityCode : 'INGRESS_STORAGE_UNCONFIRMED'
       return { ingress, authority: code === 'INGRESS_STORAGE_UNCONFIRMED' || code === 'INGRESS_SERVICE_UNCONFIRMED' || code === 'INGRESS_ADDRESSING_UNCONFIRMED' ? 'unavailable' : 'refused', code }
     }
+  }
+  /** Owner-private observation of the frozen target; never follows a newer Run or reads output. */
+  async inspectInputRuntime(ingressId: string): Promise<ConnectionIngressRuntimeObservation | null> {
+    const original = this.read(ingressId)
+    if (!original?.input || original.kind === 'action') return null
+    const input = original.input, result: ConnectionIngressRuntimeObservation = { target: 'unavailable', state: 'unavailable', exitCode: null }
+    const client = this.options.core(input.hostId, input.author.authoritySource?.executionRuntimeId)
+    if (!client) return result
+    try {
+      const session = await client.readAgentSession(input.agentSessionId, input.author.authoritySource?.executionRuntimeId)
+      result.target = !session ? 'missing' : session.agentSessionId === input.agentSessionId && session.hostId === input.hostId &&
+        session.run.runId === input.expectedRun.runId ? 'original' : 'changed'
+    } catch { /* A failed metadata observation does not prove the original target changed. */ }
+    try {
+      const subject = await client.runtimeSubject?.({ kind: 'terminal-run', runId: input.expectedRun.runId })
+      if (subject?.run.runId === input.expectedRun.runId) {
+        result.state = subject.run.state
+        result.exitCode = subject.run.state === 'exited' && Number.isSafeInteger(subject.run.exitCode) ? subject.run.exitCode! : null
+      }
+    } catch { /* The original Run remains unknown, never inferred dead from an input error. */ }
+    return result
   }
   /** Explicitly rejoin a positively saved original Core wait; unknown effects are read only. */
   async rejoin(ingressId: string): Promise<ConnectionIngressInspection> {
