@@ -1,16 +1,6 @@
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { AgentSessionControl } from './contracts'
 
-export type ContinuousProgressInputRequest = {
-  requestId: string
-  operation: 'continuous-progress.observeInput'
-  control: AgentSessionControl
-}
-export type ContinuousProgressInputResult = {
-  operation: 'continuous-progress.observeInput'
-  control: AgentSessionControl
-  occupied: boolean
-}
 export type ContinuousProgressApi = {
   goals(goalId: string): Promise<ContinuousProgressLoop[]>
   goalAction(goalId: string, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', revision: number, operationId: string, caller?: import('@agentmux/core').AgentMuxControlCaller): Promise<ContinuousProgressLoop>
