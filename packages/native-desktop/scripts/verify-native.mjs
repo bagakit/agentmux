@@ -63,10 +63,13 @@ function parseSources() {
 function testCounts(report) {
   const count = xpath => Number(command('/usr/bin/xmllint', ['--nonet', '--xpath', xpath, report], { capture: true }).stdout.trim())
   const tests = count('count(//testcase)')
+  const skipped = count('count(//testcase[skipped])')
   const failures = count('count(//testcase/failure | //testcase/error)')
   assert(Number.isSafeInteger(tests) && tests > 0, `Empty/non-XCTest report: ${report}`)
+  assert(Number.isSafeInteger(skipped) && skipped >= 0 && skipped <= tests && tests - skipped > 0,
+    `No executed XCTest cases: ${report}`)
   assert(Number.isSafeInteger(failures) && failures >= 0, `Invalid XCTest failure count: ${report}`)
-  return { tests, failures }
+  return { tests, skipped, executed: tests - skipped, failures }
 }
 
 // Mutants live in this invocation's private copy. Missing reports, compilation
