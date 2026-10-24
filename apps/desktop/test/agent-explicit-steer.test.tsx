@@ -21,7 +21,7 @@ import type { AgentMuxPreloadApi, AppConfig } from '../src/shared/contracts'
 import type { ConfigStore } from '../src/main/config-store'
 import type { ScratchTopics } from '../src/main/scratch-topics'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
-import type { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
+import type { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager'
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,

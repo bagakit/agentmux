@@ -18,7 +18,7 @@ const cases = [
   { id: 'partial-result', path: 'apps/desktop/src/main/name-change-audit.ts', old: 'if (outcomes.some(outcome => outcome.status === \'rejected\')) throw', next: 'if (false && outcomes.some(outcome => outcome.status === \'rejected\')) throw', test: 'retains an applied name' },
   { id: 'topic-owner-record', path: 'apps/desktop/src/main/scratch-topics.ts', old: 'return this.nameAudit ? await this.nameAudit.run', next: 'return false && this.nameAudit ? await this.nameAudit.run', test: 'serializes Topic and Mote' },
   { id: 'browser-owner-record', path: 'apps/desktop/src/main/browser-task-assets.ts', old: 'return this.options.nameAudit\n', next: 'return false && this.options.nameAudit\n', test: 'captures a Browser task name' },
-  { id: 'host-history-coverage', path: 'apps/desktop/src/main/name-history.ts', old: "if (!query.target || query.target.kind === 'demand')", next: "if (query.target?.kind === 'demand')", test: 'queries the actual Spatial and Demand' }
+  { id: 'host-history-coverage', path: 'apps/host/src/name-history.ts', old: "if (!query.target || query.target.kind === 'demand')", next: "if (query.target?.kind === 'demand')", test: 'queries the actual Spatial and Demand' }
 ]
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const paths = [...new Set([...cases.map(item => item.path), 'apps/desktop/src/main/control-ipc-bridge.ts', 'apps/desktop/test/name-change-owners.test.ts'])]

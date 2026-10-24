@@ -170,7 +170,7 @@ export async function probeDeviceGoalRuntime({ repository, evidence, mainRef } =
     receipt.nativeOrderedInput = { path: 'native-input.ndjson', sha256: digest(nativeBytes), chunks: chunks.length,
       initialPrompt: 'Produce the original useful result.', manualInputs: receipt.inputs.map(input => input.label) }
     for (const name of ['packages/core/src/hosted-client.ts', 'packages/core/src/public-rpc-service.ts',
-      'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/main/continuous-progress-loop-manager.ts',
+      'apps/desktop/src/renderer/src/store.ts', 'apps/host/src/continuous-progress-loop-manager.ts',
       'apps/desktop/src/main/runtime-controller.ts', 'apps/mobile/src/navigation/goal-work.ts', 'apps/mobile/src/recovery/device-workface.ts'])
       assert.ok(receipt.source[name], 'An actual compiled original caller cannot be absent: ' + name)
     // Each Host's transcript is cumulative. Preserve it once rather than counting earlier
@@ -182,7 +182,7 @@ export async function probeDeviceGoalRuntime({ repository, evidence, mainRef } =
       { source: 'packages/core/src/hosted-client.ts', symbol: 'connectHostedAgentMux.forwardRpc', methods: ['goal.ls', 'goal.inspect', 'goal.continuation-action'] },
       { source: 'packages/core/src/public-rpc-service.ts', symbol: 'AgentMuxRpcService.execute', operations: ['demand.list', 'demand.show', 'demand.continuation-action'] },
       { source: 'apps/desktop/src/renderer/src/store.ts', symbol: 'useAppStore.executeControl', caller: 'startHeadlessAgentMux.service.execute' },
-      { source: 'apps/desktop/src/main/continuous-progress-loop-manager.ts', symbol: 'ContinuousProgressLoopManager.goalAction', caller: 'api.continuousProgress.goalAction' },
+      { source: 'apps/host/src/continuous-progress-loop-manager.ts', symbol: 'ContinuousProgressLoopManager.goalAction', caller: 'api.continuousProgress.goalAction' },
       { source: 'apps/desktop/src/main/runtime-controller.ts', symbol: 'RuntimeController.write', evidence: 'Actual original Run ordered native-input.ndjson and manual input output' }
     ]
     for (const phase of [receipt.beforeRestart, receipt.final]) {

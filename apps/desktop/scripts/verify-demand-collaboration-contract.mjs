@@ -12,7 +12,7 @@ await fs.mkdir(evidence, { recursive: true })
 const mutations = [
   { id: 'atomic-history-union', file: 'packages/demand/src/demand-store.ts', before: 'demand.sessionIds = [...new Set([...demand.sessionIds, ...patch.assigneeSessionIds])]', after: 'demand.sessionIds = [...patch.assigneeSessionIds]' },
   { id: 'supervisor-membership', file: 'packages/demand/src/demand-store.ts', before: 'if (assigneeSessionIds.some(id => !sessionIds.includes(id)) || supervisorSessionId !== null && !assigneeSessionIds.includes(supervisorSessionId))', after: 'if (assigneeSessionIds.some(id => !sessionIds.includes(id)))' },
-  { id: 'authenticated-request-source', file: 'apps/desktop/src/main/demand-participation.ts', before: 'agentSessionId: context.actor.id,', after: "agentSessionId: 'body-claim'," },
+  { id: 'authenticated-request-source', file: 'apps/host/src/demand-participation.ts', before: 'agentSessionId: context.actor.id,', after: "agentSessionId: 'body-claim'," },
   { id: 'authored-first-default-clear', file: 'packages/demand/src/demand-store.ts', before: 'if (demand.creationOrigin) demand.creationOrigin.supervisorDefaultPending = false', after: 'if (demand.creationOrigin) demand.creationOrigin.supervisorDefaultPending = true' },
   { id: 'owner-only-origin-patch', file: 'packages/demand/src/demand-store.ts', before: '    rejectProvenanceInput(patch)', after: '    void patch' },
   { id: 'public-assignee-filter', file: 'packages/core/src/public-rpc-service.ts', before: '(!filters.assigneeSessionId || goal.assigneeSessionIds.includes(String(filters.assigneeSessionId)))', after: '(!filters.assigneeSessionId || goal.sessionIds.includes(String(filters.assigneeSessionId)))' },
@@ -28,7 +28,7 @@ const qualifiedPaths = [
   'packages/core/src/control.ts', 'packages/core/src/control-codec.ts', 'packages/core/src/public-rpc.ts',
   'packages/core/src/public-rpc-service.ts', 'packages/core/src/rpc-business-codec.ts', 'packages/core/src/rpc-native-codec.ts',
   'packages/core/src/agentmux-cli-commands.ts', 'packages/core/src/agentmux-cli-help.ts',
-  'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/demand-participation.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/preload/index.ts',
+  'apps/desktop/src/main/ipc.ts', 'apps/host/src/demand-participation.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/preload/index.ts',
   'apps/desktop/src/renderer/src/lib/api.ts', 'apps/desktop/src/renderer/src/store.ts',
   'apps/desktop/src/renderer/src/lib/global-demand-board.ts', 'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx', 'apps/desktop/src/renderer/src/components/GoalProperties.tsx',
   'apps/mobile/src/goals/MobileGoalActions.tsx', 'apps/mobile/src/goals/MobileGoalsSurface.tsx',
@@ -58,7 +58,7 @@ try {
   receipt.baseline = { ...baseline }; delete receipt.baseline.graph
   assert.equal(baseline.exitCode, 0); assert.equal(baseline.signal, null); assert.ok(baseline.testsPassed >= 7)
   for (const consumer of ['actual-source-cli', 'actual-vite-module']) assert.ok(baseline.graph.some(row => row.consumer === consumer), 'Original actual consumer: ' + consumer)
-  for (const file of ['packages/core/src/public-rpc-service.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/preload/index.ts', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/GoalDetail.tsx', 'packages/demand/src/demand-store.ts', 'apps/desktop/src/main/demand-participation.ts', 'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx', 'apps/desktop/src/renderer/src/components/GoalProperties.tsx', 'apps/mobile/src/goals/MobileGoalActions.tsx'])
+  for (const file of ['packages/core/src/public-rpc-service.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/preload/index.ts', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/GoalDetail.tsx', 'packages/demand/src/demand-store.ts', 'apps/host/src/demand-participation.ts', 'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx', 'apps/desktop/src/renderer/src/components/GoalProperties.tsx', 'apps/mobile/src/goals/MobileGoalActions.tsx'])
     assert.ok(baseline.graph.some(row => row.file === file), 'Actual loaded owner/consumer: ' + file)
   for (const file of qualifiedPaths) receipt.source[file] = digest(await fs.readFile(path.join(repository, file)))
   for (const mutation of mutations) {

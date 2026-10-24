@@ -70,15 +70,15 @@ const semantic = (session: AgentMuxStoredAgentSession, state: AgentStatus['state
 
 const sources = ['packages/demand/src/responsibility.ts', 'packages/demand/src/demand-store.ts', 'packages/core/src/goal-responsibility.ts',
   'packages/core/src/goal-delegation.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/agentmux-cli-commands.ts',
-  'apps/desktop/src/main/goal-responsibility-owner.ts', 'apps/desktop/src/main/goal-delegation-owner.ts',
+  'apps/host/src/goal-responsibility-owner.ts', 'apps/host/src/goal-delegation-owner.ts',
   'apps/desktop/src/renderer/src/lib/goal-delegation-work.ts', 'apps/desktop/src/renderer/src/lib/goal-current-work.ts',
   'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/GoalResponsibilitySummary.tsx']
 async function evidence(scenario: string, proof: unknown, slice: 'responsibility' | 'patrol' = 'responsibility') {
   const directory = process.env[slice === 'patrol' ? 'AGENTMUX_GOAL_PATROL_RECEIPT_DIR' : 'AGENTMUX_GOAL_RESPONSIBILITY_RECEIPT_DIR']
   if (!directory) return
   await fs.mkdir(directory, { recursive: true })
-  const selected = slice === 'patrol' ? [...sources, 'packages/demand/src/goal-patrol.ts', 'apps/desktop/src/main/goal-patrol-owner.ts',
-    'packages/core/src/goal-role-guidance.ts', 'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/main/goal-start-responsibility.ts',
+  const selected = slice === 'patrol' ? [...sources, 'packages/demand/src/goal-patrol.ts', 'apps/host/src/goal-patrol-owner.ts',
+    'packages/core/src/goal-role-guidance.ts', 'apps/desktop/src/main/runtime-controller.ts', 'apps/host/src/goal-start-responsibility.ts',
     'apps/desktop/src/renderer/src/components/GoalPatrolControl.tsx', 'apps/desktop/test/goal-patrol-product.test.tsx',
     'apps/desktop/test/helpers/goal-responsibility-product.tsx'] : sources
   const source = await Promise.all(selected.map(async file => ({ file, sha256: createHash('sha256').update(await fs.readFile(resolve(file))).digest('hex') })))

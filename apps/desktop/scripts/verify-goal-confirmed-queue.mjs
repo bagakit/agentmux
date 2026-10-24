@@ -69,7 +69,7 @@ async function run(name, mutation) {
   const graph = loadedBytes.toString().trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
   assert.ok(graph.length > 0, 'Empty loaded graph cannot qualify')
   for (const consumer of ['actual-source-cli', 'actual-vite-module']) assert.ok(graph.some(row => row.consumer === consumer), consumer + ' must execute')
-  for (const file of [storeFile, 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/continuous-progress-loop-manager.ts',
+  for (const file of [storeFile, 'apps/desktop/src/main/ipc.ts', 'apps/host/src/continuous-progress-loop-manager.ts',
     'apps/desktop/src/preload/index.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/client.ts', 'packages/demand/src/demand-store.ts']) {
     assert.ok(graph.some(row => row.file === file), 'Actual production owner must load: ' + file)
   }

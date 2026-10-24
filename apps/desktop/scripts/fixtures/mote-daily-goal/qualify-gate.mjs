@@ -10,12 +10,12 @@ const artifact=async ref=>{assert.ok(ref?.file&&/^[a-f0-9]{64}$/.test(ref.sha256
 async function reference(file){assert.ok(file,'An explicit qualification receipt is required');const bytes=await fs.readFile(path.resolve(root,file));return {file:path.relative(root,path.resolve(root,file)),sha256:hash(bytes)}}
 async function current(source,label){assert.ok(Object.keys(source).length>0,'Nonempty '+label+' actual Source required');for(const[file,sha]of Object.entries(source))assert.equal(hash(await fs.readFile(path.resolve(root,file))),sha,label+' actual Source changed '+file)}
 const checks=[
- ['Goal continuation DTO','packages/core/src/continuous-progress-scheduler.ts','apps/desktop/src/main/continuous-progress-loop-store.ts','parseGoalContinuationLoop(item)'],
- ['original Goal lifecycle','apps/desktop/src/main/continuous-progress-task-source.ts','apps/desktop/src/main/continuous-progress-loop-manager.ts','readContinuousProgressTaskSource('],
- ['one original Demand owner','apps/desktop/src/main/continuous-progress-loop-manager.ts','apps/desktop/src/main/index.ts','inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop)'],
- ['initial durable operation','apps/desktop/src/main/continuous-progress-loop-manager.ts','apps/desktop/src/main/ipc.ts','args.progressLoops.submitGoalInitial('],
+ ['Goal continuation DTO','packages/core/src/continuous-progress-scheduler.ts','apps/host/src/continuous-progress-loop-store.ts','parseGoalContinuationLoop(item)'],
+ ['original Goal lifecycle','apps/host/src/continuous-progress-task-source.ts','apps/host/src/continuous-progress-loop-manager.ts','readContinuousProgressTaskSource('],
+ ['one original Demand owner','apps/host/src/continuous-progress-loop-manager.ts','apps/desktop/src/main/index.ts','inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop)'],
+ ['initial durable operation','apps/host/src/continuous-progress-loop-manager.ts','apps/desktop/src/main/ipc.ts','args.progressLoops.submitGoalInitial('],
  ['trusted Goal IPC','apps/desktop/src/main/ipc.ts','apps/desktop/src/preload/index.ts',"ipcRenderer.invoke('continuousProgress:prepareGoal'"],
- ['original Store input queue','apps/desktop/src/main/continuous-progress-loop-manager.ts','apps/desktop/src/renderer/src/store.ts','api.continuousProgress.prepareGoal('],
+ ['original Store input queue','apps/host/src/continuous-progress-loop-manager.ts','apps/desktop/src/renderer/src/store.ts','api.continuousProgress.prepareGoal('],
  ['reusable Goal control','apps/desktop/src/renderer/src/components/GoalContinuationControl.tsx','apps/desktop/src/renderer/src/components/GoalExecution.tsx','<GoalContinuationControl demand={demand}'],
  ['public business operation','packages/core/src/rpc-business-codec.ts','packages/core/src/public-rpc-service.ts','rpcControlRequest('],
  ['exact public method','packages/core/src/control.ts','packages/core/src/public-rpc.ts',"'goal.continuation-action': 'demand.continuation-action'"],

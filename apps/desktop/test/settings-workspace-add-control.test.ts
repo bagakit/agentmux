@@ -29,7 +29,7 @@ vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ 
 import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
 import { ConfigStore, DEFAULT_CONFIG, createWorkspaceInputSchema } from '../src/main/config-store.js'
 import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-controller.js'
-import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { registerIpc } from '../src/main/ipc.js'
 import { CONFIG_CHANGED_CHANNEL, type AppConfig, type WorkspaceRecord } from '../src/shared/contracts.js'

@@ -29,7 +29,7 @@ await verifyRendererSourceMutations({
   sources: [store, 'apps/desktop/scripts/verify-pmo-startup-context.mjs',
     'apps/desktop/scripts/lib/verify-renderer-source-mutations.mjs',
     'apps/desktop/src/main/scratch-topics.ts', 'apps/desktop/src/main/ipc.ts',
-    'apps/desktop/src/main/goal-role-input.ts', 'apps/desktop/src/main/runtime-controller.ts',
+    'apps/host/src/goal-role-input.ts', 'apps/desktop/src/main/runtime-controller.ts',
     'apps/desktop/src/shared/scratch-topics.ts', 'apps/desktop/src/shared/topic-agent-instructions.ts',
     'apps/desktop/test/helpers/injected-context-core.ts', 'apps/desktop/test/helpers/isolate-core-environment.ts',
     'apps/desktop/test/helpers/local-runtime-connector.ts', 'test/fixture-values.mjs',
