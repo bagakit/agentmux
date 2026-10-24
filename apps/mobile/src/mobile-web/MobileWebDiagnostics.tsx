@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { MobileNotice } from '../notices/MobileNotice'
-import type { MobileWebPageObservation } from './use-mobile-web-observation'
+import { mobileWebUpdateStatus, type MobileWebPageObservation } from './use-mobile-web-observation'
 
 /** An on-demand view of original page/Host observations; it never reloads the document. */
 export function MobileWebDiagnostics({ observation: value, copyText }: {
@@ -11,15 +11,11 @@ export function MobileWebDiagnostics({ observation: value, copyText }: {
   const [expanded, expand] = useState(false), [feedback, setFeedback] = useState<{ text: string; attempt: number; reference: string } | null>(null)
   const loaded = value.loaded.result, inspection = value.inspection.result, target = inspection?.client
   useEffect(() => { if (expanded && loaded) void value.refresh() }, [expanded, loaded, value.refresh])
-  const joined = loaded?.accepted && inspection?.hostInstanceId === loaded.hostInstanceId && target?.availability === 'found'
-    && target.loaded?.occurrenceId === loaded.occurrenceId && target.loaded.buildId === value.page.buildId
-    && target.loaded.namespaceDigest === value.page.namespaceDigest
-  const current = joined && value.page.buildId !== null && value.page.namespaceDigest !== null
-    && inspection?.active?.buildId === value.page.buildId && inspection.active.digest === value.page.namespaceDigest
+  const status = mobileWebUpdateStatus(value), current = status === 'current'
   const summary = !value.connected ? '连接中断 · 保留当前页' : value.inspection.pending ? '正在查询原 Host'
     : value.inspection.issue ? '版本查询未确认 · 保留上次观察'
-    : !inspection ? '按需查询本页与 Host 版本' : !joined ? '页面版本尚待确认'
-      : current ? '本页已载入当前版本' : inspection.active ? '有版本待载入 · 当前页保留' : 'Host 版本尚未确认'
+    : !inspection ? '按需查询本页与 Host 版本' : status === 'unknown' ? '页面版本尚待确认'
+      : current ? '本页已载入当前版本' : '有版本待载入 · 当前页保留'
   const reference = JSON.stringify({ page: value.page, loaded,
     inspection: inspection ? { hostId: inspection.hostId, hostInstanceId: inspection.hostInstanceId,
       active: inspection.active, client: inspection.client, coverage: inspection.coverage, observedAt: inspection.observedAt } : null,
