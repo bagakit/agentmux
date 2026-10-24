@@ -31,16 +31,21 @@ function verifyFoldRoundTrip({ before, folded, expanded, occurrences, areaIds, c
     const actual = new Map(values.map(box => [box.id, box]))
     for (const id of controlIds) assert.deepEqual(actual.get(id), previous.get(id), 'The far unrelated control retains its exact world geometry: ' + id)
   }
+  verifyScreenAnchors(anchors)
+}
+function verifyScreenAnchors(anchors) {
   for (const [before, after] of [[anchors.beforeFold, anchors.folded], [anchors.beforeExpand, anchors.expanded]]) {
     assert.equal(after.areaId, before.areaId)
     assert.equal(after.inViewport, true, 'The exact original region retains a discoverable native fold/expand entry')
-    assert.ok(Math.abs(after.x - before.x) < 1.5 && Math.abs(after.y - before.y) < 1.5, 'Fold/expand preserves the actually clicked screen heading, including a clamped context heading')
+    assert.equal(after.labelInside, true, 'The complete label and its internal connection disclosure remain inside the actual canvas')
+    assert.ok(Math.abs(after.summary.x - before.summary.x) < 1.5 && Math.abs(after.summary.y - before.summary.y) < 1.5, 'Fold/expand preserves the actually clicked summary row, including a clamped context heading')
+    assert.ok(Math.abs(after.button.x - before.button.x) < 1.5 && Math.abs(after.button.y - before.button.y) < 1.5, 'The original fold action stays at the actual clicked screen point when internal connections change the full label height')
     assert.ok(Math.abs(after.zoom - before.zoom) < 1e-6, 'Fold/expand preserves the actual reading scale')
   }
 }
 
 /** Native input over the original App/Graph/Worker. No camera or geometry is assigned. */
-module.exports = async function terrain({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, closeDetails, locate, pause, until, matrix, measure }) {
+module.exports = async function terrain({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, closeDetails, locate, pause, until, matrix, measure, dragCanvas }) {
   const original = await read('window.graphCapture.terrain()')
   assert.equal(original.areas.length, 3); assert.equal(original.agents.length, 3)
   const areaId = id => JSON.stringify(['area', id])
@@ -91,7 +96,25 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
     const control = candidates[0]
     assert.ok(control && Math.hypot(center(control.area).x - center(root).x, center(control.area).y - center(root).y) > Math.hypot(root.width, root.height) * 2, 'The independent control is a genuinely far disconnected region with an actual member')
     const labelSelector = '.collaboration-region-labels .collaboration-area__overview-label[data-area-id=' + JSON.stringify(root.id) + ']'
-    const labelAnchor = async action => read(`(()=>{const labels=[...document.querySelectorAll(${JSON.stringify(labelSelector)})].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&!e.closest('[hidden],[inert]')&&getComputedStyle(e).visibility==='visible'});if(labels.length!==1)throw Error('Expected exactly one visible original terrain heading');const label=labels[0],r=label.getBoundingClientRect(),canvas=document.querySelector('.collaboration-canvas').getBoundingClientRect(),button=[...label.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')===${JSON.stringify(action + ' 协作地形')});if(!button)throw Error('The same accurate heading has no requested fold action');const b=button.getBoundingClientRect();return{areaId:label.dataset.areaId,x:r.left-canvas.left,y:r.bottom-canvas.top,zoom:new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a,inViewport:b.left>=canvas.left&&b.top>=canvas.top&&b.right<=canvas.right&&b.bottom<=canvas.bottom&&button.contains(document.elementFromPoint(b.x+b.width/2,b.y+b.height/2))}})()`)
+    const labelAnchor = async action => read(`(()=>{
+      const labels=[...document.querySelectorAll(${JSON.stringify(labelSelector)})].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&!e.closest('[hidden],[inert]')&&getComputedStyle(e).visibility==='visible'})
+      if(labels.length!==1)throw Error('Expected exactly one visible original terrain heading')
+      const label=labels[0],r=label.getBoundingClientRect(),canvas=document.querySelector('.collaboration-canvas').getBoundingClientRect()
+      const button=[...label.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')===${JSON.stringify(action + ' 协作地形')})
+      if(!button)throw Error('The same accurate heading has no requested fold action')
+      const b=button.getBoundingClientRect(),summary=label.querySelector('.collaboration-area__summary').getBoundingClientRect()
+      const camera=new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform)
+      const box=window.graphCapture.deliveredLayout().boxes.find(box=>box.id===label.dataset.areaId)
+      return{areaId:label.dataset.areaId,x:r.left-canvas.left,y:r.bottom-canvas.top,zoom:camera.a,
+        label:{x:r.left-canvas.left,y:r.top-canvas.top,width:r.width,height:r.height,measuredWidth:label.dataset.labelWidth,measuredHeight:label.dataset.labelHeight,summaryBottom:label.style.getPropertyValue('--collaboration-summary-bottom'),internalAbove:label.dataset.internalAbove,context:label.dataset.context},
+        summary:{x:summary.left-canvas.left,y:summary.bottom-canvas.top,width:summary.width,height:summary.height},
+        button:{x:b.x+b.width/2-canvas.left,y:b.y+b.height/2-canvas.top,width:b.width,height:b.height},
+        camera:{x:camera.e,y:camera.f,zoom:camera.a},
+        projectedHeading:box?{x:(box.x+box.heading.x)*camera.a+camera.e,y:(box.y+box.heading.y+box.heading.height)*camera.a+camera.f}:null,
+        labelInside:r.left>=canvas.left&&r.top>=canvas.top&&r.right<=canvas.right&&r.bottom<=canvas.bottom,
+        inViewport:b.left>=canvas.left&&b.top>=canvas.top&&b.right<=canvas.right&&b.bottom<=canvas.bottom&&button.contains(document.elementFromPoint(b.x+b.width/2,b.y+b.height/2))}
+    })()`)
+
     const foldClick = action => click(labelSelector + ' [aria-label=' + JSON.stringify(action + ' 协作地形') + ']')
     await click('[aria-label^="Locate 协作地形 ·"]')
     await until('parent terrain enters one of its actual readable descendant occurrences', () => read(`(()=>{const canvas=document.querySelector('.collaboration-canvas').getBoundingClientRect();return ['fixture-terrain-tool','fixture-terrain-a','fixture-terrain-b'].some(id=>{const card=document.querySelector('.collaboration-agent__detail-layer:not([inert]) .focus-context[data-session-id="'+id+'"]');if(!card)return false;const r=card.getBoundingClientRect(),layer=card.closest('[data-map-layer]');return getComputedStyle(layer).opacity==='1'&&r.x>=canvas.x&&r.y>=canvas.y&&r.right<=canvas.right&&r.bottom<=canvas.bottom})})()`))
@@ -99,6 +122,8 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
     await locate('fixture-terrain-a'); await closeDetails(); await frame('terrain-nested-dark')
     const camera = await matrix()
     const anchors = { beforeFold: await labelAnchor('Collapse') }
+    // Persist before validation so a failure retains every actual screen observation.
+    result.terrainFold = { anchors, before, occurrences: originalOccurrences, areaIds: [root.id, tools.id, deep.id], controlIds: [control.area.id, ...control.members.map(box => box.id)] }
     await foldClick('Collapse'); await foldedState(root.id, true)
     anchors.folded = await labelAnchor('Expand')
     const folded = await boxes(), foldedIds = new Set(folded.map(box => box.id))
@@ -108,12 +133,32 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
     await foldClick('Expand'); await foldedState(root.id, false)
     anchors.expanded = await labelAnchor('Collapse')
     const expanded = await boxes(), controlIds = [control.area.id, ...control.members.map(box => box.id)]
+    result.terrainFold.folded = folded; result.terrainFold.expanded = expanded
     verifyFoldRoundTrip({ before, folded, expanded, occurrences: originalOccurrences, areaIds: [root.id, tools.id, deep.id], controlIds, anchors })
     const expandedLayout = await read('window.graphCapture.deliveredLayout()')
     assert.deepEqual(expandedLayout.issues, []); assert.deepEqual(input.edges.filter(edge => !expandedLayout.pathIds.includes(edge.id)).map(edge => edge.id), [], 'Every original relationship returns with its accurate expanded endpoints')
     const settledJobs = await read('window.graphCapture.workerSamples().length')
     await pause(300); assert.deepEqual(await boxes(), expanded, 'The finite local adjustment stops without another structural input'); assert.equal(await read('window.graphCapture.workerSamples().length'), settledJobs, 'A settled fold episode does not continue simulating')
     await frame('terrain-expanded-dark')
+    // Move through original bounded native pointer gestures; never assign the camera.
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const delta = await read(`(()=>{const canvas=document.querySelector('.collaboration-canvas').getBoundingClientRect(),camera=new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform),box=window.graphCapture.deliveredLayout().boxes.find(box=>box.id===${JSON.stringify(root.id)});return canvas.height-12-((box.y+box.heading.y+box.heading.height)*camera.a+camera.f)})()`)
+      if (Math.abs(delta) < 1) break
+      await dragCanvas(0, Math.max(-180, Math.min(180, delta)))
+    }
+    const bottomAnchors = { beforeFold: await labelAnchor('Collapse') }
+    result.terrainBottomFold = { anchors: bottomAnchors }
+    const bottomCanvasHeight = await read(`document.querySelector('.collaboration-canvas').getBoundingClientRect().height`)
+    assert.ok(Math.abs(bottomAnchors.beforeFold.summary.y - (bottomCanvasHeight - 12)) < 1.5, 'The actual native drag exposes the same accurate summary at the lower edge')
+    await foldClick('Collapse'); await foldedState(root.id, true)
+    bottomAnchors.folded = await labelAnchor('Expand')
+    assert.equal(bottomAnchors.folded.label.internalAbove, 'true', 'Original internal connections disclose above the stable bottom row')
+    await frame('terrain-bottom-folded-dark')
+    bottomAnchors.beforeExpand = await labelAnchor('Expand')
+    await foldClick('Expand'); await foldedState(root.id, false)
+    bottomAnchors.expanded = await labelAnchor('Collapse')
+    verifyScreenAnchors(bottomAnchors)
+    await frame('terrain-bottom-expanded-dark')
     await click('[aria-label="Collapse 协作地形"]'); await foldedState(root.id, true)
     await locate('fixture-terrain-b'); await closeDetails(); await settleLayout()
     assert.ok((await boxes()).some(box => box.id === deep.id), 'Exact Agent search expands its required ancestors')
