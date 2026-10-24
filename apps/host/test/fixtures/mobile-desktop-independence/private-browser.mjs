@@ -24,7 +24,9 @@ export async function privateMobileBrowser(directory) {
     })
     commands.push({ command: ['playwright-cli', ...invocation], ...result })
     assert.equal(result.signal, null); assert.equal(result.code, 0, result.stdout + result.stderr)
-    return args[0] === 'run-code' && result.stdout.trim() ? JSON.parse(result.stdout) : result.stdout
+    if (args[0] !== 'run-code' || !result.stdout.trim()) return result.stdout
+    try { return JSON.parse(result.stdout) }
+    catch (cause) { throw new Error('Private Browser command returned no JSON result: ' + result.stdout, { cause }) }
   }
   try {
     await run(['open', 'about:blank', '--config=' + config]); opened = true
@@ -65,6 +67,7 @@ export async function openMobile(page, input) {
 export async function openOriginalSession(page, input) {
   await page.locator('.mobile-navigation [data-workface="focus"]').click()
   const row = page.locator('.mobile-agent-row__open').filter({ has: page.locator('strong', { hasText: input.name }) })
+  await row.waitFor({ state: 'visible' })
   if (await row.count() !== 1) throw Error('The original Agent row must be unique')
   await row.click()
   await page.locator('.mobile-conversation[data-agent-session-id="' + input.sessionId + '"]').waitFor()
