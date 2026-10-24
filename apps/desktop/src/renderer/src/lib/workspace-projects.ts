@@ -1,5 +1,5 @@
 import { isFolderWorkspace, isScratchWorkspaceId, type WorkspaceRecord } from '../../../shared/contracts'
-import { NOTES_WORKSPACE_ID } from '../../../shared/notes-library'
+import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { directoryIdentity } from '../../../shared/space-addresses'
 
 export type WorkspaceProject = {

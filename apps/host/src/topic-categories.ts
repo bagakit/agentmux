@@ -1,8 +1,10 @@
 import type { TopicCategory, AgentMuxSpaceFact } from '@agentmux/core/control'
 import type { AgentMuxSpatialGraph, SpatialJson } from '@agentmux/core/spatial-graph'
-import type { ScratchTopicSnapshot, WorkspaceRecord } from './contracts'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath } from './scratch-topics'
-import { directoryIdentity, homeZoneId, type SpaceZoneBindings } from './space-addresses'
+import type { WorkspaceRecord } from './content-types.js'
+import type { ScratchTopicSnapshot } from './mote-topic-model.js'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath } from './mote-topic-model.js'
+import { directoryIdentity, homeZoneId } from './mote-model.js'
+type SpaceZoneBindings = Record<string, { topicId?: string; contentKind?: string }>
 
 export const UNCLASSIFIED_TOPIC_CATEGORY_ID = '00000000-0000-4000-8000-000000000000'
 export function isKnowledgeTopic(topic: ScratchTopicSnapshot): boolean {

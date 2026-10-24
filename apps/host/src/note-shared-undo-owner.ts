@@ -7,10 +7,10 @@ import { noteHistoryRevision, type NoteFileWitness, type NoteHistoryQuery, type 
 import type { NoteResource } from '@agentmux/core/notebook-catalog'
 import { noteProvenanceResourceKey, type NoteBlockProvenance } from '@agentmux/core/note-provenance'
 import { deriveNoteCorpus } from '@agentmux/client-ui/note/note-corpus'
-import { readNoteDocument, serializeNoteDocument, type NoteDocument } from '../shared/note-document.js'
-import type { WorkspaceRecord } from '../shared/contracts.js'
+import { readNoteDocument, serializeNoteDocument, type NoteDocument } from '@agentmux/client-ui/note/note-document'
+import type { WorkspaceRecord } from './content-types.js'
 import { readNoteCorpusSources, type NoteCorpusSource } from './note-corpus-reader.js'
-import type { WorkspaceFiles } from './workspace-files.js'
+import type { WorkspaceFiles } from './content-types.js'
 import type { SharedFileDeleteInput, SharedFileDeleteOutcome } from './note-shared-file-delete-owner.js'
 import type { NoteHistoryWriteAction } from './note-history-actions.js'
 
@@ -20,7 +20,7 @@ type Candidate = { item: FileShareCollection; create: NoteHistoryWriteRecord; or
 type Scan = { hostId: string; complete: boolean; documents: NoteCorpusSource[]; physical: Map<string, NoteCorpusSource>; roots: string; directoryEntries: Map<string, string>; files: Map<string, string> }
 export type NoteSharedUndoPorts = {
   files: Pick<WorkspaceFiles, 'read' | 'readDirectory'>
-  workspaces(): readonly WorkspaceRecord[]
+  workspaces(): Promise<{ workspaces: readonly WorkspaceRecord[]; complete: boolean }>
   target(resource: NoteResource): Promise<Target | null>
   read(params: FileReadParams): Promise<FileReadResult>
   write(params: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult>
@@ -72,8 +72,9 @@ export class NoteSharedUndoOwner {
     catch (error) { return { ...result, status: error instanceof AgentMuxError ? 'error' : 'unknown', code: error instanceof AgentMuxError ? error.code : 'NOTE_SHARE_UNDO_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } }
   }
   private async scan(hostId: string): Promise<Scan> {
-    const workspaces = this.ports.workspaces().filter(w => w.hostId === hostId).map(w => ({ ...w })), documents: NoteCorpusSource[] = [], directoryEntries = new Map<string, string>(), files = new Map<string, string>(), physical = new Map<string, NoteCorpusSource>()
-    let complete = true
+    const scope = await this.ports.workspaces()
+    const workspaces = scope.workspaces.filter(w => w.hostId === hostId).map(w => ({ ...w })), documents: NoteCorpusSource[] = [], directoryEntries = new Map<string, string>(), files = new Map<string, string>(), physical = new Map<string, NoteCorpusSource>()
+    let complete = scope.complete
     for (const workspace of workspaces) {
       if (workspace.hostId !== 'local') { complete = false; continue }
       try {
@@ -103,10 +104,11 @@ export class NoteSharedUndoOwner {
     return observed
   }
   private async unchanged(scan: Scan): Promise<boolean> {
-    if (scan.roots !== JSON.stringify(this.ports.workspaces().filter(w => w.hostId === scan.hostId).map(w => [w.hostId, w.id, w.path]).sort())) return false
+    const scope = await this.ports.workspaces()
+    if (!scope.complete || scan.roots !== JSON.stringify(scope.workspaces.filter(w => w.hostId === scan.hostId).map(w => [w.hostId, w.id, w.path]).sort())) return false
     for (const [path, stat] of scan.files) { try { if (statValue(await lstat(path, { bigint: true })) !== stat) return false } catch { return false } }
     for (const [path, entries] of scan.directoryEntries) {
-      const owner = this.ports.workspaces().find(w => w.hostId === 'local' && (path === w.path || path.startsWith(w.path + '/')))
+      const owner = scope.workspaces.find(w => w.hostId === 'local' && (path === w.path || path.startsWith(w.path + '/')))
       if (!owner) return false
       try { const current = await this.ports.files.readDirectory(owner, relative(owner.path, path) || '.'); if (JSON.stringify(current.map(e => [e.name, e.isDirectory, e.isSymlink]).sort()) !== entries) return false } catch { return false }
     }
@@ -144,7 +146,7 @@ export class NoteSharedUndoOwner {
   }
   private async historyResources(resource: NoteResource): Promise<NoteResource[]> {
     const path = await realpath(join(resource.workspacePath, resource.path)), resources = [resource]
-    for (const workspace of this.ports.workspaces().filter(w => w.hostId === resource.hostId)) {
+    for (const workspace of (await this.ports.workspaces()).workspaces.filter(w => w.hostId === resource.hostId)) {
       const root = await realpath(workspace.path).catch(() => undefined)
       if (!root || !path.startsWith(root + '/')) continue
       const alias: NoteResource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path: relative(root, path) }

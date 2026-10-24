@@ -6,12 +6,13 @@ import { AgentMuxError, durableWriteFile } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import type { AgentMuxSpatialGraph, AgentMuxSpatialState, SpatialJson } from '@agentmux/core/spatial-graph'
 import type { TopicCategory, TopicMigrationPreview, TopicMigrationReceipt, TopicUnavailable } from '@agentmux/core/control'
-import type { ScratchTopicSnapshot, WorkspaceRecord } from '../shared/contracts'
-import { scratchTopicPhysicalPath, scratchTopicStorageRoots } from '../shared/scratch-topics'
-import type { TopicSpatialPort, TopicSpatialInspection, TopicSpatialIdentity } from './topic-knowledge'
-import { directoryIdentity } from '../shared/space-addresses'
+import type { WorkspaceRecord } from './content-types.js'
+import type { ScratchTopicSnapshot } from './mote-topic-model.js'
+import { scratchTopicPhysicalPath, scratchTopicStorageRoots } from './mote-topic-model.js'
+import type { TopicSpatialPort, TopicSpatialInspection, TopicSpatialIdentity } from './topic-knowledge.js'
+import { directoryIdentity } from './mote-model.js'
 import { categoryResource, categorySpaceFact, categoriesFromSpatial, isKnowledgeTopic, topicContentSpaceId, topicContentZoneId,
-  UNCLASSIFIED_TOPIC_CATEGORY_ID } from '../shared/topic-categories'
+  UNCLASSIFIED_TOPIC_CATEGORY_ID } from './topic-categories.js'
 
 const resource = (value: unknown): SpatialJson => JSON.parse(JSON.stringify(value)) as SpatialJson
 const emptyGraph = (): AgentMuxSpatialGraph => ({ spaces: [], zones: [], bindings: [], tabs: [], regions: [], layouts: {}, tabLayouts: {}, resources: {} })

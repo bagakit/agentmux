@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { NoteSource } from '@agentmux/core/notebook-catalog'
-import { NOTES_WORKSPACE_ID } from '../../../shared/notes-library'
+import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '../../../shared/note-document'
 import { registerCreatedNote, useAppStore } from '../store'
 import { api } from './api'

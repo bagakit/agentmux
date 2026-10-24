@@ -2,7 +2,7 @@ import type { AgentMuxSpaceFact, AgentMuxZoneFact, AgentMuxSpaceDestination, Age
 import type { AgentMuxAgentForkSource } from '@agentmux/core'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from './contracts'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath, scratchTopicPhysicalPath } from './scratch-topics'
-import { categorySpaceFact, isKnowledgeTopic, UNCLASSIFIED_TOPIC_CATEGORY_ID } from './topic-categories'
+import { categorySpaceFact, isKnowledgeTopic, UNCLASSIFIED_TOPIC_CATEGORY_ID } from '@agentmux/host/topic-categories'
 
 /** Durable directory identity shared by the Space tree, CLI and Project grouping. */
 export { directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'

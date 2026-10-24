@@ -1,7 +1,7 @@
 import type { NotesResourceChange } from '@agentmux/core/notebook-store'
 import { api } from './api'
 import { useLauncherState } from './launcher-state'
-import { NOTES_WORKSPACE_ID } from '../../../shared/notes-library'
+import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import type { SpaceZoneBindings } from '../../../shared/space-addresses'
 import type { NoteCreationReceipt } from './note-creation'
 import type { FileWorkbenchState } from './file-workbench-state'
