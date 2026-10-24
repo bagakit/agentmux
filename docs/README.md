@@ -67,7 +67,7 @@
 
 ## 历史与本机过程资料
 
-[事故复盘](casestudy/) 保留当时现场和改进动作，其中[终端丢色案例](casestudy/terminal-colors-lost-after-resume.md)说明长寿命 Runtime 的环境继承与显式 unset，[磁盘有空间却无法恢复 Session](casestudy/all-sessions-unrecoverable-with-disk-space.md)说明共享持久化容量、事务分类和原身份恢复的证据边界，[Performance 合法观察误拒](casestudy/performance-valid-observations-rejected.md)说明协议包装、叶子预算和管道回压的组合缺口，[新 Agent 终端退出、首输入未发](casestudy/new-agent-terminal-exits-before-first-input.md)说明辅助历史观察与原输入、前台恢复的互锁；[Benchmark 协议](benchmarks/agentmux-daemon-cutover.md) 定义测量方法，历史数值不成为当前预算或排名。
+[事故复盘](casestudy/) 保留当时现场和改进动作，其中[终端丢色案例](casestudy/terminal-colors-lost-after-resume.md)说明长寿命 Runtime 的环境继承与显式 unset，[磁盘有空间却无法恢复 Session](casestudy/all-sessions-unrecoverable-with-disk-space.md)说明共享持久化容量、事务分类和原身份恢复的证据边界，[Performance 合法观察误拒](casestudy/performance-valid-observations-rejected.md)说明协议包装、叶子预算和管道回压的组合缺口，[新 Agent 终端退出、首输入未发](casestudy/new-agent-terminal-exits-before-first-input.md)说明辅助历史观察与原输入、前台恢复的互锁，[正常突发中的 RPC 断开](casestudy/rpc-disconnects-during-normal-bursts.md)说明人工 ACK 账本、传输背压与连接放大的区别；[Benchmark 协议](benchmarks/agentmux-daemon-cutover.md) 定义测量方法，历史数值不成为当前预算或排名。
 
 [历史清理改坏引用与候选代码](casestudy/history-hygiene-changes-semantics.md)记录隐私扫描越过语义边界的红线事件，区分候选验证故障、审查拒收与尚未证实的线上影响。
 
