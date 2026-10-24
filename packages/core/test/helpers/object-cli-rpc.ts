@@ -158,7 +158,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'settings.hosts.ls': [], 'settings.hosts.test': ['--help'], 'settings.workspaces.register': ['--input', input],
     'settings.browser-links.ls': [], 'settings.browser-links.forget': ['--help'],
     'system.doctor': [], 'system.endpoint': [], 'system.storage': ['--host', 'local', '--run', 'RUN'], 'system.crash-log.inspect': [], 'system.crash-log.reveal': [],
-    'system.metrics.get': [], 'system.metrics.watch': []
+    'system.metrics.get': [], 'system.metrics.watch': [], 'system.metrics.app-memory.inspect': []
   }
   const found = fixed[method]
   if (found) return found
