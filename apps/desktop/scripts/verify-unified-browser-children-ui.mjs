@@ -29,6 +29,7 @@ const receipt = { schema: 'agentmux.unified-browser-children-ui.v1', passed: fal
 const rendererInputs = await fileHashes([
   ...await files(path.join(desktop, 'src/renderer')), ...await files(path.join(desktop, 'src/shared')),
   ...await files(path.join(root, 'packages/client-ui/src')), ...await files(path.join(root, 'packages/layout/src')), ...await files(path.join(root, 'packages/core/dist')),
+  ...await files(path.join(root, 'packages/native-desktop/dist')),
   path.join(fixture, 'entry.tsx'), path.join(fixture, 'index.html'), path.join(desktop, 'resources/icon-128.png'), path.join(root, 'pnpm-lock.yaml')
 ])
 const server = createServer((request, response) => {
