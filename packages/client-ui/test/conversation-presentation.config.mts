@@ -10,6 +10,7 @@ const owner = mutation === 'ignore-cold-selected-candidates' ? 'packages/client-
   : mutation === 'ignore-precommit-selection' ? 'packages/client-ui/src/lib/use-conversation-reading-selection.ts'
   : mutation === 'ignore-commit-anchor' || mutation === 'restore-without-capture' ? 'packages/client-ui/src/components/ConversationReadingCommit.tsx' : file
 const edits: Record<string, [string, string]> = {
+  'scan-unprotected-records': ['if (range || focused && focused !== document?.body && root?.contains(focused))', 'if (true)'],
   'ignore-parent-change': ['prior.parent === next.parent', 'true'],
   'ignore-role-revision': ['prior.version === next.version', 'true'],
   'split-frame': ['return { ...accepted.frame, sequence:', 'return { ...accepted.frame, coverage: (frame as any).coverage, sequence:'],
