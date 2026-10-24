@@ -76,7 +76,7 @@ type Segment = { kind: 'item'; item: AgentTimelineItem; record: ConversationReco
 /** Source payloads for the existing leaf renderer and ruler; sequence order stays canonical. */
 function buildActivityEntries(projection: ReturnType<typeof projectConversationWindow> | null) {
   const records = projection?.records ?? []
-  const nativeTail = records.reduce((last, record, index) => record.original.kind === 'native' ? index : last, -1)
+  const nativeTail = records.reduce((last, record, index) => record.source.kind === 'native' ? index : last, -1)
   const afterNativeTail = nativeTail < 0 ? undefined : records[nativeTail + 1]
   const segments: Segment[] = records.flatMap(record => record.original.kind === 'captured'
     ? [{ kind: 'item' as const, item: record.original.item, record }] : [])
@@ -226,7 +226,15 @@ export function ActivityView({
     readAhead.cancel()
     followRef.current = { ...followRef.current, following: false }
     if (feedEl) anchorRef.current = captureReadingAnchor(feedEl)
-    readingWindow.readEarlier()
+    if (readingWindow.held || readingWindow.error || readingWindow.automaticReadError || readingWindow.previousSource) readingWindow.readEarlier()
+    else readAhead.request('earlier', true)
+  }
+  function readNewerRecords(): void {
+    readAhead.cancel()
+    followRef.current = { ...followRef.current, following: false }
+    if (feedEl) anchorRef.current = captureReadingAnchor(feedEl)
+    if (readingWindow.held || readingWindow.error || readingWindow.automaticReadError || readingWindow.previousSource) readingWindow.readNewer()
+    else readAhead.request('newer', true)
   }
   const handleReadingKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     const interactive = event.target instanceof Element && event.target.closest('input, textarea, select, button, a, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="button"], [role="textbox"], [role="combobox"], [role="menu"]')
@@ -258,9 +266,7 @@ export function ActivityView({
     ? { ...recentNativePage, items: nativeContextItems ?? recentNativePage.items } : null,
     [recentNativePage, nativeContextItems])
   const historyBoundary = readingWindow.historyBoundary
-  const boundaryIndex = !historyBoundary || !nativeHistoryPage ? -1 : nativeHistoryPage.items.findIndex(item => item.id === historyBoundary.beforeRecordId)
-  const lastEarlierRecord = nativeHistoryPage?.items[boundaryIndex - 1]
-  const boundaryTime = lastEarlierRecord?.completedAt ?? lastEarlierRecord?.startedAt
+  const boundaryTime = historyBoundary?.recordedAt
   const items = readingWindow.captured ?? []
   const readingEnabled = conversationReading?.enabled !== false
   const consumerDocument = useWorkbenchDocument()
@@ -271,7 +277,7 @@ export function ActivityView({
     stopped: Boolean(readingWindow.held || readingWindow.error || readingWindow.automaticReadError || readingWindow.previousSource),
     loading: readingWindow.loading,
     frame: readingWindow.snapshot,
-    nearEdge: direction => Boolean(feedEl && readingEdgeIsNear(direction, feedEl)),
+    nearEdge: direction => Boolean(feedEl && feedEl.clientHeight > 0 && readingEdgeIsNear(direction, feedEl, 0, 3)),
     read: direction => {
       if (feedEl) anchorRef.current = captureReadingAnchor(feedEl)
       followRef.current = { ...followRef.current, following: false }
@@ -420,14 +426,8 @@ export function ActivityView({
     }
   }, [currentSessionId, readingEnabled])
 
-  const nativeReadingTail = (el: HTMLElement): number | null => {
-    const tail = nativeTailRef.current
-    return tail && nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length
-      ? el.scrollTop + tail.getBoundingClientRect().top - el.getBoundingClientRect().top
-      : null
-  }
-  // Displayed content and native pagination have different ends. A captured reply is readable
-  // content too; opening machine details must not change which native cursor owns paging.
+  // The unified sequence owns both pagination edges. Tail padding added only
+  // for anchor restoration is outside the readable extent.
   const readingHeight = (el: HTMLElement): number => Math.max(el.clientHeight, readingTailRef.current
     ? el.scrollTop + readingTailRef.current.getBoundingClientRect().top - el.getBoundingClientRect().top
     : el.scrollHeight)
@@ -487,28 +487,22 @@ export function ActivityView({
   }
   const requestReadingEdge = (direction: number, el: HTMLElement, delta = 0): void => {
     if (!conversationReading?.enabled) return
-    if (direction < 0 && anchorRef.current?.kind === 'segment') {
-      const observed = visibleShells.current
-      const nativeAnchor = conversationReadingAnchor(el, undefined, true, observed?.feed === el && observed.sessionId === sessionId ? observed.shells : undefined)
-      // Captured content has its own readable tail. Hand paging back only when
-      // the original sequence is actually visible in this viewport.
-      if (!nativeAnchor) { readAhead.cancel(); return }
-      anchorRef.current = nativeAnchor
-    }
     if (!direction) return
     const edge = direction < 0 ? 'earlier' : 'newer'
-    if (!readingEdgeIsNear(edge, el, delta) || edge === 'newer' && anchorRef.current?.kind === 'segment') {
+    if (!readingEdgeIsNear(edge, el, delta)) {
       readAhead.cancel(); return
     }
-    readAhead.request(edge)
+    // The actual input already qualified its projected edge. Only subsequent
+    // pages wait for the completed layout's readable reserve.
+    readAhead.request(edge, true)
   }
-  function readingEdgeIsNear(direction: 'earlier' | 'newer', el: HTMLElement, delta = 0): boolean {
-    const distance = Math.max(80, el.clientHeight * 2)
+  function readingEdgeIsNear(direction: 'earlier' | 'newer', el: HTMLElement, delta = 0, screens = 2): boolean {
+    const distance = Math.max(80, el.clientHeight * screens)
     const nextTop = Math.max(0, el.scrollTop + delta)
     const boundary = earlierRef.current
     const boundaryTop = boundary ? el.scrollTop + boundary.getBoundingClientRect().bottom - el.getBoundingClientRect().top : 0
     if (direction === 'earlier') return nextTop <= boundaryTop + distance
-    const tail = nativeReadingTail(el) ?? el.scrollHeight
+    const tail = readingHeight(el)
     return tail - el.scrollTop >= 0 && tail - el.clientHeight - nextTop <= distance
   }
 
@@ -655,7 +649,8 @@ export function ActivityView({
       revealRequest.complete(false, '记录关系未确认，无法定位。'); return
     }
     const id = conversationRecordId(target)
-    const loaded = originalConversationRecords.some(record => record.records?.some(original => original.id === id))
+    const loaded = originalConversationRecords.some(record => record.records?.some(original => original.id === id)
+      || record.deferred?.records.some(original => original.id === id))
     if (conversationReading && revealReadGeneration.current !== revealRequest.generation && !loaded) {
       revealReadGeneration.current = revealRequest.generation
       readAhead.cancel()
@@ -716,12 +711,12 @@ export function ActivityView({
     const sourceKey = conversationMessageSourceKey(accepted.agentSessionId, accepted.source)
     if (sourceKey) setLocatedMessageKey(sourceKey)
     const findNode = (): HTMLElement | undefined => {
-      if (target.kind === 'observed') {
-        const host = segmentForIndex(target.index)
-        return host ? segmentEls.current.get(host.key) : undefined
-      }
-      return [...thread.querySelectorAll<HTMLElement>('[data-native-record-id], [data-native-step-id]')]
-        .find(node => node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource === target.source && (node.dataset.nativeRecordId === target.recordId || node.dataset.nativeStepId === target.recordId))
+      const host = target.kind === 'observed' ? segmentForIndex(target.index) : undefined
+      const node = target.kind === 'observed' ? host && segmentEls.current.get(host.key)
+        : [...thread.querySelectorAll<HTMLElement>('[data-native-record-id], [data-native-step-id]')]
+          .find(node => node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource === target.source && (node.dataset.nativeRecordId === target.recordId || node.dataset.nativeStepId === target.recordId))
+      return node ?? [...thread.querySelectorAll<HTMLElement>('[data-deferred-process-id][data-message-source-key]')]
+        .find(node => node.dataset.messageSourceKey === sourceKey)
     }
     locateRef.current.frame = requestAnimationFrame(() => {
       locateRef.current.frame = null
@@ -742,7 +737,8 @@ export function ActivityView({
 
   const hasUserMessages = Boolean(readingWindow.projection?.inputs.length)
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
-  const hasItems = unifiedItems.length > 0
+    || conversationRecords.some(record => record.source.kind === 'native')
+  const hasItems = unifiedItems.length > 0 || conversationRecords.length > 0
   const readPending = readingEnabled && readingWindow.loading
   const hasAcceptedFrame = Boolean(conversationReading && readingWindow.snapshot)
   const initialReadPending = readPending && !hasAcceptedFrame
@@ -790,7 +786,7 @@ export function ActivityView({
         ) : null}
         {readingWindow.hasNewer ? <button type="button" className="activity-feed__reading-action"
           disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading.enabled}
-          title="Read the adjacent newer page" onClick={() => { readAhead.cancel(); readingWindow.readNewer() }}>Newer</button> : null}
+          title="Continue reading newer conversation records" onClick={readNewerRecords}>Newer</button> : null}
         {conversationReading.nativeSourceFacts?.nativeConfirmation ? <>
           <span className="activity-feed__reading-status">{readingWindow.previousSource ? 'Previous native source' : 'Current native source'}</span>
           <button type="button" className="activity-feed__reading-action" disabled={!conversationReading.enabled}
@@ -811,8 +807,10 @@ export function ActivityView({
       scope={readingServiceScope} issues={readingIssues} visible={readingEnabled} /> : null : readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
       <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>{readingWindow.retryLabel}</button></div> : null}
   </>
-  const collapseTraces = nativeHistoryPage?.items.some(item => item.contentParts.some(part =>
-    part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result')) ? <button type="button"
+  const collapseTraces = (nativeHistoryPage?.items.some(item => item.contentParts.some(part =>
+    part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result')) || conversationRecords.some(record =>
+    record.original.kind === 'deferred' && record.original.item.kind === 'native' && record.original.item.parts.some(part =>
+      part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result'))) ? <button type="button"
     className="conversation-process-collapse" aria-label="收起已展开的过程详情"
     title={traceDisclosure.expandedTraces.size ? '收起本页已展开的工具与思考详情；保留答案和过程摘要' : '本页没有已展开的工具或思考详情'}
     disabled={!readingEnabled} aria-disabled={traceDisclosure.expandedTraces.size === 0}
@@ -880,7 +878,7 @@ export function ActivityView({
       </div>
     ))
   }
-  if (!hasUserMessages && !hasNativeRecords && showEmptyState(displayState, hasItems ? items : [])) {
+  if (!hasItems && !hasUserMessages && !hasNativeRecords && showEmptyState(displayState, items)) {
     return renderSurface(findTrigger => (
       <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={handleReadingWheel}>
@@ -998,6 +996,7 @@ export function ActivityView({
           intent: readingWindow.presentationIntent }}
         page={nativeHistoryPage}
         readActivity={readingWindow.readActivity}
+        readProcessDetail={readingWindow.readProcessDetail}
         expandSubmissions={Boolean(readingWindow.error || readingWindow.automaticReadError)}
         records={conversationRecords}
         originalRecords={originalConversationRecords}
@@ -1010,7 +1009,7 @@ export function ActivityView({
         insertions={[{ key: 'native-reading-tail', role: 'anchor', ...(nativeTailBeforeRecordId ? { beforeRecordId: nativeTailBeforeRecordId } : {}), content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> }]}
         traceDisclosure={traceDisclosure}
         questionAnswerContext={questionAnswerContext}
-        {...(historyBoundary && boundaryIndex > 0 ? {
+        {...(historyBoundary ? {
           recordBoundary: { ...historyBoundary, content: <div className="activity-feed__history-divider" role="separator">
             以上是历史消息（{boundaryTime === undefined ? '时间未记录' : new Date(boundaryTime).toLocaleString()}）
           </div> }

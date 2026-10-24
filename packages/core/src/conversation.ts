@@ -1,3 +1,4 @@
+import { isCompleteConversationRecord, type ConversationProcessHeader, type ConversationDeferredRecord } from './conversation-process-detail.js'
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from './types.js'
 import { projectSessionUserMessages } from './session-user-messages.js'
 import { projectConversationTimeline, projectConversationEventFacts, type ConversationProjectionInput } from './conversation-timeline.js'
@@ -26,7 +27,8 @@ export type AgentConversationRecord = {
   event?: ConversationEvent
   records?: readonly ConversationSourceRecord[]
   input?: AgentSessionUserMessage
-  original: { kind: 'native'; item: AgentSessionHistoryItem } | { kind: 'captured'; item: AgentTimelineItem }
+  deferred?: { records: readonly ConversationDeferredRecord[]; frontier: import('./conversation-changes.js').ConversationCheckpoint }
+  original: { kind: 'native'; item: AgentSessionHistoryItem } | { kind: 'captured'; item: AgentTimelineItem } | { kind: 'deferred'; item: ConversationProcessHeader }
 }
 
 /** Read-only content and attribution over the same accepted events, without versioned event/record DTOs. */
@@ -38,6 +40,7 @@ export function conversationA2ANotificationId({ original }: Pick<AgentConversati
     const item = original.item
     return item.kind === 'system_message' && item.source === 'agentmux' ? item.a2aNotificationId : undefined
   }
+  if (original.kind === 'deferred') return undefined
   const adopted = original.item.conversation?.adoptedInput
   return adopted?.purpose === 'a2a-notification' && adopted.key.kind === 'prompt' ? adopted.key.submissionId : undefined
 }
@@ -76,7 +79,7 @@ export function projectConversationReading(input: ConversationProjectionInput & 
 
 /** Presentation adapter only: accepted backend events, roles and order are unchanged. */
 export function projectConversationWindow(snapshot: import('./conversation-changes.js').ConversationWindowSnapshot) {
-  const units = [...snapshot.units].reverse(), records = units.flatMap(unit => unit.records)
+  const units = [...snapshot.units].reverse(), records = units.flatMap(unit => unit.records).filter(isCompleteConversationRecord)
   const native = snapshot.scope.sources.find(source => source.kind === 'native')
   const historyPage: AgentSessionHistoryPage | undefined = native?.kind === 'native' ? {
     agentSessionId: snapshot.agentSessionId, sourceHostId: snapshot.sourceHostId,
@@ -87,11 +90,27 @@ export function projectConversationWindow(snapshot: import('./conversation-chang
     revision: snapshot.window.revision, items: records.flatMap(record => record.original.kind === 'captured' ? [record.original.item] : []) }
   const timeline: ReturnType<typeof projectConversationTimeline> = {
     reference: { hostId: snapshot.sourceHostId, agentSessionId: snapshot.agentSessionId }, agentSessionId: snapshot.agentSessionId,
-    scope: snapshot.scope, records, events: units.map(unit => unit.event), coverage: snapshot.coverage,
+    scope: snapshot.scope, records, events: units.filter(unit => unit.records.every(isCompleteConversationRecord)).map(unit => unit.event), coverage: snapshot.coverage,
     order: { basis: snapshot.order.basis, crossSource: snapshot.order.crossSource }
   }
-  return { ...adaptConversationTimeline({ agentSessionId: snapshot.agentSessionId, routeHostId: snapshot.hostId,
-    ...(historyPage ? { historyPage } : {}), timeline: captured }, timeline), historyPage, captured }
+  const complete = adaptConversationTimeline({ agentSessionId: snapshot.agentSessionId, routeHostId: snapshot.hostId,
+    ...(historyPage ? { historyPage } : {}), timeline: captured }, timeline)
+  const byEvent = new Map(complete.records.map(record => [record.event!.id, record]))
+  const projected: AgentConversationRecord[] = units.map(unit => {
+    const full = byEvent.get(unit.event.id)
+    if (full) return full
+    const deferred = unit.records.filter((record): record is ConversationDeferredRecord => !isCompleteConversationRecord(record))
+    const primary = deferred.find(record => record.id === unit.event.anchorId) ?? deferred[0]!
+    const header = primary.original.item, reference = primary.reference!
+    return { id: JSON.stringify([snapshot.hostId, unit.event.id]), rawId: reference.source.recordId,
+      agentSessionId: snapshot.agentSessionId, executionHostId: snapshot.hostId, sourceHostId: snapshot.sourceHostId,
+      kind: header.kind === 'native' ? header.item.kind : 'activity', source: reference.source,
+      content: '', contentParts: [], ...recordedTime(header.kind === 'native' ? header.item.startedAt : header.item.createdAt),
+      author: unit.event.author, role: unit.event.role, event: unit.event, records: [], original: primary.original,
+      deferred: { records: deferred, frontier: snapshot.window.checkpoint } }
+  })
+  return { ...complete, records: projected, historyPage, captured }
+
 }
 
 type ConversationEventFacts = Omit<ConversationEvent, 'revision'>

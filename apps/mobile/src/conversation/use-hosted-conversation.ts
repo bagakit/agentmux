@@ -88,7 +88,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
   const refresh = useCallback(() => view.refresh(), [view.refresh])
   const activity = active && selected.activity?.owner === activityOwner &&
     selected.activity.hostId === selected.session?.hostId && selected.activity.runId === selected.session?.run.runId ? selected.activity.observation : null
-  return { ...selected, activity, held: view.held, acceptHeld: view.acceptHeld, page: reading?.historyPage ?? null, timeline: reading?.captured ?? null, projection: reading,
+  return { ...selected, activity, readProcessDetail: view.readProcessDetail, held: view.held, acceptHeld: view.acceptHeld, page: reading?.historyPage ?? null, timeline: reading?.captured ?? null, projection: reading,
     readError: view.error, readActivity: { sourceRead: view.sourceRead, loading: view.loading },
     pageOwner: view.snapshot ? pageOwner.current?.owner ?? null : null, answerContext, reading: view.loading,
     olderWindow: view.historical, capturedHasMore: view.hasMore, newerAvailable: view.newerAvailable || view.held,

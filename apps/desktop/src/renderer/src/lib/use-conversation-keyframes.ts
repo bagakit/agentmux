@@ -14,7 +14,7 @@ export function useConversationKeyframes(feed: HTMLElement | null, sessionId: st
   // retaining the original media/DOM. A new record array is not evidence of a new video frame.
   const paints = useMemo(() => new WeakMap<Media, { token: string; ready: boolean; recordId?: string; observation?: object }>(), [scope])
   const sources = useMemo(() => new Map(records.flatMap(record => record.sourceKey ? [[record.sourceKey, {
-    id: record.id, version: record.revision ?? ('contentParts' in record.record ? record.record.contentParts : record.record.content)
+    id: record.id, version: record.revision ?? ('contentParts' in record.record ? record.record.contentParts : 'content' in record.record ? record.record.content : undefined)
   }] as const] : [])), [records])
   const [state, setState] = useState<{ scope: object; frames: Map<string, Frame> }>({ scope, frames: EMPTY })
   const frames = state.scope === scope ? state.frames : EMPTY

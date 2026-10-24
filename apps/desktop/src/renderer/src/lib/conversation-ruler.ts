@@ -16,7 +16,7 @@ export type RulerRecord = {
   /** Existing Core source revisions survive IPC object reallocation. */
   revision?: string
   target: { kind: 'native'; source: string; recordId: string } | { kind: 'observed'; index: number }
-  record: AgentSessionHistoryItem | Exclude<ConversationAxisItem, RulerRecord>
+  record: AgentSessionHistoryItem | Exclude<ConversationAxisItem, RulerRecord> | import('@agentmux/core/conversation').ConversationProcessHeader['item']
 }
 export const RULER_WINDOWS = { '6h': 6 * 3_600_000, '12h': 12 * 3_600_000, '24h': 24 * 3_600_000,
   '3d': 3 * 86_400_000, '7d': 7 * 86_400_000, all: Infinity }
@@ -30,9 +30,9 @@ export function conversationRulerRecords(sessionId: string | undefined, page: Ag
   const projected = accepted ?? projectConversationRecords({ agentSessionId: sessionId ?? '', historyPage: native,
     timeline: { agentSessionId: sessionId ?? '', revision: 0, items: [...captured] } })
   const indices = new Map(observed.map((item, index) => [item.id, index]))
-  const records: RulerRecord[] = projected.map(record => ({ id: record.id, kind: 'ruler-record', record: record.original.item,
+  const records: RulerRecord[] = projected.map(record => ({ id: record.id, kind: 'ruler-record', record: record.original.kind === 'deferred' ? record.original.item.item : record.original.item,
     sourceKey: conversationMessageSourceKey(sessionId, record.source),
-    ...(record.records?.length ? { revision: JSON.stringify(record.records.map(source => [source.id, source.revision])) } : {}),
+    ...(record.event ? { revision: record.event.revision } : record.records?.length ? { revision: JSON.stringify(record.records.map(source => [source.id, source.revision])) } : {}),
     ...(record.recordedAt === undefined ? {} : { recordedAt: record.recordedAt }),
     speaker: record.role === 'message' || record.role === 'notice' ? record.speaker ?? null : null,
     target: record.source.kind === 'native' ? { kind: 'native', source: JSON.stringify([record.source.providerId, record.source.nativeSessionId]), recordId: record.rawId }
@@ -85,7 +85,7 @@ export function rulerRecordQuote(item: RulerAxisItem): string | null {
     return quote.trim() || null
   }
   if ('content' in record) return record.content?.trim().slice(0, 280) || null
-  if ('contentParts' in record) {
+  if ('contentParts' in record && Array.isArray(record.contentParts)) {
     let quote = ''
     for (const part of record.contentParts) if (part.kind === 'text' || part.kind === 'reasoning') {
       quote += (quote ? '\n' : '') + part.text.slice(0, 280 - quote.length)

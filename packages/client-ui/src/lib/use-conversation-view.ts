@@ -1,3 +1,4 @@
+import { readConversationProcessDetail, type ConversationProcessDetailReader } from './read-conversation-process-detail.js'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { consumeConversationWindowPage, projectConversationWindow, conversationSourceKey, CONVERSATION_MAX_READ_BYTES, type ConversationWindowAssembly,
@@ -285,12 +286,12 @@ export function useConversationView(client: ConversationViewClient | null, refer
       const originalNative = prior?.scope.sources.find(source => source.kind === 'native')
       // This consumer assembles a complete bounded frame before committing it.
       // Use the existing wire budget instead of fragmenting it into CLI-sized pages.
-      const request: ConversationTimelineReadInput = { ...ref, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES,
+      const request: ConversationTimelineReadInput = { ...ref, ...(!selection.record && !selection.anchor && !(kind === 'resume' && prior?.window.anchor) ? { processDetails: 'deferred' as const } : {}), limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES,
         ...selection, ...(kind === 'reopen' && originalNative?.kind === 'native' ? { nativeSource: { providerId: originalNative.providerId, nativeSessionId: originalNative.nativeSessionId } } : {}),
         ...(kind === 'resume' && prior?.window.view ? { view: prior.window.view } : {}), ...(kind === 'older' && prior?.window.navigation.older ? { cursor: prior.window.navigation.older } : {}),
         ...(kind === 'newer' && prior?.window.navigation.newer ? { cursor: prior.window.navigation.newer } : {}) }
       const change: ConversationChangesInput | null = kind === 'changes' && prior ? {
-        ...ref, checkpoint: prior.window.checkpoint, view: prior.window.view!, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES
+        ...ref, ...(prior.processDetails ? { processDetails: prior.processDetails } : {}), checkpoint: prior.window.checkpoint, view: prior.window.view!, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES
       } : null
       // Presentation follows this original request, never a retained frame's
       // source during an unqualified latest selection or a replay-only resume.
@@ -499,6 +500,10 @@ export function useConversationView(client: ConversationViewClient | null, refer
     }
   }, [client, key])
 
+  const readProcessDetail = useCallback<ConversationProcessDetailReader>((anchor, signal) => {
+    if (!client || !reference || anchor.frontier.hostId !== reference.hostId || anchor.frontier.agentSessionId !== reference.agentSessionId) return Promise.reject(new Error('The original process detail belongs to another reading scope.'))
+    return readConversationProcessDetail(client, anchor, signal)
+  }, [client, reference?.hostId, reference?.agentSessionId])
   const earlier = useCallback(async (limit?: number, options: Pick<ConversationTimelineReadInput, 'preserveCurrent'> = {}) => {
     await operation.current('older', { ...options, ...(limit === undefined ? {} : { limit }) }); return owner.current?.snapshot ?? null
   }, [])
@@ -553,5 +558,5 @@ export function useConversationView(client: ConversationViewClient | null, refer
     current.note(event); current.flush('progress')
   }, [])
   const reading = useMemo(() => snapshot ? projectConversationWindow(snapshot) : null, [snapshot])
-  return { ...state, error: state.error ?? state.sourceError, errorOperation: state.error ? state.errorOperation : null, snapshot, reading, loading: active && state.loading, hasMore: Boolean(snapshot?.window.navigation.older), hasNewer: Boolean(snapshot?.window.navigation.newer), earlier, newer, refresh, resume, settle, changes, retry, inspect, acceptHeld, selectSource, selectRecord, reveal, noteDiagnostic }
+  return { ...state, error: state.error ?? state.sourceError, errorOperation: state.error ? state.errorOperation : null, snapshot, reading, loading: active && state.loading, hasMore: Boolean(snapshot?.window.navigation.older), hasNewer: Boolean(snapshot?.window.navigation.newer), readProcessDetail, earlier, newer, refresh, resume, settle, changes, retry, inspect, acceptHeld, selectSource, selectRecord, reveal, noteDiagnostic }
 }

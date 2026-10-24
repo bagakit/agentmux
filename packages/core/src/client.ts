@@ -2543,7 +2543,7 @@ export class AgentMuxClient {
     if (previous && history) descriptor = { ...descriptor, history: { ...history, nativeHandle: history.previousNativeHandle! } }
     const source = selected ?? (descriptor.history?.nativeHandle?.kind === 'provider'
       ? { providerId: descriptor.history.nativeHandle.providerId, nativeSessionId: descriptor.history.nativeHandle.sessionId } : undefined)
-    return { reference, port: { state: this.conversationReadState, descriptor, readHostId: input.hostId, ...(options.signal ? { signal: options.signal } : {}),
+    return { reference, port: { state: this.conversationReadState, descriptor, nativeRecordAvailable: source ? typeof this.providers.list().find(provider => provider.id === source.providerId)?.readSessionHistoryRecord === 'function' : false, readHostId: input.hostId, ...(options.signal ? { signal: options.signal } : {}),
       captured: async query => {
         let inputJournal: import('./agent-input-conversation.js').AgentInputJournalCut | undefined
         let failure: { code: string; message: string } | undefined

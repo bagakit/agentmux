@@ -1,3 +1,8 @@
+import { ConversationRetainedDetails } from './ConversationRetainedDetails.js'
+import { NativeProcessStep } from './NativeProcessObservation.js'
+import { DeferredConversationProcess } from './DeferredConversationProcess.js'
+import type { ConversationProcessDetailReader } from '../lib/read-conversation-process-detail.js'
+import { projectConversationWindow } from '../lib/conversation-records.js'
 import { ConversationBodyWorkContext } from './ConversationProgressiveBody.js'
 import { ConversationReadingCommit } from './ConversationReadingCommit.js'
 import type { ConversationReadingGeometry } from '../lib/conversation-body-work.js'
@@ -36,6 +41,7 @@ type Props = ReadingProps & {
   presentation?: ConversationPresentationPort
   readingGeometry?: ConversationReadingGeometry
   readActivity?: ConversationReadActivity
+  readProcessDetail?: ConversationProcessDetailReader
   questionReplyRoute?: AgentCapabilities['asyncQuestionReply']
   questionReplyTarget?: { source: AgentSessionHistorySource; run: AgentMuxRunRef } | undefined
   /** Changes reset only transient card actions; drafts remain in the host's original owner. */
@@ -75,13 +81,13 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  presentation, readingGeometry, page: acceptedPage, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, coverageSummary, onLocateRecord, renderCapturedRecord, expandSubmissions = false, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary: acceptedBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions: acceptedInsertions, questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply, renderQuestionNotice, ...reading
+  presentation, readingGeometry, readProcessDetail, page: acceptedPage, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, coverageSummary, onLocateRecord, renderCapturedRecord, expandSubmissions = false, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary: acceptedBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions: acceptedInsertions, questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply, renderQuestionNotice, ...reading
 }: Props) {
   const frame = useMemo(() => ({ records: acceptedRecords, originalRecords: acceptedOriginals ?? acceptedRecords,
     coverage: coverage ?? acceptedRecords[0]?.coverage ?? [], page: acceptedPage, recordBoundary: acceptedBoundary, insertions: acceptedInsertions }),
     [acceptedRecords, acceptedOriginals, coverage, acceptedPage, acceptedBoundary, acceptedInsertions])
   const sourceKey = JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch])
-  const boundaryRecord = acceptedRecords.find(record => record.original.kind === 'native' && record.rawId === acceptedBoundary?.beforeRecordId)
+  const boundaryRecord = acceptedRecords.find(record => record.source.kind === 'native' && record.rawId === acceptedBoundary?.beforeRecordId)
   const layout = useConversationRecordLayout(frame, sourceKey, { ...(boundaryRecord ? { beforeRecordId: boundaryRecord.presentationKey ?? boundaryRecord.id } : {}),
     ...(acceptedInsertions ? { anchors: acceptedInsertions } : {}), active: reading.active !== false, ...(readingGeometry ? { geometry: readingGeometry } : {}), ...(presentation ? { presentation, intent: presentation.intent } : {}) })
   const bodyScope = useMemo(() => ({ work: layout.bodyWork, active: reading.active !== false }), [layout.bodyWork, reading.active])
@@ -127,6 +133,7 @@ export const ConversationView = memo(function ConversationView({
   const questions = new Map((page ? projectConversationQuestions({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page ?? undefined, answerContext: questionAnswerContext }) : [])
     .map(question => [question.recordId, question]))
   const locatedRecord = locatedMessageKey ? describedRecords.find(record => conversationMessageSourceKey(sessionId, record.source) === locatedMessageKey
+    || record.deferred?.records.some(source => conversationMessageSourceKey(sessionId, source.reference!.source) === locatedMessageKey)
     || record.records?.some(source => originals.has(source.id) && conversationMessageSourceKey(sessionId, originals.get(source.id)!.source) === locatedMessageKey)) : undefined
   function renderCaptured(record: ConversationRecord, canonicalDisclosure?: ConversationProcessProps['disclosure'], feed = false): ReactNode {
     // Source leaves keep their raw payload API; all stored choices use the canonical key.
@@ -182,10 +189,21 @@ export const ConversationView = memo(function ConversationView({
   function renderOriginal(record: ConversationRecord): ReactNode {
     return record.original.kind === 'native' ? renderNativeRecord(record.original.item, undefined, record) : renderCaptured(record)
   }
-  const renderRecord: ConversationRecordRenderer = (record, wrapBody, disclosure) => record.original.kind === 'native'
+  const renderRecord: ConversationRecordRenderer = (record, wrapBody, disclosure) => record.original.kind === 'deferred'
+    ? <DeferredConversationProcess key={JSON.stringify([record.executionHostId, record.sourceHostId, record.deferred!.records.map(source => [source.id, source.revision])])}
+        record={record} {...(readProcessDetail ? { readDetail: readProcessDetail } : {})} active={reading.active !== false}
+        located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source) || record.deferred!.records.some(source => conversationMessageSourceKey(sessionId, source.reference!.source) === locatedMessageKey)} {...(disclosure ? { disclosure } : {})}
+        renderDetail={snapshot => {
+          const detail = projectConversationWindow(snapshot)
+          return detail.records.map(original => original.original.kind === 'native'
+            ? renderNativeRecord(original.original.item, body => <NativeProcessStep item={original.original.kind === 'native' ? original.original.item : neverCaptured()} bodyOnly>{body}</NativeProcessStep>, original, undefined, detail.historyPage)
+            : <CapturedProcessRecord key={original.id} record={original} bodyOnly {...(reading.workspaceRoot ? { workspaceRoot: reading.workspaceRoot } : {})} />)
+        }} />
+    : record.original.kind === 'native'
     ? renderNativeRecord(record.original.item, wrapBody, undefined, record)
     : <div data-conversation-layout-key={record.presentationKey ?? record.id}>{renderCaptured(record, disclosure, true)}{renderOriginals(record)}</div>
-  function renderNativeRecord(item: AgentSessionHistoryItem, wrapBody?: (body: ReactNode) => ReactNode, original?: ConversationRecord, canonical?: ConversationRecord): ReactNode {
+  function renderNativeRecord(item: AgentSessionHistoryItem, wrapBody?: (body: ReactNode) => ReactNode, original?: ConversationRecord, canonical?: ConversationRecord, detailPage = page): ReactNode {
+      const page = detailPage
       if (!page) return null
       const record = original ?? canonical!
       const recordId = record.id
@@ -270,9 +288,7 @@ function CapturedToolDetails({ record }: { record: ConversationRecord }) {
   const sourceKey = conversationMessageSourceKey(record.agentSessionId, record.source)
   const sourceIdentity = useMemo(() => ({}), [record.sourceHostId, sourceKey])
   if (record.original.kind !== 'captured') return null
-  return <>{[record.original.item.toolInput, record.original.item.toolOutput].map((text, index) => text === undefined || text.length === 0 ? null : <details key={index}>
-    <summary>{index ? 'Original tool output' : 'Original tool input'}</summary><ConversationToolPayload text={text} identity={sourceIdentity} sourceIdentity={sourceIdentity} copyLabel={index ? 'Copy tool output' : 'Copy tool input'} />
-  </details>)}</>
+  return <>{[record.original.item.toolInput, record.original.item.toolOutput].map((text, index) => text === undefined || text.length === 0 ? null : <ConversationRetainedDetails key={index} summary={index ? 'Original tool output' : 'Original tool input'}>{() => <ConversationToolPayload text={text} identity={sourceIdentity} sourceIdentity={sourceIdentity} copyLabel={index ? 'Copy tool output' : 'Copy tool input'} />}</ConversationRetainedDetails>)}</>
 }
 
 function neverCaptured(): never { throw new Error('Captured source renderer received a native record.') }

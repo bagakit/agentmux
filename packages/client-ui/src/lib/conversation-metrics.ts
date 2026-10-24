@@ -8,7 +8,7 @@ export type ConversationMetricsObservation = {
 }
 
 /** Source-local reading projection. Each cumulative sample replaces, never adds to, its predecessor. */
-export function projectConversationMetrics(items: readonly AgentSessionHistoryItem[]): Map<string, ConversationMetricsObservation> {
+export function projectConversationMetrics(items: readonly Pick<AgentSessionHistoryItem, 'id' | 'metrics' | 'turnId'>[]): Map<string, ConversationMetricsObservation> {
   const result = new Map<string, ConversationMetricsObservation>()
   const turns = new Map<string, { anchor: string; metrics: AgentSessionHistoryMetrics; recordIds: string[] }>()
   const seen = new Set<string>()

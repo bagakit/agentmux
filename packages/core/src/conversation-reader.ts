@@ -1,8 +1,9 @@
+import { deferConversationProcessRecord } from './conversation-process-detail.js'
 import { mintObjectId } from './object-id.js'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { projectConversationStream, conversationRecordId, conversationRevision, conversationSourceKey, conversationInputAdoptionEdges,
+import { projectConversationStream, conversationRecordRole, conversationRecordId, conversationRevision, conversationSourceKey, conversationInputAdoptionEdges,
   type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationInputAdoptionContext } from './conversation-stream.js'
 import { parseConversationTimelineReadInput, parseConversationChangesInput, parseConversationFrontier, parseConversationReadPage, parseConversationChangesPage,
   CONVERSATION_DEFAULT_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, CONVERSATION_MAX_WINDOW_RECORDS, type ConversationTimelineReadInput, type ConversationChangesInput, type ConversationFrontier,
@@ -20,21 +21,24 @@ export type ConversationReaderPort = {
   nativePage(cursor: string | undefined, limit: number): Promise<AgentSessionHistoryPage>
   nativeCheckpoint(position?: 'beginning'): Promise<NativeConversationCheckpoint>
   nativeChanges(checkpoint: NativeConversationCheckpoint, limit: number): Promise<NativeConversationChangesPage>
+  /** Original Provider interface fact. Unsupported sources retain complete process bodies. */
+  nativeRecordAvailable?: boolean
   nativeRecord(source: { providerId: string; nativeSessionId: string }, id: string): Promise<AgentSessionHistoryItem>
   signal?: AbortSignal
 }
 type Position = { native?: string | null; capturedBefore?: number | null; capturedCut?: { epoch: string; sequence: number; inputJournal?: import('./agent-input-conversation.js').AgentInputJournalCut }; unavailable?: ConversationSourceCoverage[] }
 type Batch = { index: number; offset: number; digests: { id: string; sha256: string }[];
   after: Position; coverage: ConversationSourceCoverage[]; end?: ConversationFrontier; more: boolean }
-type Cursor = ConversationRef & { version: 1; mode: 'inspect' | 'changes'; scope: ConversationFrontier['scope']; position: Position;
+type Cursor = ConversationRef & { processDetails?: 'deferred'; version: 1; mode: 'inspect' | 'changes'; scope: ConversationFrontier['scope']; position: Position;
   batch?: Pick<Batch, 'index' | 'offset'>; checkpoint?: ConversationFrontier; anchor?: ConversationVersionedAnchor; viewId?: string; viewRevision?: number; snapshotId?: string; pageIndex?: number; direction?: 'newer'; preserveCurrent?: true }
 type HistoryPosition = { position: Position; after: Position; checkpoint: ConversationFrontier; limit: number; more: boolean;
   native?: { witness: string; first: string; last: string; count: number };
   captured?: { first: number; last: number; count: number };
   head?: { page: AgentSessionHistoryPage; rows: ConversationSourceRecord[] } }
-type Snapshot = { rows: ConversationSourceRecord[]; batch: Batch; units: ConversationUnit[]; coverage: ConversationSourceCoverage[];
+type CompleteUnit = ReturnType<typeof projection>['units'][number]
+type Snapshot = { rows: ConversationSourceRecord[]; batch: Batch; units: CompleteUnit[]; deferredUnits?: ConversationUnit[]; coverage: ConversationSourceCoverage[];
   order: ReturnType<typeof projection>['order']; revision: number; checkpoint: ConversationFrontier; committed: boolean; requestKey: string; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext; navigation?: ReturnType<typeof historyNavigation> }
-type ReadingView = ConversationRef & { id: string; scope: ConversationFrontier['scope']; revision: number; rows: ConversationSourceRecord[];
+type ReadingView = ConversationRef & { processDetails?: 'deferred'; id: string; scope: ConversationFrontier['scope']; revision: number; rows: ConversationSourceRecord[];
   checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; observers: number; readers: number; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext }
 const MAX_UNOBSERVED_VIEWS = 16
 /** Temporary state of this original Reader. Durable originals remain in their original owners. */
@@ -44,9 +48,9 @@ export class ConversationReaderState {
     const parked = [...this.views.values()].filter(view => view.observers === 0 && view.readers === 0)
     for (const view of parked.slice(0, Math.max(0, parked.length - limit))) this.views.delete(view.id)
   }
-  create(ref: ConversationRef, checkpoint: ConversationFrontier): ReadingView {
+  create(ref: ConversationRef, checkpoint: ConversationFrontier, processDetails?: 'deferred'): ReadingView {
     this.trimParked(MAX_UNOBSERVED_VIEWS - 1)
-    const view: ReadingView = { ...ref, id: mintObjectId(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), observers: 0, readers: 0, outside: { older: null, newer: null }, inputAdoption: { witnesses: [] } }
+    const view: ReadingView = { ...ref, ...(processDetails ? { processDetails } : {}), id: mintObjectId(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), observers: 0, readers: 0, outside: { older: null, newer: null }, inputAdoption: { witnesses: [] } }
     this.views.set(view.id, view); return view
   }
   get(id: string, ref: ConversationRef, scope: ConversationFrontier['scope']): ReadingView {
@@ -342,21 +346,32 @@ function historyNavigation(rows: readonly ConversationSourceRecord[], history: r
   const present = history.map(page => {
     const ids = page.native ? native.get(page.native.witness) : undefined
     const from = page.captured ? lower(page.captured.first) : 0, to = page.captured ? lower(page.captured.last + 1) : 0
-    return { count: (ids?.size ?? 0) + to - from,
-      earlier: Boolean(page.native && ids?.size && !ids.has(page.native.first) || page.captured && to > from && captured[from] !== page.captured.first),
-      newer: Boolean(page.native && ids?.size && !ids.has(page.native.last) || page.captured && to > from && captured[to - 1] !== page.captured.last) }
+    return {
+      native: page.native ? { count: ids?.size ?? 0, earlier: !ids?.has(page.native.first), newer: !ids?.has(page.native.last) } : null,
+      captured: page.captured ? { count: to - from, earlier: captured[from] !== page.captured.first, newer: captured[to - 1] !== page.captured.last } : null
+    }
   })
-  const first = present.findIndex(value => value.count), last = present.length - 1 - [...present].reverse().findIndex(value => value.count)
-  // A Provider may examine a final metadata-only physical page. Its empty
-  // accepted position is not an evicted page and must not be read repeatedly.
-  const adjacent = (start: number, direction: 1 | -1): number | null => {
+  // Skip positions without this source's original contribution. A surviving
+  // captured record cannot stand in for the native frontier of a mixed page.
+  const adjacent = (start: number, direction: 1 | -1, source?: 'native' | 'captured'): number | null => {
     let index = start
-    while (index >= 0 && index < history.length && !history[index]!.native && !history[index]!.captured) index += direction
+    while (index >= 0 && index < history.length && (source ? !history[index]![source] : !history[index]!.native && !history[index]!.captured)) index += direction
     return index < 0 ? null : index < history.length ? index : history.at(-1)?.more ? history.length : null
   }
-  if (first < 0) return { older: adjacent(0, 1), newer: null }
-  return { older: present[last]!.earlier ? last : adjacent(last + 1, 1),
-    newer: present[first]!.newer ? first : adjacent(first - 1, -1) }
+  if (!present.some(page => page.native?.count || page.captured?.count)) return { older: adjacent(0, 1), newer: null }
+  const edges = (['native', 'captured'] as const).flatMap(source => {
+    if (!history.some(page => page[source])) return []
+    const first = present.findIndex(page => page[source]?.count)
+    const last = present.length - 1 - [...present].reverse().findIndex(page => page[source]?.count)
+    // If this entire source left the bounded window, its known originals
+    // remain reachable from either direction through their original pages.
+    if (first < 0) return [{ older: adjacent(0, 1, source), newer: adjacent(history.length - 1, -1, source) }]
+    return [{ older: present[last]![source]!.earlier ? last : adjacent(last + 1, 1, source),
+      newer: present[first]![source]!.newer ? first : adjacent(first - 1, -1, source) }]
+  })
+  const older = edges.flatMap(edge => edge.older === null ? [] : [edge.older])
+  const newer = edges.flatMap(edge => edge.newer === null ? [] : [edge.newer])
+  return { older: older.length ? Math.min(...older) : null, newer: newer.length ? Math.max(...newer) : null }
 }
 async function read(input: ConversationTimelineReadInput | ConversationChangesInput, port: ConversationReaderPort, mode: Cursor['mode']): Promise<AgentConversationReadPage | ConversationChangesPage> {
   port.signal?.throwIfAborted()
@@ -382,6 +397,11 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     state = { ...ref, version: 1, mode, scope: checkpoint.scope, checkpoint, position: captured?.kind === 'captured'
       ? { capturedCut: { epoch: captured.epoch, sequence: captured.sequence } } : { capturedBefore: null } }
   }
+  if (input.cursor || input.view) {
+    const prior = input.cursor ? state : decode(input.view!, ref, 'inspect')
+    if (prior.processDetails !== input.processDetails) return fail('The continuation changed its original process detail representation.')
+  }
+  if (input.processDetails) state.processDetails = input.processDetails
   const requestedPreservation = mode === 'inspect' && 'preserveCurrent' in input && input.preserveCurrent === true
   if (state.snapshotId) {
     if (Boolean(state.preserveCurrent) !== requestedPreservation) return fail('The wire continuation changed its original window preservation policy.')
@@ -395,12 +415,13 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     if (!token.viewId || !Number.isSafeInteger(token.viewRevision) || token.snapshotId || !same(token.scope, state.scope) || state.viewId && state.viewId !== token.viewId) return fail('The view belongs to another original accepted scope.')
     if (!state.viewId) { state.viewId = token.viewId; state.viewRevision = token.viewRevision! }
   }
-  const view = state.viewId ? port.state.get(state.viewId, ref, state.scope) : port.state.create(ref, state.checkpoint!)
+  const view = state.viewId ? port.state.get(state.viewId, ref, state.scope) : port.state.create(ref, state.checkpoint!, state.processDetails)
+  if (view.processDetails !== state.processDetails) return fail('The accepted view changed its original process detail representation.')
   const releaseRead = port.state.holdRead(view)
   try {
     state.viewId = view.id
     if (mode === 'changes' && view.anchor) return fail('This view inspects one exact original version. Reopen history explicitly to follow later changes.')
-    const requestKey = hash(JSON.stringify([mode, state.viewRevision ?? view.revision, state.checkpoint, state.position, state.anchor, state.pageIndex, state.direction, preserveCurrent]))
+    const requestKey = hash(JSON.stringify([mode, state.viewRevision ?? view.revision, state.checkpoint, state.position, state.anchor, state.pageIndex, state.direction, preserveCurrent, state.processDetails]))
     if (!state.snapshotId) {
       const repeated = [...view.snapshots].find(([, snapshot]) => snapshot.requestKey === requestKey)
       if (repeated) { state.snapshotId = repeated[0]; state.batch = { index: 0, offset: 0 } }
@@ -479,11 +500,11 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
         [...heads.values()].filter(row => !sizes.has(row.id) || records.get(row.id)?.revision !== row.revision)
           .reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0)
       if (preserveCurrent && (retainedCount > CONVERSATION_MAX_WINDOW_RECORDS || retainedBytes > CONVERSATION_MAX_UNIT_BYTES)) return fail('This older expansion cannot retain the accepted window within its record and byte budgets. Continue explicit history navigation or retain the current live view.', 'AGENT_CONVERSATION_WINDOW_FULL')
-      const removed = new Set<string>(), boundary = (unit: ConversationUnit) => {
+      const removed = new Set<string>(), boundary = (unit: CompleteUnit) => {
         const record = unit.records.find(record => record.id === unit.event.anchorId) ?? unit.records[0]!
         return { record: record.reference!, revision: record.revision }
       }
-      const evict = (unit: ConversationUnit) => {
+      const evict = (unit: CompleteUnit) => {
         for (const record of unit.records) if (!removed.has(record.id)) {
           removed.add(record.id)
           const head = heads.get(record.id)
@@ -518,7 +539,9 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       view.snapshots.set(state.snapshotId, snapshot)
       while (view.snapshots.size > 3) view.snapshots.delete(view.snapshots.keys().next().value!)
     }
-    const batch = snapshot.batch, units = snapshot.units
+    const batch = snapshot.batch, units: ConversationUnit[] = state.processDetails === 'deferred'
+      ? snapshot.deferredUnits ??= snapshot.units.map(unit => unit.event.role === 'process' && unit.records.every(record => conversationRecordRole(record) === 'process' && (record.original.kind === 'captured' || port.nativeRecordAvailable === true))
+        ? { event: unit.event, records: unit.records.map(deferConversationProcessRecord) } : unit) : snapshot.units
     const digests = batch.digests.length ? batch.digests : units.map(unit => ({ id: unit.event.id, sha256: hash(JSON.stringify(unit)) }))
     batch.digests = digests
     const budgetBytes = input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES, items: ConversationUnitEntry[] = []
@@ -527,7 +550,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       if (index === null) return null
       const position = snapshot.history[index], tail = snapshot.history.at(-1)
       if (!position && !tail) return null
-      return encode({ ...ref, version: 1, mode: 'inspect', scope: state.scope, position: position?.position ?? tail!.after,
+      return encode({ ...ref, ...(state.processDetails ? { processDetails: state.processDetails } : {}), version: 1, mode: 'inspect', scope: state.scope, position: position?.position ?? tail!.after,
         checkpoint: position?.checkpoint ?? tail!.checkpoint, viewId: view.id, viewRevision: snapshot.revision, pageIndex: index, ...(direction ? { direction } : {}) })
     }
     const next = (index: number, offset: number): string | null => {
@@ -538,10 +561,10 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     const result = (index: number, offset: number, entries = items) => {
       const complete = index >= units.length
       const checkpoint = { ...target, sourceHostId: ref.hostId, frontier: complete ? snapshot.checkpoint : state.checkpoint! }
-      return { ...target, sourceHostId: ref.hostId, scope: state.scope, coverage: snapshot.coverage, order: { ...snapshot.order, direction: 'newest-first' as const }, items: entries, nextCursor: next(index, offset), budgetBytes,
+      return { ...target, ...(state.processDetails ? { processDetails: state.processDetails } : {}), sourceHostId: ref.hostId, scope: state.scope, coverage: snapshot.coverage, order: { ...snapshot.order, direction: 'newest-first' as const }, items: entries, nextCursor: next(index, offset), budgetBytes,
         window: { id: view.id, revision: snapshot.revision, itemCount: units.length, complete,
           ...(snapshot.anchor ? { anchor: { ...snapshot.anchor, frontier: checkpoint } } : {}),
-          view: complete ? encode({ ...ref, version: 1, mode: 'inspect', scope: state.scope, position: {}, viewId: view.id, viewRevision: snapshot.revision }) : null,
+          view: complete ? encode({ ...ref, ...(state.processDetails ? { processDetails: state.processDetails } : {}), version: 1, mode: 'inspect', scope: state.scope, position: {}, viewId: view.id, viewRevision: snapshot.revision }) : null,
           replay: encode({ ...state, position: {}, batch: state.batch! }), checkpoint, outside: snapshot.outside, navigation: { older: complete ? historyCursor(navigation.older) : null, newer: complete ? historyCursor(navigation.newer, 'newer') : null } },
         ...(mode === 'changes' ? { checkpoint, more: !complete || batch.more } : {}) }
     }

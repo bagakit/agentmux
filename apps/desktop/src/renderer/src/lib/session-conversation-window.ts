@@ -73,12 +73,17 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   })
   const projection = useMemo(() => view.reading ? describeConversationWindow(view.reading) : null, [view.reading])
   const page = projection?.historyPage ?? null
+  // Headers retain the original position and time even when their unread body
+  // is absent from the complete-record compatibility projection.
+  const nativeMetadata = useMemo(() => [...view.snapshot?.units ?? []].reverse().flatMap(unit =>
+    unit.records.flatMap<{ id: string; startedAt?: number; completedAt?: number }>(record => record.original.kind === 'native' ? [record.original.item]
+      : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? [record.original.item.item] : [])), [view.snapshot])
   const currentSource = handleSource(reading?.nativeSourceFacts?.nativeHandle)
   const previousSource = Boolean(page && currentSource && !matchesSource(page.source, currentSource))
   const bindingChanged = acceptedBinding.current.key === key && acceptedBinding.current.bindingKey !== bindingKey
   const navigate = (operation: ConversationViewOperation) => {
     intent.current = operation === 'older' ? 'earlier' : operation === 'newer' ? 'newer' : operation === 'latest' ? 'current' : 'live'
-    if (operation === 'older' && !boundary.current) boundary.current = page?.items[0]?.id ?? null
+    if (operation === 'older' && !boundary.current) boundary.current = nativeMetadata[0]?.id ?? null
     if (operation === 'latest') boundary.current = null
     return operation === 'older' ? view.earlier() : operation === 'newer' ? view.newer() : operation === 'changes' ? view.changes() : view.refresh()
   }
@@ -94,7 +99,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     if (view.error || view.held || !reading?.enabled || bindingChanged) { coverageDemand.current.remaining = 0; return }
     if (!coverageDemand.current.remaining || view.loading || !page) return
     if (!view.hasMore) { coverageDemand.current.remaining = 0; return }
-    const times = page.items.flatMap(item => item.startedAt === undefined ? [] : [item.startedAt])
+    const times = nativeMetadata.flatMap(item => item.startedAt === undefined ? [] : [item.startedAt])
     if (coverageDuration !== Infinity && (!times.length || Math.max(...times) - Math.min(...times) >= coverageDuration)) { coverageDemand.current.remaining = 0; return }
     const limit = remainingReadLimit(view.snapshot)
     if (limit <= 0 || view.snapshot?.window.outside.newer) {
@@ -102,7 +107,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     }
     coverageDemand.current.remaining--
     intent.current = 'coverage'; void view.earlier(limit)
-  }, [page, view.loading, view.held, view.hasMore, view.error, reading?.enabled, bindingChanged, coverageDuration])
+  }, [page, nativeMetadata, view.loading, view.held, view.hasMore, view.error, reading?.enabled, bindingChanged, coverageDuration])
   const selectSource = (source?: AgentSessionHistorySource) => {
     intent.current = 'current'; boundary.current = null; coverageDemand.current.remaining = 0
     if (source) void view.selectSource(source); else void view.refresh()
@@ -111,22 +116,26 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const error = (automaticReadError ? null : view.error?.message) ?? view.observationError?.message ?? (bindingChanged ? 'Native source changed. The original window is retained; explicitly open Current source or Previous source.' : null)
   const currentOutside = Boolean(view.snapshot?.window.navigation.newer || view.newerAvailable || view.held)
   const expiredHistorical = view.historical && (view.error as { code?: string } | null)?.code === 'AGENT_CONVERSATION_VIEW_EXPIRED'
-  return { page, projection, acceptHeld: view.acceptHeld, presentationIntent: presentationIntent.current, snapshot: view.snapshot, readActivity: { sourceRead: view.sourceRead, loading: view.loading }, inspect: view.inspect, noteDiagnostic: view.noteDiagnostic, capturedSnapshot: projection?.captured,
+  const boundaryIndex = nativeMetadata.findIndex(item => item.id === boundary.current)
+  const previousRecord = nativeMetadata[boundaryIndex - 1]
+  return { page, projection, acceptHeld: view.acceptHeld, presentationIntent: presentationIntent.current, snapshot: view.snapshot, readActivity: { sourceRead: view.sourceRead, loading: view.loading }, readProcessDetail: view.readProcessDetail, inspect: view.inspect, noteDiagnostic: view.noteDiagnostic, capturedSnapshot: projection?.captured,
     captured: projection?.captured.items ?? null, capturedLoading: view.loading, capturedHasMore: view.hasMore,
     readCapturedEarlier: () => { coverageDemand.current.remaining = 0; void navigate('older') },
     historical: view.historical || previousSource || bindingChanged, hasEarlierNavigation: Boolean(boundary.current) || previousSource,
     previousSource, coverageLoading: view.loading && view.operation === 'older' && intent.current === 'coverage', loading: view.loading, error, automaticReadError,
     held: view.held, loadingEarlier: view.loading && view.operation === 'older' && intent.current === 'earlier',
-    historyBoundary: boundary.current && page?.items.some(item => item.id === boundary.current) ? { beforeRecordId: boundary.current } : null,
+    historyBoundary: boundary.current && boundaryIndex > 0 ? { beforeRecordId: boundary.current,
+      recordedAt: previousRecord?.completedAt ?? previousRecord?.startedAt } : null,
     currentOutside, newerOutside: currentOutside, hasNewer: view.hasNewer, hasMore: view.hasMore,
     readEarlier: () => { coverageDemand.current.remaining = 0; void navigate('older') }, readNewer: () => { coverageDemand.current.remaining = 0; void navigate('newer') },
     prepareEarlier: () => {
-      const limit = remainingReadLimit(view.snapshot)
-      if (!reading?.enabled || view.loading || view.held || view.error || !view.hasMore || limit <= 0) return false
+      if (!reading?.enabled || view.loading || view.held || view.error || !view.hasMore) return false
       coverageDemand.current.remaining = 0
       intent.current = 'earlier'
-      if (!boundary.current) boundary.current = page?.items[0]?.id ?? null
-      void view.earlier(limit, { preserveCurrent: true })
+      if (!boundary.current) boundary.current = nativeMetadata[0]?.id ?? null
+      // Actual directional reading may slide the Core window. Presentation
+      // admission still protects the visible original, selection and return path.
+      void view.earlier(100)
       return true
     },
     retryLabel: expiredHistorical ? 'Read current records' : 'Retry',

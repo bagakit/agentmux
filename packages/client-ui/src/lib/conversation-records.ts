@@ -28,7 +28,7 @@ function describeReading(reading: ReturnType<typeof projectCoreReading>) {
   const describe = (record: AgentConversationRecord): ConversationRecord => {
     const speaker = record.author?.kind === 'system' ? { role: 'system' as const, id: record.author.providerId ?? 'agentmux' }
       : record.author ? speakerOfUserMessage({ author: record.author }) : undefined
-    return { ...record, sources: presentSources(record), coverage: reading.timeline.coverage, ...(speaker ? { speaker } : {}) }
+    return { ...record, ...(record.original.kind === 'deferred' ? {} : { sources: presentSources(record) }), coverage: reading.timeline.coverage, ...(speaker ? { speaker } : {}) }
   }
   return { timeline: reading.timeline, records: reading.records.map(describe), originalRecords: reading.originalRecords.map(describe), inputs: reading.inputs }
 }

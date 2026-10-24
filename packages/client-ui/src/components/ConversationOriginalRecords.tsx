@@ -18,7 +18,7 @@ function Original({ record, sessionId, locatedMessageKey, renderRecord, expanded
   useEffect(() => { if (expanded || key && key === locatedMessageKey) { setOpen(true); setPresented(true); if (key === locatedMessageKey) onOpenChange?.(true) } }, [key, locatedMessageKey, expanded])
   return <details className="conversation-original-record" data-message-source-key={key} data-original-contribution={record.id} tabIndex={-1}
     open={open} onToggle={event => { const next = event.currentTarget.open; if (next === open) return; setOpen(next); if (next) setPresented(true); onOpenChange?.(next) }}>
-    <summary>Original {record.original.kind} record · {record.original.item.id}</summary>
+    <summary>Original {record.original.kind} record · {record.rawId}</summary>
     {open || presented ? <ConversationOriginalRecordContent record={record} renderRecord={renderRecord} /> : null}
   </details>
 }
