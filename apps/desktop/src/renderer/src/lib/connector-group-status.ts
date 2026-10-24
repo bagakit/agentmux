@@ -10,7 +10,7 @@ export function connectorGroupDiagnostics(snapshot: CheckedGroupDiagnosis | unde
   const config = report.binding.value, service = report.service.value, adapterService = report.adapterService.value, connection = report.connection.value, out = report.outgoing.value
   const policy = [config ? config.state === 'active' ? 'Linked' : config.state === 'paused' ? 'Sharing paused' : 'Detached' : 'Link unconfirmed',
     `Sync ${service ? service.enabled ? 'on' : 'off' : 'unknown'}`, `Platform ${adapterService ? adapterService.enabled ? 'on' : 'off' : 'unknown'}`, `Bot ${connection ? connection.enabled ? 'on' : 'off' : 'unknown'}`].join(' · ')
-  const { gapCount: gaps, counts, effects } = outgoingFacts(out)
+  const { gapCount: gaps, accessUnconfirmed, effects } = outgoingFacts(out)
   const source = !out ? 'Reading unavailable' : out.observation?.reason === 'content-unconfirmed' ? 'Content not confirmed' :
     out.sourceObservation?.state === 'ready' ? 'Read confirmed' : out.sourceObservation?.state === 'unavailable' ? 'Reading unavailable' : 'Reading unconfirmed'
   const sourceText = source + (gaps ? ` · ${gaps} content gap${gaps === 1 ? '' : 's'} in this page` : out?.coverage?.state === 'incomplete' ? ' · coverage incomplete' : '')
@@ -20,6 +20,7 @@ export function connectorGroupDiagnostics(snapshot: CheckedGroupDiagnosis | unde
   const sharing = config ? `${config.scope.publication === 'future-shared-conversation' ? 'Confirmed user messages and public Agent replies' : 'Public Agent replies and questions'} → group · ${config.scope.input === 'all-messages' ? 'All group messages' : 'Mentions and replies'} → Agent (member access required)` : 'Range unconfirmed'
   return { outcome: issues.length === sections.length ? 'Unavailable' : issues.length ? 'Partial' : 'Checked',
     rows: [['Configuration', policy], ['Sharing', sharing], ['Conversation → group', sourceText], ['Platform requests', out ? requests : 'Reading unavailable'], ['Group → Agent', incoming],
+      ...(accessUnconfirmed ? [['Member access', 'Application permissions could not be checked; saved decisions are kept']] : []),
       ...(retained ? [['Earlier observations', 'Kept after this check failed; not current confirmation']] : [])] as Array<[string, string]> }
 }
 
@@ -36,7 +37,7 @@ function incomingStatus(report: GroupDiagnosis): string {
   return `${recorded} · ${input}`
 }
 
-export type ConnectorProblemKind = 'configuration-unconfirmed' | 'sync-off' | 'platform-off' | 'sharing-paused' | 'bot-off' | 'content-gap' | 'source-unconfirmed' |
+export type ConnectorProblemKind = 'configuration-unconfirmed' | 'sync-off' | 'platform-off' | 'sharing-paused' | 'bot-off' | 'content-gap' | 'source-unconfirmed' | 'access-unconfirmed' |
   'outgoing-unconfirmed' | 'outgoing-not-applied' | 'outgoing-read-unavailable' | 'incoming-read-unavailable' | 'member-access' | 'request-refused' | 'agent-waiting' | 'agent-stopped' | 'agent-not-applied' | 'agent-unconfirmed' | 'recording-unconfirmed'
 export type ConnectorProblem = { kind: ConnectorProblemKind; title: string; detail: string; tone: 'warning' | 'muted' }
 export type ConnectorDirectionSummary = { direction: 'outgoing' | 'incoming'; title: string; value: string; detail: string; tone: 'neutral' | 'warning' | 'muted' }
@@ -59,7 +60,8 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
   if (report?.binding.value?.state === 'paused') add('sharing-paused', 'Group sharing is paused', 'The saved group and its original requests are kept.', 'muted')
   if (report?.connection.value?.enabled === false) add('bot-off', 'Bot is disabled', 'Enable this original bot in its settings to resume its automatic work.', 'muted')
   const out = report?.outgoing.value
-  const { gapCount, contentGap, sourceUnconfirmed, counts, effects } = outgoingFacts(out)
+  const { gapCount, contentGap, sourceUnconfirmed, accessUnconfirmed, counts, effects } = outgoingFacts(out)
+  if (accessUnconfirmed) add('access-unconfirmed', 'Member access check unavailable', 'Application permissions could not be checked. Saved decisions are kept; review member access and check again.')
   if (contentGap) add('content-gap',
     gapCount ? `${gapCount} content gap${gapCount === 1 ? '' : 's'}` : 'Content coverage unconfirmed', 'Some source content is not confirmed for sharing in this window. This is separate from platform receipts.')
   else if (sourceUnconfirmed) add('source-unconfirmed', 'Source reading unconfirmed', 'This describes the local conversation source, not delivery to the group.')
@@ -96,7 +98,8 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
 function outgoingFacts(out: GroupDiagnosis['outgoing']['value'] | undefined) {
   const gapCount = out?.coverage ? out.coverage.gaps.length + out.coverage.omittedGapCount : 0
   const contentGap = gapCount > 0 || out?.coverage?.state === 'incomplete' || out?.observation?.reason === 'content-unconfirmed'
-  const sourceUnconfirmed = !!out && (out.sourceObservation?.state !== 'ready' || out.observation?.state === 'unavailable' && out.observation.reason !== 'effect-unconfirmed')
+  const accessUnconfirmed = out?.observation?.reason === 'access-unconfirmed'
+  const sourceUnconfirmed = !!out && (out.sourceObservation?.state !== 'ready' || out.observation?.state === 'unavailable' && out.observation.reason !== 'effect-unconfirmed' && !accessUnconfirmed)
   const counts = { confirmed: 0, unconfirmed: 0, pending: 0, notApplied: 0 }
   for (const delivery of out?.deliveries ?? []) {
     if (delivery.receipt === 'confirmed') counts.confirmed++
@@ -106,5 +109,5 @@ function outgoingFacts(out: GroupDiagnosis['outgoing']['value'] | undefined) {
   }
   const effects = [[counts.confirmed, 'confirmed'], [counts.unconfirmed, 'unconfirmed'], [counts.pending, 'pending'], [counts.notApplied, 'not applied']]
     .filter(([count]) => count).map(([count, label]) => `${count} ${label}`).join(' · ')
-  return { gapCount, contentGap, sourceUnconfirmed, counts, effects }
+  return { gapCount, contentGap, sourceUnconfirmed, accessUnconfirmed, counts, effects }
 }
