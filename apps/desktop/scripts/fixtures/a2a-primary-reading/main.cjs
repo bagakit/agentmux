@@ -62,8 +62,14 @@ async function scenario(surface, theme, width, generation) {
       await waitFor(`a2aPrimaryReading.facts().copied.at(-1)===${JSON.stringify(message.body)}`)
     }
     receipt.stage.action = 'inspect-notification-sources'
-    await evaluate(`${details}.querySelector('summary').focus()`)
-    for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+    const keyboardTarget = await evaluate(`(()=>{const e=${details}.querySelector('summary');e.scrollIntoView({block:'nearest'});e.focus();return{focused:document.activeElement===e,tag:e.tagName,text:e.textContent}})()`)
+    assert.equal(keyboardTarget.focused, true, 'The original notification summary owns keyboard focus before Return')
+    // Match the existing conversation-reading-density native keyboard activation, including the character event.
+    for (const input of [{ type: 'keyDown', keyCode: 'Enter' }, { type: 'char', keyCode: '\r' }, { type: 'keyUp', keyCode: 'Enter' }]) {
+      receipt.operations.push({ kind: 'native-keyboard-input', target: keyboardTarget, input })
+      win.webContents.sendInputEvent(input)
+    }
+    await painted()
     await waitFor(`${details}.open`)
     await click(`${details}.querySelector('[aria-label="Copy notification protocol"]')`)
     await waitFor(`a2aPrimaryReading.facts().copied.at(-1)===${JSON.stringify(source.wire)}`)
