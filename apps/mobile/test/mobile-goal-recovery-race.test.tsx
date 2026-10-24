@@ -20,6 +20,33 @@ afterEach(async () => {
   vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
+it('retains the exact request when another page replaces the workface, and refuses to write it into the replacement', async () => {
+  const owner = getDeviceWorkface(), f = fixture(), waiting = deferred<any>()
+  await owner.replaceBackup(emptyDeviceWorkface())
+  f.client.runtimeOwnerIdentity = () => ({ runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' } as never)
+  const rpc = vi.fn((..._args: any[]) => waiting.promise); f.client.forwardRpc = rpc as any
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, url: `${location.origin}/mobile/new/${'a'.repeat(64)}/index.html` })))
+  const render = (show: boolean) => <MobileWebUpdateSafetyProvider verifyConnection={connection}><Update /><MobileGoalOperationSafety /><MobileGoalOperationRecovery copyText={vi.fn(async () => true)} />{show && <MobileGoalLinks client={f.client} goal={goal} updated={() => {}} />}</MobileWebUpdateSafetyProvider>
+  const view = await mount(render(true)); await input(view.element); await click(button(view.element, '关联会话'))
+  await vi.waitFor(() => expect(owner.snapshot().record.goalOperationRecords?.length).toBe(1))
+  await act(async () => { waiting.reject(Error('original receipt unavailable')); await Promise.resolve() })
+  const priorRecordId = owner.recordIdentity()
+  await act(async () => { await owner.replaceBackup(emptyDeviceWorkface()) })
+  expect(owner.recordIdentity()).not.toBe(priorRecordId)
+  await view.render(render(false))
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('尚未保存在当前设备工作面') })
+  await click(button(view.element, '保存原设备工作面'))
+  expect(view.element.textContent).toContain('设备工作面身份已变化')
+  expect(owner.snapshot().record.goalOperationRecords ?? []).toEqual([])
+  const replacement = localStorage.getItem('agentmux-mobile-workface-v1')
+  await click(button(view.element, '复制原请求'))
+  await click(button(view.element, '已另行保全，移除本页副本…'))
+  await click(button(view.element, '确认已保全并移除本页副本'))
+  await vi.waitFor(() => expect(view.element.textContent).toContain('设备原记录状态未知'))
+  expect(localStorage.getItem('agentmux-mobile-workface-v1')).toBe(replacement)
+  expect(rpc).toHaveBeenCalledTimes(1)
+})
+
 it('sends the original Goal request without waiting for bookkeeping and removes only its confirmed record', async () => {
   const owner = getDeviceWorkface(), f = fixture(), release = deferred<void>()
   await act(async () => { await owner.replaceBackup(emptyDeviceWorkface()) })
@@ -52,28 +79,6 @@ it('does not misclassify a confirmed Goal receipt when the local presentation ca
   expect(rpc).toHaveBeenCalledOnce()
 })
 
-it('retains the exact request when another page replaces the workface, then explicitly saves it into the current one', async () => {
-  const owner = getDeviceWorkface(), f = fixture(), waiting = deferred<any>()
-  await owner.replaceBackup(emptyDeviceWorkface())
-  f.client.runtimeOwnerIdentity = () => ({ runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' } as never)
-  const rpc = vi.fn((..._args: any[]) => waiting.promise); f.client.forwardRpc = rpc as any
-  const navigate = vi.spyOn(location, 'assign').mockImplementation(() => {})
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, url: `${location.origin}/mobile/new/${'a'.repeat(64)}/index.html` })))
-  const render = (show: boolean) => <MobileWebUpdateSafetyProvider verifyConnection={connection}><Update /><MobileGoalOperationSafety /><MobileGoalOperationRecovery copyText={vi.fn()} />{show && <MobileGoalLinks client={f.client} goal={goal} updated={() => {}} />}</MobileWebUpdateSafetyProvider>
-  const view = await mount(render(true)); await input(view.element); await click(button(view.element, '关联会话'))
-  await vi.waitFor(() => expect(owner.snapshot().record.goalOperationRecords?.length).toBe(1))
-  await act(async () => { waiting.reject(Error('original receipt unavailable')); await Promise.resolve() })
-  const original = owner.snapshot().record.goalOperationRecords![0]!
-  const priorRecordId = owner.recordIdentity()
-  await act(async () => { await owner.replaceBackup(emptyDeviceWorkface()) })
-  expect(owner.recordIdentity()).not.toBe(priorRecordId)
-  await view.render(render(false))
-  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('目标原请求尚未') })
-  await click(button(view.element, '保存到当前设备工作面'))
-  expect(owner.snapshot().record.goalOperationRecords).toEqual([original])
-  expect(await apply()).toEqual({ status: 'navigating' }); expect(navigate).toHaveBeenCalledOnce()
-  expect(rpc).toHaveBeenCalledTimes(1)
-})
 
 it('immediately reports the unknown receipt and restores the action when bookkeeping is still hung', async () => {
   const owner = getDeviceWorkface(), f = fixture(), release = deferred<void>()
