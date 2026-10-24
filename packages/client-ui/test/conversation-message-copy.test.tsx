@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ConversationMessage, type ConversationMessageProps } from '../src/components/ConversationMessage.js'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
 import { contentFixture, record } from './fixtures/native-history-content/content.js'
+import { renderAgentMuxMessageReferences } from '@agentmux/core/agent-message-render'
 
 let root: Root, host: HTMLDivElement
 const copy = vi.fn<ClientUiPlatform['copyText']>()
@@ -97,6 +98,54 @@ it('keeps a failed full-text read visible when another action succeeds', async (
   await click('Copy message'); expect(host.querySelector('.log-turn__copy-error')?.textContent).toContain('temporarily unavailable')
   await click('Copy Agent ID')
   expect(button('Agent ID copied')).not.toBeNull(); expect(host.querySelector('.log-turn__copy-error')?.textContent).toContain('temporarily unavailable')
+})
+
+it('keeps a long copy failure outside the action slot while original details and retry remain available', async () => {
+  const failure = 'The original clipboard is temporarily unavailable. '.repeat(12)
+  copy.mockImplementationOnce(async (_text, reportError) => { reportError(new Error(failure)); return false })
+  await render({ createdAt: 1, messageDetails: <p>Exact original metadata</p> })
+  const originalCopy = button('Copy message'), originalBody = host.querySelector('.log-turn__body')
+  await click('Copy message')
+  const alert = host.querySelector('.log-turn__copy-error')!
+  expect(alert.textContent).toContain(failure)
+  expect(alert.parentElement).toBe(host.querySelector('.log-turn__head'))
+  expect(host.querySelector('.log-turn__actions')!.contains(alert)).toBe(false)
+  await click('Message details')
+  expect(host.querySelector('.conversation-input-details__body')?.textContent).toContain('Exact original metadata')
+  expect(host.querySelector('.log-turn__body')).toBe(originalBody)
+  await click('Copy message')
+  expect(button('Message copied')).toBe(originalCopy)
+  expect(copy).toHaveBeenLastCalledWith('Original body', expect.any(Function))
+  expect(host.querySelector('.log-turn__copy-error')).toBeNull()
+  expect(host.querySelector('.conversation-input-details__body')?.textContent).toContain('Exact original metadata')
+})
+
+it('confirms copying in the existing icon target without adding a wider text action', async () => {
+  await render()
+  const originalCopy = button('Copy message')
+  await click('Copy message')
+  expect(button('Message copied')).toBe(originalCopy)
+  expect(originalCopy.querySelector('svg')).not.toBeNull()
+  expect(originalCopy.textContent).toBe('')
+  expect(host.querySelector('.log-turn__sender-id code')?.textContent).toBe('original-agent')
+  expect(host.querySelector('.log-turn__body')?.textContent).toBe('Original body')
+})
+
+it('retains notification Copy failures in their original source disclosure outside the card frame', async () => {
+  const wire = renderAgentMuxMessageReferences([{ senderSessionId: 'sender', messageId: 'original-message' }])
+  copy.mockImplementationOnce(async (_text, reportError) => { reportError(new Error('Original notification Copy failed')); return false })
+  await render({ content: wire, speaker: { role: 'system', id: 'agentmux' }, a2aNotificationId: 'original-notification' })
+  const disclosure = host.querySelector<HTMLDetailsElement>('.conversation-a2a-notice__details')!
+  expect(disclosure).not.toBeNull()
+  await act(async () => { disclosure.open = true; disclosure.dispatchEvent(new Event('toggle')) })
+  const copyNotice = disclosure.querySelector<HTMLButtonElement>('[title="Copy message"]')!
+  expect(copyNotice).not.toBeNull()
+  await act(async () => copyNotice.click())
+  expect(disclosure.querySelector('[role="alert"]')?.textContent).toContain('Original notification Copy failed')
+  await act(async () => copyNotice.click())
+  expect(copy).toHaveBeenLastCalledWith(wire, expect.any(Function))
+  expect(disclosure.querySelector('[role="alert"]')).toBeNull()
+  expect(disclosure.open).toBe(true)
 })
 
 it('expires each success on its own timer without clearing another action or a newer failure', async () => {
