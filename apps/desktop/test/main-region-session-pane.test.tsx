@@ -86,7 +86,7 @@ for (const [mainSurface, destination, kind] of [['workbench', 'right', 'file'], 
           content: kind === 'file' ? '[source](./src/sidecar.md)' : '[source](https://example.test/sidecar)', source: 'native-hook', status: 'complete', createdAt: 100, updatedAt: 100 }] } } })
     expect(useAppStore.getState().selectMainRegion(main)).toBe(true)
     requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId, reference })
-    const before = useAppStore.getState(), context = createSessionProjectFileContextSelector(targetSid, origin)(before)
+    const before = useAppStore.getState(), context = createSessionProjectFileContextSelector(targetSid, origin, () => null)(before)
     expect(sessionFileRegionAvailable(origin, context)).toBe(true)
     const system = vi.spyOn(api.files, 'openSystem').mockResolvedValue(undefined)
     const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
