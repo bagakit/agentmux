@@ -102,6 +102,10 @@ export const SubTrigger = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<ty
       onPointerLeave={event => {
         pointer.onPointerLeave(event)
         const target = event.relatedTarget as Node | null
+        const submenuId = event.currentTarget.getAttribute('aria-controls')
+        // A fast crossing may reach the submenu before Radix records its direction.
+        // Its exact destination is already known; keep item-leave from focusing the parent.
+        if (target?.nodeType && submenuId && event.currentTarget.ownerDocument.getElementById(submenuId)?.contains(target)) event.preventDefault()
         if (menu.hover.current && target?.nodeType && menu.content.current?.contains(target)) sub?.change(false)
       }}
       onPointerMove={event => {
