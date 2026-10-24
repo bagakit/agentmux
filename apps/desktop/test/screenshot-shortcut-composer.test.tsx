@@ -224,6 +224,55 @@ it('a failed native capture preserves the original draft and does not perform a 
   expect(focus).not.toHaveBeenCalled()
 })
 
+it.each([[false, 'composing'], [false, 'readOnly'], [true, 'composing'], [true, 'readOnly']] as const)(
+  'the real %s Composer retains saved recovery when late %s rejects insertion', async (launcher, rejection) => {
+    let finish!: (value: typeof captured) => void
+    const native = vi.fn(() => new Promise<typeof captured>(resolve => { finish = resolve }))
+    const { saved, focus } = connect(native)
+    const { node, editor, id } = await mount(launcher)
+    await act(async () => editor.commands.insertContentAt(1, 'new '))
+    expect(dom.draft(id)).toBe('new alpha omega')
+    const { pending } = await begin()
+    await act(async () => {
+      if (rejection === 'composing') node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '组' }))
+      else editor.setEditable(false, false)
+    })
+    if (rejection === 'composing') expect(editor.view.composing).toBe(true)
+    else expect(editor.isEditable).toBe(false)
+    let outcome: unknown
+    await act(async () => { finish(captured); try { await pending } catch (error) { outcome = error } })
+    const path = await saved.mock.results[0]!.value
+    expect(await readFile(path!)).toEqual(bytes)
+    expect(outcome).toBeInstanceOf(Error)
+    expect(String(outcome)).toContain(path!)
+    expect(String(outcome)).toMatch(/check the original draft.*reference this image/iu)
+    expect((outcome as Error).cause).toBeInstanceOf(Error)
+    expect(String((outcome as Error).cause)).toContain('not accepting this attachment')
+    expect(dom.draft(id)).toBe('new alpha omega')
+    expect(native).toHaveBeenCalledExactlyOnceWith({ mode: 'selection' })
+    expect(focus).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions[0]?.control).toEqual(composerSession().control)
+    await act(async () => {
+      if (rejection === 'composing') node.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }))
+      else editor.setEditable(true, false)
+    })
+    await vi.waitFor(() => expect(editor.view.composing).toBe(false))
+    await act(async () => editor.commands.undo())
+    expect(dom.draft(id)).toBe('alpha omega')
+  }
+)
+
+it('a failure before image saving keeps the original error without inventing saved recovery', async () => {
+  const original = new Error('Original native connection ended before a PNG receipt')
+  const native = vi.fn(async () => { throw original })
+  const { focus } = connect(native)
+  const { id } = await mount(false)
+  await act(async () => { await expect(runScreenshotShortcut()).rejects.toBe(original) })
+  expect(dom.draft(id)).toBe('alpha omega')
+  expect(focus).not.toHaveBeenCalled()
+  expect(native).toHaveBeenCalledOnce()
+})
+
 it('an unconfirmed exact document focus does not claim that the saved attachment returned to the draft', async () => {
   const native = vi.fn(async () => captured)
   const { saved, focus } = connect(native, 'unknown')
