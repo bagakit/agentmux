@@ -11,7 +11,7 @@ import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/co
 import { AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
 import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-controller'
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store'
-import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager'
+import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
 import { CONFIG_CHANGED_CHANNEL, type AppConfig } from '../src/shared/contracts'

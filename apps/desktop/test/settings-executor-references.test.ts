@@ -46,7 +46,7 @@ vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: clas
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import { ConfigStore } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
-import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 // Actual Runtime and Core admission, Store, input and Provider History execute. Only the

@@ -48,7 +48,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxMemoryAgentSes
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { registerIpc } from '../src/main/ipc.js'
-import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 const roots: string[] = [], exec = promisify(execFile)

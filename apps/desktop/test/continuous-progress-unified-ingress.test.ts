@@ -13,8 +13,9 @@ import {
 } from '@agentmux/core'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { CtxmuxRunAdapter } from '../../../packages/core/src/ctxmux-run-adapter.js'
+import { createGoalRuntime } from '@agentmux/host/goal-runtime'
 import { RuntimeController } from '../src/main/runtime-controller.js'
-import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { nextCalendarOccurrence } from '@agentmux/core/schedule-calendar'
 import { privateTracker } from './helpers/continuous-progress-tracker'
@@ -47,7 +48,7 @@ afterEach(async () => {
 })
 
 /**
- * Actual Main observer/delivery and public Core ingress/Store; only Native I/O and
+ * Actual Host observer/delivery and public Core ingress/Store; only Native I/O and
  * optional rendered-composer observation are controlled. This is not a PTY/GUI proof.
  */
 async function fixture(extra: Partial<AgentMuxStoredAgentSession> = {}) {
@@ -98,10 +99,12 @@ async function fixture(extra: Partial<AgentMuxStoredAgentSession> = {}) {
     state.kernel.identity = () => ({ daemonInstanceId: 'private-daemon', protocolVersion: 18, buildIdentity: 'private-I/O-seam' })
     state.kernel.status = vi.fn(async () => projection()); state.kernel.input = input
     vi.spyOn(state.screenEvidence, 'wait').mockResolvedValue(0)
-    const runtime = new RuntimeController(freshStore, localRuntimeConnector)
-    runtime.setContinuousProgressInputObserver(async () => false)
-    // Already-connected host I/O seam; no connect/start/attach is performed.
-    ;(runtime as unknown as { hosts: Map<string, { client: AgentMuxClient }> }).hosts.set('local', { client })
+    const desktop = new RuntimeController(freshStore, localRuntimeConnector)
+    // Already-connected manual client I/O seam; no connect/start/attach is performed.
+    ;(desktop as unknown as { hosts: Map<string, { client: AgentMuxClient }> }).hosts.set('local', { client })
+    const progress = createGoalRuntime({ clients: () => [{ hostId: 'local', client }], inputOccupied: async () => false,
+      checkIn: async () => ({ known: false, reason: 'No quiet-follow-up source is supplied by this input-boundary fixture.' }) })
+    const runtime = { ...progress, write: desktop.write.bind(desktop) }
     return { store: freshStore, client, state, runtime }
   }
   const first = await make()
@@ -295,7 +298,7 @@ describe('continuous progress uses the public ingress and shared observation', (
     expect(manager.list()[0]).toMatchObject({ lastOutcome: 'skipped', nextCheckAt: _tailFixtureEpoch(0, 0, 1010) })
   })
 
-  it('the Main future scheduler reads only its exact saved body from the Core public capability', async () => {
+  it('the Host future scheduler reads only its exact saved body from the Core public capability', async () => {
     const f = await fixture()
     await f.client.saveAgentFuturePromptIntent({ agentSessionId: f.session.agentSessionId, intentId: 'chosen', operationId: 'chosen-operation', prompt: 'this exact future task', active: true })
     await f.client.saveAgentFuturePromptIntent({ agentSessionId: f.session.agentSessionId, intentId: 'unrelated', operationId: 'other-operation', prompt: 'unrelated retained body', active: false })
@@ -363,7 +366,7 @@ describe('continuous progress uses the public ingress and shared observation', (
     vi.resetModules()
     vi.doMock('@agentmux/core', () => ({ ...realCore,
       AGENTMUX_AGENT_MESSAGING_ENTRY: 'Rules for a future claim; never replace the pending message.' }))
-    const { ContinuousProgressLoopManager: CurrentManager } = await import('../../host/src/continuous-progress-loop-manager.js')
+    const { ContinuousProgressLoopManager: CurrentManager } = await import('@agentmux/host/continuous-progress-loop-manager')
     const cold = owner.make(CurrentManager); await cold.start(); owner.at(1000); await cold.check()
     expect(cold.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown', pendingCompletion: original })
     expect(f.requests).toHaveLength(1)

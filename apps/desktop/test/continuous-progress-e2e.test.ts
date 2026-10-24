@@ -1,7 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { observeAgent } from '@agentmux/core'
 import { describe, expect, it } from 'vitest'
-import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager'
+import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import type { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 describe('continuous progress provider delivery', () => {

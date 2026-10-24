@@ -74,7 +74,7 @@ describe('reading evidence in the sole client incident archive', () => {
   it('discovers and reads original metadata through the real public service after its producer disappears', async () => {
     const owner = await archive(), original = record('held')
     owner.enqueue(readingClientIncident(original, 0), producer()); await owner.flush()
-    const service = new AgentMuxRpcService({ clientIncidents: owner, coreClients: () => [] }); services.push(service)
+    const service = new AgentMuxRpcService({ clientIncidents: () => owner, coreClients: () => [] }); services.push(service)
     const query = { target: { domain: 'client.incident' as const, hostId: 'local', recent: { kind: 'conversation-reading-held' as const } } }
     const found = parseDiagnosticEvidenceResult(await service.call('system.diagnostics.inspect', query), query)
     const page = found.reads[0]!.data as AgentMuxClientIncidentPage
@@ -90,7 +90,7 @@ describe('reading evidence in the sole client incident archive', () => {
     const owner = await archive(), original = record('held')
     owner.enqueue(readingClientIncident(original, 0), producer()); await owner.flush()
     const before = await owner.read({ domain: 'client.incident', hostId: 'local', logId: original.logId }, bounds())
-    const entry = process.env.AGENTMUX_TEST_READING_ARCHIVE_ENTRY ?? new URL('@agentmux/host/client-incident-archive', import.meta.url).href
+    const entry = process.env.AGENTMUX_TEST_READING_ARCHIVE_ENTRY ?? new URL('../../host/src/client-incident-archive.ts', import.meta.url).href
     const script = `import {ClientIncidentArchive} from ${JSON.stringify(entry)};
       const owner=new ClientIncidentArchive(process.argv[1]); await owner.flush();
       const bounds={signal:new AbortController().signal,maxBytes:131072};
@@ -108,7 +108,7 @@ describe('reading evidence in the sole client incident archive', () => {
 
     const reader = new ClientIncidentArchive(owner.directory); await reader.flush()
     const socketPath = join(owner.directory, 'query.sock')
-    const server = new AgentMuxControlServer({ socketPath, coreClients: () => [], clientIncidents: reader })
+    const server = new AgentMuxControlServer({ socketPath, coreClients: () => [], clientIncidents: () => reader })
     await server.start()
     try {
       const prefix = ['--endpoint', `unix://${socketPath}`, 'system', 'diagnostics', 'inspect']

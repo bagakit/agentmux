@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { observeAgent, type AgentTimelineSnapshot, type AgentSessionHistoryPage, type ContinuousProgressLoop, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { DEFAULT_AGENT_SCHEDULE_CHECK_IN, AGENT_SCHEDULE_CHECK_IN_GUIDANCE } from '@agentmux/core/schedule'
 import { checkInHumanObservation, decideCheckIn, type CheckInObservation } from '@agentmux/host/agent-schedule-check-in'
-import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager'
+import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
 
