@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const sourcePath = 'packages/core/src/agent-session-recovery/lifecycle.ts'
+const continuitySourcePath = 'packages/core/src/agent-session-recovery/continuity-attempt.ts'
+const continuityReceipt = "error.creationFailure?.operationId === agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId) &&\n      error.creationFailure.disposition === 'not_applied'"
 const negativeReceipt = 'retains direct resume preparation for a foreign-operation negative receipt'
 const restartRejected = 'an authoritative not-applied Start remains explicitly retryable'
 const mutations = [
@@ -29,7 +31,12 @@ const mutations = [
   { id: 'restart-rejection-loses-storage-evidence', from: 'error.logId, error.creationFailure, error.storageFailure)',
     to: 'error.logId, error.creationFailure, undefined)', assertion: restartRejected },
   { id: 'restart-rejection-loses-original-cause', from: "Object.defineProperty(rejected, 'cause', { value: error })",
-    to: 'void rejected', assertion: restartRejected }
+    to: 'void rejected', assertion: restartRejected },
+  { id: 'continuity-loses-confirmed-creation-refusal', source: continuitySourcePath, from: continuityReceipt,
+    to: "error.controlFailure?.disposition === 'not_applied'",
+    assertion: 'allows a distinct explicit intent after a confirmed not-applied Start' },
+  { id: 'continuity-guesses-unknown-start-not-applied', source: continuitySourcePath, from: continuityReceipt,
+    to: 'true', assertion: 'keeps frozen continuity input unknown for a foreign-operation creation failure' }
 ]
 const mutationIndex = process.argv.indexOf('--mutation')
 const selected = mutationIndex < 0 ? mutations : mutations.filter(value => value.id === process.argv[mutationIndex + 1])
@@ -46,10 +53,11 @@ async function run(name, mutation) {
   const witness = join(directory, name + '.loaded.json')
   let plugin = ''
   if (mutation) {
-    const source = await readFile(join(root, sourcePath), 'utf8')
+    const sourceFile = mutation.source ?? sourcePath
+    const source = await readFile(join(root, sourceFile), 'utf8')
     assert.equal(source.split(mutation.from).length, 2, mutation.id + ': unique owning source anchor required')
     const changed = source.replace(mutation.from, mutation.to)
-    plugin = `plugins:[{name:'recovery-creation-source-mutation',enforce:'pre',transform(code,id){if(id.split('?')[0]===${JSON.stringify(resolve(root, sourcePath))}){if(code.split(${JSON.stringify(mutation.from)}).length!==2)throw new Error('Mutation source anchor unavailable');const next=code.replace(${JSON.stringify(mutation.from)},${JSON.stringify(mutation.to)});writeFileSync(${JSON.stringify(witness)},JSON.stringify({source:sha(code),loaded:sha(next)}));return {code:next,map:null}}}}],`
+    plugin = `plugins:[{name:'recovery-creation-source-mutation',enforce:'pre',transform(code,id){if(id.split('?')[0]===${JSON.stringify(resolve(root, sourceFile))}){if(code.split(${JSON.stringify(mutation.from)}).length!==2)throw new Error('Mutation source anchor unavailable');const next=code.replace(${JSON.stringify(mutation.from)},${JSON.stringify(mutation.to)});writeFileSync(${JSON.stringify(witness)},JSON.stringify({source:sha(code),loaded:sha(next)}));return {code:next,map:null}}}}],`
     mutation.expectedLoaded = sha(changed)
   }
   await writeFile(config, `import { writeFileSync } from 'node:fs';import { createHash } from 'node:crypto';const sha=value=>createHash('sha256').update(value).digest('hex');import base from ${JSON.stringify(join(root, 'packages/core/test/recovery-creation-failure.config.mts'))};export default {...base,root:${JSON.stringify(root)},${plugin}test:{...base.test,${mutation ? 'testNamePattern:' + JSON.stringify(mutation.assertion) + ',' : ''}passWithNoTests:false,maxWorkers:1}};\n`)
@@ -71,21 +79,22 @@ async function run(name, mutation) {
   let loaded
   if (mutation) {
     loaded = JSON.parse(await readFile(witness, 'utf8'))
-    assert.equal(loaded.source, receipt.inputs[sourcePath]); assert.equal(loaded.loaded, mutation.expectedLoaded)
+    assert.equal(loaded.source, receipt.inputs[mutation.source ?? sourcePath]); assert.equal(loaded.loaded, mutation.expectedLoaded)
     assert.equal(result.code, 1, name + ': loaded mutation must fail. ' + result.output.slice(-4000))
     assert.ok(failures.some(item => item.fullName.includes(mutation.assertion) && item.failureMessages.some(message => /AssertionError|promise resolved|promise rejected/.test(message))),
       name + ': designated business assertion must fail, not collection or preparation. ' + JSON.stringify(failures) + result.output.slice(-4000))
   } else {
     assert.equal(result.code, 0, JSON.stringify(failures) + result.output.slice(-4000))
-    assert.equal(data.numFailedTests, 0); assert.equal(data.numPassedTests, 14, 'All three recovery consumers must execute')
+    assert.equal(data.numFailedTests, 0); assert.equal(data.numPassedTests, 22, 'All four recovery consumers must execute')
   }
   return { name, exitCode: result.code, passed: data.numPassedTests, failed: data.numFailedTests,
-    reportSha256: sha(await readFile(report)), ...(mutation ? { source: sourcePath, loadedSha256: loaded.loaded,
+    reportSha256: sha(await readFile(report)), ...(mutation ? { source: mutation.source ?? sourcePath, loadedSha256: loaded.loaded,
       assertion: mutation.assertion, failures: failures.map(item => ({ name: item.fullName, messages: item.failureMessages })) } : {}) }
 }
 
 try {
-  for (const path of [sourcePath, 'packages/core/test/durable-direct-resume.test.ts', 'packages/core/test/agent-session-restart.test.ts',
+  for (const path of [sourcePath, continuitySourcePath, 'packages/core/test/session-continuity-launch-input.test.ts',
+    'packages/core/test/durable-direct-resume.test.ts', 'packages/core/test/agent-session-restart.test.ts',
     'packages/core/test/retired-session-reopen.test.ts', 'packages/core/test/recovery-creation-failure.config.mts',
     'packages/core/scripts/verify-recovery-creation-failure.mjs']) receipt.inputs[path] = sha(await readFile(join(root, path)))
   receipt.baseline = await run('baseline')
