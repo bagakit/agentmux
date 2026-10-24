@@ -22,8 +22,9 @@ export function createGoalParticipationOwner(options: {
       if (context.caller.agentSessionId !== sessionId) {
         const creator = created.creation?.createdBy
         const originalCreator = goal.discussionIntent?.callerAgentSessionId === caller.agentSessionId && creator?.owner.kind === 'local' && creator.agentSessionId === caller.agentSessionId && creator.run.runId === caller.run.runId
-        if (goal.discussionOperationId !== created.creation?.createOperationId || messageSource?.sessionId !== caller.agentSessionId && !originalCreator)
-          throw new AgentMuxError('The authenticated caller has no exact original Goal discussion creation provenance. Original participation and Agent input are retained.', 'CONTROL_PERMISSION_DENIED')
+        const originalMessage = messageSource?.sessionId === caller.agentSessionId && await options.discussion?.(goal, hostId, sessionId)
+        if (!originalMessage && (goal.discussionOperationId !== created.creation?.createOperationId || !originalCreator))
+          throw new AgentMuxError('The authenticated caller has no exact original Goal discussion creation or authored input provenance. Original participation and Agent input are retained.', 'CONTROL_PERMISSION_DENIED')
       }
     } else if (!context.principal || !['user','device'].includes(context.principal.kind)) throw new AgentMuxError('Goal participation requires its original person, device or authenticated Agent.', 'CONTROL_PERMISSION_DENIED')
   }
@@ -57,7 +58,7 @@ export function createGoalParticipationOwner(options: {
           !originalKey || admission.intent?.run.runId !== input.expectedRun.runId)
         throw new AgentMuxError('The original Core prompt input receipt is unconfirmed. Retain the same Goal and input operation; no message was repeated.', 'CONTROL_UNAVAILABLE')
       if (input.evidence === 'message-input') {
-        if (!goal.discussionIntent || goal.discussionOperationId !== created.creation?.createOperationId || !await options.discussion?.(goal, input.hostId, input.agentSessionId))
+        if (!await options.discussion?.(goal, input.hostId, input.agentSessionId))
           throw new AgentMuxError('The message recipient has no exact original Goal discussion role. The message, Goal and existing Agent remain retained.', 'CONTROL_UNAVAILABLE')
         const envelope = message?.envelope
         if (envelope?.sender.kind !== 'agent-session' || envelope.senderSessionId !== admission.intent.message?.authorAgentSessionId || envelope.sender.agentSessionId !== envelope.senderSessionId ||

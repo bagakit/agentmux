@@ -1,3 +1,4 @@
+import { contributeGoalDiscussionBinding, readGoalDiscussionBinding, resolveGoalDiscussionBinding } from './goal-discussion-bindings.js'
 import { AgentMuxError, agentPromptCondition, spatialCatalog, type AgentMuxRpcCallContext, type AgentMuxRpcMethod, type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxSpatialStateStore } from '@agentmux/core'
 import { spatialAgentOpenRecord } from '@agentmux/core/spatial-state'
 import { deriveObjectId } from '@agentmux/core/object-id'
@@ -32,7 +33,7 @@ export function createHostGoalDiscussions(options: {
   spatial?: AgentMuxSpatialStateStore
   runtime: GoalRuntimePort
   confirmParticipation(input: import('@agentmux/core').GoalParticipationConfirm, context: AgentMuxRpcCallContext): Promise<unknown>
-  call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
+  call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext, hostId?: string): Promise<AgentMuxRpcResult<M>>
 }) {
   const topics = new ScratchTopics()
   const current = async (context: AgentMuxRpcCallContext) => { context.signal?.throwIfAborted(); await context.assertCurrent?.() }
@@ -112,10 +113,12 @@ export function createHostGoalDiscussions(options: {
   const taskContext = async (goal: Demand, mode: 'grill' | 'grounding') => [discussionTask(goal, mode), await projectContext(goal)].join('\n\n')
   return {
     async ownsRecipient(goal: Demand, hostId: string, sessionId: string): Promise<boolean> {
-      if (!goal.discussionOperationId || !goal.discussionIntent) return false
-      const state = await options.spatial?.read(), record = state && spatialAgentOpenRecord(state.graph, goal.discussionOperationId)
-      return !!record && record.agentSessionId === sessionId && record.execution.hostId === hostId && record.executorId === goal.discussionIntent.executorId &&
-        record.address.spaceId === goal.discussionIntent.spaceId && record.address.zoneId === goal.discussionIntent.zoneId
+      const state = await options.spatial?.read()
+      if (!state) return false
+      const binding = readGoalDiscussionBinding(state.graph, goal.id)
+      if (!binding || binding.recipient.kind !== 'agent' || binding.recipient.hostId !== hostId || binding.recipient.agentSessionId !== sessionId) return false
+      resolveGoalDiscussionBinding(state.graph, binding)
+      return true
     },
     async patrol(request: Extract<AgentMuxControlRequest, { operation: 'demand.patrol-all' }>, context: AgentMuxRpcCallContext): Promise<Extract<AgentMuxControlResult, { operation: 'demand.patrol-all' }>> {
       await current(context)
@@ -149,31 +152,52 @@ export function createHostGoalDiscussions(options: {
     async execute(request: Request, context: AgentMuxRpcCallContext): Promise<Extract<AgentMuxControlResult, { operation: 'demand.discuss' }>> {
       await current(context)
       let goal = await saved(request.demandId)
-      const original = await intent(goal, request, context)
+      if (!options.spatial) return unavailable('The original Core spatial owner is unavailable.')
+      let state = await options.spatial.read()
+      if (!state) return unavailable('The original Core spatial document is unavailable.')
+      let binding = readGoalDiscussionBinding(state.graph, goal.id)
+      const original = goal.discussionIntent || !binding ? await intent(goal, request, context) : undefined
       goal = await saved(goal.id)
-      const operationId = goal.discussionOperationId!
-      const opened = await options.call('agent.open', { content: { kind: 'new-agent', executorId: original.executorId, ...(original.prompt === undefined ? {} : { prompt: original.prompt }) },
-        destination: { spaceId: original.spaceId, zoneId: original.zoneId, newTab: true }, focus: false, operationId }, context)
-      if (!opened.to || !opened.agent || opened.outcome !== 'opened') return unavailable('The original dedicated discussion creation is unconfirmed. Inspect its same operation without choosing another recipient.')
-      const state = await options.spatial?.read(), record = state && spatialAgentOpenRecord(state.graph, operationId)
-      const region = record && state!.graph.regions.find(region => region.tabId === record.address.tabId && region.regionId === record.address.regionId)
-      if (!record || record.agentSessionId !== opened.agent.agentSessionId || region?.agentSessionId !== record.agentSessionId) return unavailable('The original discussion workface binding is unconfirmed.')
-      if (original.prompt && goal.creationOrigin) {
-        if (!opened.agent.createdRun) return unavailable('The original discussion creation Run is unconfirmed.')
-        await options.confirmParticipation({ goalId: goal.id, ...(!goal.creationOrigin.requesterParticipationId ? { creationOperationId: goal.creationOrigin.operationId } : {}), hostId: record.execution.hostId,
-          agentSessionId: record.agentSessionId, expectedRun: opened.agent.createdRun, evidence: 'creation-input', operationId }, context)
+      if (!binding) {
+        const operationId = goal.discussionOperationId!
+        const opened = await options.call('agent.open', { content: { kind: 'new-agent', executorId: original!.executorId, ...(original!.prompt === undefined ? {} : { prompt: original!.prompt }) },
+          destination: { spaceId: original!.spaceId, zoneId: original!.zoneId, newTab: true }, focus: false, operationId }, context)
+        if (!opened.to || !opened.agent || opened.outcome !== 'opened') return unavailable('The original dedicated discussion creation is unconfirmed. Inspect its same operation without choosing another recipient.')
+        state = await options.spatial.read()
+        const record = state && spatialAgentOpenRecord(state.graph, operationId)
+        if (!record || record.agentSessionId !== opened.agent.agentSessionId) return unavailable('The original discussion creation workface is unconfirmed.')
+        binding = { schema: 'agentmux.goal-discussion-binding.v1', tabId: record.address.tabId, regionId: record.address.regionId,
+          recipient: { kind: 'agent', hostId: record.execution.hostId, agentSessionId: record.agentSessionId } }
+        await current(context)
+        state = (await contributeGoalDiscussionBinding({ spatial: options.spatial, goalId: goal.id, binding })).state
       }
-      if (request.mode !== 'open' && request.requestId !== original.requestOperationId) {
-        const observed = await options.runtime.observeGoalAgent(record.execution.hostId, record.agentSessionId)
-        const key = { kind: 'prompt' as const, agentSessionId: record.agentSessionId, expectedRun: observed.session.run, submissionId: request.requestId }
+      resolveGoalDiscussionBinding(state.graph, binding)
+      const receipt = () => ({ demandId: goal.id, requestId: request.requestId, mode: request.mode, tabId: binding.tabId, regionId: binding.regionId,
+        hostId: binding.recipient.kind === 'agent' ? binding.recipient.hostId : null, agentSessionId: binding.recipient.kind === 'agent' ? binding.recipient.agentSessionId : null })
+      if (binding.recipient.kind === 'launcher') {
+        if (request.mode !== 'open') return unavailable('Open the original discussion launcher and explicitly choose its Agent before sending this request.')
+        return { operation: request.operation, demand: projectHostGoal(goal), receipt: receipt() }
+      }
+      const recipient = binding.recipient
+      if (original?.prompt && goal.creationOrigin && request.requestId === original.requestOperationId) {
+        const created = await options.runtime.agentCreation(recipient.hostId, recipient.agentSessionId)
+        const creation = created.kind === 'agent' ? created.creation : undefined
+        if (created.kind !== 'agent' || creation?.createOperationId !== goal.discussionOperationId || !creation?.createdRun)
+          return unavailable('The original discussion creation input and Run are unconfirmed.')
+        await options.confirmParticipation({ goalId: goal.id, ...(!goal.creationOrigin.requesterParticipationId ? { creationOperationId: goal.creationOrigin.operationId } : {}), hostId: recipient.hostId,
+          agentSessionId: recipient.agentSessionId, expectedRun: creation.createdRun, evidence: 'creation-input', operationId: goal.discussionOperationId! }, context)
+      }
+      if (request.mode !== 'open' && request.requestId !== original?.requestOperationId) {
+        const observed = await options.runtime.observeGoalAgent(recipient.hostId, recipient.agentSessionId)
+        const key = { kind: 'prompt' as const, agentSessionId: recipient.agentSessionId, expectedRun: observed.session.run, submissionId: request.requestId }
         const messageId = deriveObjectId('goal-discussion-message', request.requestId)
         const inputId = context.caller ? messageId : request.requestId
-        const session = await options.runtime.agentCreation(record.execution.hostId, record.agentSessionId)
+        const session = await options.runtime.agentCreation(recipient.hostId, recipient.agentSessionId)
         if (session.kind !== 'agent') return unavailable('The original discussion Session was explicitly retired. Keep its history and recover that exact Session before sending.')
         const runs = [...new Map([session.run, ...session.retiredRuns].map(run => [run.runId, run])).values()]
         let prior: Awaited<ReturnType<GoalRuntimePort['inspectGoalAttention']>> = null
         for (const run of runs) {
-          prior = await options.runtime.inspectGoalAttention({ hostId: record.execution.hostId, supervisorAgentSessionId: record.agentSessionId, supervisorRunId: run.runId, operationId: inputId, ...(context.caller ? { producer: 'message' as const } : {}) })
+          prior = await options.runtime.inspectGoalAttention({ hostId: recipient.hostId, supervisorAgentSessionId: recipient.agentSessionId, supervisorRunId: run.runId, operationId: inputId, ...(context.caller ? { producer: 'message' as const } : {}) })
           if (prior) break
         }
         if (prior && !prior.admission?.acknowledged) return unavailable('The original discussion request input is unconfirmed; it was not automatically repeated.')
@@ -181,25 +205,25 @@ export function createHostGoalDiscussions(options: {
           throw new AgentMuxError('This original discussion input belongs to another frozen request. Its input and recipient remain retained.', 'CONTROL_REQUEST_CONFLICT')
         if (!prior) {
           if (context.caller) {
-            await options.call('agent.send', { target: { kind: 'agent-session', agentSessionId: record.agentSessionId }, expectedRun: key.expectedRun,
+            await options.call('agent.send', { target: { kind: 'agent-session', agentSessionId: recipient.agentSessionId }, expectedRun: key.expectedRun,
               operationId: request.requestId, messageId, correlationId: deriveObjectId('goal-discussion-' + request.mode, goal.id),
-              text: await taskContext(goal, request.mode), execution: 'immediate', sourceChannel: 'api' }, context)
+              text: await taskContext(goal, request.mode), execution: 'immediate', sourceChannel: 'api' }, context, recipient.hostId)
           } else {
-          await options.runtime.submitPrompt({ kind: 'agent', hostId: record.execution.hostId, agentSessionId: record.agentSessionId, run: key.expectedRun },
+          await options.runtime.submitPrompt({ kind: 'agent', hostId: recipient.hostId, agentSessionId: recipient.agentSessionId, run: key.expectedRun },
             request.mode === 'grill' ? 'Clarify this existing Goal.' : 'Inspect this existing Goal and its actual results.', request.requestId, agentPromptCondition(observed.session), undefined, undefined, true,
             await taskContext(goal, request.mode), 'api', undefined, context)
           }
-          prior = await options.runtime.inspectGoalAttention({ hostId: record.execution.hostId, supervisorAgentSessionId: record.agentSessionId, supervisorRunId: key.expectedRun.runId, operationId: inputId, ...(context.caller ? { producer: 'message' as const } : {}) })
+          prior = await options.runtime.inspectGoalAttention({ hostId: recipient.hostId, supervisorAgentSessionId: recipient.agentSessionId, supervisorRunId: key.expectedRun.runId, operationId: inputId, ...(context.caller ? { producer: 'message' as const } : {}) })
         }
         if (!prior?.admission?.acknowledged) return unavailable('The original discussion input remains unconfirmed. Its operation and recipient are retained; it was not repeated.')
         if (context.caller) {
-          const { message } = await options.call('message.read', { hostId: record.execution.hostId, operationId: request.requestId }, context)
+          const { message } = await options.call('message.read', { hostId: recipient.hostId, operationId: request.requestId }, context)
           if (message?.envelope.messageId !== messageId || message.envelope.correlationId !== deriveObjectId('goal-discussion-' + request.mode, goal.id) || message.envelope.body !== await taskContext(goal, request.mode))
             throw new AgentMuxError('The original discussion message belongs to another business request. Its actual sender, recipient and input remain retained.', 'CONTROL_REQUEST_CONFLICT')
         }
-        await options.confirmParticipation({ goalId: goal.id, hostId: record.execution.hostId, agentSessionId: record.agentSessionId, expectedRun: prior.run, evidence: context.caller ? 'message-input' : 'prompt-input', operationId: request.requestId }, context)
+        await options.confirmParticipation({ goalId: goal.id, hostId: recipient.hostId, agentSessionId: recipient.agentSessionId, expectedRun: prior.run, evidence: context.caller ? 'message-input' : 'prompt-input', operationId: request.requestId }, context)
       }
-      return { operation: request.operation, demand: projectHostGoal(await saved(goal.id)), receipt: { demandId: goal.id, requestId: request.requestId, mode: request.mode, tabId: record.address.tabId, agentSessionId: record.agentSessionId } }
+      return { operation: request.operation, demand: projectHostGoal(await saved(goal.id)), receipt: receipt() }
     }
   }
 }

@@ -1492,7 +1492,10 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     const demandId = id(r.demandId, 'Goal id is invalid.', 'CONTROL_PROTOCOL_ERROR')
     if (operation === 'demand.discuss') {
       if (!['open', 'grill', 'grounding'].includes(r.mode as string)) throw new AgentMuxError('Goal discussion receipt mode is invalid.', 'CONTROL_PROTOCOL_ERROR')
-      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId, requestId: id(r.requestId, 'Goal operation id is invalid.', 'CONTROL_PROTOCOL_ERROR'), mode: r.mode as 'open' | 'grill' | 'grounding', tabId: id(r.tabId, 'Goal Tab is invalid.', 'CONTROL_PROTOCOL_ERROR'), agentSessionId: r.agentSessionId === null ? null : id(r.agentSessionId, 'Goal Session is invalid.', 'CONTROL_PROTOCOL_ERROR') } } }
+      const agentSessionId = r.agentSessionId === null ? null : id(r.agentSessionId, 'Goal Session is invalid.', 'CONTROL_PROTOCOL_ERROR')
+      const hostId = r.hostId === null ? null : id(r.hostId, 'Goal execution Host is invalid.', 'CONTROL_PROTOCOL_ERROR')
+      if ((hostId === null) !== (agentSessionId === null)) throw new AgentMuxError('Goal discussion recipient identity is incomplete.', 'CONTROL_PROTOCOL_ERROR')
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId, requestId: id(r.requestId, 'Goal operation id is invalid.', 'CONTROL_PROTOCOL_ERROR'), mode: r.mode as 'open' | 'grill' | 'grounding', tabId: id(r.tabId, 'Goal Tab is invalid.', 'CONTROL_PROTOCOL_ERROR'), regionId: id(r.regionId, 'Goal Region is invalid.', 'CONTROL_PROTOCOL_ERROR'), hostId, agentSessionId } } }
     }
     const revision = operation === 'demand.confirm' ? r.confirmedRevision : r.alignmentRevision
     if (!Number.isSafeInteger(revision) || (revision as number) < 1) throw new AgentMuxError('Goal receipt revision is invalid.', 'CONTROL_PROTOCOL_ERROR')
