@@ -149,8 +149,8 @@ const projects: WorkspaceRecord[] = [
 ]
 const scratch = projects[2]!
 const background = Array.from({ length: 8 }, (_, index): WorkspaceRecord => ({ id: 'fixture-background-' + index, hostId, name: perception ? ['FlowLens 数据工作台', 'Pageville', '工作流与工具', 'Cloudflare 域名与邮件', '个人知识库', 'Farm', '设计素材', '研究记录'][index]! : 'Independent work ' + (index + 1), path: fixturePath('private/graph/independent/' + index), kind: 'folder' }))
-const emptyProjects = Array.from({ length: scenario === 'perception' ? 6 : 60 }, (_, index): WorkspaceRecord => ({ id: 'fixture-empty-' + index, hostId, name: index % 3 ? 'Unassigned project ' + (index + 1) : '归档与材料 ' + (index + 1), path: fixturePath('private/graph/empty/' + index), kind: 'folder' }))
-const singletonProjects = Array.from({ length: 12 }, (_, index): WorkspaceRecord => ({ id: 'fixture-singleton-' + index, hostId, name: 'Independent contributor ' + (index + 1), path: fixturePath('private/graph/singleton/' + index), kind: 'folder' }))
+const emptyProjects = Array.from({ length: scenario === 'endpoints' ? 0 : scenario === 'perception' ? 6 : 60 }, (_, index): WorkspaceRecord => ({ id: 'fixture-empty-' + index, hostId, name: index % 3 ? 'Unassigned project ' + (index + 1) : '归档与材料 ' + (index + 1), path: fixturePath('private/graph/empty/' + index), kind: 'folder' }))
+const singletonProjects = Array.from({ length: scenario === 'endpoints' ? 0 : 12 }, (_, index): WorkspaceRecord => ({ id: 'fixture-singleton-' + index, hostId, name: 'Independent contributor ' + (index + 1), path: fixturePath('private/graph/singleton/' + index), kind: 'folder' }))
 if (perception) Object.assign(emptyProjects[0]!, { hostId: 'fixture-remote', name: 'Remote · 模型评测服务' })
 const terrainProjects: WorkspaceRecord[] = scenario === 'perception-scale' ? [
   { id: 'fixture-terrain-root', hostId, name: '协作地形', path: projects[0]!.path + '/terrain', kind: 'folder' },
@@ -210,9 +210,10 @@ const terrainSessions = terrainProjects.length ? ['fixture-terrain-tool', 'fixtu
     nativeHandle: { kind: 'provider' as const, providerId: original.providerId, sessionId: nativeSessionId },
     currentActivity: { ...original.currentActivity!, run, nativeSessionId, nativeTurnId: 'turn-' + id, sourceId: 'source-' + id, hookReceiptId: 'receipt-' + id } }
 }) : []
-const initialSessions = [...originalSessions, ...terrainSessions, ...extraSessions.slice(0, 88)]
+const initialSessions = [...originalSessions, ...terrainSessions, ...extraSessions.slice(0, scenario === 'endpoints' ? 4 : 88)]
 sessions = initialSessions
-const retired: AgentSessionHistoryDescriptor[] = Array.from({ length: 4 }, (_, index) => ({ agentSessionId: 'fixture-retired-' + index, hostId, state: 'retired', retiredAt: now - (index + 1) * 86400000, history: { providerId: 'codex', executorId: 'codex', workspacePath: projects[0]!.path, createdAt: now - (index + 3) * 86400000 } }))
+const retired: AgentSessionHistoryDescriptor[] = Array.from({ length: scenario === 'endpoints' ? 0 : 4 }, (_, index) => ({ agentSessionId: 'fixture-retired-' + index, hostId, state: 'retired', retiredAt: now - (index + 1) * 86400000, history: { providerId: 'codex', executorId: 'codex', workspacePath: projects[0]!.path, createdAt: now - (index + 3) * 86400000 } }))
+if (scenario === 'endpoints') retired.push({ agentSessionId: 'fixture-endpoint-retired', hostId, state: 'retired', retiredAt: now - 10000 })
 const timelines: Record<string, AgentTimelineSnapshot> = Object.fromEntries(identities.map(([id, label]) => {
   const items: AgentTimelineSnapshot['items'] = [
     { id: id + '-input', agentSessionId: id, kind: 'user_message', source: 'user', status: 'complete', title: 'User message', content: 'Keep the original Session and inspect its recorded relationships.', authorHuman: true, createdAt: now - 40000, updatedAt: now - 40000 },
@@ -311,7 +312,7 @@ const denseSenders = extraSessions.slice(0, 88).filter(session => session.worksp
 const densePeers = extraSessions.slice(singletonProjects.length, 88).filter(session => session.workspacePath !== projects[0]!.path && session.processState === 'running').slice(0, 12)
 if (denseSenders.length !== 12 || densePeers.length !== 12) throw Error('The declared cross-area collaboration input must be nonempty and complete')
 const denseRefs: ReturnType<typeof reference>[] = []
-for (let sender = 0; sender < denseSenders.length; sender++) for (let offset = 0; offset < 3; offset++) {
+for (let sender = 0; sender < (scenario === 'endpoints' ? 0 : denseSenders.length); sender++) for (let offset = 0; offset < 3; offset++) {
   const ref = reference(`fixture-dense-${sender}-${offset}`, denseSenders[sender]!.id, densePeers[(sender + offset) % densePeers.length]!.id)
   denseRefs.push(ref); refs.push(ref)
   events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'message', at: now - 3000, messages: [ref] })
@@ -341,9 +342,16 @@ api.sessions.messageEvents = async (subject, options = {}) => {
 const creation: AgentMuxSpawnRecord = { agentSessionId: 'fixture-core', phase: 'active', currentRun: { runId: 'fixture-run-fixture-core' }, createdAt: now - 50000,
   creation: { createOperationId: 'fixture-creation', initialPrompt: 'not-requested', createdRun: { runId: 'fixture-run-fixture-core' },
     createdBy: { agentSessionId: 'fixture-ui', run: { runId: 'fixture-run-fixture-ui' }, owner: { kind: 'local' } } } }
-const creations: AgentMuxSpawnRecord[] = [creation, ...densePeers.slice(0, 4).map((session, index): AgentMuxSpawnRecord => ({ agentSessionId: session.id, phase: 'active', currentRun: session.control.run, createdAt: now - 10000,
+const creations: AgentMuxSpawnRecord[] = [creation, ...(scenario === 'endpoints' ? [] : densePeers.slice(0, 4)).map((session, index): AgentMuxSpawnRecord => ({ agentSessionId: session.id, phase: 'active', currentRun: session.control.run, createdAt: now - 10000,
   creation: { createOperationId: 'fixture-dense-creation-' + index, initialPrompt: 'not-requested', createdRun: session.control.run,
     createdBy: { agentSessionId: denseSenders[index]!.id, run: denseSenders[index]!.control.run, owner: { kind: 'local' } } } }))]
+// Prepared is only a recorded target reference: deliberately absent from both
+// the current snapshot and retained-history catalog. No Run is invented.
+if (scenario === 'endpoints') for (const phase of ['prepared', 'retired'] as const) creations.push({
+  agentSessionId: 'fixture-endpoint-' + phase, phase, currentRun: null, createdAt: now - 12000,
+  creation: { createOperationId: 'fixture-endpoint-operation-' + phase, initialPrompt: 'not-requested',
+    createdBy: { agentSessionId: 'fixture-ui', run: { runId: 'fixture-run-fixture-ui' }, owner: { kind: 'local' } } }
+})
 api.sessions.spawns = async (subject, options) => {
   reads.push({ kind: 'spawns', participant: subject.agentSessionId, options: structuredClone(options) })
   const matches = creations.filter(record => options.direction === 'created' ? record.creation?.createdBy?.agentSessionId === subject.agentSessionId : record.agentSessionId === subject.agentSessionId)
@@ -548,6 +556,15 @@ Object.assign(window, { graphCapture: {
       ...(latest.semanticStatus ? { semanticStatus: latest.semanticStatus } : {}), ...(latest.currentActivity ? { currentActivity: latest.currentActivity } : {}), ...(latest.nativeHandle ? { nativeHandle: latest.nativeHandle } : {}) }
     for (const listener of listeners) listener({ type: 'core', hostId, event: { type: 'agent-session', session } })
     return { expectedWorldAgents: sessions.length + retired.length, expectedAgentKeys: [...sessions.map(session => JSON.stringify([session.hostId, session.kind === 'agent' ? session.control.agentSessionId : session.id])), ...retired.map(source => JSON.stringify([source.hostId, source.agentSessionId]))], snapshotMembers: sessions.length, retiredMembers: retired.length, unassociatedMembers: added.filter(session => !refs.some(ref => ref.senderSessionId === session.id || ref.recipientSessionId === session.id)).length, nativeActivityCounts: { active: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'active').length, idle: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'idle').length, unknown: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'unknown').length, exited: sessions.filter(session => session.processState === 'exited').length }, fixtureMutationMS: performance.now() - start }
+  },
+  endpoints() {
+    if (scenario !== 'endpoints') throw Error('Only the declared endpoint scenario may expose its typed input')
+    const prepared = 'fixture-endpoint-prepared', closed = 'fixture-endpoint-retired'
+    return { hostId, source: 'fixture-ui', active: 'fixture-core', prepared, retired: closed,
+      names: Object.fromEntries(identities.map(([id, name]) => [id, name])), records: structuredClone(creations),
+      snapshotIds: sessions.map(session => session.id), historyIds: retired.map(source => source.agentSessionId),
+      unplacedArea: collaborationAreaNode('retained-unplaced'),
+      boundary: 'Synthetic original spawn/message pages only. Prepared has no Session descriptor or Run; retired has no workspace or current Run. Original projector, grouping, Graph and input owners remain unchanged.' }
   },
   terrain() { return { areas: terrainProjects.map(project => ({ id: directoryIdentity(hostId, project.path), name: project.name })), agents: terrainSessions.map(session => ({ id: session.id, name: session.label, areaId: directoryIdentity(session.hostId, session.workspacePath) })) } },
   prepare() {

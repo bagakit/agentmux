@@ -14,8 +14,8 @@ const scriptPath = fileURLToPath(import.meta.url)
 const compiling = process.argv[2] === '--compile'
 const verifying = process.argv[2] === '--verify'
 const scenario = process.argv[4] === '--scenario' ? process.argv[5] : 'readability'
-assert.ok(['readability', 'perception', 'perception-scale'].includes(scenario), 'Use a declared capture scenario')
-assert.ok(compiling ? process.argv.length === 5 : ['--evidence', '--verify'].includes(process.argv[2]) && process.argv[3] && (process.argv.length === 4 || process.argv.length === 6 && process.argv[4] === '--scenario'), 'Use --evidence <new private evidence directory> or --verify <completed evidence directory> [--scenario perception|perception-scale]')
+assert.ok(['readability', 'perception', 'perception-scale', 'endpoints'].includes(scenario), 'Use a declared capture scenario')
+assert.ok(compiling ? process.argv.length === 5 : ['--evidence', '--verify'].includes(process.argv[2]) && process.argv[3] && (process.argv.length === 4 || process.argv.length === 6 && process.argv[4] === '--scenario'), 'Use --evidence <new private evidence directory> or --verify <completed evidence directory> [--scenario perception|perception-scale|endpoints]')
 if (verifying) {
   // Join the exact completed native observation once; never recapture or turn a
   // failed observation green. A changed source, harness or PNG requires new evidence.
@@ -41,7 +41,7 @@ if (verifying) {
       assert.equal(wait.final.agentId, JSON.stringify(['local', wait.id]))
     }
   }
-  for (const name of ['initial-gui-entry-keeps-accurate-context-and-full-width', 'source-cli-original-app-admission-and-dom-inspect', 'focus-list-map-and-original-return', ...(scenario === 'perception-scale' ? ['perception-original-large-world-and-consumer-cost', 'terrain-original-nesting-fold-and-exact-reveal', 'terrain-native-continuous-lod-and-selection-cost', 'terrain-held-reader-keyboard-and-motion-choice'] : [])]) assert.ok(receipt.actual.checks.some(check => check.name === name && check.passed === true), 'Missing actual native check: ' + name)
+  for (const name of scenario === 'endpoints' ? ['endpoints-original-phases-parallel-and-input', 'endpoints-original-theme-point-and-static', 'endpoints-original-mixed-group-and-keyboard'] : ['initial-gui-entry-keeps-accurate-context-and-full-width', 'source-cli-original-app-admission-and-dom-inspect', 'focus-list-map-and-original-return', ...(scenario === 'perception-scale' ? ['perception-original-large-world-and-consumer-cost', 'terrain-original-nesting-fold-and-exact-reveal', 'terrain-native-continuous-lod-and-selection-cost', 'terrain-held-reader-keyboard-and-motion-choice'] : [])]) assert.ok(receipt.actual.checks.some(check => check.name === name && check.passed === true), 'Missing actual native check: ' + name)
   for (const key of ['inputs', 'harness']) {
     const entries = Object.entries(receipt[key] ?? {}); assert.ok(entries.length, 'Nonempty exact ' + key)
     for (const [file, sha] of entries) { const target = resolve(root, file); assert.ok(target.startsWith(root + sep)); assert.equal(digest(await readFile(target)), sha, 'Changed candidate ' + key + ': ' + file) }
@@ -49,6 +49,7 @@ if (verifying) {
   assert.ok(receipt.frames?.length)
   assert.deepEqual(receipt.frames.map(({ sha256, ...frame }) => frame), receipt.actual.frames)
   for (const frame of receipt.frames) { const target = resolve(directory, frame.file); assert.ok(target.startsWith(directory + sep)); assert.equal(digest(await readFile(target)), frame.sha256, 'Changed native frame: ' + frame.file) }
+  if (scenario === 'endpoints') createRequire(import.meta.url)(join(fixture, 'endpoints.cjs')).verify(receipt.actual.endpoints, receipt.frames, receipt.actual.nativeWorkers)
   if (scenario === 'perception-scale') {
     assert.ok(receipt.actual.perceptionScale?.input?.nodes >= 240)
     assert.equal(receipt.actual.perceptionScale.boxes.agents, receipt.actual.perceptionScale.input.nodes)
@@ -168,9 +169,9 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key
 Object.assign(env, { AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), COLLABORATION_CAPTURE_NODE: process.execPath })
 let server
 try {
-  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'settings.cjs', 'server-host.mjs', 'scenario.md'].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
+  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'settings.cjs', 'server-host.mjs', 'scenario.md', ...(scenario === 'endpoints' ? ['endpoints.cjs'] : [])].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
   receipt.harness = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
-  receipt.publicTransport = { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
+  receipt.publicTransport = scenario === 'endpoints' ? { boundary: 'No public transport or lifecycle operation is exercised by the isolated endpoint presentation increment.' } : { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
   receipt.phase = 'compiling'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   receipt.compilationProcess = await runProbeProcess(process.execPath, [scriptPath, '--compile', privateRoot, evidence],
     { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 120000, onLine: line => logs.push(line) })
@@ -186,6 +187,7 @@ try {
   for (const owner of ['App.tsx', 'GlobalFocusSurface.tsx', 'FocusToolbar.tsx', 'FocusViewSwitch.tsx', 'SurfaceToolDock.tsx', 'WorkspaceCollaboration.tsx', 'CollaborationMapToolbar.tsx', 'collaboration-areas.ts', 'collaboration-presentation.ts', 'collaboration-hierarchy.ts', 'workspace-agent-scope.ts', 'AgentCollaborationMap.tsx', 'AgentCollaborationGraph.tsx', 'collaboration-layout.worker.ts', 'collaboration-layout-engine.ts', 'collaboration-layout-refinement.ts', 'collaboration-map-transition.ts', 'collaboration-map-geometry.ts', 'desktop-presentation.ts', 'FocusContextCards.tsx', 'use-collaboration-layout.ts', 'FocusContextCardBody.tsx', 'FocusContextRow.tsx', 'AgentInformationPreview.tsx', 'AgentInformationReader.tsx', 'store.ts', 'collaboration.css']) {
     assert.ok(Object.keys(sources).some(file => file.endsWith('/' + owner)), 'Actual owning module must compile: ' + owner)
   }
+  if (scenario === 'endpoints') for (const owner of ['CollaborationRelationMark.tsx', 'collaboration-relation-presentation.ts', 'icon-catalog.ts', 'icon-glyphs.ts', 'icons.tsx', 'icon-sprite.ts']) assert.ok(Object.keys(sources).some(file => file.endsWith('/' + owner)), 'The original endpoint and theme owner actually compiles: ' + owner)
   receipt.outputs = {}
   async function recordOutputs(directory) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -213,7 +215,7 @@ try {
   assert.ok(receipt.actual, 'The original source capture did not publish scene evidence')
   const controlLoaded = await readFile(join(evidence, 'control-loaded.jsonl'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
   receipt.controlInputs = controlLoaded.trim() ? controlLoaded.trim().split('\n').map(line => JSON.parse(line)) : []
-  assert.ok(receipt.controlInputs.some(input => input.path === 'packages/core/src/public-rpc-server.ts') && receipt.controlInputs.some(input => input.path === 'packages/core/src/agentmux-cli-commands.ts'), 'Original Core server and source CLI must load in the public App join')
+  if (scenario !== 'endpoints') assert.ok(receipt.controlInputs.some(input => input.path === 'packages/core/src/public-rpc-server.ts') && receipt.controlInputs.some(input => input.path === 'packages/core/src/agentmux-cli-commands.ts'), 'Original Core server and source CLI must load in the public App join')
   for (const input of receipt.controlInputs) { assert.equal(input.originalSHA256, input.effectiveSHA256, 'Public join uses unmodified source'); if (sources[input.path]) assert.equal(sources[input.path], input.originalSHA256); sources[input.path] = input.originalSHA256 }
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
   receipt.sourceAfter = Object.fromEntries(await Promise.all(Object.keys(sources).map(async file => [file, hash(await readFile(join(root, file)))])))
@@ -223,6 +225,7 @@ try {
   assert.equal(receipt.process.exitCode, 0, JSON.stringify(receipt.actual.failures.map(({ name, message }) => ({ name, message })))); assert.equal(receipt.actual.passed, true)
   assert.equal(receipt.changedInputs.length, 0, 'Candidate changed during capture: ' + receipt.changedInputs.join(', '))
   assert.equal(receipt.changedHarness.length, 0, 'Capture harness changed during execution: ' + receipt.changedHarness.join(', '))
+  if (scenario === 'endpoints') require(join(fixture, 'endpoints.cjs')).verify(receipt.actual.endpoints, receipt.frames, receipt.actual.nativeWorkers)
   receipt.capturedPass = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }
 finally {
