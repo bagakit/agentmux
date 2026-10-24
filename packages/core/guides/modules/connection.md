@@ -69,9 +69,16 @@ source preconditions and frozen children for inspect/advance; old source-only bo
 create/sync inputs. Keep an unconfirmed old request and inspect its original operation, without
 filling it with new profile data or resending it. Application creation, profile write and Mote
 default save retain separate receipts; missing original File acknowledgement remains unknown.
-For private Mote chat use space mote chat configure/inspect/history/audience/allocate --input FILE|-.
+For private Mote chat use space mote chat configure/inspect/history/audience/allocate/diagnose --input FILE|-.
 A person or device controls chat policy and per-person total allowances. A chat Agent may read only
 its own retained lane with space mote chat history; copy the original target from its first context.
+Authenticated callers can use diagnose with that complete exact target to read saved policy,
+read-only readiness and the newest five direct-intake stages for the selected application.
+targetKey and intake keys are equality fingerprints, not selectors or permission to read history.
+The result omits private paths, content, people, quotas, Agent/Session references and raw errors.
+An empty window means no observed intake in this window; unavailable is not absence. Readiness,
+terminal confirmation and admission are separate observations, not proof of a reply or completion.
+Diagnosis never starts an Agent, changes policy, fetches platform messages or retries an input.
 The saved Mote Executor starts lazily on authorized direct messages. Inactivity creates a new Agent
 without removing prior conversations. Quota counts unique admitted native messages, including the
 last allowed message; replies do not consume quota. An unknown mutation keeps its entire input and
