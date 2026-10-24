@@ -14,7 +14,7 @@ export function useMobileCommands({ client, agentSessionId, providerId, commands
   useEffect(() => {
     if (!visible || !demand) return
     const controller = new AbortController()
-    const retained = (previous: typeof state) => previous?.client === client && previous.scope === scope ? previous.prompts : []
+    const retained = (previous: typeof state) => previous && previous.client === client && previous.scope === scope ? previous.prompts : []
     setState(previous => ({ client, scope, prompts: retained(previous), loading: true, issue: '' }))
     void (async () => {
       try {
@@ -37,7 +37,7 @@ export function useMobileCommands({ client, agentSessionId, providerId, commands
     })()
     return () => controller.abort()
   }, [client, scope, visible, connected, demand, revision])
-  const own = state?.client === client && state.scope === scope ? state : null
+  const own = state && state.client === client && state.scope === scope ? state : null
   const candidates = useMemo(() => composerCommandCandidates(own?.prompts ?? [], providerId, commands ?? []), [own?.prompts, providerId, commands])
   return { ...candidates, loading: own?.loading ?? false, issue: own?.issue ?? '', retry: () => retry(value => value + 1) }
 }
