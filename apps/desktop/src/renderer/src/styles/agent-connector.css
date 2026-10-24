@@ -140,7 +140,17 @@
 .agent-connector-dialog .agent-connector-disclosure > summary > svg { vertical-align: middle; margin-inline-end: var(--sp-2); }
 .agent-connector-dialog .agent-connector-section .agent-connector-check { padding: var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-2); }
 .agent-connector-dialog .agent-connector-section .agent-connector-check input { margin-block: 2px; }
+.agent-connector-dialog .agent-connector-section-title h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: var(--fs-body); font-weight: 600; }
+.agent-connector-dialog .agent-connector-section-title h3 > svg { flex: none; }
 .agent-connector-dialog [aria-label="Group delivery"] { padding-block: var(--sp-2); }
+.connector-delivery-details__section { display: grid; gap: var(--sp-3); min-width: 0; padding-block: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.connector-delivery-details__section h4 { margin: 0; color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
+.connector-delivery-details__section > button { justify-self: start; }
+.connector-delivery-details__section:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; }
+.connector-delivery-details__originals > summary { color: var(--text-3); font-size: var(--fs-micro); }
+.agent-connector-host-sync { padding-top: var(--sp-2); border-top: 1px solid var(--line-soft); }
+.agent-connector-dialog .agent-connector-host-sync .connector-service-control { padding: var(--sp-3) 0; border: 0; border-radius: 0; gap: var(--sp-2); }
+.agent-connector-host-sync .connector-service-control__heading h3 { color: var(--text-3); }
 
 @media (max-width: 620px) {
   .agent-connector-section-grid { grid-template-columns: minmax(0, 1fr); }
