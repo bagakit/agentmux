@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '../src/notebook-store.js'
-import { initializeNotebookDatabase, writeNotebookDatabase, readNotebookDatabase } from '../src/notebook-database.js'
+import { initializeNotebookFiles, writeNotebookFiles, readNotebookFiles } from '../src/notebook-files.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { noteHistoryRevision } from '../src/note-history.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -34,14 +34,14 @@ async function fixture() {
   const original = join(root, 'original'), target = join(root, 'new library'), location = join(root, 'state', 'notes-location.json')
   await mkdir(original); const bytes = body('original-note', 'Saved content')
   await writeFile(join(original, 'one.note.md'), bytes)
-  const store = new AgentMuxNotebookStore(join(original, 'notebooks.sqlite'))
+  const store = new AgentMuxNotebookStore(join(original, 'notebooks.root.json'))
   await store.apply({ expectedRevision: 0, operationId: 'register', change: { kind: 'register', noteId: 'original-note', title: 'Original title', resource: { hostId: 'local', workspaceId: '__notes__', workspacePath: original, path: 'one.note.md' }, source: { sourceId: 'source-original', url: 'https://example.test', title: 'Source', recordedAt: _newTailFixtureEpoch(0, 0, 1) } } }, { kind: 'user', id: 'original-user' })
   return { root, original, target, location, bytes, storage: new AgentMuxNotesStorage(location, original), before: await store.read() }
 }
 describe('one durable Notes directory operation', () => {
   it('moves recoverable historical bodies and event identities with the original library', async () => {
     const f = await fixture(), resource = f.before.pages['original-note']!.resource
-    const store = new AgentMuxNotebookStore(join(f.original, 'notebooks.sqlite'))
+    const store = new AgentMuxNotebookStore(join(f.original, 'notebooks.root.json'))
     const event = await store.recordHistory({ eventId: 'original-edit-operation', sequence: 0, batchId: 'original-edit-operation',
       noteId: 'original-note', resource, originalResource: { ...resource }, status: 'committed', at: _historyFixtureEpoch(0, 0, 1),
       actor: { kind: 'user', id: 'original-person' }, parentEventId: null, operation: 'edit', requestFingerprint: noteHistoryRevision('original-request'),
@@ -75,7 +75,7 @@ describe('one durable Notes directory operation', () => {
     const f = await fixture(); await mkdir(f.target); await writeFile(join(f.target, 'one.note.md'), 'other data')
     const op = { operationId: 'original-conflict', expectedDirectory: f.original, directory: f.target }
     await expect(f.storage.change(op)).rejects.toMatchObject({ code: 'NOTES_STORAGE_CONFLICT' })
-    expect((await f.storage.inspect()).catalogPath).toBe(join(f.original, 'notebooks.sqlite'))
+    expect((await f.storage.inspect()).catalogPath).toBe(join(f.original, 'notebooks.root.json'))
     expect(await readFile(join(f.original, 'one.note.md'), 'utf8')).toBe(f.bytes)
     await rm(join(f.target, 'one.note.md')); const next = new AgentMuxNotesStorage(f.location, fixturePath("unused")); await next.resume()
     expect((await next.inspect('original-conflict')).operation?.phase).toBe('committed')
@@ -91,7 +91,7 @@ describe('one durable Notes directory operation', () => {
     const f = await fixture(); await writeFile(join(f.original, 'one.note.md'), body('different-note', 'Different original'))
     await expect(f.storage.change({ operationId: 'invalid-identity', expectedDirectory: f.original, directory: f.target })).rejects.toThrow('identity')
     const guarded = new AgentMuxNotebookStore(undefined, f.storage)
-    await f.storage.withLock(() => f.storage.confirmCatalog()); await rm(join(f.original, 'notebooks.sqlite'))
+    await f.storage.withLock(() => f.storage.confirmCatalog()); await rm(join(f.original, 'notebooks.root.json'))
     await expect(guarded.read()).rejects.toMatchObject({ code: 'NOTEBOOK_READ_UNCONFIRMED' })
     await expect(f.storage.change({ operationId: 'missing-catalog', expectedDirectory: f.original, directory: f.target })).rejects.toMatchObject({ code: 'NOTEBOOK_READ_UNCONFIRMED' })
     expect((await f.storage.inspect()).directory).toBe(f.original)
@@ -117,7 +117,7 @@ describe('one durable Notes directory operation', () => {
   })
   it('retains ambiguous managed bytes whose identity already belongs to a foreign registered Note', async () => {
     const f = await fixture(), foreignRoot = join(f.root, 'project'); await mkdir(foreignRoot)
-    const store = new AgentMuxNotebookStore(join(f.original, 'notebooks.sqlite'))
+    const store = new AgentMuxNotebookStore(join(f.original, 'notebooks.root.json'))
     await store.apply({ expectedRevision: f.before.revision, operationId: 'foreign-page', change: { kind: 'register', noteId: 'foreign-note', title: 'Project note', resource: { hostId: 'local', workspaceId: 'project', workspacePath: foreignRoot, path: 'foreign.note.md' } } }, { kind: 'user', id: 'original-user' })
     const bytes = body('foreign-note', 'Keep ambiguous bytes')
     await writeFile(join(f.original, 'unregistered.note.md'), bytes)
@@ -143,18 +143,18 @@ describe('one durable Notes directory operation', () => {
     expect((await storage.inspect(operation.operationId)).operation?.phase).toBe('committed')
     if (damage === 'missing body') await rm(join(f.target, 'one.note.md'))
     if (damage === 'changed body') await writeFile(join(f.target, 'one.note.md'), 'damaged target')
-    if (damage === 'missing catalog') await rm(join(f.target, 'notebooks.sqlite'))
-    if (damage === 'changed catalog') { const catalog = (await readNotebookDatabase(join(f.target, 'notebooks.sqlite'), false))!.state; catalog.pages['original-note']!.resource.workspacePath = f.original; await writeNotebookDatabase(join(f.target, 'notebooks.sqlite'), { state: catalog }) }
+    if (damage === 'missing catalog') await rm(join(f.target, 'notebooks.root.json'))
+    if (damage === 'changed catalog') { const catalog = (await readNotebookFiles(join(f.target, 'notebooks.root.json'), false))!.state; catalog.pages['original-note']!.resource.workspacePath = f.original; await writeNotebookFiles(join(f.target, 'notebooks.root.json'), { state: catalog }) }
     acknowledged = true; await expect(storage.change(operation)).rejects.toThrow()
     expect(await readFile(join(f.original, 'one.note.md'), 'utf8')).toBe(f.bytes)
-    expect(await readFile(join(f.original, 'notebooks.sqlite'), 'utf8')).toContain('original-note')
+    expect((await readNotebookFiles(join(f.original, 'notebooks.root.json'), false))!.state.pages['original-note']).toBeDefined()
   })
   it.each(['source', 'destination'])('does not overwrite a %s Notebook catalog changed while the original operation was prepared', async changed => {
     const f = await fixture(); await mkdir(f.target); await writeFile(join(f.target, 'one.note.md'), 'occupied body')
     await expect(f.storage.change({ operationId: 'prepared-catalog', expectedDirectory: f.original, directory: f.target })).rejects.toMatchObject({ code: 'NOTES_STORAGE_CONFLICT' })
     await rm(join(f.target, 'one.note.md'))
-    const path = join(changed === 'source' ? f.original : f.target, 'notebooks.sqlite')
-    await initializeNotebookDatabase(path); await writeNotebookDatabase(path, { state: { ...f.before, revision: f.before.revision + 1 } }); const bytes = await readFile(path, 'utf8'); await expect(f.storage.resume()).rejects.toMatchObject({ code: 'NOTES_STORAGE_CONFLICT' })
+    const path = join(changed === 'source' ? f.original : f.target, 'notebooks.root.json')
+    await initializeNotebookFiles(path); await writeNotebookFiles(path, { state: { ...f.before, revision: f.before.revision + 1 } }); const bytes = await readFile(path, 'utf8'); await expect(f.storage.resume()).rejects.toMatchObject({ code: 'NOTES_STORAGE_CONFLICT' })
     expect(await readFile(path, 'utf8')).toBe(bytes); expect((await f.storage.inspect()).directory).toBe(f.original)
     expect(await readFile(join(f.original, 'one.note.md'), 'utf8')).toBe(f.bytes)
   })
@@ -166,7 +166,7 @@ describe('one durable Notes directory operation', () => {
     await expect(storage.change({ operationId: 'changed-during-ack', expectedDirectory: f.original, directory: f.target })).rejects.toThrow('during the host acknowledgement')
     expect(await readFile(join(f.original, 'one.note.md'), 'utf8')).toBe(f.bytes)
     expect(await readFile(secondPath, 'utf8')).toBe(changed)
-    expect(await readFile(join(f.original, 'notebooks.sqlite'), 'utf8')).toContain('original-note')
+    expect((await readNotebookFiles(join(f.original, 'notebooks.root.json'), false))!.state.pages['original-note']).toBeDefined()
     expect((await storage.inspect()).operation?.operationId).toBe('changed-during-ack')
   })
   it('reconfirms directory durability when retrying an already published Note after sync failed', async () => {
