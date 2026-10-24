@@ -1,5 +1,5 @@
 import { AgentMuxError, validateAgentPromptInputBinding, type AgentMuxClient,
-  type AgentMuxAgentCreationInspection, type AgentMuxAgentRuntimeStatus, type AgentMuxClientEvent,
+  type AgentMuxAgentSession, type AgentMuxAgentCreationInspection, type AgentMuxAgentRuntimeStatus, type AgentMuxClientEvent,
   type AgentMuxRunRef, type AgentMuxRun, type AgentMuxRpcCallContext, type AgentPromptInputBinding,
   type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentPromptPreparationRetryFence,
   type AgentMessageChannel, type AgentPromptSubmissionRecord, type AgentTimelineSnapshot,
@@ -21,6 +21,7 @@ type Attention = { hostId: string; supervisorAgentSessionId: string; supervisorR
 
 /** The existing Goal mechanisms borrow typed Core operations, never an editor controller. */
 export interface GoalRuntimePort {
+  spatialCreationCandidates(tabId: string, regionId: string): Promise<AgentMuxAgentSession[]>
   agentCreation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
   observeGoalAgent(hostId: string, agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus>
   resolveGoalAgent(agentSessionId: string): Promise<{ hostId: string; status: AgentMuxAgentRuntimeStatus }>
@@ -65,9 +66,23 @@ export function createGoalRuntime(options: {
     ? { kind: 'message', agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, messageId: input.operationId }
     : { kind: 'prompt', agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, submissionId: input.operationId })
   const runtime: GoalRuntimePort = {
+    spatialCreationCandidates: async (tabId, regionId) => {
+      const clients = options.clients()
+      if (!clients.length) throw new AgentMuxError('The original Core creation owners are unavailable. Keep the Launcher and request.', 'CONTROL_UNAVAILABLE')
+      const candidates = await Promise.all(clients.map(async ({ hostId, client }) => {
+        if (exact(hostId) !== client) throw new AgentMuxError('The original Core creation Host is ambiguous.', 'CONTROL_UNAVAILABLE')
+        const sessions = await client.readAgentSessions()
+        if (exact(hostId) !== client) throw new AgentMuxError('The original Core creation owner changed while reading.', 'CONTROL_UNAVAILABLE')
+        const matched = sessions.filter(session => session.creation?.spatialIntent?.tabId === tabId && session.creation.spatialIntent.regionId === regionId)
+        if (matched.some(session => session.hostId !== 'local' && session.hostId !== hostId)) throw new AgentMuxError('The original creation metadata names another Core owner.', 'CONTROL_UNAVAILABLE')
+        return matched.map(session => ({ ...session, hostId }))
+      }))
+      return candidates.flat()
+    },
     agentCreation: async (hostId, sessionId) => {
-      const value = await exact(hostId).inspectAgentCreation(sessionId)
-      if (value.agentSessionId !== sessionId) throw new AgentMuxError('The original Goal Agent identity changed.', 'STALE_AGENT_SESSION')
+      const client = exact(hostId), value = await client.inspectAgentCreation(sessionId)
+      if (exact(hostId) !== client) throw new AgentMuxError('The original Core creation owner changed during observation. Its Goal and Session remain retained.', 'STALE_AGENT_SESSION')
+      if (value.agentSessionId !== sessionId || value.hostId !== 'local' && value.hostId !== hostId) throw new AgentMuxError('The original Goal Agent identity changed.', 'STALE_AGENT_SESSION')
       return { ...value, hostId }
     },
     observeGoalAgent: status,

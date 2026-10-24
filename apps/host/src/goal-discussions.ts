@@ -1,3 +1,4 @@
+import { confirmSpatialGoalDiscussionLauncher } from './goal-discussion-launcher.js'
 import { contributeGoalDiscussionBinding, readGoalDiscussionBinding, resolveGoalDiscussionBinding } from './goal-discussion-bindings.js'
 import { AgentMuxError, agentPromptCondition, spatialCatalog, type AgentMuxRpcCallContext, type AgentMuxRpcMethod, type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxSpatialStateStore } from '@agentmux/core'
 import { spatialAgentOpenRecord } from '@agentmux/core/spatial-state'
@@ -170,6 +171,10 @@ export function createHostGoalDiscussions(options: {
           recipient: { kind: 'agent', hostId: record.execution.hostId, agentSessionId: record.agentSessionId } }
         await current(context)
         state = (await contributeGoalDiscussionBinding({ spatial: options.spatial, goalId: goal.id, binding })).state
+      }
+      if (binding.recipient.kind === 'launcher') {
+        const confirmed = await confirmSpatialGoalDiscussionLauncher({ spatial: options.spatial, original: { goalId: goal.id, binding }, agent: options.runtime.agentCreation, candidates: options.runtime.spatialCreationCandidates })
+        if (confirmed) { state = confirmed.state; binding = readGoalDiscussionBinding(state.graph, goal.id)! }
       }
       resolveGoalDiscussionBinding(state.graph, binding)
       const receipt = () => ({ demandId: goal.id, requestId: request.requestId, mode: request.mode, tabId: binding.tabId, regionId: binding.regionId,
