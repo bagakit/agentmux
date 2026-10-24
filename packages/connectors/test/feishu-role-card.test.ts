@@ -3,7 +3,8 @@ import { feishuRoleCard } from '../src/adapters/feishu/role-card.js'
 import { feishuReplyElements, fragmentFeishuReply } from '../src/adapters/feishu/reply-card.js'
 import { FEISHU_MESSAGE_BODY_BYTES } from '../src/adapters/feishu/message.js'
 
-const body = (card: Record<string, unknown>) => (card.body as { elements: Record<string, any>[] }).elements
+const surfaces = (card: Record<string, unknown>) => (card.body as { elements: Record<string, any>[] }).elements
+const body = (card: Record<string, unknown>) => surfaces(card).flatMap(node => node.tag === 'column_set' ? node.columns.flatMap((column: { elements: Record<string, any>[] }) => column.elements) : [node])
 it('keeps a qualified identity small and literal above complete native Markdown and table content', () => {
   const text = '[message · source · agent]\n\n**Original body**\n\n| Name | Value |\n| :--- | :--- |\n| Original | 完整 |\n\n```ts\nconst original = "<at user_id=all>";\n```'
   const card = feishuRoleCard(text, { kind: 'agent', name: 'Original <at user_id="all">Name</at>', imageKey: 'confirmed-original-image' }, { phase: 'final' })
@@ -11,7 +12,8 @@ it('keeps a qualified identity small and literal above complete native Markdown 
   expect(body(card)[0]).toEqual({ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: 'Original <at user_id="all">Name</at> · Agent · Reply', text_size: 'notation', text_color: 'grey' },
     icon: { tag: 'custom_icon', img_key: 'confirmed-original-image', size: '16px 16px' } })
   expect(body(card).slice(1)).toEqual(feishuReplyElements(text))
-  expect(body(card).some(node => node.tag === 'table')).toBe(true)
+  expect(surfaces(card).map(node => node.tag)).toEqual(['column_set', 'table', 'column_set'])
+  expect(surfaces(card).filter(node => node.tag === 'column_set').every(node => node.columns.every((column: { elements: { tag: string }[] }) => column.elements.every(element => element.tag !== 'table')))).toBe(true)
   expect(body(card)[1]!.content).toContain('[message · source · agent]')
 })
 it.each(['agent', 'human', 'external', 'mixed', 'unknown'] as const)('retains complete body without inventing a %s portrait or name', kind => {
@@ -25,11 +27,13 @@ it.each(['agent', 'human', 'external', 'mixed', 'unknown'] as const)('retains co
 it('keeps progress complete with native small Markdown, a compact portrait row and reduced padding', () => {
   const text = '**Original progress**\n\nEvery original paragraph remains.\n\n```ts\nconst original = "完整正文";\n```'
   const card = feishuRoleCard(text, { kind: 'agent', name: 'Exact sender', imageKey: 'confirmed-original-image' }, { phase: 'progress' })
-  expect(card.body).toMatchObject({ padding: '4px 8px 4px 8px', vertical_spacing: '4px' })
+  expect(card.body).toMatchObject({ padding: '0px', vertical_spacing: '0px' })
+  expect(surfaces(card)[0]).toMatchObject({ background_style: 'bg-white', columns: [{ padding: '6px 12px 6px 12px', vertical_spacing: '4px' }] })
   expect(body(card)[0]!.icon).toMatchObject({ tag: 'custom_icon', size: '16px 16px' })
   expect(body(card).slice(1)).toEqual(feishuReplyElements(text).map(element => ({ ...element, text_size: 'notation' })))
   const final = feishuRoleCard(text, { kind: 'agent' }, { phase: 'final' })
-  expect(final.body).toMatchObject({ padding: '12px 14px 12px 14px', vertical_spacing: '8px' })
+  expect(final.body).toMatchObject({ padding: '0px', vertical_spacing: '0px' })
+  expect(surfaces(final)[0]).toMatchObject({ background_style: 'bg-white', columns: [{ padding: '10px 12px 10px 12px' }] })
   expect(body(final).slice(1)).toEqual(feishuReplyElements(text))
 })
 it('uses exact source slices and measures the identity row in the native encoded request budget', () => {
@@ -52,4 +56,17 @@ it('keeps original literal continuations and a quiet fragment position without a
   expect(card.header).toBeUndefined()
   expect(body(card)[1]).toEqual({ tag: 'div', text: { tag: 'plain_text', content: text } })
   expect(body(card).at(-1)).toEqual({ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: '2/3' } })
+})
+
+it.each([
+  ['human', false, 'user-surface', 'rgba(50,100,230,0.07)', 'rgba(100,150,255,0.15)'],
+  ['agent', true, 'peer-surface', 'rgba(125,75,205,0.07)', 'rgba(174,130,250,0.15)']
+] as const)('keeps the %s conversation surface complete and legible in both native themes', (kind, incoming, surface, light, dark) => {
+  const text = '**Complete original message**\n\nParagraph and code remain full size.'
+  const card = feishuRoleCard(text, { kind }, { incoming, phase: 'progress' })
+  expect(card.header).toBeUndefined()
+  expect(surfaces(card)).toMatchObject([{ tag: 'column_set', background_style: surface, columns: [{ padding: '8px 12px 8px 12px' }] }])
+  expect(card.config).toMatchObject({ style: { color: { [surface]: { light_mode: light, dark_mode: dark } } } })
+  expect(body(card).slice(1)).toEqual(feishuReplyElements(text))
+  expect(body(card)[0].text.content).toContain(incoming ? '→ this conversation' : 'User · via amux')
 })

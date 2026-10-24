@@ -4,12 +4,18 @@ import { feishuConfig, botOpenId } from './feishu.js'
 
 export type FeishuHttpCall = { method: string; path: string; query: Record<string, string>; body: string }
 export type FeishuHttpResponse = { status: number; body: unknown }
+/** Native columns retain ordered text; original-card reads still return exact authored JSON. */
+export function feishuCardElements(card: { elements?: any[]; body?: { elements?: any[] } }): any[] {
+  const visit = (elements: any[]): any[] => elements.flatMap(element => element.tag === 'column_set'
+    ? element.columns.flatMap((column: { elements: any[] }) => visit(column.elements)) : [element])
+  return visit(card.elements ?? card.body?.elements ?? [])
+}
 // The native message reading format is not the authored card JSON. Retain the
 // original in the fixture so only an explicit original-card GET can return it.
 function receivedMessage(message: Record<string, unknown>): Record<string, unknown> {
   if (message.msg_type !== 'interactive' || !message.body) return message
   const card = JSON.parse((message.body as { content: string }).content)
-  const elements = (card.elements ?? card.body?.elements ?? []) as Array<{ tag: string; text?: { content?: string }; content?: string }>
+  const elements = feishuCardElements(card)
   return { ...message, body: { content: JSON.stringify({ title: card.header?.title?.content ?? '', elements: elements.flatMap(element => {
     const text = element.tag === 'div' ? element.text?.content : element.tag === 'markdown' ? element.content : undefined
     return text === undefined ? [] : [[{ tag: 'text', text }]]

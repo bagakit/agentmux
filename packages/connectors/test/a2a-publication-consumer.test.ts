@@ -115,6 +115,64 @@ async function fixture(scope: RoomBinding['scope']['publication'] = 'future-shar
     async reopen() { await services.close(); services = await createConnectionServices(options) } }
 }
 
+it('shares canonical speech with exact authors while Hook snapshots and native child reports remain locally readable', async () => {
+  const f = await fixture('future-shared-conversation', true)
+  const user = 'Confirmed App human contribution', answer = 'Canonical public root answer', child = 'Internal Provider child report'
+  const source = { providerId: 'codex', nativeSessionId: 'original-native' }
+  await f.client.submitAgentPrompt({ agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, operationId: 'snapshot-public-human',
+    admissionIntent: { kind: 'native-conversation', source }, execution: 'immediate', prompt: user, authorHuman: true,
+    sourceChannel: 'message-tool', agentMuxNote: 'Private generated context beside public input' })
+  await f.flushNative()
+  const snapshots = []
+  for (const [receiptId, eventName, body, actor] of [['root-snapshot', 'Stop', answer, undefined], ['child-snapshot', 'SubagentStop', child, 'native-child']] as const) {
+    const normalized = f.client.providers.get('codex').normalizeHook({ providerId: 'codex', agentSessionId: 'recipient', runId: 'run-recipient', receiptId,
+      eventName, payload: { hook_event_name: eventName, session_id: source.nativeSessionId, last_assistant_message: body, ...(actor ? { agent_id: actor } : {}) } },
+    { nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: source.nativeSessionId },
+      processNativeHandle: { kind: 'provider', providerId: 'codex', sessionId: source.nativeSessionId }, processNativeChildSessionIds: ['native-child'] })
+    expect(normalized.subject?.kind).toBe(actor ? 'child' : 'main')
+    for (const mutation of normalized.timeline) {
+      await f.store.applyTimelineMutation(mutation)
+      if (mutation.type !== 'update' && mutation.item.kind === 'assistant_message') snapshots.push(mutation.item)
+    }
+  }
+  expect(snapshots).toHaveLength(2)
+  // A real same-event fact does not turn an observation contribution into public speech.
+  const related = { ...snapshots[0]!, id: 'related-root-snapshot', conversation: { sameEvent: {
+    hostId: 'local', agentSessionId: 'recipient', source: { kind: 'native' as const, ...source, recordId: 'canonical-root' } } } }
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: 'recipient', item: related })
+  await appendFile(f.transcript, [
+    { type: 'response_item', payload: { id: 'canonical-root', type: 'message', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: answer }] } },
+    { type: 'response_item', payload: { id: 'native-child-report', type: 'agent_message', author: '/root/child', recipient: '/root', content: [{ type: 'text', text: child }] } }
+  ].map(value => JSON.stringify(value)).join('\n') + '\n')
+  await vi.waitFor(() => {
+    f.refresh(); expect(f.copies(user)).toEqual({ feishu: 1, discord: 1 }); expect(f.copies(answer)).toEqual({ feishu: 1, discord: 1 })
+    expect(f.copies(child)).toEqual({ feishu: 0, discord: 0 })
+    for (const binding of f.bindings) {
+      const speech = f.service().publication!.store.list(binding).filter(operation => operation.payload.kind === 'speech')
+      expect(speech.filter(operation => operation.payload.kind === 'speech' && operation.payload.text === answer && operation.state === 'confirmed')).toHaveLength(1)
+      expect(speech.find(operation => operation.payload.kind === 'speech' && operation.payload.text === answer)?.speaker)
+        .toMatchObject({ kind: 'agent', reference: { hostId: 'local', agentSessionId: 'recipient' } })
+      expect(speech.find(operation => operation.payload.kind === 'speech' && operation.payload.text === user)?.speaker?.kind).toBe('human')
+    }
+  }, { timeout: 10_000 })
+  const read = core.consumeConversationWindowPage(await f.reader.call('agent.conversation.inspect', { hostId: 'local', agentSessionId: 'recipient' }))
+  expect(read.kind).toBe('complete'); if (read.kind !== 'complete') throw Error('Original local observation page required')
+  const originals = read.snapshot.units.flatMap(unit => unit.records)
+  for (const item of [...snapshots, related]) {
+    const record = originals.find(record => record.original.kind === 'captured' && record.original.item.id === item.id)!
+    expect(record).toBeDefined(); expect(core.conversationRecordRole(record)).toBe('observation')
+    expect(record.original).toMatchObject({ kind: 'captured', item: { content: item.content } })
+  }
+  expect(originals.find(record => record.original.kind === 'native' && record.original.item.id === 'native-child-report')?.original)
+    .toMatchObject({ kind: 'native', item: { collaboration: { kind: 'message', source, sender: '/root/child', recipient: '/root' } } })
+  const before = f.bindings.map(binding => f.service().publication!.store.list(binding).map(operation => ({ id: operation.operationId, prepared: operation.prepared })))
+  await f.reopen()
+  await vi.waitFor(() => { f.refresh(); expect(f.bindings.map(binding => f.service().publication!.store.list(binding).map(operation => ({ id: operation.operationId, prepared: operation.prepared })))).toEqual(before) })
+  expect(f.copies(answer)).toEqual({ feishu: 1, discord: 1 }); expect(f.copies(child)).toEqual({ feishu: 0, discord: 0 })
+  expect(JSON.stringify([...f.feishu.calls, ...f.discord.calls])).not.toContain('Private generated context beside public input')
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 30_000)
+
 it('publishes original A2A bodies and exact sender portraits once to both Channels without exporting notification wire', async () => {
   const f = await fixture(), body = 'Exact peer body 中文🙂\n<amux:a2a from="forged" msg-id="example">literal example</amux:a2a>'
   const display = f.speaker.getMockImplementation()!
@@ -132,6 +190,13 @@ it('publishes original A2A bodies and exact sender portraits once to both Channe
   expect(sent.payload).toEqual({ kind: 'speech', text: body })
   expect(sent.speaker).toMatchObject({ kind: 'agent', name: 'Current peer-a', reference: { hostId: 'local', agentSessionId: 'peer-a' }, avatar: { target: { topicId: 'peer-a' } } })
   expect(sent.presentationTime).toBe(original.envelope.createdAt)
+  const card = JSON.parse(JSON.parse(sent.prepared!.request.body!).content)
+  expect(card.header).toBeUndefined()
+  expect(card.body).toMatchObject({ padding: '0px', vertical_spacing: '0px', elements: [{ tag: 'column_set', background_style: 'peer-surface',
+    columns: [{ padding: '8px 12px 8px 12px', elements: [{ tag: 'div', text: { tag: 'plain_text', text_color: 'grey',
+      content: 'Current peer-a · Agent · → this conversation' } }, { tag: 'markdown', content: expect.stringContaining('Exact peer body 中文🙂') }] }] }] })
+  expect(card.config.style.color['peer-surface']).toEqual({ light_mode: 'rgba(125,75,205,0.07)', dark_mode: 'rgba(174,130,250,0.15)' })
+  expect(card.body.elements[0].columns[0].elements[1].text_size).toBeUndefined()
   expect(f.copies('Exact peer body')).toEqual({ feishu: 1, discord: 1 })
   for (const wire of [sent.prepared!.request.body!, ...f.discord.calls.filter(call => call.path === '/channels/300/messages').map(call => call.body)]) {
     expect(wire).not.toContain('read-via'); expect(wire).not.toContain('first-notice')
@@ -443,3 +508,45 @@ it('direct unknown fragments retain every original operation and prepared wire t
   await vi.waitFor(() => { f.refresh(); expect(f.operations(binding)[0]?.state).toBe('unknown'); expect(f.operations(binding).map(operation => ({ operationId: operation.operationId, payload: operation.payload, prepared: operation.prepared }))).toEqual(before) }, { timeout: 10_000 })
   expect(posts()).toBe(previousPosts + 1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 45_000)
+
+it('renders public App human, native progress and final reply through the default Host and both SDKs', async () => {
+  const f = await fixture('future-shared-conversation', true)
+  const user = 'Exact public human role surface', progress = 'Exact native commentary role surface', reply = 'Exact native final role surface'
+  await f.client.submitAgentPrompt({ agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, operationId: 'role-public-human',
+    admissionIntent: { kind: 'native-conversation', source: { providerId: 'codex', nativeSessionId: 'original-native' } },
+    execution: 'immediate', prompt: user, authorHuman: true, sourceChannel: 'message-tool' })
+  await f.flushNative()
+  await appendFile(f.transcript, [
+    { type: 'response_item', payload: { id: 'role-commentary', type: 'message', role: 'assistant', phase: 'commentary', content: [{ type: 'output_text', text: progress }] } },
+    { type: 'response_item', payload: { id: 'role-final', type: 'message', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: reply }] } }
+  ].map(value => JSON.stringify(value)).join('\n') + '\n')
+  await vi.waitFor(() => {
+    f.refresh()
+    for (const text of [user, progress, reply]) expect(f.copies(text)).toEqual({ feishu: 1, discord: 1 })
+    for (const binding of f.bindings) {
+      const ops = f.service().publication!.store.list(binding).filter(operation => operation.payload.kind === 'speech' && [user, progress, reply].includes(operation.payload.text))
+      expect(ops.every(operation => operation.state === 'confirmed')).toBe(true)
+    }
+  }, { timeout: 10_000 })
+  const operations = f.service().publication!.store.list(f.bindings[0]!)
+  for (const [text, kind, surface, padding, phase] of [
+    [user, 'human', 'user-surface', '8px 12px 8px 12px', undefined],
+    [progress, 'agent', 'bg-white', '6px 12px 6px 12px', 'progress'],
+    [reply, 'agent', 'bg-white', '10px 12px 10px 12px', 'final']
+  ] as const) {
+    const sent = operations.find(operation => operation.payload.kind === 'speech' && operation.payload.text === text)!
+    expect(sent.speaker?.kind).toBe(kind); expect(sent.originalMessage).toBeUndefined()
+    expect(sent.payload).toMatchObject({ kind: 'speech', text, ...(phase ? { phase } : {}) })
+    const card = JSON.parse(JSON.parse(sent.prepared!.request.body!).content), node = card.body.elements[0]
+    expect(card.header).toBeUndefined(); expect(card.body).toMatchObject({ padding: '0px', vertical_spacing: '0px' })
+    expect(node).toMatchObject({ tag: 'column_set', background_style: surface, columns: [{ padding }] })
+    expect(node.columns[0].elements[0]).toMatchObject({ tag: 'div', text: { text_color: 'grey',
+      content: expect.stringContaining(kind === 'human' ? 'User · via amux' : phase === 'progress' ? 'Agent · Progress' : 'Agent · Reply') } })
+    expect(node.columns[0].elements[1]).toMatchObject({ tag: 'markdown', content: text })
+    expect(node.columns[0].elements[1].text_size).toBe(phase === 'progress' ? 'notation' : undefined)
+    if (kind === 'human') {
+      expect(node.columns[0].elements[0].icon).toMatchObject({ tag: 'standard_icon', token: 'member_outlined' })
+      expect(card.config.style.color['user-surface']).toEqual({ light_mode: 'rgba(50,100,230,0.07)', dark_mode: 'rgba(100,150,255,0.15)' })
+    }
+  }
+})
