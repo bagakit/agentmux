@@ -10,9 +10,9 @@ export default defineConfig({ ...original, plugins: [...original.plugins!, {
     if (!/\/packages\/(core|connectors)\/src\/.+\.ts$/u.test(id)) return
     let code = source
     if (process.env.MARKDOWN_RESOURCE_MUTANT === 'drop-images' && id.endsWith('/publication-markdown.ts')) {
-      const anchor = 'const nodes = markdownImageReferences(text)'
+      const anchor = 'const imageNodes = markdownImageReferences(text)'
       if (code.split(anchor).length !== 2) throw Error('Markdown business mutation requires the actual node resolver')
-      code = code.replace(anchor, 'const nodes: ReturnType<typeof markdownImageReferences> = []')
+      code = code.replace(anchor, 'const imageNodes: ReturnType<typeof markdownImageReferences> = []')
     }
     if (process.env.MARKDOWN_RESOURCE_MUTANT === 'replace-unread-image' && id.endsWith('/publication-store.ts')) {
       const anchor = ' || preserveResources.has(publicationPartKey(piece.part))'

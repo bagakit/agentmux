@@ -1,11 +1,10 @@
 import { createHash } from 'node:crypto'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
-import { createServer } from 'node:http'
-import { appendFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { PublicationStore } from '../dist/publication-store.js'
-import { defaultHttpInstance, type HttpInstance } from '@larksuiteoapi/node-sdk'
+import { feishuMediaPlatform } from './fixtures/feishu-media-platform.js'
 import * as core from '../../core/dist/index.js'
 import { parseConnectionDelivery } from '../../core/dist/connections.js'
 import { createPublicationConversationPort } from '../dist/index.js'
@@ -15,6 +14,7 @@ import { feishuConfig } from './fixtures/feishu.js'
 import { context } from './fixtures/room-binding.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { recordedRaster } from '../../core/test/helpers/recorded-raster.js'
+import * as diagramRenderer from '../src/mermaid-renderer.js'
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII=', 'base64')
 const reference = 'data:image/png;base64,' + png.toString('base64')
@@ -28,55 +28,11 @@ afterEach(async () => {
   if (errors.length) throw new AggregateError(errors, 'Recorded image consumer cleanup failed')
 })
 
-async function platform() {
-  const controls: { missingUploadKey?: boolean; unknownImageMessage?: boolean; rejectImageMessage?: boolean; beforeUpload?: (() => Promise<void>) | undefined } = {}
-  const uploads: Buffer[] = [], calls: Array<{ method: string; path: string; body: unknown }> = [], messages = new Map<string, Record<string, unknown>>()
-  const server = createServer(async (request, response) => {
-    try {
-      const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk))
-      const bytes = Buffer.concat(chunks), path = new URL(request.url!, 'http://loopback').pathname
-      let result: unknown
-      if (path.includes('/auth/v3/')) result = { code: 0, tenant_access_token: 'fixture-image-access', expire: 3600 }
-      else if (path === '/open-apis/im/v1/images') {
-        const boundary = /boundary=([^;]+)/u.exec(String(request.headers['content-type']))?.[1]
-        if (!boundary) throw new Error('Official SDK multipart boundary required')
-        const field = bytes.indexOf('name="image"'), start = bytes.indexOf('\r\n\r\n', field) + 4, end = bytes.indexOf('\r\n--' + boundary, start)
-        if (field < 0 || start < 4 || end < start || !bytes.includes(Buffer.from('name="image_type"\r\n\r\nmessage'))) throw new Error('Original multipart image fields required')
-        uploads.push(bytes.subarray(start, end)); await controls.beforeUpload?.()
-        result = { code: 0, data: controls.missingUploadKey ? {} : { image_key: 'original-image-key-' + uploads.length } }
-      } else {
-        const id = path.split('/').at(-1)!, original = messages.get(id), body = bytes.length ? JSON.parse(bytes.toString('utf8')) : undefined
-        calls.push({ method: request.method!, path, body })
-        if (request.method === 'GET') result = { code: 0, data: { items: original ? [original] : [] } }
-        else if (request.method === 'DELETE') { if (original) original.deleted = true; result = { code: 0, data: {} } }
-        else {
-          const messageId = request.method === 'POST' ? 'original-message-' + (messages.size + 1) : id
-          const message = { message_id: messageId, chat_id: body.receive_id ?? original?.chat_id, msg_type: body.msg_type ?? original?.msg_type,
-            sender: { sender_type: 'app', id_type: 'app_id', id: feishuConfig.application.appId }, deleted: false, body: { content: JSON.stringify(body.msg_type === 'interactive' || original?.msg_type === 'interactive' ? JSON.parse(body.content) : JSON.parse(body.content).zh_cn) } }
-          if (!controls.rejectImageMessage || !body.content.includes('img_key')) messages.set(messageId, message)
-          result = body.content.includes('img_key') && controls.rejectImageMessage ? { code: 230025 } : controls.unknownImageMessage && body.content.includes('img_key') ? { code: 230049 } : { code: 0, data: message }
-        }
-      }
-      response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(result))
-    } catch { response.writeHead(400, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ code: 230001 })) }
-  })
-  await new Promise<void>(done => server.listen(0, '127.0.0.1', done))
-  closes.push(async () => { server.closeAllConnections(); await new Promise<void>((done, reject) => server.close(error => error ? reject(error) : done())) })
-  const port = (server.address() as { port: number }).port, request = defaultHttpInstance.request.bind(defaultHttpInstance) as HttpInstance['request']
-  vi.spyOn(defaultHttpInstance, 'request').mockImplementation(options => {
-    const url = new URL(options.url!)
-    if (!['https://open.feishu.cn', 'https://open.larksuite.com'].includes(url.origin)) throw new Error('Original official SDK endpoint required')
-    const { params, ...original } = options
-    if (params !== undefined && (params === null || typeof params !== 'object')) throw new Error('Original SDK query parameters must be a record')
-    const forwarded = { ...original, ...(params === undefined ? {} : { params }), url: `http://127.0.0.1:${port}${url.pathname}${url.search}`, proxy: false, adapter: 'http' }
-    return request(forwarded)
-  })
-  return { uploads, calls, messages, controls }
-}
 
 async function fixture(scope: 'future-shared-conversation' | 'future-native-user-facing' = 'future-shared-conversation') {
   const original = await ingressFixture(false, feishuConfig, undefined, { publication: 'future-shared-conversation' }); closes.push(original.close)
-  const remote = await platform(), port = createPublicationConversationPort(original.coreClients)
+  const remote = await feishuMediaPlatform(), port = createPublicationConversationPort(original.coreClients)
+  closes.push(remote.close)
   const openServices = () => createConnectionServices({ directory: join(original.root, 'image-host'),
     bindings: { spatial: original.spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, publication: port })
   let services = await openServices()
@@ -141,6 +97,73 @@ const posts = (f: Awaited<ReturnType<typeof fixture>>) => f.remote.calls.filter(
   (call.body as { msg_type: string }).msg_type === 'interactive' && JSON.parse((call.body as { content: string }).content).header?.title?.content !== 'Conversation connected')
 const imagePosts = (f: Awaited<ReturnType<typeof fixture>>) => posts(f).filter(call => JSON.stringify(call.body).includes('img_key'))
 const imageOperation = (f: Awaited<ReturnType<typeof fixture>>) => contentOperations(f.services.publication!.store, f.binding).find(operation => operation.payload.kind === 'image')
+
+it('Mermaid diagrams reach the default connection service and official SDK as complete images in original source order', async () => {
+  const f = await fixture(), render = vi.spyOn(diagramRenderer, 'renderMermaidDiagram'),
+    flow = 'flowchart LR\nA[Original message] --> B[Render diagram]\nB --> C[Deliver image]',
+    sequence = 'sequenceDiagram\nparticipant User\nparticipant Host\nparticipant Channel\nUser->>Host: Original diagram\nHost->>Channel: Rendered image\nChannel-->>User: Delivery confirmed',
+    invalid = '```mermaid\nthis is not a diagram\n```',
+    text = 'Before original diagram\n\n```mermaid\n' + flow + '\n```\n\nBetween original diagrams\n\n```mermaid\n' + sequence + '\n```\n\n' + invalid + '\n\nAfter original diagrams'
+  await append(f, native('mermaid-original', [{ type: 'text', text }]))
+  f.services.publication!.refresh()
+  await vi.waitFor(() => {
+    expect(f.remote.uploads).toHaveLength(2)
+    expect(JSON.stringify(posts(f))).toContain('After original diagrams')
+    expect(contentOperations(f.services.publication!.store, f.binding).every(operation => operation.state === 'confirmed')).toBe(true)
+  }, { timeout: 30_000 })
+  const operations = contentOperations(f.services.publication!.store, f.binding), images = operations.filter(operation => operation.payload.kind === 'image')
+  expect(images).toHaveLength(2)
+  for (const [index, operation] of images.entries()) {
+    if (operation.payload.kind !== 'image') throw Error('Original diagram image required')
+    expect(operation.payload.image.derivation).toMatchObject({ kind: 'mermaid', textSha256: createHash('sha256').update(text).digest('hex') })
+    const span = operation.payload.image.derivation!
+    expect(text.slice(span.start, span.end)).toBe('```mermaid\n' + (index ? sequence : flow) + '\n```')
+    expect(f.remote.uploads[index]).toEqual(Buffer.from(operation.payload.image.dataBase64, 'base64'))
+    expect(operation.payload.image.width).toBeGreaterThan(200); expect(operation.payload.image.height).toBeGreaterThan(60)
+    expect(await f.cli(operation.operationId)).toMatchObject({ delivery: { state: 'confirmed', resourceUpload: { kind: 'image', state: 'confirmed', attempt: 1 } } })
+  }
+  const wire = JSON.stringify(posts(f))
+  expect(wire.indexOf('Before original diagram')).toBeLessThan(wire.indexOf('original-image-key-1'))
+  expect(wire.indexOf('original-image-key-1')).toBeLessThan(wire.indexOf('Between original diagrams'))
+  expect(wire.indexOf('Between original diagrams')).toBeLessThan(wire.indexOf('original-image-key-2'))
+  expect(wire).toContain('Diagram image unavailable. The Host could not render this diagram.')
+  expect(wire).toContain('this is not a diagram')
+  expect(f.services.publication!.store.coverage(f.binding).gaps.some(gap => gap.reason === 'resource-unavailable')).toBe(true)
+  // Recovering the invalid neighboring fence revisits this same original part.
+  expect(render.mock.calls.filter(([source]) => source === 'this is not a diagram').length).toBeGreaterThan(1)
+  expect(render.mock.calls.filter(([source]) => source === flow)).toHaveLength(1)
+  expect(render.mock.calls.filter(([source]) => source === sequence)).toHaveLength(1)
+  const history = core.consumeConversationWindowPage(await f.client.readAgentConversation({ hostId: 'local', agentSessionId: 'original-agent' }))
+  expect(JSON.stringify(history)).toContain(JSON.stringify(text).slice(1, -1))
+  if (process.env.MERMAID_IMAGE_OUTPUT) {
+    await mkdir(process.env.MERMAID_IMAGE_OUTPUT, { recursive: true })
+    for (const [index, bytes] of f.remote.uploads.entries()) await writeFile(join(process.env.MERMAID_IMAGE_OUTPUT, index ? 'sequence.png' : 'flowchart.png'), bytes)
+    await writeFile(join(process.env.MERMAID_IMAGE_OUTPUT, 'actual-wire.json'), JSON.stringify(posts(f), null, 2))
+  }
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 45_000)
+
+it('Mermaid original unknown upload stays the same operation after reopen while neighboring text continues', async () => {
+  const f = await fixture(), render = vi.spyOn(diagramRenderer, 'renderMermaidDiagram')
+  f.remote.controls.missingUploadKey = true
+  await append(f, native('mermaid-unknown', [{ type: 'text', text: 'Before unknown diagram\n\n```mermaid\nflowchart LR; A-->B\n```\n\nText still reaches the group' }]))
+  f.services.publication!.refresh()
+  await vi.waitFor(() => {
+    expect(f.remote.uploads).toHaveLength(1)
+    expect(imageOperation(f)?.uploads?.at(-1)?.state).toBe('unknown')
+    expect(JSON.stringify(posts(f))).toContain('Text still reaches the group')
+  }, { timeout: 30_000 })
+  const original = imageOperation(f)!
+  await f.restart()
+  await append(f, native('mermaid-after-reopen', [{ type: 'text', text: 'New original message after reopening' }]))
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(JSON.stringify(posts(f))).toContain('New original message after reopening'), { timeout: 15_000 })
+  expect(f.services.publication!.store.inspect(original.operationId)).toEqual(original)
+  expect(f.remote.uploads).toHaveLength(1)
+  expect(render).toHaveBeenCalledTimes(1)
+  expect((await f.cli(original.operationId)).delivery.resourceUpload).toMatchObject({ state: 'unknown', attempt: 1 })
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 45_000)
 
 it('public tool activities stay local while pure image replies and adjacent speech reach the actual resource owner and SDK', async () => {
   const f = await fixture(), read = vi.spyOn(f.port, 'resource'), hidden = 'Tool-only argument stays local'
