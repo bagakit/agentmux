@@ -1,12 +1,39 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory } from '@agentmux/core'
 import { fixturePath } from '../../../test/fixture-values.mjs'
-import { macosHostService, macosHostServiceAddress, macosHostServicePlist, parseMacosServiceList } from '../src/macos-service.js'
+import { macosHostService, macosHostServiceAddress, macosHostServicePlist, normalizeMacosHostServiceDefinition, parseMacosServiceList } from '../src/macos-service.js'
 
 const input = { executable: process.execPath, entrypoint: fixturePath('host/entry.js'),
   storePath: fixturePath('host/state/sessions.json'), socketPath: fixturePath('host/runtime/control.sock'),
   mobileBuildDirectory: fixturePath('host/mobile'), environment: {} }
 
 describe('the macOS Host has one platform service per original endpoint', () => {
+  it('recognizes explicit default paths without borrowing the cold launcher environment', () => {
+    const original = { Label: 'original', ProgramArguments: ['program', '--store', input.storePath],
+      KeepAlive: true, EnvironmentVariables: { ELECTRON_RUN_AS_NODE: '1' } }
+    const explicit = { ...original, EnvironmentVariables: { ...original.EnvironmentVariables,
+      AGENTMUX_STATE_DIRECTORY: defaultAgentMuxStateDirectory({}),
+      AGENTMUX_MESSAGE_QUEUE_PATH: defaultAgentMuxMessageQueuePath(input.storePath, '') } }
+    vi.stubEnv('AGENTMUX_STATE_DIRECTORY', fixturePath('unrelated/state'))
+    vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', fixturePath('unrelated/queue.ndjson'))
+    try {
+      expect(normalizeMacosHostServiceDefinition(original, input.storePath))
+        .toEqual(normalizeMacosHostServiceDefinition(explicit, input.storePath))
+      for (const [key, value] of Object.entries({ AGENTMUX_STATE_DIRECTORY: fixturePath('another/state'),
+        AGENTMUX_MESSAGE_QUEUE_PATH: fixturePath('another/queue.ndjson'), UNRECOGNIZED: 'extra' })) {
+        expect(normalizeMacosHostServiceDefinition({ ...explicit,
+          EnvironmentVariables: { ...explicit.EnvironmentVariables, [key]: value } }, input.storePath))
+          .not.toEqual(normalizeMacosHostServiceDefinition(original, input.storePath))
+      }
+      for (const changed of [{ ...original, UnknownKey: true }, { ...original, KeepAlive: false },
+        { ...original, ProgramArguments: [...original.ProgramArguments].reverse() },
+        { ...original, EnvironmentVariables: { ELECTRON_RUN_AS_NODE: 1 } }]) {
+        expect(normalizeMacosHostServiceDefinition(changed, input.storePath))
+          .not.toEqual(normalizeMacosHostServiceDefinition(original, input.storePath))
+      }
+    } finally { vi.unstubAllEnvs() }
+  })
+
   it('preserves namespace overrides and persists only the service environment', () => {
     const service = macosHostService({ ...input, environment: { AGENTMUX_RUNTIME_DIRECTORY: fixturePath('original/runtime'),
       AGENTMUX_STATE_DIRECTORY: fixturePath('original/state'), AGENTMUX_MESSAGE_QUEUE_PATH: fixturePath('original/messages.ndjson'),
