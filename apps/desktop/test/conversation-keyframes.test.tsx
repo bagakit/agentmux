@@ -96,11 +96,50 @@ it('retains a native cached frame through an unchanged Core revision and invalid
   expect(frames.get('record')).toBe('data:image/webp;base64,frame1')
   records = [{ ...records[0]!, record: { contentParts: [{ kind: 'text', text: 'original' }] } } as RulerRecord]
   await act(async () => root.render(<Probe />))
+  // IntersectionObserver delivers an initial intersection again after the effect re-observes.
+  await act(async () => visible(img, true))
   expect(frames.get('record')).toBe('data:image/webp;base64,frame1')
   expect(draw).toHaveBeenCalledTimes(1)
+  expect(encoded).toBe(1)
   records = [{ ...records[0]!, revision: 'updated-revision' }]
   await act(async () => root.render(<Probe />))
   expect(frames.size).toBe(0)
+})
+it('recaptures an evicted frame and a new decoded image instead of retaining a sticky captured flag', async () => {
+  const img = image(), original = records[0]!
+  await act(async () => root.render(<Probe />))
+  await act(async () => visible(img, true))
+  records = []
+  await act(async () => root.render(<Probe />))
+  expect(frames.size).toBe(0)
+  records = [original]
+  await act(async () => root.render(<Probe />))
+  await act(async () => visible(img, true))
+  expect(frames.get('record')).toBe('data:image/webp;base64,frame2')
+  await act(async () => img.dispatchEvent(new Event('load')))
+  expect(frames.get('record')).toBe('data:image/webp;base64,frame3')
+  expect(encoded).toBe(3)
+})
+it.each(['video', 'canvas'] as const)('captures a fresh %s frame on actual visibility leave while skipping observer refreshes', async tag => {
+  const message = document.createElement('div'); message.dataset.messageSourceKey = records[0]!.sourceKey!
+  const page = document.createElement('section'); page.dataset.conversationKeyframe = 'navigation'
+  const media = document.createElement(tag); page.append(media); message.append(page); feed.append(message)
+  if (tag === 'video') Object.defineProperties(media, { videoWidth: { value: 800 }, videoHeight: { value: 600 }, readyState: { value: 2 } })
+  else { (media as HTMLCanvasElement).width = 800; (media as HTMLCanvasElement).height = 600 }
+  await act(async () => root.render(<Probe />))
+  await act(async () => visible(media, true))
+  records = [...records]
+  await act(async () => root.render(<Probe />))
+  await act(async () => visible(media, true))
+  expect(encoded).toBe(1)
+  await act(async () => visible(media, false))
+  expect(frames.get('record')).toBe('data:image/webp;base64,frame2')
+  await act(async () => visible(media, true))
+  expect(encoded).toBe(2)
+  if (tag === 'video') {
+    await act(async () => media.dispatchEvent(new Event('loadeddata')))
+    expect(frames.get('record')).toBe('data:image/webp;base64,frame3')
+  }
 })
 it('does not capture unseen video or run a video frame loop', async () => {
   const message = document.createElement('div'); message.dataset.messageSourceKey = records[0]!.sourceKey!

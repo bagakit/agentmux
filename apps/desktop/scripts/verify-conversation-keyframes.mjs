@@ -27,7 +27,7 @@ try {
   const vitest = join(dirname(createRequire(join(root, 'package.json')).resolve('vitest/package.json')), 'vitest.mjs')
   report.unit = await runProbeProcess(process.execPath, [vitest, 'run', '--configLoader', 'runner', '--config', 'test/conversation-keyframes.config.mts'], { cwd: desktop, env: process.env, timeoutMs: 45000 })
   assert.equal(report.unit.exitCode, 0, 'The owning isolated keyframe unit suite must pass first')
-  for (const mode of ['green', 'blank-capture', 'restored']) {
+  for (const mode of ['green', 'blank-capture', 'repeat-capture', 'restored']) {
     const loaded = [], outDir = join(temporary, 'out')
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
       plugins: [{ name: `conversation-keyframe-proof-${mode}`, enforce: 'pre',
@@ -43,6 +43,11 @@ try {
             assert.equal(code.split(anchor).length - 1, 1, 'The mutation must reach the production pixel capture')
             actual = code.replace(anchor, 'context.clearRect(0, 0, canvas.width, canvas.height)')
           }
+          if (mode === 'repeat-capture' && file === hook) {
+            const anchor = 'if (!force && cached && paint.recordId === record.id && cached.version === record.version &&'
+            assert.equal(code.split(anchor).length - 1, 1, 'The mutation must reach the production exact-frame reuse guard')
+            actual = code.replace(anchor, 'if (false && !force && cached && paint.recordId === record.id && cached.version === record.version &&')
+          }
           loaded.push({ path: file, sourceSHA256: hash(code), loadedSHA256: hash(actual), mutated: actual !== code })
           return actual === code ? null : actual
         }
@@ -57,6 +62,12 @@ try {
       assert.notEqual(outcome.exitCode, 0, 'Blanking the actual capture must turn pixels red')
       assert.equal(render.failure?.name, 'AssertionError', 'The mutation must fail a behavior assertion, not startup')
       assert.match(render.failure?.message ?? '', /decoded original red image pixels/)
+      assert.ok(loaded.some(item => item.mutated))
+    } else if (mode === 'repeat-capture') {
+      assert.notEqual(outcome.exitCode, 0, 'Removing exact-frame reuse must repeat actual WebP encoding')
+      assert.equal(render.failure?.name, 'AssertionError', 'The reuse mutation must fail a behavior assertion, not startup')
+      assert.match(render.failure?.message ?? '', /Unrelated record refresh must not repeat WebP encoding/)
+      assert.ok(render.performance?.refreshes[0].after.encodes > render.performance?.refreshes[0].before.encodes)
       assert.ok(loaded.some(item => item.mutated))
     } else {
       assert.equal(outcome.exitCode, 0, render.failure?.message); assert.equal(render.passed, true)

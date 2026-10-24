@@ -50,6 +50,37 @@ app.whenReady().then(async () => {
       assert.equal(value.reads.length, 2, 'Timeline observations must not add another original media read')
       assert.ok(value.messages.every(message => message.sourceKey === JSON.stringify(['keyframe-session', 'captured', message.id])), 'Every message and record association must use the exact production source-key contract')
       assert.ok(value.originalImages.every(image => image.complete && image.width === 320 && image.height === 160), 'The unchanged real message images must remain decoded')
+      if (name === 'normal-light') {
+        report.performance = { refreshes: [] }
+        let before = await facts()
+        for (const revision of [1, 2, 3]) {
+          await evaluate(`conversationKeyframeProbe.configure({unrelatedRevision:${revision}})`)
+          // This observes real Chromium IO initial callbacks, rather than manually invoking capture.
+          for (const key of before.messages.filter(message => message.image).map(message => message.sourceKey)) {
+            const previous = before.observations.filter(item => item === key).length
+            await until(`conversationKeyframeProbe.facts().then(value=>value.observations.filter(item=>item===${JSON.stringify(key)}).length>${previous})`, 'Unrelated record refresh must actually re-deliver original-image intersections')
+          }
+          const after = await facts()
+          report.performance.refreshes.push({ revision, before: { encodes: before.encodes, captures: before.captures.length, intersections: before.observations.length },
+            after: { encodes: after.encodes, captures: after.captures.length, intersections: after.observations.length } })
+          assert.equal(after.encodes, before.encodes, 'Unrelated record refresh must not repeat WebP encoding for retained exact frames')
+          assert.equal(after.captures.length, before.captures.length, 'Unrelated record refresh must not repeat drawing retained exact frames')
+          assert.deepEqual(after.keyframes.map(frame => frame.src), before.keyframes.map(frame => frame.src))
+          assert.equal(after.reads.length, 2, 'Record refresh must not read original media again')
+          before = after
+        }
+        await evaluate('conversationKeyframeProbe.configure({omitRed:true})')
+        await until("document.querySelectorAll('.conversation-axis__keyframe').length===1", 'Evicting a source record must remove its retained frame')
+        const evicted = await facts()
+        await evaluate('conversationKeyframeProbe.configure({omitRed:false,unrelatedRevision:0})')
+        await until("document.querySelectorAll('.conversation-axis__keyframe').length===2", 'The same original must be captured again after eviction and re-entry')
+        const reentered = await facts()
+        report.performance.eviction = { before: { encodes: evicted.encodes, captures: evicted.captures.length }, after: { encodes: reentered.encodes, captures: reentered.captures.length } }
+        assert.equal(reentered.encodes, evicted.encodes + 1, 'Re-entry must encode exactly the evicted original, while retaining the other source frame')
+        assert.equal(reentered.captures.length, evicted.captures.length + 1)
+        assert.equal(reentered.reads.length, 2, 'Re-entry must reuse the already decoded original image without reading it again')
+        assertPixels(reentered.keyframes)
+      }
     }
     await click('.conversation-axis__mark', 0)
     const selected = await facts(); report.scenarios.push({ name: 'selected-original', value: selected }); await capture('selected-original')
