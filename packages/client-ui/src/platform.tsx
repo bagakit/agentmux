@@ -33,7 +33,7 @@ export type ClientUiPlatform = {
   renderProjectLabel(project: NonNullable<ConversationSenderDetails['project']>): ReactNode
   renderIcon(name: ClientUiIconName, size: number): ReactNode
   /** Read one original Inbox message at its recorded Host/participant. Never sends or acknowledges input. */
-  readA2AMessage?(reference: ConversationRef, messageId: string): Promise<DurableAgentMuxMessage | null>
+  readA2AMessage?(reference: ConversationRef, messageId: string, notificationId?: string): Promise<DurableAgentMuxMessage | null>
   /** Optional inline presentation of an exact Core object URI. The host owns facts and navigation. */
   renderObjectLink?(reference: ObjectLinkReference): ReactNode
   /** Explicit block-level Capsule embedding; the host owns native document isolation and lifecycle. */

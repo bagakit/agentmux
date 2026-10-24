@@ -212,24 +212,35 @@ function delivery(value: unknown): void {
   const p = record(value, ['state', 'at', 'reason']); if (!isAgentDeliveryState(p.state)) fail(); count(p.at)
   if (p.reason !== undefined) text(p.reason)
 }
-function notificationStatus(value: unknown, envelope: ReturnType<typeof validateAgentMuxMessageEnvelope>): void {
+function notificationStatus(value: unknown, envelope: ReturnType<typeof validateAgentMuxMessageEnvelope>, notificationId?: string): void {
   const p = record(value)
+  if (notificationId !== undefined) {
+    const selected = record(p.notification)
+    if (selected.notificationId !== notificationId) fail()
+    if (selected.state === 'unassociated') {
+      record(selected, ['state', 'notificationId', 'reason'])
+      if (selected.reason !== 'notification-not-associated' || p.deliveryMode !== undefined && p.deliveryMode !== 'reference') fail()
+      return
+    }
+  }
   if (p.deliveryMode === undefined) { if (p.notification !== undefined) fail(); return }
   if (p.deliveryMode !== 'reference' || envelope.sender.kind !== 'agent-session' || envelope.recipient.kind !== 'agent-session' || !envelope.recipientRunId) fail()
-  const status = record(p.notification, ['state', 'notificationId', 'key', 'reason'])
-  member(status.state, ['pending', 'submitted', 'unconfirmed'])
+  const status = record(p.notification, ['state', 'notificationId', 'key', 'reason', 'mode', 'preparedAt', 'resultRecordedAt'])
+  member(status.state, ['pending', 'submitted', 'unconfirmed', 'not-applied'])
   if ((status.notificationId === undefined) !== (status.key === undefined) || status.state !== 'pending' && status.key === undefined) fail()
   if (status.key !== undefined) {
     const key = validateAgentPromptInputKey(status.key); string(status.notificationId)
     if (key.kind !== 'prompt' || key.submissionId !== status.notificationId || key.submissionId === envelope.messageId ||
         key.agentSessionId !== envelope.recipientSessionId) fail()
-  }
+    member(status.mode, ['idle', 'steer']); count(status.preparedAt, true); count(status.resultRecordedAt, true)
+    if (status.state === 'pending' && status.resultRecordedAt !== null) fail()
+  } else if (status.mode !== undefined || status.preparedAt !== undefined || status.resultRecordedAt !== undefined) fail()
   if (status.reason !== undefined) text(status.reason)
 }
-function message(value: unknown): ReturnType<typeof validateAgentMuxMessageEnvelope> {
+function message(value: unknown, notificationId?: string): ReturnType<typeof validateAgentMuxMessageEnvelope> {
   const p = record(value); count(p.sequence); delivery(p.delivery)
   const envelope = validateAgentMuxMessageEnvelope(p.envelope)
-  notificationStatus(p, envelope)
+  notificationStatus(p, envelope, notificationId)
   if (p.promptCondition !== undefined && p.promptCondition !== null) validateAgentPromptCondition(p.promptCondition)
   return envelope
 }
@@ -766,7 +777,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         record(p, ['hostId', 'notification', 'input'])
         if (p.hostId !== input.hostId) fail()
         if (method === 'message.notify.inspect' && p.notification === null) { if (p.input !== null) fail(); break }
-        const raw = record(p.notification, ['notificationId', 'key', 'messageIds', 'wire', 'condition', 'mode', 'idle', 'state', 'reason'])
+        const raw = record(p.notification, ['notificationId', 'key', 'messageIds', 'wire', 'condition', 'mode', 'idle', 'state', 'reason', 'preparedAt', 'resultRecordedAt'])
         const notice = validateMessageNotification(raw as unknown as import('./agent-message-notification.js').AgentMuxMessageNotification)
         if (notice.notificationId !== input.operationId || method === 'message.notify' && (notice.mode !== 'steer' || !isDeepStrictEqual(notice.messageIds, input.messageIds))) fail()
         if (p.input !== null) {
@@ -780,7 +791,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (input.hostId !== undefined && p.hostId !== input.hostId) fail()
         if (p.message !== null) {
           const original = record(p.message, ['sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice'])
-          const envelope = message(original)
+          const envelope = message(original, input.notificationId as string | undefined)
           if ((input.messageId === undefined ? envelope.operationId !== input.operationId : envelope.messageId !== input.messageId) || credentials && envelope.senderSessionId !== credentials.agentSessionId &&
             envelope.recipientSessionId !== credentials.agentSessionId) fail()
           if (original.execution !== undefined) member(original.execution, ['default', 'immediate'])

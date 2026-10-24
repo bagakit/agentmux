@@ -129,8 +129,8 @@ export type AgentMuxMessageJournalRecord =
   | { readonly kind: 'broadcast-result'; readonly sequence: number; readonly operationId: string; readonly agentSessionId: string; readonly outcome: 'saved' | 'not-applied' | 'unconfirmed'; readonly issue?: AgentMuxBroadcastIssue; readonly at: number }
   | { readonly kind: 'message-route'; readonly sequence: number; readonly route: AgentMessageRoute }
   | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly deliveryMode?: 'reference'; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
-  | { readonly kind: 'a2a-notification'; readonly sequence: number; readonly notification: AgentMuxMessageNotification }
-  | { readonly kind: 'a2a-notification-result'; readonly sequence: number; readonly notificationId: string; readonly state: Exclude<AgentMuxMessageNotification['state'], 'pending'>; readonly reason?: string }
+  | { readonly kind: 'a2a-notification'; readonly sequence: number; readonly notification: AgentMuxMessageNotification; readonly at?: number }
+  | { readonly kind: 'a2a-notification-result'; readonly sequence: number; readonly notificationId: string; readonly state: Exclude<AgentMuxMessageNotification['state'], 'pending'>; readonly reason?: string; readonly at?: number }
   | { readonly kind: 'prompt-condition'; readonly sequence: number; readonly messageId: string; readonly condition: AgentPromptCondition }
   | { readonly kind: 'delivery-issue'; readonly sequence: number; readonly messageId: string; readonly at: number; readonly reason: string }
   | { readonly kind: 'delivery'; readonly sequence: number; readonly messageId: string; readonly state: AgentDeliveryState; readonly at: number; readonly reason?: string }
@@ -318,7 +318,7 @@ export class DurableAgentMuxMessageQueue {
     return result
   }
 
-  private message(messageId: string): DurableAgentMuxMessage | undefined {
+  private message(messageId: string, notificationId?: string): DurableAgentMuxMessage | undefined {
     const row = this.db.prepare(`SELECT m.message_sequence AS sequence, original.json AS original,
       condition.json AS condition, delivery.json AS delivery FROM messages m
       JOIN records original ON original.sequence = m.message_sequence
@@ -334,7 +334,9 @@ export class DurableAgentMuxMessageQueue {
       ? { state: last.state, at: last.at, ...(last.reason === undefined ? {} : { reason: last.reason }) }
       : { state: 'queued', at: envelope.createdAt, ...(last ? { reason: last.reason } : {}) }
     return { sequence: Number(row.sequence), envelope, delivery,
-      ...(original.deliveryMode === 'reference' ? { deliveryMode: original.deliveryMode, notification: this.messageNotification(envelope.messageId) } : {}),
+      ...(original.deliveryMode === 'reference' ? { deliveryMode: original.deliveryMode, notification: this.messageNotification(envelope.messageId, envelope.recipientSessionId, notificationId) } : {}),
+      ...(original.deliveryMode !== 'reference' && notificationId !== undefined
+        ? { notification: { state: 'unassociated' as const, notificationId, reason: 'notification-not-associated' } } : {}),
       ...(condition ? { promptCondition: validateAgentPromptCondition(condition.condition) } : original.promptCondition === null ? { promptCondition: null } : {}),
       ...(original.execution === undefined ? {} : { execution: original.execution }),
       ...(original.admissionIntent === undefined ? {} : { admissionIntent: validateAgentPromptAdmissionIntent(original.admissionIntent) }),
@@ -350,14 +352,20 @@ export class DurableAgentMuxMessageQueue {
     const original = JSON.parse(String(row.original)) as Extract<JournalRecord, { kind: 'a2a-notification' }>
     const result = row.result === null ? null : JSON.parse(String(row.result)) as Extract<JournalRecord, { kind: 'a2a-notification-result' }>
     return validateMessageNotification({ ...original.notification,
-      ...(result ? { state: result.state, ...(result.reason === undefined ? {} : { reason: result.reason }) } : {}) })
+      ...(original.at === undefined ? {} : { preparedAt: original.at }),
+      ...(result ? { state: result.state, ...(result.reason === undefined ? {} : { reason: result.reason }),
+        ...(result.at === undefined ? {} : { resultRecordedAt: result.at }) } : {}) })
   }
 
-  private messageNotification(messageId: string): AgentMuxMessageNotificationStatus {
-    const row = this.db.prepare('SELECT notification_id FROM a2a_message_notifications WHERE message_id=?').get(messageId)
-    const notice = row?.notification_id ? this.notification(String(row.notification_id)) : undefined
-    return notice ? { state: notice.state === 'submitted' ? 'submitted' : notice.state === 'unconfirmed' ? 'unconfirmed' : 'pending',
-      notificationId: notice.notificationId, key: notice.key, ...(notice.reason === undefined ? {} : { reason: notice.reason }) } : { state: 'pending' }
+  private messageNotification(messageId: string, recipientSessionId: string | null, notificationId?: string): AgentMuxMessageNotificationStatus {
+    const selectedId = notificationId ?? this.db.prepare('SELECT notification_id FROM a2a_message_notifications WHERE message_id=?').get(messageId)?.notification_id
+    const notice = selectedId ? this.notification(String(selectedId)) : undefined
+    if (notificationId !== undefined && (!notice || !notice.messageIds.includes(messageId) || notice.key.agentSessionId !== recipientSessionId)) {
+      return { state: 'unassociated', notificationId, reason: 'notification-not-associated' }
+    }
+    return notice ? { state: notice.state, notificationId: notice.notificationId, key: notice.key, mode: notice.mode,
+      preparedAt: notice.preparedAt ?? null, resultRecordedAt: notice.resultRecordedAt ?? null,
+      ...(notice.reason === undefined ? {} : { reason: notice.reason }) } : { state: 'pending' }
   }
 
   /** The notification path never materializes an original body or preview. */
@@ -373,6 +381,7 @@ export class DurableAgentMuxMessageQueue {
   }
 
   private applyNotificationRecord(record: Extract<JournalRecord, { kind: 'a2a-notification' | 'a2a-notification-result' }>): void {
+    if (record.at !== undefined) finiteTimestamp(record.at, 'Notification journal time')
     initializeMessageNotificationReferenceIndex(this.db)
     if (record.kind === 'a2a-notification') {
       const notice = validateMessageNotification(record.notification)
@@ -513,7 +522,7 @@ export class DurableAgentMuxMessageQueue {
       if (this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(notice.key)) ||
           input.originalInputAbsent && !await input.originalInputAbsent()) throw new AgentMuxError(
         'Another original input already owns this notification operation ID.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-      await this.appendRecord({ kind: 'a2a-notification', sequence: this.nextSequence, notification: notice })
+      await this.appendRecord({ kind: 'a2a-notification', sequence: this.nextSequence, notification: notice, at: Date.now() })
       return this.notification(input.notificationId)!
     }, true)
   }
@@ -525,7 +534,7 @@ export class DurableAgentMuxMessageQueue {
       const current = this.notification(notificationId)
       if (!current) throw new AgentMuxError('The original notification is not retained.', 'A2A_NOTIFICATION_NOT_FOUND')
       if (current.state === state && current.reason === reason) return current
-      await this.appendRecord({ kind: 'a2a-notification-result', sequence: this.nextSequence, notificationId, state,
+      await this.appendRecord({ kind: 'a2a-notification-result', sequence: this.nextSequence, notificationId, state, at: Date.now(),
         ...(reason === undefined ? {} : { reason }) })
       return this.notification(notificationId)!
     }, true)
@@ -536,7 +545,7 @@ export class DurableAgentMuxMessageQueue {
     return this.withLock(async () => {
       const notice = this.notification(notificationId)
       if (!notice || notice.state !== 'pending' || !await noOriginalClaim()) return false
-      await this.appendRecord({ kind: 'a2a-notification-result', sequence: this.nextSequence, notificationId, state: 'not-applied', reason })
+      await this.appendRecord({ kind: 'a2a-notification-result', sequence: this.nextSequence, notificationId, state: 'not-applied', reason, at: Date.now() })
       return true
     }, true)
   }
@@ -1104,10 +1113,10 @@ export class DurableAgentMuxMessageQueue {
 
   /** Read the first original operation binding without replaying unrelated communication. */
   async readByOperationId(operationId: string,
-    reauthorize?: (message: DurableAgentMuxMessage | null) => Promise<void>): Promise<DurableAgentMuxMessage | null> {
+    reauthorize?: (message: DurableAgentMuxMessage | null) => Promise<void>, notificationId?: string): Promise<DurableAgentMuxMessage | null> {
     return this.withLock(async () => {
       const messageId = this.operationMessageId(nonEmpty(operationId, 'Message operation id'))
-      const message = messageId ? this.message(messageId)! : null
+      const message = messageId ? this.message(messageId, notificationId === undefined ? undefined : nonEmpty(notificationId, 'Notification ID'))! : null
       await reauthorize?.(message)
       return message
     })
@@ -1115,9 +1124,9 @@ export class DurableAgentMuxMessageQueue {
 
   /** Exact immutable message identity lookup; never discovers unrelated messages. */
   async readByMessageId(messageId: string,
-    reauthorize?: (message: DurableAgentMuxMessage | null) => Promise<void>): Promise<DurableAgentMuxMessage | null> {
+    reauthorize?: (message: DurableAgentMuxMessage | null) => Promise<void>, notificationId?: string): Promise<DurableAgentMuxMessage | null> {
     return this.withLock(async () => {
-      const message = this.message(nonEmpty(messageId, 'Message id')) ?? null
+      const message = this.message(nonEmpty(messageId, 'Message id'), notificationId === undefined ? undefined : nonEmpty(notificationId, 'Notification ID')) ?? null
       await reauthorize?.(message)
       return message
     })
@@ -1183,7 +1192,7 @@ export class DurableAgentMuxMessageQueue {
           : { state: 'queued', at: envelope.createdAt, ...(last ? { reason: last.reason } : {}) }
         return { sequence: Number(row.sequence), envelope, delivery,
           bodyPreview: String(row.preview).slice(0, 240), bodyBytes: Number(row.body_bytes),
-          ...((original as JournalMessage).deliveryMode === 'reference' ? { deliveryMode: 'reference' as const, notification: this.messageNotification(envelope.messageId) } : {}) } satisfies AgentMuxMessageMetadata
+          ...((original as JournalMessage).deliveryMode === 'reference' ? { deliveryMode: 'reference' as const, notification: this.messageNotification(envelope.messageId, envelope.recipientSessionId) } : {}) } satisfies AgentMuxMessageMetadata
       })
       return { participantSessionId, direction: input.direction, messages,
         nextBeforeSequence: rows.length > limit ? messages.at(-1)!.sequence : null }

@@ -24,14 +24,21 @@ export type AgentMuxMessageNotification = {
   idle?: AgentMuxMessageIdleBoundary
   state: 'pending' | 'submitted' | 'unconfirmed' | 'not-applied'
   reason?: string
+  /** Journal preparation time; absent in retained records that did not capture it. */
+  preparedAt?: number
+  /** Time the journal recorded this outcome, never proof of model adoption. */
+  resultRecordedAt?: number
 }
 
 /** Read-only journal projection. Notification is independent of body read or task acceptance. */
 export type AgentMuxMessageNotificationStatus = {
-  state: 'pending' | 'submitted' | 'unconfirmed'
+  state: AgentMuxMessageNotification['state'] | 'unassociated'
   notificationId?: string
   key?: Extract<AgentPromptInputKey, { kind: 'prompt' }>
   reason?: string
+  mode?: AgentMuxMessageNotification['mode']
+  preparedAt?: number | null
+  resultRecordedAt?: number | null
 }
 
 /** Only the original platform producer can supply a notification's input outcome. */
@@ -58,6 +65,8 @@ export function validateMessageNotification(value: AgentMuxMessageNotification):
       !['idle', 'steer'].includes(value.mode) || !['pending', 'submitted', 'unconfirmed', 'not-applied'].includes(value.state) ||
       value.reason !== undefined && typeof value.reason !== 'string') throw new AgentMuxError('The original A2A notification is invalid.', 'INVALID_A2A_NOTIFICATION')
   for (const id of value.messageIds) messageEnvelopeString(id, 'Original message ID')
+  for (const at of [value.preparedAt, value.resultRecordedAt]) if (at !== undefined && (!Number.isSafeInteger(at) || at < 0)) throw new AgentMuxError(
+    'The original notification journal time is invalid.', 'INVALID_A2A_NOTIFICATION')
   if (value.mode === 'idle') {
     const idle = value.idle, native = idle?.nativeEvidence
     const validOpportunity = native === undefined

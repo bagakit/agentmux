@@ -1911,7 +1911,7 @@ export type AgentMuxDesktopApi = {
     dispatches(session: SessionHistoryReference, options?: SessionDispatchPageOptions): Promise<AgentMuxRpcResult<'message.dispatch.ls'>>
     dispatch(session: SessionHistoryReference, sourceMessageId: string): Promise<AgentMuxRpcResult<'message.dispatch.read'>>
     listMessages(session: SessionHistoryReference, options: SessionMessagePageOptions): Promise<AgentMuxRpcResult<'message.ls'>>
-    readMessage(session: SessionHistoryReference, messageId: string): Promise<AgentMuxRpcResult<'message.read'>>
+    readMessage(session: SessionHistoryReference, messageId: string, notificationId?: string): Promise<AgentMuxRpcResult<'message.read'>>
     notifyMessage(session: SessionHistoryReference, messageId: string, operationId: string): Promise<AgentMuxRpcResult<'message.notify'>>
     inspectMessageNotification(session: SessionHistoryReference, messageId: string, operationId: string): Promise<AgentMuxRpcResult<'message.notify.inspect'>>
     messageEvents(session: SessionHistoryReference, options?: SessionMessageEventsOptions): Promise<AgentMuxRpcResult<'message.events'>>

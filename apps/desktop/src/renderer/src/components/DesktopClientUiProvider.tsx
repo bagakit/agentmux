@@ -72,8 +72,8 @@ const desktopPlatform: ClientUiPlatform = {
   renderProjectIcon: project => <ProjectIcon workspaceId={project.workspaceId} name={project.name} />,
   renderProjectLabel: project => <SenderProject project={project} />,
   renderIcon: (name, size) => <SemanticIcon name={`status.${name}`} size={size} />,
-  readA2AMessage: async (reference, messageId) => {
-    const result = await api.sessions.readMessage(reference, messageId)
+  readA2AMessage: async (reference, messageId, notificationId) => {
+    const result = await api.sessions.readMessage(reference, messageId, notificationId)
     if (result.hostId !== reference.hostId) throw new Error('The original message Host could not be confirmed. The reference is retained.')
     return result.message
   },

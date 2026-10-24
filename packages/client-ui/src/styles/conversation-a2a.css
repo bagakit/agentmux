@@ -1,0 +1,37 @@
+/* Original-message metadata stays subordinate to the shared speech card. */
+[data-a2a-original-message-id] > .log-turn > .log-turn__head > .log-turn__identity {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: var(--sp-1);
+}
+[data-a2a-original-message-id] .log-turn__title {
+  align-items: center;
+  padding-block-start: 0;
+}
+[data-a2a-original-message-id] .log-turn__sender-id {
+  flex: 1 1 8ch;
+  max-width: max-content;
+}
+.conversation-a2a-timing {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-3);
+  min-width: 0;
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+.conversation-a2a-timing__stage { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-1); }
+.conversation-a2a-timing time { color: var(--text-2); font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.conversation-a2a-timing__mode { color: var(--text-2); }
+.conversation-a2a-timing [data-notification-state='unconfirmed'],
+.conversation-a2a-timing [data-notification-state='not-applied'] { color: var(--text-2); }
+.conversation-a2a-metadata small { display: block; margin-top: 2px; color: var(--text-3); }
+.conversation-a2a-metadata p { color: var(--text-3); font-size: var(--fs-micro); }
+
+.conversation-a2a-timing__refresh { border: 0; padding: 0 var(--sp-1); min-height: var(--conversation-message-action-size, 24px); border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; cursor: pointer; }
+.conversation-a2a-timing__refresh:hover { color: var(--text); background: var(--surface-3); }
+.conversation-a2a-timing__refresh:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+.conversation-a2a-timing__issue { flex-basis: 100%; overflow-wrap: anywhere; color: var(--text-2); }

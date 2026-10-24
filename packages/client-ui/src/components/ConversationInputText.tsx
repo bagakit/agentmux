@@ -18,17 +18,18 @@ type MarkdownProps = Omit<ComponentProps<typeof AgentMarkdown>, 'content' | 'cla
  * Core owns parsing; these spans are declarations and never establish authorship.
  * Full Copy continues to use the original content, independently of this face.
  */
-export function ConversationInputText({ text, prefix, inputContext, inputContextSource, a2aReferenceScope, describeSpeaker, ...markdown }: MarkdownProps & {
+export function ConversationInputText({ text, prefix, inputContext, inputContextSource, a2aReferenceScope, a2aNotificationId, describeSpeaker, ...markdown }: MarkdownProps & {
   text: string
   prefix?: AgentMuxMessagePrefix | null
   inputContext?: BrowserInputContext | undefined
   inputContextSource?: BrowserInputContextSource | undefined
   a2aReferenceScope?: ConversationRef | undefined
+  a2aNotificationId?: string | undefined
   describeSpeaker?: DescribeSpeaker | undefined
 }) {
   const readA2AMessage = useA2AMessageReader()
   const originals = prefix?.kind === 'references' && a2aReferenceScope && readA2AMessage
-    ? <ConversationA2AReferences references={prefix.references} scope={a2aReferenceScope} active={markdown.visible ?? true}
+    ? <ConversationA2AReferences references={prefix.references} scope={a2aReferenceScope} active={markdown.visible ?? true} notificationId={a2aNotificationId}
       {...(describeSpeaker ? { describeSpeaker } : {})}
       {...(markdown.workspaceRoot ? { workspaceRoot: markdown.workspaceRoot } : {})} {...(markdown.homeDir ? { homeDir: markdown.homeDir } : {})}
       {...(markdown.openWorkspaceFile ? { openWorkspaceFile: markdown.openWorkspaceFile } : {})}

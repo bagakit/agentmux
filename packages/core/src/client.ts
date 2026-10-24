@@ -4356,8 +4356,8 @@ export class AgentMuxClient {
         'Only an original message participant can read it with Agent authority.', 'MESSAGE_PARTICIPANT_MISMATCH')
     }
     return input.messageId === undefined
-      ? this.messageQueue.readByOperationId(input.operationId!, reauthorize)
-      : this.messageQueue.readByMessageId(input.messageId, reauthorize)
+      ? this.messageQueue.readByOperationId(input.operationId!, reauthorize, input.notificationId)
+      : this.messageQueue.readByMessageId(input.messageId, reauthorize, input.notificationId)
   }
 
   /** Original A2A metadata only; no connection, Run probe, input or acknowledgement. */
@@ -6321,8 +6321,10 @@ export class AgentMuxClient {
       ...(record.admission ? { promptCompletionAdmission: record.admission } : {}),
       ...(record.terminalPromptSubmission ? { terminalPromptSubmission: record.terminalPromptSubmission } : {}) }) !== undefined
     if (!submitted && !notApplied) return { notification, input: record }
-    const { reason: _reason, ...original } = notification
-    return { notification: { ...original, state: submitted ? 'submitted' : 'not-applied',
+    const { reason: _reason, resultRecordedAt, ...original } = notification
+    const state = submitted ? 'submitted' : 'not-applied'
+    return { notification: { ...original, state,
+      ...(notification.state === state && resultRecordedAt !== undefined ? { resultRecordedAt } : {}),
       ...(submitted ? {} : { reason: 'The original input owner confirmed this whole notification input was not applied.' }) }, input: record }
   }
 

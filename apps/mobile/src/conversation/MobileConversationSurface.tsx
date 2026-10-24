@@ -53,11 +53,11 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
 export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, visible = true, displayName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const conversationPlatform = useMemo(() => ({ ...platform,
-    readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string) => {
+    readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
       // The selected hosted client owns the local namespace; it cannot route another Host or participant.
       if (!client) throw new Error('The selected Host is unavailable. The original message reference is retained.')
       if (reference.hostId !== 'local' || reference.agentSessionId !== agentSessionId) throw new Error('The original message belongs to another Host or Session. Its reference is retained.')
-      return client.readMessage({ messageId })
+      return client.readMessage({ messageId, ...(notificationId === undefined ? {} : { notificationId }) })
     }
   }), [platform, client, agentSessionId])
   const feed = useRef<HTMLDivElement>(null), follow = useRef(initFollowState())
