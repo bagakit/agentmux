@@ -121,10 +121,33 @@ it('preserves an uncertain start reservation and never repeats or blindly stops 
     f.starts.push(input); throw new AgentMuxError('private start ACK lost', 'CTXMUX_io', undefined, { disposition: 'unknown', confirmedInputBytes: null })
   })
   await expect(f.client.reopenAgent(f.input)).rejects.toMatchObject({ controlFailure: { disposition: 'unknown' } })
-  expect(JSON.parse(await readFile(f.storePath, 'utf8')).reservations).toHaveLength(1)
+  expect(await f.store.readLifecycleReservation(f.old.agentSessionId)).toMatchObject({ agentSessionId: f.old.agentSessionId })
   await expect(f.client.reopenAgent(f.input)).rejects.toMatchObject({ code: 'AGENT_SESSION_BUSY' })
   expect(f.starts).toHaveLength(1); expect(f.stops).toEqual([])
   expect(await f.store.loadRetiredAgentSessions()).toEqual([f.retired])
+})
+
+it.each(['original-operation', 'foreign-operation', 'input-receipt'] as const)('uses only an exact creation receipt for retired reopen: %s', async kind => {
+  const f = await fixture()
+  const storageFailure = { stage: 'start' as const, sqlitePrimaryCode: 14, sqliteExtendedCode: 14,
+    systemErrno: 2, transactionOutcome: 'not_started' as const }
+  let original: AgentMuxError | undefined
+  f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => {
+    f.starts.push(input)
+    original = new AgentMuxError('Original creation receipt', 'CTXMUX_io', undefined,
+      kind === 'input-receipt' ? { disposition: 'not_applied', confirmedInputBytes: null } : undefined,
+      undefined, kind === 'input-receipt' ? undefined : { operationId: kind === 'original-operation' ? input.operationKey : 'unrelated-start', disposition: 'not_applied' }, storageFailure)
+    throw original
+  })
+  const exact = kind === 'original-operation'
+  await expect(f.client.reopenAgent(f.input)).rejects.toMatchObject({ code: exact ? 'CTXMUX_io' : 'AGENT_REOPEN_UNCONFIRMED', storageFailure,
+    creationFailure: { operationId: agentLifecycleOperationIdentity('reopen', f.old.agentSessionId, f.input.operationId), disposition: exact ? 'not_applied' : 'unknown' } })
+  const reservation = await f.store.readLifecycleReservation(f.old.agentSessionId)
+  if (exact) expect(reservation).toBeNull()
+  else expect(reservation).toMatchObject({ agentSessionId: f.old.agentSessionId })
+  expect(f.starts).toHaveLength(1); expect(f.stops).toEqual([])
+  expect(await f.store.loadRetiredAgentSessions()).toEqual([f.retired])
+  expect(await f.store.loadTimeline(f.old.agentSessionId)).toEqual(f.timelineBefore)
 })
 
 it('keeps the Run and reservation when the commit and canonical read are both unknown', async () => {
@@ -133,7 +156,7 @@ it('keeps the Run and reservation when the commit and canonical read are both un
   vi.spyOn(f.store, 'load').mockRejectedValueOnce(new Error('private canonical read unavailable'))
   await expect(f.client.reopenAgent(f.input)).rejects.toThrow('Continue result is unconfirmed')
   expect(f.stops).toEqual([]); expect(f.starts).toHaveLength(1)
-  expect(JSON.parse(await readFile(f.storePath, 'utf8')).reservations).toHaveLength(1)
+  expect(await f.store.readLifecycleReservation(f.old.agentSessionId)).toMatchObject({ agentSessionId: f.old.agentSessionId })
   expect(await f.store.loadRetiredAgentSessions()).toEqual([f.retired])
 })
 
@@ -190,7 +213,7 @@ it('keeps an unprepared dead reopen attempt unknown without stopping its possibl
   await (f.client as any).recoverStaleLifecycles()
   expect(f.stops).toEqual([]); expect(f.starts).toEqual([])
   expect(await f.store.loadRetiredAgentSessions()).toEqual([f.retired])
-  expect(JSON.parse(await readFile(f.storePath, 'utf8')).reservations).toHaveLength(1)
+  expect(await f.store.readLifecycleReservation(f.old.agentSessionId)).toMatchObject({ agentSessionId: f.old.agentSessionId })
   expect(await f.store.loadTimeline(f.old.agentSessionId)).toEqual(f.timelineBefore)
 })
 
@@ -275,7 +298,7 @@ it.each(['missing', 'wrong-cwd', 'ambiguous'] as const)('keeps %s actual prepare
   await expect(f.client.reconcileAgentReopen(f.input)).rejects.toMatchObject({ controlFailure: { disposition: 'unknown' } })
   expect(f.starts).toHaveLength(1); expect(f.stops).toEqual([]); expect(f.inner.kernel.input).not.toHaveBeenCalled()
   expect(await f.store.loadRetiredAgentSessions()).toEqual([f.retired]); expect(await loadAgentSessions(f.store)).toEqual([])
-  expect(JSON.parse(await readFile(f.storePath, 'utf8')).reservations).toHaveLength(1)
+  expect(await f.store.readLifecycleReservation(f.old.agentSessionId)).toMatchObject({ agentSessionId: f.old.agentSessionId })
 })
 
 it('does not claim a still-executing original operation even while its Run already exists', async () => {

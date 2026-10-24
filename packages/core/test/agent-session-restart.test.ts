@@ -249,9 +249,17 @@ it('an identity-only caller resumes the original frozen executor after config ch
 })
 it('an authoritative not-applied Start remains explicitly retryable under its original operation after Core restart', async () => {
   const f = await fixture()
-  f.start.mockRejectedValueOnce(new core.AgentMuxError('Original Start was not dispatched', 'CONTROL_UNAVAILABLE', undefined,
-    { disposition: 'not_applied', confirmedInputBytes: null }))
-  await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESTART_START_NOT_APPLIED', controlFailure: { disposition: 'unknown' } })
+  const storageFailure = { stage: 'start' as const, sqlitePrimaryCode: 14, sqliteExtendedCode: 14,
+    systemErrno: 2, transactionOutcome: 'not_started' as const }
+  let original: InstanceType<typeof core.AgentMuxError>
+  f.start.mockImplementationOnce(async (input: { operationKey: string }) => {
+    original = new core.AgentMuxError('Original Start was not dispatched', 'CONTROL_UNAVAILABLE', undefined, undefined, undefined,
+      { operationId: input.operationKey, disposition: 'not_applied' }, storageFailure)
+    throw original
+  })
+  const rejected = await f.restart().catch(error => error)
+  expect(rejected).toMatchObject({ code: 'AGENT_RESTART_START_NOT_APPLIED', controlFailure: { disposition: 'unknown' },
+    creationFailure: { disposition: 'not_applied' }, storageFailure, cause: original! })
   expect(await f.client.inspectAgentRestart(f.request)).toMatchObject({ phase: 'starting', canRetry: true, detail: expect.stringContaining('confirmed not applied') })
   const saved = await f.store.readLifecycleReservation(f.original.agentSessionId)
   expect(saved?.restart?.startNotApplied).toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
@@ -264,6 +272,19 @@ it('an authoritative not-applied Start remains explicitly retryable under its or
   expect(result.continuity?.errorCode).toBeUndefined()
   expect(await second.client.inspectAgentRestart(f.request)).toMatchObject({ phase: 'restarted', newRun: result.run })
   await f.invariants(second, 2, 1)
+})
+
+it.each(['foreign-operation', 'input-receipt'] as const)('keeps restart Start unconfirmed for a %s negative receipt', async kind => {
+  const f = await fixture()
+  f.start.mockRejectedValueOnce(new core.AgentMuxError('No matching Start receipt', 'CTXMUX_io', undefined,
+    kind === 'input-receipt' ? { disposition: 'not_applied', confirmedInputBytes: null } : undefined,
+    undefined, kind === 'foreign-operation' ? { operationId: 'unrelated-start', disposition: 'not_applied' } : undefined))
+  await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED', creationFailure: { disposition: 'unknown' } })
+  expect(await f.client.inspectAgentRestart(f.request)).toMatchObject({ phase: 'unconfirmed', canRetry: false })
+  const saved = await f.store.readLifecycleReservation(f.original.agentSessionId)
+  expect(saved?.restart?.startNotApplied).toBeUndefined(); expect(saved?.preparedSession).toBeDefined()
+  await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESTART_UNCONFIRMED' })
+  await f.invariants()
 })
 
 it('reports a genuinely exited replacement as a known failed restart and retains original native recovery', async () => {
