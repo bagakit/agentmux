@@ -4,13 +4,14 @@ import { externalConversationAuthor, externalConversationRecordId } from '@agent
 import { createHash } from 'node:crypto'
 import type { PublicationImage, PublicationFile, ResourceUploadReceipt, ResolvedPublicationPart } from './publication-resource.js'
 import { publicationContent, publicationPartKey, type PublicationContentPlan } from './publication-content.js'
+import { publicationInputAlias } from './publication-input-alias.js'
 import type { PublicationA2A, PublicationOriginalMessage } from './publication-a2a.js'
 import type { PublicationSpeaker } from './publication-speaker.js'
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication, type PublicationPreparer } from './publication-wire.js'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
 import { parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
-import { parseConversationChangesPage, parseConversationUnit, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
+import { parseConversationChangesPage, parseConversationUnit, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
 export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'sourceFrontier' | 'publicationOrigin' | 'scope'>
@@ -106,6 +107,7 @@ const same = (a: unknown, b: unknown) => encode(a) === encode(b)
 type RepresentationIntent = { kind: 'representation'; projectionId: string } & PublicationContentPlan['pieces'][number]
 type LegacyRepresentationIntent = { kind: 'legacy-representation'; projectionId: string; record: ConversationItemRef; operations: string[]; text: string }
 type RepresentationRow = { ordinal: number; id: string; value: RepresentationIntent | LegacyRepresentationIntent }
+type InputAliasDecision = { kind: 'gap'; gap: ConnectionDeliveryGap; state: 'resolved' | 'unresolved'; inputAlias: ConversationInputWitness }
 type QuestionReadWitness = { recordRevision: string; targets: ConversationQuestionIdentity[]; read: string[] }
 const questionReadsComplete = (witnesses: QuestionReadWitness[]) => witnesses.length > 0 && witnesses.every(witness => witness.targets.length > 0 && witness.targets.every(target => witness.read.includes(encode(target))))
 function acceptQuestionReads(witnesses: QuestionReadWitness[], questions: ReadonlySet<string>): QuestionReadWitness[] {
@@ -222,7 +224,13 @@ export class PublicationStore {
       CREATE INDEX IF NOT EXISTS connector_publication_intent_projection ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.projectionId'))
       WHERE json_extract(decision_json,'$.kind') IN ('representation','legacy-representation');
       CREATE INDEX IF NOT EXISTS connector_publication_intent_record ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.part.record'))
-      WHERE json_extract(decision_json,'$.kind')='representation';`)
+      WHERE json_extract(decision_json,'$.kind')='representation';
+      CREATE INDEX IF NOT EXISTS connector_publication_public_input ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.publicInputKey'))
+      WHERE json_extract(decision_json,'$.kind')='representation' AND json_type(decision_json,'$.publicInputKey')='object';
+      CREATE INDEX IF NOT EXISTS connector_publication_input_alias ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.inputAlias.key'))
+      WHERE json_extract(decision_json,'$.kind')='gap' AND json_type(decision_json,'$.inputAlias.key')='object';
+      CREATE INDEX IF NOT EXISTS connector_publication_input_alias_record ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.inputAlias.record'))
+      WHERE json_extract(decision_json,'$.kind')='gap' AND json_type(decision_json,'$.inputAlias.key')='object';`)
 
     try { database.exec(`CREATE INDEX IF NOT EXISTS connector_publication_context_message
       ON connector_publication_operation(
@@ -583,17 +591,21 @@ export class PublicationStore {
         // Resolve only decisions superseded by these accepted original versions.
         for (const row of this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved'").all(...scopeKey(boundary))) {
           const d = JSON.parse(String(row.decision_json))
-          if (d.kind === 'gap' && d.gap.part && !ambiguous.has(conversationRecordId(d.gap.part.record)) && unit.records.some(r => r.id === conversationRecordId(d.gap.part.record))) this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...d, state: 'resolved' }), Number(row.rowid))
+          if (d.kind === 'gap' && !d.inputAlias && d.gap.part && !ambiguous.has(conversationRecordId(d.gap.part.record)) && unit.records.some(r => r.id === conversationRecordId(d.gap.part.record))) this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...d, state: 'resolved' }), Number(row.rowid))
         }
         this.saveDecision(boundary, 'scope-' + digest(unit.event.id), unit.event.revision, { kind: 'scope', event: { id: unit.event.id, revision: unit.event.revision }, excluded: plan.excluded })
         for (const gap of plan.gaps) {
           const stored = { ...gap, gapId: 'gap-' + digest([...scopeKey(boundary), gap.event, gap.part, gap.reason]) }
-          this.saveDecision(boundary, stored.gapId, gap.part?.recordRevision ?? unit.event.revision, { kind: 'gap', gap: stored, state: 'unresolved' })
+          const inputAlias = publicationInputAlias(unit, gap)
+          this.saveDecision(boundary, stored.gapId, gap.part?.recordRevision ?? unit.event.revision, { kind: 'gap', gap: stored, state: 'unresolved', ...(inputAlias ? { inputAlias } : {}) })
         }
         for (const representation of plan.origins) this.saveDecision(boundary, 'origin-' + digest(representation.part), representation.part.recordRevision, { kind: 'origin', representation })
         if (mappingConflict) continue
         const materialized = this.materialize(boundary, projectionId, unit, plan, coalesced)
-        this.queueRepresentation(boundary, projectionId, unit, materialized, options.fragmentBytes ?? 4096, undefined, undefined,
+        // An input's transport-only observation has no new public body or receipt.
+        // Keep its original captured representation instead of dropping that receipt.
+        const inputWireOnly = !plan.pieces.length && unit.records.length > 0 && unit.records.every(record => isCompleteConversationRecord(record) && record.original.kind === 'native' && record.original.item.kind === 'user-message' && conversationNativeInputWitness(record)?.key !== undefined)
+        if (!inputWireOnly) this.queueRepresentation(boundary, projectionId, unit, materialized, options.fragmentBytes ?? 4096, undefined, undefined,
           plan.pieces.map(piece => options.questions?.get(conversationRecordId(piece.part.record))).find(value => value !== undefined), options.fragmentText, options.speakers?.get(unit.event.id))
         this.projectOriginalMessages(boundary, unit, options.originals?.get(unit.event.id) ?? [], page.checkpoint, options.fragmentBytes ?? 4096, options.fragmentText)
         // Explicit Core coalescence moves only representation intent. Original
@@ -601,8 +613,50 @@ export class PublicationStore {
         // unknown predecessor remains inspect-only and keeps its request bytes.
         for (const original of coalesced) this.queueRepresentation(boundary, original, unit, { ...plan, text: '', complete: true }, options.fragmentBytes ?? 4096)
       }
+      this.accountInputAliases(boundary, units)
       this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?').run(encode(page.checkpoint), ...scopeKey(boundary), 'unified')
     })
+  }
+  /** A public captured span represents only its exact accepted native text wrapper. */
+  private accountInputAliases(boundary: PublicationBoundary, units: readonly ConversationUnit[]): void {
+    if (boundary.scope.publication !== 'future-shared-conversation') return
+    const records = units.flatMap(unit => unit.records).filter(isCompleteConversationRecord), keys = new Map<string, NonNullable<RepresentationIntent['publicInputKey']>>()
+    for (const record of records) {
+      const key = record.original.kind === 'native' ? record.original.item.conversation?.adoptedInput?.key : record.original.item.kind === 'user_message' ? record.original.item.inputRef : undefined
+      if (key) keys.set(encode(key), key)
+    }
+    const aliases = new Map<number, InputAliasDecision>(), witnesses = units.flatMap(unit => unit.event.inputAdoption?.witnesses ?? [])
+    const collect = (rows: Record<string, unknown>[]) => { for (const row of rows) aliases.set(Number(row.rowid), JSON.parse(String(row.decision_json))) }
+    for (const key of keys.keys()) collect(this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_type(decision_json,'$.inputAlias.key')='object' AND json_extract(decision_json,'$.inputAlias.key')=?").all(...scopeKey(boundary), key))
+    // Include prior facts for a changed native record so Core can reject conflicting source/key updates.
+    for (const record of records) if (record.original.kind === 'native' && record.reference && conversationNativeInputWitness(record)) {
+      collect(this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_type(decision_json,'$.inputAlias.key')='object' AND json_extract(decision_json,'$.inputAlias.record')=?").all(...scopeKey(boundary), encode(record.reference)))
+      const witness = conversationNativeInputWitness(record)
+      if (witness) witnesses.push(witness)
+    }
+    if (!aliases.size) return
+    witnesses.push(...[...aliases.values()].map(value => value.inputAlias))
+    const accepted = conversationInputAdoptionEdges(records, { witnesses, ...(units.some(unit => unit.event.inputAdoption?.unconfirmed) ? { unconfirmed: true as const } : {}) })
+    if (accepted.unconfirmed) return
+    const byKey = new Map<string, Array<[number, InputAliasDecision]>>()
+    for (const entry of aliases) if (entry[1].state === 'unresolved' && entry[1].inputAlias.key) {
+      const key = encode(entry[1].inputAlias.key), group = byKey.get(key) ?? []
+      group.push(entry); byKey.set(key, group)
+    }
+    for (const [encoded, key] of keys) {
+      const related = byKey.get(encoded)
+      if (!related?.length) continue
+      const publicParts = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='representation' AND json_type(decision_json,'$.publicInputKey')='object' AND json_extract(decision_json,'$.publicInputKey')=?").all(...scopeKey(boundary), encoded)
+        .map(row => JSON.parse(String(row.decision_json)) as RepresentationIntent)
+        .filter(part => part.purpose === 'conversation' && part.part.record.source.kind === 'captured' && part.part.selector.kind === 'captured-field' && part.part.selector.field === 'content' && same(part.publicInputKey, key))
+      if (publicParts.length !== 1) continue
+      for (const [ordinal, value] of related) {
+        const identity = conversationInputIdentity(value.inputAlias.record.hostId, key), association = accepted.byKey.get(identity)
+        if (accepted.ambiguous.has(identity) || association?.length !== 1 || !association[0]!.key || conversationRecordId(association[0]!.record) !== conversationRecordId(value.inputAlias.record)) continue
+        if (publicParts[0]!.part.record.hostId !== value.inputAlias.record.hostId || publicParts[0]!.part.record.agentSessionId !== key.agentSessionId) continue
+        this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...value, state: 'resolved' }), ordinal)
+      }
+    }
   }
   private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }, references: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)], question?: QuestionPublicationPayload, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker, originalMessage?: PublicationOriginalMessage): void {
     const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal').all(projectionId).map(row => this.read(row)!)

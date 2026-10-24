@@ -1,12 +1,12 @@
-import { AgentMuxError } from '@agentmux/core'
+import { AgentMuxError, type AgentPromptInputKey } from '@agentmux/core'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
-import { conversationRecordAuthor, conversationRecordId, type ConversationSourceRecord, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
+import { conversationRecordAuthor, conversationRecordId, conversationInputKey, type ConversationSourceRecord, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
 import type { PublicationImage, PublicationFile, PublicationMarkdown, ResolvedPublicationPart } from './publication-resource.js'
 import type { ConnectionDeliveryGap, ConnectionDeliveryRelay, ConnectionOriginRepresentation, RoomBinding } from '@agentmux/core/connections'
 
 export type PublicationContentPlan = {
   text: string
-  pieces: Array<{ part: ConversationContentRef; text: string; image?: PublicationImage; file?: PublicationFile; segments?: PublicationMarkdown['segments']; contentEligibility?: 'public'; purpose?: 'conversation'; relay?: ConnectionDeliveryRelay['sources'][number] }>
+  pieces: Array<{ part: ConversationContentRef; text: string; image?: PublicationImage; file?: PublicationFile; segments?: PublicationMarkdown['segments']; contentEligibility?: 'public'; purpose?: 'conversation'; relay?: ConnectionDeliveryRelay['sources'][number]; publicInputKey?: AgentPromptInputKey }>
   relay?: ConnectionDeliveryRelay
   phase?: 'progress' | 'final'
   inputSubmission?: import('@agentmux/core').AgentInputSubmissionObservation
@@ -139,7 +139,9 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
         : narrow || unit.event.role === 'message' && unit.event.author.kind === 'agent' && slot.placement === 'body' ? ''
         : `[${unit.event.role} · ${source} · ${unit.event.author.kind}${original.kind === 'captured' ? ` · ${original.item.status}` : ''}${unit.event.role === 'message' ? ' · via amux' : ' · read-only'}]\n`
       const text = value ? label + value : ''
-      pieces.push({ part, text, ...(segments ? { segments: label ? [{ text: label }, ...segments] : segments } : {}), purpose: 'conversation', ...(original.kind === 'native' ? { contentEligibility: 'public' as const } : {}), ...(author && author.kind !== 'system' ? { relay: { part, author } } : {}) })
+      pieces.push({ part, text, ...(segments ? { segments: label ? [{ text: label }, ...segments] : segments } : {}), purpose: 'conversation', ...(original.kind === 'native' ? { contentEligibility: 'public' as const } : {}),
+        ...(original.kind === 'captured' && original.item.kind === 'user_message' && conversationInputKey(record) ? { publicInputKey: original.item.inputRef! } : {}),
+        ...(author && author.kind !== 'system' ? { relay: { part, author } } : {}) })
       if (text) sections.push(text)
     }
   }
