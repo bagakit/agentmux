@@ -23,12 +23,13 @@ type Props = {
   client: AgentMuxHostedClient | null; session: AgentMuxAgentSession | null; connected: boolean;
   promptOperationId: string | null; confirmedPrompt: ConfirmedAttachmentPrompt | null;
   onSendBodyOnly?(): void; bodyOnlyDisabled?: boolean;
+  onCancelPreparation?(): void; preparing?: boolean;
   controls: Ref<MobileAttachmentControls>; insert(resolve: () => Promise<string | null>, original: MobileFileUpload): Promise<void>;
   pickFile?: () => Promise<LocalAttachment | null>
   onPendingContentChange?: (pending: boolean) => void
 }
 /** A local selection and one original Host receipt, beside the maintained shared Composer. */
-export function MobileAttachments({ client, session, connected, promptOperationId, confirmedPrompt, onSendBodyOnly, bodyOnlyDisabled, controls, insert, pickFile = pickLocalAttachment, onPendingContentChange }: Props) {
+export function MobileAttachments({ client, session, connected, promptOperationId, confirmedPrompt, onSendBodyOnly, bodyOnlyDisabled, onCancelPreparation, preparing, controls, insert, pickFile = pickLocalAttachment, onPendingContentChange }: Props) {
   const [uploads, setUploads] = useState<MobileFileUpload[]>(() => (getDeviceWorkface().snapshot().record.fileUploads ?? []).map(item =>
     item.phase === 'sending' ? { ...item, phase: 'unknown', issue: '原上传回执尚未确认；核对同一操作，不会自动重传。' } : item))
   const [notice, setNotice] = useState<string | null>(null), [readingCount, setReadingCount] = useState(0)
@@ -212,7 +213,7 @@ export function MobileAttachments({ client, session, connected, promptOperationI
     let cancelled = false
     const originalSelection = selected.every(upload => recordIds.current.get(upload.identity.operationId) === originalRecord && fileUploadScopeMatches(upload, originalScope))
     const assertOriginal = () => {
-      if (cancelled) throw new Error('本次已明确选择仅发送正文；原上传和附件仍保留。')
+      if (cancelled) throw new Error('本次发送准备已取消；原上传和附件仍保留。')
       const now = scope()
       if (!mounted.current || current.current.client !== originalClient || getDeviceWorkface().recordIdentity() !== originalRecord ||
           !originalSelection || now.sessionId !== originalScope.sessionId || now.runId !== originalScope.runId || now.runtimeId !== originalScope.runtimeId || now.hostId !== originalScope.hostId) {
@@ -271,6 +272,7 @@ export function MobileAttachments({ client, session, connected, promptOperationI
       </div>
     })}
     {visible.length > 0 && onSendBodyOnly && <button type="button" className="mobile-text-button" disabled={bodyOnlyDisabled} onClick={onSendBodyOnly}>本次仅发送正文</button>}
+    {preparing && onCancelPreparation && <button type="button" className="mobile-text-button" onClick={onCancelPreparation}>取消发送准备</button>}
     {notice && <MobileNotice identity={[session?.agentSessionId,notice]} className="mobile-attachment-notice" role="status">{notice}</MobileNotice>}
   </div>
 }
