@@ -73,7 +73,7 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
     ...(metrics ? { metrics: <ConversationMetricsInline observation={metrics} /> } : {}),
     ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }}
     keepContentVisible={anchored} expanded={expanded} onExpandedChange={open => { if (open) setReadOnce(true); setExpanded(open); disclosure?.onExpandedChange(open) }}>
-    {metrics ? <div hidden={!expanded}><ConversationMetricsDetails observation={metrics} /></div> : null}
+    {metrics ? <div className="native-process-observation__metrics" hidden={!expanded}><ConversationMetricsDetails observation={metrics} /></div> : null}
     {layout.map(entry => {
       if (entry.kind === 'anchor') return <div key={JSON.stringify(['anchor', entry.key])}>{entry.content}</div>
       const record = entry.record, key = conversationPresentationKey(record)
@@ -119,7 +119,7 @@ export function NativeProcessStep({ item, origin, children, bodyOnly = false, ex
     setExpanded(!expanded)
     onExpandedChange?.(!expanded)
   }
-  return <div className="wf-native-process" data-native-step-id={item.id}>
+  return <div className="wf-native-process" data-native-step-id={item.id} data-body-only={bodyOnly ? '' : undefined}>
     {!bodyOnly ? <WorkflowToolRow observation={{ id: item.id, title, source: NATIVE_CONVERSATION_SOURCE, persistentSource: true,
       ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
       className="log-row" icon={collaboration ? <SemanticIcon name="object.collaboration" size={12} /> : <SemanticIcon name={call ? 'conversation.tool-call' : item.contentParts.some(part => part.kind === 'tool-result') ? 'conversation.tool-result' : 'object.activity'} size={12} />}

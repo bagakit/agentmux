@@ -86,11 +86,12 @@ function ReplyObservation({ item, active, observation, compact, reveal, children
       <button type="button" className="conversation-reply-observation__toggle" aria-expanded={expanded} aria-controls={bodyId}
         aria-label={expanded ? '收起采集内容' : '展开采集内容'} onClick={() => { setChoice(!expanded); if (!expanded) setReadOnce(true) }}>
         <span className="conversation-reply-observation__node"><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" /></span>
-        {expanded ? '收起原文' : <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply ?? COLLECTED_REPLY_TITLE} />}
-        {!expanded ? <><time>{formatClock(item.createdAt)}</time>{preview ? <span className="conversation-reply-observation__preview">{preview}</span> : null}</> : null}
+        <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply ?? COLLECTED_REPLY_TITLE} />
+        <time>{formatClock(item.createdAt)}</time>
+        {!expanded && preview ? <span className="conversation-reply-observation__preview">{preview}</span> : null}
       </button>
       {!expanded && item.status !== 'complete' ? <span role="status" data-status={item.status}>{item.status === 'failed' ? '记录失败' : '记录中'}</span> : null}
     </div> : null}
-    <div ref={body} id={bodyId} hidden={!expanded} inert={!expanded}>{expanded || readOnce ? children : null}</div>
+    <div ref={body} id={bodyId} className={observation ? 'conversation-reply-observation__body' : undefined} hidden={!expanded} inert={!expanded}>{expanded || readOnce ? children : null}</div>
   </div>
 }
