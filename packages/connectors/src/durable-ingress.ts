@@ -2,7 +2,7 @@ import { grantAuthorReference } from './effective-grant.js'
 import { parseExternalConversationReference, type AgentExternalAuthoritySource, type AgentExternalConversationAuthority, type AgentExternalConversationReference } from '@agentmux/core'
 import { isDeepStrictEqual } from 'node:util'
 import { ConversationActions, externalActionIntentDigest } from './conversation-actions.js'
-import { parseConnectionQuestionAnswerSubmissions } from '@agentmux/core/connections'
+import { sameRoomPublication, parseConnectionQuestionAnswerSubmissions } from '@agentmux/core/connections'
 import { mintObjectId, AgentMuxError, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
 import { CONNECTION_INGRESS_AUTHORITY_CODES, connectionDiagnosisIntakeCodes, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressReadPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
@@ -253,13 +253,13 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     const connection = this.options.connections.readConfiguration(record.connectionId)
     const binding = expected ? this.options.bindings.readExact(expected.author.bindingId, expected.author.bindingRevision) : this.binding(record)
     const current = binding ? this.options.bindings.readCurrent(binding.bindingId) : null
-    if (!current || current.state !== 'active' || current.revision !== binding?.revision) fail('INGRESS_BINDING_UNAVAILABLE')
+    if (!current || current.state !== 'active' || !binding || current.revision !== binding.revision && (!expected || !sameRoomPublication(binding, current) || !this.options.bindings.publicationAuthority(binding.bindingId, binding.revision).authorized)) fail('INGRESS_BINDING_UNAVAILABLE')
     if (!connection?.config.enabled || !equal(connection.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
     if (!binding) fail('INGRESS_BINDING_UNAVAILABLE')
     const target = binding.connectionId === record.connectionId ? connection : this.options.connections.readConfiguration(binding.connectionId)
     if (!target?.config.enabled || !equal(target.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
     if (binding.connectionId !== record.connectionId) this.assertService(binding.connectionId)
-    const grant = this.options.bindings.effectiveGrant(binding.bindingId, binding.revision, record.actor)
+    const grant = this.options.bindings.effectiveGrant(binding.bindingId, current.revision, record.actor)
     if (!grant || grant.state !== 'active' || !grant.capabilities.includes('input') || !equal(grant.actor, record.actor)) fail('INGRESS_ACTOR_NOT_AUTHORIZED')
     const event = JSON.parse(String(this.database.prepare('SELECT event_json FROM connection_ingress_message WHERE ingress_id=?').get(record.ingressId)!.event_json)) as VerifiedIngressMessage
     const qualifiedReply = record.addressing?.state === 'confirmed' && record.addressing.selection === 'reply' && record.addressing.replyToMessageId === event.replyToMessageId

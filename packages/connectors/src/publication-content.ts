@@ -52,7 +52,7 @@ export function isConversationPublicationPart(record: ConversationSourceRecord, 
 }
 
 /** Platform representation only. Identity, role, author, order and relations are accepted Core facts. */
-export function publicationContent(unit: ConversationUnit, binding: RoomBinding, frontier: ConversationCheckpoint, options: PublicationContentOptions): PublicationContentPlan {
+export function publicationContent(unit: ConversationUnit, binding: Pick<RoomBinding, 'bindingId' | 'connectionId' | 'externalConversationId' | 'scope' | 'sourceFrontier'>, frontier: ConversationCheckpoint, options: PublicationContentOptions): PublicationContentPlan {
   if (unit.records.some(record => !isCompleteConversationRecord(record))) throw new AgentMuxError('Publication requires complete original records; read the same checkpoint without deferred process details.', 'PUBLICATION_COMPLETE_RECORDS_REQUIRED')
   const records = new Map(unit.records.map(record => [record.id, record])), gaps: ConnectionDeliveryGap[] = [], origins: ConnectionOriginRepresentation[] = [], excluded: ConversationContentRef[] = []
   const event = { id: unit.event.id, revision: unit.event.revision }, sections: string[] = [], pieces: PublicationContentPlan['pieces'] = [], questions = new Set<string>()
@@ -91,7 +91,7 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
     // parts above carry the original Provider purpose independently of display kind.
     if (original.kind === 'captured' && (original.item.kind === 'user_message' && original.item.publicContent !== 'confirmed' || original.item.kind === 'system_message' && original.item.source === 'agentmux')) { gap('public-content-unconfirmed'); continue }
     const external = original.kind === 'captured' ? original.item.authorExternal : undefined
-    if (external && external.connectionId === binding.connectionId && external.externalConversationId === binding.externalConversationId && external.bindingId === binding.bindingId && external.bindingRevision === binding.revision) {
+    if (external && external.connectionId === binding.connectionId && external.externalConversationId === binding.externalConversationId && external.bindingId === binding.bindingId) {
       const origin = options.origin(record.id)
       if (origin) { origins.push({ event, part, origin }); continue }
       gap('public-content-unconfirmed'); continue
