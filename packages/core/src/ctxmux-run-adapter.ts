@@ -37,7 +37,7 @@ import {
 } from '@ctxmux/sdk'
 import { AgentMuxError } from './errors.js'
 import { withCtxmuxStartupDiagnostic } from './ctxmux-startup-diagnostic.js'
-import { projectRunStorageFacts, type AgentMuxRunStorageFacts } from './run-storage-observation.js'
+import { projectRunStorageFacts, projectStorageFailure, type AgentMuxRunStorageFacts } from './run-storage-observation.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { classifyStreamEnd } from './ctxmux-stream-end.js'
 import { probeSocketLiveness } from './socket-liveness.js'
@@ -387,14 +387,15 @@ function artifactDirectory(): string {
 }
 
 function translateCtxmuxError(error: unknown): AgentMuxError {
-  if (error instanceof CtxmuxCommandError) {
-    return new AgentMuxError(error.message, `CTXMUX_${error.code}`, error.disposition, {
-      disposition: error.disposition,
-      confirmedInputBytes: error.confirmedInputBytes
-    })
-  }
   if (error instanceof CtxmuxProtocolError) {
-    return new AgentMuxError(error.message, `CTXMUX_${error.code}`)
+    const creation = error.creationFailure
+    const storage = error.storageFailure
+    const control = error instanceof CtxmuxCommandError ? {
+      disposition: error.disposition, confirmedInputBytes: error.confirmedInputBytes
+    } : undefined
+    return new AgentMuxError(error.message, `CTXMUX_${error.code}`, control?.disposition, control, undefined,
+      creation === undefined ? undefined : { operationId: creation.operation_key, disposition: creation.disposition },
+      storage === undefined ? undefined : projectStorageFailure(storage))
   }
   return error instanceof AgentMuxError
     ? error
@@ -1029,6 +1030,7 @@ export class CtxmuxRunAdapter {
       if (error instanceof CtxmuxUnsupportedCapabilityError && error.capability === 'services.storage_observation') {
         return { status: 'unsupported', message: 'This Runtime does not expose storage diagnostics. Its Runs and input remain available; capacity and persistence failure details are unknown.' }
       }
+      if (error instanceof CtxmuxProtocolError && !(error instanceof CtxmuxUnsupportedCapabilityError)) throw translateCtxmuxError(error)
       throw error
     }
   }

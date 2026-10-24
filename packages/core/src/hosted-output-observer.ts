@@ -62,7 +62,8 @@ export function createHostedOutputObservation(rpc: AgentMuxHostedOutputRpcPort,
                 throw new AgentMuxError('Output diagnostic belongs to another Run.', 'CONTROL_PROTOCOL_ERROR')
               }
               fail(new AgentMuxError(event.error.message, event.error.code,
-                event.error.detail ?? (typeof event.error.details === 'string' ? event.error.details : undefined), event.error.controlFailure), event.error.evidence); return
+                event.error.detail ?? (typeof event.error.details === 'string' ? event.error.details : undefined), event.error.controlFailure,
+                event.error.logId, event.error.creationFailure, event.error.storageFailure), event.error.evidence); return
             }
             if (event.type === 'output') {
               const output = event.data

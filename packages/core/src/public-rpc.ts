@@ -436,7 +436,7 @@ type AgentMuxRpcStreamInitialMap = AgentMuxHostedStreamInitialMap & {
 export type AgentMuxRpcStreamInitial<M extends AgentMuxRpcStreamMethod> = AgentMuxRpcStreamInitialMap[M]
 export type AgentMuxRpcStreamEvent<M extends AgentMuxRpcStreamMethod> =
   | { type: 'end'; data: unknown }
-  | { type: 'error'; error: { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: import('./errors.js').AgentMuxControlFailure; logId?: string; evidence?: import('./types.js').AgentMuxEvidence } }
+  | { type: 'error'; error: { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: import('./errors.js').AgentMuxControlFailure; logId?: string; creationFailure?: import('./errors.js').AgentMuxCreationFailure; storageFailure?: import('./errors.js').AgentMuxStorageFailure; evidence?: import('./types.js').AgentMuxEvidence } }
   | (M extends AgentMuxHostedStreamMethod ? Extract<AgentMuxHostedStreamEvent, { type: 'snapshot' }>
     : M extends 'agent.conversation.watch' ? { type: 'snapshot'; data: import('./conversation-changes.js').ConversationObservation }
     : M extends 'connection.metadata.watch' ? { type: 'change'; data: import('./channel-metadata-contract.js').ChannelMetadataChange }

@@ -4622,9 +4622,14 @@ export class AgentMuxClient {
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
       }).catch(error => {
-        if (!(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {
-          throw new AgentMuxError(`Agent start is unconfirmed. Inspect the original operation; no start or input was resent. ${error instanceof Error ? error.message : String(error)}`,
-            'AGENT_CREATION_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+        if (!(error instanceof AgentMuxError && error.creationFailure?.operationId === lifecycleOperationId &&
+          error.creationFailure.disposition === 'not_applied')) {
+          const failure = new AgentMuxError(`Agent start is unconfirmed. Inspect the original operation; no start or input was resent. ${error instanceof Error ? error.message : String(error)}`,
+            'AGENT_CREATION_UNCONFIRMED', undefined, undefined, undefined,
+            { operationId: lifecycleOperationId, disposition: 'unknown' },
+            error instanceof AgentMuxError ? error.storageFailure : undefined)
+          Object.defineProperty(failure, 'cause', { value: error })
+          throw failure
         }
         preservePreparedCreation = false
         throw error
@@ -4744,13 +4749,24 @@ export class AgentMuxClient {
       this.publisher.publishRunState(this.projectRun(run, readySession), agentSessionId)
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains
       // available when input confirmation fails; the retained history must not claim it was sent.
+      let observedInputConfirmed = false
       try { readySession = await this.continueInitialInput(readySession, run, () => this.assertCreationInputCurrent(session, run)) }
       catch (error) {
+        // A Session projection write can fail after the original input owner acknowledged it.
+        // Read that exact receipt; neither the failed projection nor this read authorizes Input.
+        const original = readySession.initialInput
+        if (original?.key) {
+          try {
+            const receipt = await this.inspectAgentPromptSubmission(original.key)
+            observedInputConfirmed = isDeepStrictEqual(receipt?.admission?.inputKey, original.key) &&
+              this.postLaunchPromptConfirmed(receipt, original.prompt, original.message)
+          } catch { /* The original input remains unconfirmed when its owner is unavailable. */ }
+        }
         this.publisher.publish({ type: 'agent-error', agentSessionId, code: 'AGENT_CREATION_RECEIPT_UNCONFIRMED',
-          message: `The original initial input is retained; its delivery receipt is unconfirmed. ${error instanceof Error ? error.message : String(error)}`,
+          message: `${observedInputConfirmed ? 'The original initial input was confirmed; saving its Session projection is unconfirmed.' : 'The original initial input is retained; its delivery receipt is unconfirmed.'} ${error instanceof Error ? error.message : String(error)}`,
           evidence: { source: 'agentmux', observedAt: Date.now(), run: session.run } })
       }
-      const inputConfirmed = ['launch-carried', 'terminal-confirmed', 'native-admitted'].includes(readySession.initialInput?.state ?? '')
+      const inputConfirmed = observedInputConfirmed || ['launch-carried', 'terminal-confirmed', 'native-admitted'].includes(readySession.initialInput?.state ?? '')
       // Empty deferred text says nothing about context delivery. Native takeover
       // has no separate platform-context carrier; retain its no-input restoration.
       const promptConfirmed = inputConfirmed || !composed.text.trim() && !contextRequested && !input.prompt?.trim()

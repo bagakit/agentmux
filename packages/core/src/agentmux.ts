@@ -259,6 +259,8 @@ function reportFailure(error: unknown): void {
       ...(source?.detail === undefined ? {} : { detail: source.detail }),
       ...(source?.details === undefined ? {} : { details: source.details }),
       ...(source?.controlFailure === undefined ? {} : { controlFailure: source.controlFailure }),
+      ...(source?.creationFailure === undefined ? {} : { creationFailure: source.creationFailure }),
+      ...(source?.storageFailure === undefined ? {} : { storageFailure: source.storageFailure }),
       ...(source?.logId === undefined ? {} : { logId: source.logId }),
       ...(source?.candidates === undefined ? {} : { candidates: source.candidates })
     }

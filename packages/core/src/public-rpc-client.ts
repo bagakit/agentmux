@@ -16,7 +16,7 @@ export type { RpcForwardingSource } from './rpc-forwarding.js'
 import { AgentMuxRpcSshTransport, AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS } from './rpc-ssh-transport.js'
 import { rpcTransportError as transportError } from './rpc-transport-error.js'
 import { JSONRPCClient, type JSONRPCRequest, type JSONRPCResponse } from 'json-rpc-2.0'
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, parseAgentMuxCreationFailure, parseAgentMuxStorageFailure } from './errors.js'
 import { isAgentMuxRpcDeviceMethod } from './public-rpc-device.js'
 import { agentMuxControlTimeoutMs } from './control.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
@@ -234,11 +234,13 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   if (event.type === 'end') { rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR'); return event }
   if (event.type === 'error') {
     rpcRecord(event, ['type', 'error'], 'CONTROL_PROTOCOL_ERROR')
-    const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates', 'controlFailure', 'logId', 'evidence'], 'CONTROL_PROTOCOL_ERROR')
+    const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates', 'controlFailure', 'logId', 'creationFailure', 'storageFailure', 'evidence'], 'CONTROL_PROTOCOL_ERROR')
     if (typeof error.code !== 'string' || !error.code || typeof error.message !== 'string' ||
       error.detail !== undefined && typeof error.detail !== 'string') throw new AgentMuxError('Invalid reader error.', 'CONTROL_PROTOCOL_ERROR')
     if (error.logId !== undefined) validateDeliveryLogId(error.logId)
     if (error.controlFailure !== undefined) parseRpcControlFailure(error.controlFailure)
+    if (error.creationFailure !== undefined) parseAgentMuxCreationFailure(error.creationFailure)
+    if (error.storageFailure !== undefined) parseAgentMuxStorageFailure(error.storageFailure)
     if (error.evidence !== undefined) {
       const evidence = parseOutputGapEvidence(error.evidence)
       if (method === 'agent.output' && evidence.run && evidence.run.runId !== (initial as import('./public-rpc.js').AgentMuxRpcOutputInitial).run.runId) {
@@ -343,7 +345,7 @@ class RpcClient implements AgentMuxRpcClient {
             { disposition: 'unknown', confirmedInputBytes: null }, failure.logId)
         }
         if (isAgentMuxRpcDeviceMethod(method) && failure instanceof AgentMuxError) {
-          failure = new AgentMuxError(failure.message + ' ' + deviceRecovery(), failure.code, failure.detail, failure.controlFailure, failure.logId)
+          failure = new AgentMuxError(failure.message + ' ' + deviceRecovery(), failure.code, failure.detail, failure.controlFailure, failure.logId, failure.creationFailure, failure.storageFailure)
         }
         // A local connection absence is not a refusal returned by the owner.
         // Preserve that distinction for callers retaining available local facts.
@@ -396,9 +398,11 @@ class RpcClient implements AgentMuxRpcClient {
           if (finished) return
           handlers!.onEvent(event as AgentMuxRpcStreamEvent<AgentMuxRpcStreamMethod>)
           if (event.type === 'end') end()
-          if (event.type === 'error') { const failure = event.error as { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: unknown; logId?: string };
+          if (event.type === 'error') { const failure = event.error as { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: unknown; logId?: string; creationFailure?: unknown; storageFailure?: unknown };
             end(new AgentMuxRpcError(failure.message, failure.code, -32000, failure.details, failure.candidates, failure.detail,
-              failure.controlFailure === undefined ? undefined : parseRpcControlFailure(failure.controlFailure), failure.logId)) }
+              failure.controlFailure === undefined ? undefined : parseRpcControlFailure(failure.controlFailure), failure.logId,
+              failure.creationFailure === undefined ? undefined : parseAgentMuxCreationFailure(failure.creationFailure),
+              failure.storageFailure === undefined ? undefined : parseAgentMuxStorageFailure(failure.storageFailure))) }
         }
       } catch (error) { end(transportError(error)) }
     }
