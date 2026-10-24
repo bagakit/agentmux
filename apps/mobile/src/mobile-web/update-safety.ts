@@ -72,7 +72,7 @@ export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prep
         const result = await Promise.race([
           (async () => {
             const connection = await original.verifyConnection()
-            const workface = await getDeviceWorkface().preparePageReload()
+            const workface = await getDeviceWorkface().preparePageReload(abort.signal)
             const response = await fetch('/', { method: 'GET', cache: 'no-store', credentials: 'same-origin', redirect: 'follow', signal: abort.signal })
             const finalConnection = await original.verifyConnection()
             return { connection, finalConnection, workface, response }
