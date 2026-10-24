@@ -77,3 +77,12 @@
 .mobile-agent-create select, .mobile-agent-create textarea { width: 100%; min-height: 44px; font-size: 16px; background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--line-soft); border-radius: var(--radius-md, 8px); padding: 8px; }
 .mobile-agent-create textarea { min-height: 76px; resize: vertical; }
 .mobile-create-receipt { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mobile-create-target { min-width: 0; font-size: 12px; line-height: 1.4; }
+.mobile-create-target > strong { font-weight: 550; }
+.mobile-create-target summary { display: flex; align-items: center; min-height: 44px; color: var(--text-3); font-size: 11px; cursor: pointer; }
+.mobile-create-target dl, .mobile-create-receipt dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; margin: 0; font-size: 11px; }
+.mobile-create-target dt, .mobile-create-receipt dt { color: var(--text-3); }
+.mobile-create-target dd, .mobile-create-receipt dd { margin: 0; overflow-wrap: anywhere; }
+
+.mobile-create-receipt details { min-width: 0; width: 100%; }
+.mobile-create-receipt summary { min-height: 44px; display: flex; align-items: center; color: var(--text-3); font-size: 11px; cursor: pointer; }
