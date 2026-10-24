@@ -22,7 +22,7 @@ export type MobilePresentationRoute = {
   goals?: MobileGoalsContext
 }
 export type MobileGoalsContext = { goalId: string | null; mode: 'detail' | 'edit';
-  discussion: { goalId: string; tabId: string; agentSessionId: string | null } | null }
+  discussion: { goalId: string; tabId: string; agentSessionId: string | null; regionId?: string; hostId?: string | null } | null }
 export type MobileTopicSourceReference = Exclude<TopicKnowledgeSource, { kind: 'url' }>
 export type MobileKnowledgeReference = { topicId: string | null; entryId: string | null;
   view: 'list' | 'read' | 'edit'; query?: string; draftKey?: string }
@@ -142,9 +142,12 @@ export function parsePresentationRoute(value: unknown): MobilePresentationRoute 
     if (!(goals.goalId === null || text(goals.goalId, 256)) || !['detail', 'edit'].includes(String(goals.mode))
       || goals.goalId === null && (goals.mode !== 'detail' || goals.discussion !== null)) invalid()
     if (goals.discussion !== null) {
-      const discussion = object(goals.discussion, ['goalId', 'tabId', 'agentSessionId'])
+      const discussion = object(goals.discussion, ['goalId', 'tabId', 'agentSessionId'], ['regionId', 'hostId'])
       if (discussion.goalId !== goals.goalId || !text(discussion.tabId, 256)
         || !(discussion.agentSessionId === null || text(discussion.agentSessionId, 256))) invalid()
+      if (discussion.regionId !== undefined || discussion.hostId !== undefined) {
+        if (!spatialId(discussion.regionId) || !(discussion.hostId === null || text(discussion.hostId, 256)) || (discussion.hostId === null) !== (discussion.agentSessionId === null)) invalid()
+      }
     }
   }
   return structuredClone(value) as MobilePresentationRoute
