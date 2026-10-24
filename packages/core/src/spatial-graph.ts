@@ -241,3 +241,5 @@ export function resolveSpatialRegion(graph: AgentMuxSpatialGraph, target: AgentM
   return { region: graph.regions.find(r => r.tabId === target.tabId && r.regionId === next) ?? null,
     locations: spatialCatalog(graph).locations.filter(l => l.tabId === target.tabId && l.regionId === next) };
 }
+
+export { AgentMuxSpatialTargetError, exactSpatialDisplayLayout, selectSpatialCatalog, spatialDestination, type AgentMuxSpatialDestination } from './spatial-destination.js';
