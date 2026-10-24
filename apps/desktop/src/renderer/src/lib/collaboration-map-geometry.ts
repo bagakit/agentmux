@@ -1,11 +1,12 @@
 import type { CollaborationLayoutBox, CollaborationLayoutPoint, CollaborationPath } from './collaboration-layout-engine'
 import { collaborationVisibleHull, type CollaborationVisibleHull } from './collaboration-map-lod'
+import { DEFAULT_FOCUS_MAP_PREFERENCES, type FocusMapBoundary, type FocusMapPreferences } from '../../../shared/focus-map-preferences'
 
 const cross = (a: CollaborationLayoutPoint, b: CollaborationLayoutPoint, c: CollaborationLayoutPoint) =>
   (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
 
 /** A presentation envelope of complete rectangles. It neither positions nor groups Agents. */
-export function collaborationEnvelope(area: Extract<CollaborationLayoutBox, { kind: 'area' }>, members: readonly CollaborationLayoutBox[]) {
+export function collaborationEnvelope(area: Extract<CollaborationLayoutBox, { kind: 'area' }>, members: readonly CollaborationLayoutBox[], boundary: FocusMapBoundary = 'bezier') {
   const rectangles = [area.heading, ...members.map(box => ({ ...box, x: box.x - area.x, y: box.y - area.y }))]
   const points = rectangles.flatMap(({ x, y, width, height }, index) => {
     const pad = index === 0 ? 8 : 18
@@ -21,6 +22,7 @@ export function collaborationEnvelope(area: Extract<CollaborationLayoutBox, { ki
     return result.slice(0, -1)
   }
   const outline = [...half(points), ...half([...points].reverse())]
+  if (boundary === 'polygon') return `M ${outline.map(point => `${point.x} ${point.y}`).join(' L ')} Z`
   const towards = (from: CollaborationLayoutPoint, to: CollaborationLayoutPoint, distance: number) => {
     const length = Math.hypot(to.x - from.x, to.y - from.y)
     const ratio = Math.min(distance / length, .25)
@@ -35,7 +37,7 @@ export function collaborationEnvelope(area: Extract<CollaborationLayoutBox, { ki
 
 /** Keep the original obstacle-safe route; connect its terminal stems to the continuous visible body.
  * This is a cheap projection at the camera layer, never a new Worker route or relationship. */
-export function collaborationVisiblePath(route: CollaborationPath, source: CollaborationLayoutBox, target: CollaborationLayoutBox, zoom: number, sourceRadius: number, targetRadius: number, sourcePointRadius = 6, targetPointRadius = 6) {
+export function collaborationVisiblePath(route: CollaborationPath, source: CollaborationLayoutBox, target: CollaborationLayoutBox, zoom: number, sourceRadius: number, targetRadius: number, sourcePointRadius = 6, targetPointRadius = 6, preferences: FocusMapPreferences = DEFAULT_FOCUS_MAP_PREFERENCES) {
   const split = (curve: readonly CollaborationLayoutPoint[], t: number) => {
     const mix = (a: CollaborationLayoutPoint, b: CollaborationLayoutPoint) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
     const [a, b, c, d] = curve as [CollaborationLayoutPoint, CollaborationLayoutPoint, CollaborationLayoutPoint, CollaborationLayoutPoint]
@@ -44,7 +46,7 @@ export function collaborationVisiblePath(route: CollaborationPath, source: Colla
   }
   const projectStart = (points: readonly CollaborationLayoutPoint[], box: CollaborationLayoutBox, radius: number, pointRadius: number): CollaborationLayoutPoint[] => {
     if (box.kind !== 'agent') return [...points]
-    const hull = collaborationVisibleHull(box, zoom, radius, pointRadius)
+    const hull = collaborationVisibleHull(box, zoom, radius, pointRadius, preferences)
     const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
     // Signed distance to the same rounded rectangle used by the visual shell.
     const distance = (point: CollaborationLayoutPoint, body: CollaborationVisibleHull = hull) => {

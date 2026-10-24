@@ -1,10 +1,11 @@
-import { type RefObject, memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type RefObject, useContext, memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { CollaborationArea } from '../lib/agent-collaboration'
 import type { CollaborationLayoutBox } from '../lib/collaboration-layout-engine'
 import { CollaborationBoundsIndex, collaborationBoundsOverlap, type CollaborationBounds } from '../lib/collaboration-spatial-index'
+import { CollaborationMapPreferences } from '../lib/collaboration-map-preferences'
 import { collaborationVisibleHitBounds } from '../lib/collaboration-map-lod'
 import { createCollaborationHierarchy } from '../lib/collaboration-hierarchy'
 import { collaborationAreaNode } from '../lib/collaboration-presentation'
@@ -31,6 +32,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
   contextControl: RefObject<HTMLButtonElement | null> | null
   readingProxies: readonly HTMLElement[]
 }) {
+  const preferences = useContext(CollaborationMapPreferences)
   const camera = useStore(state => [...state.transform, state.width, state.height], same)
   const root = useRef<HTMLDivElement>(null)
   const [sizes, setSizes] = useState<ReadonlyMap<string, { budget: number; width: number; height: number }>>(new Map())
@@ -75,7 +77,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
       const padded = { x: label.x - clearance, y: label.y - clearance, width: label.width + clearance * 2, height: label.height + clearance * 2 }
       const nearby = obstacles.query({ x: (padded.x - panX) / zoom, y: (padded.y - panY) / zoom, width: padded.width / zoom, height: padded.height / zoom })
       return nearby.flatMap(({ box }) => {
-        const hit = collaborationVisibleHitBounds(box, zoom)
+        const hit = collaborationVisibleHitBounds(box, zoom, preferences)
         const screen = { x: hit.x * zoom + panX, y: hit.y * zoom + panY, width: hit.width * zoom, height: hit.height * zoom }
         return collaborationBoundsOverlap(padded, screen) ? [screen] : []
       })
@@ -117,7 +119,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
       }
     }
     return placed
-  }, [areas, camera, obstacles, sizes, occlusion, hierarchy, currentAreas, originalAreaIds])
+  }, [areas, camera, obstacles, sizes, occlusion, hierarchy, currentAreas, originalAreaIds, preferences])
   const mounted = labels.map(({ data, budget }) => `${data.area.id}:${budget}`).sort().join('\n')
   const readingCamera = readingProxies.length ? camera : null
   useLayoutEffect(() => {

@@ -6,6 +6,42 @@
 .focus-settings__controls { min-width: 0; display: grid; gap: var(--sp-5); }
 .focus-settings__controls .settings-group { min-width: 0; padding: 0; border: 0; background: transparent; }
 .focus-settings__controls .settings-group > header { padding: 0 0 var(--sp-3); border-bottom: 1px solid var(--line-soft); }
+.focus-settings__controls .settings-group[data-settings-field=map] > header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.focus-map-settings { display: grid; gap: 12px; margin-top: 14px; }
+.focus-map-settings__boundaries { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; min-width: 0; border: 0; padding: 0; margin: 0; }
+.focus-map-settings__boundaries legend { margin-bottom: 8px; font-size: var(--fs-meta); color: var(--text-2); }
+.focus-map-settings__boundaries label { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: center; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; }
+.focus-map-settings__boundaries label[data-selected=true] { border-color: var(--green); background: color-mix(in srgb, var(--green) 7%, var(--surface-1)); }
+.focus-map-settings__boundaries svg { width: 100%; height: 64px; grid-column: 1 / -1; grid-row: 1; overflow: visible; }
+.focus-map-settings__boundaries path, .focus-map-preview__contour { fill: color-mix(in srgb, var(--green) 5%, transparent); stroke: var(--text-3); stroke-width: 2; }
+.focus-map-settings__boundaries rect { fill: var(--surface-2); stroke: var(--line); stroke-width: 3; }
+.focus-map-settings__boundaries label > span { font-size: var(--fs-meta); }
+.focus-map-settings__field { display: grid; grid-template-columns: minmax(70px, .7fr) minmax(0, 1fr); align-items: center; gap: 8px; font-size: var(--fs-meta); }
+.focus-map-settings select, .focus-map-settings input[type=number] { width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); background: var(--surface-1); color: var(--text); border-radius: var(--radius-sm); font: inherit; }
+.focus-map-settings__levels { display: grid; gap: 7px; }
+.focus-map-settings__levels details { border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 10px; min-width: 0; }
+.focus-map-settings__levels summary { cursor: pointer; font-size: var(--fs-meta); color: var(--text-2); }
+.focus-map-settings__levels summary span { display: block; font-size: var(--fs-micro); color: var(--text-3); margin: 4px 0 0 14px; overflow-wrap: anywhere; }
+.focus-map-settings__levels details[open] .focus-map-settings__field { margin-top: 12px; }
+.focus-map-settings__range { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.focus-map-settings__range label { display: grid; gap: 6px; font-size: var(--fs-meta); }
+.focus-map-settings__range label > span:last-child { display: flex; gap: 5px; align-items: center; }
+.focus-map-settings__range small { color: var(--text-3); }
+.focus-map-preview__zoom { display: flex; gap: 10px; align-items: center; font-size: var(--fs-meta); color: var(--text-2); }
+.focus-map-preview__zoom input { min-width: 40px; flex: 1; accent-color: var(--green); }
+.focus-map-preview__zoom output { width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+.focus-map-preview__canvas { position: relative; height: 300px; margin-top: 14px; border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: hidden; background: radial-gradient(circle, var(--line-soft) .6px, transparent .8px) 0 0 / 16px 16px; }
+.focus-map-preview__world { position: absolute; left: 50%; top: 50%; transform-origin: center; }
+.focus-map-preview__world > svg { position: absolute; overflow: visible; }
+.focus-map-preview__world text { fill: var(--text-2); font: 16px sans-serif; }
+.focus-map-preview__route { fill: none; stroke: var(--green); stroke-width: 2; }
+.focus-map-preview__agent { position: absolute; background: var(--surface-1); border: 1px solid var(--line); overflow: hidden; }
+.focus-map-preview__identity { position: absolute; inset: 0; }
+.focus-map-preview__point { position: absolute; inset: 2px; border-radius: 50%; background: var(--text-3); opacity: .5; }
+.focus-map-preview__identity > span { position: absolute; top: 50%; }
+.focus-map-preview__identity > strong { position: absolute; top: 50%; transform: translateY(-50%); right: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.focus-map-preview__detail { box-sizing: border-box; position: absolute; inset: 0; padding: 10px; }
+@container (max-width: 380px) { .focus-map-settings__field { grid-template-columns: minmax(0,1fr); } .focus-map-settings__range { gap: 8px; } }
 .focus-settings-description { margin: var(--sp-2) 0 var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
 .focus-settings-window { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 5px; margin: var(--sp-4) 0 0; padding: 0; border: 0; min-width: 0; }
 .focus-settings-window legend { margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }

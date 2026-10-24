@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { FOCUS_RECENT_ACTIVITY_HOURS, FOCUS_REPLY_LINES, FOCUS_RECENT_INPUTS, resolveFocusPreferences, type FocusPreferences } from '../../../../shared/focus-preferences'
 import { useAppStore } from '../../store'
@@ -7,6 +7,9 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { FocusSettingsPreview, type FocusPreviewScene } from './FocusSettingsPreview'
 import { useSettingsPreviewReturn } from './use-settings-preview-return'
+import { configValuesEqual } from '../../../../shared/config-edit'
+import { DEFAULT_FOCUS_MAP_PREFERENCES, focusMapPreferencesIssue } from '../../../../shared/focus-map-preferences'
+import { FocusMapSettings } from './FocusMapSettings'
 import '../../styles/settings-focus.css'
 import '../../styles/settings-workview-layout.css'
 
@@ -25,7 +28,9 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
   preferences?: FocusPreferences | undefined; active?: boolean
   onSave(value: FocusSettingsValues, expected: FocusSettingsValues): Promise<void>
 }) {
-  const draft = useSettingDraftRecord(resolveFocusPreferences(preferences)), saveState = useSettingsSave()
+  const draft = useSettingDraftRecord(resolveFocusPreferences(preferences), configValuesEqual), saveState = useSettingsSave()
+  const mapIssue = focusMapPreferencesIssue(draft.value.map), validMap = useRef(draft.value.map)
+  if (!mapIssue) validMap.current = draft.value.map
   const [scene, setScene] = useState<FocusPreviewScene>('board')
   const preview = useSettingsPreviewReturn('Project scanning')
   const ruler = useAppStore(state => state.focusTimelineRuler), saveRuler = useAppStore(state => state.setFocusTimelineRuler)
@@ -62,14 +67,17 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
           <p className="focus-settings-description">Alt-click chooses a position for that link.</p>
           {previewButton('opening-resources', 'Opening resources', 'links')}
         </section>
-        <section className="settings-group"><header><span>Map</span></header>
+        <section className="settings-group" data-settings-field="map" data-settings-preview-group="map"><header><span>Map</span><button type="button" className="small-button" onClick={() => change('map', DEFAULT_FOCUS_MAP_PREFERENCES, 'map')}>Restore Map defaults</button></header>
+          <FocusMapSettings value={draft.value.map} onChange={value => change('map', value, 'map')} />
+          {mapIssue ? <p className="settings-inline-error" role="alert">{mapIssue} Your draft is kept.</p> : null}
           <Choices id="map-motion" legend="Map motion" value={draft.value.mapMotion} options={[{ value: 'system', label: 'Follow system', hint: 'Respect reduced motion' }, { value: 'on', label: 'On', hint: 'Animate recent activity' }, { value: 'off', label: 'Off', hint: 'Keep activity still' }]} onChange={value => draft.setField('mapMotion', value)} />
           <p className="focus-settings-description">Only changes movement on the map. New messages and activity remain visible.</p>
+          {previewButton('map', 'Map', 'map')}
         </section>
         <div className="focus-settings__timeline" data-settings-field="timeline"><span><strong>Timeline</strong><small>Use the same ruler and time zone settings as Focus.</small></span><FocusTimelineRulerSettings active={active} preferences={ruler} onChange={saveRuler} dateChoice={null} onSelectDate={() => {}} onCancelDate={() => {}} /></div>
       </div>
-      <FocusSettingsPreview values={draft.value} active={active} scene={scene} onScene={setScene} previewRef={preview.previewRef} returnAction={preview.returnAction} />
+      <FocusSettingsPreview values={{ ...draft.value, map: validMap.current }} mapPreviewLastValid={Boolean(mapIssue)} active={active} scene={scene} onScene={setScene} previewRef={preview.previewRef} returnAction={preview.returnAction} />
     </div>
-    <SettingsSaveBar save={saveState} dirty={draft.dirty} onSave={() => void save()} />
+    <SettingsSaveBar save={saveState} dirty={draft.dirty} disabled={Boolean(mapIssue)} onSave={() => void save()} />
   </div>
 }

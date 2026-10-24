@@ -9,15 +9,17 @@ import { FocusContextRow } from './FocusContextRow'
  * detail remain the projection owner's facts, including unconfirmed Mote scope. */
 export function FocusContextCardBody(props: ComponentProps<typeof FocusContextRow>) {
   const { context } = props
+  const summary = !props.disclosure || props.disclosure.summary > 0
   const facts = useAppStore(useShallow(state => {
+    if (!summary) return { session: undefined, timeline: undefined, name: undefined }
     const timeline = state.timelines[context.id]
     return { session: sessionPresentationById(state.sessions).get(context.id), timeline,
       name: state.agentNames[context.id], ...focusTimelineStamp(timeline) }
   }))
   const complete = useMemo(() => {
-    if (context.recap !== undefined || !facts.session || facts.session.hostId !== context.hostId) return context
+    if (!summary || context.recap !== undefined || !facts.session || facts.session.hostId !== context.hostId) return context
     const original = agentContextForSession(facts.session, facts.timeline, facts.name, context.workspace, context.topicId)
     return { ...context, recap: original.recap }
-  }, [context, facts])
+  }, [context, facts, summary])
   return <FocusContextRow {...props} context={complete} />
 }

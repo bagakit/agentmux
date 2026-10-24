@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 type Scalar = string | number | boolean
 
 /** Each scalar field retains its own expectation while its draft is dirty or saving. */
-export function useSettingDraftRecord<T extends Record<keyof T, Scalar>>(saved: T) {
+export function useSettingDraftRecord<T extends Record<keyof T, unknown>>(saved: T, equal: (a: unknown, b: unknown) => boolean = Object.is) {
   const [draft, setDraft] = useState({ value: saved, expected: saved, saving: false })
   const keys = Object.keys(saved) as (keyof T)[]
   useEffect(() => {
@@ -12,17 +12,17 @@ export function useSettingDraftRecord<T extends Record<keyof T, Scalar>>(saved: 
       const value = { ...current.value }, expected = { ...current.expected }
       let changed = false
       for (const key of Object.keys(saved) as (keyof T)[]) {
-        if (value[key] === expected[key] && expected[key] !== saved[key]) {
+        if (equal(value[key], expected[key]) && !equal(expected[key], saved[key])) {
           value[key] = expected[key] = saved[key]
           changed = true
         }
       }
       return changed ? { ...current, value, expected } : current
     })
-  }, [saved, draft.value, draft.expected, draft.saving])
+  }, [saved, draft.value, draft.expected, draft.saving, equal])
   return {
     ...draft,
-    dirty: keys.some((key) => draft.value[key] !== draft.expected[key]),
+    dirty: keys.some((key) => !equal(draft.value[key], draft.expected[key])),
     setField: <K extends keyof T>(key: K, value: T[K]) => setDraft((current) => ({
       ...current, value: { ...current.value, [key]: value }
     })),
