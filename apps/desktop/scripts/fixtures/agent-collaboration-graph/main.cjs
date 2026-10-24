@@ -15,12 +15,13 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ width: 1440, height: 900, x: -10000, y: -10000, useContentSize: true, show: false,
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
     result.nativeLifecycle = []
-    const nativeEvent = (event, detail = {}) => { const fact={ event, phase, ...detail }; result.nativeLifecycle.push(fact); require('node:fs').appendFileSync(path.join(evidence,'native-lifecycle.jsonl'),JSON.stringify(fact)+'\n') }
+    const clock = () => ({ phase, at: new Date().toISOString(), mainMonotonicMS: Number(process.hrtime.bigint()) / 1e6 })
+    const nativeEvent = (event, detail = {}) => { const fact={ event, ...clock(), ...detail }; result.nativeLifecycle.push(fact); require('node:fs').appendFileSync(path.join(evidence,'native-lifecycle.jsonl'),JSON.stringify(fact)+'\n') }
     win.on('closed', () => nativeEvent('window-closed'))
     win.webContents.on('render-process-gone', (_event, details) => nativeEvent('render-process-gone', details))
     win.webContents.on('did-fail-load', (_event, code, description, _url, mainFrame) => nativeEvent('did-fail-load', { code, description, mainFrame }))
     app.on('before-quit', () => nativeEvent('before-quit'))
-    win.webContents.on('console-message', event => { if (event.level === 'error') { result.rendererErrors.push(String(event.message).slice(0, 2000)); result.rendererMessages.push({ phase, message: event.message, source: event.sourceId, line: event.lineNumber }) } })
+    win.webContents.on('console-message', event => { if (event.level === 'error') { result.rendererErrors.push(String(event.message).slice(0, 2000)); result.rendererMessages.push({ ...clock(), message: event.message, source: event.sourceId, line: event.lineNumber }) } })
     const read = async code => { try { return await win.webContents.executeJavaScript(code) } catch (error) { result.failedEvaluation = code; throw error } }
     const pause = ms => new Promise(done => setTimeout(done, ms))
     const until = async (label, predicate) => { const end = Date.now() + 12000; do { if (await predicate()) return; await pause(40) } while (Date.now() < end); throw Error('Scene did not settle: ' + label) }
@@ -37,7 +38,7 @@ app.whenReady().then(async () => {
       if (!motion && !name.endsWith('-live')) await until('finite entrance settled', () => read(`![...document.getAnimations()].some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().iterations)&&a.effect?.target?.closest?.('.collaboration-map,.agent-information-reader,.collaboration-filter-menu'))`))
       const file = name + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file, label: name, viewport: win.getContentSize() }); await checkpoint()
     }
-    const check = async (name, action) => { phase = name; try { await action(); result.checks.push({ name, passed: true }) } catch (error) { result.checks.push({ name, passed: false }); result.failures.push({ name, message: error.message, stack: error.stack }); await frame('failure-' + name) } finally { await checkpoint() } }
+    const check = async (name, action) => { phase = name; await read(`window.graphCapture.diagnosticPhase(${JSON.stringify(name)})`); const startedAt = clock(); try { await action(); result.checks.push({ name, passed: true, startedAt, completedAt: clock() }) } catch (error) { result.checks.push({ name, passed: false, startedAt, completedAt: clock() }); result.failures.push({ name, ...clock(), message: error.message, stack: error.stack }); await frame('failure-' + name) } finally { await checkpoint() } }
     const facts = () => read('window.graphCapture.facts()')
     const activity = () => read('window.graphCapture.activity()')
     const motionFrame = async (label, event, offset) => {
@@ -100,6 +101,11 @@ app.whenReady().then(async () => {
       }
     }
     const closeReader = async () => { if (await read(`Boolean(document.querySelector('[aria-label="Close Agent reading"]'))`)) await click('[aria-label="Close Agent reading"]'); await until('Reader closed', () => read(`!document.querySelector('.agent-information-reader')`)) }
+    const closeDetails = async () => {
+      await closeReader()
+      const visible = await read(`(()=>{const e=document.querySelector('[aria-label="Close map details"]');if(!e)return false;const r=e.getBoundingClientRect(),style=getComputedStyle(e);return r.width>0&&r.height>0&&!e.closest('[hidden],[inert]')&&style.visibility==='visible'&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight})()`)
+      if (visible) await click('[aria-label="Close map details"]')
+    }
     const markByText = async (selector, text, attribute) => {
       assert.ok(await read(`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(selector)})].find(e=>e.textContent?.trim()===${JSON.stringify(text)});if(!e)return false;e.setAttribute(${JSON.stringify(attribute)},'');return true})()`), 'Actual named control ' + text)
       return '[' + attribute + ']'
@@ -260,9 +266,9 @@ app.whenReady().then(async () => {
     })
     if (scenario === 'perception' || scenario === 'perception-scale') {
       await require('./perception.cjs')({ win, result, read, click, key, frame, check, facts, activity, motionFrame, intact, matrix, mapReady, closeReader, locate, pause, until, settle, fullMap, measure, pan, overview, observeDenseRelations, denseOnly: scenario === 'perception-scale' })
-      if (scenario === 'perception-scale') await require('./terrain.cjs')({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, locate, pause, until, settle, matrix, measure })
-      if (scenario === 'perception-scale') await require('./adaptive.cjs')({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, locate, pause, until, matrix, dragCanvas })
-      if (scenario === 'perception-scale') await require('./settings.cjs')({ win, result, read, click, key, move, frame, check, intact, closeReader, locate, pause, until, matrix })
+      if (scenario === 'perception-scale') await require('./terrain.cjs')({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, closeDetails, locate, pause, until, settle, matrix, measure })
+      if (scenario === 'perception-scale') await require('./adaptive.cjs')({ win, result, read, click, key, move, frame, check, intact, mapReady, closeDetails, locate, pause, until, matrix, dragCanvas })
+      if (scenario === 'perception-scale') await require('./settings.cjs')({ win, result, read, click, key, move, frame, check, intact, closeDetails, locate, pause, until, matrix })
     } else {
     await check('focus-locates-in-the-same-map', async () => {
       await click('[aria-label="List"]'); await until('original Focus Locate entry', () => read(`Boolean(document.querySelector('[aria-label="Locate Agent in map"]'))`)); await frame('focus-locate-entry')
@@ -574,9 +580,13 @@ app.whenReady().then(async () => {
     } finally {visibility.destroy()}
     result.nativeWorkers = await read('window.graphCapture.workerSamples()'); result.after=await facts(); assert.ok(result.frames.length>=12); assert.equal(result.rendererErrors.length,0,'Original Renderer errors remain visible'); result.passed=result.failures.length===0
   } catch(error) {
-    result.failures.push({name:'scene',message:error.message,stack:error.stack})
+    result.failures.push({name:'scene',phase,at:new Date().toISOString(),mainMonotonicMS:Number(process.hrtime.bigint())/1e6,message:error.message,stack:error.stack})
     if(win&&!win.isDestroyed()){result.diagnostics=await win.webContents.executeJavaScript(`({facts:window.graphCapture?.facts(),workers:window.graphCapture?.workerSamples(),map:document.querySelector('.collaboration-map')?.outerHTML.slice(0,14000)})`);await fs.writeFile(path.join(evidence,'failure.png'),(await win.webContents.capturePage()).toPNG())}
   } finally {
+    if (win && !win.isDestroyed()) {
+      try { result.rendererDiagnostics = await win.webContents.executeJavaScript('window.graphCapture?.rendererDiagnostics()') }
+      catch (error) { result.rendererDiagnosticObservationFailure = { phase, at: new Date().toISOString(), message: error.message } }
+    }
     if (controlHost && !result.publicControl?.exitConfirmed) {
       if (controlHost.connected) controlHost.send({ kind: 'stop' })
       await Promise.race([controlExit, new Promise(resolve => setTimeout(resolve, 1200))])

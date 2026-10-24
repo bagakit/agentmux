@@ -1,4 +1,5 @@
 import type { CollaborationLayoutBox, CollaborationPath } from '../../../src/renderer/src/lib/collaboration-layout-engine'
+import { agentInformationPreview } from '../../../src/renderer/src/lib/agent-information-preview'
 
 type Delivered = { boxes: ReadonlyMap<string, CollaborationLayoutBox>; paths: ReadonlyMap<string, CollaborationPath>; busy: boolean; transitioning: boolean; issues: ReadonlyMap<string, string> }
 const delivered = () => (globalThis as typeof globalThis & { __collaborationCaptureLayout?: Delivered }).__collaborationCaptureLayout
@@ -8,10 +9,12 @@ const rect = (element: Element) => { const r = element.getBoundingClientRect(); 
  * It never writes geometry, camera, inputs or product scheduling. */
 export function createAdaptivePresentationObserver(ids: () => ReadonlySet<string>, parents: () => ReadonlyMap<string, string>) {
   let anchor: HTMLElement | null = null, reader: Element | null = null, focused: Element | null = null
+  let reading: { id: string; token: object; hostId: string; subject: string; runId: string } | null = null
   type Trace = { label: string; frame: number; samples: ReturnType<typeof sample>[]; overheadMS: number; gesture?: { at: number; trusted: boolean; inCanvas: boolean; transitioning: boolean | null } }
   let trace: Trace | undefined
   let gestureListener: ((event: PointerEvent) => void) | undefined
   function sample() {
+    const request = reading && agentInformationPreview.getAll().find(request => request.token === reading!.token)
     const layout = delivered(), wanted = ids(), parent = parents(), selected = [...wanted].flatMap(id => { const box = layout?.boxes.get(id); return box ? [box] : [] })
     const nodes = new Map([...document.querySelectorAll<HTMLElement>('.collaboration-map .react-flow__node')].filter(node => wanted.has(node.dataset.id!)).map(node => [node.dataset.id!, node]))
     const viewport = document.querySelector('.collaboration-map .react-flow__viewport'), matrix = viewport ? new DOMMatrix(getComputedStyle(viewport).transform) : null
@@ -41,13 +44,21 @@ export function createAdaptivePresentationObserver(ids: () => ReadonlySet<string
       camera: viewport?.getAttribute('style') ?? null, zoom: matrix?.a ?? null,
       surface: renderer ? rect(renderer) : null, transform: matrix ? { a: matrix.a, b: matrix.b, c: matrix.c, d: matrix.d, e: matrix.e, f: matrix.f } : null,
       nodes: [...nodes].map(([id, node]) => ({ id, bounds: rect(node), transform: node.style.transform })), edges, envelopes,
-      held: { sameAnchor: Boolean(anchor?.isConnected), sameReader: Boolean(reader?.isConnected && reader === document.querySelector('.agent-information-reader')), sameFocus: Boolean(focused && focused === document.activeElement), readers: document.querySelectorAll('.agent-information-reader').length,
-        subject: reader?.getAttribute('data-agent-session-id'), readerBounds: reader?.isConnected ? rect(reader) : null },
+      held: { sameAnchor: Boolean(anchor?.isConnected && request?.anchor === anchor), sameReader: Boolean(reader?.isConnected && request?.id === reading?.id && document.getElementById(request.id) === reader), sameFocus: Boolean(focused && focused === document.activeElement), readers: document.querySelectorAll('.agent-information-reader').length,
+        subject: request?.context.id, hostId: request?.context.hostId, runId: request?.context.runId,
+        sameSubject: Boolean(request && reading && request.context.id === reading.subject && request.context.hostId === reading.hostId && request.context.runId === reading.runId), readerBounds: reader?.isConnected ? rect(reader) : null },
       motion: document.querySelector('[aria-label="Map animations"]')?.getAttribute('aria-pressed'), packets: document.querySelectorAll('.collaboration-edge__packet,.collaboration-edge__pulse').length }
   }
   return {
     status() { const layout = delivered(); return { busy: layout?.busy ?? true, transitioning: layout?.transitioning ?? false, boxes: layout?.boxes.size ?? 0, paths: layout?.paths.size ?? 0 } },
-    remember(element: HTMLElement) { anchor = element; reader = document.querySelector('.agent-information-reader'); focused = document.activeElement; if (!reader || !anchor.isConnected) throw Error('The original adaptive Reader and anchor must be mounted'); return sample() },
+    remember(element: HTMLElement) {
+      const request = agentInformationPreview.getAll().find(request => request.anchor === element)
+      const panel = request && document.getElementById(request.id)
+      if (!request || !panel?.matches('.agent-information-reader') || element.getAttribute('aria-describedby') !== request.id || !element.isConnected) throw Error('The exact original adaptive request, Reader and anchor must be linked')
+      anchor = element; reader = panel; focused = document.activeElement
+      reading = { id: request.id, token: request.token, hostId: request.context.hostId, subject: request.context.id, runId: request.context.runId }
+      return sample()
+    },
     rememberFocus() { focused = document.activeElement },
     sample,
     start(label: string) {

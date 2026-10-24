@@ -21,6 +21,40 @@ import { collaborationAreaNode, collaborationAgentNode } from '../../../src/rend
 import { createAdaptivePresentationObserver } from './adaptive-observer'
 import '../../../src/renderer/src/styles/index.css'
 
+// Finite fixture diagnostics only. Read native entry payloads, never layout or
+// styles; invoke the original callback immediately and preserve error delivery.
+let diagnosticPhase = 'load-original-app', resizeObserverSequence = 0, resizeObservationMS = 0, resizeCallbackBatches = 0
+type ResizeBatch = { observer: number; phase: string; at: number; entries: number; targets: Array<{ tag: string; class: string | null; nodeId: string | null; regionId: string | null; width: number; height: number }> }
+const resizeBatches: ResizeBatch[] = [], resizeConstructors: Array<{ observer: number; at: number; stack?: string }> = []
+const rendererDiagnostics: Array<{ kind: string; phase: string; at: number; wallTime: string; message: string; stack?: string; filename?: string; line?: number; column?: number; recentResizeBatches: readonly ResizeBatch[] }> = []
+const OriginalResizeObserver = window.ResizeObserver
+window.ResizeObserver = class extends OriginalResizeObserver {
+  constructor(callback: ResizeObserverCallback) {
+    const start = performance.now(), observer = ++resizeObserverSequence
+    if (resizeConstructors.length < 256) resizeConstructors.push({ observer, at: start, stack: new Error('Native ResizeObserver construction').stack?.slice(0, 4000) })
+    super((entries, instance) => {
+      const start = performance.now()
+      resizeCallbackBatches++
+      resizeBatches.push({ observer, phase: diagnosticPhase, at: start, entries: entries.length, targets: entries.slice(0, 32).map(entry => ({
+        tag: entry.target.tagName, class: entry.target.getAttribute('class')?.slice(0, 240) ?? null,
+        nodeId: entry.target.getAttribute('data-id')?.slice(0, 240) ?? null, regionId: entry.target.getAttribute('data-region-id')?.slice(0, 240) ?? null,
+        width: entry.contentRect.width, height: entry.contentRect.height })) })
+      if (resizeBatches.length > 16) resizeBatches.shift()
+      resizeObservationMS += performance.now() - start
+      callback.call(instance, entries, instance)
+    })
+    resizeObservationMS += performance.now() - start
+  }
+}
+window.addEventListener('error', event => {
+  rendererDiagnostics.push({ kind: 'error', phase: diagnosticPhase, at: performance.now(), wallTime: new Date().toISOString(), message: event.message,
+    stack: event.error instanceof Error ? event.error.stack : undefined, filename: event.filename, line: event.lineno, column: event.colno, recentResizeBatches: [...resizeBatches] })
+})
+window.addEventListener('unhandledrejection', event => {
+  rendererDiagnostics.push({ kind: 'unhandledrejection', phase: diagnosticPhase, at: performance.now(), wallTime: new Date().toISOString(), message: String(event.reason),
+    stack: event.reason instanceof Error ? event.reason.stack : undefined, recentResizeBatches: [...resizeBatches] })
+})
+
 // Transparent instrumentation: actual browser Workers and original context code execute.
 const nativeWorkers: Array<{ request?: { type: CollaborationLayoutRequest['type']; id: string; queuedAt: number; sentAt?: number; delayMS: number; connectionIds: string[] }; errors?: Array<Extract<CollaborationLayoutResponse, { type: 'error' }> & { at: number }>; retainedPathIds?: string[]; input?: { nodes: number; connections: number; ids: string[]; sizes: Record<string, number>; areas: Array<{ id: string; members: number; parentId?: string | null }>; edges: Array<{ id: string; source: string; target: string; kind: string; strength?: number }> }; boxes?: { agents: number; ids: string[]; areas: Array<{ id: string; width: number; height: number }> }; geometry?: readonly CollaborationLayoutBox[]; pathIds?: string[]; responses?: Array<{ type: CollaborationLayoutResponse['type']; at: number }>; complete?: boolean; terminated?: boolean; observerMS: number }> = []
 let delayedRoute: { milliseconds: number; sender: string; recipient: string } | undefined
@@ -375,6 +409,9 @@ function adaptiveMessage(sender: string, recipient: string, id: string, notify =
 }
 Object.assign(window, { graphCapture: {
   ready: true, reads, controls, census, beginMeasurement, endMeasurement,
+  diagnosticPhase(value: string) { diagnosticPhase = value },
+  rendererDiagnostics() { return { errors: rendererDiagnostics, resizeConstructors, resizeCallbackBatches, resizeObserverCount: resizeObserverSequence, resizeObservationMS,
+    limits: { batches: 16, targetsPerBatch: 32, constructors: 256 }, boundary: 'Finite fixture-only native ResizeObserver payload/constructor observation; original callback, scheduling, observe/disconnect and window errors unchanged. No layout reads. Additional clock/attribute/stack costs are recorded, not calibrated or subtracted from product timings.' } },
   async publicControl(request: Parameters<NonNullable<typeof admittedControl>>[0]) {
     if (!admittedControl || request.operation !== 'focus' && request.operation !== 'inspect.client') throw Error('Original public callback unavailable for this finite scene')
     const controller = new AbortController(); publicSignals.set(request.requestId, controller)

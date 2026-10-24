@@ -53,7 +53,7 @@ function verify(data, actualFrames) {
     const before = map(phase.before), after = map(phase.after), target = new Map(phase.target.geometry.map(box => [box.id, box]))
     for (const id of [data.readerNodeId, data.scope.control.nodeId, data.scope.control.areaId]) assert.deepEqual(after.get(id), before.get(id), 'The accurate reading occurrence and unrelated control stay fixed: ' + id)
     for (const [id, box] of after) assert.deepEqual(box, target.get(id), 'Final presentation reaches the same actual Worker target: ' + id)
-    assert.ok(phase.before.held.sameReader && phase.after.held.sameReader && phase.after.held.sameAnchor && phase.after.held.readers === 1 && phase.after.held.subject === data.scope.reader, 'The sole original Reader and its exact anchor remain mounted')
+    assert.ok(phase.before.held.sameReader && phase.after.held.sameReader && phase.after.held.sameAnchor && phase.after.held.sameSubject && phase.after.held.readers === 1 && phase.after.held.subject === data.scope.reader && phase.after.held.hostId === 'local' && phase.after.held.runId === phase.before.held.runId, 'The sole original Reader, exact request subject/Run and its anchor remain mounted')
     assert.equal(phase.after.held.sameFocus, true, 'The latest real keyboard or gesture owner retains focus')
     const middle = phase.trace.samples.filter(sample => sample.transitioning && progress(phase.before, phase.after, sample) !== null)
     if (phase.name === 'redraw-motion-off') {
@@ -95,7 +95,7 @@ function verify(data, actualFrames) {
   assert.ok(data.intact, 'Original durable workface, draft, spatial selection and no-Run-control checks completed')
 }
 
-module.exports = async function adaptive({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, locate, pause, until, matrix, dragCanvas }) {
+module.exports = async function adaptive({ win, result, read, click, key, move, frame, check, intact, mapReady, closeDetails, locate, pause, until, matrix, dragCanvas }) {
   await check('adaptive-original-structure-and-motion-consumers', async () => {
     const scope = await read('window.graphCapture.adaptivePrepare()')
     const data = result.adaptive = { scope, phases: [], readerNodeId: scope.members[0].nodeId }
@@ -108,7 +108,6 @@ module.exports = async function adaptive({ win, result, read, click, key, move, 
         return Date.now() - since >= 200
       })
     }
-    const closeDetails = async () => { await closeReader(); if (await read(`Boolean(document.querySelector('[aria-label="Close map details"]'))`)) await click('[aria-label="Close map details"]') }
     for (const member of scope.members) { await locate(member.id); await closeDetails(); await mapReady() }
     const previousJobs = await read('window.graphCapture.workerSamples().length')
     await click('[aria-label="Arrange map"]')
@@ -140,8 +139,8 @@ module.exports = async function adaptive({ win, result, read, click, key, move, 
       await settled()
     }
     async function holdReader() {
-      await read(`(()=>{const anchor=document.querySelector('.collaboration-agent__identity-layer:not([inert]) [data-session-id="fixture-adaptive-00"]');if(!anchor)throw Error('The real adaptive identity anchor must be in this view');anchor.focus()})()`)
-      await key('ArrowDown'); await until('the original adaptive Reader opens', () => read(`document.querySelector('.agent-information-reader')?.getAttribute('data-agent-session-id')==='fixture-adaptive-00'`))
+      await read(`(()=>{const anchor=document.querySelector('.collaboration-agent__identity-layer:not([inert]) [data-session-id="fixture-adaptive-00"]');if(!anchor)throw Error('The real adaptive identity anchor must be in this view');window.__adaptiveAnchor=anchor;anchor.focus()})()`)
+      await key('ArrowDown'); await until('the exact original adaptive anchor enters its own Reader', () => read(`(()=>{const anchor=window.__adaptiveAnchor,id=anchor?.getAttribute('aria-describedby'),reader=id&&document.getElementById(id);return anchor?.isConnected&&reader?.matches('.agent-information-reader')&&reader.contains(document.activeElement)})()`))
       if (await read(`Boolean(document.querySelector('[aria-label="Pin Agent bookmark"]'))`)) await click('[aria-label="Pin Agent bookmark"]')
       await move('.agent-information-reader__reading'); await read('window.graphCapture.adaptiveRemember()')
     }
