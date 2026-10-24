@@ -51,7 +51,7 @@ const mutations = {
   'menu-binding': ['components/SettingsPanel.tsx', '<Icon size={15} aria-hidden="true" />', '', 'Menu module icon: profile']
 }
 const inputs = new Map(), relevant = file => file.startsWith('packages/client-ui/src/theme/') || file.includes('/components/settings/') || file.includes('/scripts/fixtures/settings-module-icons/') || file.endsWith('/verify-settings-module-icons.mjs') || file.endsWith('/SettingsPanel.tsx') || /styles\/(settings-[^/]+|surfaces)\.css$/.test(file)
-for (const file of ['package.json', 'pnpm-lock.yaml', 'apps/desktop/package.json', 'packages/client-ui/package.json', 'packages/core/package.json', 'apps/host/package.json', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/fixtures/settings-overview/vitest.config.mts', 'apps/desktop/scripts/verify-settings-module-icons.mjs', ...['main.cjs', 'entry.tsx', 'index.html', 'scenario.md'].map(file => 'apps/desktop/scripts/fixtures/settings-module-icons/' + file)]) inputs.set(file, hash(await fs.readFile(path.join(root, file))))
+for (const file of ['package.json', 'pnpm-lock.yaml', 'apps/desktop/package.json', 'packages/client-ui/package.json', 'packages/identity/package.json', 'packages/capsule/package.json', 'packages/core/package.json', 'apps/host/package.json', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/fixtures/settings-overview/vitest.config.mts', 'apps/desktop/scripts/verify-settings-module-icons.mjs', ...['main.cjs', 'entry.tsx', 'index.html', 'scenario.md'].map(file => 'apps/desktop/scripts/fixtures/settings-module-icons/' + file)]) inputs.set(file, hash(await fs.readFile(path.join(root, file))))
 const receipt = { passed: false, source: {}, runs: [], runtime, aestheticReview: 'not-performed', boundary: 'Actual SettingsPanel, module contributions, original Profile draft and shared theme preview in private Chromium with controlled preview configuration/API ports. Not live Runtime, installed app or theme-editor save qualification.' }
 try {
   for (const variant of ['baseline', ...Object.keys(mutations)]) {
@@ -72,6 +72,7 @@ try {
     else for (const [file, digest] of buildInputs) if (relevant(file)) assert.equal(digest, inputs.get(file), 'Original source changed between variants: ' + file)
     for (const source of ['components/SettingsPanel.tsx', 'components/settings/SettingsSearchResults.tsx', 'components/settings/modules/continuity.tsx']) assert.ok(inputs.has('apps/desktop/src/renderer/src/' + source))
     assert.ok(inputs.has('packages/client-ui/src/theme/icon-catalog.ts'))
+    for (const file of ['packages/identity/src/index.ts', 'packages/capsule/src/index.ts']) assert.ok(inputs.has(file), 'Original workspace source consumed: ' + file)
     const output = path.join(evidence, variant); await fs.mkdir(output, { recursive: true })
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
     const processResult = await runProbeProcess(require('electron'), [path.join(fixture, 'main.cjs'), path.join(compiled, 'index.html'), path.join(privateRoot, variant), output, variant], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 60000 })
