@@ -28,9 +28,16 @@ export function workbenchBrowserWindowTarget(targets: readonly WorkbenchViewTarg
   return matches.length === 1 ? matches[0] : undefined
 }
 
-/** A Tab's committed host does not change occurrence when its selected sibling changes. */
+/** A Tab's committed occurrence outlives its selected sibling, including closure. */
 function committedTabMarkerMatches(tab: WorkbenchTab, prefix: 'primary' | 'view', reference: WorkbenchProjectionSelection, marker: string | undefined): boolean {
-  return Object.keys(tab.regions).some(regionId => marker === workbenchRegionProjectionSlotId(prefix, { ...reference, regionId }))
+  if (!marker?.startsWith(`${prefix}:`)) return false
+  try {
+    const address: unknown = JSON.parse(marker.slice(prefix.length + 1))
+    // The existing machine marker keeps its full Region address. Only Tab
+    // placement ignores that historical caret; input and Region readers do not.
+    return Array.isArray(address) && address.length === 4 && address.every(part => typeof part === 'string' && part.length > 0) &&
+      address[0] === reference.displayWorkspaceId && address[1] === reference.groupId && address[2] === tab.id && address[2] === reference.tabId
+  } catch { return false }
 }
 
 /** A mode change retains this exact live Tab placement; it does not claim input. */
