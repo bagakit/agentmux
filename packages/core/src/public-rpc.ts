@@ -237,7 +237,7 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'agent.question.reply': Omit<import('./client.js').AgentMuxSessionQuestionReplyInput, 'authorHuman' | 'sourceDevice' | 'signal' | 'commandOverride' | 'args' | 'env'>
   'agent.history.resource': import('./session-history-resource.js').AgentSessionHistoryResourceParams
   'agent.conversation.record': import('./external-conversation.js').AgentExternalConversationReference & { hostId: string }
-  'agent.conversation.checkpoint': import('./conversation.js').ConversationRef
+  'agent.conversation.checkpoint': import('./conversation-changes.js').ConversationCheckpointInput
   'agent.conversation.release': import('./conversation-changes.js').ConversationViewReleaseInput
   'agent.conversation.changes': import('./conversation-changes.js').ConversationChangesInput
   'agent.conversation.watch': import('./conversation-changes.js').ConversationWatchInput

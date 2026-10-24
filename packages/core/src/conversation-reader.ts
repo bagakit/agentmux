@@ -18,7 +18,7 @@ export type ConversationReaderPort = {
   readHostId?: string
   captured(input: AgentCapturedTimelineRead): Promise<AgentCapturedTimelinePage>
   nativePage(cursor: string | undefined, limit: number): Promise<AgentSessionHistoryPage>
-  nativeCheckpoint(): Promise<NativeConversationCheckpoint>
+  nativeCheckpoint(position?: 'beginning'): Promise<NativeConversationCheckpoint>
   nativeChanges(checkpoint: NativeConversationCheckpoint, limit: number): Promise<NativeConversationChangesPage>
   nativeRecord(source: { providerId: string; nativeSessionId: string }, id: string): Promise<AgentSessionHistoryItem>
   signal?: AbortSignal
@@ -141,14 +141,14 @@ async function discover(ref: ConversationRef, port: ConversationReaderPort): Pro
     return { scope: { sources: coverage.map(c => c.source) }, coverage, position: { capturedBefore: null } }
   }
 }
-export async function conversationCheckpoint(ref: ConversationRef, port: ConversationReaderPort): Promise<ConversationCheckpointPage> {
+export async function conversationCheckpoint(ref: ConversationRef, port: ConversationReaderPort, nativePosition?: 'beginning'): Promise<ConversationCheckpointPage> {
   port.signal?.throwIfAborted()
   const found = await discover(ref, port), cuts: ConversationFrontier['cuts'][number][] = []
   if (found.position.capturedCut) cuts.push({ kind: 'captured', ...found.position.capturedCut })
   const native = found.scope.sources.find(s => s.kind === 'native')
   if (native) {
     try {
-      const checkpoint = await port.nativeCheckpoint()
+      const checkpoint = await port.nativeCheckpoint(nativePosition)
       if (checkpoint.source.providerId !== native.providerId || checkpoint.source.nativeSessionId !== native.nativeSessionId) return fail('The original native source changed before its checkpoint.')
       cuts.unshift({ kind: 'native', checkpoint })
       const c = found.coverage.find(c => c.source.kind === 'native')!; c.current = 'complete-through-cut'; c.readExtent = { through: checkpoint.cursor }

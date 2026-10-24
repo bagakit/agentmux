@@ -467,10 +467,11 @@ export const NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES = 64 * 1024
 /** Physical append iteration is shared; the original Provider alone interprets each row. */
 export async function readNativeConversationChanges(reader: NativeJsonlHistoryReader, context: ProviderConversationChangesContext,
   convert: (row: Record<string, unknown>, start: number) => NativeHistoryItem | null | Promise<NativeHistoryItem | null>): Promise<ProviderConversationChangesPage> {
+  if (context.head && (context.after !== undefined || context.tail)) return failure('INVALID_CURSOR', 'A beginning checkpoint cannot include another source position.')
   await reader.seekChanges(context.after, context.tail === true)
   const items: AgentSessionHistoryItem[] = []
   let bytes = 0
-  if (!context.tail) for (let scanned = 0; scanned < context.limit; scanned++) {
+  if (!context.tail && !context.head) for (let scanned = 0; scanned < context.limit; scanned++) {
     const entry = await reader.readNext()
     if (!entry) break
     const original = await convert(entry.value, entry.start)
@@ -482,5 +483,5 @@ export async function readNativeConversationChanges(reader: NativeJsonlHistoryRe
     }
     items.push(item); bytes += size
   }
-  return { source: context.source, items, cursor: await reader.changesCursor(), more: context.tail ? false : await reader.hasMoreChanges() }
+  return { source: context.source, items, cursor: await reader.changesCursor(), more: context.tail || context.head ? false : await reader.hasMoreChanges() }
 }

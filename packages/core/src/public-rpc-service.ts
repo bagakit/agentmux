@@ -45,7 +45,7 @@ import { isRoomBindingMethod, parseRoomBindingParams } from './room-binding-code
 import { isRoomProvisioningMethod, parseRoomProvisioningParams } from './room-provisioning-codec.js'
 import { isRoomDiscoveryMethod, parseRoomDiscoveryParams } from './room-discovery-codec.js'
 import { forwardConversationInput, readRoutedConversation } from './conversation-reader.js'
-import { parseConversationViewReleaseInput, parseConversationViewReleaseResult, parseConversationWatchInput, parseConversationRef, parseConversationCheckpointPage, parseConversationChangesInput, parseConversationChangesPage, parseConversationTimelineReadInput, parseConversationReadPage } from './conversation-changes.js'
+import { parseConversationViewReleaseInput, parseConversationViewReleaseResult, parseConversationWatchInput, parseConversationRef, parseConversationCheckpointInput, parseConversationCheckpointPage, parseConversationChangesInput, parseConversationChangesPage, parseConversationTimelineReadInput, parseConversationReadPage } from './conversation-changes.js'
 import { createAgentMuxSearchReader, type AgentMuxSearchReadContext } from './search-reader.js'
 import { createAgentMuxSearchObservationOwner } from './search-observation.js'
 import { parseAgentMuxSearchInput } from './search-codec.js'
@@ -302,7 +302,7 @@ const NATIVE_FIELDS = {
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel', 'externalAction'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'],
   'agent.conversation.record': ['hostId', 'agentSessionId', 'ingressId', 'authoritySource'],
-  'agent.conversation.checkpoint': ['hostId', 'agentSessionId'],
+  'agent.conversation.checkpoint': ['hostId', 'agentSessionId', 'nativePosition'],
   'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes', 'view'],
   'agent.conversation.release': ['hostId', 'agentSessionId', 'view'],
   'agent.conversation.watch': ['hostId', 'agentSessionId', 'view'],
@@ -1354,7 +1354,7 @@ export class AgentMuxRpcService {
     }
     if (method === 'agent.conversation.checkpoint' || method === 'agent.conversation.changes' || method === 'agent.conversation.inspect') {
       const input = method === 'agent.conversation.changes' ? parseConversationChangesInput(params)
-        : method === 'agent.conversation.inspect' ? parseConversationTimelineReadInput(params) : parseConversationRef(params)
+        : method === 'agent.conversation.inspect' ? parseConversationTimelineReadInput(params) : parseConversationCheckpointInput(params)
       const owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
       if (owners.length !== 1) throw new AgentMuxError('The exact conversation Host is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
       const client = owners[0]!.client, options = { ...(context.signal ? { signal: context.signal } : {}) }
