@@ -32,6 +32,7 @@
 @import './conversation-native-thread.css';
 @import './conversation-metrics.css';
 @import './conversation-avatar.css';
+@import './agent-avatar-face.css';
 @import './conversation-reactions.css';
 @import './message-delivery-failure.css';
 

@@ -111,6 +111,7 @@
 @import './goal-agent-picker.css';
 @import './agent-panels.css';
 @import './performance-toolkit.css';
+@import '@agentmux/client-ui/styles/agent-avatar-face.css';
 @import './agent-avatar.css';
 @import './full-page-loading.css';
 @import './session-recap.css';
