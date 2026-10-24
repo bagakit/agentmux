@@ -75,6 +75,31 @@ describe('portable evidence mechanism', () => {
 })
 
 describe('original domain owners → typed public RPC → compiled CLI', () => {
+  it('discovers Core startup history without a SID and keeps strict queries and original Host authorization', async () => {
+    const h = await rpcOwnerFixture(); close.push(h.close)
+    const service = new AgentMuxRpcService({ coreClients: h.coreClients }); close.push(() => service.dispose())
+    const discovery = await service.call('system.diagnostics.inspect', {})
+    expect(discovery.capabilities).toEqual(expect.arrayContaining([
+      { domain: 'agent.startup', target: 'recent', raw: false, read: 'supported' },
+      { domain: 'agent.startup', target: 'log-id', raw: true, read: 'supported' },
+    ]))
+    const target = { domain: 'agent.startup' as const, hostId: 'local', recent: {} }
+    const read = vi.spyOn(h.client, 'findAgentStartupDiagnostics')
+    const result = await service.call('system.diagnostics.inspect', { target })
+    expect(result.reads[0]).toMatchObject({ availability: 'found', scope: 'interval-observation', recordRef: null,
+      data: { kind: 'agent-startup-page', items: [], coverage: { history: 'accepted-observations-only', observationGaps: 'unknown' } } })
+    expect(() => parseDiagnosticEvidenceResult(result, { target })).not.toThrow()
+    read.mockClear()
+    const forbidden = await service.call('system.diagnostics.inspect', { target: { ...target, hostId: 'other' } }, { caller: h.credentials })
+    expect(forbidden.reads[0]?.availability).toBe('forbidden'); expect(read).not.toHaveBeenCalled()
+    await expect(service.call('system.diagnostics.inspect', { target: { ...target, recent: { limit: 33 } } })).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    await expect(service.call('system.diagnostics.inspect', { target: { ...target, recent: { text: 'private full-text search' } } } as any)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    const corrupt = structuredClone(result)
+    ;(corrupt.reads[0]!.data as any).privateText = 'private payload'
+    for (let i = 0; i < 4; i++) corrupt.budget.usedBytes = Buffer.byteLength(JSON.stringify(corrupt))
+    expect(() => parseDiagnosticEvidenceResult(corrupt, { target })).toThrow()
+    expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+  })
   it('keeps arbitrary primary text out of the ordinary domain projection', () => {
     const data = projectDeliveryEvidence(original(), false)
     expect(JSON.stringify(data)).not.toContain('private-error-text')
