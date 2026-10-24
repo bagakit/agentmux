@@ -5,9 +5,12 @@ import type { RoomBinding } from '@agentmux/core/connections'
 import { api } from '../lib/api'
 import { deliveryFacts, deliveryMatches, formatGroupDiagnosis, groupTarget, readGroupDiagnosis, retainGroupDiagnosis, type GroupDiagnosis, type GroupWindow } from '../lib/group-diagnosis'
 
+import { connectorGroupSummary } from '../lib/connector-group-status'
+import { ConnectorTrafficSummary } from './ConnectorTrafficSummary'
+
 const LoadingIcon = semanticIconComponent('status.loading')
 /** Bounded original incoming/outgoing observations. Reading or copying never retries an effect. */
-export function ConnectorDeliveryDetails({ binding, hostingTarget }: { binding: RoomBinding; hostingTarget?: ConnectionHostingTarget | null }) {
+export function ConnectorDeliveryDetails({ binding, hostingTarget, onMembers }: { binding: RoomBinding; hostingTarget?: ConnectionHostingTarget | null; onMembers?: () => void }) {
   const target = groupTarget(binding), key = JSON.stringify([target, hostingTarget]), originalSource = api.connections.call
   const source: typeof api.connections.call = useMemo(() => (method, params) => {
     if (hostingTarget === null) return Promise.reject(new Error('The original bot hosting owner is unconfirmed.'))
@@ -15,7 +18,7 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget }: { binding: 
   }, [originalSource, key])
   const current = useRef({ key, source }), live = useRef(false), epoch = useRef(0), exportRead = useRef(0)
   current.current = { key, source }
-  const [read, setRead] = useState<{ key: string; value: GroupDiagnosis } | null>(null), [pending, setPending] = useState(false), [expanded, setExpanded] = useState(false)
+  const [read, setRead] = useState<{ key: string; value: GroupDiagnosis; checkedAt: number } | null>(null), [pending, setPending] = useState(false), [expanded, setExpanded] = useState(false)
   const [detail, setDetail] = useState<{ key: string; value: ReturnType<typeof deliveryFacts> | null; issue: boolean } | null>(null)
   const [copying, setCopying] = useState(false), [feedback, setFeedback] = useState('')
   const visible = read?.key === key ? read.value : null
@@ -25,7 +28,7 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget }: { binding: 
     const request = ++epoch.current; setPending(true)
     const result = await readGroupDiagnosis(source, target, window)
     if (!accepts() || request !== epoch.current) return
-    setRead(previous => ({ key, value: retainGroupDiagnosis(previous?.key === key ? previous.value : null, result) })); setPending(false)
+    setRead(previous => ({ key, value: retainGroupDiagnosis(previous?.key === key ? previous.value : null, result), checkedAt: Date.now() })); setPending(false)
   }
   async function inspectOriginal(operationId: string) {
     const request = ++epoch.current; setPending(true)
@@ -54,32 +57,18 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget }: { binding: 
     live.current = true; setFeedback(''); setCopying(false); setDetail(null); void inspect()
     return () => { live.current = false; epoch.current++; exportRead.current++ }
   }, [key, source])
-  const outgoing = visible?.outgoing.value, incoming = visible?.incoming.value, receipt = outgoing?.deliveries.find(delivery => delivery.kind === 'conversation')?.receipt
+  const outgoing = visible?.outgoing.value, incoming = visible?.incoming.value
   const incomplete = outgoing?.coverage?.state === 'incomplete' || outgoing?.observation?.reason === 'content-unconfirmed'
   const sectionIssue = (name: string, section: { issue: string | null; retained?: true } | undefined) => section?.issue ? <p className="agent-connector-note" role="status">{name} observation unconfirmed{section.retained ? '; earlier observed facts are kept.' : '.'}</p> : null
-  const lastInput = incoming?.rows[0]
-  const recordingSummary = lastInput?.recording?.state === 'recorded' ? 'Message saved in this conversation.'
-    : lastInput?.recording?.state === 'unavailable' ? 'Message received; saving it in this conversation is not confirmed.'
-    : lastInput?.recording?.state === 'refused' ? 'Message could not be recorded for this connection.'
-    : lastInput ? 'Message received; no conversation record confirmed.' : incoming ? 'No new group message in this window.' : 'Group message observation is not confirmed.'
-  const incomingSummary = visible?.service.value?.enabled === false ? 'Automatic service is paused.'
-    : lastInput?.scope === 'other-binding' ? 'An earlier group connection has a receipt. Its current result is unconfirmed.'
-    : lastInput?.state === 'refused' ? lastInput.code === 'INGRESS_ACTOR_NOT_AUTHORIZED' ? 'Not sent to the Agent. This member has no request access.' : lastInput.code === 'INGRESS_INPUT_OUTSIDE_SCOPE' ? 'Not sent to the Agent. Use an @mention or reply in this group.' : 'A request was refused. Check its original receipt below.'
-    : lastInput?.coreStatus === 'admitted' ? 'Request accepted.'
-    : lastInput?.coreStatus === 'terminal-confirmed' || lastInput?.coreStatus === 'bytes-accepted' ? 'Request submitted; Agent acknowledgement is unconfirmed.'
-    : lastInput ? 'Agent submission is not confirmed.'
-    : incoming ? 'No received messages in this checked window.' : 'The incoming result is not confirmed.'
   const readFailed = !!visible && [visible.service, visible.connection, visible.binding, visible.outgoing, visible.incoming].some(section => section.issue)
-  return <section className="agent-connector-fields" aria-busy={pending} aria-label="Group delivery">
-    <div className="agent-connector-section-title"><h3>Group activity</h3><button className="agent-connector-text-action" aria-busy={pending} disabled={pending} onClick={() => void inspect()}>{pending ? <LoadingIcon size={13} animation="spin" /> : null}Check group activity</button></div>
+  return <section className="agent-connector-fields" aria-busy={pending} aria-label="Group delivery" data-connection-section="activity" tabIndex={-1}>
+    <div className="agent-connector-section-title"><div><h3>Group activity</h3>{visible && read ? <small className="agent-connector-checked">Checked <time dateTime={new Date(read.checkedAt).toISOString()}>{new Date(read.checkedAt).toLocaleTimeString()}</time> · recent receipt window</small> : null}</div><button className="agent-connector-text-action" aria-busy={pending} disabled={pending} onClick={() => void inspect()}>{pending ? <LoadingIcon size={13} animation="spin" /> : null}Check group activity</button></div>
     {pending ? <p className="agent-connector-note" role="status">Reading original local group receipts…</p> : null}
-    <p className="agent-connector-note"><strong>Group → conversation</strong> · {recordingSummary}</p>
-    <p className="agent-connector-note"><strong>Agent response</strong> · {incomingSummary}</p>
-    {visible?.binding.value?.activeInputGrants === 0 ? <p className="agent-connector-note">No member approved to send requests. Review member access above.</p> : null}
-    <p className="agent-connector-note"><strong>Conversation → group</strong> · {receipt === 'confirmed' ? 'Delivery confirmed in this window' : receipt === 'not-applied' ? 'Delivery in this window was not sent' : receipt === 'unknown' || visible?.outgoing.issue ? 'Delivery not confirmed. Check the original receipt below.' : outgoing?.deliveries.some(delivery => delivery.kind === 'conversation') ? 'An outgoing request is recorded. Its platform receipt is not confirmed.' : outgoing ? 'No new delivery receipt recorded. No delivery in this reading window.' : 'The delivery result is not confirmed.'}</p>
+    <ConnectorTrafficSummary summary={connectorGroupSummary(visible)} />
+    {visible?.binding.value?.activeInputGrants === 0 && onMembers ? <button className="agent-connector-text-action" onClick={onMembers}>Review member access</button> : null}
     {readFailed ? <p className="agent-connector-note" role="status">The latest check is unconfirmed. Earlier observed receipts are kept; check group activity again.</p> : null}
-    {incomplete ? <div className="agent-connector-service" role="status"><strong>Some content has not synced</strong><p className="agent-connector-note">You can keep working in the original conversation. Check the original delivery for the remaining content.</p><button className="agent-connector-text-action" onClick={() => setExpanded(true)}>View original delivery</button></div> : null}
-    <details className="agent-connector-disclosure" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}><summary>Delivery receipt details</summary><div className="agent-connector-fields">
+
+    <details className="agent-connector-disclosure" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}><summary>{incomplete ? 'View original delivery' : 'Delivery receipt details'}</summary><div className="agent-connector-fields">
       {visible?.service.value ? <p className="agent-connector-note">Automatic service: {visible.service.value.enabled ? 'on' : 'off'} · revision {visible.service.value.revision}</p> : null}
       {visible?.connection.value ? <p className="agent-connector-note">Application revision {visible.connection.value.revision} · authentication: {visible.connection.value.authentication.state} · transport: {visible.connection.value.transport.state} · intake: {visible.connection.value.intake.state} · delivery: {visible.connection.value.delivery.state}</p> : null}
       {visible?.binding.value ? <p className="agent-connector-note">Binding: {visible.binding.value.state} · {visible.binding.value.activeInputGrants} active input grants · current revision {visible.binding.value.currentRevision ?? 'unconfirmed'}</p> : null}
@@ -102,8 +91,8 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget }: { binding: 
       {outgoing?.coverage?.nextContent ? <button className="small-button" disabled={pending} onClick={() => void inspect({ afterContent: outgoing.coverage!.nextContent! })}>Next content window</button> : null}
       {original ? <p className="agent-connector-note" role="status">{original.value ? 'Original queue: ' + original.value.state + ' · Platform receipt: ' + (original.value.receipt ?? 'Not recorded') + ' · ' + original.value.operationId : 'Original receipt unavailable; no retry was sent.'}</p> : null}
       <button className="small-button" disabled={pending} onClick={() => void inspect()}>Latest receipts</button>
-    </div></details>
     <div className="agent-connector-row"><button className="small-button" aria-busy={copying} disabled={copying} onClick={() => void copyDiagnosis()}>{copying ? <LoadingIcon size={13} animation="spin" /> : null}Copy group diagnosis</button>{copying ? <button className="small-button" onClick={() => { exportRead.current++; setCopying(false); setFeedback('Group diagnosis copy canceled.') }}>Cancel copy</button> : null}</div>
-    <p className="agent-connector-note" role="status">{feedback}</p>
+    {feedback ? <p className="agent-connector-note" role="status">{feedback}</p> : null}
+    </div></details>
   </section>
 }
