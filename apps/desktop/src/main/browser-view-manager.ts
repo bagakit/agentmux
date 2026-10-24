@@ -146,6 +146,7 @@ type BrowserEntry = {
   driving: boolean
   /** 这一页上待答的那个应用链接提问。回答掉或换页就清。 */
   appLinkPrompt: { url: string; scheme: string } | null
+  appLinkRequest: symbol | null
   activity: BrowserActivityState
   humanControl: boolean
   activeRun: { operationId: string; signal: AbortSignal; stop: () => void } | undefined
@@ -1474,6 +1475,7 @@ export class BrowserViewManager {
       error: null,
       driving: false,
       appLinkPrompt: null,
+      appLinkRequest: null,
       activity: { operation: null, control: 'human', ...(retiredInputShield ? { warning: 'An earlier native Browser input surface could not be fully released. The original Browser has reopened; explicitly hand it to its Agent to retry cleanup before starting a fresh isolated program.' } : {}) },
       humanControl: false,
       activeRun: undefined,
@@ -3151,21 +3153,23 @@ export class BrowserViewManager {
    * 见 `window-security.ts` 里 `windowOpenOutcome` 的注释。
    */
   private async handOffAppLink(entry: BrowserEntry, url: string, scheme: string): Promise<void> {
-    const view = entry.view
+    const view = entry.view, navigationId = entry.navigationId, request = Symbol('app-link request')
+    entry.appLinkRequest = request
+    const current = () => this.owns(entry, view) && entry.navigationId === navigationId && entry.appLinkRequest === request
     const remembered = (await this.appLinks.rememberedSchemes())[scheme]
     // 读盘是异步的，这中间页面可能已经换掉或被顶掉。既有的每一处异步回写都先判这一句。
-    if (!this.owns(entry, view)) return
+    if (!current()) return
     this.projectAppLinkOutcome(entry, appLinkOutcome(url, scheme, remembered, (target) => {
-      void this.openExternalWithFeedback(entry, target)
+      void this.openExternalWithFeedback(entry, target, current)
     }))
   }
 
-  private async openExternalWithFeedback(entry: BrowserEntry, target: string): Promise<void> {
+  private async openExternalWithFeedback(entry: BrowserEntry, target: string, current: () => boolean): Promise<void> {
     try {
       await this.appLinks.openExternal(target)
     } catch (error) {
-      if (!this.owns(entry, entry.view)) return
-      entry.error = `Could not open this link in another app: ${error instanceof Error ? error.message : String(error)}. Try again or choose another app.`
+      if (!current()) return
+      entry.error = `Could not open this link: ${error instanceof Error ? error.message : String(error)}. Inspect the exact target before trying the link again.`
       this.emit(entry)
     }
   }
@@ -3190,11 +3194,14 @@ export class BrowserViewManager {
     const entry = this.require(id)
     const pending = entry.appLinkPrompt
     if (!pending) throw new Error('No app link is waiting for an answer on this Browser')
+    const request = entry.appLinkRequest, view = entry.view, navigationId = entry.navigationId
+    const current = () => this.owns(entry, view) && entry.navigationId === navigationId && entry.appLinkRequest === request
     const choice: AppLinkSchemeChoice = allow ? 'allow' : 'deny'
     if (remember) await this.appLinks.rememberScheme(pending.scheme, choice)
+    if (!current() || entry.appLinkPrompt !== pending) return this.snapshot(entry)
     // 记不记得住是两回事：这一次照答案走。传 choice 而不是 remembered，才让「只答这一次」成立。
     this.projectAppLinkOutcome(entry, appLinkOutcome(pending.url, pending.scheme, choice, (target) => {
-      void this.openExternalWithFeedback(entry, target)
+      void this.openExternalWithFeedback(entry, target, current)
     }))
     return this.snapshot(entry)
   }
@@ -3780,6 +3787,8 @@ export class BrowserViewManager {
       entry.requestedUrl = requestedUrl
       const previousNavigationId = entry.navigationId
       entry.navigationId = mintObjectId()
+      entry.appLinkRequest = null
+      entry.appLinkPrompt = null
       entry.committedNavigationId = null
       if (details.isSameDocument && entry.capsuleResponse?.navigationId === previousNavigationId) entry.capsuleResponse.navigationId = entry.navigationId
       else { entry.capsuleRequest = null; entry.capsuleResponse = null }
@@ -3853,6 +3862,8 @@ export class BrowserViewManager {
     contents.on('render-process-gone', (_event, details) => {
       if (!this.owns(entry, view)) return
       entry.committedNavigationId = null
+      entry.appLinkRequest = null
+      entry.appLinkPrompt = null
       this.cancelRecoveryPreview(entry)
       this.revokePresentationCapture(entry, 'source-replaced')
       entry.error = `Browser renderer stopped: ${details.reason}`

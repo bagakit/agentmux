@@ -466,8 +466,17 @@ export async function registerIpc(args: {
         browser: { ...current.browser, appLinkSchemes: { ...current.browser.appLinkSchemes, [scheme]: choice } }
       }))
     },
-    // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
-    openExternal: (target) => shell.openExternal(target)
+    // Browser and Popup have already authorized this handoff through their original app-link owner.
+    openExternal: async (target) => {
+      if (/^amux:/iu.test(target)) {
+        if (!args.spatialLinks) throw new Error('Object link navigation is unavailable in this window. The original workface and Agents are kept; retry the exact link in the main Desktop window.')
+        const issue = await args.spatialLinks.receive(target)
+        if (issue) throw new Error(issue)
+        return
+      }
+      // Keep Electron's native receiver for third-party applications.
+      return shell.openExternal(target)
+    }
   }, browserOperationJournal, browserEvidence, browserResults, browserDemonstrations,
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE)), { nameAudit }),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
