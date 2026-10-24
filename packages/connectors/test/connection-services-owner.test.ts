@@ -17,7 +17,7 @@ it('keeps one receive/publication owner while independent management reads remai
   const directory = await mkdtemp(join(tmpdir(), 'amux-channel-owner-'))
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
   const noSource = vi.fn(async () => { throw Error('An empty binding owner cannot read a conversation') })
-  const publication: PublicationConversationPort = { checkpoint: noSource, changes: noSource, inspect: noSource, observe: noSource }
+  const publication: PublicationConversationPort = { checkpoint: noSource, changes: noSource, inspect: noSource, observe: noSource, notification: noSource, message: noSource }
   const options = { directory, adapters: [], publication,
     bindings: { spatial: { read: async () => null }, checkpoint: noSource } }
   const first = await createConnectionServices(options); cleanup.push(() => first.close())
@@ -39,7 +39,7 @@ it('reacquires the same background database after its previous owner exits witho
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
   const noSource = vi.fn(async () => { throw Error('No source exists') })
   const options = { directory, adapters: [],
-    publication: { checkpoint: noSource, changes: noSource, inspect: noSource, observe: noSource },
+    publication: { checkpoint: noSource, changes: noSource, inspect: noSource, observe: noSource, notification: noSource, message: noSource },
     bindings: { spatial: { read: async () => null }, checkpoint: noSource } }
   const first = await createConnectionServices(options); cleanup.push(() => first.close())
   const second = await createConnectionServices(options); cleanup.push(() => second.close())
