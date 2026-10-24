@@ -12,6 +12,11 @@ dispatch threads. Use message ls --direction incoming|outgoing for bounded origi
 and body previews; message read --message-id ID retrieves one original body, without
 creating a delivery batch or advancing ack. Keep nextBeforeSequence with the same Host,
 participant and direction. message read --operation-id retains original intake lookup.
+Its derived inputOrigin is the exact direct input's original queue position, or null when
+membership cannot be confirmed. It uses only frozen original Run facts, never the current Run;
+reference-only Inbox messages have no direct input position. A notification's separate prompt-key
+position belongs to message notify inspect. Missing membership does not remove
+an authorized original body read or prove input dispatch, native adoption or task completion.
 Add --notification-id ID to read that exact notification's metadata for the original MID
 and recipient. An unassociated result keeps the original body and never substitutes the
 latest notice. Notification mode is separate from the original message execution choice.
