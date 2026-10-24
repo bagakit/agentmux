@@ -5,7 +5,9 @@ import { mobileUpdateFragment } from '../connection/reload-identity'
 export type MobileWebUpdateResult = { status: 'navigating' } | { status: 'blocked'; message: string }
 type SafetyOwner = () => string | null
 type ConnectionCheck = () => Promise<() => boolean>
-type SafetyContext = { apply(): Promise<MobileWebUpdateResult>; register(owner: SafetyOwner): () => void }
+type DispatchMatch = (candidate: unknown) => boolean
+type SafetyContext = { apply(): Promise<MobileWebUpdateResult>; register(owner: SafetyOwner): () => void;
+  trackDispatch(key: string, match: DispatchMatch): () => void; isDispatched(key: string, candidate: unknown): boolean }
 const unavailable = '当前页面无法确认原连接；请保留工作内容并恢复原 Mac 连接后重试。'
 const Safety = createContext<SafetyContext | null>(null)
 
@@ -21,13 +23,36 @@ export function useMobileWebUpdateSafety(): Pick<SafetyContext, 'apply'> {
   return context ?? { apply: async () => ({ status: 'blocked', message: unavailable }) }
 }
 
+/** Keep an accepted operation protected even if its presenting component unmounts. */
+export function useMobileWebUpdatePendingAction() {
+  const context = useContext(Safety)
+  return async <T,>(message: string | (() => string), action: (allowUpdate: () => void) => Promise<T>): Promise<T> => {
+    let pendingContinuation = true
+    const release = context?.register(() => pendingContinuation ? typeof message === 'function' ? message() : message : null)
+    try { return await action(() => { pendingContinuation = false }) } finally { release?.() }
+  }
+}
+
+/** The original operation owns its matcher until that exact invocation settles. */
+export function useMobileWebDispatchedOperations() {
+  const context = useContext(Safety)
+  return { track: (key: string, match: DispatchMatch) => context?.trackDispatch(key, match) ?? (() => {}),
+    includes: (key: string, candidate: unknown) => context?.isDispatched(key, candidate) ?? false }
+}
+
 /** Explicit navigation retains the page when any preservation check is unknown. */
 export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prepareReload, native = false }: {
   children: ReactNode; verifyConnection: ConnectionCheck; prepareReload?: () => () => void; native?: boolean
 }) {
-  const owners = useRef(new Set<SafetyOwner>()), ownersRevision = useRef(0), current = useRef({ verifyConnection, prepareReload, native })
+  const owners = useRef(new Set<SafetyOwner>()), dispatched = useRef(new Map<string, Set<DispatchMatch>>()), ownersRevision = useRef(0), current = useRef({ verifyConnection, prepareReload, native })
   current.current = { verifyConnection, prepareReload, native }
   const context = useMemo<SafetyContext>(() => ({
+    trackDispatch(key, match) {
+      const group = dispatched.current.get(key) ?? new Set<DispatchMatch>()
+      group.add(match); dispatched.current.set(key, group)
+      return () => { group.delete(match); if (!group.size && dispatched.current.get(key) === group) dispatched.current.delete(key) }
+    },
+    isDispatched(key, candidate) { for (const match of dispatched.current.get(key) ?? []) if (match(candidate)) return true; return false },
     register(owner) {
       owners.current.add(owner); ownersRevision.current++
       return () => { if (owners.current.delete(owner)) ownersRevision.current++ }

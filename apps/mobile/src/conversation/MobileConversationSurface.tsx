@@ -101,12 +101,13 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const current = useRef({ client, agentSessionId })
   current.current = { client, agentSessionId }
   const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue,
-    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation } = useMobilePromptController({ local, client, agentSessionId,
+    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId,
       session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   useMobileWebUpdateSafetyOwner(() => {
     if (local.saveIssue || local.recordChanged || local.hasUnconfirmedSave) return '草稿或原操作尚未确认保存在设备；请先恢复设备存储并保存，再更新网页。'
-    if (hasAnyPreparation() || [...local.attempts.values(), ...local.responses.values(), ...local.questions.values()].some(item => item.phase === 'sending')) {
-      return '原消息或答复仍在发送；请等待回执，再更新网页。'
+    if (hasAnyPreparation() || [...local.attempts.entries()].some(([key, item]) => item.phase === 'sending' && !isDispatchedPrompt(key, item)) ||
+      [...local.responses.values(), ...local.questions.values()].some(item => item.phase === 'sending')) {
+      return hasAnyPreparation() ? '附件消息仍在准备；可返回原对话选择“取消发送准备”。' : '原消息或答复仍在发送；请等待回执，再更新网页。'
     }
     return null
   })
@@ -301,7 +302,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       for (const item of [...set]) if (item.includes(JSON.stringify(original.operationId))) set.delete(item)
     })
     const controlledManual = Boolean(original.manualInput && (original.inputReceipt || original.phase === 'sending'))
-    if (original.phase !== 'sending' && dismissed.has(signature)) {
+    if (original.phase !== 'sending' && dismissed.has(signature) && !hasPendingAction(key, 'retry') && !hasPendingAction(key, 'stop')) {
       const summary = controlledManual
         ? presentMessageDeliveryFailure({ error: failure ?? diagnostics.get(original.logId ?? '')?.record.error ?? original.message,
             logId: original.logId, log: original.logId ? diagnostics.get(original.logId) : undefined,
@@ -319,6 +320,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     return <aside
           className="mobile-send-status" key={key} data-phase={original.phase} data-manual={Boolean(original.manualInput) || undefined} data-retained={key !== draftKey || undefined}
           data-original-operation={original.operationId} aria-live="polite">
+          {(hasPendingAction(key, 'retry') || hasPendingAction(key, 'stop')) && <div className="mobile-send-status__actions">
+            {hasPendingAction(key, 'retry') && <button type="button" onClick={() => cancelPendingAction(key, 'retry')}>取消未发起的重试</button>}
+            {hasPendingAction(key, 'stop') && <button type="button" onClick={() => cancelPendingAction(key, 'stop')}>取消未发起的停止</button>}
+          </div>}
           {controlledManual ? <>
             {original.phase === 'sending' && !original.inputReceipt ? <p role="status">正在保存这条原消息…</p>
               : original.phase === 'confirmed' && !original.inputReceipt ? <p role="status">先前输入已确认；当前 Core 回执观察待恢复。这不代表任务完成。</p>
@@ -460,6 +465,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           onPendingContentChange={setHasPendingAttachments}
           promptOperationId={attempt?.operationId ?? null} confirmedPrompt={confirmedAttachmentPrompt}
           onSendBodyOnly={sendBodyOnly}
+          onCancelPreparation={() => cancelPreparation()} preparing={preparing}
           bodyOnlyDisabled={!draft.trim() || attempt?.phase === 'sending'}
           insert={async (resolve, original) => {
             const originalClient = current.current.client, selectedId = current.current.agentSessionId
