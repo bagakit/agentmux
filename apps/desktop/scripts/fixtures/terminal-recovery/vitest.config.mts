@@ -12,6 +12,7 @@ const uiAliases = Object.entries(ui.exports).map(([key, value]) => {
   return { find: new RegExp('^' + ('@agentmux/client-ui' + (key === '.' ? '' : key.slice(1))).split('*').map(escape).join('(.*)') + '$'), replacement: resolve(root, 'packages/client-ui', target.replace('*', '$1')) }
 }).sort((a, b) => b.find.source.length - a.find.source.length)
 const changes: Record<string, [string, string, string]> = {
+  'missing-owner-absolute-path': ['packages/core/src/terminal-recovery-owner.ts', 'if (!isAbsolute(input.workspacePath))', 'if (false)'],
   'replay-unknown': ['packages/core/src/terminal-recovery-owner.ts', "if (intent.phase !== 'not_applied' && input.action !== 'continue') return this.result(intent)", "if (intent.phase !== 'not_applied' && input.action !== 'continue') { intent = (await update(attempt, current => { current.phase = 'prepared'; return true })).current; }"],
   'forget-durable-intent': ['packages/core/src/terminal-recovery-owner.ts', "current.phase = 'dispatched'; return true", "current.phase = 'prepared'; return true"],
   'follow-replacement-attempt': ['packages/core/src/terminal-recovery-owner.ts', 'current.prepared.createOperationId === attempt.createOperationId && change(current)', 'change(current)'],

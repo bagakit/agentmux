@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TerminalRecoveryOwner } from '../src/terminal-recovery-owner.js'
@@ -36,6 +36,40 @@ async function fixture() {
   }
   return { root, port, owner: () => new TerminalRecoveryOwner(root, port), setRetained: (value: AgentMuxRun | null) => { retained = value }, count: () => started }
 }
+it('[terminal recovery] shared DTO validates Host path structure without interpreting the client OS', () => {
+  for (const workspacePath of ['relative/cwd', 'C:\\original\\cwd']) {
+    expect(parseTerminalRecoveryInput({ ...input, workspacePath })).toEqual({ ...input, workspacePath })
+  }
+  for (const workspacePath of ['', 'bad\0path', 'bad\npath']) {
+    expect(() => parseTerminalRecoveryInput({ ...input, workspacePath })).toThrow()
+  }
+})
+it.each(['recover', 'inspect', 'continue'] as const)('[terminal recovery] relative recovery %s is rejected before every port and intent write', async action => {
+  const f = await fixture(), runtime = vi.spyOn(f.port, 'runtime')
+  await expect(f.owner().recover({ ...input, workspacePath: 'relative/cwd', action }))
+    .rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  for (const port of [runtime, f.port.original, f.port.prepare, f.port.start, f.port.inspect, f.port.retire, f.port.observeRetirement]) {
+    expect(port).not.toHaveBeenCalled()
+  }
+  expect(await readdir(f.root)).toEqual([])
+})
+it('[terminal recovery] relative recovery persisted intent cannot prepare or dispatch and does not revoke a healthy original Run', async () => {
+  const f = await fixture()
+  await f.owner().recover(input)
+  const path = join(f.root, (await readdir(f.root)).find(path => path.endsWith('.json'))!)
+  const intent = JSON.parse(await readFile(path, 'utf8'))
+  intent.workspacePath = intent.prepared.workspacePath = 'relative/cwd'
+  const launch = JSON.parse(intent.prepared.launch)
+  launch.request.cwd = 'relative/cwd'; intent.prepared.launch = JSON.stringify(launch)
+  const damaged = JSON.stringify(intent)
+  await writeFile(path, damaged)
+  for (const port of [f.port.prepare, f.port.start, f.port.inspect, f.port.retire, f.port.observeRetirement]) port.mockClear()
+  await expect(f.owner().recover(input)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  f.port.original.mockResolvedValueOnce(run('old-run'))
+  expect(await f.owner().recover(input)).toMatchObject({ kind: 'reattachable', run: { runId: 'old-run' } })
+  for (const port of [f.port.prepare, f.port.start, f.port.inspect, f.port.retire, f.port.observeRetirement]) expect(port).not.toHaveBeenCalled()
+  expect(await readFile(path, 'utf8')).toBe(damaged)
+})
 it('[terminal recovery] lost Start reentry keeps one durable frozen launch across owner reconstruction and a new caller operation', async () => {
   const f = await fixture(), start = f.port.start.getMockImplementation()!
   f.port.start.mockImplementationOnce(async () => { await start(); throw Error('reply lost') })

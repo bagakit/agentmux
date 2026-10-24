@@ -52,6 +52,7 @@ try {
     ['follow-retirement-successor', 'concurrent same continuation', 'packages/core/test/terminal-recovery.test.ts'],
     ['resurrect-retired-attempt', 'cannot undo a confirmed fence', 'packages/core/test/terminal-recovery.test.ts'],
     ['forget-durable-intent', 'lost Start reentry', 'packages/core/test/terminal-recovery.test.ts'],
+    ['missing-owner-absolute-path', 'relative recovery', 'packages/core/test/terminal-recovery.test.ts'],
     ['ignore-original-cwd', 'Core rejects wrong cwd', 'packages/core/test/terminal-recovery.test.ts'],
     ['desktop-new-terminal', 'actual Desktop recovery', 'apps/desktop/test/terminal-recovery-consumer.test.ts'],
     ['stop-late-view', 'late raw Terminal recovery', 'apps/desktop/test/session-recovery-lost-receipt.test.tsx'],
