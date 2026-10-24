@@ -70,7 +70,7 @@ it('the unbound header remains usable during the first read and unrelated host o
   try {
     await f.mount(); await wait(() => expect(trigger()?.dataset.channelState).toBe('unknown'))
     expect(trigger().getAttribute('aria-busy')).toBe('true'); expect(trigger().disabled).toBe(false)
-    await action('Connect a conversation')
+    await action('Connect a group')
     await wait(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull())
   } finally { await act(async () => { for (const release of pending) release() }); vi.mocked(api.connections.call).mockImplementation(f.forward) }
   await wait(() => expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value).toBe(f.config.connectionId))
@@ -84,7 +84,7 @@ it('the unbound header remains usable during the first read and unrelated host o
 
 it('the header continues its created but unbound group with the original request through close, reopen and a failed binding read', async () => {
   await f.mount(); await wait(() => expect(trigger()?.dataset.channelState).toBe('unbound'))
-  await action('Connect a conversation')
+  await action('Connect a group')
   await wait(() => expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value).toBe(f.config.connectionId))
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="New group"]')!.click())
   await f.fill('Group name', 'Original header setup'); await f.button('Create group')
@@ -142,9 +142,13 @@ it('the actual Terminal header opens its exact original group and joining sectio
   expect(joining.closest('details:not([open])'), 'Joining actions are directly available').toBeNull()
   expect(joining.textContent).toContain('Create join link')
   await wait(() => expect(document.querySelector('[aria-label="Group connection status"]')).not.toBeNull())
-  expect(document.querySelector('.agent-connector-room-overview')?.textContent).toContain('Group ID · ' + binding.externalConversationId)
+  const overview = document.querySelector('.agent-connector-room-overview')!
+  expect(overview.querySelector('summary')?.textContent).toBe('Group identity')
+  expect(overview.querySelector('code')?.textContent).toBe(binding.externalConversationId)
   expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value).toBe(binding.connectionId)
-  expect(f.calls.filter(call => call.method === 'connection.binding.inspect').map(call => call.input)).toContainEqual({ bindingId: binding.bindingId, revision: binding.revision })
+  const inspection = f.calls.find(call => call.method === 'connection.binding.inspect' && (call.input as { bindingId?: string }).bindingId === binding.bindingId)!
+  expect(inspection.input).toEqual({ bindingId: binding.bindingId })
+  expect(inspection.result).toMatchObject({ binding: { bindingId: binding.bindingId, revision: binding.revision } })
   expect(f.platformCalls.filter(call => call.method === 'POST')).toHaveLength(writes)
   expect(f.calls.some(call => call.method === 'connection.room.link.create')).toBe(false)
   await f.button('Create join link')
@@ -153,7 +157,7 @@ it('the actual Terminal header opens its exact original group and joining sectio
   const originalLink = f.calls.find(call => call.method === 'connection.room.link.create')!
   expect(originalLink.input).toMatchObject({ connectionId: binding.connectionId, externalConversationId: 'oc_header' })
   await f.button('Close'); await menu()
-  expect(document.querySelector('.connector-header-menu')?.textContent).toContain('Connect a conversation')
+  expect(document.querySelector('.connector-header-menu')?.textContent).toContain('Connect a group')
   expect(document.querySelector('.connector-header-menu')?.textContent).not.toContain('Open channel setup')
   const originalGroup = document.querySelector<HTMLElement>('.connector-header-menu__item')!
   await act(async () => originalGroup.click())
