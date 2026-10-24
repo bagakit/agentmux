@@ -27,8 +27,8 @@ it('uses the single root pen leaf through actual current Workflow and native con
   const workingIcons = host.querySelectorAll('[data-icon-animation="work"] > svg.semantic-icon')
   expect(workingIcons).toHaveLength(2)
   for (const svg of workingIcons) {
-    expect(svg.querySelector('.semantic-icon-work-body use')!.getAttribute('href')).toBe(semanticIconHref('status.working'))
-    expect(svg.querySelector('.semantic-icon-work-pen use')!.getAttribute('href')).toBe('#agentmux-icon-status.working--work-pen')
+    expect(svg.querySelector('use')!.getAttribute('href')).toBe(semanticIconHref('status.working'))
+    expect(svg.parentElement!.querySelector('.semantic-icon-work-pen use')!.getAttribute('href')).toBe('#agentmux-icon-status.working--work-pen')
     expect(svg.querySelector('path')).toBeNull() // Geometry is retained once in the root, never duplicated per instance.
   }
   const pen = symbol().querySelector('[data-semantic-icon-part="writing-pen"]')!

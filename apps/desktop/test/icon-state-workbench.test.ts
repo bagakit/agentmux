@@ -52,8 +52,8 @@ it('projects every authored state design into the actual workbench, plays only t
     expect(document.getElementById('motion-content')!.children).toHaveLength(0)
   }
   document.querySelector<HTMLElement>('[data-motion-glyph="work-writing"]')!.click()
-  expect(document.querySelector('#authored-demo foreignObject[data-semantic-icon-work="status.working"]')).not.toBeNull()
-  expect(document.querySelectorAll('#authored-demo .semantic-icon-work-model use')).toHaveLength(2)
+  expect(document.querySelector('#authored-demo [data-semantic-work="status.working"]')).not.toBeNull()
+  expect(document.querySelectorAll('#authored-demo [data-semantic-work="status.working"] use')).toHaveLength(2)
   document.querySelector<HTMLElement>('[data-close="motion-dialog"]')!.click()
   document.querySelector<HTMLElement>('[data-motion-glyph="demonstration-edit"]')!.click()
   const first=document.querySelector('#authored-demo .semantic-icon-motion')

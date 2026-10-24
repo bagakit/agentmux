@@ -72,13 +72,16 @@ it('groups by original Host/Project identity with shared completed and working s
   const f = original()
   const row = f.catalog.agentPresentation![0]!
   f.catalog.agentPresentation = [{ ...row, stateMark: 'results', projectGroup: { key: 'local-project', projectId: 'project-local', hostId: 'local', name: 'Same name', spaceId: null } },
-    { ...row, agentSessionId: 'sid-second', name: 'Another original Agent', state: 'working', group: 'working', stateMark: 'working', projectGroup: { key: 'remote-project', projectId: 'project-remote', hostId: 'remote', name: 'Same name', spaceId: null } }]
+    { ...row, agentSessionId: 'sid-second', name: 'Another original Agent', state: 'working', group: 'working', stateMark: 'working', stateLabel: 'Activity not confirmed', projectGroup: { key: 'remote-project', projectId: 'project-remote', hostId: 'remote', name: 'Same name', spaceId: null } }]
   const element = await mount(<MobileSpatialNavigation client={f.client} connected home="focus" sessions={[]} openSession={f.open} />)
   const groups = element.querySelectorAll<HTMLElement>('.mobile-focus-project')
   expect(groups).toHaveLength(2)
   expect(groups[0]!.dataset.projectKey).toBe('local-project'); expect(groups[1]!.dataset.projectKey).toBe('remote-project')
   expect(groups[0]!.querySelector('[data-focus-state-icon="results"]')).not.toBeNull()
   expect(groups[1]!.querySelector('[data-focus-state-icon="working"]')).not.toBeNull()
+  expect(groups[1]!.querySelector('.mobile-session-state .semantic-icon')?.getAttribute('width')).toBe('12')
+  expect(groups[1]!.querySelector('.mobile-session-state > span[title]')?.getAttribute('title')).toBe('Activity not confirmed')
+  expect(groups[1]!.textContent).toContain('Activity not confirmed')
   await click(groups[1]!, 'Another original Agent')
   expect(f.open).toHaveBeenLastCalledWith('sid-second', expect.objectContaining({ name: 'Another original Agent' }))
 })

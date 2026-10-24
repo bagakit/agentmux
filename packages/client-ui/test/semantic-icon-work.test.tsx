@@ -42,11 +42,11 @@ it('moves only the declared pen onto an HTML bone and retains the original SVG c
   expect(svg.style.strokeWidth).toBe('2.4')
   expect(svg.style.strokeLinecap).toBe('butt')
   expect(svg.style.strokeLinejoin).toBe('bevel')
-  const bone = svg.querySelector('.semantic-icon-work-pen')!
+  const bone = host.querySelector('.semantic-icon-work-pen')!
   expect(bone.namespaceURI).toBe('http://www.w3.org/1999/xhtml')
   expect(bone.getAttribute('data-semantic-icon-part')).toBe('writing-pen')
-  expect(svg.querySelectorAll('use')).toHaveLength(2)
-  expect(svg.querySelector('.semantic-icon-work-body use')?.getAttribute('href')).toBe(semanticIconHref('status.working'))
+  expect(host.querySelectorAll('use')).toHaveLength(2)
+  expect(host.querySelector('.semantic-icon-work-body use')?.getAttribute('href')).toBe(semanticIconHref('status.working'))
   expect(bone.querySelector('use')?.getAttribute('href')).toBe('#agentmux-icon-status.working--work-pen')
   const originalPen = symbol('status.working')!.querySelector('[data-semantic-icon-part="writing-pen"]')!
   const projectedPen = symbol('status.working--work-pen')!.firstElementChild!
@@ -72,7 +72,7 @@ it('keeps detached native work references current through custom themes and rest
   expect(symbol('status.working')!.querySelector('path')!.getAttribute('d')).toBe('M3 12L21 12')
   expect(symbol('status.working--work-pen')).toBeNull()
   const rules = document.querySelector('[data-semantic-icon-sprite] > style')!.textContent!
-  expect(rules).not.toContain('[data-semantic-icon="status.working"]')
+  expect(rules).not.toContain('[data-semantic-work="status.working"]')
   native.remove()
   theme()
   document.body.append(native)
@@ -87,14 +87,14 @@ it('retains work articulation during presentation updates and changes its live s
   const host = mount()
   act(() => root!.render(<SemanticIcon name="status.working" animation="work" size={12}><title>Writing</title></SemanticIcon>))
   const svg = host.querySelector('.semantic-icon')!
-  const model = svg.querySelector('.semantic-icon-work-model')!
+  const bone = host.querySelector('.semantic-icon-work-pen')!
   act(() => root!.render(<SemanticIcon name="status.working" animation="work" size={20} color="gold"><title>Still writing</title></SemanticIcon>))
   expect(host.querySelector('.semantic-icon')).toBe(svg)
-  expect(svg.querySelector('.semantic-icon-work-model')).toBe(model)
+  expect(host.querySelector('.semantic-icon-work-pen')).toBe(bone)
   expect(svg.querySelector('title')?.textContent).toBe('Still writing')
   act(() => root!.render(<SemanticIcon name="action.close" animation="work" />))
   expect(host.querySelector('.semantic-icon')).toBe(svg)
-  expect(svg.querySelector('.semantic-icon-work-body use')?.getAttribute('href')).toBe(semanticIconHref('action.close'))
+  expect(host.querySelector('.semantic-icon-work-body use')?.getAttribute('href')).toBe(semanticIconHref('action.close'))
   expect(symbol('action.close--work-pen')).toBeNull()
   act(() => root!.render(<SemanticIcon name="status.working" animation="none" />))
   const still = host.querySelector('.semantic-icon')!
@@ -120,7 +120,7 @@ it('includes complete work geometry references in serialized React and native ma
   const native = createSemanticIconElement('status.working', document, { animation: 'work' })
   expect(host.querySelector('title')?.textContent).toBe('Current work')
   for (const element of [host, native]) {
-    expect(element.querySelectorAll('.semantic-icon-work-model')).toHaveLength(1)
+    expect(element.querySelectorAll('.semantic-icon-work-pen')).toHaveLength(1)
     expect(element.querySelectorAll('use')).toHaveLength(2)
     expect(element.querySelector('.semantic-icon-work-body use')?.getAttribute('href')).toBe(semanticIconHref('status.working'))
     expect(element.querySelector('.semantic-icon-work-pen use')?.getAttribute('href')).toBe('#agentmux-icon-status.working--work-pen')
