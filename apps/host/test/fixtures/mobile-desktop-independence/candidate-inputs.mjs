@@ -41,7 +41,10 @@ export async function bindCandidate(repository, output) {
     const bytes = await readFile(join(mobileRoot, file.path))
     assert.equal(bytes.length, file.bytes); assert.equal(digest(bytes), file.digest)
   }
-  assert.equal(await freshness.staleDistComplaint(join(root, 'apps/desktop'), 'out/renderer/release.json'), null,
+  const newestRendererSource = await freshness.extremeModification(join(root, 'apps/desktop/src/renderer'), (a, b) => a > b)
+  const oldestRendererArtifact = await freshness.extremeModification(join(root, 'apps/desktop/out/renderer'), (a, b) => a < b)
+  assert.ok(newestRendererSource && oldestRendererArtifact, 'The original Desktop Renderer source and artifacts must both be nonempty')
+  assert.equal(freshness.distIsStale(newestRendererSource, oldestRendererArtifact), false,
     'The current Desktop Renderer source must precede the consumed release')
   const renderer = JSON.parse(await readFile(join(root, 'apps/desktop/out/renderer/release.json'), 'utf8'))
   const { sourceUpdateIdentity } = await import(pathToFileURL(join(root, 'apps/desktop/scripts/update-identity.mjs')).href)
