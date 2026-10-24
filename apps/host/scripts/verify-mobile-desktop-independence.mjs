@@ -291,7 +291,19 @@ try {
   sameOriginalInput(await fixture.sdk.inspectAgentInput({ key: originalUnknown.key }), originalUnknown.input)
   phase('explicit-mobile-level-b-same-session-and-retained-native-context', { recovery, resumed, restoredContextDigest: digest(nativeContext), originalInput: originalUnknown.key })
   receipt.passed = true
-} catch (error) { failed = error; receipt.error = { name: error.name, message: error.message, stack: error.stack } }
+} catch (error) {
+  failed = error; receipt.error = { name: error.name, message: error.message, stack: error.stack }
+  if (fixture) receipt.failureContext = {
+    agentSessionId: fixture.original.agentSessionId, run: fixture.original.run,
+    nativeHandle: fixture.original.nativeHandle, workspacePath: fixture.original.workspacePath,
+    desktopSeed: Object.fromEntries(await Promise.all(['seed-desktop.stderr.txt', 'ready-seed.json', 'seed-report.json'].map(async name => {
+      try {
+        const text = await readFile(join(fixture.root, name), 'utf8')
+        return [name, { status: text.length > 16384 ? 'truncated' : 'complete', chars: text.length, tail: text.slice(-16384) }]
+      } catch (observation) { return [name, { status: 'unavailable', code: observation.code, message: observation.message }] }
+    })))
+  }
+}
 finally {
   for (const [name, close] of [['browser', () => browser?.close()], ['fixture', () => fixture?.close()], ['candidate', () => candidate?.assertUnchanged()]]) {
     try { await close(); receipt.cleanup[name] = 'confirmed' }
