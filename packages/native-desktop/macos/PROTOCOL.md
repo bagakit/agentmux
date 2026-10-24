@@ -50,19 +50,21 @@ Capture returns `{state:"captured",screenshot:{data:"<base64-PNG>",format:"png",
 
 ## Build profiles and concurrent requests
 
-Production validates the exact running peer with Security.framework. `SecCodeCheckValidity` must satisfy signed identifier `dev.agentmux.desktop` and the same persistent leaf certificate as the native layer itself, in addition to OS PID, UID and the token. A caller-selected PID/token, process command line or unvalidated Bundle ID does not grant authority.
+Production validates the exact running peer with Security.framework. The connected socket's kernel `LOCAL_PEERTOKEN` is passed as `kSecGuestAttributeAudit` to `SecCodeCopyGuestWithAttributes`, binding lookup to its original process generation rather than a reusable PID. `SecCodeCheckValidity` must satisfy signed identifier `dev.agentmux.desktop` and the same persistent leaf certificate as the native layer itself, in addition to OS PID, UID and the token. A missing audit token or failed guest lookup rejects that connection in every build profile; it never falls back to a PID lookup. A caller-selected PID/token, process command line or unvalidated Bundle ID does not grant authority.
 
 A release `AgentMux Native.app` always requires this validated Desktop signer. It contains no CLI or environment option that disables signing checks. Only a compiled `DEBUG` bare executable outside an `.app` may use the development/test profile after the OS reports it unsigned (`errSecCSUnsigned`) or ad-hoc with no certificates. Unknown Security.framework results are rejection, never an unsigned inference; a real signing certificate always selects the production check, including in DEBUG. Refusal affects the exact native connection and retains Main, Core, Agent Sessions and Runs.
 
 One connection accepts concurrent requests. Responses may arrive out of order and remain correlated by original numeric id, instanceId and operationId. Socket writes serialize complete response frames. Reading is incremental in 64 KiB chunks, with the same 26 MiB single-frame limit as Node; truncated/invalid frames never dispatch operations. Socket EOF is observed while a person selects a screen rectangle.
 
-AX snapshots and actions share their necessary state mutex. Selection uses one native surface with the normal AppKit event loop; another selector reports `capture_busy`. Clipboard, permissions, application discovery and display discovery remain callable during selection. Clipboard operations and temporary paste share only the pasteboard owner. A paste restores the prior pasteboard only when its own changeCount is still current, preserving external copies made in the meantime.
+AX snapshots and actions share their necessary state mutex. Selection uses one native surface with the normal AppKit event loop; another selector reports `capture_busy`. Clipboard, permissions, application discovery and display discovery remain callable during selection. Clipboard operations and temporary paste share only the pasteboard owner. A clipboard-based paste retains the requested text because posted CGEvents do not acknowledge when the target consumed it; it does not restore old content based on a guessed delay.
 
 Per-image allocation/decoding uses the host bounds: 16,384 pixels per dimension, 32 Mi pixels and 18 MiB PNG bytes (24 MiB base64). Checks precede numeric conversion, pixel allocation and decompression. These limits protect one image and do not constrain cumulative captures or Agent state. A result outside the frame returns correlated `response_too_large`; it does not authorize replay.
 
 ## Action receipts and verification fields
 
 `getAppState.noScreenshot` defaults to `true`; only explicit `false` attempts window pixels. Queries do not open permission UI. `snapshot.elements` exposes `{index,actions:string[],frame:{x,y,width,height}|null}`; frames are window relative and action names are the unmodified AX machine names. `performSecondaryAction.action` must equal an original name exactly. Readable labels in treeText do not grant or select actions.
+
+The public Core snapshot query is AX only. Raw Node/native `getAppState` retains the explicit pixel option, but `noScreenshot:false` is classified as a capture mutation and requires its original `operationId` plus exact `expectedInstanceId`, exactly as `captureScreenshot` does. Missing/true remains an AX observation; a malformed value is refused rather than inferred.
 
 `action` contains `path` (`accessibility`, `synthetic` or `clipboard`), `actionName` (native name or null), `fallbackReason` (string or null), `targetWindowId`, and optional `verification`:
 
@@ -71,7 +73,7 @@ Per-image allocation/decoding uses the host bounds: 16,384 pixels per dimension,
 - `{state:"accepted",completedPages,requestedPages}` records AX success for every requested scroll, without claiming rendered content.
 - `{state:"failed",reason:"action_unsupported",completedPages,requestedPages}` preserves already accepted pages before an unsupported reply.
 - `{state:"unverified",reason:"native_action_outcome_unknown",completedPages,requestedPages,error:{code,message}}` preserves an unconfirmed later scroll.
-- `{state:"unverified",reason:"clipboard_paste",clipboardRestoration:"restored"|"preserved_external_change"|"failed"}` records a posted paste and independent pasteboard cleanup.
+- `{state:"unverified",reason:"clipboard_paste",clipboardRestoration:"retained_for_paste",clipboardChangeCount}` records a confirmed clipboard write and a posted, unconfirmed paste. If later key posting is refused/unconfirmed, reason is "clipboard_paste_post_unconfirmed" and error preserves the posting failure while retaining the write receipt. If the pasteboard did not confirm its write, reason is "clipboard_write_unconfirmed" with clipboardChangeCount and error, and no shortcut is posted.
 
 Only an explicit AX unsupported/not-implemented reply permits another input path. An AX write accepted with unconfirmed readback returns unverified. A cannot-complete/error returns `action_outcome_unknown` and never automatically attempts a second write. Keyboard sequences recheck original process launch identity and exact window focus for every event, target the original PID and stop after recipient changes. Cleanup may release only already pressed keys in the original live process. Unknown input is never retried.
 
