@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 import type { ConnectionApiJson } from '@agentmux/core/connections'
 
-const protectedFields = new Set(['token', 'accesstoken', 'refreshtoken', 'tenantaccesstoken', 'useraccesstoken', 'apptoken', 'bottoken', 'webhooktoken', 'verificationtoken', 'appsecret', 'clientsecret', 'secret', 'authorization', 'proxyauthorization', 'cookie', 'setcookie', 'password', 'privatekey', 'sessionkey', 'encryptkey', 'signingsecret', 'appticket'])
+const protectedFields = new Set(['token', 'accesstoken', 'refreshtoken', 'tenantaccesstoken', 'useraccesstoken', 'apptoken', 'bottoken', 'webhooktoken', 'verificationtoken', 'appsecret', 'clientsecret', 'secret', 'authorization', 'proxyauthorization', 'cookie', 'setcookie', 'password', 'privatekey', 'sessionkey', 'encryptkey', 'encryptionkey', 'signingsecret', 'appticket'])
 const secretField = (key: string) => protectedFields.has(key.replace(/[-_ ]/gu, '').toLowerCase())
 /** Values live only for this original admitted request; neither registration nor raw outcomes are persisted. */
 export class ConnectionApiRedaction {
