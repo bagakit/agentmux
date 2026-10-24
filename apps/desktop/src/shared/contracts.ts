@@ -361,6 +361,8 @@ export type AgentAvatarAppearance = { tint?: string; badge?: AgentAvatarBadge }
 export type AgentExecutorConfig = CoreAgentExecutorConfig & { avatar?: AgentAvatarAppearance }
 
 export type AppearanceConfig = {
+  /** App header presentation only; absent platform entries are shown. */
+  channelHeaderVisibility?: Record<string, boolean>
   /** Client theme identity; omitted retains the built-in default. */
   themeId?: string
   /** Original authored records are retained even when one theme is unsupported. */

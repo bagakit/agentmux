@@ -68,6 +68,8 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'toolkit.mobileConnection.statusBar') return value ?? DEFAULT_MOBILE_CONNECTION_PREFERENCES.statusBar
   if (path === 'toolkit.tools') return value ?? []
   if (path === 'copyPathsAsAbsolute' || path === 'browser.agentAutomation') return value ?? false
+  if (path === 'appearance.channelHeaderVisibility') return value ?? {}
+  if (path.startsWith('appearance.channelHeaderVisibility.')) return value ?? true
   if (path === 'appearance.customThemes') return value ?? {}
   if (path === 'appearance.themeId') return value ?? DEFAULT_THEME_ID
   if (path === 'appearance.appAppearance') return value ?? APP_APPEARANCE_DEFAULT
@@ -90,7 +92,7 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
     // Optional domains still merge authored fields/identities after a concurrent first edit.
-    if (path === 'a2a' || path === 'notes' || path === 'goals' || path === 'continuity' || path === 'automation' || path === 'browser.startPage' || path === 'browser.agentControl') {
+    if (path === 'a2a' || path === 'notes' || path === 'goals' || path === 'continuity' || path === 'automation' || path === 'browser.startPage' || path === 'browser.agentControl' || path === 'appearance.channelHeaderVisibility') {
       // Compare effective defaults without persisting fields the user did not edit.
       actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
     } else if (path === 'messageToolCompletion' || path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {

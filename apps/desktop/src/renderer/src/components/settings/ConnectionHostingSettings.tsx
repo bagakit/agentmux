@@ -8,6 +8,7 @@ import { api } from '../../lib/api'
 import { selectConnectorServiceObservation } from '../../lib/connector-service-observation'
 import { connectionSettingsPort } from '../../lib/connection-settings-port'
 import { botTaskSelectionKey, readBotTaskLocator, restoredManagementTask } from '../../lib/bot-task-selection'
+import { ChannelHeaderControl } from './ChannelHeaderControl'
 import { ConnectorServiceControl } from './ConnectorServiceControl'
 import { ExternalConnectionsSettings } from './ExternalConnectionsSettings'
 import '../../styles/channel-settings.css'
@@ -48,6 +49,7 @@ export function ConnectionHostingSettings(props: { active: boolean; platform: { 
   const key = JSON.stringify([channel, target]), connections = useMemo(() => connectionSettingsPort(target ?? null), [key])
   if (!props.active) return null
   return <div className="settings-pane-stack channel-settings">
+    <ChannelHeaderControl key={props.platform.adapterId} platform={props.platform} />
     <div className="channel-environment">
     <section className="channel-hosting" data-connection-hosting>
       <label className="channel-hosting__selection"><span><HostIcon size={15} />Bot hosting</span>
