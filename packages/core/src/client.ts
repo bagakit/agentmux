@@ -184,6 +184,7 @@ import { normalizeSessionHistoryPage, SESSION_HISTORY_TIMEOUT_MS } from './sessi
 import { AgentMuxCreationAuthority, agentCreationIntentDigest } from './agent-creation-authority.js'
 import type { AgentMuxCreationAdmission, AgentMuxCreationOrigin } from './agent-creation-admission.js'
 import type { AgentMuxHostExecutorOwner } from './executor-owner.js'
+import type { AgentExecutorConfig } from './types.js'
 import type { AgentMuxHostExecutorConfigureInput } from './executor-contract.js'
 
 /** Zero means no authoritative observation has been recorded. */
@@ -422,6 +423,8 @@ export type AgentMuxClientOptions = {
   diagnosticOwner?: AgentStartupDiagnosticOwner
   externalConversationAuthority?: AgentExternalConversationAuthorityPort
   hostExecutorOwner?: AgentMuxHostExecutorOwner
+  /** Read original local Session configuration on its semantic Host; never overrides target-owned or explicit SDK execution. */
+  sessionExecutorConfiguration?(executorId: string): Promise<AgentExecutorConfig>
   creationAuthority?: AgentMuxCreationAuthority
   /** Exact local public owner endpoint inherited by managed CLI callers. */
   controlSocketPath?: string
@@ -578,6 +581,7 @@ type RawInputCall = { signal: AbortSignal; check(): void; author?: () => void | 
 
 export class AgentMuxClient {
   private readonly hostExecutorOwner: AgentMuxHostExecutorOwner | undefined
+  private readonly sessionExecutorConfiguration: AgentMuxClientOptions['sessionExecutorConfiguration']
   private readonly creationAuthority: AgentMuxCreationAuthority | undefined
 
   private requireCreationAuthority(): AgentMuxCreationAuthority {
@@ -859,6 +863,7 @@ export class AgentMuxClient {
   constructor(options: AgentMuxClientOptions = {}) {
     this.externalConversationAuthority = options.externalConversationAuthority
     this.hostExecutorOwner = options.hostExecutorOwner
+    this.sessionExecutorConfiguration = options.sessionExecutorConfiguration
     this.creationAuthority = options.creationAuthority
     this.controlSocketPath = options.controlSocketPath ?? defaultAgentMuxControlSocketPath()
     if (!isAbsolute(this.controlSocketPath) || /[\0\r\n]/u.test(this.controlSocketPath)) {
@@ -1036,7 +1041,8 @@ export class AgentMuxClient {
         }
       },
       providers: { providers: this.providers, probeAgent: (...args) => this.probeAgent(...args), providerLaunch: (...args) => this.providerLaunch(...args) },
-      executors: { hostExecutorOwner: this.hostExecutorOwner, sessionExecutorOptions: (...args) => this.sessionExecutorOptions(...args) },
+      executors: { hostExecutorOwner: this.hostExecutorOwner, sessionExecutorConfiguration: this.sessionExecutorConfiguration,
+        sessionExecutorOptions: (...args) => this.sessionExecutorOptions(...args) },
       hooks: {
         hookServer: this.hookServer,
         hasActiveBinding: runId => this.hookBindings.has(runId),
@@ -2959,11 +2965,16 @@ export class AgentMuxClient {
     // Executor registry. Host-owned creation authority survives retirement in
     // history metadata and still resolves its original private configuration.
     if (!targetOwned && (explicit || historyAgentSessionId !== undefined)) return input
-    if (!this.hostExecutorOwner) {
-      if (targetOwned) throw new AgentMuxError('The target Executor owner is unavailable. The original Session and Run are retained; restore its Host configuration.', 'CONTROL_UNAVAILABLE')
-      return input
+    let config: AgentExecutorConfig
+    if (!targetOwned && this.sessionExecutorConfiguration) {
+      config = await this.sessionExecutorConfiguration(session.executorId)
+    } else {
+      if (!this.hostExecutorOwner) {
+        if (targetOwned) throw new AgentMuxError('The target Executor owner is unavailable. The original Session and Run are retained; restore its Host configuration.', 'CONTROL_UNAVAILABLE')
+        return input
+      }
+      config = (await this.hostExecutorOwner.resolve(session.executorId)).config
     }
-    const { config } = await this.hostExecutorOwner.resolve(session.executorId)
     if (config.providerId !== session.providerId) throw new AgentMuxError('The target Executor Provider differs from the retained Session. Its original native identity and Run are retained.', 'EXECUTOR_PROVIDER_CONFLICT')
     return { ...input, commandOverride: config.command, args: config.args, env: config.env }
   }

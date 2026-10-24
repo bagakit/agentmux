@@ -6,6 +6,7 @@ import { createHostSpatialAgentControl } from './spatial-agent-control.js'
 import { createHostGoals } from './goals.js'
 import { projectWorkspaces } from './workspace-projects.js'
 import { readPresentationConfiguration } from './presentation-configuration.js'
+import { readConfiguredExecutor } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { createHostSnapshotObservation } from './snapshot-observation.js'
 import { createHostSpatialPresentation } from './spatial-presentation.js'
@@ -231,6 +232,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     // is never displaced or adopted by speculative workflow probes.
     const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
     runtime = await startHeadlessAgentMux({ store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
+      ...(configurationPath ? { sessionExecutorConfiguration: (executorId: string) => readConfiguredExecutor(configurationPath, executorId) } : {}),
       ...(options.connections?.clients ? { coreClients: options.connections.clients } : {}),
       ...(options.providers ? { providers: options.providers } : {}), service,
       forwardingPeer: { authoritySocketPath: desktopPath, bindAuthority: async principal => principal.kind === 'device'

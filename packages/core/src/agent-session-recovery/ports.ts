@@ -11,7 +11,7 @@ import { CtxmuxRunAdapter, type CtxmuxAdapterRun, type CtxmuxAdapterStopOperatio
 import { type AgentMuxAgentSessionStore } from '../agent-session-store.js'
 import { AgentMuxAgentSessionRegistry } from '../agent-session-registry.js'
 import { AgentHookServer, type AgentHookBinding } from '../hook-server.js'
-import type { AgentCapabilitySnapshot, AgentExecutorId, AgentProviderId, AgentMuxAgentSession, AgentPromptMessageContent, AgentMuxRun, AgentMuxRunRef, AgentMuxStoredAgentSession, AgentSessionHistoryPageOptions } from '../types.js'
+import type { AgentCapabilitySnapshot, AgentExecutorConfig, AgentExecutorId, AgentProviderId, AgentMuxAgentSession, AgentPromptMessageContent, AgentMuxRun, AgentMuxRunRef, AgentMuxStoredAgentSession, AgentSessionHistoryPageOptions } from '../types.js'
 import type { AgentMuxHostExecutorOwner } from '../executor-owner.js'
 
 /** Explicit original Core resources; no client or recovery-decision callback crosses this port. */
@@ -46,6 +46,7 @@ export type AgentSessionRecoveryPorts = {
   };
   executors: {
     readonly hostExecutorOwner: AgentMuxHostExecutorOwner | undefined;
+    readonly sessionExecutorConfiguration: ((executorId: string) => Promise<AgentExecutorConfig>) | undefined;
     sessionExecutorOptions<T extends Pick<AgentSessionHistoryPageOptions, 'commandOverride' | 'args' | 'env'>>(
     session: Pick<AgentMuxStoredAgentSession, 'executorId' | 'providerId' | 'creation'>, input: T, historyAgentSessionId?: string
   ): Promise<T>;
