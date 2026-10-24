@@ -63,7 +63,7 @@ import { parseAgentNativeSessionConfirmation } from './agent-native-session-conf
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { parseNativeHistoryParams, parseNativeHistoryResult, parseNativeHistoryResourceParams, parseNativeHistoryResourceResult } from './public-rpc-native-history.js'
 import { parseNameChangeRecord } from './display-label.js'
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, parseAgentMuxStorageFailure } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
 import { parseSessionHistoryResourceResult, type AgentSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseHostedBootstrap } from './hosted-value.js'
@@ -930,8 +930,9 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         count(memory.firstAvailableByte); count(memory.latestOutputByte)
         if ((memory.firstAvailableByte as number) > (memory.latestOutputByte as number)) fail()
         if (storage.persistence !== null) {
-          const owner = record(storage.persistence, ['firstFailure', 'actorStopped', 'queuedAppendCommands', 'offeredByte', 'confirmedByte'])
+          const owner = record(storage.persistence, ['firstFailure', 'storageFailure', 'actorStopped', 'queuedAppendCommands', 'offeredByte', 'confirmedByte'])
           if (owner.firstFailure !== null) text(owner.firstFailure)
+          if (owner.storageFailure !== null) parseAgentMuxStorageFailure(owner.storageFailure)
           bool(owner.actorStopped)
           for (const key of ['queuedAppendCommands', 'offeredByte', 'confirmedByte']) count(owner[key])
         }
