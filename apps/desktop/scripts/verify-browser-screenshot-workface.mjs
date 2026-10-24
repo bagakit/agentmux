@@ -31,7 +31,7 @@ const screenshotDirectories = ['apps/desktop/src/renderer/src/components/browser
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const sourceInputs = [
   'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx',
-  'apps/desktop/src/renderer/src/components/image-annotation/canvas-render.ts', 'apps/desktop/src/renderer/src/components/browser-screenshot/compose.ts',
+  'apps/desktop/src/renderer/src/components/image-annotation/canvas-render.ts', 'apps/desktop/src/renderer/src/components/image-annotation/compose.ts',
   'apps/desktop/src/renderer/src/components/image-annotation/drawing-model.ts', 'apps/desktop/src/renderer/src/components/image-annotation/drawing-renderer.ts',
   'apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts', 'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts',
   'apps/desktop/src/main/native-overlay-surfaces.ts', 'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/renderer/src/styles/browser.css',

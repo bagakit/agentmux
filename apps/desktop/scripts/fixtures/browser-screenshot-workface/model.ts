@@ -1,4 +1,4 @@
-import { composeScreenshot } from '../../../src/renderer/src/components/browser-screenshot/compose'
+import { composeScreenshot } from '../../../src/renderer/src/components/image-annotation/compose'
 import { drawScreenshotShapes } from '../../../src/renderer/src/components/image-annotation/drawing-renderer'
 import { commitShape, createScreenshotDocument, hitTestShape, moveShape, removeShapes, replaceShape, screenshotOutputShapes, setCrop, undoShape, type ScreenshotShape } from '../../../src/renderer/src/components/image-annotation/drawing-model'
 import { renderCommittedLayer, renderScreenshotScene } from '../../../src/renderer/src/components/image-annotation/canvas-render'

@@ -9,12 +9,13 @@ import {
   composeScreenshot,
   dataUrlByteLength,
   screenshotCanvasSize
-} from '../src/renderer/src/components/browser-screenshot/compose.js'
+} from '../src/renderer/src/components/image-annotation/compose.js'
 
 let encodedPng = 'data:image/png;base64,AQID'
 
 function fakeCanvas() {
   return {
+    ownerDocument: globalThis.document,
     width: 0,
     height: 0,
     getContext: () => ({ drawImage: vi.fn() }),
