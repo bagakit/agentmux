@@ -12,6 +12,12 @@ dispatch threads. Use message ls --direction incoming|outgoing for bounded origi
 and body previews; message read --message-id ID retrieves one original body, without
 creating a delivery batch or advancing ack. Keep nextBeforeSequence with the same Host,
 participant and direction. message read --operation-id retains original intake lookup.
+Add --notification-id ID to read that exact notification's metadata for the original MID
+and recipient. An unassociated result keeps the original body and never substitutes the
+latest notice. Notification mode is separate from the original message execution choice.
+preparedAt and resultRecordedAt are original journal preparation and outcome-recording
+times; null means that historical time was not recorded. submitted confirms notification
+submission, never model adoption. queued delivery.at is not an Inbox-arrival timestamp.
 message events reads the same original message/delivery/notification/dispatch changes from either side,
 without opening bodies or consuming. Narrow by an original MID or broadcast operation when needed.
 Use --latest for a bounded recent window. Preserve its exact scope, journal incarnation and
