@@ -173,13 +173,14 @@ describe('original Host file upload owner and public transport', () => {
   it('rechecks the original device after target reads and rejects missing or revoked authority without changing the Agent', async () => {
     const input = upload('revoked-during-target-read'), principal = { kind: 'device' as const, id: 'original-phone' }
     let current = true
-    const readAgentSession = vi.fn(async () => { current = false; return session })
+    const authorityOrder: string[] = []
+    const readAgentSession = vi.fn(async () => { authorityOrder.push('original-session-read'); current = false; return session })
     const service = new AgentMuxRpcService({ fileUploads: owner,
       coreClients: () => [{ hostId: 'local', client: { ...port, readAgentSession } as unknown as AgentMuxRpcCorePort }] })
-    const assertCurrent = vi.fn(() => { if (!current) throw new AgentMuxError('Original device was revoked', 'CONTROL_PERMISSION_DENIED') })
+    const assertCurrent = vi.fn(() => { authorityOrder.push(current ? 'current' : 'revoked'); if (!current) throw new AgentMuxError('Original device was revoked', 'CONTROL_PERMISSION_DENIED') })
     try {
       await expect(service.call('file.upload', input, { principal, assertCurrent })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
-      expect(readAgentSession).toHaveBeenCalledOnce(); expect(assertCurrent).toHaveBeenCalledTimes(2)
+      expect(readAgentSession).toHaveBeenCalledOnce(); expect(authorityOrder.slice(-2)).toEqual(['original-session-read', 'revoked'])
       expect(await owner.inspect(identity(input))).toMatchObject({ status: 'missing' })
       await expect(service.call('file.upload.inspect', identity(input), { principal, assertCurrent })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
       await expect(service.call('file.upload', input, { principal })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
