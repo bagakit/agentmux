@@ -2,6 +2,7 @@ import type { CollaborationAgent, CollaborationArea } from './agent-collaboratio
 import type { CollaborationLayoutBox } from './collaboration-layout-engine'
 import { createCollaborationHierarchy } from './collaboration-hierarchy'
 import { collaborationAgentNode, collaborationAreaNode } from './collaboration-presentation'
+import { DEFAULT_FOCUS_MAP_PREFERENCES, type FocusMapPreferences } from '../../../shared/focus-map-preferences'
 
 export const COLLABORATION_OVERVIEW_ZOOM = .45
 export const COLLABORATION_READING_ZOOM = .7
@@ -13,13 +14,15 @@ export function collaborationCameraTarget(
   geometry: ReadonlyMap<string, CollaborationLayoutBox>, areas: readonly CollaborationArea[],
   agents: ReadonlyMap<string, CollaborationAgent>, viewport: { width: number; height: number },
   locate?: CollaborationLocate,
+  preferences: FocusMapPreferences = DEFAULT_FOCUS_MAP_PREFERENCES,
 ) {
+  const readable = Math.max(COLLABORATION_READING_ZOOM, preferences.levels.find(level => level.information === 'summary')?.to ?? preferences.levels.find(level => level.form !== 'point')?.to ?? COLLABORATION_READING_ZOOM)
   const occurrence = (area: CollaborationArea, id: string) => geometry.get(collaborationAgentNode(area.id, id))
   if (locate?.agentId) {
     for (const area of areas) {
       if (!area.members.includes(locate.agentId)) continue
       const box = occurrence(area, locate.agentId)
-      if (box) return { x: box.x + box.width / 2, y: box.y + box.height / 2, zoom: 1, anchor: box.id }
+      if (box) return { x: box.x + box.width / 2, y: box.y + box.height / 2, zoom: Math.max(1, readable), anchor: box.id }
     }
     return null
   }
@@ -40,7 +43,7 @@ export function collaborationCameraTarget(
   if (!area) return null
   const box = geometry.get(collaborationAreaNode(area.id))!
   const zoom = Math.min(.95, (viewport.width - 96) / box.width, (viewport.height - 112) / box.height)
-  if (zoom >= COLLABORATION_READING_ZOOM || !members(area).length || box.folded) {
+  if (zoom >= readable || !members(area).length || box.folded) {
     return { x: box.x + box.width / 2, y: box.y + box.height / 2, zoom: Math.max(COLLABORATION_READING_ZOOM, zoom) }
   }
   // A large region's geometric center may be empty. Center a real readable occurrence instead.
@@ -54,5 +57,5 @@ export function collaborationCameraTarget(
   }))
   const foldedSummary = descendants.map(owner => geometry.get(collaborationAreaNode(owner.id))).find(box => box?.folded)
   const anchor = (occurrences.find(({ id }) => agents.get(id)?.tier === 'active') ?? occurrences[0])?.box ?? foldedSummary
-  return anchor ? { x: anchor.x + anchor.width / 2, y: anchor.y + anchor.height / 2, zoom: .85, anchor: anchor.id } : null
+  return anchor ? { x: anchor.x + anchor.width / 2, y: anchor.y + anchor.height / 2, zoom: Math.max(.85, readable), anchor: anchor.id } : null
 }

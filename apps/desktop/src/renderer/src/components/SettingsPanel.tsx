@@ -87,7 +87,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     restoreReading.current = null
     setQuery('')
     setShowResults(false)
-    setDestination(null)
+    setDestination(navigationRequest?.field ? { section: initialSection, target: navigationRequest.field, route } : null)
     setTargetIssue('')
     setActive(initialSection)
   }, [route, initialSection])
@@ -109,7 +109,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   }, [active, searching, visible, visited])
 
   useLayoutEffect(() => {
-    if (!visible || showResults || !searching || !destination?.target || destination.route !== route || destination.section !== active) return
+    if (!visible || showResults || !destination?.target || destination.route !== route || destination.section !== active) return
     const pane = originalScroll(active)
     if (!pane) return // The visited editor mounts on the following render.
     const target = Array.from(pane.querySelectorAll<HTMLElement>('[data-settings-field]')).find(node => node.dataset.settingsField === destination.target)

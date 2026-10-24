@@ -112,7 +112,7 @@ function DesktopApp() {
     setSettingsRoute(request)
     setSettingsOpen(true)
   }, [])
-  const openSettings = useCallback((section: SettingsPageId, executorId?: string): void => navigateSettings({ section, executorId }), [navigateSettings])
+  const openSettings = useCallback((section: SettingsPageId, executorId?: string, field?: string): void => navigateSettings({ section, executorId, field }), [navigateSettings])
   const closeSettings = useCallback((): void => setSettingsOpen(false), [])
   const openToolkit = useCallback((toolId: string): void => navigateSettings({ section: 'toolkit', toolId }), [navigateSettings])
   const openHostSettings = useCallback((hostId: string): void => navigateSettings({ section: 'hosts', hostId }), [navigateSettings])

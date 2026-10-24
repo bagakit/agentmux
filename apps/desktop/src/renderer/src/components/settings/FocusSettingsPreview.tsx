@@ -12,8 +12,9 @@ import { focusCardTrackHeight } from '../../lib/focus-lane-layout'
 import type { FocusContext } from '../../lib/focus-context'
 import { useAgentPreviewIntent } from '../../lib/use-agent-preview-intent'
 import { useWorkbenchDocument } from '../../lib/workbench-document'
+import { FocusMapPreview } from './FocusMapSettings'
 
-export type FocusPreviewScene = 'board' | 'reading' | 'links'
+export type FocusPreviewScene = 'board' | 'reading' | 'links' | 'map'
 const hour = 3_600_000
 const exampleReply = 'The layout now keeps related work together. Long replies retain a readable excerpt, while the complete conversation stays available in the Agent preview. The original task and its sources remain intact.'
 const inputs = ['Keep the original task and its sources.', 'Make the important information easier to scan.', 'Keep related work together.', 'Use a compact, readable layout.', 'Preserve the original conversation.', 'Show the current state clearly.', 'Let me inspect the full reply.', 'Keep the Agent beside its resources.', 'Make the controls work with the keyboard.', 'Use the shared components throughout.']
@@ -32,7 +33,7 @@ function exampleContexts(now: number): FocusContext[] {
 }
 
 /** Static example facts and local interaction only; original product leaves own the drawings. */
-export function FocusSettingsPreview({ values, active, scene, onScene, previewRef, returnAction }: { values: FocusSettingsValues; active: boolean; scene: FocusPreviewScene; onScene(value: FocusPreviewScene): void; previewRef?: Ref<HTMLElement>; returnAction?: ReactNode }) {
+export function FocusSettingsPreview({ values, active, scene, onScene, previewRef, returnAction, mapPreviewLastValid = false }: { values: FocusSettingsValues; active: boolean; scene: FocusPreviewScene; onScene(value: FocusPreviewScene): void; previewRef?: Ref<HTMLElement>; returnAction?: ReactNode; mapPreviewLastValid?: boolean }) {
   const document = useWorkbenchDocument(), [documentVisible, setDocumentVisible] = useState(() => document.visibilityState !== 'hidden')
   useEffect(() => {
     if (!active) return
@@ -74,8 +75,9 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
   }
   return <aside ref={previewRef} tabIndex={-1} className="focus-settings-preview" aria-label="Focus settings live example" inert={!enabled} data-active={enabled} style={style}>
     <header><span><SemanticIcon name="navigation.focus" size={15} /><strong>Live preview</strong></span><div className="settings-preview-header-actions"><small>Example workspace</small>{returnAction}</div></header>
-    <nav aria-label="Focus example view">{([['board', 'Board'], ['reading', 'Agent preview'], ['links', 'Links']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={scene === key} onClick={() => onScene(key)}>{label}</button>)}</nav>
+    <nav aria-label="Focus example view">{([['board', 'Board'], ['reading', 'Agent preview'], ['links', 'Links'], ['map', 'Map']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={scene === key} onClick={() => onScene(key)}>{label}</button>)}</nav>
     <div className="focus-settings-preview__canvas" data-scene={scene}>
+      {scene === 'map' ? <FocusMapPreview value={values.map} contexts={contexts} lastValid={mapPreviewLastValid} /> : null}
       {scene === 'board' ? <div className="focus-settings-preview__board">
         <div className="focus-settings-preview__caption"><span>Project contexts</span><span>Recent · {values.recentActivityHours === 168 ? '1 week' : `${values.recentActivityHours}h`}</span></div>
         {lanes.map(lane => { const context = contexts.find(item => item.id === lane.contextIds[0])!; return <section className="focus-settings-preview__lane" key={lane.id} data-example-project={lane.name}>
