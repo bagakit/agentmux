@@ -107,41 +107,48 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
   const descriptors = useMemo(() => new Map([...resolved.sources, ...catalog.history]), [resolved.sources, catalog.history])
   const contextDemand = useMemo(() => new Set([...wanted].map(id => resolved.aliases.get(id) ?? id)), [wanted, resolved.aliases])
   const contextCache = useRef(new Map<string, { session: Facts['sessions'][number] | AgentSessionHistoryDescriptor; name: string | undefined; workspace: ReturnType<typeof workspaceForSession>; topicId: ReturnType<typeof topicIdForSession>; context: FocusContext }>())
-  const previousContexts = useRef<FocusContext[]>([])
-  const contexts = useMemo(() => {
+  const previousHeldContexts = useRef<FocusContext[]>([]), previousContexts = useRef<FocusContext[]>([])
+  const heldContexts = useMemo(() => {
     const topics = scratchTopicsForConfig(facts.config, facts.scratchTopicSnapshots)
-    const rows = [...contextDemand].flatMap(id => {
+    // Retained marks still show live metadata after leaving body demand. Refresh
+    // only demanded or previously held identities, without consulting timelines.
+    const refresh = new Set([...contextDemand, ...contextCache.current.keys()])
+    for (const id of refresh) {
       const session = catalog.sessions.get(id)
       if (!session || session.kind !== 'agent') {
         const source = descriptors.get(id)
-        if (!source) return []
-        const key = JSON.stringify([source.hostId, source.agentSessionId]), old = contextCache.current.get(key), name = facts.names[source.agentSessionId]
-        if (old?.session === source && old.name === name) return [old.context]
+        if (!source) continue
+        const key = id, old = contextCache.current.get(key), name = facts.names[source.agentSessionId]
+        if (old?.session === source && old.name === name) continue
         const context = retainedFocusContext(source, name)
         contextCache.current.set(key, { session: source, name, workspace: undefined, topicId: null, context })
-        return [context]
+        continue
       }
-      const key = JSON.stringify([session.hostId, session.id]), old = contextCache.current.get(key), name = facts.names[session.id]
+      const key = id, old = contextCache.current.get(key), name = facts.names[session.id]
       const workspace = workspaceForSession(facts.config, session, topics), topicId = topicIdForSession(facts.config, session, topics)
-      if (old && old.session === session && old.name === name && old.workspace === workspace && old.topicId === topicId) return [old.context]
+      if (old && old.session === session && old.name === name && old.workspace === workspace && old.topicId === topicId) continue
       const context = { ...agentContextForSession(session, undefined, name, workspace, topicId), recap: undefined }
       contextCache.current.set(key, { session, name, workspace, topicId, context })
-      return [context]
-    })
-    const presentations = new Set([...catalog.sessions.values()].map(session => JSON.stringify([session.hostId, session.id])))
-    for (const key of contextCache.current.keys()) if (!presentations.has(key) && !descriptors.has(key)) contextCache.current.delete(key)
+    }
+    for (const id of contextCache.current.keys()) if (!catalog.sessions.has(id) && !descriptors.has(id)) contextCache.current.delete(id)
+    const rows = [...contextCache.current.values()].map(value => value.context)
+    if (previousHeldContexts.current.length !== rows.length || rows.some((row, index) => row !== previousHeldContexts.current[index])) previousHeldContexts.current = rows
+    return previousHeldContexts.current
+  }, [catalog.sessions, descriptors, facts.config, facts.scratchTopicSnapshots, facts.names, contextDemand])
+  const contexts = useMemo(() => {
+    const rows = [...contextDemand].flatMap(id => contextCache.current.get(id)?.context ?? [])
     if (previousContexts.current.length !== rows.length || rows.some((row, index) => row !== previousContexts.current[index])) previousContexts.current = rows
     return previousContexts.current
-  }, [catalog.sessions, descriptors, facts.config, facts.scratchTopicSnapshots, facts.names, contextDemand])
+  }, [heldContexts, contextDemand])
   const originals = useMemo(() => {
-    const result = collaborationAgents([...contextCache.current.values()].map(value => value.context))
-    for (const { context } of contextCache.current.values()) if (!context.control) {
+    const result = collaborationAgents(heldContexts)
+    for (const context of heldContexts) if (!context.control) {
       const id = collaborationSubjectKey({ hostId: context.hostId, agentSessionId: context.id })
       const agent = catalog.agents.get(id) ?? resolved.agents.get(id)
       if (agent && descriptors.has(id) && !catalog.sessions.has(id)) result.set(id, { ...agent, context })
     }
     return result
-  }, [contexts, catalog.agents, descriptors, catalog.sessions, resolved.agents])
+  }, [heldContexts, catalog.agents, descriptors, catalog.sessions, resolved.agents])
   const overlays = useRef(new Map<string, { base: CollaborationAgent | undefined; context: FocusContext | undefined; agent: CollaborationAgent }>())
   const agents = useMemo(() => {
     const result = new Map([...resolved.agents, ...catalog.agents])
