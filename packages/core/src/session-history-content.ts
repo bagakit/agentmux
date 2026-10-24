@@ -52,3 +52,4 @@ export async function readSessionHistoryTextResource(
     throw new Error('Recorded content has an invalid semantic body.')
   return candidate
 }
+export { markdownImageReferences, type MarkdownImageReference } from './markdown-images.js'

@@ -10,7 +10,7 @@ const MAX_DIMENSION = 16_384
 const MAX_REFERENCE_CHARS = Math.ceil(SESSION_HISTORY_IMAGE_MAX_BYTES / 3) * 4 + 128
 export type AgentSessionHistoryResourceParams = AgentSessionHistoryResourceRequest & { hostId: string; agentSessionId: string }
 export type AgentSessionHistoryResourceResult = AgentSessionHistoryResourceReadResult & { hostId: string }
-const requestFields = ['source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'] as const
+const requestFields = ['source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation', 'markdownImage'] as const
 function invalid(message: string, code = 'INVALID_AGENT_SESSION_HISTORY_RESOURCE'): never { throw new AgentMuxError(message, code) }
 function exactString(value: unknown, name: string, code: string, max = 16_384): asserts value is string {
   if (typeof value !== 'string' || !value || value.length > max || /[\0\r\n]/u.test(value)) invalid(`${name} requires an exact bounded string.`, code)
@@ -31,6 +31,12 @@ export function parseSessionHistoryResourceOptions(value: unknown): AgentSession
   if (p.representation !== undefined && p.representation !== 'image' && p.representation !== 'file' || p.representation !== undefined && p.offsetBytes !== undefined)
     invalid('Binary representation requires an explicit image or file purpose and no text offset.', code)
   if (p.signal !== undefined && !(p.signal instanceof AbortSignal)) invalid('Resource cancellation requires an AbortSignal.', code)
+  if (p.markdownImage !== undefined) {
+    const image = rpcRecord(p.markdownImage, ['index', 'textSha256'], code)
+    if (p.representation !== 'image' || !Number.isSafeInteger(image.index) || (image.index as number) < 0 ||
+      typeof image.textSha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(image.textSha256))
+      invalid('A Markdown image requires its original text digest, image-node index and image representation.', code)
+  }
   if (p.commandOverride !== undefined) exactString(p.commandOverride, 'Executor command', code)
   if (p.args !== undefined && (!Array.isArray(p.args) || p.args.some(arg => typeof arg !== 'string' || arg.includes('\0')))) invalid('Executor args must be strings.', code)
   if (p.env !== undefined) {

@@ -1,9 +1,25 @@
 import { constants } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { open, stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { decodeBase64, encodeBase64 } from './hosted-value.js'
 import { fileBytes, imageBytes, unavailable } from './session-history-resource.js'
-import type { AgentSessionHistoryResourceReadResult } from './types.js'
+import type { AgentSessionHistoryContentPart, AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult } from './types.js'
+import { markdownImageReferences } from './markdown-images.js'
+import { AgentMuxError } from './errors.js'
+
+/** Called only after the original owner locates the exact record and part. */
+export async function readRecordedMarkdownImage(part: AgentSessionHistoryContentPart | undefined, input: AgentSessionHistoryResourceReadOptions,
+  maxBytes: number, signal: AbortSignal, signedText = false): Promise<AgentSessionHistoryResourceReadResult['result']> {
+  signal.throwIfAborted()
+  const selector = input.markdownImage
+  if (part?.kind !== 'text' || !selector || createHash('sha256').update(part.text).digest('hex') !== selector.textSha256)
+    throw new AgentMuxError('The original Markdown text revision changed.', 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH')
+  const image = markdownImageReferences(part.text)[selector.index]
+  if (!image || !signedText && image.url !== input.expectedReference)
+    throw new AgentMuxError('The original Markdown image node changed.', 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH')
+  return readRecordedImage(image.url, maxBytes, signal)
+}
 
 /** Only a located original file part supplies this self-contained reference; paths and URLs never grant IO. */
 export async function readRecordedFile(reference: string, maxBytes: number, signal: AbortSignal, label?: string): Promise<AgentSessionHistoryResourceReadResult['result']> {
