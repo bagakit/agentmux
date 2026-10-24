@@ -28,7 +28,7 @@ function inputStatus(payload: Extract<PublicationPayload, { kind: 'speech' }>): 
 }
 function speechCard(payload: Extract<PublicationPayload, { kind: 'speech' }>, speaker: FeishuRoleSpeaker,
   originalMessage?: PublicationOperation['originalMessage'], fragment?: PublicationOperation['fragment']): Record<string, unknown> {
-  const status = speaker.kind === 'human' ? inputStatus(payload) : undefined
+  const status = inputStatus(payload)
   return feishuRoleCard(publicationSpeechText({ ...payload, text: (payload.presentationContext?.before ?? '') + payload.text + (payload.presentationContext?.after ?? '') }), speaker,
     { ...(payload.phase ? { phase: payload.phase } : {}), ...(fragment ? { fragment } : {}),
       ...(payload.presentationContext?.literal ? { literal: true } : {}), incoming: originalMessage !== undefined, ...(status ? { status } : {}) })
