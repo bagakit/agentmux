@@ -56,10 +56,11 @@ it('Desktop keeps an accepted source across same-target confirmation and require
   }
   const select = async (handle: typeof handleA, operationId?: string) => {
     const before = (await f.store.readMetadata(reference.agentSessionId))!
+    if (before.nativeHandle?.kind !== 'provider') throw new Error('The reading fixture requires its original Provider locator')
     const observedAt = before.updatedAt + 1
     const next = { ...before, nativeHandle: handle, updatedAt: observedAt,
       nativeBinding: { source: operationId ? 'user-selected' as const : 'process-witness' as const, run: before.run, observedAt },
-      ...(operationId ? { nativeConfirmation: { operationId, run: before.run, previousNativeHandle: before.nativeHandle!, nativeHandle: handle,
+      ...(operationId ? { nativeConfirmation: { operationId, run: before.run, previousNativeHandle: before.nativeHandle, nativeHandle: handle,
         candidateObservedAt: before.updatedAt, observedAt, basis: 'run-main-candidate' as const } } : {}) }
     await f.store.compareAndSwap(before, next)
     facts = next
