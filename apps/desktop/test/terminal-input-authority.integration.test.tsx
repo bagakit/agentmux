@@ -75,14 +75,18 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
-  disposeUi?.(); disposeUi = undefined
+  const failures: unknown[] = []
+  try { disposeUi?.() } catch (error) { failures.push(error) }
+  disposeUi = undefined
   useAppStore.persist.setOptions(persistenceOptions)
-  await act(async () => root?.unmount())
+  try { await act(async () => root?.unmount()) } catch (error) { failures.push(error) }
   release?.(); release = undefined
-  try { await owner?.dispose() } finally { await scope?.cleanup() }
-  if (run?.pid) expect(() => process.kill(run.pid!, 0)).toThrow()
+  try { await owner?.dispose() } catch (error) { failures.push(error) }
+  try { await scope?.cleanup() } catch (error) { failures.push(error) }
+  try { if (run?.pid) expect(() => process.kill(run.pid!, 0)).toThrow() } catch (error) { failures.push(error) }
   useAppStore.setState(original, true)
   document.body.replaceChildren(); bridge.listeners.clear(); vi.restoreAllMocks(); vi.unstubAllEnvs()
+  if (failures.length) throw new AggregateError(failures, 'Private input authority cleanup failed')
 })
 
 async function create(kind: 'terminal' | 'agent') {

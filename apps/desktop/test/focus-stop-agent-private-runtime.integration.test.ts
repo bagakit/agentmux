@@ -4,20 +4,22 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 // Electron service shell and Node DOM are controlled; no user Runtime is touched.
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
+import { access, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore,
+import { AgentMuxControlServer, AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore,
   type AgentMuxClientEvent, type AgentMuxAgentSession } from '@agentmux/core'
 import { agentPromptCondition } from '@agentmux/core/prompt-condition'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { headlessFixture, until } from '../../../packages/core/test/helpers/headless-runtime-fixture'
+import { runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { privateRuntimeConnector } from './helpers/private-runtime-connector'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { summarizeRecoveryStorage } from '../src/main/recovery-probe'
 import { useAppStore } from '../src/renderer/src/store'
+import { api } from '../src/renderer/src/lib/api'
 import { EMPTY_AGENT_FOCUS } from '../src/renderer/src/lib/agent-focus'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
@@ -30,23 +32,41 @@ const original = useAppStore.getState()
 let scope: Awaited<ReturnType<typeof headlessFixture>> | undefined
 let controller: RuntimeController | undefined
 let privateClient: import('@agentmux/core/hosted').AgentMuxHostedClient | undefined
+let controlServer: AgentMuxControlServer | undefined
 const privatePids = new Set<number>()
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 afterEach(async () => {
-  for (const session of privateClient?.agentSessions() ?? []) {
-    expect(session.agentSessionId.startsWith('private-focus-stop-')).toBe(true)
-    await privateClient!.stopAgent(session.agentSessionId, session.run)
+  const errors: unknown[] = []
+  const attempt = async (close: () => void | Promise<void>) => { try { await close() } catch (error) { errors.push(error) } }
+  try {
+    await attempt(async () => { await controlServer?.stop() })
+    controlServer = undefined
+    await attempt(async () => {
+      for (const session of privateClient?.agentSessions() ?? []) await attempt(async () => {
+        expect(session.agentSessionId.startsWith('private-focus-stop-')).toBe(true)
+        await privateClient!.stopAgent(session.agentSessionId, session.run)
+      })
+    })
+    await attempt(async () => { await controller?.dispose() })
+    await attempt(async () => { await scope?.cleanup() })
+    const stillRunning = [...privatePids].filter(pid => { try { process.kill(pid, 0); return true } catch { return false } })
+    await attempt(() => { expect(stillRunning).toEqual([]) })
+    const receiptPath = process.env.AGENTMUX_FOCUS_STOP_PRIVATE_RECEIPT
+    if (receiptPath) await attempt(async () => {
+      const privateRootRemoved = scope ? await access(scope.root).then(() => false, error => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true
+        throw error
+      }) : false
+      await writeFile(receiptPath.replace(/\.json$/u, '-cleanup.json'), JSON.stringify({
+        privatePids: [...privatePids], remaining: stillRunning, privateRootRemoved, sharedRuntimeControls: 0
+      }, null, 2) + '\n')
+    })
+  } finally {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+    useAppStore.setState(original, true)
   }
-  await controller?.dispose()
-  await scope?.cleanup()
-  const stillRunning = [...privatePids].filter(pid => { try { process.kill(pid, 0); return true } catch { return false } })
-  expect(stillRunning).toEqual([])
-  const receiptPath = process.env.AGENTMUX_FOCUS_STOP_PRIVATE_RECEIPT
-  if (receiptPath) await writeFile(receiptPath.replace(/\.json$/u, '-cleanup.json'), JSON.stringify({
-    privatePids: [...privatePids], remaining: stillRunning, privateRootRemoved: true, sharedRuntimeControls: 0
-  }, null, 2) + '\n')
-  vi.restoreAllMocks()
-  useAppStore.setState(original, true)
+  if (errors.length) throw new AggregateError(errors, 'Private Stop fixture cleanup failed')
 })
 
 it('Stop targets one exact private Run, retains its retired history and leaves the neighboring Run and durable workface recoverable', async () => {
@@ -61,7 +81,7 @@ it('Stop targets one exact private Run, retains its retired history and leaves t
     const created = await client.createAgent({ providerId: 'codex', executorId: 'private-codex',
       agentSessionId: `private-focus-stop-${name}`, createOperationId: `private-focus-stop-create-${name}`,
       workspacePath: scope.root, commandOverride: fakeCli, args: [],
-      env: { AGENTMUX_FAKE_READY_MODE: 'before' }, injectAgentMuxGuide: false })
+      env: { AGENTMUX_FAKE_READY_MODE: 'before', AGENTMUX_FAKE_NATIVE_RECORD: '1' }, injectAgentMuxGuide: false })
     await client.reattachAgent(created.agentSessionId, 0, 'terminal')
     await until(() => client.agentSession(created.agentSessionId), session =>
       Boolean(session.nativeHandle) && session.semanticStatus?.state === 'done', `${name} native identity and ready input`)
@@ -82,7 +102,8 @@ it('Stop targets one exact private Run, retains its retired history and leaves t
     hosts: [{ id: 'local', kind: 'local', label: 'Private local' }],
     workspaces: [{ id: 'private-workspace', kind: 'folder', hostId: 'local', name: 'Private', path: scope.root }],
     executors: { 'private-codex': { providerId: 'codex', label: 'Private Codex',
-      command: fakeCli, args: [], env: { AGENTMUX_FAKE_READY_MODE: 'before' }, injectAgentMuxGuide: false } } }
+      command: fakeCli, args: [], env: { AGENTMUX_FAKE_READY_MODE: 'before', AGENTMUX_FAKE_NATIVE_RECORD: '1',
+        AGENTMUX_FAKE_NATIVE_PRESERVE: '1' }, injectAgentMuxGuide: false } } }
   controller = new RuntimeController(new AgentMuxFileAgentSessionStore(join(scope.root, 'desktop-sessions.json')),
     privateRuntimeConnector(scope.socketPath, () => { throw new Error('No remote Host belongs to this private proof') }))
   controller.commit(await controller.prepare(config))
@@ -113,7 +134,23 @@ it('Stop targets one exact private Run, retains its retired history and leaves t
   expect(persisted.workbenchSpaceSelection).toEqual(selection)
   const spatialBytes = await readFile(spatialPath)
   const stopBefore = client.runtimeIdentity()
-  await controller.stopSession(stopControl)
+  // Keep the real public CLI, Renderer control handler and Stop business owners.
+  // Only the Electron transport port is replaced with the private Main controller.
+  vi.spyOn(api.sessions, 'stop').mockImplementation(async selected => {
+    expect(selected).toEqual(stopControl)
+    await controller!.stopSession(selected)
+  })
+  controlServer = new AgentMuxControlServer({ coreClients: () => controller!.rpcClients(),
+    execute: request => useAppStore.getState().executeControl(request) }, join(scope.root, 'desktop-control.sock'))
+  await controlServer.start()
+  // happy-dom's URL is a browser URL. Pin the actual workspace CLI explicitly
+  // through the existing Node fixture override rather than a DOM-relative URL.
+  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
+  const cli = await runCompiledObjectCli(['--endpoint', `unix:${controlServer.path}`, 'agent', 'stop',
+    '--session', stopped.agentSessionId, '--operation-id', 'private-focus-stop-cli'], scope.env)
+  expect(cli.code, cli.stderr).toBe(0)
+  expect(JSON.parse(cli.stdout).result).toMatchObject({ agentSessionId: stopped.agentSessionId })
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(stopControl)
   const retired = (await client.sessionHistorySources()).find(entry => entry.agentSessionId === stopped.agentSessionId)!
   expect(retired.state).toBe('retired')
   expect(retired.history?.nativeHandle).toEqual(stopped.nativeHandle)
@@ -182,6 +219,8 @@ it('Stop targets one exact private Run, retains its retired history and leaves t
   if (receiptPath) await writeFile(receiptPath, JSON.stringify({ schema: 'agentmux.focus-stop-private-runtime.v1', passed: true,
     stopped: { sid: stopped.agentSessionId, runId: stopped.run.runId, nativeHandle: stopped.nativeHandle,
       retiredAt: retired.retiredAt, state: 'removed-from-runtime', publicHistoryItems: originalPage.items.length },
+    cli: { command: 'agent stop', operationId: 'private-focus-stop-cli', code: cli.code,
+      path: 'public service -> Renderer control owner -> Main RuntimeController -> Hosted/Core Stop' },
     neighbor: { sid: healthy.agentSessionId, runId: healthy.run.runId, pid: healthyBefore.run.pid,
       inputBefore: healthyBefore.run.acceptedInputBytes, inputAfter: healthyAfterInput.run.acceptedInputBytes,
       outputBefore: healthyBefore.run.latestOutputBytes, outputAfter: healthyAfterInput.run.latestOutputBytes },

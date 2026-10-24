@@ -1,4 +1,4 @@
-import { connectAgentMuxRpc, connectHostedAgentMux } from '@agentmux/core'
+import { connectAgentMuxRpc, connectHostedAgentMux, type AgentMuxRpcClient } from '@agentmux/core'
 import type { AgentMuxHostedRpcPort } from '@agentmux/core/hosted'
 import type { DesktopRuntimeConnector } from '../../src/main/desktop-host.js'
 import type { DesktopRuntimeClient } from '../../src/main/desktop-host.js'
@@ -16,10 +16,13 @@ export function privateRuntimeConnector(localSocket: string, remoteSocket: (host
       path: hostname === null ? localSocket : remoteSocket(hostname) } })
     let ready: Promise<void> | undefined
     const prepare = () => ready ??= hostname === null ? Promise.resolve() : beforeRemote?.(hostname) ?? Promise.resolve()
-    const port: AgentMuxHostedRpcPort = {
-      call: async (method, params, options) => { await prepare(); return await rpc.call(method, params, options) },
-      subscribe: async (method, params, handlers) => { await prepare(); return await rpc.subscribe(method, params, handlers) }
+    const call: AgentMuxRpcClient['call'] = async (method, params, options) => {
+      await prepare(); return await rpc.call(method, params, options)
     }
+    const subscribe: AgentMuxRpcClient['subscribe'] = async (method, params, handlers) => {
+      await prepare(); return await rpc.subscribe(method, params, handlers)
+    }
+    const port: AgentMuxHostedRpcPort = { call, subscribe }
     const client = await connectHostedAgentMux({ rpc: port, waitForReady: false,
       ...(config.kind === 'ssh' && config.runtimeId ? { expectedRuntimeId: config.runtimeId } : {}) })
     const dispose = client.dispose.bind(client)
