@@ -10,6 +10,8 @@ export * from './renderer-v8-profile.js'
 export * from './renderer-trace.js'
 export * from './renderer-memory.js'
 export * from './renderer-animations.js'
+export * from './app-memory-evidence.js'
+import type { AppMemoryEvidence } from './app-memory-evidence.js'
 import type { RendererAnimationsInput, RendererAnimationsResult } from './renderer-animations.js'
 import type { RendererMemoryInput, RendererMemoryResult } from './renderer-memory.js'
 import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.js'
@@ -109,6 +111,7 @@ export type HostResourceSnapshot = {
 export type MetricsSubscription = { dispose(): void }
 /** The host owns observation. Core only frames, validates and releases consumption. */
 export interface AgentMuxMetricsPort {
+  inspectAppMemory?(): Promise<AppMemoryEvidence>
   captureHeapSnapshot?(input: RendererHeapSnapshotInput, signal?: AbortSignal): Promise<RendererHeapSnapshotResult>
   inspectHeapSnapshot?(input: RendererHeapSnapshotInspectInput, signal?: AbortSignal): Promise<RendererHeapSnapshotInspection>
   inspectAnimations?(input: RendererAnimationsInput, signal?: AbortSignal): Promise<RendererAnimationsResult>
