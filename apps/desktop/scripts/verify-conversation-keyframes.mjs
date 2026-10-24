@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
 import { fixturePath } from './lib/fixture-values.mjs'
-const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop'), require = createRequire(join(desktop, 'package.json'))
-const { build } = await import(pathToFileURL(require.resolve('vite')).href)
+import { aliases, desktopRequire } from './fixtures/settings-resource-library/environment.mjs'
+const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
+const { build } = await import(pathToFileURL(desktopRequire.resolve('vite')).href)
 const fixture = join(desktop, 'scripts/fixtures/conversation-keyframes')
 const hook = 'apps/desktop/src/renderer/src/lib/use-conversation-keyframes.ts'
 const sourceFiles = [hook, 'apps/desktop/src/renderer/src/lib/conversation-ruler.ts', 'apps/desktop/src/renderer/src/components/ConversationReadingRuler.tsx',
@@ -16,7 +16,9 @@ const sourceFiles = [hook, 'apps/desktop/src/renderer/src/lib/conversation-ruler
   'packages/client-ui/src/components/ConversationMessage.tsx', 'packages/client-ui/src/components/ConversationImage.tsx',
   'packages/client-ui/src/components/AgentProviderIcon.tsx',
   'packages/client-ui/src/lib/conversation-message-location.ts', 'packages/client-ui/src/theme/runtime.ts']
-const fixtureFiles = ['verify-conversation-keyframes.mjs', ...(await readdir(fixture)).map(file => `fixtures/conversation-keyframes/${file}`)].map(file => `apps/desktop/scripts/${file}`)
+const fixtureFiles = ['verify-conversation-keyframes.mjs', 'fixtures/settings-resource-library/environment.mjs',
+  ...(await readdir(fixture)).map(file => `fixtures/conversation-keyframes/${file}`)].map(file => `apps/desktop/scripts/${file}`)
+fixtureFiles.push('apps/desktop/test/conversation-keyframes.config.mts')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const hashes = Object.fromEntries(await Promise.all(sourceFiles.map(async file => [file, hash(await readFile(join(root, file)))])))
 const fixtureHashes = Object.fromEntries(await Promise.all(fixtureFiles.map(async file => [file, hash(await readFile(join(root, file)))])))
@@ -24,12 +26,13 @@ await mkdir(join(root, '.tmp'), { recursive: true })
 const evidence = await mkdtemp(join(root, '.tmp/conversation-keyframes-')), temporary = await mkdtemp(fixturePath('tmp/amx-conversation-keyframes-'))
 const report = { passed: false, evidence, sourceHashes: hashes, fixtureHashes, phases: [], boundary: 'Private Chromium over production ConversationReadingRuler → Ruler → Axis, actual keyframe hook, and shared ConversationMessage → ConversationImage. ClientUiPlatform supplies original configured avatars and an exact bounded image reader; only Desktop window portal and unused Store avatar fallback are adapted. Full Workbench/store navigation and native Browser/capsule acquisition are outside this probe; no user Session or Browser is operated.' }
 try {
-  const vitest = join(dirname(createRequire(join(root, 'package.json')).resolve('vitest/package.json')), 'vitest.mjs')
+  const vitest = join(dirname(desktopRequire.resolve('vitest/package.json')), 'vitest.mjs')
   report.unit = await runProbeProcess(process.execPath, [vitest, 'run', '--configLoader', 'runner', '--config', 'test/conversation-keyframes.config.mts'], { cwd: desktop, env: process.env, timeoutMs: 45000 })
   assert.equal(report.unit.exitCode, 0, 'The owning isolated keyframe unit suite must pass first')
   for (const mode of ['green', 'blank-capture', 'repeat-capture', 'restored']) {
     const loaded = [], outDir = join(temporary, 'out')
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error', define: { 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
+      resolve: { alias: aliases },
       plugins: [{ name: `conversation-keyframe-proof-${mode}`, enforce: 'pre',
         resolveId(source, importer) {
           if (source === './WindowOverlayHost' && importer?.endsWith('/HoverDropdownMenu.tsx') || source === './ConversationMessageAvatar' && importer?.endsWith('/ConversationAxis.tsx')) return join(fixture, 'host.tsx')
@@ -54,7 +57,7 @@ try {
       }], worker: { format: 'es' }, build: { outDir, emptyOutDir: true } })
     for (const file of sourceFiles) assert.ok(loaded.some(item => item.path === file), `${file}: actual nonempty product consumer must compile`)
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-    const logs = [], outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), join(temporary, `profile-${mode}`), evidence, mode],
+    const logs = [], outcome = await runProbeProcess(desktopRequire('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), join(temporary, `profile-${mode}`), evidence, mode],
       { cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
     await writeFile(join(evidence, `${mode}.log`), logs.join('\n'))
     const render = JSON.parse(await readFile(join(evidence, `${mode}.render.json`), 'utf8')); report.phases.push({ mode, loaded, outcome, render })
