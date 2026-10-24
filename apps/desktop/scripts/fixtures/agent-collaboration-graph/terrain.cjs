@@ -45,6 +45,7 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
     assert.equal(input.areas.find(area => area.id === tools.id).parentId, root.id)
     assert.equal(input.areas.find(area => area.id === deep.id).parentId, tools.id)
     assert.ok(input.edges.some(edge => edge.source === nodeId(original.areas[2].id, 'fixture-terrain-b')), 'The explicitly read original external relationship enters the actual solve')
+    assert.equal(input.edges.find(edge => edge.source === nodeId(original.areas[2].id, 'fixture-terrain-a') && edge.target === nodeId(original.areas[2].id, 'fixture-terrain-b') && edge.kind === 'communication')?.strength, 3, 'Explicit Arrange consumes three distinct original messages without counting their delivery event twice')
     await click('[aria-label^="Locate 协作地形 ·"]')
     await until('parent terrain enters one of its actual readable descendant occurrences', () => read(`(()=>{const canvas=document.querySelector('.collaboration-canvas').getBoundingClientRect();return ['fixture-terrain-tool','fixture-terrain-a','fixture-terrain-b'].some(id=>{const card=document.querySelector('.collaboration-agent__detail-layer:not([inert]) .focus-context[data-session-id="'+id+'"]');if(!card)return false;const r=card.getBoundingClientRect(),layer=card.closest('[data-map-layer]');return getComputedStyle(layer).opacity==='1'&&r.x>=canvas.x&&r.y>=canvas.y&&r.right<=canvas.right&&r.bottom<=canvas.bottom})})()`))
     await frame('terrain-parent-readable-destination')
