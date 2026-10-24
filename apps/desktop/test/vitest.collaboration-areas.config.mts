@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 import shared from '../scripts/fixtures/agent-information-card/vitest.owning.config.mts'
 export const collaborationAreaMutations = [
-  { name: 'project-parent-terrain', file: 'lib/collaboration-areas.ts', before: 'parentId: parents.get(project.id)', after: 'parentId: null', assertion: 'preserves the real project ancestry without grouping prefix siblings, other Hosts or worktrees as children' },
+  { name: 'project-parent-terrain', file: 'lib/collaboration-areas.ts', before: 'parentId: parents.get(project.id) ?? null', after: 'parentId: null', assertion: 'preserves the real project ancestry without grouping prefix siblings, other Hosts or worktrees as children' },
   { name: 'folded-ancestor-terrain', file: 'lib/collaboration-hierarchy.ts', before: 'ancestor && folded.has(ancestor) ? ancestor : id', after: 'id', assertion: 'folds the exact ancestor subtree while retaining original relations, shared identities and accurate expansion' },
   { name: 'distinct-message-strength', file: 'lib/collaboration-presentation.ts', before: 'Math.max(1, messages.size)', after: '1', assertion: 'counts distinct original communication evidence rather than event stages, dispatch or repeated observations' },
   { name: 'original-project-appearance', file: 'lib/collaboration-areas.ts', before: 'folderSpaceIconTarget(project)', after: "folderSpaceIconTarget({ ...project, hostId: 'local' })", assertion: 'keeps the captured request independent from background selection and coalesces project worktrees by original identity' },

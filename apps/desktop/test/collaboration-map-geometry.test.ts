@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest'
-import { collaborationEnvelope, collaborationOverviewPath, collaborationOverviewScale } from '../src/renderer/src/lib/collaboration-map-geometry'
+import { collaborationEnvelope, collaborationVisiblePath } from '../src/renderer/src/lib/collaboration-map-geometry'
+import { collaborationCameraDuration, collaborationMapLod, collaborationOverviewScale, collaborationVisibleHull } from '../src/renderer/src/lib/collaboration-map-lod'
 import { routeCollaborationLayout, type CollaborationLayoutBox, type CollaborationPath } from '../src/renderer/src/lib/collaboration-layout-engine'
 
 const member = (id: string, x: number, y: number, width = 250, height = 94): CollaborationLayoutBox =>
@@ -47,7 +48,7 @@ it('joins visible overview points to the original directed route without moving 
   const route: CollaborationPath = { id: 'message', points, path: 'M 250 20 C 310 20 420 240 500 240',
     sourceHandle: 'out', targetHandle: 'in', labelX: 375, labelY: 140, bounds: { x: 250, y: 20, width: 250, height: 220 } }
   const original = structuredClone(route)
-  const path = collaborationOverviewPath(route, source, target, .25, 14, 6)
+  const path = collaborationVisiblePath(route, source, target, .25, 14, 6)
   const numbers = path.match(/-?\d+(?:\.\d+)?/g)!.map(Number)
   expect(numbers.slice(6, 14)).toEqual(points.flatMap(point => [point.x, point.y]))
   expect(Math.hypot(numbers[0]!-125, numbers[1]!-47)).toBeCloseTo(56)
@@ -66,7 +67,7 @@ it('clips original short creation ports at overview circles without reversing th
     expect(route!.sourceHandle).toBe('creation-out-bottom'); expect(route!.targetHandle).toBe('creation-in-top')
     const original = structuredClone(route!), zoom = .2, radius = 14 / zoom
     if (obstructed) expect(route!.points.length).toBeGreaterThan(7)
-    const path = collaborationOverviewPath(route!, source, target, zoom, 14, 14)
+    const path = collaborationVisiblePath(route!, source, target, zoom, 14, 14)
     const numbers = path.match(/-?\d+(?:\.\d+)?(?:e[-+]?\d+)?/g)!.map(Number)
     const points = numbers.flatMap((value, index) => index % 2 ? [] : [{ x: value, y: numbers[index + 1]! }])
     expect(points.length).toBeGreaterThanOrEqual(4); expect((points.length - 1) % 3).toBe(0)
@@ -95,6 +96,39 @@ it('clips original short creation ports at overview circles without reversing th
   const adjacent = { ...target, y: 122 }
   const [covered] = await routeCollaborationLayout([source, adjacent], [{ id: 'covered', kind: 'creation', source: 'from', target: 'to' }])
   const retained = structuredClone(covered!)
-  expect(collaborationOverviewPath(covered!, source, adjacent, .05, 14, 14)).toBe('')
+  expect(collaborationVisiblePath(covered!, source, adjacent, .05, 14, 14)).toBe('')
   expect(covered).toEqual(retained)
+})
+
+it('keeps actual endpoint ink continuous through both former LOD thresholds without moving the world', () => {
+  const source = member('source', 100, 200), target = member('target', 700, 450)
+  const route: CollaborationPath = { id: 'continuous', points: [{ x: 350, y: 247 }, { x: 400, y: 247 }, { x: 650, y: 497 }, { x: 700, y: 497 }],
+    path: 'M 350 247 C 400 247 650 497 700 497', sourceHandle: 'out', targetHandle: 'in', labelX: 525, labelY: 372,
+    bounds: { x: 350, y: 247, width: 350, height: 250 } }
+  const original = structuredClone({ source, target, route })
+  const endpoints = (zoom: number) => {
+    const numbers = collaborationVisiblePath(route, source, target, zoom, 14, 14).match(/-?\d+(?:\.\d+)?(?:e[-+]?\d+)?/gi)!.map(Number)
+    return [{ x: numbers[0]!, y: numbers[1]! }, { x: numbers.at(-2)!, y: numbers.at(-1)! }]
+  }
+  for (const zoom of [.32, .44, .45, .46, .58, .62, .69, .7, .71, .82]) {
+    const ends = endpoints(zoom)
+    for (const [index, box] of [source, target].entries()) {
+      const hull = collaborationVisibleHull(box, zoom), endpoint = ends[index]!
+      // This route leaves horizontally: its real ink must meet the rendered side.
+      expect(endpoint.x).toBeCloseTo(index ? hull.x : hull.x + hull.width, 5)
+      expect(endpoint.y).toBeCloseTo(box.y + box.height / 2, 5)
+      expect(hull.x + hull.width / 2).toBe(box.x + box.width / 2)
+      expect(hull.y + hull.height / 2).toBe(box.y + box.height / 2)
+    }
+    const before = endpoints(zoom - 1e-5), after = endpoints(zoom + 1e-5)
+    expect(Math.hypot(before[0]!.x - after[0]!.x, before[0]!.y - after[0]!.y)).toBeLessThan(.02)
+  }
+  expect(collaborationMapLod(.69).detail).toBeGreaterThan(0)
+  expect(collaborationMapLod(.71).detail).toBeLessThan(1)
+  expect(collaborationMapLod(.69).detail).toBeLessThan(collaborationMapLod(.71).detail)
+  expect(collaborationVisiblePath(route, source, target, 1, 14, 14)).toBe(route.path)
+  expect({ source, target, route }).toEqual(original)
+  expect(collaborationCameraDuration(false)).toBe(0)
+  expect(collaborationCameraDuration(true, true)).toBe(0)
+  expect(collaborationCameraDuration(true)).toBeGreaterThanOrEqual(200)
 })
