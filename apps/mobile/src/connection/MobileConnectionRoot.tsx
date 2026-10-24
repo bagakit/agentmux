@@ -131,11 +131,13 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
     void connect()
     return () => { controller.abort(); clearTimeout(timer); release?.(); if (binding.current?.client === owned) binding.current = null; void owned?.dispose(); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
   }, [offer, linkIssue, connectionRetry])
-  if (updatePending) return <main className="mobile-chat-start" aria-live="polite">
+  if (updatePending) return <main className="mobile-chat-start mobile-update-recovery" aria-live="polite">
     <strong>正在接回原工作面</strong><p>{connection.message}</p>
     <p>若无法返回上一页，请恢复这台设备的原工作面、设备身份与 Mac 连接后重新检查。</p>
-    <button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查原连接</button>
-    <button type="button" onClick={() => { if (history.length > 1) history.back(); else setReturnIssue('没有可返回的上一页；请恢复原工作面、设备身份与 Mac 连接，再重新检查。') }}>返回上一页</button>
+    <div className="mobile-update-recovery__actions">
+      <button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查原连接</button>
+      <button type="button" onClick={() => { if (history.length > 1) history.back(); else setReturnIssue('没有可返回的上一页；请恢复原工作面、设备身份与 Mac 连接，再重新检查。') }}>返回上一页</button>
+    </div>
     {returnIssue && <p role="status">{returnIssue}</p>}
   </main>
   return <MobileWebUpdateSafetyProvider verifyConnection={verifyConnection} prepareReload={prepareReload} native={native}><MobileWebCatalogObservation.Provider value={mobileWeb.observeCatalog}>
