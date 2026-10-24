@@ -362,11 +362,11 @@ export function ConversationMessage({
     </span>,
     actions: hasCopyContent && !copyInParent || messageActions ? <span className="log-turn__actions" data-copy-state={copyState}>
       {messageActions}
-      {copyState === 'failed' ? <span className="log-turn__copy-error" role="alert">{copyReadError ?? 'Copy failed'}</span> : null}
       {hasCopyContent && !copyInParent ? <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
-        <SemanticIcon name="action.copy" size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
+        <SemanticIcon name={copyState === 'copied' ? 'action.confirm' : 'action.copy'} size={13} />
       </button> : null}
     </span> : null,
+    feedback: copyState === 'failed' ? <span className="log-turn__copy-error" role="alert">{copyReadError ?? 'Copy failed'} · Retry Copy</span> : null,
     details: isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata || sourceLabelsInDetails && sources || nativeCollaboration
       ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
         declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>
@@ -423,7 +423,7 @@ export function ConversationMessage({
         </>} />}
       {a2aNotificationId ? <ConversationNotificationDetails key={JSON.stringify([recordSourceKey, a2aNotificationId])} notificationId={a2aNotificationId} protocol={firstText}
         records={notificationRecords} locatedSourceKey={locatedSourceKey}>
-        {primaryNotice ? <>{createdAt === undefined ? null : <p>通知记录时间 · {renderClock(createdAt)}</p>}{metadata}{messageDetails}{card.actions}</> : null}
+        {primaryNotice ? <>{createdAt === undefined ? null : <p>通知记录时间 · {renderClock(createdAt)}</p>}{metadata}{messageDetails}{card.actions}{card.feedback}</> : null}
       </ConversationNotificationDetails> : null}
       {questionDiagnostic ? <p className="agent-interaction__error" role="status" data-question-reply-diagnostic={questionDiagnostic.code}>{questionDiagnostic.message}</p> : null}
       {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
