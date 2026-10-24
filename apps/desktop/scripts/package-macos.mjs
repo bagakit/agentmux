@@ -28,7 +28,7 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { observeApplicationProcesses, assertApplicationActivationOwnership, applicationQuitOwnershipDiagnostic } from './package-process-scope.mjs'
-import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient, requireOutgoingWorkbenchStorage, createPrivateRuntimeScope } from './package-runtime-upgrade.mjs'
+import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, confirmUiTerminalRebindings, observeUiClient, requireOutgoingWorkbenchStorage, createPrivateRuntimeScope } from './package-runtime-upgrade.mjs'
 import { prepareSemanticHostReload, inspectSemanticHostForInstall, stopSemanticHostForInstall, confirmSemanticHostReload } from './package-semantic-host.mjs'
 import { defaultAgentMuxControlSocketPath, probeSocketLiveness } from '@agentmux/core'
 import { macosHostService, macosHostServiceRegistration, inspectMacosHostService, stopMacosHostService } from '../../host/dist/macos-service.js'
@@ -827,7 +827,13 @@ function workbenchIdentity(workbench, { expectedAfterRestart = false, includeSur
   return { activeWorkspaceId: workbench.activeWorkspaceId, mainSurface: workbench.mainSurface, focus: workbench.focus,
     ...(includeSurvey ? { survey: workbench.survey } : {}),
     layouts: workbench.layouts, tabs: workbench.tabs.map(tab => ({ ...tab, regions: tab.regions.map(region => {
-      if (region.kind === 'agent' || region.kind === 'terminal') {
+      if (region.kind === 'terminal') {
+        // A raw shell's legacy sessionId is its execution Run, not a durable AgentSession.
+        // Any changed binding is independently qualified against exact Native facts below.
+        const { sessionId, control, processState, ...descriptor } = region
+        return descriptor
+      }
+      if (region.kind === 'agent') {
         const { control, processState, ...descriptor } = region
         return descriptor
       }
@@ -883,8 +889,10 @@ async function awaitUiActivation(appPath, before, runtimePlan = null) {
     try {
       const observed = await qualifyUi(appPath, before)
       lastObservation = observed
-      if (runtimePlan) assertUiRuntimeObservation(observed, await confirmUiRuntime(runtimePlan), before)
-      return observed
+      const confirmation = runtimePlan ? await confirmUiRuntime(runtimePlan) : null
+      if (confirmation) assertUiRuntimeObservation(observed, confirmation, before)
+      const terminalRebindings = await confirmUiTerminalRebindings(runtimePlan, confirmation, before, observed)
+      return { observation: observed, terminalRebindings }
     }
     catch (error) {
       lastError = error
@@ -1040,11 +1048,12 @@ export async function installApplication(appPath, { intent = installIntent, home
     if (runtimeReviewPath) process.stdout.write(`runtime_review=${runtimeReviewPath}\n`)
     if (previousInstall) process.stdout.write(`previous_install_trashed=${previousInstall}\n`)
     process.stdout.write(`quit_previous_instance=${quitOutcome.wasRunning ? quitOutcome.pids.join(',') : 'not_running'}\n`)
-    let relaunched, observed
+    let relaunched, observed, terminalRebindings
     const launchBaseline = await scopedProcesses(destination)
     try {
       relaunched = await launch(destination)
-      observed = await awaitUiActivation(destination, before, uiRuntime ?? runtimeUpgrade)
+      const activation = await awaitUiActivation(destination, before, uiRuntime ?? runtimeUpgrade)
+      observed = activation.observation; terminalRebindings = activation.terminalRebindings
       await confirmSemanticHostReload(semanticHost, destination)
     } catch (error) {
       const result = { intent, ui: { status: 'unknown', error: error.message }, native, candidate: destination, previous: previousInstall ?? null }
@@ -1067,13 +1076,14 @@ export async function installApplication(appPath, { intent = installIntent, home
       main: observed.main, intent, native, path: destination
     })
     process.stdout.write(`activated_serving_owners=${JSON.stringify(activatedOwners)}\n`)
-    if (intent === 'ui-only' && !before) return { intent, ui: { status: 'unknown', path: destination, observation: observed,
+    if (intent === 'ui-only' && !before) return { intent, ui: { status: 'unknown', path: destination, observation: observed, terminalRebindings,
       reason: 'The candidate GUI is active. Without an outgoing workbench observation, complete recovery cannot be confirmed.' }, native }
     if (observed.workbench.survey === undefined || before && before.workbench.survey === undefined) return { intent, ui: {
-      status: 'unknown', path: destination, observation: observed,
+      status: 'unknown', path: destination, observation: observed, terminalRebindings,
       reason: 'The candidate GUI is active. Complete Survey continuity is unconfirmed because an original or restored stored preference observation is unavailable.',
       continuity: { before: structuredClone(before), after: structuredClone(observed) } }, native }
-    return { intent, ui: { status: 'committed', main: observed.main, path: destination, observation: observed }, native }
+    return { intent, ui: { status: 'committed', main: observed.main, path: destination, observation: observed,
+      terminalRebindings }, native }
   } catch (error) {
     if (!error.transaction) error.transaction = { intent, ui: { status: 'unknown', error: error.message }, native }
     if (error.ownershipDiagnostic) error.transaction.ui.ownership = error.ownershipDiagnostic
