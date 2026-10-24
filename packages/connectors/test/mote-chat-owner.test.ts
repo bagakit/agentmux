@@ -36,6 +36,7 @@ async function fixture(limit = 4) {
       created.set(plan.input.createOperationId!, result); return result
     }),
     inspect: vi.fn(async plan => created.get(plan.input.createOperationId!) ?? null),
+    prepareInput: vi.fn(async () => {}),
     activity: vi.fn(async () => ({ lastActivityAt: 10 }))
   }
   const assertTarget = vi.fn(async () => {})
@@ -187,7 +188,7 @@ it('retains the frozen creation across unknown ACK and owner replacement without
   const ownerModule = process.env.AGENTMUX_MOTE_CHAT_RESTART_MODULE
   const imports = ownerModule ? `import {ConnectionHost,MoteChatHost} from ${JSON.stringify(ownerModule)};`
     : `import {ConnectionHost} from './packages/connectors/dist/connection-host.js';import {MoteChatHost} from './packages/connectors/dist/mote-chat.js';`
-  const script = imports + `const [path,target]=process.argv.slice(1);const connections=new ConnectionHost({databasePath:path,secrets:{resolve:async()=>null}});const forbidden=async()=>{throw new Error('Read must not launch')};const host=new MoteChatHost({connections,assertTarget:forbidden,agents:{prepare:forbidden,create:forbidden,inspect:forbidden,activity:forbidden}});console.log(JSON.stringify({history:await host.history({target:JSON.parse(target)}),audience:await host.audience({target:JSON.parse(target)})}));connections.close()`
+  const script = imports + `const [path,target]=process.argv.slice(1);const connections=new ConnectionHost({databasePath:path,secrets:{resolve:async()=>null}});const forbidden=async()=>{throw new Error('Read must not launch')};const host=new MoteChatHost({connections,assertTarget:forbidden,agents:{prepare:forbidden,create:forbidden,inspect:forbidden,prepareInput:forbidden,activity:forbidden}});console.log(JSON.stringify({history:await host.history({target:JSON.parse(target)}),audience:await host.audience({target:JSON.parse(target)})}));connections.close()`
   const restarted = JSON.parse((await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script, f.databasePath, JSON.stringify(target)])).stdout)
   expect(restarted.history.generations).toMatchObject([{ phase: 'ready', agentSessionId: reserved.agentSessionId }])
   expect(restarted.audience.people).toMatchObject([{ used: 1, total: 1 }])
