@@ -47,6 +47,7 @@ it('a new group has one complete sharing contract, a visible audience review and
   await f.button('Connect group')
   await wait(() => expect(f.services.bindings!.listActive()).toHaveLength(1))
   expect(f.services.bindings!.listActive()[0]!.scope.publication).toBe('future-shared-conversation')
+  await wait(() => expect(document.querySelector('[aria-label="Group connection status"]')?.textContent).toContain('Two-way sync enabled'))
   expect(Object.values(useAppStore.getState().connectorRoomDrafts).every(draft => !('publication' in draft))).toBe(true)
   expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
 })
@@ -60,8 +61,10 @@ it.each(['active', 'paused'] as const)('a recorded %s group completes from its o
   const original = f.services.bindings!.readCurrent(saved.binding.bindingId)!
   const before = (await f.forward('connection.binding.inspect', { bindingId: original.bindingId })).grants
   await form(original)
-  await wait(() => expect(document.querySelector('[data-partial-sharing]')?.textContent).toContain('User messages are not connected'))
+  await wait(() => expect(document.querySelector('[data-partial-sharing]')?.textContent).toContain('App and group are not fully synced'))
   const notice = document.querySelector('[data-partial-sharing]')!
+  expect(notice.textContent).toContain('new messages in the App and this group stay in the same conversation')
+  expect(notice.textContent).toContain('Earlier private history stays local')
   if (state === 'paused') {
     expect(notice.textContent).toContain('No new messages are being shared')
     expect([...document.querySelectorAll('button')].some(button => button.textContent === 'Resume sync')).toBe(false)
@@ -70,9 +73,10 @@ it.each(['active', 'paused'] as const)('a recorded %s group completes from its o
   expect(f.services.bindings!.readCurrent(original.bindingId)).toEqual(original)
   expect(f.calls.filter(call => call.method === 'connection.binding.relink')).toHaveLength(0)
   await inputScope('all-messages')
-  await f.button(state === 'paused' ? 'Resume and share complete conversation' : 'Share complete conversation')
+  await f.button(state === 'paused' ? 'Resume two-way sync' : 'Enable two-way sync')
   await wait(() => expect(f.services.bindings!.readCurrent(original.bindingId)?.revision).toBe(original.revision + 1))
   const current = f.services.bindings!.readCurrent(original.bindingId)!
+  await wait(() => expect(document.querySelector('[aria-label="Group connection status"]')?.textContent).toContain('Two-way sync enabled'))
   expect(current).toMatchObject({ state: 'active', scope: { input: original.scope.input, publication: 'future-shared-conversation' }, inputTarget: original.inputTarget })
   const after = (await f.forward('connection.binding.inspect', { bindingId: original.bindingId })).grants
   expect(after.map(grant => [grant.grantId, grant.actor, grant.state, grant.capabilities])).toEqual(before.map(grant => [grant.grantId, grant.actor, grant.state, grant.capabilities]))
@@ -92,7 +96,7 @@ it.each(['not-dispatched', 'may-have-dispatched'] as const)('reopening a %s reco
   await wait(() => expect(f.calls.some(call => call.method === 'connection.binding.inspect' && (call.input as { operationId?: string }).operationId === input.operationId)).toBe(true))
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain(phase === 'not-dispatched' ? 'Not sent. It will not be dispatched.' : 'Original result retained')
   expect([...document.querySelectorAll('button')].some(button => button.textContent === 'Continue setup')).toBe(false)
-  await f.button('Share complete conversation')
+  await f.button('Enable two-way sync')
   await wait(() => expect(f.services.bindings!.readCurrent(saved.binding.bindingId)?.scope.publication).toBe('future-shared-conversation'))
   expect(useAppStore.getState().connectorRoomIntents[input.operationId]).toEqual(intent)
   expect(f.calls.some(call => (call.method === 'connection.bind' || call.method === 'connection.binding.relink') && (call.input as { operationId: string }).operationId === input.operationId)).toBe(false)
