@@ -29,7 +29,7 @@ export async function roomBindingFixture(native = true, options: { adapters?: re
     return await original.client.conversationCheckpoint(ref)
   }
   const bindings = new RoomBindingHost({ connections, spatial, checkpoint }); connections.bindings = bindings
-  const input: RoomBindingBindInput = { operationId: 'bind-original', bindingId: 'original-binding', connectionId: connection.connectionId, expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: original.session.agentSessionId, regionAnchor: { regionId: 'original-region' }, externalConversationId: 'original-group', scope: { input: 'mentions-and-replies', publication: 'future-native-user-facing' }, expectedSource: { providerId: 'claude', nativeSessionId: 'original-native' } }
+  const input: RoomBindingBindInput = { operationId: 'bind-original', bindingId: 'original-binding', connectionId: connection.connectionId, expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: original.session.agentSessionId, regionAnchor: { regionId: 'original-region' }, externalConversationId: 'original-group', scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' }, expectedSource: { providerId: 'claude', nativeSessionId: 'original-native' } }
   return { ...original, graph, spatial, connections, bindings, checkpoint, input,
     async change(change: (graph: AgentMuxSpatialGraph) => void) { const state = (await spatial.read())!; change(state.graph); return await spatial.commit({ expectedRevision: state.revision, graph: state.graph }) },
     async close() { connections.close(); await original.close() }
