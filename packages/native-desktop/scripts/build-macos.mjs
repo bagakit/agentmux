@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -37,10 +37,14 @@ if (bare) {
 } else {
 const appPath = resolve(option('--output') ?? join(binDirectory, 'AgentMux Native.app'))
 const executablePath = join(appPath, 'Contents', 'MacOS', 'agentmux-native-macos')
+// Compilation succeeded. Replace only this planned output, including any old signature.
+rmSync(appPath, { recursive: true, force: true })
 mkdirSync(dirname(executablePath), { recursive: true })
 mkdirSync(join(appPath, 'Contents', 'Resources'), { recursive: true })
 copyFileSync(binaryPath, executablePath)
 copyFileSync(join(packageDirectory, 'LICENSE.orca'), join(appPath, 'Contents', 'Resources', 'LICENSE.orca'))
+copyFileSync(join(packageDirectory, 'UPSTREAM.md'), join(appPath, 'Contents', 'Resources', 'UPSTREAM.md'))
+copyFileSync(join(packageDirectory, '..', 'THIRD_PARTY_NOTICES.md'), join(appPath, 'Contents', 'Resources', 'THIRD_PARTY_NOTICES.md'))
 chmodSync(executablePath, 0o755)
 writeFileSync(join(appPath, 'Contents', 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
