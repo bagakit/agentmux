@@ -37,6 +37,7 @@ export type AgentMuxHostOptions = {
   fileUploads?: import('@agentmux/core/files').AgentMuxRpcFileUploadsOwner
   inputContextCaptureReader?: import('@agentmux/core').AgentInputContextCaptureReader
   externalInputAuthority?: import('@agentmux/core').AgentExternalInputAuthorityPort
+  shutdown?: () => void | Promise<void>
 }
 
 /** The Node Host owns the original Core. Desktop and phones only own client connections. */
@@ -190,7 +191,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     // Reserve the public endpoint before constructing/loading any Core owner. A live old owner
     // is never displaced or adopted by speculative workflow probes.
     const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
-    runtime = await startHeadlessAgentMux({ store: options.store, socketPath: path,
+    runtime = await startHeadlessAgentMux({ store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
       ...(options.providers ? { providers: options.providers } : {}), service,
       forwardingPeer: { authoritySocketPath: desktopPath, bindAuthority: async principal => principal.kind === 'device'
         ? await (await authorityReady).bindForwardedDevice(principal) : undefined },

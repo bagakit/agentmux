@@ -93,6 +93,10 @@
     "./presentation-configuration": {
       "types": "./dist/presentation-configuration.d.ts",
       "import": "./dist/presentation-configuration.js"
+    },
+    "./macos-service": {
+      "types": "./dist/macos-service.d.ts",
+      "import": "./dist/macos-service.js"
     }
   }
 }
