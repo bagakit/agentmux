@@ -268,7 +268,7 @@ describe('global PMO inspection uses one public creation/input owner and the ori
     const prompt = p.launches[0]!.input.prompt!
     expect(Buffer.byteLength(prompt)).toBeLessThan(MAX_AGENT_PROMPT_BYTES)
     expect(scope(prompt)).toMatchObject({ state: 'observed', totalCount: originals.length })
-    expect(prompt).toContain('goal ls without filters or a limiting sample')
+    expect(prompt).toContain('goal ls --all without filters or a limiting sample')
     expect(p.start).toHaveBeenCalledOnce()
   }, 30_000)
 })
