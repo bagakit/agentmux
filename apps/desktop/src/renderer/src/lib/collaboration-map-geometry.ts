@@ -37,7 +37,7 @@ export function collaborationEnvelope(area: Extract<CollaborationLayoutBox, { ki
 
 /** Keep the original obstacle-safe route; connect its terminal stems to the continuous visible body.
  * This is a cheap projection at the camera layer, never a new Worker route or relationship. */
-export function collaborationVisiblePath(route: CollaborationPath, source: CollaborationLayoutBox, target: CollaborationLayoutBox, zoom: number, sourceRadius: number, targetRadius: number, sourcePointRadius = 6, targetPointRadius = 6, preferences: FocusMapPreferences = DEFAULT_FOCUS_MAP_PREFERENCES) {
+export function collaborationVisibleRoute(route: CollaborationPath, source: CollaborationLayoutBox, target: CollaborationLayoutBox, zoom: number, sourceRadius: number, targetRadius: number, sourcePointRadius = 6, targetPointRadius = 6, preferences: FocusMapPreferences = DEFAULT_FOCUS_MAP_PREFERENCES) {
   const split = (curve: readonly CollaborationLayoutPoint[], t: number) => {
     const mix = (a: CollaborationLayoutPoint, b: CollaborationLayoutPoint) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
     const [a, b, c, d] = curve as [CollaborationLayoutPoint, CollaborationLayoutPoint, CollaborationLayoutPoint, CollaborationLayoutPoint]
@@ -89,10 +89,14 @@ export function collaborationVisiblePath(route: CollaborationPath, source: Colla
     return []
   }
   const from = projectStart(route.points, source, sourceRadius, sourcePointRadius)
-  if (!from.length) return ''
+  if (!from.length) return { path: '', points: [] }
   const points = projectStart([...from].reverse(), target, targetRadius, targetPointRadius).reverse()
-  if (!points.length) return ''
+  if (!points.length) return { path: '', points }
   const path = [`M ${points[0]!.x} ${points[0]!.y}`]
   for (let index = 1; index < points.length; index += 3) path.push(`C ${points.slice(index, index + 3).map(point => `${point.x} ${point.y}`).join(' ')}`)
-  return path.join(' ')
+  return { path: path.join(' '), points }
+}
+
+export function collaborationVisiblePath(...args: Parameters<typeof collaborationVisibleRoute>) {
+  return collaborationVisibleRoute(...args).path
 }

@@ -8,7 +8,7 @@ import { collaborationAreaAncestors, createCollaborationHierarchy, collaboration
 import type { CollaborationPulse } from '../lib/use-collaboration-reading'
 import type { CollaborationLayoutBox as CollaborationBox, CollaborationLayoutInput, CollaborationPath } from '../lib/collaboration-layout-engine'
 import { useCollaborationLayout } from '../lib/use-collaboration-layout'
-import { collaborationEnvelope, collaborationVisiblePath } from '../lib/collaboration-map-geometry'
+import { collaborationEnvelope, collaborationVisibleRoute } from '../lib/collaboration-map-geometry'
 import { collaborationMapReadsSummary, COLLABORATION_OVERVIEW_MARK_SIZE, collaborationCameraDuration, collaborationIdentityInk, collaborationMapContentInk, collaborationMapLod, collaborationMapTextBudget, collaborationOverviewScale, collaborationVisibleHull } from '../lib/collaboration-map-lod'
 import { collaborationCameraTarget, COLLABORATION_OVERVIEW_ZOOM, type CollaborationLocate } from '../lib/collaboration-map-camera'
 import { COLLABORATION_ACTIVITY_MS, collaborationNodeSize, collaborationRecency, collaborationAgentName, collaborationAgentGlyph } from '../lib/collaboration-map-presentation'
@@ -25,6 +25,8 @@ import { useAppStore } from '../store'
 import { CollaborationMapPreferences } from '../lib/collaboration-map-preferences'
 import { SettingsNavigation } from './SettingsNavigation'
 import { CollaborationCompactState, CollaborationEssentialState } from './CollaborationCompactState'
+import { COLLABORATION_LABELS, collaborationRelationSummary } from '../lib/collaboration-relation-presentation'
+import { CollaborationRelationArrow, CollaborationRelationKey } from './CollaborationRelationMark'
 import { agentInformationPreview } from '../lib/agent-information-preview'
 import '@xyflow/react/dist/base.css'
 import '../styles/collaboration.css'
@@ -36,10 +38,9 @@ type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: st
 type AgentNode = Node<AgentData, 'agent'>
 type AreaNode = Node<AreaData, 'area'>
 type GraphNode = AgentNode | AreaNode
-type RelationPath = { id: string; label: string; route: CollaborationPath; sourceBox: CollaborationBox; targetBox: CollaborationBox; sourceRadius: number; targetRadius: number; sourcePointRadius: number; targetPointRadius: number; relations: readonly CollaborationRelation[]; active: number; startedAt: number; count: number; selected: boolean; emphasis: 'normal' | 'related' | 'muted' }
+type RelationPath = { id: string; label: string; title: string; detail: string; unconfirmed: boolean; route: CollaborationPath; sourceBox: CollaborationBox; targetBox: CollaborationBox; sourceRadius: number; targetRadius: number; sourcePointRadius: number; targetPointRadius: number; relations: readonly CollaborationRelation[]; active: number; startedAt: number; count: number; selected: boolean; emphasis: 'normal' | 'related' | 'muted' }
 const emptyHandles: NodeHandle[] = [], emptyEdges: never[] = []
 const sameItems = <T,>(left: readonly T[], right: readonly T[]) => left.length === right.length && left.every((item, index) => item === right[index])
-export const COLLABORATION_LABELS = { communication: 'Messages', creation: 'Created', supervision: 'Dispatch' } as const
 const colors = { communication: 'var(--green)', creation: 'var(--text-2)', supervision: 'var(--amber)' } as const
 const MapMotionContext = createContext(true)
 const MapReadingProxyContext = createContext<(element: HTMLSpanElement | null) => (() => void) | undefined>(() => undefined)
@@ -279,9 +280,12 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       const sourceRadius = sourceGlyph.overviewRadius, targetRadius = targetGlyph.overviewRadius
       const sourcePointRadius = sourceGlyph.pointRadius, targetPointRadius = targetGlyph.pointRadius
       const count = connection.relations.reduce((count, relation) => count + relation.evidence.length, 0)
-      const label = `${COLLABORATION_LABELS[first.kind]}: ${from} → ${to} · ${count} original ${count === 1 ? 'record' : 'records'}`
+      const { title, unconfirmed } = old && sameItems(old.relations, connection.relations) ? old
+        : collaborationRelationSummary(first.kind, first.kind === 'creation' ? connection.relations.flatMap(relation => relation.evidence) : [])
+      const detail = `${from} → ${to} · ${count} original ${count === 1 ? 'record' : 'records'}`
+      const label = `${title}: ${detail}`
       const path: RelationPath = old?.route === route && old.sourceBox === sourceBox && old.targetBox === targetBox && old.label === label && old.sourceRadius === sourceRadius && old.targetRadius === targetRadius && old.sourcePointRadius === sourcePointRadius && old.targetPointRadius === targetPointRadius && old.active === (pulse?.id ?? 0) && old.selected === selected && old.emphasis === emphasis && sameItems(old.relations, connection.relations) ? old : {
-        id: connection.id, label, route, sourceBox, targetBox, sourceRadius, targetRadius, sourcePointRadius, targetPointRadius, relations: connection.relations, active: pulse?.id ?? 0, startedAt: pulse?.startedAt ?? 0, selected, emphasis,
+        id: connection.id, label, title, detail, unconfirmed, route, sourceBox, targetBox, sourceRadius, targetRadius, sourcePointRadius, targetPointRadius, relations: connection.relations, active: pulse?.id ?? 0, startedAt: pulse?.startedAt ?? 0, selected, emphasis,
         count
       }
       next.set(connection.id, { path }); return [path]
@@ -310,7 +314,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       <button type="button" className="icon-button" aria-label="Overview" title="Show the whole map" onClick={() => { layout.settle(); ++gestures.current; animateCamera(duration => flow.current?.fitView({ padding: .1, maxZoom: 1, includeHiddenNodes: true, duration })) }}><SemanticIcon name="layout.expand" size={14} /></button>
     </div>
     {motion.issue ? <p className="collaboration-canvas__motion-issue" role="status">{motion.issue}</p> : null}
-    <div className="collaboration-canvas__legend" aria-label="Map legend"><div aria-label="Agent states">{(['active', 'idle', 'closed', 'unknown'] as const).map(tier => <span key={tier}><i className="collaboration-node-key" data-tier={tier} aria-hidden="true" />{{active: 'Active', idle: 'Idle', closed: 'Closed', unknown: 'Unconfirmed'}[tier]}</span>)}</div><div aria-label="Relation legend">{Object.entries(COLLABORATION_LABELS).map(([kind, label]) => <span key={kind}><i className="collaboration-relation-key" data-kind={kind} aria-hidden="true" />{label}</span>)}</div></div></div>
+    <div className="collaboration-canvas__legend" aria-label="Map legend"><div aria-label="Agent states">{(['active', 'idle', 'closed', 'unknown'] as const).map(tier => <span key={tier}><i className="collaboration-node-key" data-tier={tier} aria-hidden="true" />{{active: 'Active', idle: 'Idle', closed: 'Closed', unknown: 'Unconfirmed'}[tier]}</span>)}</div><div aria-label="Relation legend">{Object.entries(COLLABORATION_LABELS).map(([kind, label]) => <span key={kind}><CollaborationRelationKey kind={kind as CollaborationRelation['kind']} />{label}</span>)}</div></div></div>
     {locate?.agentId && geometry.size > 0 && !graphAreas.some(area => area.members.includes(locate.agentId!)) ? <p className="collaboration-canvas__issue" role="status">The original Agent location is unconfirmed. Its identity and sources are retained.</p> : null}
     {layout.issues.size ? <div className="collaboration-canvas__issue" role="status"><span>{layout.issues.has('layout') ? 'Layout needs attention. Original Agents and records are retained.' : `${layout.issues.size} ${layout.issues.size === 1 ? 'connection could' : 'connections could'} not be drawn. Original records remain readable.`}</span> <button type="button" onClick={layout.retry}>Retry layout</button><details><summary>Details</summary>{[...layout.issues].map(([id, message]) => <p key={id}>{message}</p>)}</details></div> : layout.busy ? <span className="collaboration-canvas__progress" role="status">{geometry.size ? 'Drawing connections…' : 'Arranging map…'}</span> : null}
     {!visibleIds.size ? <p className="collaboration-canvas__empty">No Agents in this map.</p> : null}
@@ -327,19 +331,29 @@ const CollaborationRelations = memo(function CollaborationRelations({ paths, act
   const zoom = useStore(state => state.transform[2])
   const markerId = useId().replace(/:/g, '')
   return <ViewportPortal><svg className="collaboration-connections" style={{ position: 'absolute', width: 1, height: 1, overflow: 'visible', pointerEvents: 'none' }}>
-    <defs>{Object.entries(colors).map(([kind, color]) => <marker key={kind} id={`${markerId}-${kind}`} viewBox="0 0 10 10" refX={10} refY={5} markerUnits="userSpaceOnUse" markerWidth={8 / zoom} markerHeight={8 / zoom} orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={color} /></marker>)}</defs>
+    <defs>{Object.entries(colors).map(([kind, color]) => <marker key={kind} id={`${markerId}-${kind}`} viewBox="0 0 20 12" refX={19} refY={6} markerUnits="userSpaceOnUse" markerWidth={20 / zoom} markerHeight={12 / zoom} orient="auto-start-reverse" style={{ color }}><CollaborationRelationArrow kind={kind as CollaborationRelation['kind']} /></marker>)}</defs>
     {visible.map(path => <RelationView key={path.id} record={path} markerId={markerId} zoom={zoom} active={active} onSelect={onSelect} onClear={onClear} />)}
   </svg></ViewportPortal>
 })
 const RelationView = memo(function RelationView({ record, markerId, zoom, active, onSelect, onClear }: { record: RelationPath; markerId: string; zoom: number; active: boolean; onSelect(path: RelationPath): void; onClear(): void }) {
   const kind = record.relations[0]!.kind, { labelX, labelY } = record.route, motion = useContext(MapMotionContext)
-  const tooltip = useWorkbenchNameTooltip(record.label, '', !active, { placement: 'bottom', pointerPassThrough: true })
+  const tooltip = useWorkbenchNameTooltip(record.title, record.detail, !active, { placement: 'bottom', pointerPassThrough: true })
   const show = (event: { currentTarget: SVGGElement }) => {
     const anchor = event.currentTarget.querySelector<SVGPathElement>('.react-flow__edge-path')
     if (anchor) tooltip.showFor(anchor)
   }
   const preferences = useContext(CollaborationMapPreferences)
-  const path = collaborationVisiblePath(record.route, record.sourceBox, record.targetBox, zoom, record.sourceRadius, record.targetRadius, record.sourcePointRadius, record.targetPointRadius, preferences)
+  const visibleRoute = collaborationVisibleRoute(record.route, record.sourceBox, record.targetBox, zoom, record.sourceRadius, record.targetRadius, record.sourcePointRadius, record.targetPointRadius, preferences)
+  const { path, points } = visibleRoute
+  const end = points.at(-1)
+  let before = end
+  for (let index = points.length - 2; end && index >= 0; index--) {
+    const point = points[index]!
+    if (point.x !== end.x || point.y !== end.y) { before = point; break }
+  }
+  const dx = end && before ? end.x - before.x : 0, dy = end && before ? end.y - before.y : 0, length = Math.hypot(dx, dy)
+  const horizontal = Math.abs(dx) >= Math.abs(dy)
+  const caption = end && length > 0 && (record.unconfirmed || zoom >= .7 || record.emphasis === 'related')
   const delay = useMemo(() => Math.min(0, record.startedAt - Date.now()), [record.active, record.startedAt, motion])
   return <><g className={`react-flow__edge selectable nopan collaboration-edge-group--${kind}`} data-id={record.id} data-emphasis={record.emphasis} data-recent={record.active ? true : undefined} tabIndex={0} role="button" aria-label={record.label} aria-pressed={record.selected} {...tooltip.props}
     style={{ pointerEvents: 'stroke' }} onMouseEnter={show} onMouseLeave={event => { if (!event.currentTarget.contains(event.currentTarget.ownerDocument.activeElement)) tooltip.hide() }} onFocus={show} onClick={event => { event.stopPropagation(); onSelect(record) }} onKeyDown={event => {
@@ -350,6 +364,8 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, active
     {record.active && motion ? <path key={record.active} d={path} pathLength={1} style={{ animationDelay: `${delay}ms` }} className="collaboration-edge__pulse" data-kind={kind} /> : null}
     {record.active && motion && kind === 'communication' ? <circle key={`packet-${record.active}`} r={4 / zoom} className="collaboration-edge__packet" data-kind={kind} aria-hidden="true"
       style={{ offsetPath: `path("${path}")`, animationDelay: `${delay}ms` }} /> : null}
+    {caption ? <EdgeLabelRenderer><span className="collaboration-edge__caption" data-creation-unconfirmed={record.unconfirmed} data-relation-id={record.id} aria-hidden="true"
+      style={{ transform: `translate(${end.x - dx / length * 24 / zoom}px, ${end.y - dy / length * 24 / zoom}px) scale(${1 / zoom}) translate(${horizontal ? dx > 0 ? '-100%' : '0' : '-50%'}, ${horizontal ? 'calc(-100% - 5px)' : dy > 0 ? '-100%' : '0'})` }}>{record.title}</span></EdgeLabelRenderer> : null}
     {record.emphasis === 'related' && record.count > 1 && !record.selected && !tooltip.props['aria-describedby'] ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}
   </g>{tooltip.content}</>
 })

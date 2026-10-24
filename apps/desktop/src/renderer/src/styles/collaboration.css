@@ -22,9 +22,9 @@
 .collaboration-map__results p { padding: 4px 8px; }
 .collaboration-filter-menu { min-width: 190px; }
 .collaboration-filter-menu__check { width: 14px; height: 14px; }
-.collaboration-relation-key { display: inline-block; flex: 0 0 14px; width: 14px; height: 0; border-top: 2px solid var(--green); }
-.collaboration-relation-key[data-kind=creation] { border-top-style: dashed; border-color: var(--text-2); }
-.collaboration-relation-key[data-kind=supervision] { border-color: var(--amber); }
+.collaboration-relation-key { display: inline-block; flex: 0 0 22px; color: var(--green); }
+.collaboration-relation-key[data-kind=creation] { color: var(--text-2); }
+.collaboration-relation-key[data-kind=supervision] { color: var(--amber); }
 .collaboration-map__world { display: flex; position: relative; flex: 1; min-width: 0; min-height: 0; }
 .collaboration-map__locate { position: absolute; z-index: 5; top: 12px; left: 12px; display: flex; align-items: center; gap: 6px; max-width: min(280px, 70%); min-height: 28px; padding: 4px 8px; background: var(--surface-1); color: var(--text-2); border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: var(--fs-meta); cursor: pointer; box-shadow: var(--elev-1); }
 .collaboration-map__locate span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -241,8 +241,6 @@
 .collaboration-canvas__legend { position: relative; z-index: 5; order: -1; display: grid; gap: 7px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-1); color: var(--text-2); font-size: 10px; pointer-events: none; }
 .collaboration-canvas__legend > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 13px; }
 .collaboration-canvas__legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.collaboration-canvas__legend .collaboration-relation-key { position: relative; width: 16px; }
-.collaboration-canvas__legend .collaboration-relation-key::after { content: ''; position: absolute; width: 4px; height: 4px; top: -3px; right: 0; border-top: 1px solid currentColor; border-right: 1px solid currentColor; transform: rotate(45deg); }
 .collaboration-node-key { display: block; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--text-2); background: var(--text-2); }
 .collaboration-node-key[data-tier=active] { background: var(--green); border-color: var(--green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 16%, transparent); }
 .collaboration-node-key[data-tier=closed] { width: 5px; height: 5px; margin-inline: 1.5px; border: 0; background: var(--text-3); }
@@ -258,3 +256,6 @@
   .collaboration-canvas__legend { margin-right: auto; }
   .collaboration-canvas__controls { margin-left: auto; }
 }
+
+.collaboration-edge__caption { position: absolute; transform-origin: 0 0; pointer-events: none; white-space: nowrap; padding: 1px 4px; border-radius: 3px; background: var(--surface-1); color: var(--text-2); font-size: 11px; line-height: 16px; }
+.collaboration-edge__caption[data-creation-unconfirmed=true] { color: var(--text); }
