@@ -21,7 +21,7 @@ import {
 import { errorMessage } from './delivery'
 import { createLocalDrafts, type PromptAttempt, type ResponseAttempt } from './local-drafts'
 import { useHostedConversation, type MobileConnection } from './use-hosted-conversation'
-import { MobileMessageTools } from './MobileMessageTools'
+import { MobileMessageTools, MobilePosturePicker } from './MobileMessageTools'
 import { MobileMailbox } from './MobileMailbox'
 import { MobileAttachments, type MobileAttachmentControls } from './MobileAttachments'
 import { fileUploadScopeMatches } from './attachments'
@@ -97,10 +97,43 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   }, [reading.session, agentSessionId, client, local])
 
   const session = reading.session
-  const questionCapability = (() => {
-    try { return { route: session?.providerId ? client?.catalog?.().find(provider => provider.id === session.providerId)?.capabilities.asyncQuestionReply : undefined } }
-    catch (error) { return { route: undefined, issue: errorMessage(error) } }
+  const isWorking = Boolean(session && (currentActivity || retainedActivity?.state === 'working'))
+  const providerCapabilities = (() => {
+    try {
+      const provider = session?.providerId ? client?.catalog?.().find(entry => entry.id === session.providerId) : undefined
+      return { route: provider?.capabilities.asyncQuestionReply, postureControl: provider?.postureControl }
+    } catch (error) { return { route: undefined, postureControl: undefined, issue: errorMessage(error) } }
   })()
+  const questionCapability = { route: providerCapabilities.route, issue: providerCapabilities.issue }
+  const postureControl = providerCapabilities.postureControl
+  async function interruptCurrentTurn() {
+    if (!client?.signalAgent || !session || !agentSessionId) return
+    try {
+      const originalSession = client.agentSession(agentSessionId)
+      if (originalSession.agentSessionId !== session.agentSessionId || originalSession.run.runId !== session.run.runId) {
+        setCopyNotice('原 Session 或 Run 已改变，未发送中断信号；原草稿保留。')
+        return
+      }
+      await client.signalAgent(originalSession.agentSessionId, { ...originalSession.run }, 'SIGINT')
+      setCopyNotice(null)
+    } catch (error) {
+      setCopyNotice(`中断当前回复未确认：${errorMessage(error)}`)
+    }
+  }
+  async function changePosture(modeId: string) {
+    if (!client?.setAgentPosture || !session || !agentSessionId) return
+    try {
+      const originalSession = client.agentSession(agentSessionId)
+      if (originalSession.agentSessionId !== session.agentSessionId || originalSession.run.runId !== session.run.runId) {
+        setCopyNotice('原 Session 或 Run 已改变，未切换模式；原草稿保留。')
+        return
+      }
+      await client.setAgentPosture({ agentSessionId: originalSession.agentSessionId, expectedRun: { ...originalSession.run }, modeId })
+      setCopyNotice(null)
+    } catch (error) {
+      setCopyNotice(`模式切换未完成：${errorMessage(error)}`)
+    }
+  }
   // A reader is scoped to its exact Host connection and persistent Agent, not to a replaceable Run.
   const historyConnection = useRef({ client, generation: 0 })
   if (historyConnection.current.client !== client) historyConnection.current = { client, generation: historyConnection.current.generation + 1 }
@@ -359,7 +392,12 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
               return appendNamedFileReference('', path, original.identity.name)
             }, { separate: true })
           }} />}
-          tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal} />} mailbox={<MobileMailbox key={historyConnection.current.generation} client={client} session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
+          tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal}
+            {...(isWorking && available && Boolean(draft.trim()) ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})} />}
+          {...(postureControl && available ? { postureTool: <MobilePosturePicker control={postureControl} disabled={!available} onSet={modeId => { void changePosture(modeId) }} /> } : {})}
+          primaryAction={isWorking && !draft.trim() ? 'stop' : 'send'}
+          {...(isWorking && available ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})}
+          mailbox={<MobileMailbox key={historyConnection.current.generation} client={client} session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
           {...(reading.projection ? { inputs: reading.projection.inputs } : {})}
           {...(reading.projection?.timeline.reference?.hostId ? { sourceHostId: reading.projection.timeline.reference.hostId } : {})}
           refresh={() => { void reading.refresh() }} historyScope={historyScope} readHistory={readInputHistory} visible={visible}
