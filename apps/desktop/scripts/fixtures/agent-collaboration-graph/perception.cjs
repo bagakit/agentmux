@@ -33,7 +33,7 @@ module.exports = async function perception({ win, result, read, click, key, fram
       const canonical = ids => [...new Set(ids.map(id => JSON.parse(id)[1]))].sort()
       assert.deepEqual(canonical(actual.input.ids), result.perceptionGrowth.expectedAgentKeys.slice().sort(), 'Every exact original identity enters the real Worker')
       assert.deepEqual(canonical(actual.boxes.ids), result.perceptionGrowth.expectedAgentKeys.slice().sort(), 'Every exact original identity receives world geometry')
-      assert.equal(actual.input.areas.filter(area => area.members === 0).length, 60, 'The original Worker retains all sixty empty areas')
+      assert.deepEqual(actual.input.areas.filter(area => result.distribution.emptyAreaNodeIds.includes(area.id) && area.members === 0).map(area => area.id).sort(), result.distribution.emptyAreaNodeIds.slice().sort(), 'The original Worker retains all sixty exact empty areas; nonempty parent territories remain separate')
       assert.ok(result.perceptionGrowth.unassociatedMembers > 0, 'Unrelated members stay in the original catalog')
       await overview('perception-dense-empty-projects-overview'); await assertHud('dense-world-with-empty-projects')
       await measure('perception-overview-idle-240', () => pause(700))

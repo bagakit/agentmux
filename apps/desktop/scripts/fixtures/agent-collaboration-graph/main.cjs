@@ -119,7 +119,7 @@ app.whenReady().then(async () => {
       await key('Enter')
       await until('original combobox committed', () => read(`document.querySelector('[aria-label="Find Agent in map"]').value===''&&!document.querySelector('[aria-label="Matching Agents"]')`))
       await until('located original card or mark', () => read(`Boolean(document.querySelector('.collaboration-map [data-session-id=${JSON.stringify(id)}]'))`))
-      await settle(); const point = await rect(`.collaboration-map [data-session-id="${id}"]`); assert.ok(point.hit, 'Located Agent is actually actionable')
+      await until('located Agent is actually actionable after its finite camera transition', async () => (await rect(`.collaboration-map [data-session-id="${id}"]`)).hit)
     }
     const measure = async (label, action) => { await read(`window.graphCapture.beginMeasurement(${JSON.stringify(label)})`); try { await action() } finally { result.performance.push(await read('window.graphCapture.endMeasurement()')); await checkpoint() } }
     const worldProjection = () => read(`(()=>{
@@ -195,7 +195,7 @@ app.whenReady().then(async () => {
       await click('button.surface-navigation__focus'); await until('unselected original Focus List', () => read(`window.graphCapture.facts().focusView==='list'&&window.graphCapture.facts().selectedSession===null`)); await frame('unselected-focus-list')
       await click('[aria-label="Map"]'); await mapReady(); await read('window.graphCapture.rememberMap()'); const target=(await facts()).mapTarget; assert.equal(target.kind,'focus'); assert.deepEqual(target.subject,{hostId:'local',agentSessionId:'fixture-ui'},'An exact original Space Agent remains the real default target'); const chrome=await fullMap()
       await until('initial working area is readable', () => read(`document.querySelectorAll('.collaboration-map .focus-context[data-session-id]').length>0`)); const camera=await matrix(), sample=(await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input&&sample.boxes).at(-1)
-      const canonical=[...new Set(sample.boxes.ids.map(id=>JSON.parse(id)[1]))].sort(); assert.deepEqual(canonical,result.distribution.expectedInitialAgentKeys.slice().sort()); assert.equal(sample.input.areas.filter(area=>area.members===0).length,result.distribution.permanentEmptyAreas)
+      const canonical=[...new Set(sample.boxes.ids.map(id=>JSON.parse(id)[1]))].sort(); assert.deepEqual(canonical,result.distribution.expectedInitialAgentKeys.slice().sort()); assert.deepEqual(sample.input.areas.filter(area=>result.distribution.emptyAreaNodeIds.includes(area.id)&&area.members===0).map(area=>area.id).sort(),result.distribution.emptyAreaNodeIds.slice().sort())
       result.initialView={chrome,camera,areas:sample.input.areas.length,emptyAreas:result.distribution.permanentEmptyAreas,canonicalAgents:canonical.length,entryIntent:'GUI List to Map without an explicit Agent argument',listExecutionSelection:null,target}; await intact(); await frame('map-first-context-readable')
       await click('button[aria-label="Space: show terminal and file workbench"]'); await until('original sidebar presentation returned', async () => { const state=await facts(); return state.chrome.rail.length>0&&state.chrome.dock.length>0 }); await intact()
     })
@@ -260,7 +260,7 @@ app.whenReady().then(async () => {
     })
     if (scenario === 'perception' || scenario === 'perception-scale') {
       await require('./perception.cjs')({ win, result, read, click, key, frame, check, facts, activity, motionFrame, intact, matrix, mapReady, closeReader, locate, pause, until, settle, fullMap, measure, pan, overview, observeDenseRelations, denseOnly: scenario === 'perception-scale' })
-      if (scenario === 'perception-scale') await require('./terrain.cjs')({ win, result, read, click, key, frame, check, intact, mapReady, closeReader, locate, pause, until, settle, matrix, measure })
+      if (scenario === 'perception-scale') await require('./terrain.cjs')({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, locate, pause, until, settle, matrix, measure })
     } else {
     await check('focus-locates-in-the-same-map', async () => {
       await click('[aria-label="List"]'); await until('original Focus Locate entry', () => read(`Boolean(document.querySelector('[aria-label="Locate Agent in map"]'))`)); await frame('focus-locate-entry')
@@ -292,7 +292,7 @@ app.whenReady().then(async () => {
       await click('button[aria-label="Space: show terminal and file workbench"]'); await until('original Space tools preference survives Map', () => read(`Boolean(document.querySelector('[aria-label="Hide Space tools"]'))`)); await click('button.surface-navigation__focus'); await mapReady(); await intact()
     })
     await check('compact-empty-areas-retain-closed-members', async () => {
-      const sample = (await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input&&sample.boxes).at(-1), empty = sample.input.areas.filter(area=>area.members===0)
+      const sample = (await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input&&sample.boxes).at(-1), empty = sample.input.areas.filter(area=>result.distribution.emptyAreaNodeIds.includes(area.id)&&area.members===0)
       assert.ok(empty.length>0,'Nonempty original empty-area sample'); const boxes = empty.map(area=>sample.boxes.areas.find(box=>box.id===area.id)); assert.ok(boxes.every(Boolean)); assert.ok(boxes.every(box=>box.height===32),'Actual empty areas use header-only world geometry')
       const closedIds = sample.boxes.ids.filter(id=>JSON.parse(JSON.parse(id)[1])[1].startsWith('fixture-retired-')); assert.equal(closedIds.length,4,'All original closed members retain actual boxes')
       assert.equal(empty.length,60,'Permanent empty areas remain present alongside occupied areas')
@@ -517,7 +517,7 @@ app.whenReady().then(async () => {
         await measure('grow-'+size, async () => { result['growth'+size]=await read(`window.graphCapture.grow(${size})`); await until('original snapshot membership '+size, () => read(`window.graphCapture.facts().ids.length===${size-4}`)); await until('full original Map world '+size, () => read(`document.querySelector('[aria-label="Map sources"]')?.title.includes('${size} Agents')`)); await until('all mixed world boxes '+size, () => read(`window.graphCapture.workerSamples().some(sample=>sample.input?.nodes>=${size}&&sample.boxes?.agents===sample.input.nodes)`)); await until('finite native layout '+size, () => read(`!document.querySelector('.collaboration-canvas__progress')`)); await pause(350) })
         const workers = await read('window.graphCapture.workerSamples()'), sample = workers.filter(sample=>sample.input?.nodes>=size&&sample.boxes?.agents===sample.input.nodes).at(-1)
         assert.ok(sample&&Object.keys(sample.input.sizes).length>=3,'Actual Worker places mixed sizes, including isolated/closed members'); const expected=result['growth'+size].expectedAgentKeys.slice().sort(), canonical=ids=>[...new Set(ids.map(id=>JSON.parse(id)[1]))].sort(); assert.deepEqual(canonical(sample.input.ids),expected,'Every original identity enters the real Worker'); assert.deepEqual(canonical(sample.boxes.ids),expected,'Every original identity receives actual world geometry'); result['world'+size]=sample
-        assert.equal(sample.input.areas.filter(area=>area.members===0).length,60); await overview('map-world-overview-'+size)
+        assert.deepEqual(sample.input.areas.filter(area=>result.distribution.emptyAreaNodeIds.includes(area.id)&&area.members===0).map(area=>area.id).sort(),result.distribution.emptyAreaNodeIds.slice().sort()); await overview('map-world-overview-'+size)
         const routing = await read(`(()=>{const samples=window.graphCapture.workerSamples(),geometryIndex=samples.findLastIndex(sample=>sample.input?.nodes>=${size}),input=samples[geometryIndex].input,expected=[...new Set([...input.edges.map(edge=>edge.id),...samples.slice(geometryIndex).flatMap(sample=>sample.request?.connectionIds??[])])],painted=[...document.querySelectorAll('.collaboration-map .react-flow__edge')].map(edge=>edge.dataset.id),missing=expected.filter(id=>!painted.includes(id)),errors=samples.flatMap(sample=>(sample.errors??[]).map(error=>({...error,request:sample.request}))).filter(error=>expected.includes(error.connectionId));return{geometryRequest:samples[geometryIndex].request,expectedConnectionIds:expected,paintedConnectionIds:painted,missingConnectionIds:missing,originalErrors:errors,diagnostics:[...document.querySelectorAll('.collaboration-canvas__issue')].map(element=>element.textContent),boundary:'Same original native scale scene; exact original Worker error receipts and real Overview DOM. Earlier errors remain historical; only currently missing original IDs describe current absent ink.'}})()`)
         ;(result.scaleRouting ??= {})[size] = routing
         if (size === 480) {

@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 
 /** Native input over the original App/Graph/Worker. No camera or geometry is assigned. */
-module.exports = async function terrain({ win, result, read, click, frame, check, intact, mapReady, closeReader, locate, pause, until, matrix, measure }) {
+module.exports = async function terrain({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, locate, pause, until, matrix, measure }) {
   const original = await read('window.graphCapture.terrain()')
   assert.equal(original.areas.length, 3); assert.equal(original.agents.length, 3)
   const areaId = id => JSON.stringify(['area', id])
@@ -11,14 +11,14 @@ module.exports = async function terrain({ win, result, read, click, frame, check
   const closeDetails = async () => { await closeReader(); if (await read(`Boolean(document.querySelector('[aria-label="Close map details"]'))`)) await click('[aria-label="Close map details"]') }
   const zoom = () => read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`)
   async function wheelTo(target) {
-    for (let attempt = 0; attempt < 16; attempt++) {
+    for (let attempt = 0; attempt < 24; attempt++) {
       const current = await zoom()
-      if (Math.abs(Math.log(target / current)) < .008) return current
+      if (Math.abs(Math.log(target / current)) < .0008) return current
       const point = await read(`(()=>{const r=document.querySelector('.collaboration-canvas').getBoundingClientRect();return{x:r.x+r.width*.52,y:r.y+r.height*.52}})()`)
       await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: Math.max(-180, Math.min(180, -Math.log2(target / current) / .002)) })
       await pause(120)
     }
-    assert.ok(Math.abs(Math.log(target / await zoom())) < .04, 'Native wheel reaches the intended intermediate reading scale')
+    assert.ok(Math.abs(Math.log(target / await zoom())) < .002, 'Native wheel reaches the intended intermediate reading scale')
     return zoom()
   }
   await check('terrain-original-nesting-fold-and-exact-reveal', async () => {
@@ -60,6 +60,7 @@ module.exports = async function terrain({ win, result, read, click, frame, check
     const samples = []
     for (const target of [.319, .321, .44, .46, .62, .72, .82]) {
       const actual = await wheelTo(target)
+      if (target === .319 || target === .321) assert.equal(actual < .32, target < .32, 'The actual camera crosses the glyph boundary on the declared side')
       await frame('terrain-lod-' + String(target).replace('.', '-'))
       samples.push({ target, actual, census: await read('window.graphCapture.census()') })
     }
@@ -73,5 +74,30 @@ module.exports = async function terrain({ win, result, read, click, frame, check
     await read('window.graphCapture.appearance("dark")'); await frame('terrain-narrow-dark')
     result.terrainLod = { samples, conditions: 'Actual native wheel input, original shared card and visible hull, unchanged Worker geometry; full frames are independent-review inputs.' }
     await intact()
+  })
+  await check('terrain-held-reader-keyboard-and-motion-choice', async () => {
+    win.setContentSize(1440, 900); await pause(200)
+    await locate('fixture-terrain-a'); await closeDetails(); await wheelTo(.9)
+    // Exact DOM focus is an observation/keyboard entry, not a Store or camera seed.
+    await read(`(()=>{const anchor=document.querySelector('.collaboration-agent__detail-layer:not([inert]) .focus-context[data-session-id="fixture-terrain-a"]');if(!anchor)throw Error('No original shared card anchor');window.__terrainAnchor=anchor;anchor.focus()})()`)
+    await key('ArrowDown')
+    await until('keyboard enters the sole original Reader', () => read(`Boolean(document.activeElement?.closest('.agent-information-reader'))`))
+    await read(`window.__terrainReader=document.querySelector('.agent-information-reader')`)
+    await wheelTo(.34)
+    const held = await read(`(()=>{const anchor=window.__terrainAnchor,layer=anchor.closest('[data-map-layer]');return{sameReader:window.__terrainReader===document.querySelector('.agent-information-reader'),readers:document.querySelectorAll('.agent-information-reader').length,sameAnchor:anchor.isConnected,opacity:getComputedStyle(layer).opacity,inert:layer.inert,proxy:anchor.closest('[data-collaboration-agent]').querySelector('.collaboration-agent__focus-proxy')?.textContent}})()`)
+    assert.equal(held.sameReader,true);assert.equal(held.readers,1);assert.equal(held.sameAnchor,true);assert.equal(held.opacity,'1');assert.equal(held.inert,false);assert.ok(held.proxy?.includes('LOD 绘制'))
+    await frame('terrain-held-reader-overview')
+    await key('Escape'); await until('Reader returns to its exact original anchor', () => read(`!document.querySelector('.agent-information-reader')&&document.activeElement===window.__terrainAnchor`))
+    await frame('terrain-held-focus-overview')
+    await click('[aria-label="Find Agent in map"]'); await wheelTo(.72)
+    const toggle='[aria-label="Map animations"]'
+    if(await read(`document.querySelector('${toggle}').getAttribute('aria-pressed')!=='false'`))await click(toggle)
+    await until('original effective motion off', () => read(`document.querySelector('${toggle}').getAttribute('aria-pressed')==='false'&&document.querySelector('${toggle}').getAttribute('aria-busy')!=='true'`))
+    await click('[aria-label="Overview"]'); const immediate=await matrix();await pause(100);assert.equal(await matrix(),immediate,'Motion Off completes the explicit camera action immediately')
+    await read('window.graphCapture.live(true,"fixture-terrain-a","fixture-terrain-b")');await pause(100)
+    assert.equal(await read(`document.querySelectorAll('.collaboration-edge__packet,.collaboration-edge__pulse').length`),0,'Motion Off retains static facts without moving packets')
+    await frame('terrain-motion-off-static')
+    await click(toggle);await until('original explicit motion on', () => read(`document.querySelector('${toggle}').getAttribute('aria-pressed')==='true'&&document.querySelector('${toggle}').getAttribute('aria-busy')!=='true'`))
+    await intact();result.terrainHeld={held,offCamera:immediate}
   })
 }

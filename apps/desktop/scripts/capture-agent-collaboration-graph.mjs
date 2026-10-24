@@ -12,9 +12,40 @@ const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'app
 const fixture = join(desktop, 'scripts/fixtures/agent-collaboration-graph')
 const scriptPath = fileURLToPath(import.meta.url)
 const compiling = process.argv[2] === '--compile'
+const verifying = process.argv[2] === '--verify'
 const scenario = process.argv[4] === '--scenario' ? process.argv[5] : 'readability'
 assert.ok(['readability', 'perception', 'perception-scale'].includes(scenario), 'Use a declared capture scenario')
-assert.ok(compiling ? process.argv.length === 5 : process.argv[2] === '--evidence' && process.argv[3] && (process.argv.length === 4 || process.argv.length === 6 && process.argv[4] === '--scenario'), 'Use --evidence <new private evidence directory> [--scenario perception|perception-scale]')
+assert.ok(compiling ? process.argv.length === 5 : ['--evidence', '--verify'].includes(process.argv[2]) && process.argv[3] && (process.argv.length === 4 || process.argv.length === 6 && process.argv[4] === '--scenario'), 'Use --evidence <new private evidence directory> or --verify <completed evidence directory> [--scenario perception|perception-scale]')
+if (verifying) {
+  // Join the exact completed native observation once; never recapture or turn a
+  // failed observation green. A changed source, harness or PNG requires new evidence.
+  const directory = resolve(process.argv[3]), receipt = JSON.parse(await readFile(join(directory, 'receipt.json'), 'utf8'))
+  const digest = bytes => createHash('sha256').update(bytes).digest('hex')
+  assert.equal(receipt.schema, 'agentmux.collaboration-graph-capture.v1')
+  assert.equal(receipt.scenario, 'focus-map-' + scenario)
+  assert.equal(receipt.phase, 'complete'); assert.equal(receipt.capturedPass, true); assert.equal(receipt.actual?.passed, true)
+  assert.equal(receipt.process?.exitConfirmed, true); assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.process.timedOut, false)
+  assert.deepEqual(receipt.changedInputs, []); assert.deepEqual(receipt.changedHarness, [])
+  assert.deepEqual(receipt.actual.failures, []); assert.deepEqual(receipt.actual.rendererErrors, [])
+  assert.ok(receipt.actual.checks?.length && receipt.actual.checks.every(check => check.passed === true))
+  for (const name of ['initial-gui-entry-keeps-accurate-context-and-full-width', 'source-cli-original-app-admission-and-dom-inspect', 'focus-list-map-and-original-return', ...(scenario === 'perception-scale' ? ['perception-original-large-world-and-consumer-cost', 'terrain-original-nesting-fold-and-exact-reveal', 'terrain-native-continuous-lod-and-selection-cost', 'terrain-held-reader-keyboard-and-motion-choice'] : [])]) assert.ok(receipt.actual.checks.some(check => check.name === name && check.passed === true), 'Missing actual native check: ' + name)
+  for (const key of ['inputs', 'harness']) {
+    const entries = Object.entries(receipt[key] ?? {}); assert.ok(entries.length, 'Nonempty exact ' + key)
+    for (const [file, sha] of entries) { const target = resolve(root, file); assert.ok(target.startsWith(root + sep)); assert.equal(digest(await readFile(target)), sha, 'Changed candidate ' + key + ': ' + file) }
+  }
+  assert.ok(receipt.frames?.length)
+  assert.deepEqual(receipt.frames.map(({ sha256, ...frame }) => frame), receipt.actual.frames)
+  for (const frame of receipt.frames) { const target = resolve(directory, frame.file); assert.ok(target.startsWith(directory + sep)); assert.equal(digest(await readFile(target)), frame.sha256, 'Changed native frame: ' + frame.file) }
+  if (scenario === 'perception-scale') {
+    assert.ok(receipt.actual.perceptionScale?.input?.nodes >= 240)
+    assert.equal(receipt.actual.perceptionScale.boxes.agents, receipt.actual.perceptionScale.input.nodes)
+    for (const label of ['terrain-nested-dark', 'terrain-folded-dark', 'terrain-expanded-dark', 'terrain-deep-agent-revealed', 'terrain-lod-0-319', 'terrain-lod-0-321', 'terrain-lod-0-44', 'terrain-lod-0-46', 'terrain-lod-0-62', 'terrain-lod-0-72', 'terrain-lod-0-82', 'terrain-lod-light', 'terrain-narrow-light', 'terrain-narrow-dark', 'terrain-held-reader-overview', 'terrain-held-focus-overview', 'terrain-motion-off-static']) assert.ok(receipt.frames.some(frame => frame.label === label), 'Missing complete native frame: ' + label)
+    const samples = receipt.actual.terrainLod.samples
+    assert.ok(samples.length >= 7 && samples.find(sample => sample.target === .319)?.actual < .32 && samples.find(sample => sample.target === .321)?.actual > .32, 'Actual camera samples cross the glyph boundary')
+  }
+  console.log(JSON.stringify({ passed: true, evidence: directory, receiptSHA256: digest(await readFile(join(directory, 'receipt.json'))), nativeChecks: receipt.actual.checks.length, completeFrames: receipt.frames.length, aestheticReview: 'separate-independent-artifact', restart: 'separate-runtime-artifact' }))
+  process.exit(0)
+}
 const evidence = resolve(process.argv[compiling ? 4 : 3]); await mkdir(evidence, { recursive: true })
 if (!compiling) assert.equal((await readdir(evidence)).length, 0, 'Keep prior captures; use an empty evidence directory')
 const privateRoot = compiling ? resolve(process.argv[3]) : await mkdtemp(join(tmpdir(), 'amux-collaboration-capture-')), compiled = join(privateRoot, 'compiled')
