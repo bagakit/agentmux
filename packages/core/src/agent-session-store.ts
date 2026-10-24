@@ -4096,7 +4096,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         stage = 'mutation'
         await operation()
         signal?.throwIfAborted()
-        stage = 'commit'; this.db.exec('COMMIT'); committed = true
+        stage = 'commit'; await this.commit(signal); committed = true
         if (this.dirty) {
           try { await syncSessionDatabase(this.path) } catch (error) { throw new AgentMuxSessionDurabilityError(error) }
         }
@@ -4127,6 +4127,24 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     })
     this.tail = current.then(() => {}, () => {})
     await current
+  }
+
+  private async commit(signal?: AbortSignal): Promise<void> {
+    const database = this.db
+    for (let attempt = 0; ; attempt += 1) {
+      signal?.throwIfAborted()
+      try {
+        database.exec('COMMIT')
+        return
+      } catch (error) {
+        // A rollback-journal reader can briefly prevent COMMIT. SQLite keeps
+        // this transaction active: yield for that reader, never replay mutation.
+        if ((error as { errcode?: unknown } | null)?.errcode !== 5 || !database.isTransaction || attempt + 1 >= LOCK_ATTEMPTS) throw error
+        await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_JITTER_MS, signal)
+        signal?.throwIfAborted()
+        if (!database.isTransaction) throw error
+      }
+    }
   }
 
   private async acquireLock(
