@@ -19,6 +19,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { ContinuousProgressControl, type ContinuousProgressStatus } from './ContinuousProgressControl'
 import { ComposerPendingDelivery } from './ComposerPendingDelivery'
+import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
 import { useMailboxMotion } from './use-mailbox-motion'
 import type { EditQueuedMessage } from './ComposerQueuedMessageEditor'
 import { ComposerOutbox, type ComposerQueuedMessage, type ArchiveQueuedMessage, type MoveQueuedMessageToDraft } from './ComposerOutbox'
@@ -452,7 +453,8 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
     return <InputMailboxRecord key={row.key} compact externalSelection expanded={detailOnly} detailOnly={detailOnly}
       hostId={inputMailboxHost} item={row.item} group={row.group} failed={journalFailures.get(row.key)}
       reading={reading} onCopy={onCopyQueued} onOpen={selectRecord}
-      related={detailOnly ? renderOriginalHistory(row.group.messages) : null}
+      related={detailOnly ? <>{!row.local.length && row.item.kind === 'controlled' && row.item.receipt ? <OriginalInputWaitingControl
+        hostId={inputMailboxHost} receipt={row.item.receipt} onRefresh={inputMailbox.refresh} /> : null}{renderOriginalHistory(row.group.messages)}</> : null}
       local={detailOnly && row.local.length ? <ol className="composer-mailbox__messages"><ComposerOutbox {...queueRecordProps()}
         queued={row.local} selectedId={selectedQueue?.id ?? row.local[0]!.id} rowsOnly
         onSelect={() => {}}
