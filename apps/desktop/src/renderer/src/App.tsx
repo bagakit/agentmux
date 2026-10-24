@@ -141,6 +141,10 @@ function DesktopApp() {
   const spaceContent = useSpaceContentPresentationOwner()
   const [moteFloating, setMoteFloating] = usePmoTeamsTopicFloatingState()
   const agentFocus = useAppStore((state) => state.agentFocus)
+  const focusCanonicalSessionId = useAppStore(state => {
+    const original = sessionPresentationById(state.sessions).get(state.agentFocus.execution.sessionId ?? '')
+    return original?.control.kind === 'agent' ? original.control.agentSessionId : original?.id ?? state.agentFocus.execution.sessionId
+  })
 
   const mainSurface = useAppStore((state) => state.mainSurface)
   const focusMode = useAppStore(state => state.focusView)
@@ -204,7 +208,7 @@ function DesktopApp() {
     const byId = sessionPresentationById(state.sessions)
     return surveySessionIds.flatMap(id => {
       const session = byId.get(id)
-      return [id, session?.control.run.runId ?? null, session?.hostId ?? null, session?.workspacePath ?? null]
+      return [id, session?.control.kind === 'agent' ? session.control.agentSessionId : null, session?.control.run.runId ?? null, session?.hostId ?? null, session?.workspacePath ?? null]
     })
   }))
   const topicsWorkspace = config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
@@ -280,10 +284,10 @@ function DesktopApp() {
   [workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly])
   const focusPresentation = useMemo(() => focusWorkfaceView !== 'closed'
     ? focusWorkfaceView === 'unconfirmed'
-      ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, reference => selectFocusContext(agentFocus.execution.sessionId!, reference))
+      ? executionFocusPresentation(agentFocus.execution, tabs, surveyCatalog, reference => selectFocusContext(agentFocus.execution.sessionId!, reference), 'tab', focusCanonicalSessionId)
       : mainFocus
     : { projection: null, issue: null, references: [] },
-  [focusWorkfaceView, mainFocus, agentFocus.execution, tabs, surveyCatalog, selectFocusContext])
+  [focusWorkfaceView, mainFocus, agentFocus.execution, tabs, surveyCatalog, selectFocusContext, focusCanonicalSessionId])
   const timelineCurrentReference = useMemo(() => focusTimelineCurrentReference(workbenchSpaceSelection,
     workbenchSpaceSelection ? layouts[workbenchSpaceSelection.workspaceId] : undefined, tabs, surveyCatalog),
   [workbenchSpaceSelection, layouts, tabs, surveyCatalog])

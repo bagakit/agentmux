@@ -48,14 +48,18 @@ export function annotationCreationRequest(sessionId: string, origin: OpenHttpLin
   if (!workspace) throw new Error('原会话的执行项目尚未确认；批注已保留，请确认项目后再新建 Agent。')
   const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []
   const catalog = spatialCatalog(state, topics)
+  const source = sessionPresentationById(state.sessions).get(sessionId)
+  const sourceId = source?.control.kind === 'agent' ? source.control.agentSessionId : undefined
+  const sourceHost = source?.control.kind === 'agent' ? source.control.hostId : undefined
   const matches = catalog.locations.filter(item => item.displayWorkspaceId === origin.workspaceId &&
     item.groupId === origin.tabGroupId && item.tabId === origin.tabId && item.regionId === origin.regionId)
   const location = matches[0]
   const region = catalog.regions.find(item => item.tabId === origin.tabId && item.regionId === origin.regionId)
-  if (matches.length !== 1 || !location?.zoneId || region?.kind !== 'agent' || region.agentSessionId !== sessionId) {
+  if (!sourceId || matches.length !== 1 || !location?.zoneId || region?.kind !== 'agent' || region.agentSessionId !== sourceId ||
+      region.execution && region.execution.hostId !== sourceHost) {
     throw new Error('原会话的显示位置已改变或尚未确认；批注已保留，不会使用其他位置。')
   }
   return { schemaVersion: 5, requestId, operation: 'agent.open', focus: false,
     destination: { zoneId: location.zoneId, displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, newTab: true },
-    content: { kind: 'new-agent', executorId, executionWorkspaceId: workspace.id, prompt: formatConversationAnnotation(annotation, sessionId) } }
+    content: { kind: 'new-agent', executorId, executionWorkspaceId: workspace.id, prompt: formatConversationAnnotation(annotation, sourceId) } }
 }

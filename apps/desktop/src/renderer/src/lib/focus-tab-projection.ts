@@ -65,11 +65,12 @@ export function executionFocusPresentation(
   tabs: Readonly<Record<string, WorkbenchTab>>,
   catalog: AgentMuxSpaceCatalog | null,
   onSelect: WorkbenchProjection['onSelect'],
-  level: 'tab' | 'region' = 'tab'
+  level: 'tab' | 'region' = 'tab',
+  canonicalAgentSessionId: string | null = execution.sessionId
 ): ExecutionFocusPresentation {
   if (!execution.sessionId) return { projection: null, issue: null, references: [] }
   if (!catalog) return { projection: null, issue: 'The original work surface directory is still restoring. Its Session and exact reference are kept.', references: [] }
-  const semanticRegions = new Set(catalog.regions.filter(region => region.agentSessionId === execution.sessionId).map(region => region.regionId))
+  const semanticRegions = new Set(catalog.regions.filter(region => canonicalAgentSessionId !== null && region.agentSessionId === canonicalAgentSessionId).map(region => region.regionId))
   const references = new Map<string, WorkbenchProjectionSelection>()
   for (const location of catalog.locations) {
     const surface = tabs[location.tabId]?.regions[location.regionId]

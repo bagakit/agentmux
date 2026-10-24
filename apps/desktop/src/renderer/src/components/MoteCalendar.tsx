@@ -9,7 +9,8 @@ import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { confirmedMoteReference } from '../lib/mote-materials-actions'
 import { executionFocusPresentation } from '../lib/focus-tab-projection'
-import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
+import { spatialCatalog } from '../lib/space-agent-control'
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { agentSessionPresentationIndex, sessionPresentationById } from '../lib/session-presentation'
 import { useScheduleClock } from '../lib/schedule-clock'
 import { useScheduleRecords, type ScheduleQuery } from '../lib/schedule-controller'
@@ -102,7 +103,7 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
     const original = reference ? state.tabs[reference.tabId]?.regions[reference.regionId] : undefined
     const located = executionFocusPresentation({ sessionId, history: [],
       ...(reference && original?.kind === 'agent' && original.sessionId === sessionId ? { reference } : {}) },
-      state.tabs, workbenchSelectionCatalog(state), () => {})
+      state.tabs, spatialCatalog(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []), () => {}, 'tab', candidates[0]!.control.agentSessionId)
     const location = located.projection?.selection[0]
     if (!location || !state.selectMainRegion(location, state.workbenchSpaceSelection)) {
       setNavigationIssue(located.issue ?? 'The original discussion could not be focused. Its arrangement is kept.'); return
