@@ -1,6 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdir, open } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
+import { ensureMacosHostService, macosHostService, type MacosHostServiceOwner } from '@agentmux/host/macos-service'
 import { AgentMuxFileAgentSessionStore, AgentMuxError, connectAgentMuxRpc,
   connectSshAgentMux, defaultAgentMuxControlSocketPath, observeRead, probeSocketLiveness,
   type AgentMuxAgentSessionStore,
@@ -12,7 +11,7 @@ import type { HostConfig } from '../shared/contracts.js'
 
 export type DesktopRuntimeClient = AgentMuxClient | AgentMuxHostedClient
 export type DesktopRuntimeConnector = (config: HostConfig, store: AgentMuxAgentSessionStore) => Promise<DesktopRuntimeClient>
-const launches = new Map<string, Promise<ChildProcess>>()
+const launches = new Map<string, Promise<MacosHostServiceOwner>>()
 type OriginalDesktopTransport = {
   call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext, expectedOwner?: AgentMuxRuntimeFence): Promise<AgentMuxRpcResult<M>>
   subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: AgentMuxRpcStreamParams<M>, handlers: AgentMuxRpcSubscriptionOptions<M>, expectedOwner?: AgentMuxRuntimeFence): Promise<AgentMuxRpcSubscription>
@@ -41,44 +40,25 @@ async function ensureHost(storePath: string, socketPath: string, configuration?:
   if (liveness !== 'dead') return
   let launching = launches.get(socketPath)
   if (!launching) {
-    let child: ChildProcess | undefined
-    const retire = () => { if (launches.get(socketPath) === launching) launches.delete(socketPath) }
-    launching = (async () => {
-      await mkdir(dirname(storePath), { recursive: true, mode: 0o700 })
-      const log = await open(join(dirname(storePath), 'agentmux-host.log'), 'a', 0o600)
-      try {
-        child = spawn(process.execPath, [join(import.meta.dirname, 'agentmux-host.js'), '--store', storePath], {
-          detached: true, stdio: ['ignore', log.fd, log.fd],
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AGENTMUX_AGENT_SESSION_STORE: storePath, AGENTMUX_MOBILE_BUILD_DIRECTORY: join(import.meta.dirname, '../mobile'),
-            AGENTMUX_WORKSPACE_MOVE_HELPER: resolve(import.meta.dirname, '../../resources/bin/agentmux-workspace-move'),
-            ...(configuration === undefined ? {} : { AGENTMUX_HOST_CONFIGURATION_PATH: configuration.path,
-              AGENTMUX_MOTE_CONFIGURATION_PATH: configuration.path, AGENTMUX_CONNECTOR_DIRECTORY: configuration.connectorDirectory }) }
-        })
-        child.once('exit', retire)
-        await new Promise<void>((resolve, reject) => {
-          child!.on('error', error => {
-            // A failed kill/send can emit error while the original process is alive.
-            // Only failure to spawn has no child identity to retain.
-            if (child!.pid === undefined) { retire(); reject(error) }
-          })
-          child!.once('spawn', resolve)
-        })
-        child.unref()
-        return child
-      } finally { await log.close() }
-    })().catch(error => { if (child?.pid === undefined) retire(); throw error })
+    launching = ensureMacosHostService(macosHostService({ executable: process.execPath,
+      entrypoint: join(import.meta.dirname, 'agentmux-host.js'), storePath, socketPath,
+      mobileBuildDirectory: join(import.meta.dirname, '../mobile'),
+      workspaceMoveHelper: resolve(import.meta.dirname, '../../resources/bin/agentmux-workspace-move'),
+      ...(configuration ? { configuration } : {}) }))
     launches.set(socketPath, launching)
+    const retire = () => { if (launches.get(socketPath) === launching) launches.delete(socketPath) }
+    void launching.then(retire, retire)
   }
-  const child = await launching
-  // Each reader owns this wait, while the launch record belongs to the child until exit.
-  // A slow endpoint cannot turn a later observation into another owner launch.
-  const deadline = Date.now() + 10_000
-  while (Date.now() < deadline) {
-    if (await probeSocketLiveness(socketPath) === 'alive') return
-    if (child.exitCode !== null || child.signalCode !== null) throw new AgentMuxError('The semantic Host exited during startup; its log remains beside the original Store.', 'CONTROL_UNAVAILABLE')
-    await new Promise(resolve => setTimeout(resolve, 25))
+  try { await launching }
+  catch (error) {
+    // A failed platform observation cannot revoke an endpoint that became healthy.
+    // Preserve the operation's log and use the original public transport, never another launcher.
+    if (await probeSocketLiveness(socketPath) === 'alive') {
+      console.warn('Host service registration is unconfirmed; the original endpoint remains available.', error)
+      return
+    }
+    throw error
   }
-  throw new AgentMuxError('The semantic Host startup has not been confirmed; original Runs and workbench remain retained.', 'CONTROL_TIMEOUT')
 }
 
 /** Product connector: the Desktop never constructs a local semantic Core owner. */

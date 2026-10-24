@@ -30,6 +30,8 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   externalInputAuthority?: import('./external-author.js').AgentExternalInputAuthorityPort
   /** Live, call-scoped App capabilities; neither the App nor Core owns the HTTP service. */
   capsuleAdapters?: CapsuleDesktopAdapters
+  /** The outer process owner may close its complete service after a fenced public shutdown. */
+  shutdown?: () => void | Promise<void>
 }
 export type AgentMuxHeadlessRuntime = {
   readonly client: AgentMuxClient
@@ -96,7 +98,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
         path: join(stateDirectory, 'host-executors.json'), runtimeId, catalog: () => client!.catalog()
       }),
       creationAuthority: options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId }) })
-    hosted = new AgentMuxHostedRuntimeService(client, storePath, ownerIdentity, stop, options.externalInputAuthority, options.inputContextCaptureReader)
+    hosted = new AgentMuxHostedRuntimeService(client, storePath, ownerIdentity, options.shutdown ?? stop, options.externalInputAuthority, options.inputContextCaptureReader)
     capsules = new CapsuleRunManager(client, stateDirectory, options.capsuleAdapters)
     server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
       ...(options.forwardingPeer ? { forwardingPeer: options.forwardingPeer } : {}),

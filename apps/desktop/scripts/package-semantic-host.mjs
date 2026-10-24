@@ -5,6 +5,9 @@ import { isAbsolute, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { observeApplicationProcesses } from './package-process-scope.mjs'
+import { defaultAgentMuxControlSocketPath } from '@agentmux/core'
+import { macosHostService, macosHostServiceAddress, macosHostServiceRegistration, macosHostServicePid,
+  inspectMacosHostService, stopMacosHostService } from '../../host/dist/macos-service.js'
 
 const exec = promisify(execFile)
 const script = fileURLToPath(import.meta.url)
@@ -71,7 +74,27 @@ export function assertSemanticHostOwner(app, identity, row, mode) {
   return row
 }
 
-const operations = { bootstrap, processRow, processes: observeApplicationProcesses,
+async function activateRegisteredService() {
+  const address = macosHostServiceAddress(defaultAgentMuxControlSocketPath())
+  if (!await macosHostServiceRegistration(address)) return false
+  await macosHostServicePid(address)
+  return true
+}
+async function serviceOwner(app, identity) {
+  const service = macosHostService({ executable: scope(app).executable,
+    entrypoint: join(app, 'Contents/Resources/app/out/main/agentmux-host.js'),
+    storePath: identity.storePath, socketPath: identity.socketPath,
+    mobileBuildDirectory: join(app, 'Contents/Resources/app/out/mobile') })
+  if (!await macosHostServiceRegistration(service, identity.hostProcessId)) return null
+  const expected = await inspectMacosHostService(service)
+  fail(expected.owner.processId === identity.hostProcessId && expected.owner.runtimeId === identity.owner.runtimeId &&
+    expected.owner.ownerInstanceId === identity.owner.ownerInstanceId,
+    'The platform service does not match the original public owner; no service was stopped.')
+  return { service, expected }
+}
+
+const operations = { bootstrap, processRow, processes: observeApplicationProcesses, activateRegisteredService, serviceOwner,
+  stopService: binding => stopMacosHostService(binding.service, binding.expected),
   source: packageSource, bundleImage, processImage,
   signal: (pid, signal) => process.kill(pid, signal), wait, now: () => Date.now() }
 
@@ -99,22 +122,28 @@ export function semanticHostProcessIds(app, owner, processes) {
 
 export async function prepareSemanticHostReload(currentApp, candidateApp, ops = operations) {
   const originalSource = await ops.source(currentApp), candidateSource = await ops.source(candidateApp)
+  const registered = await ops.activateRegisteredService()
+  const registeredIdentity = registered ? await ops.bootstrap(currentApp) : null
   const processes = await ops.processes(scope(currentApp))
   const entry = join(currentApp, 'Contents/Resources/app/out/main/agentmux-host.js')
   // No semantic worker from this bundle means ordinary new App startup owns the cold path.
   const selectedPids = [...new Set([...processes.serving, ...processes.externalNode])]
   const rows = await Promise.all(selectedPids.map(pid => ops.processRow(pid)))
-  if (!rows.some(row => row?.command?.startsWith(`${scope(currentApp).executable} ${entry} --store `))) return null
-  const identity = await ops.bootstrap(currentApp)
+  if (!rows.some(row => row?.command?.startsWith(`${scope(currentApp).executable} ${entry} --store `))) {
+    fail(!registered, 'The registered Host is outside this installed bundle. Its original service and Runs were retained.')
+    return null
+  }
+  const identity = registeredIdentity ?? await ops.bootstrap(currentApp)
   const row = assertSemanticHostOwner(currentApp, identity, await ops.processRow(identity.hostProcessId), processes.nodeModes.find(mode => mode.pid === identity.hostProcessId))
-  return { currentApp, originalSource, candidateSource, candidateImage: await ops.bundleImage(candidateApp), identity, owner: row }
+  return { currentApp, originalSource, candidateSource, candidateImage: await ops.bundleImage(candidateApp), identity, owner: row, service: await ops.serviceOwner(currentApp, identity) }
 }
 
 /** Read the prepared namespace again; preparation is not permanent exit authority. */
 export async function inspectSemanticHostForInstall(plan, ops = operations) {
   fail(await ops.source(plan.currentApp) === plan.originalSource, 'Another installation changed the App; its current Host is retained.')
   const identity = await ops.bootstrap(plan.currentApp)
-  fail(identity.hostProcessId === plan.identity.hostProcessId && identity.storePath === plan.identity.storePath,
+  fail(identity.hostProcessId === plan.identity.hostProcessId && identity.storePath === plan.identity.storePath &&
+    identity.owner.runtimeId === plan.identity.owner.runtimeId && identity.owner.ownerInstanceId === plan.identity.owner.ownerInstanceId,
     'The original Semantic Host owner changed before activation; retry without replacing the original namespace.')
   const processes = await ops.processes(scope(plan.currentApp))
   const row = assertSemanticHostOwner(plan.currentApp, identity, await ops.processRow(identity.hostProcessId), processes.nodeModes.find(mode => mode.pid === identity.hostProcessId))
@@ -131,7 +160,12 @@ export async function stopSemanticHostForInstall(plan, ops = operations) {
   const original = processes.processes.filter(process => namespace.has(process.pid))
   fail(processes.serving.filter(pid => !namespace.has(pid)).length === 0,
     'The original GUI has not exited normally; its Semantic Host and Runs are retained.')
-  ops.signal(row.pid, 'SIGTERM')
+  // Removing the exact platform job precedes replacement, so KeepAlive cannot reload the outgoing image.
+  if (plan.service) await ops.stopService(plan.service)
+  else {
+    fail(!await ops.serviceOwner(plan.currentApp, plan.identity), 'The original foreground Host acquired a platform owner. Re-observe before installation.')
+    ops.signal(row.pid, 'SIGTERM')
+  }
   const deadline = ops.now() + 10000
   while ((await Promise.all(original.map(async process => {
     const current = await ops.processRow(process.pid)
@@ -147,8 +181,10 @@ export async function confirmSemanticHostReload(plan, app, ops = operations) {
   if (!plan) return
   fail(await ops.source(app) === plan.candidateSource, 'The activated App Source does not match this installation.')
   const identity = await ops.bootstrap(app)
-  fail(identity.hostProcessId !== plan.identity.hostProcessId && identity.storePath === plan.identity.storePath,
+  fail(identity.hostProcessId !== plan.identity.hostProcessId && identity.storePath === plan.identity.storePath &&
+    identity.owner.runtimeId === plan.identity.owner.runtimeId && identity.owner.ownerInstanceId !== plan.identity.owner.ownerInstanceId,
     'The new App has not activated its original Semantic Host namespace; the original Runs are retained.')
+  fail(await ops.serviceOwner(app, identity), 'The installed Host has no confirmed platform service owner; its Runs are retained.')
   const processes = await ops.processes(scope(app))
   const row = assertSemanticHostOwner(app, identity, await ops.processRow(identity.hostProcessId), processes.nodeModes.find(mode => mode.pid === identity.hostProcessId))
   const current = await ops.bundleImage(app), mapped = await ops.processImage(identity.hostProcessId, scope(app).executable)
@@ -163,19 +199,19 @@ export async function confirmSemanticHostReload(plan, app, ops = operations) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && process.argv[2] === '--bootstrap') {
   const { mintObjectId } = await import('@agentmux/core/object-id')
   const { connectAgentMuxRpc } = await import(pathToFileURL(process.argv[3]).href)
-  // Observe the installed App through the public contract it actually ships. A new owner
-  // requires its exact semantic fence; observing the outgoing App cannot upgrade its API.
-  const { AGENTMUX_RPC_NATIVE_METHODS } = await import(new URL('./public-rpc.js', pathToFileURL(process.argv[3])))
+  const { defaultAgentMuxControlSocketPath } = await import(new URL('./runtime-paths.js', pathToFileURL(process.argv[3])))
   const rpc = await connectAgentMuxRpc(), consumerId = `package-host-${mintObjectId()}`
-  let fence
   try {
-    if (Object.hasOwn(AGENTMUX_RPC_NATIVE_METHODS, 'runtime.owner.identity')) {
-      const { owner } = await rpc.call('runtime.owner.identity', {})
-      fence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+    let owner, last
+    for (let attempt = 0; attempt < 100; attempt++) {
+      try { owner = (await rpc.call('runtime.owner.identity', {})).owner; break }
+      catch (error) { last = error; await wait(50) }
     }
-    const value = await rpc.call('runtime.bootstrap', { consumerId, ...(fence ? { fence } : {}) })
-    process.stdout.write(JSON.stringify({ hostProcessId: value.hostProcessId, storePath: value.storePath }))
-  } finally {
-    await rpc.dispose()
-  }
+    if (!owner) throw last
+    const value = await rpc.call('runtime.bootstrap', { consumerId,
+      fence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } })
+    process.stdout.write(JSON.stringify({ hostProcessId: value.hostProcessId, storePath: value.storePath,
+      owner: value.owner, socketPath: defaultAgentMuxControlSocketPath() }))
+  } finally { await rpc.dispose() }
+
 }
