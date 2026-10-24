@@ -25,9 +25,9 @@ import { composeAgentPrompt } from './agent-outbound-message.js'
 import { renderAgentMuxMessageEnvelope, channelQuoteWireMatchesEnvelope } from './agent-message-render.js'
 import { browserInputContextFields } from './browser-input-context.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { configureMessageJournal, inputControlJournalSchema, messageRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, initializeMessageEventIndex, messageBroadcastJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
+import { configureMessageJournal, initializeInputDeliveryIndex, initializeInputWaitingIndex, inputControlJournalSchema, messageRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, initializeMessageEventIndex, messageBroadcastJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
 import { assertAgentMessageRouteIntent, validateAgentMessageRoute, type AgentMessageRoute } from './agent-message-route.js'
-import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputWaitRef,
+import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
   type AgentInputWaitJournalRecord, type AgentInputWaitReason, type AgentInputWaitRef,
   type AgentInputWaitStopReceipt, type AgentInputDispatchLink } from './agent-input-wait.js'
@@ -271,6 +271,8 @@ export class DurableAgentMuxMessageQueue {
         this.db.exec('BEGIN IMMEDIATE')
         // Existing journals are validated before their owner adds internal projections.
         this.db.exec(inputControlJournalSchema)
+        initializeInputDeliveryIndex(this.db)
+        initializeInputWaitingIndex(this.db)
         this.db.exec(messageBroadcastJournalSchema)
         this.db.exec(messageRouteJournalSchema)
         this.db.exec(messageNotificationJournalSchema)
@@ -519,7 +521,8 @@ export class DurableAgentMuxMessageQueue {
         key: { kind: 'prompt', agentSessionId: input.agentSessionId, expectedRun: condition.expectedRun, submissionId: input.notificationId },
         messageIds: references.map(reference => reference.messageId), wire, condition,
         mode: input.idle ? 'idle' : 'steer', ...(input.idle ? { idle: input.idle } : {}), state: 'pending' }
-      if (this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(notice.key)) ||
+      if (!isDeepStrictEqual(this.inputOwnerKey(notice.key), notice.key) ||
+          this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(notice.key)) ||
           input.originalInputAbsent && !await input.originalInputAbsent()) throw new AgentMuxError(
         'Another original input already owns this notification operation ID.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       await this.appendRecord({ kind: 'a2a-notification', sequence: this.nextSequence, notification: notice, at: Date.now() })
@@ -564,15 +567,58 @@ export class DurableAgentMuxMessageQueue {
       : structuredClone(latest.control) }
   }
 
+  private inputOwnerKey(key: AgentPromptInputKey): AgentPromptInputKey {
+    const owner = this.db.prepare(`SELECT json_extract(original.json, '$.intent.key') AS key
+      FROM input_delivery_bindings b JOIN input_intents i ON i.input_id=b.input_id
+      JOIN records original ON original.sequence=i.intent_sequence WHERE b.delivery_id=?`).get(agentInputJournalKey(key))
+    if (!owner) return key
+    // The physical index stores only original identities, never another copy of input content or outcome.
+    return validateAgentPromptInputKey(JSON.parse(String(owner.key)))
+  }
+
+  /** Resolve the original journal owner of an actual delivery, without preparing or dispatching. */
+  async resolveInputOwnerKey(value: AgentPromptInputKey): Promise<AgentPromptInputKey> {
+    const key = validateAgentPromptInputKey(value)
+    return await this.withLock(async () => structuredClone(this.inputOwnerKey(key)))
+  }
+
+  /** Only this recipient's pending human manual inputs, or a bounded cold-start page across recipients. */
+  async readRestorablePromptInputs(afterSequence = 0, limit = 100, agentSessionId?: string): Promise<AgentInputJournalEntry[]> {
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AgentMuxError(
+      'Input recovery requires a finite original sequence and a page of at most 100 waiting inputs.', 'INVALID_AGENT_INPUT_CONTROL')
+    if (agentSessionId !== undefined) nonEmpty(agentSessionId, 'Input recipient')
+    return await this.withLock(async () => {
+      const rows = this.db.prepare(`SELECT json_extract(original.json, '$.intent.key') AS key FROM input_waiting w
+        JOIN records original ON original.sequence=w.intent_sequence
+        WHERE w.intent_sequence>? ${agentSessionId === undefined ? '' : 'AND w.recipient_id=?'}
+        ORDER BY w.intent_sequence LIMIT ?`).all(afterSequence, ...(agentSessionId === undefined ? [] : [agentSessionId]), limit)
+      return rows.flatMap(row => {
+        const current = this.input(validateAgentPromptInputKey(JSON.parse(String(row.key))))
+        return current?.control.state === 'enabled' ? [current] : []
+      })
+    })
+  }
+
+  private updateInputWaitingIndex(intent: AgentInputJournalIntent, sequence: number, state: AgentInputWaitControl['state']): void {
+    if (intent.source.kind === 'prompt' && intent.source.authorHuman === true && intent.source.recoveryAuthorization === 'local-human' &&
+        intent.admissionIntent.kind === 'manual-actor' && state === 'enabled') {
+      this.db.prepare('INSERT OR IGNORE INTO input_waiting VALUES (?, ?, ?)').run(agentInputJournalKey(intent.key), intent.key.agentSessionId, sequence)
+    } else this.db.prepare('DELETE FROM input_waiting WHERE input_id=?').run(agentInputJournalKey(intent.key))
+  }
+
   private applyInputRecord(record: AgentInputWaitJournalRecord): void {
     if (record.kind === 'input-submission') {
       const key = validateAgentPromptInputKey(record.key)
+      if (!isDeepStrictEqual(this.inputOwnerKey(key), key)) throw new AgentMuxError(
+        'An accepted delivery retains its original controlled input membership.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       finiteTimestamp(record.at, 'Original input acceptance time')
       this.db.prepare('INSERT INTO input_intents VALUES (?, ?, ?, ?)').run(agentInputJournalKey(key), key.agentSessionId, record.sequence, record.sequence)
       return
     }
     if (record.kind === 'input-intent') {
       const intent = record.intent, key = validateAgentPromptInputKey(intent.key)
+      if (!isDeepStrictEqual(this.inputOwnerKey(key), key)) throw new AgentMuxError(
+        'A resumed delivery cannot create another input owner.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       const admissionIntent = validateAgentPromptAdmissionIntent(intent.admissionIntent)
       if (intent.execution !== 'immediate' || admissionIntent.kind === 'exact-condition' || admissionIntent.expectedRun.runId !== key.expectedRun.runId) {
         throw new AgentMuxError('Controlled input must preserve its explicit direct intent.', 'INVALID_AGENT_INPUT_CONTROL')
@@ -582,7 +628,9 @@ export class DurableAgentMuxMessageQueue {
       if (intent.source.kind === 'prompt') {
         if (key.kind !== 'prompt' || typeof intent.source.prompt !== 'string' ||
             intent.source.agentMuxNote !== undefined && typeof intent.source.agentMuxNote !== 'string' ||
-            intent.source.authorHuman !== undefined && typeof intent.source.authorHuman !== 'boolean') {
+            intent.source.authorHuman !== undefined && typeof intent.source.authorHuman !== 'boolean' ||
+            intent.source.recoveryAuthorization !== undefined && (intent.source.recoveryAuthorization !== 'local-human' ||
+              intent.source.authorHuman !== true || admissionIntent.kind !== 'manual-actor')) {
           throw new AgentMuxError('Original prompt intent is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
         }
         browserInputContextFields(intent.source)
@@ -601,6 +649,7 @@ export class DurableAgentMuxMessageQueue {
             !message.envelope.channelQuote && intent.source.promptWire !== undefined) throw new AgentMuxError('Frozen original channel quote wire is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
       } else throw new AgentMuxError('Original input producer is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
       this.db.prepare('INSERT INTO input_intents VALUES (?, ?, ?, ?)').run(agentInputJournalKey(key), key.agentSessionId, record.sequence, record.sequence)
+      this.updateInputWaitingIndex(intent, record.sequence, 'enabled')
       return
     }
     const ref = validateAgentInputWaitRef(record.kind === 'input-control' ? record.control.ref : record.receipt.ref)
@@ -626,13 +675,27 @@ export class DurableAgentMuxMessageQueue {
     }
     if (next.state === 'dispatch-authorized') validateAgentInputControlId(next.gateId)
     else if (next.gateId !== undefined) throw new AgentMuxError('Unclaimed input cannot invent a dispatch gate.', 'INVALID_AGENT_INPUT_CONTROL')
+    if (next.deliveryKey !== undefined) {
+      if (next.state !== 'dispatch-authorized' || current.intent.source.kind !== 'prompt' || current.intent.source.authorHuman !== true ||
+          current.intent.admissionIntent.kind !== 'manual-actor') throw new AgentMuxError(
+        'Only an original human manual input can freeze delivery to its confirmed resumed Session.', 'INVALID_AGENT_INPUT_CONTROL')
+      const key = validateAgentInputDeliveryKey(ref.key, next.deliveryKey)
+      const deliveryId = agentInputJournalKey(key), ownerId = agentInputJournalKey(ref.key)
+      const existing = this.db.prepare('SELECT input_id FROM input_delivery_bindings WHERE delivery_id=?').get(deliveryId)
+      if (existing && existing.input_id !== ownerId || this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(deliveryId)) throw new AgentMuxError(
+        'This delivery already belongs to another original input.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      this.db.prepare('INSERT INTO input_delivery_bindings VALUES (?, ?)').run(deliveryId, ownerId)
+    }
     this.db.prepare('UPDATE input_intents SET control_sequence=? WHERE input_id=?').run(record.sequence, agentInputJournalKey(ref.key))
+    this.updateInputWaitingIndex(current.intent, current.sequence, next.state)
   }
 
   /** The original journal preserves SDK content and its platform note separately. */
   async savePromptInput(intent: AgentInputJournalIntent, originalClaimAbsent?: () => Promise<boolean>): Promise<AgentInputJournalEntry | null> {
     return this.withLock(async () => {
       const key = validateAgentPromptInputKey(intent.key), existing = this.input(key)
+      if (!isDeepStrictEqual(this.inputOwnerKey(key), key)) throw new AgentMuxError(
+        'This delivery belongs to an original controlled input; retain its original waiting reference.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       if (key.kind === 'prompt' && isDeepStrictEqual(this.notification(key.submissionId)?.key, key)) throw new AgentMuxError(
         'This input identity belongs to an original Inbox notification.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       if (existing) {
@@ -651,6 +714,11 @@ export class DurableAgentMuxMessageQueue {
   async recordInputSubmission(keyValue: AgentPromptInputKey, at: number): Promise<void> {
     const key = validateAgentPromptInputKey(keyValue)
     await this.withLock(async () => {
+      const owner = this.inputOwnerKey(key)
+      if (!isDeepStrictEqual(owner, key)) {
+        if (owner.kind !== key.kind) throw new AgentMuxError('Another producer owns this original delivery.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+        return
+      }
       const existing = this.db.prepare('SELECT original.json AS json FROM input_intents i JOIN records original ON original.sequence=i.intent_sequence WHERE input_id=?').get(agentInputJournalKey(key))
       if (existing) {
         const original = JSON.parse(String(existing.json)) as Extract<AgentInputWaitJournalRecord, { kind: 'input-intent' | 'input-submission' }>
@@ -739,6 +807,8 @@ export class DurableAgentMuxMessageQueue {
   /** Only the original metadata claim runs here; no Provider or Native awaits. */
   async withUncontrolledInputClaim<T>(key: import('./agent-prompt-condition.js').AgentPromptInputKey, claim: () => Promise<T>, originalClaim?: () => Promise<boolean>, expectedNotificationId?: string): Promise<T> {
     return await this.withLock(async () => {
+      if (!isDeepStrictEqual(this.inputOwnerKey(key), key)) throw new AgentMuxError(
+        'This delivery requires its original controlled input gate.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       const notice = key.kind === 'prompt' ? this.notification(key.submissionId) : undefined
       const sameNotificationKey = notice !== undefined && isDeepStrictEqual(notice.key, key)
       if (expectedNotificationId === undefined ? sameNotificationKey :
@@ -774,16 +844,31 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** Stop and this short gate share one original journal transaction; no Native await. */
-  async authorizeInputDispatch(refValue: AgentInputWaitRef, signal?: AbortSignal): Promise<AgentInputDispatchLink | null> {
+  async authorizeInputDispatch(refValue: AgentInputWaitRef, signal?: AbortSignal,
+    delivery?: { key: AgentPromptInputKey; claimsAbsent: () => Promise<boolean>; assertTarget: () => Promise<void> }): Promise<AgentInputDispatchLink | null> {
     const ref = validateAgentInputWaitRef(refValue)
     return this.withLock(async () => {
       signal?.throwIfAborted()
       const current = this.input(ref.key)
       if (!current || !isDeepStrictEqual(current.control.ref, ref) || current.control.state !== 'enabled') return null
+      const deliveryKey = delivery && !isDeepStrictEqual(delivery.key, ref.key) ? validateAgentInputDeliveryKey(ref.key, delivery.key) : undefined
+      if (deliveryKey && (current.intent.source.kind !== 'prompt' || current.intent.source.authorHuman !== true ||
+          current.intent.admissionIntent.kind !== 'manual-actor')) throw new AgentMuxError(
+        'Only the original human manual input may first deliver after its Session resumes.', 'INVALID_AGENT_INPUT_CONTROL')
+      if (delivery) {
+        await delivery.assertTarget()
+        signal?.throwIfAborted()
+        if (!await delivery.claimsAbsent()) throw new AgentMuxError(
+          'The original input or resumed delivery already has an admission. Retain its exact result.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+        signal?.throwIfAborted()
+      }
+      if (deliveryKey && (!isDeepStrictEqual(this.inputOwnerKey(deliveryKey), deliveryKey) ||
+          this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(deliveryKey)))) throw new AgentMuxError(
+        'This resumed delivery already belongs to another original input.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       const gateId = mintObjectId()
       await this.appendRecord({ kind: 'input-control', sequence: this.nextSequence,
-        control: { ref, state: 'dispatch-authorized', gateId, at: Date.now() } })
-      return { ref, gateId }
+        control: { ref, state: 'dispatch-authorized', gateId, ...(deliveryKey ? { deliveryKey } : {}), at: Date.now() } })
+      return { ref, gateId, ...(deliveryKey ? { deliveryKey } : {}) }
     }, true)
   }
 

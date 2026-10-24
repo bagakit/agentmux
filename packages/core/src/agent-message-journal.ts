@@ -6,6 +6,7 @@ import { constants } from 'node:fs'
 import { dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import type { AgentMuxMessageJournalRecord } from './agent-global-message-queue.js'
+import { agentInputJournalKey, validateAgentInputDeliveryKey, validateAgentInputWaitRef } from './agent-input-wait.js'
 
 const applicationId = 0x414d514a
 const sqliteHeader = Buffer.from('SQLite format 3\0')
@@ -43,6 +44,38 @@ export const inputControlJournalSchema = `
     PRIMARY KEY(input_id, generation, cancel_operation_id)
   );
 `
+
+/** Delivery aliases are rebuildable positions over immutable original dispatch gates. */
+export function initializeInputDeliveryIndex(db: DatabaseSync): void {
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='input_delivery_bindings'").get()) return
+  db.exec('CREATE TABLE input_delivery_bindings (delivery_id TEXT PRIMARY KEY, input_id TEXT NOT NULL UNIQUE)')
+  const insert = db.prepare('INSERT INTO input_delivery_bindings VALUES (?, ?)')
+  for (const row of db.prepare(`SELECT latest.json AS json FROM input_intents i JOIN records latest ON latest.sequence=i.control_sequence
+    WHERE json_extract(latest.json, '$.control.deliveryKey') IS NOT NULL`).all()) {
+    const control = (JSON.parse(String(row.json)) as Extract<AgentMuxMessageJournalRecord, { kind: 'input-control' }>).control
+    const ref = validateAgentInputWaitRef(control.ref), key = validateAgentInputDeliveryKey(ref.key, control.deliveryKey)
+    insert.run(agentInputJournalKey(key), agentInputJournalKey(ref.key))
+  }
+}
+
+/** Pending positions over the original input journal; no content or execution authorization is copied. */
+export function initializeInputWaitingIndex(db: DatabaseSync): void {
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='input_waiting'").get()) return
+  db.exec(`CREATE TABLE input_waiting (
+    input_id TEXT PRIMARY KEY, recipient_id TEXT NOT NULL, intent_sequence INTEGER NOT NULL UNIQUE
+  );
+  CREATE INDEX input_waiting_recipient ON input_waiting(recipient_id, intent_sequence);
+  INSERT INTO input_waiting
+    SELECT i.input_id, i.recipient_id, i.intent_sequence FROM input_intents i
+      JOIN records original ON original.sequence=i.intent_sequence
+      JOIN records latest ON latest.sequence=i.control_sequence
+      WHERE json_extract(original.json, '$.kind')='input-intent'
+        AND json_extract(original.json, '$.intent.source.kind')='prompt'
+        AND json_extract(original.json, '$.intent.source.authorHuman')=1
+        AND json_extract(original.json, '$.intent.source.recoveryAuthorization')='local-human'
+        AND json_extract(original.json, '$.intent.admissionIntent.kind')='manual-actor'
+        AND COALESCE(json_extract(latest.json, '$.control.state'), 'enabled')='enabled';`)
+}
 
 /** The source freezes routing before a remote effect; the target alone owns the message. */
 export const messageRouteJournalSchema = `
@@ -341,6 +374,8 @@ export async function openMessageJournal(
     db.exec('BEGIN IMMEDIATE')
     db.exec(schema)
     db.exec(inputControlJournalSchema)
+    initializeInputDeliveryIndex(db)
+    initializeInputWaitingIndex(db)
     db.exec(messageBroadcastJournalSchema)
     db.exec(messageRouteJournalSchema)
     db.exec(messageNotificationJournalSchema)

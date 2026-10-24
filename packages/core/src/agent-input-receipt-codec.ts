@@ -1,7 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { dequal } from 'dequal'
 import { parseDeliveryFailure } from './delivery-attempt.js'
-import { agentInputSubmissionStatus, validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
+import { agentInputDeliveryKey, agentInputSubmissionStatus, validateAgentInputDeliveryKey, validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
 import { agentPromptInputId, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
 import { rpcRecord } from './rpc-data.js'
@@ -16,18 +16,23 @@ export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubm
   if (!dequal(key, ref.key) || p.persistence !== 'confirmed') wireFail()
   wireMember(p.observation, ['owned', 'rejoin-needed', 'closed'])
   if (p.originalControlOperationId !== undefined) wireString(p.originalControlOperationId)
-  const control = wireRecord(p.control, ['ref', 'state', 'at', 'waiting', 'gateId'])
+  const control = wireRecord(p.control, ['ref', 'state', 'at', 'waiting', 'gateId', 'deliveryKey'])
   if (!dequal(validateAgentInputWaitRef(control.ref), ref)) wireFail()
   wireMember(control.state, ['enabled', 'stopped-before-dispatch', 'dispatch-authorized']); wireTimestamp(control.at)
   if (control.state === 'dispatch-authorized') wireString(control.gateId)
   else if (control.gateId !== undefined) wireFail()
+  if (control.deliveryKey !== undefined) {
+    if (control.state !== 'dispatch-authorized') wireFail()
+    validateAgentInputDeliveryKey(key, control.deliveryKey)
+  }
   if (control.waiting !== undefined) {
     const waiting = wireRecord(control.waiting, ['phase', 'reason', 'wake', 'failure', 'mechanism', 'observation'])
     if (waiting.phase === 'runtime') { if (waiting.reason !== 'runtime-unavailable' || waiting.wake !== 'runtime-restored') wireFail() }
+    else if (waiting.phase === 'session') { if (waiting.reason !== 'session-resume-needed' || waiting.wake !== 'session-restored') wireFail() }
     else if (waiting.phase === 'authorization') { if (waiting.reason !== 'author-authorization-needed' || waiting.wake !== 'explicit-rejoin') wireFail() }
     else if (waiting.phase === 'observer') { if (waiting.reason !== 'observer-stopped' || waiting.wake !== 'explicit-rejoin' || waiting.failure === undefined) wireFail() }
     else if (waiting.phase === 'input-environment') { if (!['original-input-unconfirmed', 'original-target-changed'].includes(String(waiting.reason)) || waiting.wake !== 'explicit-rejoin' || waiting.failure === undefined) wireFail() }
-    else if (waiting.phase === 'service') { if (waiting.reason !== 'observation-failed' || waiting.wake !== 'explicit-rejoin' || waiting.failure === undefined) wireFail() }
+    else if (waiting.phase === 'service') { if (waiting.reason !== 'observation-failed' || !['explicit-rejoin', 'session-restored'].includes(String(waiting.wake)) || waiting.failure === undefined) wireFail() }
     else { if (waiting.phase !== 'native-environment' || !['original-environment-unconfirmed', 'original-target-changed'].includes(String(waiting.reason)) || waiting.wake !== 'explicit-rejoin') wireFail() }
     if (waiting.failure !== undefined) parseDeliveryFailure(waiting.failure)
     if (waiting.mechanism !== undefined) wireMember(waiting.mechanism, ['unconfirmed', 'unavailable'])
@@ -38,8 +43,9 @@ export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubm
     }
   }
   const admission = p.admission === null ? null : parsePromptSubmissionRecord(p.admission)
-  if (admission && (admission.agentSessionId !== key.agentSessionId || admission.run.runId !== key.expectedRun.runId ||
-      admission.admission?.inputKey && !dequal(admission.admission.inputKey, key) ||
+  const deliveryKey = agentInputDeliveryKey(control as AgentInputSubmissionReceipt['control'])
+  if (admission && (admission.agentSessionId !== key.agentSessionId || admission.run.runId !== deliveryKey.expectedRun.runId ||
+      admission.admission?.inputKey && !dequal(admission.admission.inputKey, deliveryKey) ||
       (admission.admission?.submissionId ?? admission.terminalPromptSubmission?.submissionId ?? admission.admission?.operationId) !== agentPromptInputId(key))) wireFail()
   const status = agentInputSubmissionStatus(control as AgentInputSubmissionReceipt['control'], admission)
   if (p.status !== status) wireFail()

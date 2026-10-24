@@ -28,12 +28,13 @@ export type AgentInputWaitRef = { key: AgentPromptInputKey; waitGeneration: numb
 export type AgentInputSelector = { key: AgentPromptInputKey } | { kind: 'message-control'; originalControlOperationId: string }
 export type AgentInputWaitReason =
   | { phase: 'runtime'; reason: 'runtime-unavailable'; wake: 'runtime-restored'; failure?: import('./delivery-attempt.js').DeliveryFailure }
+  | { phase: 'session'; reason: 'session-resume-needed'; wake: 'session-restored'; failure?: import('./delivery-attempt.js').DeliveryFailure }
   | { phase: 'authorization'; reason: 'author-authorization-needed'; wake: 'explicit-rejoin'; failure?: import('./delivery-attempt.js').DeliveryFailure }
   | { phase: 'observer'; reason: 'observer-stopped'; wake: 'explicit-rejoin'; failure: import('./delivery-attempt.js').DeliveryFailure; observation?: { phase: string } }
   | { phase: 'native-environment'; reason: 'original-environment-unconfirmed' | 'original-target-changed'; wake: 'explicit-rejoin';
       mechanism?: 'unconfirmed' | 'unavailable'; observation?: { phase: string; failure: import('./delivery-attempt.js').DeliveryFailure } }
   | { phase: 'input-environment'; reason: 'original-input-unconfirmed' | 'original-target-changed'; wake: 'explicit-rejoin'; failure: import('./delivery-attempt.js').DeliveryFailure; observation?: { phase: string } }
-  | { phase: 'service'; reason: 'observation-failed'; wake: 'explicit-rejoin'; failure: import('./delivery-attempt.js').DeliveryFailure; observation?: { phase: string } }
+  | { phase: 'service'; reason: 'observation-failed'; wake: 'explicit-rejoin' | 'session-restored'; failure: import('./delivery-attempt.js').DeliveryFailure; observation?: { phase: string } }
 
 /** Provider/executor identify the original target; Native locators are retained observations, not a terminal input gate. */
 export type AgentInputSavedEnvironment = {
@@ -49,6 +50,8 @@ export type AgentInputJournalIntent = {
   environment: AgentInputSavedEnvironment
   source:
     | { kind: 'prompt'; prompt: string; agentMuxNote?: string; authorHuman?: boolean; sourceChannel?: AgentMessageChannel; sourceDevice?: AgentOperationDevice;
+        /** Original Core intake confirmed local human authority without an invocation-local restrictor. */
+        recoveryAuthorization?: 'local-human';
         inputContext?: import('./browser-input-context.js').BrowserInputContext; inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource;
         inputContextCaptureProof?: import('./agent-input-context-capture.js').AgentInputContextCaptureProof;
         /** Wire frozen at first intake, before waiting or Provider preparation. */
@@ -57,7 +60,7 @@ export type AgentInputJournalIntent = {
         /** Original quote wire, frozen at the first journal save before waiting. */
         promptWire?: string }
 }
-export type AgentInputDispatchLink = { ref: AgentInputWaitRef; gateId: string }
+export type AgentInputDispatchLink = { ref: AgentInputWaitRef; gateId: string; deliveryKey?: AgentPromptInputKey }
 export type AgentInputJournalEntry = { sequence: number; recordedAt: number; intent: AgentInputJournalIntent; control: AgentInputWaitControl }
 export type AgentInputWaitControl = {
   ref: AgentInputWaitRef
@@ -65,6 +68,22 @@ export type AgentInputWaitControl = {
   at: number
   waiting?: AgentInputWaitReason
   gateId?: string
+  /** Frozen only by the original dispatch gate after confirmed same-Session recovery. */
+  deliveryKey?: AgentPromptInputKey
+}
+
+/** The original journal identity survives an unclaimed input's first delivery to a resumed Run. */
+export function agentInputDeliveryKey(value: Pick<AgentInputWaitControl, 'ref' | 'deliveryKey'>): AgentPromptInputKey {
+  return value.deliveryKey ?? value.ref.key
+}
+
+/** A delivery binding changes only the executing Run, never the original producer or logical input. */
+export function validateAgentInputDeliveryKey(originalValue: AgentPromptInputKey, value: unknown): AgentPromptInputKey {
+  const original = validateAgentPromptInputKey(originalValue), key = validateAgentPromptInputKey(value)
+  if (original.kind !== key.kind || original.agentSessionId !== key.agentSessionId ||
+      agentPromptInputId(original) !== agentPromptInputId(key) || original.expectedRun.runId === key.expectedRun.runId) throw new AgentMuxError(
+    'A resumed input delivery must retain its original Session, producer and logical identity.', 'INVALID_AGENT_INPUT_CONTROL')
+  return key
 }
 export type AgentInputWaitStopReceipt = {
   ref: AgentInputWaitRef
@@ -87,12 +106,19 @@ export type AgentInputSubmissionReceipt = {
  * A linked terminal ACK confirms ordered input bytes, never Native acceptance. */
 export function agentInputSubmissionStatus(control: AgentInputWaitControl, admission: AgentPromptSubmissionRecord | null): AgentInputSubmissionReceipt['status'] {
   const claim = admission?.admission
+  const deliveryKey = agentInputDeliveryKey(control)
+  const linkedKey = claim?.inputDispatch && agentInputDeliveryKey(claim.inputDispatch)
   const linked = claim?.inputDispatch && control.state === 'dispatch-authorized' &&
     claim.inputDispatch.ref.waitGeneration === control.ref.waitGeneration &&
     claim.inputDispatch.ref.key.kind === control.ref.key.kind &&
     claim.inputDispatch.ref.key.agentSessionId === control.ref.key.agentSessionId &&
     claim.inputDispatch.ref.key.expectedRun.runId === control.ref.key.expectedRun.runId &&
-    agentPromptInputId(claim.inputDispatch.ref.key) === agentPromptInputId(control.ref.key) && claim.inputDispatch.gateId === control.gateId
+    agentPromptInputId(claim.inputDispatch.ref.key) === agentPromptInputId(control.ref.key) && claim.inputDispatch.gateId === control.gateId &&
+    linkedKey?.kind === deliveryKey.kind && linkedKey.agentSessionId === deliveryKey.agentSessionId &&
+    linkedKey.expectedRun.runId === deliveryKey.expectedRun.runId && agentPromptInputId(linkedKey) === agentPromptInputId(deliveryKey) &&
+    claim.inputKey?.kind === deliveryKey.kind && claim.inputKey.agentSessionId === deliveryKey.agentSessionId &&
+    claim.inputKey.expectedRun.runId === deliveryKey.expectedRun.runId &&
+    agentPromptInputId(claim.inputKey) === agentPromptInputId(deliveryKey)
   if (linked && claim) {
     if (claim.transport === 'native') return claim.native.outcome === 'admitted' && claim.acknowledged ? 'admitted'
       : claim.native.outcome === 'not-applied' && claim.notApplied ? 'not-applied' : 'unknown'
