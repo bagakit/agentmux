@@ -143,7 +143,7 @@ it('reduces settled-disk writes while retaining original evidence through authen
   await vi.advanceTimersByTimeAsync(1000); await archive.flush()
   expect({ writes, indexWrites, candidateWrites }).toEqual({ writes: 9, indexWrites: 6, candidateWrites: 3 })
   expect(sender.inspect()).toMatchObject({ pending: 0, coalesced: 21, inFlight: false })
-  const service = new AgentMuxRpcService({ clientIncidents: archive, coreClients: () => [] })
+  const service = new AgentMuxRpcService({ clientIncidents: () => archive, coreClients: () => [] })
   try {
     const query = { target: { domain: 'client.incident' as const, hostId: 'local', recent: {} } }
     const result = parseDiagnosticEvidenceResult(await service.call('system.diagnostics.inspect', query), query)

@@ -230,7 +230,7 @@ it('archives the real Terminal failure and frozen refresh before default-Host CL
     // Freezing is synchronous; async transport need not have acknowledged this new occurrence yet.
     expect(requested.metadata.cursorBytes).toBe(0)
     const desktopPath = join(directory, 'desktop.sock'), hostPath = join(directory, 'host.sock')
-    server = new AgentMuxControlServer({ socketPath: desktopPath, coreClients: () => [], clientIncidents: archive })
+    server = new AgentMuxControlServer({ socketPath: desktopPath, coreClients: () => [], clientIncidents: () => archive })
     await server.start()
     const owner = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: desktopPath } }); clients.push(owner)
     host = new AgentMuxControlServer({ socketPath: hostPath, coreClients: () => [],

@@ -153,7 +153,7 @@ it('keeps all nine injected capabilities and both domains within the complete wi
   const businessRead = vi.spyOn(f.client, 'readAgentConversation'), businessWatch = vi.spyOn(f.client, 'observeConversation')
   const ports = { coreClients: () => [{ hostId: 'local', client: f.client }], deliveryAttempts: { hostId: 'local', store },
     toolkit: { execute: unusedOwner, subscribe: unusedOwner }, metrics: { inspectScene: unusedOwner, subscribe: unusedOwner },
-    moteContext: { hostId: 'local', read: unusedOwner }, clientIncidents: { hostId: 'local', read: unusedOwner },
+    moteContext: { hostId: 'local', read: unusedOwner }, clientIncidents: () => ({ hostId: 'local', read: unusedOwner }),
   } satisfies AgentMuxRpcServiceOptions
   const socketPath = join(f.root, 'joint.sock'), server = new AgentMuxControlServer({ socketPath, ...ports })
   await server.start(); releases.push(() => server.stop())

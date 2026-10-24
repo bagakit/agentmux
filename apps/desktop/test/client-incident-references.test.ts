@@ -86,7 +86,7 @@ describe('original incident references through the existing evidence readers', (
       join(root, 'incidents', incident.target.logId + '.json')]
     const before = await Promise.all(paths.map(path => readFile(path, 'utf8')))
     const desktopPath = join(root, 'desktop.sock'), hostPath = join(root, 'host.sock')
-    const desktop = new AgentMuxControlServer({ socketPath: desktopPath, coreClients: () => [], clientIncidents: incident.owner,
+    const desktop = new AgentMuxControlServer({ socketPath: desktopPath, coreClients: () => [], clientIncidents: () => incident.owner,
       deliveryAttempts: { hostId: 'local', store: journal }, toolkit, metrics: { subscribe: async () => ({ dispose() {} }),
         inspectScene: (input, signal) => scene.inspect(input, signal) } })
     await desktop.start(); cleanup.push(() => desktop.stop())
@@ -152,7 +152,7 @@ describe('original incident references through the existing evidence readers', (
       { domain: 'native-recorder-failure', hostId: 'local', agentSessionId: 'original-session', runId: 'original-run' },
     ]
     const incident = await archive(root, references)
-    const service = new AgentMuxRpcService({ coreClients: () => [], clientIncidents: incident.owner, deliveryAttempts: { hostId: 'local', store: journal } })
+    const service = new AgentMuxRpcService({ coreClients: () => [], clientIncidents: () => incident.owner, deliveryAttempts: { hostId: 'local', store: journal } })
     cleanup.push(() => service.dispose())
     const result = await service.call('system.diagnostics.inspect', { target: incident.target })
     expect(result.reads.map(read => read.availability)).toEqual(['found', 'not-found', 'unavailable', 'found', 'unsupported', 'not-exposed'])
@@ -183,7 +183,7 @@ describe('original incident references through the existing evidence readers', (
       { domain: 'delivery.client', hostId: 'other', logId: mintObjectId() },
       { domain: 'toolkit.performance-failure', hostId: 'other', executionId: 'unknown-execution' },
     ])
-    const service = new AgentMuxRpcService({ coreClients: h.coreClients, clientIncidents: incident.owner, deliveryAttempts: { hostId: 'local', store: journal } })
+    const service = new AgentMuxRpcService({ coreClients: h.coreClients, clientIncidents: () => incident.owner, deliveryAttempts: { hostId: 'local', store: journal } })
     cleanup.push(() => service.dispose())
     const result = await service.call('system.diagnostics.inspect', { target: incident.target }, { caller: h.credentials })
     expect(result.reads.map(value => value.availability)).toEqual(['found', 'forbidden', 'forbidden'])

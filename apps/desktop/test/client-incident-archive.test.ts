@@ -10,7 +10,7 @@ import { durableWriteFile, type AgentMuxClientIncidentReport, type AgentMuxClien
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { parseDiagnosticEvidenceResult } from '../../../packages/core/src/diagnostic-evidence-codec'
 const { ClientIncidentArchive, CLIENT_INCIDENT_LIMITS }: typeof import('@agentmux/host/client-incident-archive') = await import(
-  process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY ?? new URL('@agentmux/host/client-incident-archive', import.meta.url).href)
+  process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY ?? new URL('../../host/src/client-incident-archive.ts', import.meta.url).href)
 type ClientIncidentArchive = import('@agentmux/host/client-incident-archive').ClientIncidentArchive
 
 const directories: string[] = []
@@ -51,7 +51,7 @@ it('keeps exact immutable originals and the same namespace readable in another r
   const receipt = archive.enqueue(report(), producer())
   await archive.flush()
   const before = await archive.read({ domain: 'client.incident', hostId: 'local', logId: receipt.logId! }, bounds())
-  const moduleUrl = new URL('@agentmux/host/client-incident-archive', import.meta.url).href
+  const moduleUrl = new URL('../../host/src/client-incident-archive.ts', import.meta.url).href
   const script = `import {ClientIncidentArchive} from ${JSON.stringify(moduleUrl)}; const a=new ClientIncidentArchive(process.argv[1]);await a.flush();const p=await a.read({domain:'client.incident',hostId:'local',recent:{}},{signal:new AbortController().signal,maxBytes:262144});const r=await a.read({domain:'client.incident',hostId:'local',logId:process.argv[2]},{signal:new AbortController().signal,maxBytes:262144});console.log(JSON.stringify({p,r}));`
   const child = await promisify(execFile)(process.execPath, ['--experimental-transform-types', '--input-type=module', '-e', script, path, receipt.logId!])
   const { p, r } = JSON.parse(child.stdout)
@@ -188,7 +188,7 @@ it('serves actual archive discovery and exact reads through the public service a
   await archive.flush()
   const receipt = archive.enqueue(report(), producer())
   await archive.flush()
-  const service = new AgentMuxRpcService({ coreClients: () => [], clientIncidents: archive })
+  const service = new AgentMuxRpcService({ coreClients: () => [], clientIncidents: () => archive })
   try {
     const recent = { target: { domain: 'client.incident' as const, hostId: 'local', recent: {} } }
     const discovered = parseDiagnosticEvidenceResult(await service.call('system.diagnostics.inspect', recent), recent)
@@ -219,7 +219,7 @@ it('retains early reports without advertising a provisional ID and deduplicates 
 })
 
 it('preserves an unconfirmed reservation when its original publishing process exits', async () => {
-  const path = await directory(), moduleUrl = new URL('@agentmux/host/client-incident-archive', import.meta.url).href
+  const path = await directory(), moduleUrl = new URL('../../host/src/client-incident-archive.ts', import.meta.url).href
   const script = `import {ClientIncidentArchive} from ${JSON.stringify(moduleUrl)};import {durableWriteFile} from ${JSON.stringify(new URL('../../../packages/core/dist/index.js', import.meta.url).href)};const a=new ClientIncidentArchive(process.argv[1],{write:async(p,c,o)=>{if(p.endsWith('.candidate'))process.exit(0);await durableWriteFile(p,c,o)}});await a.flush();console.log(JSON.stringify(a.enqueue(JSON.parse(process.argv[2]),JSON.parse(process.argv[3]))));await a.flush();`
   const child = await promisify(execFile)(process.execPath, ['--experimental-transform-types', '--input-type=module', '-e', script, path, JSON.stringify(report()), JSON.stringify(producer())])
   const receipt = JSON.parse(child.stdout), restarted = new ClientIncidentArchive(path)

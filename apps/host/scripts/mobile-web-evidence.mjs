@@ -70,7 +70,7 @@ export async function checkBackendProof() {
   const path = resolve(evidenceDirectory, 'backend-final/receipt.json'), proof = await readJSON(path)
   assert.equal(proof.schema, 'agentmux.mobile-web-backend-proof.v1')
   await checkInputs(proof.inputs)
-  const labels = ['baseline', 'main-route', 'manifest-hash', 'report-forward', 'report-producer', 'restored']
+  const labels = ['baseline', 'main-route', 'manifest-hash', 'report-owner', 'report-producer', 'restored']
   assert.deepEqual(proof.runs.map(run => run.label), labels)
   for (const run of proof.runs) {
     assert.equal(run.signal, null); assert.equal(run.command.program, 'pnpm'); assert.ok(isAbsolute(run.command.cwd))

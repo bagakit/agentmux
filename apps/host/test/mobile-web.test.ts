@@ -50,7 +50,7 @@ it('actual managed CLI keeps its injected Host endpoint and original Main revers
   expect((await f.client.statusAgent(f.session.agentSessionId)).run).toMatchObject({ runId: f.session.run.runId, state: 'running' })
 })
 
-it('real encrypted device reports retain exact producer/build in the original Main archive and original diagnostics CLI', async () => {
+it('real encrypted device reports retain exact producer/build in the original Host archive and original diagnostics CLI', async () => {
   const f = await mobileWebFixture(); cleanup.push(f.close)
   const phone = await f.relay()
   const loadedInput = { documentId: 'original-phone-document', buildId: 'old-actually-loaded-build', namespaceDigest: 'sha256:' + 'a'.repeat(64), occurrenceId: 'loaded-once', observedAt: 10 }
@@ -59,8 +59,8 @@ it('real encrypted device reports retain exact producer/build in the original Ma
   const base = { documentId: loadedInput.documentId, buildId: loadedInput.buildId, namespaceDigest: loadedInput.namespaceDigest, observedAt: 11,
     reporter: { droppedCount: 0, queuedCount: 1, queuedBytes: 100 } }
   const partial = { ...base, occurrenceId: 'catalog-original-occurrence', observation: { kind: 'catalog-partial' as const, source: 'space.ls' as const,
-    code: null, issueCount: 1, spaceIds: ['["local","/private/explicit-steer"]'], omittedCount: 0 } }
-  await expect(phone.call('app.mobile.report', partial)).rejects.toHaveProperty('code')
+    code: null, issueCount: 1, spaceIds: ['original-space'], omittedCount: 0 } }
+  await expect(phone.call('app.mobile.report', partial)).resolves.toMatchObject({ accepted: true })
   expect((await phone.call('runtime.owner.identity', {})).owner.runtimeId).toBe(f.native.owner.runtimeId)
   await f.startMain()
   const firstReport = phone.call('app.mobile.report', partial)

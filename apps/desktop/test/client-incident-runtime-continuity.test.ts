@@ -57,7 +57,7 @@ it('retains original incident, Session, Run, PID and layout across real semantic
     expect(after.run).toMatchObject({ runId: original.run.runId, pid: attached.attachment.run.pid,
       state: 'running', acceptedInputBytes: before.run.acceptedInputBytes })
     expect(client.runtimeIdentity().instanceId).toBe(native.instanceId)
-    const archiveModule = pathToFileURL(resolve('apps/desktop/src/main/client-incident-archive.ts')).href
+    const archiveModule = pathToFileURL(resolve('apps/host/src/client-incident-archive.ts')).href
     const coreModule = pathToFileURL(resolve('packages/core/dist/spatial-state.js')).href
     const script = `import {ClientIncidentArchive} from ${JSON.stringify(archiveModule)};import {AgentMuxSpatialStateStore} from ${JSON.stringify(coreModule)};const a=new ClientIncidentArchive(process.argv[1]);await a.flush();console.log(JSON.stringify({record:await a.read({domain:'client.incident',hostId:'local',logId:process.argv[2]},{signal:new AbortController().signal,maxBytes:131072}),spatial:await new AgentMuxSpatialStateStore(process.argv[3]).read()}));`
     const child = await promisify(execFile)(process.execPath, ['--experimental-transform-types', '--input-type=module', '-e', script,
