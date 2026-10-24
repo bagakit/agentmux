@@ -437,6 +437,7 @@
 .conversation-reply-observation__toggle > :is(time, .conversation-source-labels) { flex-shrink: 0; }
 .conversation-reply-observation__toggle .conversation-source-labels { flex-wrap: nowrap; }
 .conversation-reply-observation__toggle time { font-variant-numeric: tabular-nums; }
+.conversation-reply-observation__expand { flex-shrink: 0; margin-inline-start: auto; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); }
 .conversation-reply-observation__toggle:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
 .conversation-reply-observation__toggle[aria-expanded='true'] > .conversation-reply-observation__node > svg { transform: rotate(90deg); }
 .conversation-reply-observation__controls [data-status='failed'] { color: var(--red-text); }
