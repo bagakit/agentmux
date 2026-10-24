@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createRequire } from 'node:module'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -61,7 +61,7 @@ async function ownerWorker() {
 }
 
 export async function compiledHostFixture(candidate) {
-  const root = await mkdtemp(join(tmpdir(), 'amx-mobile-independent-'))
+  const root = await mkdtemp(join(await realpath(tmpdir()), 'ami-'))
   const privateHome = join(root, 'home'), userData = join(root, 'user-data'), runtime = join(root, 'runtime'), state = join(root, 'state')
   const workspace = join(root, 'workspace'), scratch = join(root, 'topics'), store = join(userData, 'agent-sessions.json')
   const environment = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key))),
