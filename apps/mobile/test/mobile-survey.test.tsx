@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import { NoteSnapshotTestWorker } from '../../desktop/test/note-snapshot-test-worker'
 import { computeNoteLiveMerge } from '@agentmux/client-ui/note/note-live-merge.worker'
-import { MobileRegionContent } from '../src/navigation/MobileRegionContent'
+import { MobileRegionContent, type MobileRegionContentProps } from '../src/navigation/MobileRegionContent'
 import { MobileSurveySurface } from '../src/survey/MobileSurveySurface'
 import { readSurveyPresentation } from '../../desktop/src/renderer/src/lib/mobile-presentation'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
@@ -162,6 +162,114 @@ describe('original Survey mobile slice', () => {
     const view = await mount(vi.fn().mockResolvedValue({ catalog: parsed(withoutSurvey) }))
     expect(view.element.querySelector('nav')).toBeNull()
     expect(view.element.textContent).toContain('原研究列表尚未确认')
+  })
+})
+
+describe('original Region read lifecycle', () => {
+  const workspacePath = fixturePath('region-read-lifecycle')
+  const file = { workspaceId: 'lifecycle-workspace', path: 'original.note.md', zoneRelativePath: 'original.note.md' }
+  const resource = { hostId: 'local', workspaceId: file.workspaceId, workspacePath, zoneId: 'lifecycle-zone', zonePath: workspacePath, path: file.path }
+  const body = (text: string, revision = text) => ({ resource, result: { status: 'read', document: {
+    path: file.path, content: serializeNoteDocument(newNoteDocument(text, 'lifecycle-note', 'lifecycle-block')), revision
+  } } })
+  function deferred() {
+    let resolve!: (value: unknown) => void, reject!: (error: Error) => void
+    const promise = new Promise((accept, fail) => { resolve = accept; reject = fail })
+    return { promise, resolve, reject }
+  }
+  async function reader(read: ReturnType<typeof vi.fn>, kind: 'file' | 'browser' = 'file') {
+    const forwardRpc = vi.fn(async (method: string) => {
+      if (method === 'app.snapshot') return { workspaces: [{ workspaceId: file.workspaceId, hostId: 'local', path: workspacePath }] }
+      if (method === 'file.read' || method === 'browser.targets') return read()
+      if (method === 'notebook.inspect') return { resourceChanges: [], conversionIssues: [] }
+      throw new Error('Unexpected lifecycle RPC: ' + method)
+    })
+    // The production connector retains this exact client across navigation and reconnects.
+    const client = { forwardRpc } as any
+    const element = document.createElement('div'); document.body.append(element)
+    const root = createRoot(element); mounted.push({ root, element })
+    const render = async (props: Partial<MobileRegionContentProps> = {}) => act(async () => root.render(<MobileRegionContent
+      client={client} connected visible tabId="lifecycle-tab" regionId="lifecycle-region" zoneId={resource.zoneId}
+      kind={kind} {...(kind === 'file' ? { file } : { browserId: 'original-browser' })} {...props} />))
+    return { element, forwardRpc, render }
+  }
+  it.each(['visible', 'connected'] as const)('resumes the same original Note after %s cancels a pending read', async trigger => {
+    const old = deferred(), read = vi.fn().mockReturnValueOnce(old.promise).mockResolvedValue(body('Current original Note', 'current-revision'))
+    const view = await reader(read)
+    await view.render(); expect(read).toHaveBeenCalledTimes(1)
+    await view.render({ [trigger]: false }); expect(read).toHaveBeenCalledTimes(1)
+    await view.render(); expect(read).toHaveBeenCalledTimes(2)
+    expect(noteText(view.element.querySelector('.mobile-note-body'))).toBe('Current original Note')
+    await act(async () => old.resolve(body('Disposed old Note', 'disposed-revision')))
+    expect(noteText(view.element.querySelector('.mobile-note-body'))).toBe('Current original Note')
+    expect(view.element.textContent).toContain('current-revision')
+    expect(view.element.textContent).not.toContain('disposed-revision')
+    expect(view.forwardRpc).toHaveBeenCalledWith('file.read', { zoneId: resource.zoneId, path: file.zoneRelativePath,
+      expectedResource: { hostId: resource.hostId, workspaceId: file.workspaceId, workspacePath } })
+  })
+  it.each(['visible', 'connected'] as const)('retains the current Note and issue when an old %s read rejects late', async trigger => {
+    const old = deferred(), read = vi.fn().mockResolvedValueOnce(body('Retained original Note', 'retained-revision'))
+      .mockReturnValueOnce(old.promise).mockResolvedValue({ result: { status: 'unknown', message: 'Current original observation is unknown' } })
+    const view = await reader(read)
+    await view.render()
+    await act(async () => [...view.element.querySelectorAll('button')].find(button => button.textContent === '刷新原文件')!.click())
+    expect(read).toHaveBeenCalledTimes(2)
+    await view.render({ [trigger]: false }); await view.render()
+    expect(read).toHaveBeenCalledTimes(3)
+    expect(view.element.textContent).toContain('Current original observation is unknown')
+    await act(async () => old.reject(new Error('Disposed observation failed')))
+    expect(noteText(view.element.querySelector('.mobile-note-body'))).toBe('Retained original Note')
+    expect(view.element.textContent).toContain('retained-revision')
+    expect(view.element.textContent).toContain('Current original observation is unknown')
+    expect(view.element.textContent).not.toContain('Disposed observation failed')
+  })
+  it.each(['visible', 'connected'] as const)('reobserves only the exact original Browser after %s resumes', async trigger => {
+    const old = deferred(), read = vi.fn().mockReturnValueOnce(old.promise).mockResolvedValue({ targets: [
+      { id: 'unrelated-browser', url: 'https://unrelated.example', title: 'Unrelated', status: 'ready' },
+      { id: 'original-browser', url: 'https://original.example/current', title: 'Current original Browser', status: 'ready' }
+    ] })
+    const view = await reader(read, 'browser')
+    await view.render(); await view.render({ [trigger]: false }); expect(read).toHaveBeenCalledTimes(1)
+    await view.render(); expect(read).toHaveBeenCalledTimes(2)
+    expect(view.element.querySelector('a')?.getAttribute('href')).toBe('https://original.example/current')
+    await act(async () => old.resolve({ targets: [{ id: 'original-browser', url: 'https://original.example/old', title: 'Disposed original Browser', status: 'ready' }] }))
+    expect(view.element.querySelector('a')?.getAttribute('href')).toBe('https://original.example/current')
+    expect(view.element.textContent).not.toContain('Disposed original Browser')
+    expect(view.forwardRpc.mock.calls.map(call => call[0])).toEqual(['browser.targets', 'browser.targets'])
+  })
+  it('does no work for hidden or stable original props and reenters on the selected file observation change', async () => {
+    const old = deferred(), read = vi.fn().mockReturnValueOnce(old.promise).mockResolvedValue(body('Current selected Note'))
+    const view = await reader(read)
+    await view.render({ visible: false }); await view.render({ connected: false }); expect(view.forwardRpc).not.toHaveBeenCalled()
+    await view.render(); expect(read).toHaveBeenCalledTimes(1)
+    await view.render({ file: { ...file }, showTitle: false }); expect(read).toHaveBeenCalledTimes(1)
+    await view.render({ file: { ...file, issue: 'Selected original mapping observation changed' } })
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(noteText(view.element.querySelector('.mobile-note-body'))).toBe('Current selected Note')
+    await act(async () => old.resolve(body('Old selected Note')))
+    expect(noteText(view.element.querySelector('.mobile-note-body'))).toBe('Current selected Note')
+  })
+  it('keeps the original Note revision and device draft when reactivation observes a changed Workspace mapping', async () => {
+    const read = vi.fn().mockResolvedValue(body('Original mapped Note', 'original-mapped-revision'))
+    const view = await reader(read)
+    await view.render()
+    await act(async () => [...view.element.querySelectorAll('button')].find(button => button.textContent === '编辑原笔记')!.click())
+    const editor = view.element.querySelector<HTMLElement>('[contenteditable=true]') as HTMLElement & { editor: { commands: { insertContent(content: string): void } } }
+    await act(async () => editor.editor.commands.insertContent('Retained device draft'))
+    const draftKey = Object.keys(localStorage).find(key => key.startsWith('agentmux-mobile-note-draft:') && key.includes('lifecycle-note'))!
+    expect(localStorage.getItem(draftKey)).toContain('Retained device draft')
+    const original = view.forwardRpc.getMockImplementation()!
+    view.forwardRpc.mockImplementation(async method => method === 'app.snapshot'
+      ? { workspaces: [{ workspaceId: file.workspaceId, hostId: 'local', path: fixturePath('another-original-workspace') }] }
+      : original(method))
+    await view.render({ visible: false }); await view.render()
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(view.element.textContent).toContain('原文件 Workspace 资源映射已改变')
+    expect(view.element.textContent).toContain('original-mapped-revision')
+    expect(view.element.querySelector('[contenteditable=true]')?.textContent).toContain('Retained device draft')
+    expect(localStorage.getItem(draftKey)).toContain('Retained device draft')
+    expect(view.forwardRpc.mock.calls.some(call => call[0] === 'file.write')).toBe(false)
+    localStorage.removeItem(draftKey)
   })
 })
 
