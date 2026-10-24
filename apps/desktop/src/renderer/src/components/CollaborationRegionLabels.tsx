@@ -168,12 +168,12 @@ function RegionIdentity({ data, hasChildren, onToggle }: { data: Region; hasChil
   })))
   const host = hostIdentityProjection(area.hostId, configuredHost)
   return <>
-    <button type="button" className="collaboration-area__summary nodrag nopan" aria-label={`Locate ${area.name} · ${data.totalMembers} Agents`} onClick={data.onLocate} title={area.issue ?? `${COLLABORATION_AREA_KINDS[area.kind].label} · ${area.name}`}>
+    <button type="button" className="collaboration-area__summary nodrag nopan" aria-label={`Locate ${area.name} · ${data.totalMembers} Agents${hasChildren ? ' including subspaces' : ''}`} onClick={data.onLocate} title={area.issue ?? `${COLLABORATION_AREA_KINDS[area.kind].label} · ${area.name}`}>
       <span className="collaboration-area__identity" aria-hidden="true">{target ? <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={manualIcon}
         {...(area.workspaceId ? { workspaceId: area.workspaceId } : {})} folderIdentityKey={target.kind === 'folder' ? target.key : undefined}
         avatarWorkspaceId={target.avatarTarget?.workspaceId} avatarTopicId={target.avatarTarget?.topicId} avatarObjectKey={target.avatarTarget?.objectKey}
         imageTarget={target.imageTarget} visible={false} /> : <SemanticIcon name={COLLABORATION_AREA_KINDS[area.kind].icon} size={18} />}</span>
-      <span className="collaboration-area__name"><strong>{area.name}</strong><span className="collaboration-area__meta"><em>{COLLABORATION_AREA_KINDS[area.kind].label}</em><small>{data.totalMembers} {data.totalMembers === 1 ? 'Agent' : 'Agents'}</small>{host.kind !== 'local' ? <HostBadge host={host} context="Host" /> : null}</span></span>
+      <span className="collaboration-area__name"><strong>{area.name}</strong><span className="collaboration-area__meta"><em>{COLLABORATION_AREA_KINDS[area.kind].label}</em><small>{data.totalMembers} {data.totalMembers === 1 ? 'Agent' : 'Agents'}{hasChildren ? ' incl. subspaces' : ''}</small>{host.kind !== 'local' ? <HostBadge host={host} context="Host" /> : null}</span></span>
       <i className="collaboration-area__activity" data-kind={data.activity?.pulse.kind} aria-hidden={!data.activity || undefined} aria-label={data.activity ? data.activity.pulse.kind === 'communication' ? 'Recent message activity' : 'Recent dispatch update' : undefined} />
     </button>
     {data.folded && data.internal.length ? <button type="button" className="collaboration-area__internal nodrag nopan" aria-label={`${area.name}: ${data.internal.length} internal connections`} onClick={data.onInspect}>{data.internal.length} internal connections<SemanticIcon name="navigation.next" size={11} /></button> : null}

@@ -15,6 +15,22 @@ export function collaborationMapLod(zoom: number) {
   return { identity: smooth(.32, .58, zoom), detail: smooth(COLLABORATION_DETAIL_START, COLLABORATION_DETAIL_END, zoom) }
 }
 
+/** Different text layouts hand over in sequence. Their shared shell remains
+ * visible, but two displaced names or avatars never become a ghosted double. */
+export function collaborationMapContentInk(detail: number) {
+  return { identity: 1 - smooth(0, .16, detail), detail: smooth(.16, .8, detail) }
+}
+
+/** Reserve the avatar's real projected footprint before revealing a name.
+ * An intermediate camera scale must not squeeze tiny text underneath it. */
+export function collaborationIdentityInk(width: number, zoom: number, progress: number, markScale: number, glyphRadius: number) {
+  const avatarCenter = mix(width / 2, 20, progress)
+  const avatarRadius = glyphRadius * mix(markScale, 1, progress)
+  const nameLeft = avatarCenter + avatarRadius + 8
+  const available = Math.max(0, (width - nameLeft - 8) * zoom)
+  return { avatarCenter, nameLeft, opacity: progress * smooth(32, 60, available), fontSize: Math.max(12, 11 / zoom) }
+}
+
 /** Original small point slots cannot become giant overlapping overview marks. */
 export const collaborationOverviewScale = (box: CollaborationLayoutBounds, zoom: number) =>
   Math.min(1 / zoom, Math.min(box.width, box.height) / (COLLABORATION_OVERVIEW_MARK_SIZE / 2))
