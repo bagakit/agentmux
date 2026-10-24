@@ -42,6 +42,8 @@ app.whenReady().then(async () => {
   }
   const capture = async name => {
     if (mode === 'commands-entry' && !name.startsWith('commands-')) return
+    if (mode === 'notice-center' && !name.startsWith('notices-')) return
+    if (mode === 'notice-light' && !['notices-settings-light-short', 'notices-restored-light-short'].includes(name)) return
     if (mode === 'parity-final' && !['focus-overview-phone', 'space-directory-430', 'focus-result-conversation-narrow', 'unknown-details-short-viewport', 'offline-retained-short'].includes(name)) return
     if (mode === 'source-recovery' && !['navigation-offline-source-restored-narrow', 'navigation-reconnected-source-narrow'].includes(name)) return
     await pause(120)
@@ -80,6 +82,52 @@ app.whenReady().then(async () => {
   await tap('.mobile-conversation-panel [contenteditable=true]', 'Original shared Composer')
   win.webContents.insertText('先比较两种方案，保留原来的依据。')
   await capture('mote-conversation-phone')
+  if (mode === 'notice-center' || mode === 'notice-light') {
+    if (mode === 'notice-light') {
+      await read('mobileProductScene.setAppearance("light")')
+      await until('document.documentElement.dataset.appearance==="light"')
+    }
+    await resize(320, 568)
+    await read('mobileProductScene.offline()')
+    await until('!!document.querySelector(".mobile-conversation__connection .mobile-notice__dismiss")')
+    await capture('notices-offline-narrow-short')
+    await tap('.mobile-conversation__connection .mobile-notice__dismiss', 'Dismiss original connection notice')
+    assert.equal(await visible('.mobile-conversation__connection'), false)
+    await button('手机设置与连接')
+    await capture('notices-menu-narrow-short')
+    await button('提醒与诊断', '[role=dialog]')
+    if (mode === 'notice-light') assert.equal(await read('document.documentElement.dataset.appearance'), 'light')
+    await resize(430, 480)
+    await capture(mode === 'notice-light' ? 'notices-settings-light-short' : 'notices-settings-short')
+    await button('恢复已收起提醒', '[role=dialog]')
+    assert.equal(await visible('.mobile-conversation__connection'), true)
+    assert.equal(await read('document.querySelector("[contenteditable=true]")===window.originalCaptureEditor'), true)
+    assert.equal(await read('document.querySelector("[contenteditable=true]").textContent'), '先比较两种方案，保留原来的依据。')
+    await capture(mode === 'notice-light' ? 'notices-restored-light-short' : 'notices-restored-short')
+    if (mode === 'notice-light') {
+      assert.equal(await read('document.documentElement.dataset.appearance'), 'light')
+      result.passed = true
+      return
+    }
+    assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.submitAgentPrompt").length'), 0)
+    await read('mobileProductScene.reconnect();mobileProductScene.unknownNext()')
+    await until('!document.querySelector(".mobile-conversation__connection")')
+    await button('Send')
+    await until('!!document.querySelector(".mobile-send-status[data-phase=unknown]")')
+    const packet = await read('JSON.stringify(mobileProductScene.facts().record.conversation.attempts)')
+    await button('关闭操作说明', '.mobile-send-status')
+    assert.equal(await visible('.mobile-send-status--collapsed'), true)
+    await button('手机设置与连接'); await button('提醒与诊断', '[role=dialog]'); await button('恢复已收起提醒', '[role=dialog]')
+    await until('!document.querySelector(".mobile-send-status--collapsed")&&!!document.querySelector(".mobile-send-status[data-phase=unknown]")')
+    assert.equal(await read('JSON.stringify(mobileProductScene.facts().record.conversation.attempts)'), packet)
+    assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.submitAgentPrompt").length'), 1)
+    await read('mobileProductScene.setAppearance("dark")'); await resize(390, 480)
+    await capture('notices-unknown-restored-short')
+    const target = result.operations.find(value => value.target === 'Dismiss original connection notice' && value.action === 'touch').observed.rect
+    assert.ok(target.width >= 44 && target.height >= 44)
+    result.passed = true
+    return
+  }
   if (mode === 'commands-entry') {
     assert.equal(await read('document.querySelector(".composer-tools").dataset.mode'), 'collapsed')
     await resize(320, 568)
