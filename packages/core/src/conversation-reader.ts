@@ -3,7 +3,7 @@ import { mintObjectId } from './object-id.js'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { projectConversationStream, conversationRecordRole, conversationRecordId, conversationRevision, conversationSourceKey, conversationInputAdoptionEdges,
+import { projectConversationStream, conversationRecordRole, conversationRecordId, conversationRevision, conversationValuesEqual as same, conversationSourceKey, conversationInputAdoptionEdges,
   type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationInputAdoptionContext } from './conversation-stream.js'
 import { parseConversationTimelineReadInput, parseConversationChangesInput, parseConversationFrontier, parseConversationReadPage, parseConversationChangesPage,
   CONVERSATION_DEFAULT_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, CONVERSATION_MAX_WINDOW_RECORDS, type ConversationTimelineReadInput, type ConversationChangesInput, type ConversationFrontier,
@@ -88,7 +88,6 @@ export class ConversationReaderState {
 const key = randomBytes(32)
 const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const fail = (message: string, code = 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'): never => { throw new AgentMuxError(message, code) }
-const same = (a: unknown, b: unknown) => conversationRevision(a) === conversationRevision(b)
 function encode(value: Cursor): string {
   const body = Buffer.from(JSON.stringify(value)).toString('base64url')
   return body + '.' + createHmac('sha256', key).update(body).digest('base64url')
