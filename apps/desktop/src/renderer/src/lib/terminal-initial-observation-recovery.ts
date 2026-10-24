@@ -17,39 +17,48 @@ export function recoverableInitialTerminalObservation(error: unknown): boolean {
 export class TerminalInitialObservationRecovery {
   private timer: ReturnType<typeof setTimeout> | null = null
   private failed = false
+  private retryable = false
+  private independentRead: boolean
   private attempts = 0
   private disposed = false
   constructor(private visible: boolean, private readonly idle: () => boolean,
-    private readonly retry: () => Promise<void>) {}
+    private readonly retry: () => Promise<void>) { this.independentRead = visible }
 
   failure(error: unknown): void {
-    this.failed = recoverableInitialTerminalObservation(error)
-    if (!this.failed) this.pause()
+    this.failed = true
+    this.retryable = recoverableInitialTerminalObservation(error)
+    this.pause()
   }
   pause(): void {
     if (this.timer !== null) clearTimeout(this.timer)
     this.timer = null
   }
   settled(): void {
-    if (this.disposed || !this.visible || !this.failed || !this.idle() || this.timer !== null || this.attempts >= RETRY_DELAYS_MS.length) return
+    if (this.disposed || !this.visible || !this.failed || !this.idle() || this.timer !== null ||
+      this.attempts >= RETRY_DELAYS_MS.length || !this.independentRead && !this.retryable) return
     this.timer = setTimeout(() => {
       this.timer = null
       if (this.disposed || !this.visible || !this.failed || !this.idle()) return
+      // A visible consumer may independently reread a failed opening. The new
+      // result still passes the original owner/identity/protocol validation.
+      // Spending this demand before opening prevents a rejected reread spinning.
+      this.independentRead = false
       this.attempts++
       void this.retry().catch(() => {})
-    }, RETRY_DELAYS_MS[this.attempts])
+    }, this.retryable ? RETRY_DELAYS_MS[this.attempts] : 0)
   }
   setVisible(visible: boolean): void {
     if (this.visible === visible) return
     this.visible = visible
     this.pause()
+    this.independentRead = visible
     if (visible) { this.attempts = 0; this.settled() }
   }
   ownerRestored(): void {
-    if (this.disposed || !this.failed) return
+    if (this.disposed || !this.failed || !this.retryable) return
     this.attempts = 0
     this.settled()
   }
-  acquired(): void { this.failed = false; this.pause() }
-  dispose(): void { this.disposed = true; this.pause() }
+  acquired(): void { this.failed = false; this.independentRead = false; this.pause() }
+  dispose(): void { this.disposed = true; this.independentRead = false; this.pause() }
 }
