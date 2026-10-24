@@ -50,13 +50,15 @@ export function ConversationAxis({
   onPeekEnd,
   width = 0,
   conversationSessionId,
-  recentFraction = 0
+  recentFraction = 0,
+  keyframes
 }: {
   /** 全量 items。scale 在全量上建，位置按原始下标取——两条轴因此与主刻度时间基准同源。 */
   items: readonly RulerAxisItem[]
   /** Actual width of the shared ruler track. */
   width?: number
   recentFraction?: number | null
+  keyframes?: ReadonlyMap<string, string>
   conversationSessionId?: string | undefined
   /** 轴语义：哪些身份在这条轴上留标记。两条轴只有这个参数不同。 */
   belongs: SpeakerPredicate
@@ -115,7 +117,7 @@ export function ConversationAxis({
         <AxisCluster key={cluster.members[0]!.item.id} cluster={cluster} size={size}
           anchorOffset={(cluster.anchorFraction - cluster.fraction) * width}
           describe={describe} conversationSessionId={conversationSessionId} recentFraction={recentFraction} selected={cluster.members.some(mark => mark.index === selectedIndex)}
-          onSelect={onSelect} {...(onPeekEnd === undefined ? {} : { onPeekEnd })} />
+          onSelect={onSelect} keyframes={keyframes} {...(onPeekEnd === undefined ? {} : { onPeekEnd })} />
       ) : (
         <AxisMark
           key={cluster.members[0]!.item.id}
@@ -127,6 +129,7 @@ export function ConversationAxis({
           recentFraction={recentFraction}
           selected={cluster.members[0]!.index === selectedIndex}
           onSelect={onSelect}
+          keyframe={keyframes?.get(cluster.members[0]!.item.id)}
           {...(onPeek === undefined ? {} : { onPeek })}
           {...(onPeekEnd === undefined ? {} : { onPeekEnd })}
         />
@@ -152,12 +155,14 @@ function AxisMark({
   onSelect,
   onPeek,
   onPeekEnd,
-  recentFraction = 0
+  recentFraction = 0,
+  keyframe
 }: {
   mark: ConversationAxisMark
   fraction: number
   anchorOffset: number
   recentFraction?: number | null
+  keyframe?: string | undefined
   size: number
   describe: DescribeSpeaker
   selected: boolean
@@ -197,6 +202,7 @@ function AxisMark({
           正文里外层是纯 span，那里那份 aria-label 正是唯一的名字来源，删掉它会让正文的头像变成只有
           视觉能识别的身份。 */}
       <MarkerStem offset={anchorOffset} />
+      {keyframe ? <img className="conversation-axis__keyframe" src={keyframe} alt="" aria-hidden="true" /> : null}
       <span className="conversation-axis__glyph" aria-hidden="true">
         <AxisAvatar speaker={displaySpeaker} identity={identity} size={size} />
       </span>
@@ -204,10 +210,11 @@ function AxisMark({
   )
 }
 
-function AxisCluster({ cluster, anchorOffset, size, describe, selected, onSelect, onPeekEnd, conversationSessionId, recentFraction = 0 }: {
+function AxisCluster({ cluster, anchorOffset, size, describe, selected, onSelect, onPeekEnd, conversationSessionId, recentFraction = 0, keyframes }: {
   cluster: ConversationAxisCluster
   anchorOffset: number
   recentFraction?: number | null
+  keyframes?: ReadonlyMap<string, string> | undefined
   conversationSessionId?: string | undefined
   size: number
   describe: DescribeSpeaker
@@ -228,7 +235,7 @@ function AxisCluster({ cluster, anchorOffset, size, describe, selected, onSelect
     <Menu.Portal>
       <Menu.Content className="tab-context-menu conversation-axis__cluster-menu" side="bottom" sideOffset={6} align="start">
         <Menu.Label className="conversation-axis__menu-heading">{cluster.members.length} messages · Original excerpts</Menu.Label>
-        <ClusterEntries members={cluster.members} describe={describe} onSelect={onSelect} conversationSessionId={conversationSessionId} />
+        <ClusterEntries members={cluster.members} describe={describe} onSelect={onSelect} conversationSessionId={conversationSessionId} keyframes={keyframes} />
       </Menu.Content>
     </Menu.Portal>
   </Menu.Root>
@@ -240,7 +247,8 @@ function MarkerStem({ offset }: { offset: number }) {
 }
 
 /** Render excerpts only while the shared menu mounts its content. */
-export function ClusterEntries({ members, describe, onSelect, conversationSessionId }: {
+export function ClusterEntries({ members, describe, onSelect, conversationSessionId, keyframes }: {
+  keyframes?: ReadonlyMap<string, string> | undefined
   conversationSessionId?: string | undefined
   members: readonly (Pick<ConversationAxisMark, 'index' | 'item'> & { speaker: ConversationSpeaker | null })[]
   describe: DescribeSpeaker
@@ -259,6 +267,7 @@ export function ClusterEntries({ members, describe, onSelect, conversationSessio
             <span aria-hidden="true">
               {speaker ? <AxisAvatar speaker={speaker} identity={identity} size={16} /> : <span className="conversation-axis__activity" aria-hidden="true">·</span>}
             </span>
+            {keyframes?.has(mark.item.id) ? <img className="conversation-axis__entry-keyframe" src={keyframes.get(mark.item.id)} alt="" aria-hidden="true" /> : null}
             <span className="conversation-axis__entry-text">
               <span className="conversation-axis__entry-name">{name}<small>{speaker?.role === 'agent' ? speaker.id === conversationSessionId ? 'This agent · ' : 'Sender · ' : ''}Record {mark.index + 1}</small></span>
               {quote ? <span className="conversation-axis__entry-quote">{quote}</span> : null}

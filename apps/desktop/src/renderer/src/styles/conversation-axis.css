@@ -55,6 +55,11 @@
   transition: transform 120ms ease;
 }
 
+/* Cached visual hints overlap the avatar's upper edge inside the existing 24px track. */
+.conversation-axis__keyframe { position:absolute; top:0; left:1px; box-sizing:border-box; width:18px; height:9px; object-fit:contain; border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface-0); pointer-events:none; }
+.conversation-axis__keyframe ~ .conversation-axis__glyph { position:relative; top:2px; }
+.conversation-axis__entry-keyframe { flex:none; width:44px; height:28px; object-fit:contain; border-radius:var(--radius-sm); background:var(--surface-0); }
+
 /* A locally displaced entry points back to its original event coordinate.
    Shared by both consumers; it never participates in hit testing or packing. */
 .timeline-marker-stem { position: absolute; top: 22px; height: 1px; background: var(--text-3); opacity: .55; pointer-events: none; }
