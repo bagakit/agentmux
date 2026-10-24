@@ -293,7 +293,7 @@ it('crossfades one visible semantic layer and keeps the original keyboard reader
       expect(Number(detail.style.opacity)).toBeLessThan(1)
     }
   }
-  await scale(.69)
+  await scale(.63)
   const identity = nodeElement(id)!.querySelector<HTMLButtonElement>('.collaboration-agent__mark')!
   await act(async () => identity.focus())
   const reader = agentInformationPreview.getAll().find(request => request.anchor === identity)!
@@ -322,6 +322,35 @@ it('crossfades one visible semantic layer and keeps the original keyboard reader
   await act(async () => { card.blur(); agentInformationPreview.dismiss(originalReader.token) })
   expect(nodeElement(id)!.querySelector('.focus-context')).toBeNull()
   expect(semanticLayers().map(layer => layer.dataset.mapLayer)).toEqual(['identity'])
+  expect(captured.nodes).toBe(originalNodes)
+  expect(requests).toHaveLength(operations)
+})
+
+it('keeps one legible identity ink through paused intermediate zoom without ghosting or avatar collisions', async () => {
+  const scene = scenario(24); await loaded(scene)
+  const id = collaborationAgentNode('area-0', subject('canvas-0')), box = renderedBox(id)
+  const originalNodes = captured.nodes, operations = requests.length
+  for (const zoom of [.319, .321, .4, .44, .46, .5, .54, .58, .62, .64, .66, .675, .68, .69, .7, .71, .72, .74, .78, .82]) {
+    await viewport(-box.x * zoom + 90, -box.y * zoom + 100, 600, 400, zoom)
+    const node = nodeElement(id)!, identity = node.querySelector<HTMLElement>('[data-map-layer="identity"]')!
+    const detail = node.querySelector<HTMLElement>('[data-map-layer="detail"]')
+    const identityOpacity = Number(identity.style.opacity), detailOpacity = detail ? Number(detail.style.opacity) : 0
+    expect(identityOpacity * detailOpacity, `Two displaced text layouts must never overlap at ${zoom}`).toBe(0)
+    expect([...node.querySelectorAll<HTMLElement>('[data-map-layer]')].filter(layer => !layer.inert)).toHaveLength(1)
+    const title = identity.querySelector<HTMLElement>('strong')
+    if (!title) continue
+    const avatar = identity.querySelector<HTMLElement>('.agent-avatar')!, wrapper = identity.querySelector<HTMLElement>('.collaboration-agent__avatar')!
+    const center = Number.parseFloat(node.querySelector<HTMLElement>('.collaboration-agent')!.style.getPropertyValue('--collaboration-avatar-center'))
+    const radius = Number.parseFloat(avatar.style.getPropertyValue('--agent-avatar-size')) / 2 * Number.parseFloat(wrapper.style.getPropertyValue('--collaboration-avatar-scale'))
+    const titleLeft = Number.parseFloat(title.style.left)
+    if (Number(title.style.opacity) * identityOpacity > 0) {
+      expect(titleLeft - center - radius, `Name starts after the actual avatar at ${zoom}`).toBeGreaterThanOrEqual(7.9999)
+      expect(Number.parseFloat(title.style.fontSize) * zoom).toBeGreaterThanOrEqual(10.9999)
+    }
+    if (zoom === .44 || zoom === .46) expect(Number(title.style.opacity)).toBe(0)
+    if (zoom === .54 || zoom === .58) expect(Number(title.style.opacity)).toBeGreaterThan(0)
+    if (zoom === .72) { expect(identityOpacity).toBe(0); expect(detailOpacity).toBeGreaterThan(0) }
+  }
   expect(captured.nodes).toBe(originalNodes)
   expect(requests).toHaveLength(operations)
 })
