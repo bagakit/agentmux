@@ -18,6 +18,8 @@ const loadedSource = {}
 try {
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'controls-terminal-route': { file: 'apps/mobile/src/MobileApp.tsx', before: "panel: value.panel === 'terminal' && !showGoalWork ? 'conversation' : 'terminal'", after: 'panel: value.panel' },
+    'controls-goal-route': { file: 'apps/mobile/src/MobileApp.tsx', before: 'goalReturn.current = { trigger, sessionId: workface.selectedSessionId }; setShowGoalWork(true)', after: 'goalReturn.current = { trigger, sessionId: workface.selectedSessionId }; setShowGoalWork(false)' },
     'avatar-oversize': { file: 'packages/client-ui/src/components/AgentAvatarFace.tsx', before: 'size = 18, mark', after: 'size = 28, mark' },
     'resource-leading-icon': { file: 'apps/mobile/src/mobile.css', before: '.mobile-session-list button > svg { flex: 0 0 auto;', after: '.mobile-session-list button > svg { margin-left: auto; flex: 0 0 auto;' },
     'duplicate-connection': { file: 'apps/mobile/src/MobileApp.tsx', before: '!conversationVisible ? connection.issue', after: 'true ? connection.issue' },
@@ -128,16 +130,16 @@ try {
   }
   receipt.loadedSource = loadedSource
   receipt.virtualInputs = Object.fromEntries(Object.entries(built.metafile.inputs).filter(([name]) => name.startsWith('(disabled):') || name.startsWith('<define:')))
-  for (const name of ['capture-ui.mjs', 'product-main.cjs', ...(process.argv.includes('--conversation-density') ? ['conversation-density.cjs'] : []), ...(process.argv.includes('--conversation-density-hit') ? ['conversation-density-hit.cjs'] : []), ...(process.argv.includes('--conversation-attachments') ? ['conversation-attachments.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
+  for (const name of ['capture-ui.mjs', 'product-main.cjs', ...(process.argv.includes('--chat-start') ? ['chat-start.cjs'] : []), ...(process.argv.includes('--conversation-controls') ? ['conversation-controls.cjs'] : []), ...(process.argv.includes('--conversation-density') ? ['conversation-density.cjs'] : []), ...(process.argv.includes('--conversation-density-hit') ? ['conversation-density-hit.cjs'] : []), ...(process.argv.includes('--conversation-attachments') ? ['conversation-attachments.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   for (const file of ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileAttachments.tsx', 'apps/mobile/src/platform/native/device.ts', 'apps/mobile/src/recovery/device-workface.ts', 'apps/mobile/src/conversation/MobileConversationSurface.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  const subset = ['conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  const subset = ['chat-start', 'conversation-controls', 'conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
   if (subset) receipt.captureSubset = subset
   receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, ...(subset ? [subset] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
-  if (subset === 'spatial-resources' && JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).passed) {
+  if (['spatial-resources', 'chat-start'].includes(subset) && JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).passed) {
     receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, subset, 'restore'],
       { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
     receipt.restoredRenderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result-restored.json'), 'utf8'))
