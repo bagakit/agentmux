@@ -107,6 +107,20 @@ it('keeps the original mounted form and unsaved answer through a real partial ow
   expect(calls.filter(call => call.method === 'capsule.interaction.draft')).toHaveLength(0)
 })
 
+it('reads original saved questions when page metadata fails and keeps a mounted unsaved answer through refresh', async () => {
+  const originalTransport = transport
+  transport = ((method, params) => method === 'capsule.inspect' ? Promise.reject(new Error('Original page metadata is unavailable')) : originalTransport(method, params)) as CapsulePort['call']
+  await mount()
+  const before = editor()
+  expect(editor().value).toBe('Saved original draft')
+  expect(container.textContent).toContain('Original page metadata is unavailable')
+  await change('Unsaved original answer')
+  await click('Refresh')
+  expect(editor()).toBe(before); expect(editor().value).toBe('Unsaved original answer')
+  expect(calls.filter(call => call.method === 'capsule.interaction.ls').length).toBeGreaterThan(0)
+  expect(api.capsuleReplies.confirm).not.toHaveBeenCalled()
+})
+
 it('retains the original unknown confirmation identity and inspect-only form through partial reads and recovery', async () => {
   await mount(); const before = editor(), scope = before.closest('article')!
   await click('Confirm answer', scope)

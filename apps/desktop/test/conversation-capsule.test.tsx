@@ -218,6 +218,7 @@ it('reconnects its original retained document before failed service observation 
   await render(`![Original page](${first})`)
   await vi.waitFor(() => expect(container.querySelector('video')).not.toBeNull())
   expect(container.textContent).toContain('The original service observation is unavailable')
+  expect(container.querySelector('[aria-label="Page questions"]')).not.toBeNull()
   expect(api.browser.restore).toHaveBeenLastCalledWith(original.id, { workspaceId: null, profileId: null, mode: 'normal', viewport: 'responsive' })
   expect(create).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled()
 })
