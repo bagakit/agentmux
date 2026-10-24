@@ -10,6 +10,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 
 const LoadingIcon = semanticIconComponent('status.loading')
+const RefreshIcon = semanticIconComponent('action.refresh')
 
 type Connection = Pick<ConnectionRecord, 'revision' | 'config'>
 const scopeOf = (connection: Connection) => ({ connectionId: connection.config.connectionId, expectedConnectionRevision: connection.revision })
@@ -90,9 +91,9 @@ export function ConnectorRoomOverview({ facts, groupId, requestedName }: {
   return <div className="agent-connector-room-overview" aria-busy={facts.pending}>
     <div className="agent-connector-section-title"><div className="agent-connector-group-identity">
       <strong className="agent-connector-group">{room?.name ?? 'Group name not confirmed'}</strong>
-      <small>Group ID · {groupId}</small>
-    </div><button type="button" className="agent-connector-text-action" disabled={facts.pending} onClick={() => void facts.refresh()}>
-      {facts.pending ? <LoadingIcon size={13} animation="spin" /> : null}Refresh group details
+
+    </div><button type="button" className="agent-connector-text-action agent-connector-room-refresh" aria-label="Refresh group details" title="Refresh group details" disabled={facts.pending} onClick={() => void facts.refresh()}>
+      {facts.pending ? <LoadingIcon size={13} animation="spin" /> : <RefreshIcon size={14} />}
     </button></div>
     {facts.pending ? <p className="agent-connector-note" role="status">Reading group details…</p> : null}
     {observation && observation.state !== 'ready' ? <p className="agent-connector-note" role="status">
@@ -105,7 +106,7 @@ export function ConnectorRoomOverview({ facts, groupId, requestedName }: {
       <span>{room.membershipApproval === 'required' ? 'Approval required to join' : room.membershipApproval === 'not-required' ? 'No approval required to join' : 'Join approval policy not confirmed'}</span>
     </div> : null}
     {facts.issue ? <p className="agent-connector-note" role="status">The group and member refresh could not complete. Earlier observed details are kept. {facts.issue}</p> : null}
-    <button type="button" className="agent-connector-text-action" onClick={() => void copyTextToClipboard(groupId, error => setFeedback(presentError(error))).then(copied => { if (copied) setFeedback('Group ID copied.') })}>Copy group ID</button>
+    <details className="agent-connector-disclosure"><summary>Group identity</summary><div className="agent-connector-fields"><code>{groupId}</code><button type="button" className="agent-connector-text-action" onClick={() => void copyTextToClipboard(groupId, error => setFeedback(presentError(error))).then(copied => { if (copied) setFeedback('Group ID copied.') })}>Copy group ID</button></div></details>
     {feedback ? <p className="agent-connector-note" role="status">{feedback}</p> : null}
   </div>
 }
@@ -113,7 +114,7 @@ export function ConnectorRoomOverview({ facts, groupId, requestedName }: {
 export function ConnectorRoomPeople({ facts, onSelect, prominent = false }: { facts: ReturnType<typeof useConnectorRoomFacts>; onSelect?: ((idType: string, userId: string) => void) | undefined; prominent?: boolean }) {
   const people = facts.people
   const body = <div className="agent-connector-fields">
-    <p className="agent-connector-note">{onSelect ? 'Choose an exact person to approve how they can use this Agent. Joining alone does not grant access.' : 'Your own membership is not verified here. Joining the group and permission to use this Agent are separate.'}</p>
+    <p className="agent-connector-note">{onSelect ? 'Choose a member to set their access to this Agent.' : 'Your own membership is not verified here. Joining the group and permission to use this Agent are separate.'}</p>
     {facts.pending ? <p className="agent-connector-note" role="status"><LoadingIcon size={14} animation="spin" /> Reading this group…</p> : null}
     {people?.observation.state === 'ready' ? people.members.length ? people.members.map(member => <div className="agent-connector-person" key={JSON.stringify([member.idType, member.userId])}>
       <span><strong>{member.name ?? member.userId}</strong><small>{member.idType} · {member.userId}</small></span>
