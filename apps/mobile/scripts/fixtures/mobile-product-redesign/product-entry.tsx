@@ -19,6 +19,7 @@ const record = (method: string, params: unknown = {}) => calls.push({ sequence: 
 const original = (id: string): AgentMuxAgentSession => ({ kind: 'agent', agentSessionId: id, providerId: 'codex', executorId: 'fixture-original',
   hostId: 'host-original', workspacePath: fixturePath("execution-original"), run: { runId: `run-${id}` }, retiredRuns: [], createdAt: 1, updatedAt: 1 })
 const main = original('session-mote'), waiting = original('session-waiting'), result = original('session-result')
+const ordinaryReply = '可以。我们先确认你想解决的问题，再比较这两种想法。\n\n我会保留原材料、已经确认的进展和还需要你决定的地方；不会把未知回执当作完成。'
 waiting.pendingInteraction = { request: { kind: 'permission', id: 'request-original', agentSessionId: waiting.agentSessionId,
   title: '请确认本次资料读取', evidence: { source: 'native-hook', observedAt: 1, run: waiting.run },
   permissionHook: { receiptId: 'request-original' },
@@ -79,6 +80,11 @@ const goal: AgentMuxRpcGoal = { id: 'goal-original', title: '把两个想法变�
   grounding: { alignmentRevision: 1, submissionId: 'result-original', summary: '建议先做范围更清晰的方案 A；以下是依据和第一步。', acceptedAt: null,
     checks: [{ criterionId: 'criterion-original', outcome: 'met', note: '已整理步骤、比较依据与需要你决定的地方。', evidence: ['原资料/实验建议.md'] }] } }
 let connected = location.hash !== '#fixture-offline', unknownNext = false, promptReadFails = false, appearanceRevision = 0
+let directoryComparisons = 0, inspectFails = false
+let agentMenuScene = false, copyFails = false
+const copiedTexts: string[] = []
+const menuAgentName = '讨论布局与原始资料核对的协作 Agent'
+let inspectRelease: (() => void) | null = null, inspectWait: Promise<void> | null = null
 let appearanceSubscriber: { onEvent(event: { type: 'snapshot'; data: unknown }): void } | null = null
 const appearanceSnapshot = (appAppearance: 'dark' | 'light') => ({
   sourceId: 'fixture-host', revision: ++appearanceRevision, issues: [],
@@ -88,7 +94,7 @@ const submittedBySession = new Map<string, Array<{ id: string; text: string }>>(
 const listeners = new Set<(event: AgentMuxClientEvent) => void>()
 const client = {
   agentSession: (id: string) => { record('sdk.agentSession', { id }); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
-  agentSessions: () => { record('sdk.agentSessions'); return sessions },
+  agentSessions: () => { record('sdk.agentSessions'); return structuredClone(sessions) },
   catalog: () => { record('sdk.catalog'); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
   onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); record('sdk.onEvent'); return () => { listeners.delete(listener); record('sdk.releaseEvent') } },
   runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', availability: connected ? 'connected' : 'disconnected' }),
@@ -96,9 +102,13 @@ const client = {
     record('sdk.ensureAgentContinuity', input)
     return { kind: 'reattachable', agentSessionId: input.agentSessionId, previousRun: input.expectedRun }
   },
-  sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); return { agentSessionId: id, source: { providerId: 'codex', nativeSessionId: `native-${id}` }, nextCursor: null,
-    items: [{ id: `${id}-user-original`, kind: 'user-message', contentParts: [{ kind: 'text', text: '这两个想法，先从哪一个做成小实验比较好？请保留原来的依据。' }] },
-      { id: `${id}-answer-original`, kind: 'assistant-message', contentParts: [{ kind: 'text', text: id === result.agentSessionId ? '我建议先试方案 A。它的范围更清晰，一天就能取得第一批反馈。\n\n1. 保留现有资料和两种方案。\n2. 选三个最关键的问题。\n3. 先观察真实反馈，再决定是否继续。\n\n方案 B 仍有价值，原依据已经保留。' : '可以。我们先确认你想解决的问题，再比较这两种想法。\n\n我会保留原材料、已经确认的进展和还需要你决定的地方；不会把未知回执当作完成。' }] },
+  sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); return { agentSessionId: id, source: { providerId: 'codex', nativeSessionId: `native-${id}${agentMenuScene ? '-original-source-reference'.repeat(6) : ''}` }, nextCursor: null,
+    items: [...(agentMenuScene && id === main.agentSessionId ? [
+      { id: `${id}-user-short`, kind: 'user-message' as const, startedAt: _tailRefreshFixtureEpoch(0, 1), contentParts: [{ kind: 'text' as const, text: '可以，继续。' }] }
+    ] : []), { id: `${id}-user-original`, kind: 'user-message', ...(agentMenuScene ? { startedAt: _tailRefreshFixtureEpoch(0, 2) } : {}), contentParts: [{ kind: 'text', text: agentMenuScene
+      ? '这两个想法，先从哪一个做成小实验比较好？请保留原来的依据。手机里的消息头应该紧凑对齐，长内容完整可读，复制和详情都能直接操作。'
+      : '这两个想法，先从哪一个做成小实验比较好？请保留原来的依据。' }] },
+      { id: `${id}-answer-original`, kind: 'assistant-message', ...(agentMenuScene ? { startedAt: _tailRefreshFixtureEpoch(0, 3) } : {}), contentParts: [{ kind: 'text', text: id === result.agentSessionId ? '我建议先试方案 A。它的范围更清晰，一天就能取得第一批反馈。\n\n1. 保留现有资料和两种方案。\n2. 选三个最关键的问题。\n3. 先观察真实反馈，再决定是否继续。\n\n方案 B 仍有价值，原依据已经保留。' : ordinaryReply }] },
       ...(submittedBySession.get(id) ?? []).map(item => ({ id: item.id, kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: item.text }] }))] } },
   readAgentInputMailbox: async (input: { agentSessionId: string; maxBytes?: number }) => ({
     agentSessionId: input.agentSessionId, queueId: 'controlled-original-journal',
@@ -199,9 +209,13 @@ const client = {
     ] }
     if (method === 'settings.executors.ls') return { items: [{ id: 'fixture-original', value: { name: 'Codex' } }], partial: true }
     if (method === 'space.inspect' && (params.target as { spaceId?: string }).spaceId === 'space-original') return { catalog: { ...catalog, appearance: [...catalog.appearance!, { spaceId: 'space-original', preset: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.kind, image: { dataUrl: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.icon } }] } }
-    if (method === 'space.ls' || method === 'space.inspect') return { catalog }
+    if (method === 'space.ls' || method === 'space.inspect') return { catalog: { ...catalog } }
     if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: [], unavailable: [] }
-    if (method === 'agent.inspect') return { routeHostId: 'host-original', session: sessions.find(session => session.agentSessionId === (params.target as { agentSessionId: string }).agentSessionId), displayName: { override: '原 Agent', availability: 'observed' } }
+    if (method === 'agent.inspect') {
+      if (inspectWait) await inspectWait
+      if (inspectFails) throw Error('原生消耗读取暂不可用，原会话仍可使用。')
+      return { routeHostId: 'host-original', session: sessions.find(session => session.agentSessionId === (params.target as { agentSessionId: string }).agentSessionId), displayName: { override: '原 Agent', availability: 'observed' } }
+    }
     if (method === 'goal.ls') return { goals: [goal] }
     if (method === 'goal.inspect') return { goal, goalContinuations: [] }
     if (method === 'goal.decisions') return { decisions: [] }
@@ -226,10 +240,52 @@ if (!localStorage.getItem('mobile-product-fixture-initialized')) {
   getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
   localStorage.setItem('mobile-product-fixture-initialized', 'true')
 }
-const platform = createBrowserPlatform()
+const browserPlatform = createBrowserPlatform()
+const platform = { ...browserPlatform, copyText: async (text: string, reportError: (error: unknown) => void) => {
+  if (!agentMenuScene) return browserPlatform.copyText(text, reportError)
+  record('fixture.copy', { text })
+  if (copyFails) { reportError(new Error('原复制回执未确认，原正文保留，可直接重试。')); return false }
+  copiedTexts.push(text)
+  return true
+} }
 function Scene() {
   const [, refresh] = useState(0)
   Object.assign(window, { mobileProductScene: {
+    prepareAgentMenu: () => { agentMenuScene = true; catalog.agentPresentation![0]!.name = menuAgentName },
+    setCopyFailure: (value: boolean) => { copyFails = value },
+    seedMenuDirectory: (count: number) => {
+      main.turnUsage = { inputTokens: 12500, outputTokens: 4200, totalTokens: 16700, observedAt: 1, scope: 'response',
+        context: { usedTokens: 52700, capacityTokens: 200000 }, cumulative: { scope: 'native-session', inputTokens: 178000, outputTokens: 42000, totalTokens: 220000 } }
+      const populated = sessions.filter(session => session.agentSessionId.startsWith('population-agent-')).length
+      for (let index = populated; index < count; index++) {
+        const id = 'population-agent-' + index, owner = 'population-mote-' + Math.floor(index / 5), zone = owner + '-zone', tab = owner + '-tab', region = id + '-region'
+        const value = original(id); sessions.push(value)
+        if (index % 5 === 0) {
+          const mote = Math.floor(index / 5) % 2 === 0
+          catalog.spaces.push({ spaceId: owner, name: '协作项目 ' + Math.floor(index / 5), kind: mote ? 'mote' : 'folder', hostId: 'host-original', directoryPath: fixturePath(owner), projectId: null })
+          catalog.zones.push({ zoneId: zone, workspaceId: 'workspace-original', kind: 'directory', hostId: 'host-original', directoryPath: fixturePath(owner), branch: null })
+          catalog.bindings.push({ spaceId: owner, zoneId: zone })
+          catalog.tabs.push({ tabId: tab, zoneId: zone, workspaceId: 'workspace-original', name: '原讨论', regionIds: [] })
+          if (mote) {
+            catalog.appearance!.push({ spaceId: owner, preset: 'primary-mote' })
+            catalog.motePresentation!.push({ spaceId: owner, content: null, quickMode: { status: 'missing' }, conversation: null })
+          }
+        }
+        catalog.tabs.find(value => value.tabId === tab)!.regionIds.push(region)
+        catalog.regions.push({ regionId: region, tabId: tab, kind: 'agent', agentSessionId: id, runId: value.run.runId, execution: { hostId: 'host-original', cwd: fixturePath(owner) } })
+        catalog.locations.push({ spaceId: owner, zoneId: zone, workspaceId: 'workspace-original', displayWorkspaceId: 'display-original', groupId: 'group-' + owner, tabId: tab, regionId: region })
+        catalog.agentPresentation!.push({ agentSessionId: id, name: '资料协作 ' + index, project: '协作项目 ' + Math.floor(index / 5), group: 'working', state: 'working', providerId: 'codex', detail: '保持原协作记录', projectGroup: { key: owner, name: '协作项目 ' + Math.floor(index / 5), spaceId: owner, projectId: owner, hostId: 'local' } })
+      }
+      // Count actual predicate work without changing Array.some semantics or the production source.
+      const some = Array.prototype.some
+      Object.defineProperty(catalog.regions, 'some', { configurable: true, value: function(predicate: (value: unknown, index: number, source: unknown[]) => unknown, receiver?: unknown) {
+        return some.call(this, (value: unknown, index: number, source: unknown[]) => { directoryComparisons++; return predicate.call(receiver, value, index, source) })
+      } })
+    },
+    resetDirectoryWork: () => { directoryComparisons = 0 },
+    holdInspection: () => { inspectWait = new Promise<void>(resolve => { inspectRelease = resolve }) },
+    releaseInspection: () => { inspectRelease?.(); inspectWait = null; inspectRelease = null },
+    failInspection: (value: boolean) => { inspectFails = value },
     unconfirmMoteBindings: () => {
       const tab = catalog.tabs.find(tab => tab.tabId === 'tab-mote')!
       tab.issue = 'The original Agent binding is unconfirmed; its saved workface is preserved.'
@@ -249,7 +305,9 @@ function Scene() {
     setAppearance: (mode: 'dark' | 'light') => { appearanceSubscriber?.onEvent({ type: 'snapshot', data: appearanceSnapshot(mode) }) },
     offline: () => { connected = false; refresh(value => value + 1) },
     reconnect: () => { connected = true; refresh(value => value + 1) },
-    facts: () => ({ calls, record: getDeviceWorkface().snapshot().record, controlledSdk: true, physicalPhone: false,
+    facts: () => ({ calls, record: getDeviceWorkface().snapshot().record, directoryComparisons, directoryFacts: catalog.regions.length + catalog.locations.length + catalog.spaces.length,
+      directoryScope: { sessions: sessions.length, regions: catalog.regions.length, locations: catalog.locations.length, spaces: catalog.spaces.length, motes: catalog.spaces.filter(owner => owner.kind === 'mote').length },
+      menuAgentName, expectedReply: ordinaryReply, copiedTexts, controlledCopy: agentMenuScene, controlledSdk: true, physicalPhone: false,
       intendedOccurrence: catalog.locations.find(location => location.regionId === 'region-mote'), sessionIds: sessions.map(session => ({ sessionId: session.agentSessionId, runId: session.run.runId })) })
   } })
   return <MobileApp client={client} connection={connected ? { state: 'connected', message: '已连接原 Host' } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} />

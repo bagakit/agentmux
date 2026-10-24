@@ -14,6 +14,7 @@ await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(director
 const receipt = { passed: false, captureOnly: true, captureSubset: 'mobile-product-redesign', aestheticReview: 'not-performed', source: {}, images: {},
   boundary: 'Actual MobileApp, DeviceWorkface, original ConversationSurface and shared Composer in private Electron Chromium; controlled original SDK/Space/Mote/Goal facts and acknowledgements. Real CDP touch events and browser insertText are simulation, not a physical phone, OS keyboard, live Relay/Host/model/Run, package or install claim.' }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
+const loadedSource = {}
 try {
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
@@ -22,19 +23,33 @@ try {
     'duplicate-connection': { file: 'apps/mobile/src/MobileApp.tsx', before: '!conversationVisible ? connection.issue', after: 'true ? connection.issue' },
     'hide-unknown': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: "{attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}", after: "{attempt && attempt.phase === 'sending' ? renderPromptAttempt([draftKey, attempt]) : null}" },
     'persistent-confirmed-diagnostic': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: "{attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}", after: "{attempt && (attempt.phase !== 'confirmed' || attempt.manualInput) ? renderPromptAttempt([draftKey, attempt]) : null}" },
-    'evidence-touch-target': { file: 'apps/mobile/src/mobile.css', before: '.mobile-goal-evidence button { min-width: 44px; min-height: 44px; padding: 6px 10px;', after: '.mobile-goal-evidence button { min-width: 12px; min-height: 12px; height: 12px; padding: 0;' }
+    'evidence-touch-target': { file: 'apps/mobile/src/mobile.css', before: '.mobile-goal-evidence button { min-width: 44px; min-height: 44px; padding: 6px 10px;', after: '.mobile-goal-evidence button { min-width: 12px; min-height: 12px; height: 12px; padding: 0;' },
+    'menu-directory': { file: 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx', before: 'const locations = (id: string) => directory.places.get(id) ?? []',
+      after: 'const locations = (id: string) => catalog?.locations.filter(location => catalog.regions.some(region => region.tabId === location.tabId && region.regionId === location.regionId && region.agentSessionId === id)) ?? []' },
+    'menu-notice-spacing': { file: 'apps/mobile/src/mobile.css', before: '.mobile-agent-usage > .mobile-notice { margin: 4px 0 8px; font-size: 13px; line-height: 1.5; }', after: '' },
+    'menu-sid-wrap': { file: 'packages/client-ui/src/styles/conversation-message.css', before: '.log-turn__sender-id code { flex: 1 1 0;', after: '.log-turn__sender-id code { flex: 1 1 auto;' },
+    'menu-full-snapshot': { file: 'apps/mobile/src/MobileApp.tsx', edits: [
+      { before: 'client && workface.selectedSessionId ? client.agentSession(workface.selectedSessionId) : undefined', after: 'client?.agentSessions().find(value => value.agentSessionId === workface.selectedSessionId)' },
+      { before: '[client, connection.state, workface.selectedSessionId, sessionRevision])', after: '[client, connection.state, workface.selectedSessionId, sessionRevision, sheet, home, secondary])' }
+    ] }
   }
   const variant = mutationId ? variants[mutationId] : null
   if (mutationId) assert.ok(variant, 'Known bounded Mobile presentation mutation is required')
   const overrides = []
   if (variant) {
     const original = await fs.readFile(path.join(root, variant.file), 'utf8')
-    assert.equal(original.split(variant.before).length - 1, 1, 'Actual production mutation anchor is unique')
-    const source = original.replace(variant.before, variant.after)
+    let source = original
+    for (const edit of variant.edits ?? [variant]) {
+      assert.equal(source.split(edit.before).length - 1, 1, 'Actual production mutation anchor is unique')
+      source = source.replace(edit.before, edit.after)
+    }
     receipt.sourceOverride = { id: mutationId, file: variant.file, originalSha256: sha(original), sha256: sha(source) }
     overrides.push({ name: 'bounded-mobile-presentation-mutation', setup(plugin) {
-      plugin.onLoad({ filter: /\.(?:tsx|css)$/ }, args => args.path === path.join(root, variant.file)
-        ? { contents: source, loader: variant.file.endsWith('.css') ? 'css' : 'tsx', resolveDir: path.dirname(args.path) } : undefined)
+      plugin.onLoad({ filter: /\.(?:tsx|css)$/ }, args => {
+        if (args.path !== path.join(root, variant.file)) return
+        loadedSource[variant.file] = sha(source)
+        return { contents: source, loader: variant.file.endsWith('.css') ? 'css' : 'tsx', resolveDir: path.dirname(args.path) }
+      })
     } })
   }
   const alias = {}
@@ -55,6 +70,15 @@ try {
     })
   } }
   const workerInputs = {}
+  const sourceProof = { name: 'actual-mobile-input-bytes', setup(plugin) {
+    plugin.onLoad({ filter: /\.(?:tsx?|css)$/ }, async args => {
+      const file = path.relative(root, args.path)
+      if (!file.startsWith('apps/mobile/src/') && !file.startsWith('packages/client-ui/src/') && args.path !== path.join(fixture, 'product-entry.tsx')) return
+      const bytes = await fs.readFile(args.path)
+      loadedSource[file] = sha(bytes)
+      return { contents: bytes.toString(), loader: path.extname(args.path).slice(1), resolveDir: path.dirname(args.path) }
+    })
+  } }
   const workers = { name: 'original-monaco-workers', setup(plugin) {
     plugin.onResolve({ filter: /\?url$/ }, args => ({ path: require.resolve(args.path.replace(/\?url$/, '')), namespace: 'original-url' }))
     plugin.onLoad({ filter: /.*/, namespace: 'original-url' }, async args => {
@@ -88,20 +112,22 @@ try {
   assert.ok(projectAppearance.icon?.startsWith('data:image/'), 'The original App filesystem owner returns the real bounded project image')
   receipt.projectAppearance = { owner: 'apps/desktop/src/main/project-appearance.ts', kind: projectAppearance.kind, source: 'apps/desktop/resources/icon-128.png', imageSha256: sha(projectAppearance.icon) }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'product-entry.tsx')], outdir: compiled, bundle: true,
-    format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...overrides, clientSources, workers],
+    format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...overrides, clientSources, workers, sourceProof],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_MOBILE_PROVIDER_CATALOG__: JSON.stringify(providerCatalog), __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: JSON.stringify(projectAppearance), __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('(disabled):') && !file.startsWith('<define:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   if (receipt.sourceOverride) {
     assert.equal(receipt.source[receipt.sourceOverride.file], receipt.sourceOverride.originalSha256, 'Mutation targets an actual nonempty production input')
     receipt.source[receipt.sourceOverride.file] = receipt.sourceOverride.sha256
   }
+  receipt.loadedSource = loadedSource
   receipt.virtualInputs = Object.fromEntries(Object.entries(built.metafile.inputs).filter(([name]) => name.startsWith('(disabled):') || name.startsWith('<define:')))
   for (const name of ['capture-ui.mjs', 'product-main.cjs']) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   for (const file of ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileAttachments.tsx', 'apps/mobile/src/platform/native/device.ts', 'apps/mobile/src/recovery/device-workface.ts', 'apps/mobile/src/conversation/MobileConversationSurface.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  const subset = ['mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  const subset = ['agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  if (subset) receipt.captureSubset = subset
   receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, ...(subset ? [subset] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   if (subset === 'spatial-resources' && JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).passed) {
@@ -113,6 +139,10 @@ try {
   }
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
+  for (const [file, digest] of Object.entries(loadedSource)) {
+    assert.equal(digest, receipt.source[file], 'Captured byte identity matches the actual compiled source input: ' + file)
+    if (file !== receipt.sourceOverride?.file) assert.equal(sha(await fs.readFile(path.join(root, file))), digest, 'Source retained through actual product capture: ' + file)
+  }
   if (receipt.sourceOverride) assert.equal(sha(await fs.readFile(path.join(root, receipt.sourceOverride.file))), receipt.sourceOverride.originalSha256, 'Private mutation never changes the shared source')
   if (receipt.restoredRenderer) {
     assert.notEqual(receipt.renderer.environment.pid, receipt.restoredRenderer.environment.pid, 'Fresh OS process owns the restored product')

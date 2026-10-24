@@ -148,6 +148,171 @@ app.whenReady().then(async () => {
     assert.equal(result.palette['--green'], '#8de3ae', 'Original MobileApp consumes the shared Mint action color')
     assert.equal(result.palette['--fs-body'], '13px', 'Mobile typography remains client-owned')
   }
+  if (mode === 'agent-menu' || mode === 'agent-menu-notice') {
+    await win.webContents.debugger.sendCommand('Emulation.setCPUThrottlingRate', { rate: 4 })
+    result.environment.cpuThrottlingRate = 4
+    result.performance = []
+    await read('mobileProductScene.prepareAgentMenu();mobileProductScene.seedMenuDirectory(20)')
+    const agentName = await read('mobileProductScene.facts().menuAgentName')
+    const draft = '这份原草稿在切换工作面时保留。'
+    const flush = () => read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
+    const noDialog = '!document.querySelector("[role=dialog]")'
+    const menuReady = `(()=>{const d=document.querySelector('[role=dialog]'),close=d?.querySelector('[aria-label="关闭面板"]'),copy=d?.querySelector('[aria-label="复制 Agent 身份链接"]');if(!close||!copy||close.disabled||copy.disabled)return false;const r=close.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return r.width>=44&&r.height>=44&&(hit===close||close.contains(hit))})()`
+    const measure = async (count, label, ready, action, event = 'click') => {
+      await flush()
+      const before = await read('mobileProductScene.facts()')
+      await read(`mobileProductScene.resetDirectoryWork();window.mobileFrameMeasure={label:${JSON.stringify(label)},event:${JSON.stringify(event)},started:null,ready:null,frames:0};document.addEventListener(${JSON.stringify(event)},()=>{const m=window.mobileFrameMeasure;m.started=performance.now();const check=()=>{m.frames++;if(${ready})m.ready=performance.now();else requestAnimationFrame(check)};requestAnimationFrame(check)},{capture:true,once:true})`)
+      await action()
+      await until('window.mobileFrameMeasure.ready!==null')
+      const timing = await read('window.mobileFrameMeasure')
+      await flush()
+      const after = await read('mobileProductScene.facts()')
+      const calls = after.calls.slice(before.calls.length)
+      const sample = { count, label, event, milliseconds: timing.ready - timing.started, frames: timing.frames,
+        sdkFullSnapshotCalls: calls.filter(call => call.method === 'sdk.agentSessions').length,
+        appSnapshotCalls: calls.filter(call => call.method === 'app.snapshot').length,
+        directoryComparisons: after.directoryComparisons, directoryFacts: after.directoryFacts, directoryScope: after.directoryScope }
+      result.performance.push(sample)
+      return sample
+    }
+    const enterOriginal = async () => {
+      await button('Mote', '.mobile-navigation')
+      if (await read('document.querySelector(\'[data-space-id="mote-original"] .mobile-space-row\')?.getAttribute("aria-expanded")!=="true"')) await button('我的 Mote', '.mobile-spatial-panel')
+      await button(agentName, '[data-space-id="mote-original"] .mobile-mote-agents')
+      await until('!!document.querySelector(' + JSON.stringify('.mobile-conversation-panel:not([hidden]) [data-native-record-id="session-mote-answer-original"] .log-turn__body') + ')')
+    }
+    await button('刷新空间目录', '.mobile-spatial-panel')
+    await enterOriginal()
+    await tap('.mobile-conversation-panel [contenteditable=true]', 'Preserved original Composer')
+    win.webContents.insertText(draft)
+    await until(`mobileProductScene.facts().record.conversation.drafts.some(([,text])=>text===${JSON.stringify(draft)})`)
+    await read('window.originalCaptureEditor=document.querySelector("[contenteditable=true]")')
+    const originalFacts = await read('mobileProductScene.facts()')
+    result.original = { selectedSessionId: originalFacts.record.selectedSessionId, identity: originalFacts.record.presentation.identity,
+      run: originalFacts.sessionIds.find(session => session.sessionId === 'session-mote'), draft }
+    const openMore = () => button(agentName + ' · 更多操作', '.mobile-focus-project')
+    const close = () => button('关闭面板', '[role=dialog]')
+    const escape = async () => {
+      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
+      win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
+      await until(noDialog)
+    }
+    for (const count of mode === 'agent-menu-notice' ? [] : [20, 160]) {
+      await read(`mobileProductScene.seedMenuDirectory(${count})`)
+      await button('Focus', '.mobile-navigation')
+      await button('刷新空间目录', '.mobile-spatial-panel')
+      await until(`document.querySelectorAll('.mobile-focus-project .mobile-agent-row__more').length>=${count}`)
+      await read('mobileProductScene.holdInspection()')
+      await measure(count, 'More while inspect is pending', menuReady, openMore)
+      const pending = await read('document.querySelector("[role=dialog] .mobile-agent-usage").textContent')
+      assert.ok(pending.includes('正在核对') && pending.includes('原生 Session 累计'), 'The first actionable menu does not wait for remote inspect')
+      assert.equal(await read('document.querySelector("[role=dialog] progress").value'), 52700)
+      assert.equal(await read('document.querySelector("[role=dialog] progress").max'), 200000)
+      await measure(count, 'Close menu', noDialog, close)
+      await measure(count, 'More before Escape', menuReady, openMore)
+      await measure(count, 'Escape menu', noDialog, escape, 'keydown')
+      await measure(count, 'More before browser Back', menuReady, openMore)
+      await read('history.back()'); await until(noDialog)
+      await read('mobileProductScene.releaseInspection()')
+      for (const workface of ['goals', 'topics', 'mote', 'space', 'focus', 'mote']) {
+        const ready = `(()=>{const active=document.querySelector('.mobile-navigation [data-workface=${JSON.stringify(workface)}]');return active?.getAttribute('aria-current')==='page'&&active.getClientRects().length>0&&document.querySelector('.mobile-conversation-panel').hidden})()`
+        await measure(count, 'Primary ' + workface, ready, () => tap(`.mobile-navigation [data-workface="${workface}"]`, 'Primary ' + workface))
+      }
+      await enterOriginal()
+      assert.equal(await read('document.querySelector("[contenteditable=true]")===window.originalCaptureEditor'), true, 'Primary navigation retains the original Composer DOM')
+      assert.equal(await read('document.querySelector("[contenteditable=true]").textContent'), draft)
+      const restored = await read('mobileProductScene.facts()')
+      assert.equal(restored.record.selectedSessionId, result.original.selectedSessionId)
+      assert.deepEqual(restored.record.presentation.identity, result.original.identity)
+      assert.deepEqual(restored.sessionIds.find(session => session.sessionId === 'session-mote'), result.original.run)
+      result.operations.push({ action: 'primary-round-trip', count, sameComposer: true, originalDraft: true, exactSessionRunAndReading: true, directoryScope: restored.directoryScope })
+    }
+    // Cost assertions run after both populations are observed, before capture pauses or visual work.
+    for (const sample of result.performance) {
+      assert.ok(sample.appSnapshotCalls <= (sample.label === 'Primary goals' ? 1 : 0), 'Only the visible Goals owner may request its own app snapshot')
+      assert.equal(sample.sdkFullSnapshotCalls, 0, 'Menu and primary navigation must not recopy unrelated Session snapshots')
+      assert.ok(sample.directoryComparisons <= sample.directoryFacts * 16, 'Directory predicate work must stay within a linear facts budget')
+    }
+    await button('Focus', '.mobile-navigation')
+    await read('mobileProductScene.holdInspection()')
+    await openMore(); await until(menuReady)
+    await capture('agent-menu-pending-390-dark')
+    await button('复制 Agent 身份链接', '[role=dialog]')
+    assert.equal(await read('mobileProductScene.facts().copiedTexts.at(-1)'), 'amux://agent/session-mote')
+    await close(); await until(noDialog)
+    // A real touch hold opens the same original row menu without selecting its conversation.
+    const hold = await read(`(()=>{const n=[...document.querySelectorAll('.mobile-focus-project .mobile-agent-row__open')].find(n=>n.querySelector('strong')?.textContent===${JSON.stringify(agentName)});n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+    await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...hold, radiusX: 1, radiusY: 1, force: 1, id: 1 }] })
+    await until(menuReady)
+    await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), result.original.selectedSessionId)
+    await close(); await until(noDialog); await read('mobileProductScene.releaseInspection();mobileProductScene.failInspection(true);mobileProductScene.setAppearance("light")')
+    await resize(320, 568); await openMore()
+    await until('document.querySelector("[role=dialog] .mobile-agent-usage").textContent.includes("读取消耗未完成")')
+    const notice = await read(`(()=>{const n=document.querySelector('.mobile-agent-usage > .mobile-notice'),c=document.querySelector('.mobile-agent-usage__context'),b=n.querySelector('button');return{warning:n.getBoundingClientRect().toJSON(),context:c.getBoundingClientRect().toJSON(),close:b.getBoundingClientRect().toJSON(),font:getComputedStyle(n).fontSize,text:n.textContent}})()`)
+    result.operations.push({ action: 'failed-usage-notice-geometry', ...notice })
+    assert.equal(notice.font, '13px', 'Failed read notice follows the same compact mobile body type')
+    assert.ok(notice.warning.bottom + 8 <= notice.context.top + 0.5, 'Failed read notice leaves eight pixels before context usage')
+    assert.ok(notice.close.width >= 44 && notice.close.height >= 44, 'Failed read notice keeps its full close target')
+    await capture('agent-menu-failure-320-light-short')
+    await button('复制 Agent 身份链接', '[role=dialog]')
+    assert.equal(await read('mobileProductScene.facts().copiedTexts.at(-1)'), 'amux://agent/session-mote')
+    await read('mobileProductScene.failInspection(false)'); await button('刷新消耗', '[role=dialog]')
+    await until('!document.querySelector("[role=dialog] .mobile-agent-usage").textContent.includes("读取消耗未完成")&&document.querySelector("[role=dialog] .mobile-agent-usage").textContent.includes("原生观测")')
+    await capture('agent-menu-320-light-short')
+    await escape(); await resize(390, 480); await read('mobileProductScene.setAppearance("dark")'); await openMore(); await until(menuReady)
+    await capture('agent-menu-390-dark-short'); await close(); await until(noDialog)
+    await enterOriginal()
+    const longUser = '[data-native-record-id="session-mote-user-original"] .log-turn'
+    const shortUser = '[data-native-record-id="session-mote-user-short"] .log-turn'
+    const reply = '[data-native-record-id="session-mote-answer-original"] .log-turn'
+    const bubbleFacts = selector => read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),r=e=>e.getBoundingClientRect().toJSON();return{row:r(n),head:r(n.querySelector('.log-turn__head')),body:r(n.querySelector('.log-turn__body')),time:r(n.querySelector('.log-turn__time')),copy:r(n.querySelector('[title="Copy message"]')),info:r(n.querySelector('[aria-label="Message details"]')),avatar:r(n.querySelector('.log-turn__node')),clock:n.querySelector('.log-turn__time').textContent,sid:n.querySelector('.log-turn__sender-id code')?.textContent,sidText:n.querySelector('.log-turn__sender-id code')?r(n.querySelector('.log-turn__sender-id code')):null,idCopy:n.querySelector('.log-turn__id-copy')?r(n.querySelector('.log-turn__id-copy')):null,headScroll:n.querySelector('.log-turn__head').scrollWidth,headClient:n.querySelector('.log-turn__head').clientWidth}})()`)
+    for (const [width, height, appearance] of [[390, 844, 'dark'], [320, 760, 'light']]) {
+      await resize(width, height); await read(`mobileProductScene.setAppearance(${JSON.stringify(appearance)});document.querySelector(${JSON.stringify(shortUser)}).scrollIntoView({block:'start'})`)
+      await flush()
+      const bubbles = []
+      for (const selector of [shortUser, longUser, reply]) {
+        const facts = await bubbleFacts(selector), middle = r => r.y + r.height / 2
+        assert.match(facts.clock, /^\d{2}:\d{2}:\d{2}$/)
+        assert.equal(facts.headScroll <= facts.headClient + 1, true)
+        assert.ok(facts.copy.width >= 44 && facts.copy.height >= 44 && facts.info.width >= 44 && facts.info.height >= 44)
+        assert.ok(Math.abs(middle(facts.time) - middle(facts.copy)) <= 1 && Math.abs(middle(facts.info) - middle(facts.copy)) <= 1)
+        assert.ok(Math.abs(middle(facts.avatar) - middle(facts.copy)) <= 1)
+        assert.equal(facts.avatar.width, selector === reply ? 32 : 20)
+        assert.ok(facts.body.y >= facts.head.bottom - 1)
+        bubbles.push(facts)
+      }
+      assert.equal(bubbles[2].sid, 'session-mote')
+      const sender = bubbles[2]
+      assert.ok(sender.idCopy.width >= 44 && sender.idCopy.height >= 44, 'Exact Agent identity Copy keeps its full 44px target')
+      assert.ok(sender.sidText.width > 0 && Math.abs((sender.sidText.y + sender.sidText.height / 2) - (sender.idCopy.y + sender.idCopy.height / 2)) <= 1, 'Exact Agent identity and Copy must share a single flex row')
+      result.operations.push({ action: 'actual-mobile-bubble-geometry', width, height, appearance, bubbles })
+      await capture(`message-bubbles-${width}-${appearance}`)
+    }
+    await read(`document.querySelector(${JSON.stringify(reply)}).scrollIntoView({block:'start'});mobileProductScene.setCopyFailure(true)`)
+    await tap(reply + ' [title="Copy message"]', 'Original response Copy failure')
+    await until(`!!document.querySelector(${JSON.stringify(reply + ' .log-turn__copy-error')})`)
+    await tap(reply + ' .conversation-input-details__toggle', 'Original response Info')
+    await until(`!!document.querySelector(${JSON.stringify(reply + ' .conversation-input-details__body')})`)
+    await capture('message-copy-failure-info-320-light')
+    await read('mobileProductScene.setCopyFailure(false)')
+    await tap(reply + ' [title="Copy message"]', 'Retry exact original response Copy')
+    await until(`!document.querySelector(${JSON.stringify(reply + ' .log-turn__copy-error')})`)
+    assert.ok(await read(`!!document.querySelector(${JSON.stringify(reply + ' .conversation-input-details__body')})`))
+    assert.equal(await read('mobileProductScene.facts().copiedTexts.at(-1)===mobileProductScene.facts().expectedReply'), true, 'Retry copies the complete original response')
+    await tap(reply + ' .conversation-input-details__toggle', 'Close original response Info')
+    await tap(longUser + ' .conversation-input-details__toggle', 'Read complete original input source')
+    await until(`!!document.querySelector(${JSON.stringify(longUser + ' .conversation-input-details__body')})`)
+    const sourceDetails = await read(`(()=>{const n=document.querySelector(${JSON.stringify(longUser)}),d=n.querySelector('.conversation-input-details__body'),h=n.querySelector('.log-turn__head');return{text:d.textContent,details:d.getBoundingClientRect().toJSON(),head:h.getBoundingClientRect().toJSON()}})()`)
+    assert.ok(sourceDetails.text.includes('-original-source-reference'.repeat(6)), 'The complete long native source reference remains readable')
+    assert.ok(sourceDetails.details.left >= sourceDetails.head.left - 1 && sourceDetails.details.right <= sourceDetails.head.right + 1)
+    await capture('message-user-source-info-320-light')
+    assert.equal(await read('document.querySelector("[contenteditable=true]")===window.originalCaptureEditor&&document.querySelector("[contenteditable=true]").textContent===' + JSON.stringify(draft)), true)
+    const final = await read('mobileProductScene.facts()')
+    assert.equal(final.calls.filter(call => call.method === 'sdk.submitAgentPrompt' || call.method === 'sdk.respondAgentInteraction' || call.method === 'sdk.ensureAgentContinuity' || call.method === 'agent.open').length, 0, 'Presentation journey does not send input or recover/create an Agent')
+    result.final = { selectedSessionId: final.record.selectedSessionId, run: final.sessionIds.find(session => session.sessionId === 'session-mote'), controlledCopy: final.controlledCopy, copiedTexts: final.copiedTexts }
+    result.passed = true; return
+  }
   if (mode === 'spatial-resources') {
     await button('Space', '.mobile-navigation'); await button('资料工作区', '.mobile-spatial-panel')
     await until('document.querySelectorAll(".mobile-spatial-tab").length===5')
