@@ -481,4 +481,27 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.drafts).toEqual([[JSON.stringify(['draft', 'session-original']), '']])
     expect(f.submit).toHaveBeenCalledOnce()
   })
+
+  it('searches and inserts declared Provider commands from MobileMessageTools without auto-submitting or losing prior draft text', async () => {
+    const f = fixture()
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await paste(view.element, '先保留这段草稿')
+    await click(button(view.element, 'Show the message tool row'))
+    const trigger = button(view.element, 'Choose a command')
+    await click(trigger)
+    const search = view.element.querySelector<HTMLInputElement>('input[aria-label="查找命令"]')!
+    expect(search).not.toBeNull()
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(search, 'compact')
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const items = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-command-menu [role="menuitem"]')]
+    expect(items.length).toBeGreaterThan(0)
+    const chosen = items[0]!.querySelector('strong')!.textContent!
+    await click(items[0]!)
+    expect(editor(view.element).textContent).toContain('先保留这段草稿')
+    expect(editor(view.element).textContent).toContain(chosen)
+    expect(f.submit).not.toHaveBeenCalled()
+  })
 })
