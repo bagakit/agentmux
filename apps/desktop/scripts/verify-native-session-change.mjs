@@ -8,6 +8,7 @@ import { execFile, fork } from 'node:child_process'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
+import { candidateAlias, candidateModule, candidateResolve } from './candidate-package-resolve.mjs'
 
 const root=path.resolve(import.meta.dirname,'../../..')
 const fixture=path.join(root,'apps/desktop/scripts/fixtures/native-session-change')
@@ -18,7 +19,7 @@ const coreRequire=createRequire(path.join(root,'packages/core/package.json'))
 const run=promisify(execFile),sha=value=>createHash('sha256').update(value).digest('hex')
 const owned=['src/shared/agent-native-source.ts','src/shared/contracts.ts','src/main/runtime-controller.ts','src/main/ipc.ts','src/preload/index.ts','src/renderer/src/lib/session-state.ts','src/renderer/src/lib/session-user-messages.ts','src/renderer/src/lib/api.ts','src/renderer/src/components/AgentNativeSourceControls.tsx','src/renderer/src/components/AgentRegionHeader.tsx','src/renderer/src/components/SessionPane.tsx','src/renderer/src/styles/agent-region-header.css'].map(file=>'apps/desktop/'+file)
 const testFiles=['apps/desktop/test/native-session-change.test.tsx','apps/desktop/test/native-source-themed-action.test.tsx','apps/desktop/scripts/fixtures/native-session-change/vitest.config.mts']
-const probeFiles=['apps/desktop/scripts/verify-native-session-change.mjs',...['main.ts','owner.ts','entry.mjs','native-cli.mjs','preload.cjs','index.html'].map(file=>'apps/desktop/scripts/fixtures/native-session-change/'+file)]
+const probeFiles=['apps/desktop/scripts/verify-native-session-change.mjs','apps/desktop/scripts/candidate-package-resolve.mjs',...['main.ts','owner.ts','entry.mjs','native-cli.mjs','preload.cjs','index.html'].map(file=>'apps/desktop/scripts/fixtures/native-session-change/'+file)]
 const hashes=files=>Promise.all(files.map(async file=>[file,sha(await fs.readFile(path.join(root,file)))])).then(Object.fromEntries)
 await fs.mkdir(evidence,{recursive:true})
 const receipt={schema:'agentmux.native-target-ui.v1',passed:false,sourceBefore:await hashes(owned),sourceAfter:{},probeSources:await hashes(probeFiles),processes:[],captureOnly:true,aestheticReview:'not-performed',isolation:[
@@ -81,28 +82,29 @@ let owner
 try{
  const {build:buildRenderer}=await import(pathToFileURL(desktopRequire.resolve('vite')).href)
  const {build:buildNode}=coreRequire('esbuild')
- const aliases=[]
- for(const [name,directory]of[['@agentmux/core','packages/core'],['@agentmux/host','apps/host']]){
-  const manifest=JSON.parse(await fs.readFile(path.join(root,directory,'package.json'),'utf8'))
-  for(const [key,value]of Object.entries(manifest.exports))if(typeof value.import==='string')aliases.push({find:new RegExp('^'+(key==='.'?name:name+'/'+key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$'),replacement:path.join(root,directory,value.import.replace('./dist/','./src/').replace(/\.js$/,'.ts'))})
- }
- aliases.push({find:/^@agentmux\/layout$/,replacement:path.join(root,'packages/core/src/spatial-layout.ts')},{find:/^@xterm\/xterm$/,replacement:path.join(root,'apps/desktop/scripts/fixtures/terminal-wheel/xterm-instrumented.ts')})
+ const manifests=new Map(),onManifest=(file,bytes)=>manifests.set(path.relative(root,file),sha(bytes))
+ const aliases=[candidateAlias(root,{browser:true,source:true,onManifest}),{find:/^@xterm\/xterm$/,replacement:path.join(root,'apps/desktop/scripts/fixtures/terminal-wheel/xterm-instrumented.ts')}]
  const consumed=new Map()
- const sourcePlugin={name:'current-native-target-product',enforce:'pre',transform(code,id){
+ const sourcePlugin={name:'current-native-target-product',enforce:'pre',async transform(_code,id){
   const file=id.split('?')[0]
-  if(['apps/desktop/src/','packages/core/src/','packages/client-ui/src/','apps/host/src/'].some(prefix=>file.startsWith(path.join(root,prefix))))consumed.set(path.relative(root,file),sha(code))
+  if(!path.isAbsolute(file))return
+  const actual=candidateModule(root,file),relative=path.relative(root,actual)
+  if(/^(?:apps|packages)\//.test(relative)&&!relative.includes('/node_modules/'))consumed.set(relative,sha(await fs.readFile(actual)))
  }}
  const renderer=path.join(evidence,'renderer')
- await buildRenderer({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true',__TERMINAL_WHEEL_UMD_URL__:'"unused"'},resolve:{alias:aliases},plugins:[sourcePlugin],build:{target:'esnext',outDir:renderer,emptyOutDir:true,minify:false}})
+ await buildRenderer({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true',__TERMINAL_WHEEL_UMD_URL__:'"unused"'},esbuild:{jsx:'automatic'},resolve:{alias:aliases},plugins:[sourcePlugin],build:{target:'esnext',outDir:renderer,emptyOutDir:true,minify:false}})
  receipt.compiledRenderer=Object.fromEntries(consumed)
  for(const file of ['App.tsx','store.ts','components/SessionPane.tsx','components/AgentRegionHeader.tsx','components/AgentNativeSourceControls.tsx','components/TerminalView.tsx'])assert.ok(consumed.has('apps/desktop/src/renderer/src/'+file),'Current Renderer consumer compiled: '+file)
- const nodeAliases=Object.fromEntries(aliases.filter(item=>item.find.source.includes('@agentmux')).map(item=>[item.find.source.slice(1,-1).replaceAll('\\/','/').replaceAll('\\.','.'),item.replacement]))
+ for(const file of ['theme/icons.tsx','theme/runtime.ts','components/ConversationView.tsx'])assert.ok(consumed.has('packages/client-ui/src/'+file),'Current shared UI consumer compiled: '+file)
  const sdkPath=path.join(root,'packages/core/node_modules/@ctxmux/sdk'),sdk=JSON.parse(await fs.readFile(path.join(sdkPath,'package.json'),'utf8'))
- nodeAliases['@ctxmux/sdk']=path.join(sdkPath,sdk.exports['.'].import)
+ const nodeAliases={'@ctxmux/sdk':path.join(sdkPath,sdk.exports['.'].import)}
  const sourceHashes=new Map()
- const nodePlugin={name:'current-native-target-node',setup(build){build.onLoad({filter:/\.[cm]?[jt]sx?$/},async input=>{
+ const nodePlugin={name:'current-native-target-node',setup(build){
+ build.onResolve({filter:/^@agentmux\//},input=>({path:candidateResolve(root,input.path,{source:true,onManifest})}))
+ build.onLoad({filter:/\.[cm]?[jt]sx?$/},async input=>{
+  const actual=candidateModule(root,input.path),relative=path.relative(root,actual)
   const code=await fs.readFile(input.path,'utf8')
-  if(['packages/core/src/','apps/desktop/src/','apps/host/src/'].some(prefix=>input.path.startsWith(path.join(root,prefix))))sourceHashes.set(path.relative(root,input.path),sha(code))
+  if(/^(?:apps|packages)\//.test(relative)&&!relative.includes('/node_modules/'))sourceHashes.set(relative,sha(code))
   return{contents:code.replaceAll('import.meta.url',JSON.stringify(pathToFileURL(input.path).href)).replaceAll('import.meta.dirname',JSON.stringify(path.dirname(input.path))),loader:input.path.endsWith('.tsx')?'tsx':input.path.endsWith('.ts')?'ts':'js'}
  })}}
  receipt.nodeBundles={}
@@ -114,6 +116,7 @@ try{
  }
  for(const file of ['apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/desktop-host.ts','packages/core/src/hosted-client.ts'])assert.ok(receipt.nodeBundles.main.inputs.includes(file),'Actual Main/Hosted consumer '+file)
  for(const file of ['packages/core/src/client.ts','packages/core/src/agent-native-session-confirmation.ts','packages/core/src/providers/app-server-native-session.ts','packages/core/src/providers/codex-native-record-role.ts'])assert.ok(receipt.nodeBundles.owner.inputs.includes(file),'Actual Core/Provider owner '+file)
+ receipt.packageManifests=Object.fromEntries(manifests)
  await fs.copyFile(path.join(fixture,'native-cli.mjs'),path.join(privateRoot,'native-cli.mjs'))
  await fs.mkdir(path.join(privateRoot,'native-codex'))
  await fs.mkdir(path.join(privateRoot,'home'))
@@ -138,6 +141,7 @@ try{
  assert.equal(new Set(receipt.processes.map(value=>value.pid)).size,2)
  receipt.sourceAfter=await hashes(owned);assert.deepEqual(receipt.sourceAfter,receipt.sourceBefore)
  assert.deepEqual(await hashes(probeFiles),receipt.probeSources,'Probe source remains the executed candidate')
+ assert.deepEqual(await hashes([...manifests.keys()]),receipt.packageManifests,'Workspace resolution remains the compiled candidate')
  for(const [file,digest] of Object.entries(receipt.compiledRenderer))assert.equal(sha(await fs.readFile(path.join(root,file))),digest,'Renderer source remains the compiled candidate: '+file)
  for(const bundle of Object.values(receipt.nodeBundles))for(const [file,digest] of Object.entries(bundle.sourceSHA256))assert.equal(sha(await fs.readFile(path.join(root,file))),digest,'Node source remains the compiled candidate: '+file)
  receipt.passed=true
