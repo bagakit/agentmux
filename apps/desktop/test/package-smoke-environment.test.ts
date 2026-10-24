@@ -32,6 +32,9 @@ it.each([undefined, '1'])('LaunchServices smoke uses GUI environment when caller
   const run = vi.fn(async (command: string) => ({ stdout: '', stderr: '' }))
   const boundaries = {
     privatePackageSmokeEnvironment,
+    defaultAgentMuxControlSocketPath: (env: Record<string, string>) => path.join(env.AGENTMUX_RUNTIME_DIRECTORY!, 'control.sock'),
+    macosHostService: (input: unknown) => input, macosHostServiceRegistration: async () => null,
+    cleanupSmokeHost: async () => ({ status: 'unregistered' }),
     createPrivateRuntimeScope: async () => ({ directory: runtime, socketPath: path.join(runtime, 'ctxmux.sock'),
       daemonPath: path.join(app, 'Contents/Resources/app/node_modules/@agentmux/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'),
       observeOwner: async () => ({}), cleanup: async () => ({ status: 'exited', signals: ['SIGTERM'], exitConfirmed: true }) }),

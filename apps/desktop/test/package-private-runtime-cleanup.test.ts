@@ -274,6 +274,9 @@ it.runIf(process.platform === 'darwin').each([false, true])('actual launch smoke
   const waitForPath = new Function('pathExists', `return (${body('waitForPath')})`)(async (path: string) => stat(path).then(() => true, () => false))
   const { privatePackageSmokeEnvironment } = await import('../scripts/package-smoke-context.mjs')
   const dependencies = { privatePackageSmokeEnvironment, realpath, join, mkdir, readFile, writeFile, rm, sep, process, PRODUCT_NAME: 'AgentMux', manifest: { version },
+    defaultAgentMuxControlSocketPath: (env: Record<string, string>) => join(env.AGENTMUX_RUNTIME_DIRECTORY!, 'control.sock'),
+    macosHostService: (input: unknown) => input, macosHostServiceRegistration: async () => null,
+    cleanupSmokeHost: async () => ({ status: 'unregistered' }),
     createPrivateRuntimeScope: create, processIdsForApplication: async () => [],
     scopedProcesses: async () => ({ nodeModes: [], ownershipObservation: { identities: new Map() } }), run, waitForPath,
     waitForProcessExit: async () => [], cleanupProcessScope: async () => [],
