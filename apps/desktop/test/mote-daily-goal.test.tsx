@@ -3,7 +3,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { injectedContextCore } from './helpers/injected-context-core'
 import { startDirectGoal, retryDirectGoal, directGoalRequest } from '../src/renderer/src/lib/goals-direct-pmo'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
-import { goalPmoOperation } from '../src/shared/goal-pmo-origin'
+import { goalPmoOperation } from '@agentmux/host/goal-pmo-origin'
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
@@ -81,7 +81,7 @@ import { GoalContinuationControl } from '../src/renderer/src/components/GoalCont
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { MobileGoalActions } from '../../mobile/src/goals/MobileGoalActions'
 import { runDemandCli } from '../../../packages/demand/src/cli'
-import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from '../src/main/demand-participation'
+import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from '@agentmux/host/demand-participation'
 import { GoalDetail } from '../src/renderer/src/components/GoalDetail'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT } from '../src/renderer/src/components/GoalAlignment'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
