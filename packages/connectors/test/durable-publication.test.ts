@@ -419,7 +419,7 @@ it('correlates late receipts to their original durable attempt without changing 
   expect(() => owner.retry(second.operationId, () => true)).toThrowError(/not confirmed non-application/)
 })
 
-it.each([false, true])('deferred process headers retain publication and allow independent speech (empty selectors: %s)', empty => {
+it.each([false, true])('deferred process headers preserve the original checkpoint until a complete reading (empty selectors: %s)', empty => {
   const db = new DatabaseSync(':memory:'); databases.push(db)
   const owner = new PublicationStore(db), shared: PublicationBoundary = { ...boundary, scope: { ...boundary.scope, publication: 'future-shared-conversation' } }
   owner.checkpoint(shared, 'host-a')
@@ -436,10 +436,15 @@ it.each([false, true])('deferred process headers retain publication and allow in
   const next = page([{ ...artifact, contentParts: empty ? [] : artifact.contentParts }, speech('independent', 'Independent original speech')], 'second-cut')
   const readUnits = next.items.flatMap(entry => entry.kind === 'item' ? [entry.item] : []).map(unit => unit.event.role === 'process'
     ? { ...unit, records: unit.records.map(record => deferConversationProcessRecord(record as import('@agentmux/core/conversation').ConversationSourceRecord)) } : unit)
-  owner.commitPage(shared, first.checkpoint, next, () => true, { units: readUnits, resolvedText: new Map() })
+  expect(() => owner.commitPage(shared, first.checkpoint, next, () => true, { units: readUnits, resolvedText: new Map() })).toThrowError(/requires complete original records/)
+  expect(owner.inspect(claimed.operationId)).toEqual(before)
+  expect(owner.list(shared)).toEqual([before])
+  expect(owner.checkpoint(shared, 'host-a')).toEqual(first.checkpoint)
+  const complete = page([artifact, speech('independent', 'Independent original speech')], 'complete-cut')
+  const completeUnits = complete.items.flatMap(entry => entry.kind === 'item' ? [entry.item] : [])
+  owner.commitPage(shared, first.checkpoint, complete, () => true, { units: completeUnits, resolvedText: new Map([[key, { kind: 'text', text: 'Known original artifact' }]]) })
   expect(owner.inspect(claimed.operationId)).toEqual(before)
   expect(owner.list(shared).some(operation => operation.effect === 'withdraw')).toBe(false)
-  expect(owner.coverage(shared)).toMatchObject({ state: 'incomplete', gaps: expect.arrayContaining([expect.objectContaining({ code: 'PUBLICATION_PROCESS_DETAILS_DEFERRED' })]) })
   expect(owner.next(shared)?.payload).toMatchObject({ kind: 'speech', text: 'Independent original speech' })
-  expect(owner.checkpoint(shared, 'host-a')).toEqual(next.checkpoint)
+  expect(owner.checkpoint(shared, 'host-a')).toEqual(complete.checkpoint)
 })
