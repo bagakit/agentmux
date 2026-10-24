@@ -9,7 +9,7 @@ import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { parseHttpLinkUrl } from '../lib/link-url.js'
 import { MarkdownOutline } from './MarkdownOutline.js'
 import { objectLinkReference, splitObjectLinkReferences } from '../lib/object-link-reference.js'
-import { useObjectLinkRenderer, useMarkdownDiagramRenderer, type ClientUiPlatform } from '../platform.js'
+import { useObjectLinkRenderer, useMarkdownDiagramRenderer, useCapsuleEmbedRenderer, type ClientUiPlatform } from '../platform.js'
 import { MarkdownCodeBlock, markdownDiagramLanguage } from './MarkdownCodeBlock.js'
 import { MarkdownMath } from './MarkdownMath.js'
 import { ConversationImageCollection } from './ConversationImageCollection.js'
@@ -43,6 +43,7 @@ type InlineContext = {
   readOnlyImages: boolean
   visible: boolean
   hasDiagramRenderer: boolean
+  embedIdentity?: string | undefined
   inLink?: boolean
   renderObjectLink?: ClientUiPlatform['renderObjectLink']
 }
@@ -171,7 +172,27 @@ function MarkdownTable({ node, context }: { node: Extract<BlockNode, { kind: 'ta
   </div>
 }
 
-function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
+/** An image-shaped reference is an explicit page request, never raw HTML or an ordinary link. */
+function MarkdownCapsule({ uri, capsuleId, title, active, inert, presentationKey }: { uri: string; capsuleId: string; title: string; active: boolean; inert: boolean; presentationKey?: string | undefined }) {
+  const render = useCapsuleEmbedRenderer()
+  const viewport = useVisibleWork<HTMLDivElement>(active && !inert && Boolean(render) && Boolean(presentationKey))
+  return <div ref={viewport.ref} data-reading-find-boundary data-capsule-embed={capsuleId}>
+    {!inert && render && presentationKey ? render({ uri, capsuleId, title, visible: viewport.visible, presentationKey })
+      : <p className="md-paragraph">{title ? `${title} · ` : ''}<code className="md-code">{uri}</code></p>}
+  </div>
+}
+
+function Block({ node, context, path }: { node: BlockNode; context: InlineContext; path: string }) {
+  if (node.kind === 'paragraph' && node.children.some(child => child.kind === 'image') && node.children.every(child =>
+    child.kind === 'break' || child.kind === 'text' && !child.text.trim() || child.kind === 'image' && objectLinkReference(child.href)?.target.kind === 'capsule')) {
+    return <>{node.children.flatMap((child, index) => {
+      if (child.kind !== 'image') return []
+      const reference = objectLinkReference(child.href)!
+      return reference.target.kind === 'capsule' ? [<MarkdownCapsule key={`${index}:${child.href}`} uri={reference.uri}
+        capsuleId={reference.target.capsuleId} title={child.alt} active={context.visible} inert={context.readOnly || context.documentMode}
+        presentationKey={context.embedIdentity ? JSON.stringify([context.embedIdentity, path, index, reference.uri]) : undefined} />] : []
+    })}</>
+  }
   if (node.kind === 'heading') {
     const Heading = context.documentMode ? (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const)[node.level - 1] ?? 'h6' : 'p'
     return <Heading className="md-heading" data-level={node.level} data-md-anchor={node.anchor} tabIndex={context.documentMode && !context.readOnly ? -1 : undefined}>
@@ -184,17 +205,17 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
     const Tag = node.ordered ? 'ol' : 'ul'
     return <Tag className="md-list" start={node.ordered ? node.start : undefined}>{node.items.map((item, index) => {
       const checked = node.checked?.[index], task = typeof checked === 'boolean'
-      const content = item.map((child, childIndex) => <Block key={childIndex} node={child} context={context} />)
+      const content = item.map((child, childIndex) => <Block key={childIndex} node={child} context={context} path={`${path}:list:${index}:${childIndex}`} />)
       return <li key={index} className={task ? 'md-task-item' : undefined} data-checked={task ? checked : undefined}>
         {task ? <><input type="checkbox" checked={checked} readOnly disabled aria-label={checked ? 'Completed task' : 'Incomplete task'} /><div className="md-task-item__content">{content}</div></> : content}
       </li>
     })}</Tag>
   }
-  if (node.kind === 'quote') return <blockquote className="md-quote">{node.children.map((child, index) => <Block key={index} node={child} context={context} />)}</blockquote>
+  if (node.kind === 'quote') return <blockquote className="md-quote">{node.children.map((child, index) => <Block key={index} node={child} context={context} path={`${path}:quote:${index}`} />)}</blockquote>
   if (node.kind === 'rule') return <hr className="md-rule" />
   if (node.kind === 'table') return <MarkdownTable node={node} context={context} />
   if (node.kind === 'footnotes') return <section className="md-footnotes" aria-label="Footnotes"><ol className="md-list">{node.items.map(note => <li key={note.identifier}
-    data-md-footnote={note.number} tabIndex={context.readOnly ? undefined : -1}>{note.children.map((child, index) => <Block key={index} node={child} context={context} />)}
+    data-md-footnote={note.number} tabIndex={context.readOnly ? undefined : -1}>{note.children.map((child, index) => <Block key={index} node={child} context={context} path={`${path}:footnote:${note.number}:${index}`} />)}
     {!context.readOnly && <span className="md-footnote-backlinks">{Array.from({ length: note.references }, (_, index) => <button key={index} type="button" className="md-link"
       aria-label={`Return to footnote ${note.number} reference ${index + 1}`} onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-footnote-reference', `${note.number}:${index + 1}`)}><ThemeFootnoteReferenceIcon size={12} />{index > 0 ? index + 1 : ''}</button>)}</span>}
   </li>)}</ol></section>
@@ -203,6 +224,8 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
 
 type AgentMarkdownProps = {
   content: string
+  /** Exact original message/part reading identity supplied by the source owner; never grants authority. */
+  embedIdentity?: string | undefined
   className?: string
   /** Host activity; viewport visibility is checked independently for each expensive block. */
   visible?: boolean
@@ -233,7 +256,7 @@ type AgentMarkdownProps = {
 export function AgentMarkdown(props: AgentMarkdownProps) {
   const { content, className, openHttpLink = defaultOpenHttpLink, openWorkspaceFile, readPastedImage,
     workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, inputMode = false, readOnly = false,
-    readOnlyImages = false, renderWorkspaceImage, renderImage, outline = false, visible = true, reveal = false } = props
+    readOnlyImages = false, renderWorkspaceImage, renderImage, outline = false, visible = true, reveal = false, embedIdentity } = props
   const renderObjectLink = useObjectLinkRenderer()
   const hasDiagramRenderer = Boolean(useMarkdownDiagramRenderer())
   const isInput = inputMode && !documentMode
@@ -252,7 +275,7 @@ export function AgentMarkdown(props: AgentMarkdownProps) {
       return value
     }
   }, [content, parseMode])
-  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly, readOnlyImages, visible, hasDiagramRenderer,
+  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly, readOnlyImages, visible, hasDiagramRenderer, embedIdentity,
     ...(!readOnly && !documentMode && renderObjectLink ? { renderObjectLink } : {}),
     ...(sourcePath ? { sourcePath } : {}), ...(!readOnly && openWorkspaceFile ? { openWorkspaceFile } : {}),
     ...((!readOnly || readOnlyImages) && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}),
@@ -282,7 +305,7 @@ function AgentMarkdownBody({ content, className, context, parse }: {
   const { document, blocks } = parsed!
   return <ConversationImageCollection references={imageReferences} readImage={readPastedImage}><div data-markdown-root="" className={`${className ? className + ' ' : ''}md${documentMode ? ' md-document' : isInput ? ' md-input' : ''}`}>
     {document && <MarkdownOutline headings={document.headings} onNavigate={(source, anchor) => navigateWithinMarkdown(source, 'data-md-anchor', anchor)} />}
-    {blocks.map((block, index) => <Block key={index} node={block} context={context} />)}
+    {blocks.map((block, index) => <Block key={index} node={block} context={context} path={String(index)} />)}
   </div></ConversationImageCollection>
 }
 

@@ -5,6 +5,20 @@ import type { CapsuleCallContext, CapsuleInspection, CapsuleOpenResult, CapsuleP
 import { browserColdDescriptor } from './browser-cold-descriptor.js'
 import { desktopWorkbenchObservationSchema } from '../shared/client-observation.js'
 import type { BrowserSnapshot } from '../shared/contracts.js'
+import type { BrowserViewManager } from './browser-view-manager.js'
+
+/** The single native Capsule acquisition path, shared by all Desktop page presentations. */
+export async function createCapsuleBrowserDocument(ports: { inspect(capsuleId: string): Promise<CapsuleInspection>; browsers: Pick<BrowserViewManager, 'create'> },
+  input: { id: string; url: string; workspaceId: string | null; rememberedProfileId?: string | undefined; mode?: import('@agentmux/core').AgentMuxBrowserMode | undefined;
+    viewport?: import('../shared/contracts.js').BrowserViewport | undefined; capsuleId: string; operationId?: string | undefined }) {
+  if (input.mode === 'private' || input.rememberedProfileId !== undefined) throw new Error('Capsule storage belongs to its original page, independently of Browser user Profiles.')
+  const capsule = await ports.inspect(input.capsuleId)
+  if (capsule.endpoint.status !== 'available') throw new Error(capsule.endpoint.issue.message)
+  const address = new URL(input.url), endpoint = new URL(capsule.endpoint.url)
+  if (address.origin !== endpoint.origin) throw new Error('The requested address is not the original Capsule endpoint.')
+  return await ports.browsers.create(input.id, address.href, input.workspaceId, undefined, 'normal', input.viewport, {
+    capsule, capsuleOrigin: endpoint.origin, ...(input.operationId ? { capsuleOpenOperationIds: [input.operationId] } : {}) })
+}
 
 type OpenParams = CapsuleParamsMap['capsule.open']
 export interface CapsulePresentationPorts {

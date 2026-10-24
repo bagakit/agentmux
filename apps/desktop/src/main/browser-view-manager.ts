@@ -686,10 +686,11 @@ export class BrowserViewManager {
     const document = this.requirePresentationDocument(sender, frame, originalDocument)
     const entry = this.require(input.browserId)
     const occurrence = input.occurrence
-    if (!occurrence?.presentationId?.trim() || !occurrence.location ||
-      !['displayWorkspaceId', 'groupId', 'tabId', 'regionId'].every(key =>
-        typeof occurrence.location[key as keyof typeof occurrence.location] === 'string' &&
-        occurrence.location[key as keyof typeof occurrence.location].trim())) {
+    const location = occurrence?.location
+    const inline = location && 'kind' in location && location.kind === 'inline' && Object.keys(location).length === 1
+    const spatial = location && !('kind' in location) && ['displayWorkspaceId', 'groupId', 'tabId', 'regionId'].every(key =>
+      typeof (location as Record<string, unknown>)[key] === 'string' && ((location as Record<string, string>)[key]?.trim()))
+    if (!occurrence?.presentationId?.trim() || !inline && !spatial) {
       throw new Error('Browser presentation requires an exact occurrence')
     }
     const nativeWindow = this.presentationWindow?.(input.window, occurrence.location) ?? this.window
@@ -718,7 +719,7 @@ export class BrowserViewManager {
     const wasVisible = lease.geometry.visible
     lease.geometry = this.presentationGeometry(value)
     if (lease.entry.inputLeaseId === leaseId) {
-      if (lease.geometry.visible) this.setBounds(lease.entry.id, lease.geometry.bounds)
+      if (lease.geometry.visible && lease.geometry.inputVisible !== false) this.setBounds(lease.entry.id, lease.geometry.bounds)
       else this.clearPresentationInput(lease.entry)
     }
     if (!this.hasVisiblePresentation(lease.entry)) this.revokePresentationCapture(lease.entry, 'no-visible-presentations')
@@ -819,7 +820,7 @@ export class BrowserViewManager {
       message: string): Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }> => ({ outcome: 'input-unconfirmed', reason, message })
     if (activation?.kind === 'select') {
       if (activation.focus !== undefined && activation.focus !== 'preserve') throw new Error('Unknown Browser presentation focus policy')
-      if (!lease.geometry.visible) return unconfirmed('hidden', 'This Browser presentation is hidden. The original page remains available.')
+      if (!lease.geometry.visible || lease.geometry.inputVisible === false) return unconfirmed('hidden', 'The page is clipped by its reading window. Scroll it fully into view or open its original Browser to interact; the page remains readable.')
       if (this.agentOwnsInput(entry)) return unconfirmed('agent-control-active', 'An Agent program owns the original Browser viewport. This live preview remains readable; take control explicitly before moving its native input owner.')
       entry.firstPress = null
       this.selectPresentation(lease, activation.focus !== 'preserve')
@@ -832,7 +833,7 @@ export class BrowserViewManager {
       if (!['left', 'middle', 'right'].includes(activation.button) || ![1, 2].includes(activation.clickCount)) {
         throw new Error('Browser first press requires a known mouse button and click count')
       }
-      if (!lease.geometry.visible || !entry.bounds) return unconfirmed('hidden', 'The original Browser viewport or this presentation is hidden.')
+      if (!lease.geometry.visible || lease.geometry.inputVisible === false || !entry.bounds) return unconfirmed('hidden', 'The original Browser viewport is hidden or clipped. Scroll the page fully into view or open its original Browser; its content remains available.')
       if (!lease.window.isFocused()) return unconfirmed('window-not-focused', 'Focus this window before taking control of the Browser.')
       if (entry.navigationId !== activation.navigationId || entry.view.webContents.isLoadingMainFrame()) {
         return unconfirmed('navigation-changed', 'The displayed Browser navigation changed. Wait for its current frame and try again.')
@@ -910,7 +911,7 @@ export class BrowserViewManager {
   }
 
   private selectPresentation(lease: PresentationLease, claimFocus = true): void {
-    if (!lease.geometry.visible) return
+    if (!lease.geometry.visible || lease.geometry.inputVisible === false) return
     const previousLeaseId = lease.entry.inputLeaseId
     lease.entry.inputLeaseId = lease.id
     try { this.setBounds(lease.entry.id, lease.geometry.bounds) }
@@ -925,7 +926,7 @@ export class BrowserViewManager {
     if (entry.controlRevision !== press.controlRevision || this.agentOwnsInput(entry)) return fail('control-changed', 'Browser control changed after this gesture was prepared. No further input was dispatched; do not replay it.')
     if (entry.firstPress !== press || this.entries.get(entry.id) !== entry || entry.view !== press.source ||
       press.source.webContents.isDestroyed() || !this.isPresentationDocumentCurrent(press.lease.document)) return fail('source-changed', 'This Browser input source changed; no further input or transfer was attempted.')
-    if (this.presentationLeases.get(press.lease.id) !== press.lease || !press.lease.geometry.visible) return fail('hidden', 'This Browser presentation is no longer visible.')
+    if (this.presentationLeases.get(press.lease.id) !== press.lease || !press.lease.geometry.visible || press.lease.geometry.inputVisible === false) return fail('hidden', 'This Browser presentation is no longer fully visible for input. Its page remains readable.')
     if (entry.navigationId !== press.navigationId || press.source.webContents.isLoadingMainFrame()) return fail('navigation-changed', 'The original Browser navigation changed.')
     if (entry.captureId !== press.capture.id || !this.isPresentationCaptureCurrent(press.capture)) return fail('capture-changed', 'The Browser capture changed.')
     if (entry.bounds !== press.sourceBounds || entry.inputLeaseId !== press.sourceInputLeaseId ||
@@ -1033,7 +1034,8 @@ export class BrowserViewManager {
     if (value?.visible === false) return { visible: false }
     const bounds = value?.visible === true ? normalizeBrowserBounds(value.bounds) : null
     if (!bounds) throw new Error('Browser presentation bounds must be finite with a positive size')
-    return { visible: true, bounds }
+    if (value.inputVisible !== undefined && typeof value.inputVisible !== 'boolean') throw new Error('Browser presentation input visibility must describe its actual clipping geometry')
+    return { visible: true, bounds, ...(value.inputVisible === false ? { inputVisible: false } : {}) }
   }
 
   private hasVisiblePresentation(entry: BrowserEntry): boolean {

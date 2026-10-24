@@ -8,6 +8,7 @@ import type { NoteResource } from '@agentmux/core/notebook-catalog'
 
 export type ClientUiIconName = 'neutral' | 'working' | 'failed'
 export type ObjectLinkReference = { uri: string; target: AmuxObjectLinkTarget; label?: string }
+export type CapsuleEmbedInput = { uri: string; capsuleId: string; title: string; visible: boolean; presentationKey?: string | undefined }
 export type MarkdownDiagramInput = { code: string; language: 'mermaid' | 'dot' | 'gv' | 'drawio' | 'plantuml'; visible: boolean }
 export type BrowserSelectionImageInput = { reference: BrowserInputImageReference; visible: boolean; interactive: boolean }
 export type NoteImageInput = { resource: NoteResource | null; src: string; alt: string; title?: string }
@@ -35,6 +36,8 @@ export type ClientUiPlatform = {
   readA2AMessage?(reference: ConversationRef, messageId: string): Promise<DurableAgentMuxMessage | null>
   /** Optional inline presentation of an exact Core object URI. The host owns facts and navigation. */
   renderObjectLink?(reference: ObjectLinkReference): ReactNode
+  /** Explicit block-level Capsule embedding; the host owns native document isolation and lifecycle. */
+  renderCapsuleEmbed?(input: CapsuleEmbedInput): ReactNode
   /** Optional transient diagram presentation. The host owns cancelable, isolated computation. */
   renderMarkdownDiagram?(input: MarkdownDiagramInput): ReactNode
   /** Original Note resource owns relative image reads; no inferred local filesystem. */
@@ -60,6 +63,7 @@ export function useObjectLinkRenderer(): ClientUiPlatform['renderObjectLink'] {
 export function useMarkdownDiagramRenderer(): ClientUiPlatform['renderMarkdownDiagram'] {
   return useContext(PlatformContext)?.renderMarkdownDiagram
 }
+export function useCapsuleEmbedRenderer(): ClientUiPlatform['renderCapsuleEmbed'] { return useContext(PlatformContext)?.renderCapsuleEmbed }
 export function useNoteLinkOpener(): ClientUiPlatform['openNoteLink'] { return useContext(PlatformContext)?.openNoteLink }
 export function useNoteImageRenderer(): ClientUiPlatform['renderNoteImage'] { return useContext(PlatformContext)?.renderNoteImage }
 

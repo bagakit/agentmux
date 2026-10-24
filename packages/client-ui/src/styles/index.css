@@ -34,3 +34,5 @@
 @import './conversation-avatar.css';
 @import './conversation-reactions.css';
 @import './message-delivery-failure.css';
+
+@import './conversation-capsule.css';

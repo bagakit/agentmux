@@ -1468,9 +1468,9 @@ export type BrowserBounds = {
 export type BrowserPresentationOccurrence = {
   presentationId: string
   location: Pick<import('@agentmux/core/control').AgentMuxSpaceLocation,
-    'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'>
+    'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'> | { kind: 'inline' }
 }
-export type BrowserPresentationGeometry = { visible: false } | { visible: true; bounds: BrowserBounds }
+export type BrowserPresentationGeometry = { visible: false } | { visible: true; bounds: BrowserBounds; inputVisible?: boolean }
 export type BrowserPresentationViewportPoint = { x: number; y: number }
 export type BrowserPresentationMouseButton = 'left' | 'middle' | 'right'
 export type BrowserPresentationMouseModifier = 'shift' | 'control' | 'alt' | 'meta'

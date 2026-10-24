@@ -3,20 +3,24 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import type { BrowserPresentationOccurrence, BrowserPresentationLease, BrowserPresentationCapture, BrowserPresentationGeometry, BrowserPresentationActivationReceipt, BrowserPresentationMouseModifier, BrowserPresentationEvent, BrowserBounds } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { LatestBrowserBoundsSynchronizer, focusRingYieldOf, hasPositiveBrowserStageGeometry, nativeBoundsClearOfFocusRing, regionAncestorOf, rendererCssBoundsToWindowDip } from '../lib/browser-bounds-sync'
-import { observeBrowserStageGeometry } from '../lib/browser-stage-geometry'
+import { browserStageInputVisible, observeBrowserStageGeometry } from '../lib/browser-stage-geometry'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import type { WorkbenchViewTarget } from '../lib/workbench-presentation'
 import type { AgentMuxBrowserControl } from '@agentmux/core'
 import type { BrowserAgentControlPreferences } from '../../../shared/browser-agent-control'
 import { BrowserControlBoundary } from './BrowserControlBoundary'
 
-export type WorkbenchBrowserPresentation = {
+export type BrowserStagePresentation = {
   occurrence: BrowserPresentationOccurrence
   stageHostId: string
   visible: boolean
   active: boolean
   yieldToFocusRing: boolean
+  clipToScrollport?: boolean
   target: WorkbenchViewTarget
+}
+export type WorkbenchBrowserPresentation = Omit<BrowserStagePresentation, 'occurrence'> & {
+  occurrence: Omit<BrowserPresentationOccurrence, 'location'> & { location: Exclude<BrowserPresentationOccurrence['location'], { kind: 'inline' }> }
 }
 
 function captureTrackIds(stream: MediaStream): readonly [string, ...string[]] {
@@ -191,11 +195,15 @@ export function useBrowserPresentationCapture(browserId: string) {
 
 type MediaOwner = ReturnType<typeof useBrowserPresentationCapture>
 /** A presentation owns geometry/lease/gesture only; page and Browser UI state stay in BrowserPane. */
-export function BrowserPresentationStage({ browserId, navigationId, presentation, inputSelected, blocked, media, stageRef, onInputSelected, control, preferences, children }: {
-  browserId: string; navigationId: string; presentation: WorkbenchBrowserPresentation; inputSelected: boolean; blocked: boolean
+export function BrowserPresentationStage({ browserId, navigationId, presentation, inputSelected, blocked, media, stageRef, onInputSelected, onPresentationRemoved, control, preferences, children }: {
+  browserId: string; navigationId: string; presentation: BrowserStagePresentation; inputSelected: boolean; blocked: boolean
   control?: AgentMuxBrowserControl | undefined; preferences?: BrowserAgentControlPreferences | undefined
   media: MediaOwner; stageRef?: Ref<HTMLDivElement> | undefined; onInputSelected?: (() => void) | undefined; children?: ReactNode
+  onPresentationRemoved?: (() => void) | undefined
 }) {
+  const removed = useRef(onPresentationRemoved)
+  removed.current = onPresentationRemoved
+  const occurrenceLocationKey = JSON.stringify(presentation.occurrence.location)
   const windowDocument = useWorkbenchWindowDocument()
   const element = useRef<HTMLDivElement | null>(null)
   const video = useRef<HTMLVideoElement>(null)
@@ -221,7 +229,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     if (!hasPositiveBrowserStageGeometry(rect)) return { visible: false }
     const bounds = { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
     const region = regionAncestorOf(stage), parent = region?.getBoundingClientRect()
-    return { visible: true, bounds: rendererCssBoundsToWindowDip(parent ? nativeBoundsClearOfFocusRing(bounds,
+    return { visible: true, ...(facts.presentation.clipToScrollport && !browserStageInputVisible(stage) ? { inputVisible: false } : {}), bounds: rendererCssBoundsToWindowDip(parent ? nativeBoundsClearOfFocusRing(bounds,
       { x: parent.x, y: parent.y, width: parent.width, height: parent.height }, focusRingYieldOf(region!, facts.presentation.yieldToFocusRing)) : bounds, api.ui.getZoomFactor()) }
   }, [])
   const synchronizer = useRef<LatestBrowserBoundsSynchronizer | null>(null)
@@ -231,7 +239,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
   const stopGeometry = useRef<() => void>(() => {})
   const observe = useCallback(() => {
     stopGeometry.current()
-    const update = () => { const next = geometry(); synchronizer.current?.observe(next.visible ? next.bounds : null) }
+    const update = () => { const next = geometry(); synchronizer.current?.observe(next.visible ? next.bounds : null, next.visible ? next.inputVisible : undefined) }
     const stage = element.current
     stopGeometry.current = stage ? observeBrowserStageGeometry(stage, update,
       latest.current.presentation.visible && !latest.current.blocked) : () => {}
@@ -260,7 +268,8 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
         registered = await api.browser.registerPresentation({ ...(windowDocument ? { window: windowDocument } : {}), browserId, occurrence: presentation.occurrence, geometry: geometry() })
       } catch (error) {
         registrationFailed = true
-        failure(error, 'registration')
+        if (cancelled) removed.current?.()
+        else failure(error, 'registration')
         return
       } finally {
         registering = false
@@ -268,12 +277,14 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
         // Creation can finish while the original failed request is still pending.
         if (!cancelled && attemptNavigationId !== latest.current.navigationId) retry()
       }
-      if (cancelled) { await api.browser.removePresentation(registered.leaseId); return }
+      if (cancelled) { try { await api.browser.removePresentation(registered.leaseId) } finally { removed.current?.() }; return }
       lease.current = registered
       registrationFailed = false
       setNotice(null) // A real lease confirms this registration.
-      const writeGeometry = async (bounds: BrowserBounds | null, intentRevision: number | null = null) => {
-        await api.browser.updatePresentation(registered.leaseId, bounds ? { visible: true, bounds } : { visible: false })
+      const writeGeometry = async (bounds: BrowserBounds | null, intentRevision: number | null = null, inputVisible?: boolean) => {
+        const currentGeometry = geometry()
+        const visibleInput = inputVisible ?? (currentGeometry.visible && currentGeometry.inputVisible !== false)
+        await api.browser.updatePresentation(registered.leaseId, bounds ? { visible: true, bounds, ...(visibleInput === false ? { inputVisible: false } : {}) } : { visible: false })
         if (bounds && !cancelled) {
           void media.registered(registered, latest.current.inputSelected, true, () => !cancelled && inputCurrent(registered), intentRevision).then(() => {
             if (!cancelled) setNotice(current => current?.source === 'presentation' ? null : current)
@@ -281,7 +292,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
         }
       }
       geometryWriter.current = writeGeometry
-      synchronizer.current = new LatestBrowserBoundsSynchronizer(writeGeometry, failure)
+      synchronizer.current = new LatestBrowserBoundsSynchronizer((bounds, inputVisible) => writeGeometry(bounds, null, inputVisible), failure)
       observe() // Native geometry stays current while preview capture is pending.
       await media.registered(registered, latest.current.inputSelected, geometry().visible, () => !cancelled && inputCurrent(registered), selectionIntent.current)
     }
@@ -291,8 +302,9 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     return () => { cancelled = true; clearTimeout(mountTask); if (registrationRetry.current === retry) registrationRetry.current = null
       stopGeometry.current(); synchronizer.current?.dispose(); synchronizer.current = null; geometryWriter.current = null
       const current = lease.current; lease.current = null
-      if (current) void api.browser.removePresentation(current.leaseId).catch(() => {}) }
-  }, [browserId, windowDocument?.windowId, windowDocument?.documentGeneration, presentation.occurrence.presentationId, geometry, observe, inputCurrent, media.registered, media.ensureCapture])
+      if (current) void api.browser.removePresentation(current.leaseId).then(() => removed.current?.(), () => removed.current?.())
+      else if (!registering) removed.current?.() }
+  }, [browserId, windowDocument?.windowId, windowDocument?.documentGeneration, presentation.occurrence.presentationId, occurrenceLocationKey, geometry, observe, inputCurrent, media.registered, media.ensureCapture])
   useLayoutEffect(() => { registrationRetry.current?.() }, [navigationId])
   useLayoutEffect(() => { if (lease.current) observe() }, [presentation.visible, presentation.yieldToFocusRing, blocked, observe])
   useLayoutEffect(() => {
