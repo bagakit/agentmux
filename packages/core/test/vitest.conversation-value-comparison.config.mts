@@ -6,6 +6,7 @@ import original from '../../../vitest.config.ts'
 
 const root = resolve(import.meta.dirname, '../../..')
 const changes: Record<string, [string, string, string]> = {
+  'reader-double-hash': ['conversation-reader.ts', 'conversationValuesEqual as same,', ''],
   'double-hash': ['conversation-changes.ts', 'return conversationValuesEqual(a, b)', 'return conversationRevision(a) === conversationRevision(b)'],
   'trust-equality': ['conversation-stream.ts', 'return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))', 'return true']
 }
@@ -20,6 +21,7 @@ export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache
       if (path === 'packages/core/src/' + change[0]) {
         if (code.split(change[1]).length !== 2) throw Error('Missing unique conversation comparison mutation anchor')
         code = code.replace(change[1], change[2])
+        if (mutation === 'reader-double-hash') code += '\nconst same = (a: unknown, b: unknown) => conversationRevision(a) === conversationRevision(b)\n'
       }
     }
     const sha = (value: string) => createHash('sha256').update(value).digest('hex')
