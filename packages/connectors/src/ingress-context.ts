@@ -11,6 +11,8 @@ const scopeKey = (recipient: IngressContextRecipient) => JSON.stringify([
   recipient.bindingId, recipient.bindingRevision, recipient.hostId, recipient.agentSessionId,
   recipient.source.providerId, recipient.source.nativeSessionId
 ])
+/** Frozen intake metadata alone joins context positions; it never grants input authority. */
+export const ingressContextRevision = (record: ConnectionIngressMessage, revision: number): number => record.group?.target?.publicationRevision ?? revision
 
 /** Derived positions and unresolved receipt indexes, not an input queue or a second history.
  * Every candidate refers back to its immutable original intake and Core operation. */
@@ -25,9 +27,10 @@ export class IngressContextPositions {
       ) STRICT;
       CREATE INDEX IF NOT EXISTS connection_ingress_context_pending_scope
         ON connection_ingress_context_pending(scope,sequence);
-      CREATE INDEX IF NOT EXISTS connection_ingress_context_origin
+      CREATE INDEX IF NOT EXISTS connection_ingress_context_publication_origin
         ON connection_ingress_message(json_extract(record_json,'$.group.target.bindingId'),
-          json_extract(record_json,'$.group.target.bindingRevision'),sequence);
+          coalesce(json_extract(record_json,'$.group.target.publicationRevision'),json_extract(record_json,'$.group.target.bindingRevision')),sequence);
+      DROP INDEX IF EXISTS connection_ingress_context_origin;
     `)
   }
   private original(ingressId: string): ConnectionIngressMessage | null {
@@ -37,7 +40,7 @@ export class IngressContextPositions {
   }
   private recipient(record: ConnectionIngressMessage): IngressContextRecipient | null {
     const input = record.input
-    return input?.contextSource ? { bindingId: input.author.bindingId, bindingRevision: input.author.bindingRevision,
+    return input?.contextSource ? { bindingId: input.author.bindingId, bindingRevision: ingressContextRevision(record, input.author.bindingRevision),
       hostId: input.hostId, agentSessionId: input.agentSessionId, source: input.contextSource } : null
   }
   position(recipient: IngressContextRecipient): { ingressId: string; messageId: string } | null {
@@ -45,15 +48,16 @@ export class IngressContextPositions {
     return row ? { ingressId: String(row.ingress_id), messageId: String(row.message_id) } : null
   }
   range(record: ConnectionIngressMessage, binding: RoomBinding, source?: AgentSessionHistorySource): ChannelQuoteRange {
-    const position = source ? this.position({ bindingId: binding.bindingId, bindingRevision: binding.revision,
+    const revision = ingressContextRevision(record, binding.revision)
+    const position = source ? this.position({ bindingId: binding.bindingId, bindingRevision: revision,
       hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, source }) : null
     if (position) return { from: { messageId: position.messageId, inclusive: false }, throughMessageId: record.externalMessageId, origin: 'admitted-input' }
     // This is a declared retained baseline, not a claim that bind-to-first-intake
     // history or a paused interval has been observed. Never borrow publication cuts.
     const first = this.database.prepare(`SELECT record_json FROM connection_ingress_message
       WHERE json_extract(record_json,'$.group.target.bindingId')=?
-        AND json_extract(record_json,'$.group.target.bindingRevision')=?
-      ORDER BY sequence LIMIT 1`).get(binding.bindingId, binding.revision)
+        AND coalesce(json_extract(record_json,'$.group.target.publicationRevision'),json_extract(record_json,'$.group.target.bindingRevision'))=?
+      ORDER BY sequence LIMIT 1`).get(binding.bindingId, revision)
     const baseline = first ? parseConnectionIngressRecord(JSON.parse(String(first.record_json))) : null
     return { from: baseline?.kind !== 'action' && baseline ? { messageId: baseline.externalMessageId, inclusive: true } : null,
       throughMessageId: record.externalMessageId, origin: 'first-observed' }
@@ -108,7 +112,7 @@ export class IngressContextPositions {
       if (previous) covered ||= quote.range.from?.messageId === previous.messageId || quote.records.some(item => item.messageId === previous.messageId)
       else {
         const baseline = this.database.prepare(`SELECT record_json FROM connection_ingress_message
-          WHERE json_extract(record_json,'$.group.target.bindingId')=? AND json_extract(record_json,'$.group.target.bindingRevision')=?
+          WHERE json_extract(record_json,'$.group.target.bindingId')=? AND coalesce(json_extract(record_json,'$.group.target.publicationRevision'),json_extract(record_json,'$.group.target.bindingRevision'))=?
           ORDER BY sequence LIMIT 1`).get(recipient.bindingId, recipient.bindingRevision)
         const first = baseline ? parseConnectionIngressRecord(JSON.parse(String(baseline.record_json))) : null
         covered = quote.range.origin === 'first-observed' && quote.range.from?.inclusive === true &&
