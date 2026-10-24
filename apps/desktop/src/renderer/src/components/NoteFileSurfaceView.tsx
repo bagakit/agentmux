@@ -36,22 +36,23 @@ type SourceChoice = { source: NoteSource; blockId: string; location: AgentMuxSpa
 const SourceScopeIcon = semanticIconComponent('status.unknown')
 
 /** Rich presentation on the original File surface and its original update/save/reveal owner. */
-export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
+export function NoteFileSurfaceView({ tabId, surface, visible = true }: { tabId: string; surface: FileWorkbenchSurface; visible?: boolean }) {
   const ownerDocument = useWorkbenchDocument()
   const key = documentKey(surface.workspaceId, surface.path)
   const presentationId = useId(), occurrence = `${surface.regionId}/${presentationId}`
   const presentation = useWorkbenchBrowserPresentation()
+  // A passive visible preview reads the original content without claiming input.
   // Retain the original editor without deriving a global graph for a hidden projection.
   // Pending input still finishes in its original owner; visibility does not cancel a save.
   const displayed = useRef<{ key: string; document: import('../../../shared/contracts').FileDocument | undefined; notes: ReturnType<typeof noteFilesFromDocuments> }>({ key, document: undefined, notes: {} })
   const compositionChanged = useCallback((active: boolean) => setNoteComposition(key, occurrence, active), [key, occurrence])
   useEffect(() => () => setNoteComposition(key, occurrence, false), [key, occurrence])
-  const document = useAppStore(state => presentation.active || displayed.current.key !== key ? state.documents[key] : displayed.current.document)
+  const document = useAppStore(state => visible || displayed.current.key !== key ? state.documents[key] : displayed.current.document)
   const dirty = useAppStore(state => Boolean(state.dirtyDocuments[key]))
   const saving = useAppStore(state => Boolean(state.savingDocuments[key]))
   const sharedUndoIssue = useAppStore(state => state.documents[key]?.noteEditing?.shareUndo ? state.documentIssues[key] : undefined)
-  const notes = useAppStore(useShallow(state => presentation.active || displayed.current.key !== key ? noteFilesFromDocuments(state.documents) : displayed.current.notes))
-  if (presentation.active || displayed.current.key !== key) displayed.current = { key, document, notes }
+  const notes = useAppStore(useShallow(state => visible || displayed.current.key !== key ? noteFilesFromDocuments(state.documents) : displayed.current.notes))
+  if (visible || displayed.current.key !== key) displayed.current = { key, document, notes }
   const knowledge = useMemo(() => noteKnowledge(loadedNoteFiles(notes), 'partial'), [notes])
   const directory = useAppStore(state => state.noteDirectorySources[noteDirectorySourceKey(surface.workspaceId, surface.path)])
   const config = useAppStore(state => state.config)
@@ -235,7 +236,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
       onSnapshotIssue={(displayed, incoming) => { if (originalResource) useAppStore.getState().retainNoteEditorDraft(tabId, surface.regionId, displayed, incoming, { hostId: originalResource.hostId, path: originalResource.path }, 'retain') }}
       onKeepDisplayedDraft={(displayed, incoming) => { if (originalResource) useAppStore.getState().retainNoteEditorDraft(tabId, surface.regionId, displayed, incoming, { hostId: originalResource.hostId, path: originalResource.path }, 'keep-displayed') }}
       {...(blockPresentation ? { onSelectedBlock } : {})} {...(restoredBlock ? { restoredBlock } : {})}
-      {...(focusRequest !== undefined ? { focusRequest, canFocus, onFocused } : {})}
+      {...(presentation.active && focusRequest !== undefined ? { focusRequest, canFocus, onFocused } : {})}
       {...(reveal?.noteBlock && presentation.active ? { revealBlock: reveal.noteBlock, onRevealed } : {})} />
     </NoteSharedFileEditing>
   </div>

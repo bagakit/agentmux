@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { WORKSPACE_FILE_MAX_BYTES } from '../../../shared/workspace-file-bytes'
 import { workspaceFileFormat } from '../../../shared/workspace-file-format'
@@ -46,7 +46,7 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
   const regionMode = useAppStore(state => effectiveFileRegionMode(state.editorRegionModes, surface.regionId, surface.path, binary))
   const setRegionMode = useAppStore(state => state.setEditorRegionMode)
   const previewing = regionMode === 'preview'
-  const retainedNotePreview = useRef<{ key: string; node: ReactNode } | null>(null)
+  const retainedNotePreview = useRef<{ key: string; overBudget: boolean } | null>(null)
   useEffect(() => {
     if (!visible || released) return
     const read = (): FileBuildSource | null => {
@@ -124,10 +124,15 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
       await current.createBrowser(group.id, undefined, joinWorkspacePath(workspaceRoot, surface.path), undefined, surface.workspaceId, reference.displayWorkspaceId)
     } catch (error) { reportError(error) }
   }
-  const currentPreview = doc && visible && !released && previewing ? overBudget
-    ? <div className="file-preview-state" role="status"><strong>Source exceeds the preview budget</strong><span>Preview is limited to 16 MB of UTF-8 content. The full source and its unsaved draft remain editable.</span></div>
-    : note
-    ? <NoteFileSurfaceView tabId={tabId} surface={surface} />
+  const previewBudgetNotice = <div className="file-preview-state" role="status"><strong>Source exceeds the preview budget</strong><span>Preview is limited to 16 MB of UTF-8 content. The full source and its unsaved draft remain editable.</span></div>
+  // Keep the editor and its last admitted budget while hidden, but pass current
+  // reading visibility. A retained element must not retain an old `visible` prop.
+  if (note && doc && visible && !released && previewing) retainedNotePreview.current = { key, overBudget }
+  const preview = note ? !released && retainedNotePreview.current?.key === key
+    ? retainedNotePreview.current.overBudget ? previewBudgetNotice
+      : <NoteFileSurfaceView tabId={tabId} surface={surface} visible={visible && previewing} />
+    : null
+    : doc && visible && !released && previewing ? overBudget ? previewBudgetNotice
     : format.sourcePreview
     ? <SourceFilePreview key={key} regionId={surface.regionId} kind={format.sourcePreview} content={doc.content} path={surface.path}
       workspaceId={surface.workspaceId} workspaceRoot={workspaceRoot} visible={visible} openReference={openReference}
@@ -135,10 +140,6 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
         if (!reference) { reportError(new Error('The original File display position is unconfirmed. Its content is retained.')); return }
         void useAppStore.getState().openHttpLink({ workspaceId: reference.displayWorkspaceId, tabGroupId: reference.groupId, tabId, regionId: surface.regionId }, url, 'tab').catch(reportError)
       }} /> : null : null
-  // Keep only the already-created projection; hidden Source input never allocates a preview
-  // budget buffer or mounts a previously over-budget Rich editor.
-  if (note && currentPreview) retainedNotePreview.current = { key, node: currentPreview }
-  const preview = note && !released ? currentPreview ?? (retainedNotePreview.current?.key === key ? retainedNotePreview.current.node : null) : currentPreview
   return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="File" title="Loading file" detail="Loading file content" />}>
     <EditorPane tabId={tabId} surface={surface} released={released} visible={visible}
       {...(format.sourcePreview ? { preview, onTogglePreview: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, previewing ? 'edit' : 'preview') } } : {})}
