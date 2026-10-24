@@ -131,6 +131,34 @@ function curvePoints(path: string) {
   const numbers = path.match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/giu)!.map(Number)
   return numbers.flatMap((number, index) => index % 2 ? [] : [{ x: number, y: numbers[index + 1]! }])
 }
+/** At reading scale the complete raw curve remains, with optional terminal
+ * connectors to the rounded visible bodies. Both projections must translate. */
+function expectAnchoredVisibleCurve(rawPath: engine.CollaborationPath, curve: ReturnType<typeof curvePoints>, offset: { x: number; y: number }) {
+  const connection = requests.flatMap(request => request.type === 'route' ? request.connections : request.input.connections).find(connection => connection.id === rawPath.id)!
+  expect(connection).toBeDefined()
+  const sourceGlyph = collaborationAgentGlyph(captured.nodes.find(node => node.id === connection.source)!.data.agent as CollaborationAgent)
+  const targetGlyph = collaborationAgentGlyph(captured.nodes.find(node => node.id === connection.target)!.data.agent as CollaborationAgent)
+  const projected = curvePoints(collaborationVisiblePath(rawPath, boxes.get(connection.source)!, boxes.get(connection.target)!, 1,
+    sourceGlyph.overviewRadius, targetGlyph.overviewRadius, sourceGlyph.pointRadius, targetGlyph.pointRadius))
+  expect(curve).toHaveLength(projected.length)
+  for (const [index, point] of curve.entries()) {
+    expect(point.x).toBeCloseTo(projected[index]!.x + offset.x, 7)
+    expect(point.y).toBeCloseTo(projected[index]!.y + offset.y, 7)
+  }
+  // Independently retain every original raw control/port in order. Sharing the
+  // projection cannot let that projection silently replace the safe middle.
+  expect(curve.some((_, start) => start + rawPath.points.length <= curve.length && rawPath.points.every((point, index) =>
+    Math.abs(curve[start + index]!.x - point.x - offset.x) < 1e-7 && Math.abs(curve[start + index]!.y - point.y - offset.y) < 1e-7))).toBe(true)
+  const translated = engine.translateCollaborationPath(rawPath, offset)
+  expect(translated.points).toHaveLength(rawPath.points.length)
+  for (const [index, point] of translated.points.entries()) {
+    expect(point.x).toBeCloseTo(rawPath.points[index]!.x + offset.x, 8)
+    expect(point.y).toBeCloseTo(rawPath.points[index]!.y + offset.y, 8)
+  }
+  expect(translated.id).toBe(rawPath.id); expect(translated.sourceHandle).toBe(rawPath.sourceHandle); expect(translated.targetHandle).toBe(rawPath.targetHandle)
+  expect(translated.bounds).toEqual({ ...rawPath.bounds, x: rawPath.bounds.x + offset.x, y: rawPath.bounds.y + offset.y })
+  expect([translated.labelX, translated.labelY]).toEqual([rawPath.labelX + offset.x, rawPath.labelY + offset.y])
+}
 /** Read the real curve and original Worker boxes; never prescribe a layout or substitute a route. */
 function detour() {
   const connections = requests.flatMap(request => request.type === 'route' ? request.connections : request.input.connections)
@@ -472,7 +500,7 @@ it('renders and selects an actual Worker detour while both original endpoint car
   await viewport(-x + 4, -y + 4, 8, 8)
   for (const id of [connection.source, connection.target]) expect([...dom.container.querySelectorAll('.react-flow__node')].some(element => element.getAttribute('data-id') === id)).toBe(false)
   const edge = edgeElement(connection.id); expect(edge).toBeDefined()
-  expect(edge!.querySelector('.react-flow__edge-path')!.getAttribute('d')).toBe(route.path)
+  expectAnchoredVisibleCurve(route, curvePoints(edge!.querySelector('.react-flow__edge-path')!.getAttribute('d')!), { x: 0, y: 0 })
   expect(edge!.querySelector('.react-flow__edge-interaction')?.getAttribute('stroke-width')).toBe('22')
   const marker = /^url\(#(.+)\)$/.exec(edge!.querySelector('.react-flow__edge-path')!.getAttribute('marker-end')!)
   expect(marker).not.toBeNull(); expect(document.getElementById(marker![1]!)?.localName).toBe('marker')
@@ -640,13 +668,7 @@ it('keeps unrelated occurrences and paths stable through an actual activity size
   expect(edges).toHaveLength(paths.size)
   for (const edge of edges) {
     const rawPath = paths.get(edge.dataset.id!)!, curve = curvePoints(edge.querySelector('.react-flow__edge-path')!.getAttribute('d')!)
-    expect(curve).toHaveLength(rawPath.points.length)
-    for (const [index, point] of curve.entries()) { expect(point.x).toBeCloseTo(rawPath.points[index]!.x + offset.x, 8); expect(point.y).toBeCloseTo(rawPath.points[index]!.y + offset.y, 8) }
-    const translated = engine.translateCollaborationPath(rawPath, offset)
-    expect(translated.points).toEqual(curve)
-    expect(translated.id).toBe(rawPath.id); expect(translated.sourceHandle).toBe(rawPath.sourceHandle); expect(translated.targetHandle).toBe(rawPath.targetHandle)
-    expect(translated.bounds).toEqual({ ...rawPath.bounds, x: rawPath.bounds.x + offset.x, y: rawPath.bounds.y + offset.y })
-    expect([translated.labelX, translated.labelY]).toEqual([rawPath.labelX + offset.x, rawPath.labelY + offset.y])
+    expectAnchoredVisibleCurve(rawPath, curve, offset)
   }
 })
 
@@ -1411,19 +1433,7 @@ it('keeps the exact reading occurrence and translates all curves through an expl
   expect(edges).toHaveLength(paths.size)
   for (const edge of edges) {
     const rawPath = paths.get(edge.dataset.id!)!, curve = curvePoints(edge.querySelector('.react-flow__edge-path')!.getAttribute('d')!)
-    const translated = engine.translateCollaborationPath(rawPath, offset)
-    const connection = requests.flatMap(request => request.type === 'arrange' ? request.input.connections : []).find(connection => connection.id === rawPath.id)!
-    const sourceGlyph = collaborationAgentGlyph(captured.nodes.find(node => node.id === connection.source)!.data.agent as CollaborationAgent)
-    const targetGlyph = collaborationAgentGlyph(captured.nodes.find(node => node.id === connection.target)!.data.agent as CollaborationAgent)
-    // Project first, then translate: the entire actual curve must commute with
-    // the anchored move, including both rounded-body terminal connectors.
-    const projected = curvePoints(collaborationVisiblePath(rawPath, boxes.get(connection.source)!, boxes.get(connection.target)!, 1,
-      sourceGlyph.overviewRadius, targetGlyph.overviewRadius, sourceGlyph.pointRadius, targetGlyph.pointRadius))
-    expect(curve).toHaveLength(projected.length)
-    for (const [index, point] of curve.entries()) { expect(point.x).toBeCloseTo(projected[index]!.x + offset.x, 7); expect(point.y).toBeCloseTo(projected[index]!.y + offset.y, 7) }
-    for (const [index, point] of translated.points.entries()) { expect(point.x).toBeCloseTo(rawPath.points[index]!.x + offset.x, 8); expect(point.y).toBeCloseTo(rawPath.points[index]!.y + offset.y, 8) }
-    expect(translated.bounds).toEqual({ ...rawPath.bounds, x: rawPath.bounds.x + offset.x, y: rawPath.bounds.y + offset.y })
-    expect([translated.labelX, translated.labelY]).toEqual([rawPath.labelX + offset.x, rawPath.labelY + offset.y])
+    expectAnchoredVisibleCurve(rawPath, curve, offset)
   }
 })
 
