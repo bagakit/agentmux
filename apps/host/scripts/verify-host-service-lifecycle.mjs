@@ -222,7 +222,8 @@ try {
   if (service) {
     // This exact unique label was created by this fixture. Cleanup has no user target.
     await exec('/bin/launchctl', ['bootout', service.target]).catch(() => {})
-    assert.equal(await managed.macosHostServiceRegistration(service), null, 'The private platform job must be gone before removing its namespace')
+    assert.equal(await until(() => managed.macosHostServiceRegistration(service), value => value === null,
+      'private platform job removal'), null, 'The private platform job must be gone before removing its namespace')
   }
   await stopProbeProcesses(process.pid + 1_000_000_000, fixture)
   await rm(fixture, { recursive: true, force: true })
