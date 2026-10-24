@@ -53,17 +53,34 @@ function desktopSeed(f) {
 async function originalDesktop(probe, seed, sid, addedTab) {
   await until('actual original nonempty Desktop Regions', () => probe.cdp.evaluate(`Array.from(document.querySelectorAll('[data-workbench-region-id]')).filter(e=>e.getClientRects().length).map(e=>e.dataset.workbenchRegionId).sort()`),
     regions => regions.includes('original-agent-region') && regions.includes('original-file-region'))
-  const state = await probe.cdp.evaluate(`(() => {const s=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;return {workbench:s.restoredWorkbench,focus:s.agentFocus,draft:s.agentComposerDrafts[${JSON.stringify(sid)}]}})()`)
+  const state = await probe.cdp.evaluate(`(async () => {const s=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;return {spatial:await window.agentmux.spatial.read(),focus:s.agentFocus,draft:s.agentComposerDrafts[${JSON.stringify(sid)}]}})()`)
+  const graph = state.spatial.graph, expected = seed.state.restoredWorkbench, originalTab = expected.tabs['original-tab']
+  const tabs = graph.tabs.filter(tab => tab.tabId === 'original-tab')
+  assert.equal(tabs.length, 1); assert.equal(tabs[0].workspaceId, originalTab.workspaceId)
+  assert.deepEqual(tabs[0].regionIds, Object.keys(originalTab.regions))
+  assert.deepEqual(graph.tabLayouts['original-tab'], originalTab.layout)
+  assert.equal(graph.resources['tab:original-tab'].titleRegionId, originalTab.titleRegionId)
+  for (const original of Object.values(originalTab.regions)) {
+    const regions = graph.regions.filter(region => region.tabId === 'original-tab' && region.regionId === original.regionId)
+    assert.equal(regions.length, 1); assert.equal(regions[0].kind, original.kind)
+    assert.equal(graph.resources['region:' + original.regionId].workspaceId, original.workspaceId)
+    if (original.kind === 'agent') assert.equal(regions[0].agentSessionId, original.sessionId)
+    else assert.equal(regions[0].file.path, original.path)
+  }
+  assert.deepEqual(graph.layouts.__scratch__, expected.layouts.__scratch__)
   if (addedTab) {
-    assert.deepEqual(state.workbench.tabs['original-tab'], seed.state.restoredWorkbench.tabs['original-tab'])
-    assert.ok(state.workbench.tabs[addedTab.tabId], 'Desktop must retain the Tab created from the disconnected Mobile client')
-    const region = state.workbench.tabs[addedTab.tabId].regions[addedTab.regionId]
-    assert.equal(region.sessionId, addedTab.agentSessionId)
+    assert.ok(graph.tabs.some(tab => tab.tabId === addedTab.tabId), 'Desktop must retain the Tab created from the disconnected Mobile client')
+    const regions = graph.regions.filter(region => region.tabId === addedTab.tabId && region.regionId === addedTab.regionId)
+    assert.equal(regions.length, 1); assert.equal(regions[0].agentSessionId, addedTab.agentSessionId)
     await until('actual Desktop renders the Mobile-created Tab', () => probe.cdp.evaluate(`Boolean(document.querySelector('.workbench-tab[data-workbench-tab-id="${addedTab.tabId}"]'))`))
-    const group = state.workbench.layouts['original-workspace'].groups.find(group => group.id === 'original-group')
-    assert.ok(group.tabOrder.includes('original-tab') && group.tabOrder.includes(addedTab.tabId))
+    const layout = graph.layouts['original-workspace'], originalLayout = expected.layouts['original-workspace']
+    assert.deepEqual(layout.root, originalLayout.root); assert.equal(layout.activeGroupId, originalLayout.activeGroupId)
+    const group = layout.groups.find(group => group.id === 'original-group')
+    assert.ok(group.tabOrder.includes(addedTab.tabId))
+    assert.deepEqual(group.tabOrder.filter(tabId => tabId !== addedTab.tabId), originalLayout.groups[0].tabOrder)
+    assert.deepEqual(group.recentTabIds, originalLayout.groups[0].recentTabIds)
     assert.equal(group.activeTabId, 'original-tab')
-  } else assert.deepEqual(state.workbench, seed.state.restoredWorkbench)
+  } else assert.deepEqual(graph.layouts['original-workspace'], expected.layouts['original-workspace'])
   assert.deepEqual(state.focus, seed.state.agentFocus)
   assert.equal(state.draft, seed.state.agentComposerDrafts[sid])
   const sessions = await until('actual Desktop consumes original Host Session', () => probe.cdp.evaluate('window.agentmux.sessions.snapshot()'), snapshot => snapshot.sessions.some(session => session.id === sid))
