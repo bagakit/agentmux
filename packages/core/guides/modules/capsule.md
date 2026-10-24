@@ -20,7 +20,8 @@ Existing absolute content/state paths stay with their original execution Host, i
 namespaces inside an App data directory. Independence never means opening an empty library.
 
 Use amux capsule runtime inspect to read revision, desired intent, original Run, actual
-runtime identity and any recovery issue. Inspection and page/configuration/interaction reads,
+runtime identity and any recovery issue. Pass --input FILE with {operationId} to inspect one
+original management command, including after another intent or Run generation. Inspection and page/configuration/interaction reads,
 including original-operation queries, do not start or stop a service, replace an ended Run,
 or save a binding. Prepared work remains starting/stopping; unknown dispatch stays unknown.
 Existing keepalive owns convergence separately. To explicitly
@@ -29,6 +30,11 @@ runtime stop --input FILE with {operationId,expectedRevision,expectedRun:{runId}
 Use exactly the revision and Run from inspection. Stop persists before the native effect;
 ordinary page reads and keepalive cannot undo it. A timeout leaves the original operation
 and Run unconfirmed: inspect them, do not resubmit Start/Stop or mint a replacement ID.
+The original result retains its first failure and structured creation/storage diagnostics.
+Only an exact not_applied result permits a new explicit command with a fresh operationId
+and the current revision. Reads and keepalive never retry that refused command. A missing
+Native creation mapping or receipt remains unknown. Native creation alone does not confirm
+service readiness; a late result cannot undo a later Stop or rewrite confirmed history.
 Native process readiness, runtime handshake, page HTTP and Browser display are distinct.
 
 Only an explicit first capsule create or runtime start establishes running intent. Other
