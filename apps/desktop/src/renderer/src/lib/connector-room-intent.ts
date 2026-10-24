@@ -3,7 +3,7 @@ import { readConnectionHostingTarget } from '../../../shared/connection-hosting-
 import { parseConnectionParams, parseRoomBindingTarget, type ConnectionParamsMap, type RoomBindingTarget } from '@agentmux/core/connections'
 import { restoredConnectorMemberDrafts, type ConnectorMemberDrafts } from './connector-member-draft'
 
-type Effect = 'connection.room.create' | 'connection.room.link.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach' | 'connection.grant'
+type Effect = 'connection.room.create' | 'connection.room.link.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach' | 'connection.grant' | 'connection.binding.member.inherit'
 /** Unsaved UI intent only. Restoring a member draft never grants or dispatches access. */
 export type ConnectorRoomDraft = {
   connectionId: string; bindingId: string | null; bindingRevision: number | null
@@ -31,7 +31,7 @@ export function restoredConnectorRoomDrafts(value: unknown): Record<string, Conn
 export type ConnectorRoomIntent = { [M in Effect]: {
   target: RoomBindingTarget; hostingTarget?: ConnectionHostingTarget; method: M; input: ConnectionParamsMap[M]; phase: 'not-dispatched' | 'may-have-dispatched'
 } & (M extends 'connection.room.link.create' ? { replacesOperationId?: string } : {}) }[Effect]
-const effects: readonly string[] = ['connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.binding.resume', 'connection.binding.detach', 'connection.grant']
+const effects: readonly string[] = ['connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.binding.resume', 'connection.binding.detach', 'connection.grant', 'connection.binding.member.inherit']
 export const sameConnectorTarget = (a: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>, b: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => a.executionHostId === b.executionHostId && a.agentSessionId === b.agentSessionId
 const intentTargets = new WeakMap<Readonly<Record<string, ConnectorRoomIntent>>, ReadonlySet<string>>()
 const targetKey = (target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => JSON.stringify([target.executionHostId, target.agentSessionId])
