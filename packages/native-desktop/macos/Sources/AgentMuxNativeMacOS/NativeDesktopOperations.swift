@@ -13,12 +13,10 @@ enum NativeDesktopOperations {
         do {
             let mode = params["mode"]?.string ?? "selection"
             let rect: CGRect
-            let selected: Bool
             if mode == "selection" {
                 let selection = try NativeSelectionRequest.run()
                 guard let selection else { return ["state": "cancelled"] }
                 rect = selection
-                selected = true
             } else if mode == "rect" {
                 guard case let .object(values)? = params["rect"],
                       let x = values["x"]?.number, let y = values["y"]?.number,
@@ -26,14 +24,12 @@ enum NativeDesktopOperations {
                     throw ProviderError.coded("invalid_argument", "rect requires x, y, width and height in Quartz points")
                 }
                 rect = CGRect(x: x, y: y, width: width, height: height)
-                selected = false
             } else if mode == "display" {
                 let displayID = try displayIDArgument(params["displayId"])
                 guard CGDisplayIsActive(displayID) != 0 else {
                     throw ProviderError.coded("display_not_found", "the requested display is not active")
                 }
                 rect = CGDisplayBounds(displayID)
-                selected = false
             } else if mode == "window" {
                 return try captureWindow(params)
             } else {
@@ -45,7 +41,6 @@ enum NativeDesktopOperations {
             let capture = try captureRect(rect)
             var result: [String: Any] = ["state": "captured", "screenshot": try png(capture.image, scale: capture.scale), "engine": capture.engine]
             result["selectionRect"] = renderRect(rect)
-            result["selected"] = selected
             return result
         } catch {
             return ["state": "failed", "error": nativeErrorPayload(error)]

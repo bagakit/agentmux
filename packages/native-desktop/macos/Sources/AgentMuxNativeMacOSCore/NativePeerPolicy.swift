@@ -7,8 +7,9 @@ public enum NativePeerPolicy {
 }
 
 public enum NativeOperationPolicy {
-    public static func isMutation(_ method: String) -> Bool {
+    public static func isMutation(_ method: String, includesScreenshot: Bool = false) -> Bool {
         switch method {
+        case "getAppState": includesScreenshot
         case "click", "performSecondaryAction", "setValue", "typeText", "pressKey", "hotkey", "pasteText", "scroll", "drag", "clipboardWrite", "captureScreenshot": true
         default: false
         }
