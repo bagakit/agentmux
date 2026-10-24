@@ -14,13 +14,14 @@ const aliases = Object.entries(exports).sort(([left], [right]) => right.length -
 })
 const owner = 'apps/desktop/src/renderer/src/lib/browser-operator-avatar.tsx'
 const face = 'apps/desktop/src/renderer/src/components/AgentAvatar.tsx'
+const artwork = 'packages/client-ui/src/components/AgentAvatarStaticArtwork.tsx'
 const mutations: Record<string, { file: string; from: string; to: string }> = {
-  'lose-enamel': { file: face, from: "<g {...(appearance?.tint ? { filter: `url(#${filterId})` } : {})}>", to: '<g>' },
+  'lose-enamel': { file: artwork, from: "<g {...(appearance?.tint ? { filter: `url(#${filterId})` } : {})}>", to: '<g>' },
   'lose-inline-raster': { file: owner, from: "image.setAttribute('href', dataUrl)", to: "image.setAttribute('href', source!)" },
   'lose-theme-key': { file: owner, from: 'return artwork(input).key', to: "return 'same-avatar-for-every-theme'" },
   'lose-byte-limit': { file: owner, from: 'const MAX_PNG_BYTES = 64 * 1024', to: 'const MAX_PNG_BYTES = 128 * 1024' }
 }
-const consumed = [owner, face, 'packages/client-ui/src/components/AgentProviderIcon.tsx', 'packages/client-ui/src/components/AgentEnamelFilter.tsx']
+const consumed = [owner, face, artwork, 'packages/client-ui/src/components/AgentProviderIcon.tsx', 'packages/client-ui/src/components/AgentEnamelFilter.tsx']
 const proof = {
   name: 'bounded-original-avatar-artwork', enforce: 'pre' as const,
   transform(source: string, id: string) {
