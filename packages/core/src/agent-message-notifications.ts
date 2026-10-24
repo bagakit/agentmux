@@ -5,7 +5,7 @@ import { agentTurnCompletionIdentity } from './agent-session-identity.js'
 import type { DurableAgentMuxMessageQueue } from './agent-global-message-queue.js'
 import type { AgentMuxMessageNotification } from './agent-message-notification.js'
 import type { AgentMuxAgentSession, AgentPromptExecutionEvidence } from './types.js'
-import { messageNotificationSourceRuns } from './agent-message-notification-sources.js'
+import { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'
 import { AgentMuxError } from './errors.js'
 
 type Dependencies = {
@@ -95,7 +95,7 @@ export class AgentMuxMessageNotifications {
     const idle = completionId ? { completionId, inputByte }
       : { nativeEvidence: { sourceId: nativeIdle!.sourceId, id: nativeIdle!.id }, inputByte }
     const condition = agentPromptCondition(session)
-    const sourceRuns = messageNotificationSourceRuns(session)
+    const sourceRuns = sessionSemanticResumeSourceRuns(session)
     const position = await this.deps.queue.pendingNotificationPosition(agentSessionId, sourceRuns)
     // Failure to explain excluded historical references is a weak observation dependency:
     // publish its service window, then continue this writer's independently qualified work.
