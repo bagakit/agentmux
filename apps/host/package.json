@@ -21,6 +21,10 @@
     "esbuild": "^0.25.0"
   },
   "exports": {
+    "./file-upload-owner": {
+      "types": "./dist/file-upload-owner.d.ts",
+      "import": "./dist/file-upload-owner.js"
+    },
     "./host-configuration": {
       "types": "./dist/host-configuration.d.ts",
       "import": "./dist/host-configuration.js"

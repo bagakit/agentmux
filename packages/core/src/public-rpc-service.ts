@@ -421,9 +421,7 @@ export class AgentMuxRpcService {
     const scopes = known.length === 1 ? known : clients
     const exact = await Promise.allSettled(scopes.map(async scope => {
       if (this.endpointUnverified(scope.client)) throw new AgentMuxError('The exact Session owner is unverified.', 'RUNTIME_UNAVAILABLE')
-      const session = typeof scope.client.readAgentSession === 'function'
-        ? await scope.client.readAgentSession(id)
-        : (await this.ownedSessions(scope)).find(item => item.agentSessionId === id) ?? null
+      const session = await scope.client.readAgentSession(id)
       if (!session) return null
       if (session.agentSessionId !== id || session.hostId !== (scope.client.forwardRpc ? 'local' : scope.hostId)) throw new AgentMuxError(
         'Exact Session metadata belongs to another identity or semantic Host.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
@@ -1048,6 +1046,7 @@ export class AgentMuxRpcService {
       if (method === 'file.upload' || method === 'file.upload.inspect') {
         const input = method === 'file.upload' ? parseFileUploadParams(params) : parseFileUploadIdentity(params)
         context.signal?.throwIfAborted()
+        await this.inputCallContext(context).assertCurrent?.()
         if (method === 'file.upload') {
           const original = await this.owner(input.agentSessionId)
           if (original.agentSessionId !== input.agentSessionId || original.hostId !== input.hostId || original.session.run.runId !== input.expectedRun.runId) {
@@ -1059,11 +1058,13 @@ export class AgentMuxRpcService {
           const route = routes.length === 1 ? routes[0] : undefined
           if (!route?.client.forwardRpc) throw new AgentMuxError('The original Host has no file upload owner. Its Agent and the local file are retained.', 'FILE_UPLOAD_HOST_UNAVAILABLE')
           const remoteInput = { ...input, hostId: 'local' }
+          context.signal?.throwIfAborted(); await this.inputCallContext(context).assertCurrent?.()
           const remote = await route.client.forwardRpc(method, remoteInput as never)
           const receipt = parseFileUploadResult(remote, remoteInput)
           return parseFileUploadResult({ ...receipt, hostId: input.hostId }, input) as AgentMuxRpcResult<M>
         }
         if (!this.ports.fileUploads && !this.ports.forwardControl) throw new AgentMuxError('The original Host file upload owner is unavailable. Original files and Agents are retained.', 'FILE_UPLOAD_HOST_UNAVAILABLE')
+        context.signal?.throwIfAborted(); await this.inputCallContext(context).assertCurrent?.()
         const result = this.ports.fileUploads
           ? (method === 'file.upload' ? await this.ports.fileUploads.upload(input as import('./public-rpc-files.js').FileUploadParams)
             : await this.ports.fileUploads.inspect(input))
