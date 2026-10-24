@@ -186,6 +186,16 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 全量工作面投影消费已确认的 Native Run 事实与原持久 Session／退休记录，不以所有 Session 的握手或整体恢复观察完成为前置。冷语义 owner 尚未装入活动 registry 时，仍须从原元数据 owner 取得准确绑定，不能把已有 Agent 误作普通 Terminal，也不能覆盖期间已受理的绑定或复活退休 Run。单个握手的失败、未知回执与实际输入资格继续由原 owner 保留和表达；可读取进程投影不证明握手成功，不授予新的输入或恢复权限。
 
+### 长期 Host 与客户端生命周期
+
+关闭 Desktop 或手机客户端只释放该客户端的连接、reader 和实际呈现，不停止长期 Host、健康 Agent 或 ctxmux Run。Host 服务的启动、存续和恢复由 Core 之外的执行环境服务管理者持有；原持久 Store、空间、配置、Hook 与 ctxmux namespace 不能因展示客户端离开而变化。手机继续使用的范围与 Desktop 专属能力沿[手机版 Relay 连接](public-control.md#手机版-relay-连接)，本节只持有服务恢复与原身份保护。
+
+Host 进程退出后，服务管理者沿原入口与准确 namespace 重新激活，原 Core 重新核对持久 Runtime 身份、设备身份、Session、原生句柄、空间图及原操作。仍健康的 Run 自动接回；已结束或丢失 Run 的同 Session 语义恢复沿[冷启动按需恢复](#冷启动按需恢复p0-末位)，不以另建空会话代替。断线或超时保留原 operation、输入和回执未知事实，不自动重放副作用；服务管理者不解释 Provider、输入资格或 Run 终态。
+
+服务注册只保存启动所需的准确 namespace 和入口，不复制业务 Store、设置、权限或 Runtime 状态。无法确认现存 owner 或其启动归属时，保留原服务与健康 Run，说明未确认步骤和可达恢复路径，不能按进程名、展示文案或空观察抢占。安装更新须先通过同一服务管理者停止旧服务的自动激活，再正常收口准确旧 Host，随后用候选入口接回同一 namespace；旧服务未确认退出时不得激活第二 owner，观测失败不授权强杀健康 Run。
+
+公开 owner shutdown 收口准确旧 owner instance 的整个 Host，包括 HTTP、Relay、连接与 Core；它不撤销服务管理者的运行意图，服务管理者可沿同 namespace 激活新 instance。显式暂停自动激活由准确服务管理者负责，不把对旧 instance 的回执用于控制后来者。已关闭语义服务的 Host 不得继续把 HTTP 存活冒成业务可用。当前 owner、服务入口、失败步骤与恢复状态分别可观察；局部手机诊断或桌面观察失败不停止健康 Host，也不阻断无关输入。执行环境关闭期间不承诺在线，环境恢复后的重新激活不能冒称未发生中断。
+
 ### 联邦 Runtime 与远端恢复边界
 
 远程管理的产品范围、连接拓扑、监控与维护入口归 [Remote 管理 PRD](remote-management.md)；本节持有联邦 Runtime 的身份、生命周期、故障隔离与恢复合同，管理页面引用本节，不另定义恢复语义。

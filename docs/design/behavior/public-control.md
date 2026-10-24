@@ -290,6 +290,10 @@ Mac 设置与手机连接 Toolkit 消费同一 Host 设备 owner 的连接事实
 
 分层与远端身份沿[《联邦 Runtime 与远端恢复边界》](session-recovery.md#联邦-runtime-与远端恢复边界)，公共方法沿[《对象优先 CLI 与统一公共业务服务》](#对象优先-cli-与统一公共业务服务)，原工作面与健康 Run 沿[《Session Attach 与 Runtime Projection 的边界》](session-recovery.md#session-attach-与-runtime-projection-的边界)，终端字节、阅读与成本沿[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)。长期无 UI Host 使用原 Core/Hook/Store/Provider 与 ctxmux namespace，同时服务 Desktop 和 Mobile；加密连接接原公共 JSON-RPC dispatcher 与有限 Hosted SDK，不复制 Runtime。网络或手机入口故障只影响该入口，保留健康 Desktop、Unix、Agent 和 Run。
 
+**桌面退出后，手机访问不打断。** 已连接的手机可以继续原工作，新打开的手机可以连接原 Host、发现并打开原工作面与会话。目录、原名称和对象关系、Agent 创建与恢复、对话和输入、文件与笔记、Topics、Mote、Goals 以及手机已有的配置读取，由原 Core 或 Host 领域 owner 提供；不能因为 Desktop 退出而隐藏入口、清空目录、另建替代 Session，或要求回桌面才能继续。Desktop 返回后消费同一持久空间图和领域事实，不能用退出前的快照覆盖手机期间的更新。屏幕呈现、窗口、真实输入焦点和 Native Browser 控制仍由 Desktop 提供；这些能力离线只影响对应操作，原手机工作面、草稿、未确认操作及健康 Agent 保留，并明确说明不可用的 owner 与恢复动作。
+
+Host 的服务生命周期独立于展示客户端，并由执行环境的唯一服务管理者负责持续运行与退出后的恢复；持有 Core 的 Host 不在 Core 内监督自身，也不复制 ctxmux 的 Run Runtime。原 Host 恢复继续同一持久 namespace、设备授权和会话，具体身份与恢复边界沿[长期 Host 与客户端生命周期](session-recovery.md#长期-host-与客户端生命周期)。Relay 的部署位置与 Host 执行环境分开：Relay 继续只转发密文，不能取得业务语义、设备授权或 Session owner 身份。桌面退出后的可用性为独立 Relay 部署提供基础，不自动授权公网部署，也不承诺执行机器关机、注销或网络不可达时在线。
+
 跨进程转发保留原认证主体及授权来源。Host 借 Desktop 的文件、窗口或其他能力时，接收方必须从可信传输边界取得准确主体，并在原业务 owner 需要授权的执行点复核；不能把设备请求改记为本机用户，也不能从业务参数接受调用者自报的身份、授权或回调。转发中的原 method、目标、参数、operation 和接收 owner 保持绑定，业务回执与原归因原样返回；凭据失效或授权未知只影响这次操作，不能退回更高权限的本机身份。
 
 原始终端按键、粘贴与高阶输入都保留本次调用的可信授权有效期。原始字节输入在排队、异步准备后及实际字节派发前检查原授权、准确 Session／Run 和原 owner 有效期；设备撤销、已取消且尚未派发的原始字节调用或已结束的 owner 不能在后续重连时发送旧输入，也不能取消另一项健康输入的观察。本次远端操作所需的原授权无法核实则保留原意图并明确不可用，不冒撤销或准许执行；已由语义 owner 接受的持久输入仍沿其原等待与恢复合同。字节已经派发后，观察中断不撤销已发生业务、不将未知回执冒成未执行、不自动重放；原 operation、输入回执与已保存内容保持。授权检查不依赖展示文案，也不阻断无关本地输入或停止健康 Run。
