@@ -11,7 +11,6 @@ import type {
   DesktopControlRequest, DesktopControlResult,
   DesktopControlResponse
 } from '../shared/contracts.js'
-import type { ContinuousProgressInputRequest, ContinuousProgressInputResult } from '../shared/continuous-progress.js'
 import type { SystemWebUrlRequest, SystemWebUrlResult } from '../shared/system-web-url.js'
 import { nameChangeRequests } from './name-change-audit.js'
 
@@ -60,7 +59,6 @@ export class DesktopControlIpcBridge {
 
   execute(request: AgentMuxControlRequest, signal?: AbortSignal): Promise<AgentMuxControlResult>
   execute(request: MetricsRendererRequest, signal?: AbortSignal): Promise<MetricsRendererResult>
-  execute(request: ContinuousProgressInputRequest, signal?: AbortSignal): Promise<ContinuousProgressInputResult>
   execute(request: SystemWebUrlRequest, signal?: AbortSignal): Promise<SystemWebUrlResult>
   execute(request: Extract<DesktopControlRequest, { operation: 'worktree.closeout.prepare' }>, signal?: AbortSignal): Promise<Extract<DesktopControlResult, { operation: 'worktree.closeout.prepare' }>>
   async execute(request: DesktopControlRequest, signal?: AbortSignal): Promise<DesktopControlResult> {
@@ -84,7 +82,7 @@ export class DesktopControlIpcBridge {
           request.requestId,
           bridgeError('CONTROL_TIMEOUT', 'Desktop Control request timed out.')
         )
-      }, agentMuxControlTimeoutMs(request.operation === 'worktree.closeout.prepare' ? 'space.mv' : request.operation === 'continuous-progress.observeInput' ? 'inspect.region' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation === 'browser.openFromSystem' ? 'open.browser' : request.operation))
+      }, agentMuxControlTimeoutMs(request.operation === 'worktree.closeout.prepare' ? 'space.mv' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation === 'browser.openFromSystem' ? 'open.browser' : request.operation))
       this.pending.set(request.requestId, { request: structuredClone(request),
         nameRequest: nameChangeRequests.getStore(), resolve, reject, timeout })
       signal?.addEventListener('abort', abort, { once: true })

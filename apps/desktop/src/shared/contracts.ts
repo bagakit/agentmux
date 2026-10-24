@@ -13,7 +13,7 @@ export type { LaunchOptionSelection } from '@agentmux/core'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
 import type { ToolkitPreferences } from './toolkit-preferences'
 import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from './workspace-file-preview'
-import type { ContinuousProgressApi, ContinuousProgressInputRequest, ContinuousProgressInputResult } from './continuous-progress'
+import type { ContinuousProgressApi } from './continuous-progress'
 import type { AgentCatalogEntry, AgentPromptCondition, AgentPromptExecution, AgentMessageChannel, AgentMuxSessionQuestionReplyInput, AgentSessionQuestionReplyReceipt, AgentMuxAgentCreateInput, AgentMuxAgentSession, AgentMuxAgentCreationInspection, AgentMuxNativeSessionConfirmationInput, AgentMuxNativeSessionConfirmation, AgentCapabilities, AgentDisplayState, AgentStatus, AgentExecutorConfig as CoreAgentExecutorConfig, AgentExecutorId, AgentProviderId, LaunchOptionSelection, AgentMuxClientEvent, AgentMuxNativeService, AgentMuxControlFailure, AgentMuxEvidenceSource, AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxRunDataEvent, AgentMuxRunAttachment, AgentMuxRunExitReason, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentMuxRunRef, AgentMuxRunReplayGap, AgentMuxRunState, AgentTerminalCapabilityState, AgentTerminalPromptDeliveryState, AgentTerminalOutputChannelState, AgentTurnUsage, AgentMuxControlError, AgentMuxControlErrorCode, AgentMuxControlBrowserRunOutcome, AgentMuxControlBrowserOperation, AgentMuxControlRequest, AgentMuxControlResult, AgentMuxControlCrashLogFact, AgentMuxExecutorProbeResult, AgentTimelineItem, AgentTimelineSnapshot, AgentSessionHistoryPage, AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceReadResult, AgentSessionHistoryDescriptor, AgentSessionHistoryPageOptions, AgentSessionHistoryObservation, AgentSessionHistoryObservationHandle } from '@agentmux/core'
 import type { AgentMuxAgentContinuityResult, AgentMuxAgentContinuityConflictReason, AgentMuxAgentContinuityUnavailableReason } from '@agentmux/core/agent-session-recovery'
 export type CrashLogRevealResult = Exclude<AgentMuxControlCrashLogFact, { outcome: 'present' }> | { path: string; outcome: 'requested' }
@@ -1190,9 +1190,9 @@ export type ExecutorDetection = { input: ExecutorDetectionInput } & (
 export type HostExecutorInventory = import('@agentmux/core').AgentMuxHostExecutorInventory & { routeHostId: string }
 export type HostExecutorConfiguration = import('@agentmux/core').AgentMuxHostExecutorConfiguration & { routeHostId: string }
 
-export type DesktopControlRequest = AgentMuxControlRequest | ContinuousProgressInputRequest | import('@agentmux/core/control').MetricsRendererRequest | import('./system-web-url').SystemWebUrlRequest
+export type DesktopControlRequest = AgentMuxControlRequest | import('@agentmux/core/control').MetricsRendererRequest | import('./system-web-url').SystemWebUrlRequest
   | { operation: 'worktree.closeout.prepare'; requestId: string }
-export type DesktopControlResult = AgentMuxControlResult | ContinuousProgressInputResult | import('@agentmux/core/control').MetricsRendererResult | import('./system-web-url').SystemWebUrlResult
+export type DesktopControlResult = AgentMuxControlResult | import('@agentmux/core/control').MetricsRendererResult | import('./system-web-url').SystemWebUrlResult
   | { operation: 'worktree.closeout.prepare'; requestId: string; diskDurability: 'confirmed' }
 
 export type DesktopControlResponse =

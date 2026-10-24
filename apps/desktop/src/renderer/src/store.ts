@@ -115,7 +115,7 @@ import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMu
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
 import { directoryIdentity, topicSpatialAddress } from '../../shared/space-addresses'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
-import { observeAgentInputOccupation, readContinuousProgressInput } from './lib/continuous-progress-input'
+import { observeAgentInputOccupation } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
 import type { MoteContextOperations } from '../../shared/mote-context-observation'
 import { observeMoteContextOperation } from './lib/mote-context-observation'
@@ -5216,8 +5216,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           await coreSpatialPersistence.flush()
           return { operation: request.operation, requestId: request.requestId, diskDurability: 'confirmed' as const }
         })()
-      : request.operation === 'browser.openFromSystem' ? openSystemUrlInSurvey({ get, navigation: () => fileNavigationSelection(get()), subscribe: listener => useAppStore.subscribe(listener) }, request, signal) : request.operation === 'continuous-progress.observeInput'
-      ? readContinuousProgressInput(get(), request, signal)
+      : request.operation === 'browser.openFromSystem' ? openSystemUrlInSurvey({ get, navigation: () => fileNavigationSelection(get()), subscribe: listener => useAppStore.subscribe(listener) }, request, signal)
       : request.operation === 'metrics.renderer'
         ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), ...api.readRendererMemory(), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() }
         : get().executeControl(request, signal, { admittedControlRequestId: request.requestId }))
