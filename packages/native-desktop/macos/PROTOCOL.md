@@ -33,7 +33,7 @@ A completed action followed by observation failure returns `ok:true` with `{acti
 
 `captureScreenshot` parameters are one of:
 
-- `{mode:"selection"}`: native AppKit rectangle overlay. Escape returns explicit `cancelled`; no display is a failure.
+- `{mode:"selection",allowEditing?:boolean}`: native AppKit rectangle overlay. Escape returns explicit `cancelled`; no display is a failure. Only explicit `true` offers the optional “标注…” action (E); Enter still completes directly.
 - `{mode:"display",displayId}`: exact active display from discovery.
 - `{mode:"rect",rect:{x,y,width,height}}`: finite positive rectangle in global Quartz points.
 - `{mode:"window",windowId,app:"pid:123",processStartedAt}`: window number and original live owner process must both match.
@@ -41,6 +41,8 @@ A completed action followed by observation failure returns `ok:true` with `{acti
 Quartz coordinates have origin `(0,0)` at the primary display's upper-left, x increasing right, y increasing down. Displays left of or above the primary display have negative coordinates. Selection covers the full display union, converts AppKit coordinates once, and restores the previously foreground application after selection/cancellation. Mixed-scale captures use the largest scale of the intersected displays. Non-display gaps remain transparent. AX action coordinates remain relative to the returned exact window (`coordinateSpace:"window"`).
 
 Capture returns `{state:"captured",screenshot:{data:"<base64-PNG>",format:"png",width,height,scale},engine,selectionRect:{x,y,width,height}}`, `{state:"cancelled"}`, or `{state:"failed",error:{code,message}}`. Missing pixels never imply cancellation. macOS 14+ uses ScreenCaptureKit's SCScreenshotManager. macOS 12/13 uses the native CoreGraphics APIs available on those systems. The 14+ operation does not silently switch engines after a capture failure.
+
+An original selection request with `allowEditing:true` adds exactly `completionAction:"capture"|"edit"` to a captured result. Both intents contain the same selected PNG; `edit` requests a host-owned editor and does not edit, copy, save or attach pixels inside Native. Omitted/false opt-in and all cancelled/failed results omit the field. The Node capture convenience validates the action against that original request; it never infers an intent from presentation or supplies one for a malformed receipt. Public pure capture consumers omit the opt-in and retain their original outcome contract.
 
 ## Clipboard and permissions
 
