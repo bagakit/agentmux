@@ -16,12 +16,15 @@ const session: AgentMuxAgentSession = { kind: 'agent', agentSessionId: 'session-
 const host = (window as unknown as { attachmentHost: { call(method: string, params: unknown): Promise<unknown> } }).attachmentHost
 const calls: { method: string; params: unknown }[] = []
 let connected = true, image = true, loseReply = false, release: (() => void) | null = null, hold = false
+let posture = false
 nativeDevicePorts.filePicker = { pickFiles: async () => {
   const blob = image ? await (await fetch(dragon)).blob() : new Blob(['这份原始资料由用户在手机上选择。'], { type: 'text/markdown' })
   return { files: [{ name: image ? '头像参考.png' : '本周研究资料与两个方案的比较.md', mimeType: image ? 'image/png' : 'text/markdown', size: blob.size, blob }] }
 } } as typeof nativeDevicePorts.filePicker
 const client = {
-  agentSession: () => session, agentSessions: () => [session], catalog: () => [], onEvent: () => () => {},
+  agentSession: () => session, agentSessions: () => [session], catalog: () => posture ? [{ id: session.providerId, capabilities: {},
+    composer: { commands: [{ text: '/review', description: '检查原内容，保留草稿' }, { text: '/compare', description: '比较两种方案' }] },
+    postureControl: { id: 'controlled-posture', label: '执行模式', modes: [{ id: 'review', label: '审阅', description: '查看原内容', tier: 'safe' }] } }] : [], onEvent: () => () => {},
   runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', availability: connected ? 'connected' : 'disconnected' }),
   sessionHistoryPage: async () => ({ agentSessionId: session.agentSessionId, source: { providerId: 'codex', nativeSessionId: 'native-original' }, nextCursor: null,
     items: [{ id: 'original-question', kind: 'user-message', contentParts: [{ kind: 'text', text: '这两个想法，我们先比较哪个更适合做成一个小实验？' }] },
@@ -53,6 +56,7 @@ const client = {
   releaseConversationView: async () => ({}),
   subscribeRpc: async () => ({ subscriptionId: 'fixture-appearance', dispose: async () => {} }),
   submitAgentPrompt: async () => { throw new Error('This Renderer fixture never sends Agent input.') },
+  setAgentPosture: async (params: Record<string, unknown>) => { calls.push({ method: 'setAgentPosture', params: structuredClone(params) }); return {} },
   forwardRpc: async (method: string, params: Record<string, unknown>) => {
     calls.push({ method, params: structuredClone(params) })
     if (!connected) throw new Error('原 Mac 连接中断；原草稿保留。')
@@ -78,6 +82,7 @@ function Scene() {
     file: () => { image = false }, hold: () => { hold = true }, release: () => { hold = false; release?.() },
     loseReply: () => { loseReply = true }, offline: () => { connected = false; refresh(value => value + 1) },
     reconnect: () => { connected = true; refresh(value => value + 1) },
+    posture: () => { posture = true; refresh(value => value + 1) },
     facts: () => ({ calls: calls.map(({ method, params }) => ({ method, params: { ...(params as object), dataBase64: undefined } })), record: getDeviceWorkface().snapshot().record })
   } })
   return <MobileApp client={client} connection={connected ? { state: 'connected', message: '已连接原 Mac' } : { state: 'disconnected', message: '连接中断，附件与草稿保留。' }} platform={platform} />

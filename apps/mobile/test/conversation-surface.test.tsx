@@ -43,7 +43,8 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await click(button(view.element, 'Reference files for the Agent to read'))
     expect(attach).toHaveBeenCalledOnce()
     // Reading and live input receipt observation each release their own subscription.
-    expect(f.unsubscribe).toHaveBeenCalledTimes(2)
+    // Metadata/activity, input, and the pinned conversation view each release their owner subscription.
+    expect(f.unsubscribe).toHaveBeenCalledTimes(3)
     expect(f.disposeHistory).toHaveBeenCalledOnce()
   })
 
@@ -489,14 +490,14 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await click(button(view.element, 'Show the message tool row'))
     const trigger = button(view.element, 'Choose a command')
     await click(trigger)
-    const search = view.element.querySelector<HTMLInputElement>('input[aria-label="查找命令"]')!
+    const search = document.querySelector<HTMLInputElement>('input[aria-label="查找命令"]')!
     expect(search).not.toBeNull()
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
       setter.call(search, 'compact')
       search.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    const items = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-command-menu [role="menuitem"]')]
+    const items = [...document.querySelectorAll<HTMLButtonElement>('.mobile-command-menu [role="menuitem"]')]
     expect(items.length).toBeGreaterThan(0)
     const chosen = items[0]!.querySelector('strong')!.textContent!
     await click(items[0]!)
@@ -504,4 +505,5 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(editor(view.element).textContent).toContain(chosen)
     expect(f.submit).not.toHaveBeenCalled()
   })
+
 })

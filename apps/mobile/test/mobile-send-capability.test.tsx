@@ -20,6 +20,7 @@ import { deliveryOutcome } from '../src/conversation/delivery'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, editor, fixture, mount, mounted, paste, plainEnter } from './conversation-fixture'
+import { activityStatus } from './activity-status-fixture'
 
 const connected = { state: 'connected' as const, message: '已连接原 Host' }
 const platform = () => createBrowserPlatform({ clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })
@@ -262,8 +263,9 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     const postureTrigger = view.element.querySelector<HTMLButtonElement>('.mobile-posture-picker button')!
     expect(postureTrigger, 'Grok declares postureControl').not.toBeNull()
     await click(postureTrigger)
-    const firstMode = view.element.querySelector<HTMLButtonElement>('.mobile-posture-menu__item')!
+    const firstMode = document.querySelector<HTMLButtonElement>('.mobile-posture-menu__item')!
     expect(firstMode).not.toBeNull()
+    expect(view.element.querySelector('.composer__toolbar')!.contains(firstMode)).toBe(false)
     await click(firstMode)
     expect(f.setAgentPosture).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       agentSessionId: 'session-original',
@@ -273,6 +275,36 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     await click(button(view.element, 'Interrupt the current turn'))
     expect(f.signalAgent).toHaveBeenCalledTimes(2)
     expect(view.element.textContent).toContain('原 Session 或 Run 已改变')
+  })
+
+  it.each(['exited', 'interrupted'] as const)('omits raw posture on an authoritatively %s Run while typed Send and draft remain usable', async process => {
+    const f = fixture(), current = { ...f.sessions.get('session-original')!, providerId: 'grok' }
+    f.sessions.set('session-original', current)
+    f.client.statusAgent = vi.fn(async () => activityStatus(current, process))
+    const view = await originalSurface(f, 'session-original')
+    expect(view.element.querySelector('.mobile-posture-picker')).toBeNull()
+    await paste(view.element, '原会话的新消息')
+    expect(button(view.element, 'Send').disabled).toBe(false)
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledOnce(); expect(f.setAgentPosture).not.toHaveBeenCalled()
+  })
+
+  it('keeps posture callable with an explicit unknown observation when status reading fails, and clears that notice on a real running observation', async () => {
+    const f = fixture(), current = { ...f.sessions.get('session-original')!, providerId: 'grok' }
+    f.sessions.set('session-original', current)
+    const status = vi.fn().mockRejectedValue(new Error('status observation unavailable'))
+    f.client.statusAgent = status
+    const view = await originalSurface(f, 'session-original')
+    expect(view.element.textContent).toContain('Run 状态未确认')
+    const trigger = view.element.querySelector<HTMLButtonElement>('.mobile-posture-picker button')
+    expect(trigger, 'Unknown observation retains the original posture capability').not.toBeNull()
+    await click(trigger!)
+    await click(document.querySelector<HTMLButtonElement>('.mobile-posture-menu__item')!)
+    expect(f.setAgentPosture).toHaveBeenCalledOnce()
+    status.mockResolvedValue(activityStatus(current))
+    await act(async () => { f.emit({ type: 'agent-session', session: current }) })
+    expect(view.element.textContent).not.toContain('Run 状态未确认')
+    expect(view.element.querySelector('.mobile-posture-picker')).not.toBeNull()
   })
 })
 
