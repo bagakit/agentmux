@@ -89,7 +89,7 @@ export async function createConnectionServices(options: { directory: string | un
         const rooms = options.bindings ? new RoomProvisioningHost({ connections, spatial: options.bindings.spatial, ...(options.bindings.session ? { session: options.bindings.session } : {}) }) : undefined
         if (rooms) connections.rooms = { ...connections.rooms, create: (input, context) => rooms.create(input, context), inspect: input => rooms.inspect(input) }
         ingress = routing && options.ingress ? new DurableIngressHost({ connections, bindings: routing, authenticators: connections.ingressAuthenticators(), core: options.ingress.core, ...(options.ingress.authoritySource ? { authoritySource: options.ingress.authoritySource } : {}),
-          ...(publicationStore ? { contextPublications: publicationStore } : {}),
+          ...(publicationStore ? { contextPublications: publicationStore, queryReceived: (binding, record) => publication?.receiveQuery(binding, record) } : {}),
           ...(moteChat ? { prepareInput: async (record: import('@agentmux/core/connections').ConnectionIngressMessage) => {
             if (record.conversationKind === 'direct') {
               try { const binding = await moteChat.prepareIncoming({ ...record, conversationKind: 'direct' }); if (binding) publication?.refresh() }
@@ -97,7 +97,7 @@ export async function createConnectionServices(options: { directory: string | un
             }
             return { state: 'ready' as const }
           } } : {}) }) : undefined
-        publication = routing && options.publication ? new PublicationHost({ connections, ...(publicationStore ? { store: publicationStore } : {}), bindings: routing, conversation: options.publication, ...(ingress ? { permissions: ingress.permissions } : {}),
+        publication = routing && options.publication ? new PublicationHost({ connections, ...(publicationStore ? { store: publicationStore } : {}), bindings: routing, conversation: options.publication, ...(ingress ? { permissions: ingress.permissions, queryFeedback: true } : {}),
           ...(options.speaker ? { speaker: async (reference, signal) => {
             const generation = moteChat?.store.generationBySession(reference.agentSessionId)?.generation
             const target = generation?.executionHostId === reference.hostId ? generation.target : undefined

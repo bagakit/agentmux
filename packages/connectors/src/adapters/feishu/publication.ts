@@ -11,6 +11,7 @@ import { feishuQuestionCard } from './question-card.js'
 import { feishuReplyCard, fragmentFeishuReply } from './reply-card.js'
 import { feishuRoleCard, type FeishuRoleSpeaker } from './role-card.js'
 import type { PublicationSpeaker } from '../../publication-speaker.js'
+import { feishuQueryReaction, readFeishuQueryReaction, feishuReactionMapping, feishuReactionReceipt } from './reaction.js'
 
 const path = '/open-apis/im/v1/messages'
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
@@ -155,12 +156,13 @@ function consistent(data: Record<string, unknown>, target: PublicationTarget, ma
 /** Stateless platform effects. The original Host owns source selection, durable work, ordering and retries. */
 export class FeishuPublicationAdapter implements PublicationAdapter {
   readonly adapterId = 'feishu'
-  readonly renderVersion = 'feishu-conversation-v5'
-  readonly supportedRenderVersions = ['feishu-post-group-v1', 'feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', this.renderVersion]
+  readonly renderVersion = 'feishu-conversation-v6'
+  readonly supportedRenderVersions = ['feishu-post-group-v1', 'feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', this.renderVersion]
   readonly fragmentBytes = 4_096
   readonly addressing = 'group'
   readonly permissionActions = true as const
   readonly questionActions = true as const
+  readonly queryFeedback = true as const
   readonly images = {
     maxBytes: 10 * 1024 * 1024,
     accepts: (image: PublicationImage) => image.byteLength > 0 && image.byteLength <= this.images.maxBytes && image.width > 0 && image.height > 0 &&
@@ -225,6 +227,10 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     if (!['open.feishu.cn', 'open.larksuite.com'].includes(operation.target.application.domain)) feishuFailure('FEISHU_APPLICATION_INVALID')
     const mapping = operation.mapping
     if (mapping) feishuIdentity(mapping.messageId)
+    if (operation.payload.kind === 'query-feedback') {
+      if (operation.effect !== 'upsert' || mapping && (mapping.messageId !== operation.payload.messageId || mapping.threadId !== undefined)) feishuFailure('FEISHU_QUERY_FEEDBACK_INVALID')
+      return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: feishuQueryReaction(operation.payload) }
+    }
     if (operation.effect === 'withdraw') {
       if (!mapping) feishuFailure('FEISHU_PUBLICATION_MAPPING_REQUIRED')
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: { method: 'DELETE', path: `${path}/${encodeURIComponent(mapping.messageId)}` } }
@@ -330,11 +336,13 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     try {
       parsePreparedPublication(prepared, this)
       if (prepared.request.body !== undefined && Buffer.byteLength(prepared.request.body) > FEISHU_MESSAGE_BODY_BYTES) return false
+      const reaction = readFeishuQueryReaction(prepared)
+      if (reaction) return mapping === undefined || mapping.messageId === reaction.messageId && mapping.threadId === undefined
       if (mapping) return prepared.request.path === `${path}/${encodeURIComponent(feishuIdentity(mapping.messageId))}` &&
-        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && (requestText(prepared) !== null || requestImage(prepared) !== null) || prepared.request.method === 'PATCH' && ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', this.renderVersion].includes(prepared.renderVersion) && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
+        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && (requestText(prepared) !== null || requestImage(prepared) !== null) || prepared.request.method === 'PATCH' && ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', this.renderVersion].includes(prepared.renderVersion) && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
       const body = object(JSON.parse(prepared.request.body!))
       return prepared.request.method === 'POST' && prepared.request.path === path && prepared.request.contentType === 'application/json' && prepared.request.query?.receive_id_type === 'chat_id' &&
-        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'file' && requestFile(prepared) !== null || body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', this.renderVersion].includes(prepared.renderVersion) && requestCard(prepared) !== null)
+        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'file' && requestFile(prepared) !== null || body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', this.renderVersion].includes(prepared.renderVersion) && requestCard(prepared) !== null)
     } catch { return false }
   }
   async dispatch(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt> {
@@ -347,6 +355,8 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         ...(prepared.request.body === undefined ? {} : { data: {}, transformRequest: [() => prepared.request.body] }),
         validateStatus: value => { status = value; return true }, signal
       }), signal)
+      const reaction = readFeishuQueryReaction(prepared)
+      if (reaction) return feishuReactionReceipt(response, status, reaction, target.application, mapping)
       const result = object(response), failed = failure(status, result?.code)
       if (failed) return failed
       const data = object(result?.data)
@@ -365,6 +375,36 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     } catch { return unknown() }
   }
   async inspect(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt | null> {
+    const reaction = readFeishuQueryReaction(prepared)
+    if (reaction) {
+      if (!this.valid(prepared, target, mapping)) return null
+      // A missing ACK can only read this original message/stage; absence never authorizes another POST.
+      try {
+        let token: string | undefined, confirmed: PublicationMapping | undefined
+        const seen = new Set<string>()
+        do {
+          if (signal.aborted) return null
+          let status: number | undefined
+          const response = await this.clients.withClient(target, credential, client => client.request<unknown>({
+            url: prepared.request.path, method: 'GET', params: { reaction_type: reaction.emojiType, page_size: 100, ...(token ? { page_token: token } : {}) },
+            validateStatus: value => { status = value; return true }, signal
+          }), signal)
+          const result = object(response), data = object(result?.data)
+          if (signal.aborted || result?.code !== 0 || status !== undefined && (status < 200 || status >= 300) ||
+              !data || !Array.isArray(data.items) || typeof data.has_more !== 'boolean') return null
+          for (const item of data.items) {
+            const found = feishuReactionMapping(item, reaction, target.application, mapping)
+            if (!found) continue
+            if (confirmed) return null
+            confirmed = found
+          }
+          if (!data.has_more) return confirmed ? { state: 'confirmed', mapping: confirmed } : null
+          const next = feishuIdentity(data.page_token)
+          if (seen.has(next)) return null
+          seen.add(next); token = next
+        } while (true)
+      } catch { return null }
+    }
     // No supported lookup by uuid exists. A missing create ID, including after dedup expiry, stays unknown.
     if (!mapping || !(this.valid(prepared, target, mapping) || this.valid(prepared, target))) return null
     try {

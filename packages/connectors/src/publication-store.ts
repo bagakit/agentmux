@@ -1,3 +1,4 @@
+import { projectQueryFeedback, queueQueryFeedback } from './publication-query-feedback.js'
 import { externalConversationAuthor, externalConversationRecordId } from '@agentmux/core'
 import { createHash } from 'node:crypto'
 import type { PublicationImage, PublicationFile, ResourceUploadReceipt, ResolvedPublicationPart } from './publication-resource.js'
@@ -37,7 +38,8 @@ export type BindingLifecyclePayload = {
   synchronization: boolean | null
 }
 export type PublicationTextFragment = { text: string; presentationContext?: { before: string; after: string; literal?: true } }
-export type PublicationPayload = PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | ImagePublicationPayload | FilePublicationPayload | {
+export type QueryFeedbackPayload = { kind: 'query-feedback'; stage: 'received' | 'started' | 'completed'; messageId: string }
+export type PublicationPayload = QueryFeedbackPayload | PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | ImagePublicationPayload | FilePublicationPayload | {
   kind: 'speech'
   text: string
   presentationContext?: PublicationTextFragment['presentationContext']
@@ -62,6 +64,9 @@ export type PublicationOperation = ConnectionDelivery & {
   /** Frozen before dispatch; private to this Host, never exposed in public delivery DTOs. */
   prepared?: PreparedPublication
   sourceRecords?: ConversationItemRef[]
+  /** Original qualified adoption proof retained with its effect for later turn completion. */
+  queryTurn?: import('@agentmux/core/conversation').ConversationInputWitness
+  queryCompletion?: { record: ConversationItemRef; revision: string }
   uploads?: Array<{ state: 'dispatching' } | ResourceUploadReceipt>
   /** Frozen presentation, never another source of author or sharing authority. */
   speaker?: PublicationSpeaker
@@ -72,11 +77,12 @@ export type PublicationOperation = ConnectionDelivery & {
 /** Reuse the original public receipt codec without accepting private request or body fields. */
 const parseReceipt = parseConnectionDeliveryReceipt
 export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
-  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, ...delivery } = operation
+  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, ...delivery } = operation
   const last = operation.uploads?.at(-1)
   return parseConnectionDelivery({ ...delivery, ...((operation.payload.kind === 'image' || operation.payload.kind === 'file') && operation.effect === 'upsert' && !operation.prepared?.request.multipart ? { resourceUpload: { kind: operation.payload.kind, part: operation.payload.part, attempt: operation.uploads?.length ?? 0, state: last?.state ?? 'pending' } } : {}) })
 }
 export type PublicationPageOptions = {
+  queryFeedback?: true
   fragmentBytes?: number
   fragmentText?: (payload: Extract<PublicationPayload, { kind: 'speech' }>, speaker?: PublicationSpeaker) => readonly PublicationTextFragment[] | undefined
   units: readonly ConversationUnit[]
@@ -123,7 +129,7 @@ function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byt
 }
 
 type RepresentationPart = { text: string; part?: ConversationContentRef; image?: PublicationImage; file?: PublicationFile; segments?: Array<{ text: string; image?: PublicationImage }> }
-type ContentPayload = Exclude<PublicationPayload, PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload>
+type ContentPayload = Exclude<PublicationPayload, PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | QueryFeedbackPayload>
 type RepresentationPayload = Extract<PublicationPayload, { kind: 'speech' }> | { kind: 'sequence'; parts: ContentPayload[] }
 type MaterializedPlan = PublicationContentPlan & { resourceParts?: RepresentationPart[] }
 function representation(parts: readonly RepresentationPart[], phase?: 'progress' | 'final', relay?: ConnectionDelivery['relay'], separator = '\n\n', inputSubmission?: import('@agentmux/core').AgentInputSubmissionObservation): RepresentationPayload {
@@ -192,6 +198,11 @@ export class PublicationStore {
           json_extract(operation_json,'$.target.connectionId'),json_extract(operation_json,'$.target.application.domain'),
           json_extract(operation_json,'$.target.application.appId'),json_extract(operation_json,'$.speaker.avatar.image.sha256'),ordinal DESC)
         WHERE json_array_length(json_extract(operation_json,'$.avatarUploads'))>0;
+      CREATE INDEX IF NOT EXISTS connector_publication_query_turn
+        ON connector_publication_operation(binding_id,binding_revision,
+          json_extract(operation_json,'$.queryTurn.record.source.providerId'),
+          json_extract(operation_json,'$.queryTurn.record.source.nativeSessionId'),json_extract(operation_json,'$.queryTurn.turnId'))
+        WHERE json_extract(operation_json,'$.payload.kind')='query-feedback' AND json_extract(operation_json,'$.payload.stage')='started';
       CREATE INDEX IF NOT EXISTS connector_publication_binding_notice
         ON connector_publication_operation(ordinal)
         WHERE json_extract(operation_json,'$.payload.kind')='binding-lifecycle'
@@ -259,9 +270,13 @@ export class PublicationStore {
     }
     return known
   }
+  /** Called only after the original ingress owner authorizes this addressed group query. */
+  queueQueryReceived(boundary: PublicationBoundary, query: import('@agentmux/core/connections').ConnectionIngressMessage): void {
+    queueQueryFeedback(this, boundary, query, 'received')
+  }
   /** A new relationship boundary skips only ordinary effects that never crossed the dispatch boundary. */
   retireBindingPending(boundary: RoomBinding): void {
-    for (const row of this.database.prepare("SELECT operation_json,state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state='pending' AND json_extract(operation_json,'$.reference.source.kind') IN ('native','captured') AND json_extract(operation_json,'$.attempt') IS NULL").all(...scopeKey(boundary))) {
+    for (const row of this.database.prepare("SELECT operation_json,state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state='pending' AND json_extract(operation_json,'$.reference.source.kind') IN ('native','captured','ingress') AND json_extract(operation_json,'$.attempt') IS NULL").all(...scopeKey(boundary))) {
       this.write({ ...this.read(row)!, state: 'cancelled', reason: 'binding-revised' })
     }
   }
@@ -464,6 +479,7 @@ export class PublicationStore {
       if (!authorized()) throw new AgentMuxError('This exact Binding no longer authorizes publication.', 'PUBLICATION_NOT_AUTHORIZED')
       const row = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), 'unified')
       if (!row || !same(JSON.parse(String(row.checkpoint_json)), after)) throw new AgentMuxError('The retained publication frontier changed.', 'PUBLICATION_CHECKPOINT_CONFLICT')
+      if (options.queryFeedback) projectQueryFeedback(this, boundary, units)
       for (const original of questionRecords) this.saveDecision(boundary, 'question-read-' + digest(original.question), 'current', { kind: 'question-read', ...original })
       for (const coverage of page.coverage) {
         const key = conversationSourceKey(coverage.source)
@@ -705,7 +721,7 @@ export class PublicationStore {
     return this.database.prepare(`SELECT original.operation_json, original.state FROM connector_publication_operation original
       WHERE original.binding_id=? AND original.binding_revision=?
         AND original.state IN ('pending','dispatching','unknown','not-applied') AND original.state='pending'
-        AND ${projectionId === undefined ? "json_extract(original.operation_json,'$.reference.source.kind') IN ('native','captured')" : 'original.projection_id=?'}
+        AND ${projectionId === undefined ? "json_extract(original.operation_json,'$.reference.source.kind') IN ('native','captured','ingress')" : 'original.projection_id=?'}
         AND NOT EXISTS (SELECT 1 FROM connector_publication_operation earlier
           WHERE earlier.binding_id=original.binding_id AND earlier.binding_revision=original.binding_revision AND earlier.projection_id=original.projection_id
             AND earlier.state IN ('pending','dispatching','unknown','not-applied') AND earlier.ordinal<original.ordinal
