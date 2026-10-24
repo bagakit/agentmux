@@ -1,10 +1,9 @@
 const assert = require('node:assert/strict')
 module.exports = async ({ win, read, until, resize, tap, button, capture, result }) => {
   await read('mobileProductScene.prepareDensity()')
-  await button('刷新空间目录', '.mobile-spatial-panel')
   await button('Mote', '.mobile-navigation')
-  if (await read('document.querySelector(\'[data-space-id="mote-original"] .mobile-space-row\')?.getAttribute("aria-expanded")!=="true"')) await button('我的 Mote', '.mobile-spatial-panel')
-  await button(await read('mobileProductScene.facts().menuAgentName'), '[data-space-id="mote-original"] .mobile-mote-agents')
+  await button('选择 Mote · 我的 Mote', '.mobile-spatial-panel')
+  await button(await read('mobileProductScene.facts().menuAgentName'), '.mobile-mote-agents')
   const editor = '.mobile-conversation .composer [contenteditable=true]', left = '.mobile-conversation .composer__toolbar > div:first-child'
   await until('!!document.querySelector(' + JSON.stringify(editor) + ')')
   const original = await read(`(()=>{window.originalCaptureEditor=document.querySelector(${JSON.stringify(editor)});const f=mobileProductScene.facts();return{sid:f.record.selectedSessionId,identity:f.record.presentation.identity,run:f.sessionIds.find(v=>v.sessionId===f.record.selectedSessionId)}})()`)
@@ -19,10 +18,10 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     win.webContents.insertText(draft)
     await until(`document.querySelector(${JSON.stringify(editor)}).textContent===${JSON.stringify(draft)}`)
     await read(`document.querySelector(${JSON.stringify(left)}).scrollLeft=0`)
-    const painted = await read(`(()=>{const c=document.querySelector('.mobile-conversation .composer'),l=c.querySelector('.composer__toolbar > div:first-child');return{left:l.getBoundingClientRect().toJSON(),editorHeight:c.querySelector('[contenteditable=true]').getBoundingClientRect().height,controls:['.composer-send','.mobile-message-tools__trigger'].map(selector=>{const n=c.querySelector(selector),s=n.querySelector('svg'),r=n.getBoundingClientRect(),g=s.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2),glyphHit=document.elementFromPoint(g.x+g.width/2,g.y+g.height/2);return{selector,rect:r.toJSON(),glyph:g.toJSON(),hit:hit===n||n.contains(hit),glyphHit:glyphHit===n||n.contains(glyphHit),disabled:n.disabled,visibility:getComputedStyle(s).visibility,opacity:getComputedStyle(s).opacity,hitOwner:hit?.outerHTML.slice(0,180)}})}})()`)
+    const painted = await read(`(()=>{const c=document.querySelector('.mobile-conversation .composer'),l=c.querySelector('.composer__toolbar > div:first-child');return{left:l.getBoundingClientRect().toJSON(),editorHeight:c.querySelector('[contenteditable=true]').getBoundingClientRect().height,controls:['.composer-send','.mobile-message-tools__trigger'].map(selector=>{const n=document.querySelector('.mobile-conversation '+selector),s=n.querySelector('svg'),r=n.getBoundingClientRect(),g=s.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2),glyphHit=document.elementFromPoint(g.x+g.width/2,g.y+g.height/2);return{selector,rect:r.toJSON(),glyph:g.toJSON(),hit:hit===n||n.contains(hit),glyphHit:glyphHit===n||n.contains(glyphHit),disabled:n.disabled,visibility:getComputedStyle(s).visibility,opacity:getComputedStyle(s).opacity,hitOwner:hit?.outerHTML.slice(0,180)}})}})()`)
     result.expandedHits.push({width,appearance,painted})
     assert.ok(painted.editorHeight>=200)
-    for(const control of painted.controls){assert.ok(control.hit&&control.glyphHit&&!control.disabled,'Actual expanded control and its visible glyph are hit-testable: '+control.selector);assert.notEqual(control.visibility,'hidden');assert.notEqual(control.opacity,'0');assert.ok(painted.left.right<=control.rect.left+.5)}
+    for(const control of painted.controls){assert.ok(control.hit&&control.glyphHit&&!control.disabled,'Actual expanded control and its visible glyph are hit-testable: '+control.selector);assert.notEqual(control.visibility,'hidden');assert.notEqual(control.opacity,'0');if(control.selector==='.composer-send')assert.ok(painted.left.right<=control.rect.left+.5)}
     await capture(`density-hit-${width}-${appearance}-expanded`)
     await tap('.mobile-conversation .mobile-message-tools__trigger','Actual expanded History')
     await until('!!document.querySelector("[role=dialog] .mobile-message-tools__records")')

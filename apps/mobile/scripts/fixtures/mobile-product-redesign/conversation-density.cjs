@@ -3,10 +3,9 @@ const assert = require('node:assert/strict')
 /** Actual MobileApp/Surface/shared Composer; no fixture CSS or rewritten presentation DOM. */
 module.exports = async ({ win, read, until, resize, tap, button, capture, result }) => {
   await read('mobileProductScene.prepareDensity()')
-  await button('刷新空间目录', '.mobile-spatial-panel')
   await button('Mote', '.mobile-navigation')
-  if (await read('document.querySelector(\'[data-space-id="mote-original"] .mobile-space-row\')?.getAttribute("aria-expanded")!=="true"')) await button('我的 Mote', '.mobile-spatial-panel')
-  await button(await read('mobileProductScene.facts().menuAgentName'), '[data-space-id="mote-original"] .mobile-mote-agents')
+  await button('选择 Mote · 我的 Mote', '.mobile-spatial-panel')
+  await button(await read('mobileProductScene.facts().menuAgentName'), '.mobile-mote-agents')
   await until('!!document.querySelector(".mobile-conversation .composer [contenteditable=true]")')
   const readingIssue = await read('document.querySelector(".mobile-conversation__notice")?.textContent')
   assert.ok(!readingIssue, 'Actual original reading must exist: ' + readingIssue)
@@ -29,7 +28,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     }
     throw Error('Original Composer mode did not reach ' + next)
   }
-  const geometry = () => read(`(()=>{const c=document.querySelector(${JSON.stringify(composer)}),e=c.querySelector('[contenteditable=true]'),l=c.querySelector('.composer__toolbar > div:first-child'),r=n=>n.getBoundingClientRect().toJSON(),s=getComputedStyle(e),h=c.querySelector('.mobile-message-tools__trigger'),range=document.createRange();range.selectNodeContents(e);const text=range.getClientRects()[0];return{width:innerWidth,phase:c.querySelector('.composer-tools').dataset.mode,composer:r(c),editor:r(e),font:s.fontSize,textLeft:text?.left??e.getBoundingClientRect().left+parseFloat(s.paddingLeft),left:r(l),leftClient:l.clientWidth,leftScroll:l.scrollWidth,controls:[...l.querySelectorAll('button')].filter(n=>n.getClientRects().length).map(n=>({label:n.getAttribute('aria-label')||n.title||n.textContent,rect:r(n)})),send:r(c.querySelector('.composer-send')),history:r(h),historyIcon:r(h.querySelector('svg')),historyLabel:r(h.querySelector('span')),sameEditor:e===window.originalCaptureEditor,draft:e.textContent,documentWidth:document.documentElement.scrollWidth}})()`)
+  const geometry = () => read(`(()=>{const c=document.querySelector(${JSON.stringify(composer)}),e=c.querySelector('[contenteditable=true]'),l=c.querySelector('.composer__toolbar > div:first-child'),r=n=>n.getBoundingClientRect().toJSON(),s=getComputedStyle(e),h=document.querySelector('.mobile-conversation__floating-tools .mobile-message-tools__trigger'),range=document.createRange();range.selectNodeContents(e);const text=range.getClientRects()[0];return{width:innerWidth,phase:c.querySelector('.composer-tools').dataset.mode,composer:r(c),editor:r(e),font:s.fontSize,textLeft:text?.left??e.getBoundingClientRect().left+parseFloat(s.paddingLeft),left:r(l),leftClient:l.clientWidth,leftScroll:l.scrollWidth,controls:[...l.querySelectorAll('button')].filter(n=>n.getClientRects().length).map(n=>({label:n.getAttribute('aria-label')||n.title||n.textContent,rect:r(n)})),send:r(c.querySelector('.composer-send')),history:r(h),historyIcon:r(h.querySelector('svg')),sameEditor:e===window.originalCaptureEditor,draft:e.textContent,documentWidth:document.documentElement.scrollWidth}})()`)
   const center = r => r.y + r.height / 2
   function check(g) {
     assert.equal(g.font, '16px', 'Original mobile editing type remains16px')
@@ -40,13 +39,13 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
       assert.ok(rect.width >= 44 && rect.height >= 44, 'Original tool keeps44px target: ' + label)
       assert.ok(Math.abs(center(rect) - center(g.send)) <= 1, 'All original tools share one control row: ' + label)
     }
-    assert.ok(g.left.right <= Math.min(g.send.left, g.history.left) + 0.5, 'Scrollable tool strip must not overlap the fixed Send or History targets')
+    assert.ok(g.left.right <= g.send.left + 0.5, 'Scrollable tool strip must not overlap fixed Send')
     for (const rect of [g.send, g.history]) {
       assert.ok(rect.width >= 44 && rect.height >= 44)
-      assert.ok(rect.left >= g.composer.left && rect.right <= g.composer.right + 0.5, 'Send and History stay in the actual Composer')
+      assert.ok(rect.left >= 0 && rect.right <= g.width, 'Send and floating History stay inside the viewport')
     }
-    assert.ok(Math.abs(center(g.history) - center(g.send)) <= 1)
-    assert.ok(g.historyLabel.height <= 12 && Math.abs(center(g.historyIcon) - center(g.historyLabel)) <= 1, 'History icon and explicit label stay inline')
+    assert.ok(g.history.bottom <= g.composer.top, 'Floating History stays above the original Composer')
+    assert.ok(Math.abs(center(g.historyIcon) - center(g.history)) <= 1, 'History glyph stays centered in its complete touch target')
     if (g.phase !== 'expanded' && !g.draft.includes('\n')) assert.ok(g.composer.height <= 78, 'Default short Composer removes unused padding rather than edit text')
     if (g.phase === 'expanded') assert.ok(g.editor.height >= 200, 'Explicit expanded editor retains its original large editing height')
   }
@@ -66,12 +65,11 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
       assert.ok(g.controls.some(c => c.label === 'Interrupt the current turn') || !text, 'A working Agent with a draft keeps its original Interrupt action')
       assert.ok(await read(`!!document.querySelector(${JSON.stringify(composer)}+' .mobile-posture-picker')`), 'Actual Provider posture control participates in the same row')
       if (phase === 'current') {
-        assert.ok(g.leftScroll > g.leftClient, 'Real expanded tool content exceeds the bounded left strip')
         await read(`[...document.querySelectorAll(${JSON.stringify(composer)}+' .composer__toolbar > div:first-child button')].at(-1).focus()`)
         await settle()
         const reachable = await read(`(()=>{const l=document.querySelector(${JSON.stringify(composer)}+' .composer__toolbar > div:first-child'),n=document.activeElement,a=l.getBoundingClientRect(),b=n.getBoundingClientRect();return{scroll:l.scrollLeft,target:n.getAttribute('aria-label'),inside:b.left>=a.left-1&&b.right<=a.right+1}})()`)
         result.operations.push({ action: 'density-last-tool-reachable', width, appearance, ...reachable })
-        assert.ok(reachable.scroll > 0 && reachable.inside, 'Last real tool is keyboard-reachable in the original scroll strip')
+        assert.ok(reachable.inside && (g.leftScroll <= g.leftClient || reachable.scroll > 0), 'Last real tool is keyboard-reachable, scrolling only when the original strip overflows')
         await read(`document.querySelector(${JSON.stringify(composer)}+' .composer__toolbar > div:first-child').scrollLeft=0`)
       }
       if (phase === 'collapsed' && text || phase === 'expanded') await capture(`density-${width}-${appearance}-${phase}`)

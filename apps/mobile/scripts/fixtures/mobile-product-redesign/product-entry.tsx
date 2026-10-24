@@ -8,6 +8,7 @@ import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentMuxClientE
 import { conversationRevision, projectConversationTimeline, type AgentConversationReadPage } from '@agentmux/core/conversation'
 import { normalizeSessionHistoryPage } from '../../../../../packages/core/src/session-history'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/core/mote-preferences'
 import { MobileApp } from '../../../src/MobileApp'
 import { createBrowserPlatform } from '../../../src/platform/browser'
 import { getDeviceWorkface } from '../../../src/recovery/device-workface'
@@ -33,7 +34,7 @@ const knowledge = { topicId: topic.topicId, entryId: '11111111-1111-4111-8111-11
 // Same SID occurs first outside the Mote and then at its intended original Mote location.
 const catalog = {
   spaces: [{ spaceId: 'other-space', kind: 'folder', name: '并行项目', hostId: 'host-original', directoryPath: fixturePath("other"), projectId: null },
-    { spaceId: 'mote-original', kind: 'mote', name: '我的 Mote', hostId: 'host-original', directoryPath: fixturePath("mote-original"), projectId: null }],
+    { spaceId: 'mote-original', kind: 'mote', topicId: PMO_TEAMS_TOPIC_ID, name: '我的 Mote', hostId: 'host-original', directoryPath: fixturePath("mote-original"), projectId: null }],
   zones: [{ zoneId: 'zone-other', workspaceId: 'workspace-original', kind: 'directory', hostId: 'host-original', directoryPath: fixturePath("other"), branch: null },
     { zoneId: 'zone-mote', workspaceId: 'workspace-original', kind: 'directory', hostId: 'host-original', directoryPath: fixturePath("mote-original"), branch: null }],
   tabs: [{ tabId: 'tab-other', zoneId: 'zone-other', workspaceId: 'workspace-original', name: '另一个展示', regionIds: ['region-other'] },

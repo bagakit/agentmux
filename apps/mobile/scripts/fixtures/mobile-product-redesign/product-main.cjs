@@ -58,26 +58,33 @@ app.whenReady().then(async () => {
   const gap = description => { if (!baseline) throw Error(description); result.gaps.push(description) }
   const openMote = async () => {
     await button('Mote', '.mobile-navigation')
-    await until('!![...document.querySelectorAll(".mobile-spatial-panel button")].find(n=>n.textContent.includes("我的 Mote"))')
-    if (await read('document.querySelector(\'[data-space-id="mote-original"] .mobile-space-row\')?.getAttribute("aria-expanded") !== "true"')) {
-      await button('我的 Mote', '.mobile-spatial-panel')
-    }
-    if (!await visible('.mobile-conversation-panel')) {
-      // Folder disclosure is not Session navigation. Enter the original Tab explicitly.
-      await button('日常协作', '.mobile-spatial-panel')
-    }
+    await button('选择 Mote · 我的 Mote', '.mobile-spatial-panel')
+    await button('日常协作', '.mobile-mote-agents')
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
   }
+  if (mode === 'chat-start') {
+    await require('./chat-start.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase })
+    result.passed = true; return
+  }
+  if (mode === 'conversation-controls') {
+    await require('./conversation-controls.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
   if (mode === 'mote-home') {
+    await button('Mote', '.mobile-navigation')
+    await until('document.querySelectorAll(".mobile-mote-choice").length===2')
     assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.ensureAgentContinuity"||call.method==="agent.open").length'),0)
-    assert.equal(await read('document.querySelectorAll(".mobile-mote-quick-open").length'),2)
-    await capture('mote-home-collapsed-phone')
-    await button('我的 Mote', '.mobile-spatial-panel')
+    assert.equal(await read('document.querySelectorAll(".mobile-mote-quick-open").length'),1)
+    await capture('mote-home-selected-phone')
+    await button('选择 Mote · 我的 Mote', '.mobile-spatial-panel')
     await until('document.querySelectorAll(".mobile-mote-agents .mobile-agent-row__open").length===2')
     assert.equal(await read('document.querySelectorAll(".mobile-spatial-tab").length'),0)
-    await button('资料协作', '.mobile-spatial-panel')
+    await button('选择 Mote · 资料协作', '.mobile-spatial-panel')
     assert.equal(await read('document.querySelectorAll(".mobile-spatial-tab").length'),0)
+    assert.equal(await read('document.querySelectorAll(".mobile-mote-selected").length'),1)
+    assert.equal(await read('document.querySelector(".mobile-mote-selected").dataset.spaceId'),'mote-resources')
+    assert.equal(await read('!!document.querySelector(".mobile-mote-selected > header .mobile-mote-profile-action")'),true)
     for (const [width,height,label] of [[390,844,'phone'],[320,760,'narrow'],[840,900,'wide']]) {
       await resize(width,height); await capture('mote-home-expanded-'+label)
       const actions = await read('Array.from(document.querySelectorAll(".mobile-mote-quick-open")).map(node=>node.getBoundingClientRect().toJSON())')
@@ -87,6 +94,7 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".mobile-mote-profile")'); await capture('mote-home-profile-phone')
     assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.ensureAgentContinuity"||call.method==="agent.open").length'),0)
     await button('关闭面板', '[role=dialog]')
+    await button('选择 Mote · 我的 Mote', '.mobile-spatial-panel')
     await button('继续主对话 · 我的 Mote', '.mobile-spatial-panel')
     await until('mobileProductScene.facts().calls.some(call=>call.method==="sdk.ensureAgentContinuity")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'),'session-mote')
@@ -107,7 +115,7 @@ app.whenReady().then(async () => {
     }
     await read('mobileProductScene.unconfirmMoteBindings()')
     await button('Mote', '.mobile-navigation'); await button('刷新空间目录', '.mobile-spatial-panel')
-    await button('我的 Mote', '.mobile-spatial-panel')
+    await button('选择 Mote · 我的 Mote', '.mobile-spatial-panel')
     await until('!!document.querySelector(".mobile-directory-notice")&&document.querySelector(\'[data-space-id="mote-original"] .mobile-mote-contents\')?.textContent.includes("原 Agent 绑定尚未确认")')
     assert.equal(await read('document.querySelector(\'[data-space-id="mote-original"] .mobile-mote-contents\').textContent.includes("尚无已绑定 Agent")'),false)
     await capture('mote-binding-unknown-narrow')
@@ -141,6 +149,8 @@ app.whenReady().then(async () => {
     assert.deepEqual(facts.record.agentCreates, saved.agentCreates)
     result.recoveryRestored = facts.record; result.passed = true; return
   }
+  // Legacy directory probes enter their own source explicitly; startup now opens chat.
+  await button('Space', '.mobile-navigation')
   await until('!!document.querySelector(".mobile-spatial-panel .mobile-session-list button")')
   result.palette = await read(`(()=>{const s=getComputedStyle(document.documentElement);return Object.fromEntries(['--surface-0','--surface-1','--green','--amber','--red','--fs-body'].map(k=>[k,s.getPropertyValue(k).trim()]))})()`)
   if (!baseline) {
@@ -451,7 +461,7 @@ app.whenReady().then(async () => {
   }
   if (mode === 'input-history') {
     const before = await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.submitAgentPrompt").length')
-    assert.ok(await read('document.querySelector(".mobile-message-tools__trigger").innerText.includes("历史")'))
+    assert.ok(await read('document.querySelector(".mobile-message-tools__trigger").getAttribute("aria-label").includes("输入历史")'))
     await capture('input-history-entry-phone')
     await tap('.mobile-conversation-panel .mobile-message-tools__trigger', 'Current Agent input history')
     await until('document.querySelector(".input-history__records")?.textContent.includes("Message Tool")')
@@ -501,10 +511,10 @@ app.whenReady().then(async () => {
     await back(); await until('!document.querySelector("[role=dialog]")')
     assert.equal(await read('document.querySelector("[contenteditable=true]")===window.originalCaptureEditor'), true)
     await capture('navigation-back-conversation-narrow')
-    await button('当前对话操作'); await button('目标与结果')
+    await button('目标与结果', '.mobile-conversation__floating-tools')
     await until('!!document.querySelector(".mobile-goal-panel:not([hidden])")')
     await back(); await until('!!document.querySelector(".mobile-conversation-panel:not([hidden])")')
-    await button('当前对话操作'); await button('查看终端')
+    await button('查看终端', '.mobile-header')
     await until('!!document.querySelector(".mobile-terminal-panel:not([hidden])")')
     await back(); await until('!!document.querySelector(".mobile-conversation-panel:not([hidden])")')
     await tap('.mobile-mote-heading', 'Profile before reload'); await button('合作方式 · BEHAVIOR.md')
@@ -604,7 +614,6 @@ app.whenReady().then(async () => {
     assert.equal(await read('document.querySelector("[contenteditable=true]")===window.originalCaptureEditor'), true)
   } else gap('Mote main-conversation entry lost its original Mote context; avatar/Profile unavailable.')
   await resize(390, 844)
-  if (!await hasButton('目标与结果') && await hasButton('当前对话操作')) await button('当前对话操作')
   if (await hasButton('目标与结果')) {
     await button('目标与结果')
     await until('!!document.querySelector(".mobile-goal-panel:not([hidden]) .mobile-goal-list button")')
