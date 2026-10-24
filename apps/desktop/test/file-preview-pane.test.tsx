@@ -214,6 +214,46 @@ it.each(['report.html', 'report.HTM'])('previews the current %s draft in its ori
   expect(container.querySelector('iframe')).toBeNull(); expect(release).toHaveBeenCalledTimes(2)
 })
 
+it('[icon-role] current-draft preview themes independently from Reveal and keeps the original FileRegion', async () => {
+  const { GRAPHITE_THEME, mountThemeRuntime, previewTheme } = await import('@agentmux/client-ui/theme')
+  const { semanticIconHref } = await import('@agentmux/client-ui/icons')
+  const releaseTheme = mountThemeRuntime(window)
+  try {
+    const { file, id, key } = seed('role-preview.html', '<h1>Saved original</h1>')
+    const open = vi.spyOn(api.files, 'openHtmlPreview').mockResolvedValue({ id: 'role-preview', url: 'about:blank#role-preview' })
+    vi.spyOn(api.files, 'releaseHtmlPreview').mockResolvedValue(undefined)
+    const write = vi.spyOn(api.files, 'write'), browser = vi.spyOn(useAppStore.getState(), 'createBrowser')
+    await render(<FileSurfaceView tabId={id} surface={file} />)
+    const content = '<h1>Original unsaved role preview</h1>'
+    await act(async () => useAppStore.getState().updateDocument(id, content, file.regionId))
+    const button = container.querySelector<HTMLButtonElement>('[aria-label="Preview current content"]')!
+    const href = semanticIconHref('action.preview'), symbol = () => document.getElementById(href.slice(1))!
+    expect(button, 'actual FileSurfaceView → EditorPane preview control').not.toBeNull()
+    expect(button.querySelector('use')?.getAttribute('href')).toBe(href)
+    expect(button.querySelector('[data-icon-animation]')).toBeNull()
+    const original = symbol().innerHTML, before = useAppStore.getState(), originalDocument = before.documents[key]
+    const custom = structuredClone(GRAPHITE_THEME); custom.id = 'custom.file-preview-role'; custom.name = 'Current draft preview role'
+    custom.icons = { 'action.reveal': { kind: 'glyph', glyph: 'gem' } }
+    await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+    expect(symbol().innerHTML).toBe(original)
+    custom.icons = { 'action.preview': { kind: 'glyph', glyph: 'gem' } }
+    await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+    expect(symbol().innerHTML).not.toBe(original)
+    custom.icons = { 'action.preview': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] } }
+    await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+    expect(symbol().querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
+    await click('Preview current content')
+    expect(open).toHaveBeenCalledExactlyOnceWith('workspace', file.path, content)
+    expect(container.querySelector('iframe')).not.toBeNull(); expect(write).not.toHaveBeenCalled(); expect(browser).not.toHaveBeenCalled()
+    expect(useAppStore.getState().documents[key]).toBe(originalDocument)
+    expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+    await click('Show source'); expect(container.querySelector('textarea')?.value).toBe(content)
+    expect(container.querySelector('[aria-label="Preview current content"] use')?.getAttribute('href')).toBe(href)
+    await act(async () => { expect(previewTheme(GRAPHITE_THEME).applied).toBe(true) })
+    expect(symbol().innerHTML).toBe(original); expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+  } finally { releaseTheme() }
+})
+
 it('keeps HTML source available after preview failure and retries the current buffer', async () => {
   const { file, id, key } = seed('report.html', '<h1>Recoverable original</h1>')
   const open = vi.spyOn(api.files, 'openHtmlPreview').mockRejectedValueOnce(new Error("Error invoking remote method 'files:openHtmlPreview': Error: Preview listener unavailable"))

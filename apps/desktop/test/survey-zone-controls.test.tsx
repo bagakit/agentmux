@@ -55,6 +55,37 @@ async function close() {
   expect(menu()).toBeNull()
 }
 
+it('[icon-role] Survey new-note controls theme creation independently and keep their original callbacks', async () => {
+  const { GRAPHITE_THEME, mountThemeRuntime, previewTheme } = await import('@agentmux/client-ui/theme')
+  const { semanticIconHref } = await import('@agentmux/client-ui/icons')
+  const release = mountThemeRuntime(window), create = vi.fn(), createFromMenu = vi.fn()
+  const href = semanticIconHref('action.create-note'), symbol = () => document.getElementById(href.slice(1))!
+  try {
+    await act(async () => root.render(<SurveyZoneItem zone={zone} title="Original exploration" glyph={null} selected activity={null} onSelect={vi.fn()} onNewNote={create} />))
+    const button = container.querySelector<HTMLButtonElement>('[aria-label="New note in Recall from Original exploration"]')!
+    expect(button, 'actual Survey shortcut').not.toBeNull()
+    expect(button.querySelector('use')?.getAttribute('href')).toBe(href)
+    expect(button.querySelector('[data-icon-animation]')).toBeNull()
+    const original = symbol().innerHTML
+    const edit = document.getElementById(semanticIconHref('action.edit-note').slice(1))!.innerHTML
+    const custom = structuredClone(GRAPHITE_THEME); custom.id = 'custom.survey-note-role'; custom.name = 'Survey creation role'
+    custom.icons = { 'action.create-note': { kind: 'glyph', glyph: 'gem' } }
+    await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+    expect(symbol().innerHTML).not.toBe(original)
+    expect(document.getElementById(semanticIconHref('action.edit-note').slice(1))!.innerHTML).toBe(edit)
+    await act(async () => button.click()); expect(create).toHaveBeenCalledExactlyOnceWith(zone.zoneId)
+    await mount({ onNewNote: createFromMenu }); await open()
+    const item = action('New Note')
+    expect(item.querySelector('use')?.getAttribute('href')).toBe(href)
+    custom.icons = { 'action.create-note': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] } }
+    await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+    expect(symbol().querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
+    await act(async () => item.click()); expect(createFromMenu).toHaveBeenCalledExactlyOnceWith()
+    await act(async () => { expect(previewTheme(GRAPHITE_THEME).applied).toBe(true) })
+    expect(symbol().innerHTML).toBe(original)
+  } finally { release() }
+})
+
 it('offers explicit research and current-panel capture without changing location bindings or navigating', async () => {
   const props = await mount({ relatedSpaces: [topicA, topicB, mote] }); await open()
   expect(document.querySelector('[data-survey-topic-id]')).toBeNull()
