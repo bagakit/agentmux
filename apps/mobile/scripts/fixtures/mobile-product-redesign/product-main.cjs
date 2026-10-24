@@ -148,6 +148,18 @@ app.whenReady().then(async () => {
     assert.equal(result.palette['--green'], '#8de3ae', 'Original MobileApp consumes the shared Mint action color')
     assert.equal(result.palette['--fs-body'], '13px', 'Mobile typography remains client-owned')
   }
+  if (mode === 'conversation-attachments') {
+    await require('./conversation-attachments.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
+    result.passed = true; return
+  }
+  if (mode === 'conversation-density-hit') {
+    await require('./conversation-density-hit.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
+  if (mode === 'conversation-density') {
+    await require('./conversation-density.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
   if (mode === 'agent-menu' || mode === 'agent-menu-notice') {
     await win.webContents.debugger.sendCommand('Emulation.setCPUThrottlingRate', { rate: 4 })
     result.environment.cpuThrottlingRate = 4

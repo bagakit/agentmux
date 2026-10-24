@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRpcResult, AgentMuxRpcGoal, AgentSessionHistoryReadInput, AgentSessionUserMessage } from '@agentmux/core'
 import { conversationRevision, projectConversationTimeline, type AgentConversationReadPage } from '@agentmux/core/conversation'
+import { normalizeSessionHistoryPage } from '../../../../../packages/core/src/session-history'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { MobileApp } from '../../../src/MobileApp'
 import { createBrowserPlatform } from '../../../src/platform/browser'
@@ -81,7 +82,7 @@ const goal: AgentMuxRpcGoal = { id: 'goal-original', title: '把两个想法变�
     checks: [{ criterionId: 'criterion-original', outcome: 'met', note: '已整理步骤、比较依据与需要你决定的地方。', evidence: ['原资料/实验建议.md'] }] } }
 let connected = location.hash !== '#fixture-offline', unknownNext = false, promptReadFails = false, appearanceRevision = 0
 let directoryComparisons = 0, inspectFails = false
-let agentMenuScene = false, copyFails = false
+let agentMenuScene = false, densityScene = false, copyFails = false
 const copiedTexts: string[] = []
 const menuAgentName = '讨论布局与原始资料核对的协作 Agent'
 let inspectRelease: (() => void) | null = null, inspectWait: Promise<void> | null = null
@@ -98,17 +99,30 @@ const client = {
   catalog: () => { record('sdk.catalog'); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
   onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); record('sdk.onEvent'); return () => { listeners.delete(listener); record('sdk.releaseEvent') } },
   runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', availability: connected ? 'connected' : 'disconnected' }),
+  statusAgent: async (id: string) => {
+    if (!densityScene) throw Error('Run status is not observed by this metadata fixture')
+    record('sdk.statusAgent', { id })
+    const session = sessions.find(value => value.agentSessionId === id)
+    if (!session) throw Error('Unknown original fixture Session')
+    return { session, run: { ...session.run, state: 'running' }, observation: { process: 'running', semantic: 'active', readiness: 'ready', source: 'native-hook', observedAt: Date.now(), stale: false } }
+  },
   ensureAgentContinuity: async (input: { agentSessionId: string; expectedRun: { runId: string }; operationId: string; trigger: string }) => {
     record('sdk.ensureAgentContinuity', input)
     return { kind: 'reattachable', agentSessionId: input.agentSessionId, previousRun: input.expectedRun }
   },
-  sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); return { agentSessionId: id, source: { providerId: 'codex', nativeSessionId: `native-${id}${agentMenuScene ? '-original-source-reference'.repeat(6) : ''}` }, nextCursor: null,
+  sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); return { agentSessionId: id, source: { providerId: densityScene ? main.providerId : 'codex', nativeSessionId: `native-${id}${agentMenuScene ? '-original-source-reference'.repeat(6) : ''}` }, nextCursor: null,
     items: [...(agentMenuScene && id === main.agentSessionId ? [
       { id: `${id}-user-short`, kind: 'user-message' as const, startedAt: _tailRefreshFixtureEpoch(0, 1), contentParts: [{ kind: 'text' as const, text: '可以，继续。' }] }
     ] : []), { id: `${id}-user-original`, kind: 'user-message', ...(agentMenuScene ? { startedAt: _tailRefreshFixtureEpoch(0, 2) } : {}), contentParts: [{ kind: 'text', text: agentMenuScene
       ? '这两个想法，先从哪一个做成小实验比较好？请保留原来的依据。手机里的消息头应该紧凑对齐，长内容完整可读，复制和详情都能直接操作。'
       : '这两个想法，先从哪一个做成小实验比较好？请保留原来的依据。' }] },
-      { id: `${id}-answer-original`, kind: 'assistant-message', ...(agentMenuScene ? { startedAt: _tailRefreshFixtureEpoch(0, 3) } : {}), contentParts: [{ kind: 'text', text: id === result.agentSessionId ? '我建议先试方案 A。它的范围更清晰，一天就能取得第一批反馈。\n\n1. 保留现有资料和两种方案。\n2. 选三个最关键的问题。\n3. 先观察真实反馈，再决定是否继续。\n\n方案 B 仍有价值，原依据已经保留。' : ordinaryReply }] },
+      { id: `${id}-answer-original`, kind: 'assistant-message', ...(densityScene ? { messagePhase: 'final' as const } : {}), ...(agentMenuScene ? { startedAt: _tailRefreshFixtureEpoch(0, 3) } : {}), contentParts: [{ kind: 'text', text: id === result.agentSessionId ? '我建议先试方案 A。它的范围更清晰，一天就能取得第一批反馈。\n\n1. 保留现有资料和两种方案。\n2. 选三个最关键的问题。\n3. 先观察真实反馈，再决定是否继续。\n\n方案 B 仍有价值，原依据已经保留。' : ordinaryReply }] },
+      ...(densityScene && id === main.agentSessionId ? [
+        { id: `${id}-progress`, kind: 'assistant-message' as const, messagePhase: 'progress' as const, startedAt: _tailRefreshFixtureEpoch(0, 4), contentParts: [{ kind: 'text' as const, text: '正在核对原材料与工具布局，完整进度保留。' }] },
+        { id: `${id}-report`, kind: 'activity' as const, startedAt: _tailRefreshFixtureEpoch(0, 5), collaboration: { kind: 'message' as const,
+          source: { providerId: main.providerId, nativeSessionId: 'native-' + id + '-original-source-reference'.repeat(6) }, sender: '/root/review/layout', recipient: '/root' },
+          contentParts: [{ kind: 'text' as const, text: 'Native envelope\n\n**检查完成**，原生回报与完整来源保留。', readingRange: { start: 17, end: 'Native envelope\n\n**检查完成**，原生回报与完整来源保留。'.length }, contentEligibility: 'public' as const }] }
+      ] : []),
       ...(submittedBySession.get(id) ?? []).map(item => ({ id: item.id, kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: item.text }] }))] } },
   readAgentInputMailbox: async (input: { agentSessionId: string; maxBytes?: number }) => ({
     agentSessionId: input.agentSessionId, queueId: 'controlled-original-journal',
@@ -138,7 +152,8 @@ const client = {
   observeSessionHistory: async (id: string) => { record('sdk.observeSessionHistory', { id }); return { source: { providerId: 'codex', nativeSessionId: `native-${id}` }, dispose() { record('sdk.releaseHistory', { id }) } } },
   readAgentConversation: async (input: Parameters<AgentMuxHostedClient['readAgentConversation']>[0]) => {
     const sourceHostId = sessions.find(session => session.agentSessionId === input.agentSessionId)?.hostId ?? 'host-original'
-    const historyPage = await client.sessionHistoryPage(input.agentSessionId)
+    const rawHistory = await client.sessionHistoryPage(input.agentSessionId)
+    const historyPage = densityScene ? { ...rawHistory, ...normalizeSessionHistoryPage(rawHistory.source, rawHistory, 100) } : rawHistory
     const captured = await client.sessionTimeline(input.agentSessionId)
     const timeline = projectConversationTimeline({ agentSessionId: input.agentSessionId, executionHostId: sourceHostId,
       historyPage: { ...historyPage, sourceHostId }, timeline: { ...captured, sourceHostId,
@@ -250,8 +265,26 @@ const platform = { ...browserPlatform, copyText: async (text: string, reportErro
 } }
 function Scene() {
   const [, refresh] = useState(0)
+  const [densityMount, remountDensity] = useState(0)
   Object.assign(window, { mobileProductScene: {
     prepareAgentMenu: () => { agentMenuScene = true; catalog.agentPresentation![0]!.name = menuAgentName },
+    prepareDensity: () => {
+      densityScene = true; agentMenuScene = true
+      const provider = __AGENTMUX_MOBILE_PROVIDER_CATALOG__.find(value => value.postureControl)
+      if (!provider) throw Error('Original Provider catalog with posture control is required')
+      main.providerId = provider.id
+      main.semanticStatus = { state: 'working', source: 'native-hook', observedAt: Date.now() }
+      catalog.agentPresentation![0]!.name = menuAgentName
+      catalog.agentPresentation![0]!.providerId = provider.id
+    },
+    seedDensityRetainedUpload: async () => {
+      const upload = { runtimeId: 'runtime-original', identity: { hostId: main.hostId, agentSessionId: main.agentSessionId,
+        expectedRun: main.run, operationId: 'original-unknown-density-upload', name: '原资料截图.png', mimeType: 'image/png', byteLength: 128, revision: 'sha256:' + 'a'.repeat(64) },
+        phase: 'unknown' as const, issue: '原上传回执未确认，原文件与正文保留。\n原 Host 是否保存尚未确认；请核对同一操作，不会自动重传。[UPLOAD_RESULT_UNKNOWN]' }
+      await getDeviceWorkface().retainFileUpload(upload)
+      remountDensity(value => value + 1)
+      return upload
+    },
     setCopyFailure: (value: boolean) => { copyFails = value },
     seedMenuDirectory: (count: number) => {
       main.turnUsage = { inputTokens: 12500, outputTokens: 4200, totalTokens: 16700, observedAt: 1, scope: 'response',
@@ -310,6 +343,6 @@ function Scene() {
       menuAgentName, expectedReply: ordinaryReply, copiedTexts, controlledCopy: agentMenuScene, controlledSdk: true, physicalPhone: false,
       intendedOccurrence: catalog.locations.find(location => location.regionId === 'region-mote'), sessionIds: sessions.map(session => ({ sessionId: session.agentSessionId, runId: session.run.runId })) })
   } })
-  return <MobileApp client={client} connection={connected ? { state: 'connected', message: '已连接原 Host' } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} />
+  return <MobileApp key={densityMount} client={client} connection={connected ? { state: 'connected', message: '已连接原 Host' } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} />
 }
 createRoot(document.getElementById('root')!).render(<Scene />)
