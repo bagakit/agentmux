@@ -26,8 +26,6 @@
 .focus-filter-menu__count { flex: none; font-size: var(--fs-micro); color: var(--text-3); font-variant-numeric: tabular-nums; }
 .focus-filter-menu__check { flex: 0 0 13px; min-height: 16px; }
 .focus-filter-menu__scope { padding: 4px 8px; white-space: normal; font-size: var(--fs-micro); color: var(--text-3); }
-.focus-filter-menu__actions { display: flex; gap: 2px; }
-.focus-filter-menu__actions > * { flex: 1; }
 .focus-filter-chips { display: flex; flex: 0 1 auto; min-width: 0; gap: 4px; }
 .focus-filter-chip { display: inline-flex; min-width: 0; max-width: 112px; height: 28px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
 .focus-filter-chip__value { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 0 5px; border: 0; background: transparent; font: inherit; font-size: var(--fs-micro); color: var(--text-3); cursor: pointer; }
