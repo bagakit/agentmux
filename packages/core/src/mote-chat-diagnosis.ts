@@ -8,6 +8,10 @@ import { parseConnectionObservation } from './connection-record-codec.js'
 import type { ConnectionObservation } from './connections-contract.js'
 import { AgentMuxError } from './errors.js'
 import type { MoteChatTarget } from './mote-chat-contract.js'
+import type { ConnectionDelivery, ConnectionDeliveryCoverage, ConnectionDeliveryObservation, ConnectionDeliveryReceiptReason } from './connection-delivery-contract.js'
+import type { ConnectionDeliverySourceObservation } from './connection-diagnosis-source.js'
+import { CONNECTION_DELIVERY_GAP_REASONS, CONNECTION_DELIVERY_RECEIPT_REASONS, CONNECTION_DELIVERY_STATES,
+  parseConnectionDeliveryObservation, parseConnectionDeliverySourceObservation } from './connection-delivery-codec.js'
 import type { ConnectionIngressRuntimeObservation } from './ingress-contract.js'
 import { parseMoteConnectionValues, parseMotePreferencesTarget, type MoteConnectionRef } from './mote-preferences.js'
 import { rpcRecord } from './rpc-data.js'
@@ -72,6 +76,22 @@ export function moteChatPreparationReason(receipt: AgentInputSubmissionReceipt):
     observed.operationId === agentPromptInputId(receipt.key) ? observed.reason : null
 }
 export const moteChatDiagnosisIssues = ['configuration-unavailable', 'target-changed', 'service-unavailable', 'connection-unavailable', 'intake-unavailable'] as const
+/** One generation's publication window, never a causal reply to an individual intake. */
+export type MoteChatDiagnosisPublication = {
+  generationKey: string
+  intakeKeys: string[]
+  reading: 'not-started' | 'unavailable' | 'observed'
+  observation: ConnectionDeliveryObservation | null
+  sourceObservation: ConnectionDeliverySourceObservation | null
+  effectObservation: ConnectionDeliveryObservation | null
+  coverage: { state: ConnectionDeliveryCoverage['state']; gaps: Array<{
+    reason: ConnectionDeliveryCoverage['gaps'][number]['reason']; code: typeof connectionDiagnosisSourceCodes[number] | null; codeRecorded: boolean
+  }>; more: boolean; originCount: number } | null
+  effects: Array<{ kind: 'conversation' | 'interaction' | 'binding-notice' | 'query-feedback'; effect: ConnectionDelivery['effect']; state: ConnectionDelivery['state'];
+    receipt: { state: 'confirmed' | 'unknown' | 'not-applied'; reason: ConnectionDeliveryReceiptReason | null } | null;
+    resourceUpload: NonNullable<ConnectionDelivery['resourceUpload']>['state'] | null }> | null
+  more: boolean
+}
 export type MoteChatDiagnosis = {
   /** Diagnostic equality, never a selector, capability or a private path. */
   targetKey: string
@@ -82,14 +102,21 @@ export type MoteChatDiagnosis = {
   adapterService: { enabled: boolean; revision: number } | null
   connection: ({ enabled: boolean; revision: number } & ConnectionObservation) | null
   incoming: { rows: MoteChatDiagnosisIntake[]; more: boolean } | null
+  publications: MoteChatDiagnosisPublication[]
   issues: Array<typeof moteChatDiagnosisIssues[number]>
 }
 /** Hash only the exact parsed input. Neither fingerprint grants history, retry or management authority. */
 export function moteChatDiagnosisKey(target: MoteChatTarget, ingressId?: string): string {
+  return diagnosisKey(target, ingressId === undefined ? 'target' : 'intake', ingressId)
+}
+export function moteChatDiagnosisGenerationKey(target: MoteChatTarget, generationId: string): string {
+  return diagnosisKey(target, 'generation', generationId)
+}
+function diagnosisKey(target: MoteChatTarget, kind: 'target' | 'intake' | 'generation', id?: string): string {
   const original = parseMotePreferencesTarget(target)
-  if (ingressId !== undefined && (typeof ingressId !== 'string' || !ingressId.trim() || /[\u0000-\u001f\u007f]/u.test(ingressId)))
+  if (id !== undefined && (typeof id !== 'string' || !id.trim() || /[\u0000-\u001f\u007f]/u.test(id)))
     throw new AgentMuxError('A diagnostic intake key requires its original identity.', 'INVALID_CONTROL_REQUEST')
-  const encoded = JSON.stringify(['mote-chat-diagnosis-v1', ingressId === undefined ? ['target', original] : ['intake', original, ingressId]],
+  const encoded = JSON.stringify(['mote-chat-diagnosis-v1', id === undefined ? [kind, original] : [kind, original, id]],
     (_key, item: unknown) => item && typeof item === 'object' && !Array.isArray(item)
       ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item)
   return Array.from(sha256(new TextEncoder().encode(encoded)), byte => byte.toString(16).padStart(2, '0')).join('')
@@ -115,7 +142,7 @@ function array<T>(value: unknown, parse: (value: unknown) => T, limit: number): 
   })
 }
 export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosisInput): MoteChatDiagnosis {
-  const p = fields(value, ['targetKey', 'limit', 'configuration', 'readiness', 'service', 'adapterService', 'connection', 'incoming', 'issues'])
+  const p = fields(value, ['targetKey', 'limit', 'configuration', 'readiness', 'service', 'adapterService', 'connection', 'incoming', 'publications', 'issues'])
   const targetKey = key(p.targetKey)
   if (p.limit !== moteChatDiagnosisWindowLimit || input && targetKey !== moteChatDiagnosisKey(input.target)) fail()
   const configuration = nullable(p.configuration, value => {
@@ -155,7 +182,7 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
         if (r.exitCode !== null && (!Number.isSafeInteger(r.exitCode) || state !== 'exited')) fail()
         return { target, state, exitCode: r.exitCode as number | null }
       })
-      if (runtime !== null && status !== 'waiting') fail()
+      if (runtime !== null && status !== 'waiting' && status !== 'terminal-confirmed' && status !== 'admitted') fail()
       let waiting: ConnectionDiagnosisIntake['waiting']
       try { waiting = parseConnectionDiagnosisWaiting(i.waiting) } catch { return fail() }
       if (code !== null && !codeRecorded || status !== null && (observation !== 'observed' || preparation === 'other-route')) fail()
@@ -175,6 +202,40 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
   })
   const issues = array(p.issues, value => member(value, moteChatDiagnosisIssues), moteChatDiagnosisIssues.length)
   if (new Set(issues).size !== issues.length) fail()
+  const eligible = new Set(incoming?.rows.filter(row => row.preparation !== 'other-route').map(row => row.key)), associated = new Set<string>()
+  const publications = array(p.publications, value => {
+    const v = fields(value, ['generationKey', 'intakeKeys', 'reading', 'observation', 'sourceObservation', 'effectObservation', 'coverage', 'effects', 'more'])
+    const intakeKeys = array(v.intakeKeys, key, moteChatDiagnosisWindowLimit)
+    if (!intakeKeys.length || intakeKeys.some(k => !eligible.has(k) || associated.has(k))) fail()
+    for (const k of intakeKeys) { if (associated.has(k)) fail(); associated.add(k) }
+    const reading = member(v.reading, ['not-started', 'unavailable', 'observed'] as const), more = bool(v.more)
+    const effects = nullable(v.effects, value => array(value, value => {
+      const e = fields(value, ['kind', 'effect', 'state', 'receipt', 'resourceUpload'])
+      const receipt = nullable(e.receipt, value => {
+        const r = fields(value, ['state', 'reason']), state = member(r.state, ['confirmed', 'unknown', 'not-applied'] as const)
+        const reason = nullable(r.reason, value => member(value, CONNECTION_DELIVERY_RECEIPT_REASONS))
+        if ((state === 'confirmed') !== (reason === null)) fail()
+        return { state, reason }
+      })
+      return { kind: member(e.kind, ['conversation', 'interaction', 'binding-notice', 'query-feedback'] as const), effect: member(e.effect, ['upsert', 'withdraw'] as const),
+        state: member(e.state, CONNECTION_DELIVERY_STATES), receipt, resourceUpload: nullable(e.resourceUpload, value => member(value, ['pending', 'dispatching', 'unknown', 'confirmed'] as const)) }
+    }, moteChatDiagnosisWindowLimit))
+    const coverage = nullable(v.coverage, value => {
+      const c = fields(value, ['state', 'gaps', 'more', 'originCount']), state = member(c.state, ['complete', 'incomplete'] as const)
+      const gaps = array(c.gaps, value => {
+        const g = fields(value, ['reason', 'code', 'codeRecorded']), code = nullable(g.code, value => member(value, connectionDiagnosisSourceCodes)), codeRecorded = bool(g.codeRecorded)
+        if (code !== null && !codeRecorded) fail()
+        return { reason: member(g.reason, CONNECTION_DELIVERY_GAP_REASONS), code, codeRecorded }
+      }, moteChatDiagnosisWindowLimit)
+      if (state === 'complete' && gaps.length) fail()
+      return { state, gaps, more: bool(c.more), originCount: count(c.originCount, 0) }
+    })
+    let observation, sourceObservation, effectObservation
+    try { observation = nullable(v.observation, parseConnectionDeliveryObservation); sourceObservation = nullable(v.sourceObservation, parseConnectionDeliverySourceObservation); effectObservation = nullable(v.effectObservation, parseConnectionDeliveryObservation) } catch { return fail() }
+    if (reading !== 'observed' && (observation || sourceObservation || effectObservation || coverage || effects || more) || reading === 'observed' && effects === null) fail()
+    return { generationKey: key(v.generationKey), intakeKeys, reading, observation, sourceObservation, effectObservation, coverage, effects, more }
+  }, moteChatDiagnosisWindowLimit)
+  if (new Set(publications.map(row => row.generationKey)).size !== publications.length) fail()
   return { targetKey, limit: moteChatDiagnosisWindowLimit, configuration, readiness,
-    service: nullable(p.service, service), adapterService: nullable(p.adapterService, service), connection, incoming, issues }
+    service: nullable(p.service, service), adapterService: nullable(p.adapterService, service), connection, incoming, publications, issues }
 }

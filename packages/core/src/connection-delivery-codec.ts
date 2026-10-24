@@ -11,6 +11,8 @@ import type { ConnectionDelivery, ConnectionDeliveryCoverage, ConnectionDelivery
 export const CONNECTION_DELIVERY_RPC_METHODS = { 'connection.delivery.inspect': 'long', 'connection.delivery.ls': 'long', 'connection.delivery.retry': 'long' } as const
 export const isConnectionDeliveryMethod = (value: unknown): value is ConnectionDeliveryMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_DELIVERY_RPC_METHODS, value)
 export const CONNECTION_DELIVERY_RECEIPT_REASONS = ['effect-unconfirmed', 'platform-rejected', 'adapter-unavailable', 'platform-unavailable', 'rate-limited', 'thread-unavailable', 'unsupported-format'] as const
+export const CONNECTION_DELIVERY_STATES = ['pending', 'dispatching', 'unknown', 'confirmed', 'not-applied', 'cancelled', 'superseded'] as const
+export const CONNECTION_DELIVERY_GAP_REASONS = ['public-content-unconfirmed', 'transport-unsupported', 'resource-unavailable', 'start-cut-unconfirmed', 'source-gap', 'version-unavailable'] as const
 const fail = (): never => { throw new AgentMuxError('Delivery data does not describe the original operation and audience.', 'INVALID_CONNECTION_DELIVERY_DATA') }
 const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'INVALID_CONNECTION_DELIVERY_DATA')
 function text(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(value)) fail(); return value as string }
@@ -84,7 +86,7 @@ export function parseConnectionDeliveryCoverage(value: unknown): ConnectionDeliv
   if (!['complete', 'incomplete'].includes(String(p.state)) || !Array.isArray(p.gaps) || p.gaps.length > 100 || !Array.isArray(p.origins) || p.origins.length > 100) fail()
   const gaps: ConnectionDeliveryGap[] = (p.gaps as unknown[]).map(value => {
     const g = object(value, ['gapId', 'event', 'part', 'anchor', 'reason', 'source', 'record', 'code'])
-    if (!['public-content-unconfirmed', 'transport-unsupported', 'resource-unavailable', 'start-cut-unconfirmed', 'source-gap', 'version-unavailable'].includes(String(g.reason))) fail()
+    if (!CONNECTION_DELIVERY_GAP_REASONS.includes(g.reason as ConnectionDeliveryGap['reason'])) fail()
     const selected = g.part === undefined ? undefined : part(g.part)
     const a = g.anchor === undefined ? undefined : object(g.anchor, ['record', 'revision', 'frontier'])
     const f = a ? object(a.frontier, ['hostId', 'agentSessionId', 'sourceHostId', 'frontier']) : undefined
@@ -112,7 +114,7 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
   const target = object(p.target, ['connectionId', 'application', 'externalConversationId']), app = object(target.application, ['domain', 'appId']), fragment = object(p.fragment, ['ordinal', 'count'])
   const domain = text(app.domain), ordinal = integer(fragment.ordinal, 0), count = integer(fragment.count, 0)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(text(app.appId))) fail()
-  if (p.effect !== 'upsert' && p.effect !== 'withdraw' || p.effect === 'upsert' && ordinal >= count || !['pending', 'dispatching', 'unknown', 'confirmed', 'not-applied', 'cancelled', 'superseded'].includes(p.state as string)) fail()
+  if (p.effect !== 'upsert' && p.effect !== 'withdraw' || p.effect === 'upsert' && ordinal >= count || !CONNECTION_DELIVERY_STATES.includes(p.state as ConnectionDeliveryState)) fail()
   const mapped = p.mapping === undefined ? undefined : mapping(p.mapping), receipt = p.receipt === undefined ? undefined : parseConnectionDeliveryReceipt(p.receipt)
   const why = p.reason === undefined ? undefined : reason(p.reason, true)
   if (p.state === 'confirmed' && (!mapped || why !== undefined) || (p.state === 'unknown' || p.state === 'not-applied') && (why === undefined || !CONNECTION_DELIVERY_RECEIPT_REASONS.includes(why as ConnectionDeliveryReceiptReason))) fail()
