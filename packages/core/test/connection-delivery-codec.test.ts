@@ -86,3 +86,21 @@ it('keeps only finite original source evidence independently of platform effects
   // Historical owners without these observations remain explicit rather than inventing a successful read.
   expect(parseConnectionDeliveryResult('connection.delivery.ls', { deliveries: [], next: null }, scope)).toEqual({ deliveries: [], next: null })
 })
+
+it('retains native query milestones and rejects a reaction mapped to another query or effect', () => {
+  const base = deliveryFact()
+  for (const stage of ['received', 'started', 'completed'] as const) {
+    const delivery: ConnectionDelivery = { ...base, reference: { ...base.reference, source: { kind: 'captured', recordId: 'original-query' } },
+      queryFeedback: { stage, ingressId: 'original-ingress', messageId: 'original-native-query' },
+      state: 'confirmed', mapping: { messageId: 'original-native-query', reactionId: 'native-reaction' },
+      receipt: { state: 'confirmed', mapping: { messageId: 'original-native-query', reactionId: 'native-reaction' } } }
+    expect(parseConnectionDeliveryResult('connection.delivery.inspect', { delivery }, { operationId: delivery.operationId })).toEqual({ delivery })
+    for (const changed of [
+      { ...delivery, effect: 'withdraw' }, { ...delivery, queryFeedback: { ...delivery.queryFeedback, stage: 'idle' } },
+      { ...delivery, queryFeedback: { ...delivery.queryFeedback, messageId: 'foreign-query' } },
+      { ...delivery, mapping: { ...delivery.mapping, reactionId: 'foreign-reaction' } },
+      { ...delivery, predecessorOperationId: 'another-stage' }, { ...delivery, reference: base.reference },
+      { ...delivery, queryFeedback: undefined }, { ...delivery, queryTurn: { turnId: 'private-native-proof' } }
+    ]) expect(() => parseConnectionDelivery(changed)).toThrow()
+  }
+})
