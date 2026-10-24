@@ -57,7 +57,7 @@ async function fixture(view: AgentMuxRunAttachmentView, initiallyPublishedThroug
     ? [chunk(100, 'P'.repeat(initiallyPublishedThroughByte - 100))] : []
   let resizes: Extract<AttachedSnapshot['terminal'], { type: 'basic_vt' }>['resizes'] = []
   const streams: Stream[] = []
-  const info = (): RunInfo => ({ native_service: null, id: stored.run.runId, spec: { program: 'codex', args: [], cwd: stored.workspacePath,
+  const info = (): RunInfo => ({ id: stored.run.runId, spec: { program: 'codex', args: [], cwd: stored.workspacePath,
     env: {}, initial_size: { cols: 80, rows: 24 }, declared_inputs: [] }, lineage: null, backend: { type: 'native' },
     capabilities: { input: true, resize: true, signal: true, stop: true, fork_level_a: false,
       fork_level_b: false, replay: 'raw_from_start' }, pid: 4321, state: { type: 'running' },
@@ -68,7 +68,7 @@ async function fixture(view: AgentMuxRunAttachmentView, initiallyPublishedThroug
     const restore = bytes('\x1bcRESTORED')
     const start = terminal ? checkpointByte : afterByte
     const snapshot: AttachedSnapshot = { run: info(), resize_revision: revision,
-      terminal: terminal ? { type: 'basic_vt', checkpoint: { restore_size: checkpointSize, restore_scrollback_rows: null, resize_after_restore_bytes: 0, run_id: stored.run.runId,
+      terminal: terminal ? { type: 'basic_vt', checkpoint: { run_id: stored.run.runId,
         through_byte: checkpointByte, resize_revision: checkpointRevision, size: checkpointSize,
         restore_size: checkpointSize, restore_scrollback_rows: null, resize_after_restore_bytes: 0,
         restore_bytes: restore.byteLength }, resizes } : { type: 'not_requested' },
@@ -93,9 +93,10 @@ async function fixture(view: AgentMuxRunAttachmentView, initiallyPublishedThroug
       replay = [chunk(100, 'A'.repeat(50) + 'B'.repeat(50))]
       resizes = partial ? [{ through_byte: 150, resize_revision: 5, size }] : []
     },
-    async loseWire(): Promise<void> {
-      streams[0]!.close()
-      await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'connection-state', state: 'restored' })))
+    async loseWire(expectRestore = true): Promise<void> {
+      // This suite covers confirmed Runtime-wide loss, not one independent reader ending.
+      adapter.resetConnection(); inner.handleConnectionLost(inner.connectionEpoch)
+      await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'connection-state', state: expectRestore ? 'restored' : 'retrying' })))
     }
   }
 }
@@ -150,7 +151,7 @@ it('raw reconnect retains original bytes without inventing a resize fence or a r
 it('snapshot publication may reset the wire without losing its offered boundary or exact representation', async () => {
   const h = await fixture('terminal'); h.setSnapshot()
   const unsubscribe = h.client.onEvent(event => { if (event.type === 'terminal-snapshot') h.adapter.resetConnection() })
-  await h.loseWire(); unsubscribe()
+  await h.loseWire(false); unsubscribe()
   expect(snapshots(h.events)).toHaveLength(1)
   expect(h.adapter.continuationByte(stored.run.runId)).toBe(200)
   expect(h.adapter.continuationView(stored.run.runId)).toBe('terminal')

@@ -57,7 +57,7 @@ async function fixture(view: AgentMuxRunAttachmentView, initiallyPublishedThroug
     ? [chunk(100, 'P'.repeat(initiallyPublishedThroughByte - 100))] : []
   let resizes: Extract<AttachedSnapshot['terminal'], { type: 'basic_vt' }>['resizes'] = []
   const streams: Stream[] = []
-  const info = (): RunInfo => ({ native_service: null, id: stored.run.runId, spec: { program: 'codex', args: [], cwd: stored.workspacePath,
+  const info = (): RunInfo => ({ id: stored.run.runId, spec: { program: 'codex', args: [], cwd: stored.workspacePath,
     env: {}, initial_size: { cols: 80, rows: 24 }, declared_inputs: [] }, lineage: null, backend: { type: 'native' },
     capabilities: { input: true, resize: true, signal: true, stop: true, fork_level_a: false,
       fork_level_b: false, replay: 'raw_from_start' }, pid: 4321, state: { type: 'running' },
@@ -68,7 +68,7 @@ async function fixture(view: AgentMuxRunAttachmentView, initiallyPublishedThroug
     const restore = bytes('\x1bcRESTORED')
     const start = terminal ? checkpointByte : afterByte
     const snapshot: AttachedSnapshot = { run: info(), resize_revision: revision,
-      terminal: terminal ? { type: 'basic_vt', checkpoint: { restore_size: checkpointSize, restore_scrollback_rows: null, resize_after_restore_bytes: 0, run_id: stored.run.runId,
+      terminal: terminal ? { type: 'basic_vt', checkpoint: { run_id: stored.run.runId,
         through_byte: checkpointByte, resize_revision: checkpointRevision, size: checkpointSize,
         restore_size: checkpointSize, restore_scrollback_rows: null, resize_after_restore_bytes: 0,
         restore_bytes: restore.byteLength }, resizes } : { type: 'not_requested' },
@@ -94,7 +94,8 @@ async function fixture(view: AgentMuxRunAttachmentView, initiallyPublishedThroug
       resizes = partial ? [{ through_byte: 150, resize_revision: 5, size }] : []
     },
     async loseWire(): Promise<void> {
-      streams[0]!.close()
+      // This suite covers confirmed Runtime-wide loss, not one independent reader ending.
+      adapter.resetConnection(); inner.handleConnectionLost(inner.connectionEpoch)
       await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'connection-state', state: 'restored' })))
     }
   }
@@ -138,7 +139,9 @@ it('a rejected fresh observation preserves the original retained pump and never 
 it('ordinary automatic reconnect keeps its independent origin and public raw Terminal refresh establishes a real pump', async () => {
   const h = await fixture('terminal')
   h.setSnapshot(); await h.loseWire()
-  expect(h.events.filter(e => e.type === 'connection-state').map(e => e.observationOrigin)).toEqual([undefined, undefined])
+  expect(h.events.filter(e => e.type === 'connection-state').map(e => e.observationOrigin)).toEqual([
+    { kind: 'runtime-connection', boundary: 'core-ctxmux' }, { kind: 'runtime-connection', boundary: 'core-ctxmux' }
+  ])
   await h.registry.delete(stored.agentSessionId)
   const refreshed = await h.client.refreshRunAttachment(stored.run, 200, 'raw', 'refresh-terminal')
   expect(refreshed.run).toMatchObject({ runId: stored.run.runId, pid: 4321, kind: 'terminal' })
