@@ -71,10 +71,10 @@
 .mobile-conversation .conversation-native-thread { border: 0; background: transparent; padding: 0; }
 .mobile-conversation .log-turn { border: 0; }
 .mobile-conversation__composer { flex-shrink: 0; padding: 0 6px 4px; border-top: 0; }
-.mobile-conversation__floating-tools { position: relative; align-self: flex-end; flex: none; margin-inline-end: 8px; display: flex; align-items: center; isolation: isolate; pointer-events: none; }
-.mobile-conversation__floating-tools::before { content: ''; position: absolute; z-index: -1; inset: 4px 0; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--elev-1); pointer-events: none; }
+.mobile-conversation__floating-tools { display: flex; width: max-content; align-items: center; pointer-events: none; }
 .mobile-conversation__floating-tools > button { display: grid; place-items: center; width: 44px; min-width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--radius); color: var(--text-2); background: transparent; pointer-events: auto; }
-.mobile-conversation__floating-tools > button:is(:hover, :focus-visible, [data-state='open']) { color: var(--text); background: var(--surface-2); }
+.mobile-conversation__floating-tools > button:is(:hover, :focus-visible, [data-state='open']) { color: var(--text); }
+.mobile-session-tool-slot .mobile-conversation__floating-tools > button:focus-visible { outline-offset: -3px; }
 .mobile-conversation__floating-tools .mobile-message-tools__trigger i { right: 10px; bottom: 10px; }
 .mobile-app .mobile-conversation__composer { padding-bottom: max(4px,env(safe-area-inset-bottom)); }
 .mobile-app .mobile-message-tools__trigger { border-radius: 50%; background: transparent; }
