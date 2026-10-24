@@ -6,7 +6,9 @@ import type { AgentMuxPreloadApi } from '../src/shared/contracts'
 import ts from 'typescript'
 import mainSource from '../src/main/ipc.ts?raw'
 
-const bridge = vi.hoisted(() => { vi.stubGlobal('window', {}); return { api: null as AgentMuxPreloadApi | null,
+const bridge = vi.hoisted(() => { vi.stubGlobal('window', {}); vi.stubGlobal('process', new Proxy(process, {
+  get: (target, key, receiver) => key === 'platform' ? 'darwin' : Reflect.get(target, key, receiver)
+})); return { api: null as AgentMuxPreloadApi | null,
   invoke: vi.fn(), quit: vi.fn(), create: vi.fn(), native: { captureScreenshot: vi.fn(), readClipboardText: vi.fn(),
     writeClipboardText: vi.fn(), writeClipboardImage: vi.fn(), dispose: vi.fn(async () => {}) } } })
 vi.mock('electron', () => ({ app: { isPackaged: true, getAppPath: () => (new URL('file:///').pathname + "fixture/AgentMux.app/Contents/Resources/app"), once: bridge.quit },
@@ -15,7 +17,7 @@ vi.mock('electron', () => ({ app: { isPackaged: true, getAppPath: () => (new URL
 vi.mock('@agentmux/native-desktop', () => ({ NativeDesktop: class { constructor(options: unknown) { bridge.create(options); return bridge.native } } }))
 import '../src/preload/index'
 import { registerNativeDesktopIpc } from '../src/main/native-desktop-ipc'
-import { getNativeDesktopOwner, resolvedNativeDesktopOptions } from '../src/main/native-desktop-owner'
+import { getDesktopNativeUiOwner, getNativeDesktopOwner, resolvedNativeDesktopOptions } from '../src/main/native-desktop-owner'
 import { readPastedImage } from '../src/main/pasted-image-read'
 import { senderTrust, assertSenderTrusted } from '../src/main/ipc-sender-trust'
 import { browserPngFromBytes } from '../src/main/browser-image'
@@ -30,7 +32,7 @@ afterEach(async () => {
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), 'amux-native-consumers-')); homes.push(home)
   const trusted = {}, handlers = new Map<string, (...args: any[]) => any>()
-  const native = vi.fn(getNativeDesktopOwner)
+  const native = vi.fn(getDesktopNativeUiOwner)
   // Execute the original Main registration, rather than a new test-only facade call.
   const source = ts.createSourceFile('ipc.ts', mainSource, ts.ScriptTarget.Latest, true)
   const calls: ts.CallExpression[] = []
@@ -41,7 +43,7 @@ async function fixture() {
   walk(source)
   expect(calls).toHaveLength(1)
   const code = ts.transpileModule(calls[0]!.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
-  new Function('registerNativeDesktopIpc', 'app', 'getNativeDesktopOwner', 'handleWithEvent', 'requireTrustedSender', code)(
+  new Function('registerNativeDesktopIpc', 'app', 'getDesktopNativeUiOwner', 'handleWithEvent', 'requireTrustedSender', code)(
     registerNativeDesktopIpc, { getPath: () => home }, native,
     (channel: string, handler: (...args: any[]) => any) => { handlers.set(channel, handler) },
     (channel: string, event: any) => assertSenderTrusted(senderTrust(channel as any, event.sender, trusted)))
