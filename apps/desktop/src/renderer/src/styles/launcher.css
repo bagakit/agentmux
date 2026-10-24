@@ -54,7 +54,10 @@
 .launcher-agent-entry small { overflow: hidden; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; white-space: nowrap; text-overflow: ellipsis; }
 .launcher-section-actions { flex: none; display: inline-flex; gap: var(--sp-1); align-items: center; }
 .launcher-section-actions .icon-button { width: 26px; height: 26px; color: var(--text-3); }
-.agent-catalog { max-height: 116px; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-2); margin-top: calc(-1 * var(--sp-2)); margin-bottom: var(--sp-5); }
+.agent-catalog-wrapper { min-width: 0; margin-top: calc(-1 * var(--sp-2)); margin-bottom: var(--sp-5); }
+.agent-catalog { max-height: 116px; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-2); scrollbar-width: thin; scrollbar-color: var(--text-3) var(--surface-1); }
+.agent-catalog__scroll { width: 100%; min-height: 24px; display: flex; align-items: center; justify-content: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font: var(--fs-meta)/1.4 var(--font-sans); cursor: pointer; }
+.agent-catalog__scroll:hover { color: var(--text); background: var(--surface-2); border-color: var(--line); }
 .agent-picks { position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 108px), 1fr)); gap: var(--sp-2); }
 .agent-picks > :is(.launcher-other-agents, .agent-catalog__empty) { grid-column: 1 / -1; }
 .agent-picks > button, .agent-picks > .agent-catalog__empty { position: relative; z-index: 1; }
@@ -146,13 +149,13 @@
 .launcher-restore:hover { color: var(--text); background: var(--surface-2); }
 .launcher-persistence-notice { margin: var(--sp-3) 0 0; color: var(--amber-text); font-size: var(--fs-meta); line-height: 1.5; }
 .launcher-mote { min-width: 0; max-width: 360px; }
-.launcher-mote__actions { min-height: 36px; min-width: 0; display: flex; align-items: center; width: fit-content; max-width: 100%; gap: var(--sp-1); }
-.launcher-mote__create, .launcher-mote__target { min-height: 32px; min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3); border: 0; color: var(--text-3); background: transparent; font: var(--fs-meta)/1.4 var(--font-sans); white-space: nowrap; }
-.launcher-mote__create { flex: none; cursor: pointer; border-radius: var(--radius-sm); }
+.launcher-mote__actions { min-height: 36px; min-width: 0; display: flex; align-items: stretch; width: fit-content; max-width: 100%; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
+.launcher-mote__create, .launcher-mote__target { min-height: 34px; min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border: 0; color: var(--text-2); background: transparent; font: var(--fs-meta)/1.4 var(--font-sans); white-space: nowrap; }
+.launcher-mote__create { flex: none; cursor: pointer; border-radius: var(--radius) 0 0 var(--radius); font-weight: 550; }
 .launcher-mote__create:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
 .launcher-mote__create:disabled { opacity: .5; cursor: default; }
-.launcher-mote__target { max-width: 200px; border-radius: var(--radius-sm); color: var(--text-2); }
-button.launcher-mote__target { cursor: pointer; }
+.launcher-mote__target { max-width: 200px; border-radius: 0 var(--radius) var(--radius) 0; color: var(--text-2); }
+button.launcher-mote__target { border-left: 1px solid var(--line-soft); cursor: pointer; }
 button.launcher-mote__target:hover { color: var(--text); background: var(--surface-2); }
 .launcher-mote__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .launcher-mote__target > svg, .launcher-mote__create > svg { flex: none; }
@@ -169,7 +172,8 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
 .launch-surface[data-density='compact'] .launcher-environment__project { flex-basis: auto; gap: var(--sp-3); }
 .launch-surface[data-density='compact'] .launcher-environment__host { max-width: 40%; padding-inline: var(--sp-3); }
 .launch-surface[data-density='compact'] .launcher-agents-head { margin-bottom: var(--sp-2); }
-.launch-surface[data-density='compact'] .agent-catalog { max-height: 40px; margin-bottom: var(--sp-4); }
+.launch-surface[data-density='compact'] .agent-catalog { max-height: 40px; }
+.launch-surface[data-density='compact'] .agent-catalog-wrapper { margin-bottom: var(--sp-4); }
 .launch-surface[data-density='compact'] .launcher-composer { --composer-input-height: clamp(3rem, calc(var(--launcher-region-height, 400px) * .16), 4rem); --composer-input-max: var(--composer-input-height); }
 .launch-surface[data-density='compact'] .launcher-tools { padding-top: var(--sp-2); }
 .launch-surface[data-density='compact'] .launch-surface__footer { margin-top: var(--sp-3); gap: var(--sp-3); align-items: start; }
