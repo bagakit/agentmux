@@ -10,6 +10,8 @@ import { normalizeSessionHistoryPage } from '../../../../../packages/core/src/se
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { PMO_TEAMS_TOPIC_ID } from '@agentmux/core/mote-preferences'
 import { MobileApp } from '../../../src/MobileApp'
+import { MobileWebUpdateSafetyProvider } from '../../../src/mobile-web/update-safety'
+import type { MobileWebPageObservation } from '../../../src/mobile-web/use-mobile-web-observation'
 import { createBrowserPlatform } from '../../../src/platform/browser'
 import { getDeviceWorkface } from '../../../src/recovery/device-workface'
 import { DEFAULT_THEME_ID, GRAPHITE_THEME, themeValue } from '@agentmux/client-ui/theme'
@@ -82,6 +84,8 @@ const goal: AgentMuxRpcGoal = { id: 'goal-original', title: '把两个想法变�
   grounding: { alignmentRevision: 1, submissionId: 'result-original', summary: '建议先做范围更清晰的方案 A；以下是依据和第一步。', acceptedAt: null,
     checks: [{ criterionId: 'criterion-original', outcome: 'met', note: '已整理步骤、比较依据与需要你决定的地方。', evidence: ['原资料/实验建议.md'] }] } }
 let connected = location.hash !== '#fixture-offline', unknownNext = false, promptReadFails = false, appearanceRevision = 0
+let holdFileUpload = false
+let releaseFileUpload: (() => void) | null = null
 let directoryComparisons = 0, inspectFails = false
 let agentMenuScene = false, densityScene = false, copyFails = false
 const copiedTexts: string[] = []
@@ -212,6 +216,9 @@ const client = {
   forwardRpc: async (method: string, params: Record<string, unknown>) => {
     record(method, params)
     if (!connected) throw Error('原 Host 连接中断；原对象、历史与草稿保留。')
+    if (method === 'file.upload' && holdFileUpload) return await new Promise(resolve => {
+      releaseFileUpload = () => { const { dataBase64: _data, ...identity } = params; resolve({ ...identity, status: 'uploaded', path: '/opaque/原资料截图.png' }) }
+    })
     if (method === 'skill.ls') {
       const original = sessions.find(session => session.agentSessionId === params.agentSessionId)!
       return { hostId: 'local', sourceHostId: original.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId,
@@ -264,10 +271,32 @@ const platform = { ...browserPlatform, copyText: async (text: string, reportErro
   copiedTexts.push(text)
   return true
 } }
+// Exact controlled page and Host observations exercise the real update UI; they are not live Relay evidence.
+const updatePage = { documentId: 'fixture-original-page', buildId: 'fixture-old-build', namespaceDigest: 'sha256:' + 'a'.repeat(64) }
+const updateProducer = { devicePrincipalId: 'fixture-original-device', documentId: updatePage.documentId }
+const updateLoaded = { ...updatePage, hostId: 'fixture-original-host', hostInstanceId: 'fixture-host-instance', producer: updateProducer,
+  occurrenceId: 'fixture-loaded-occurrence', observedAt: 100, receivedAt: 200, accepted: true, reason: null }
+const webUpdateObservation: MobileWebPageObservation = { page: updatePage, connected: true,
+  loaded: { pending: false, result: updateLoaded, issue: null }, inspection: { pending: false, issue: null,
+    result: { hostId: updateLoaded.hostId, hostInstanceId: updateLoaded.hostInstanceId,
+      active: { buildId: 'fixture-new-build', digest: 'sha256:' + 'b'.repeat(64), bytes: 100, fileCount: 2, revision: 2 },
+      retained: [], retention: 'active-and-previous', operation: null, clients: [updateLoaded],
+      client: { target: updateProducer, availability: 'found', loaded: updateLoaded, namespace: 'retained' },
+      coverage: { lifetime: 'current-host-instance', operationsRetained: 0, operationsEvicted: 0, loadedRetained: 1, loadedRejected: 0 }, observedAt: 300 } },
+  reporter: { inFlight: false, queuedCount: 0, queuedBytes: 0, droppedCount: 0, receipt: null, issue: null },
+  refresh: async () => { record('fixture.mobile-assets.inspect') }, retryReports: () => {} }
+const verifyWebUpdateConnection = async () => () => connected
 function Scene() {
   const [, refresh] = useState(0)
   const [densityMount, remountDensity] = useState(0)
+  const [unconfirmedClient, setUnconfirmedClient] = useState(false)
+  const [webUpdateScene, setWebUpdateScene] = useState(false)
   Object.assign(window, { mobileProductScene: {
+    prepareWebUpdate: () => setWebUpdateScene(true),
+    prepareFocusState: () => {
+      catalog.agentPresentation![1]!.stateMark = 'unknown'
+      catalog.agentPresentation![1]!.stateLabel = 'Activity not confirmed'
+    },
     prepareAgentMenu: () => { agentMenuScene = true; catalog.agentPresentation![0]!.name = menuAgentName },
     prepareDensity: () => {
       densityScene = true; agentMenuScene = true
@@ -335,15 +364,38 @@ function Scene() {
       ] as const) await owner.retainAgentCreate({ runtimeId, deviceHostId,
         input: { operationId, content: { kind: 'new-agent', executorId: 'fixture-original', prompt: '保留原意图，不自动重放。' }, destination, focus: false }, phase: 'unknown' }, owner.recordIdentity())
     },
+    seedGoalRecovery: async () => {
+      const owner = getDeviceWorkface()
+      const item = { runtimeId: 'runtime-original', ownerInstanceId: 'owner-original', deviceHostId: 'host-original', origin: location.origin,
+        method: 'goal.delete' as const, request: { goalId: '原目标-已删除', operationId: 'original-goal-operation', confirmation: 'delete' } }
+      await owner.retainGoalRequest(item, owner.recordIdentity())
+      return item
+    },
+    holdGoalRecoveryWrite: async () => {
+      const saved = await getDeviceWorkface().preparePageReload()
+      if (!saved()) throw Error('The original workface must be stable before the controlled write failure')
+      const original = indexedDB.open.bind(indexedDB)
+      let held = false
+      indexedDB.open = ((name: string, version?: number) => {
+        if (name !== 'agentmux-device-workface-write-lock' || held) return original(name, version)
+        held = true
+        return {} as IDBOpenDBRequest
+      }) as typeof indexedDB.open
+    },
     unknownNext: () => { unknownNext = true },
     setAppearance: (mode: 'dark' | 'light') => { appearanceSubscriber?.onEvent({ type: 'snapshot', data: appearanceSnapshot(mode) }) },
     offline: () => { connected = false; refresh(value => value + 1) },
     reconnect: () => { connected = true; refresh(value => value + 1) },
+    setUnconfirmedClient: (value: boolean) => { connected = !value; setUnconfirmedClient(value) },
+    holdFileUpload: () => { holdFileUpload = true },
+    releaseFileUpload: () => { releaseFileUpload?.() },
+    appearanceReady: () => Boolean(appearanceSubscriber),
     facts: () => ({ calls, record: getDeviceWorkface().snapshot().record, directoryComparisons, directoryFacts: catalog.regions.length + catalog.locations.length + catalog.spaces.length,
       directoryScope: { sessions: sessions.length, regions: catalog.regions.length, locations: catalog.locations.length, spaces: catalog.spaces.length, motes: catalog.spaces.filter(owner => owner.kind === 'mote').length },
       menuAgentName, expectedReply: ordinaryReply, copiedTexts, controlledCopy: agentMenuScene, controlledSdk: true, physicalPhone: false,
       intendedOccurrence: catalog.locations.find(location => location.regionId === 'region-mote'), sessionIds: sessions.map(session => ({ sessionId: session.agentSessionId, runId: session.run.runId })) })
   } })
-  return <MobileApp key={densityMount} client={client} connection={connected ? { state: 'connected', message: '已连接原 Host' } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} />
+  const app = <MobileApp key={densityMount} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host' } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
+  return webUpdateScene ? <MobileWebUpdateSafetyProvider verifyConnection={verifyWebUpdateConnection}>{app}</MobileWebUpdateSafetyProvider> : app
 }
 createRoot(document.getElementById('root')!).render(<Scene />)
