@@ -59,12 +59,15 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
       state: 'Core 已确认停止这一代等待，原消息保留。', action: '再次发送会重新确认这条原消息。' }
     if (receipt.status === 'waiting' && receipt.control.state === 'enabled' && receipt.admission === null) {
       const wait = receipt.control.waiting
-      return { kind: 'saved-waiting', title: wait?.phase === 'runtime' ? '已保存 · 等待连接' : '已保存 · 等待确认',
-        state: wait?.phase === 'observer' ? '本次观察已结束，原消息仍由 Core 保存。'
+      const owned = receipt.observation === 'owned'
+      return { kind: 'saved-waiting', title: !owned && (wait?.phase === 'runtime' || wait?.phase === 'session') ? '已保存 · 等待确认' : wait?.phase === 'runtime' ? '已保存 · 等待连接' : wait?.phase === 'session' ? '已保存 · 等待恢复' : '已保存 · 等待确认',
+        state: !owned && (wait?.phase === 'runtime' || wait?.phase === 'session') ? '原消息由 Core 保存；当前等待尚未接回，需要继续确认原输入。'
+          : wait?.phase === 'observer' ? '本次观察已结束，原消息仍由 Core 保存。'
           : wait?.phase === 'authorization' ? '原消息已保存；需要原作者的当前授权才能继续确认。'
           : wait?.phase === 'runtime' ? '原消息已保存；原 Runtime 连接恢复后继续确认这条消息。'
+          : wait?.phase === 'session' ? '原消息由 Core 保存；原 Session 语义恢复后自动继续首次投递。'
           : '原消息已保存，输入环境尚未确认。完整原因保留在详情中。',
-        action: wait?.wake === 'runtime-restored' ? '可停止这一代等待。' : '可继续确认原环境，或停止这一代等待。' }
+        action: owned && (wait?.wake === 'runtime-restored' || wait?.wake === 'session-restored') ? '可停止这一代等待。' : '可继续确认原环境，或停止这一代等待。' }
     }
   }
   if (reason && noInput) return { kind: 'waiting',
@@ -110,6 +113,7 @@ export function messageDeliveryDiagnosticReport(input: MessageDeliveryDiagnostic
     `等待代次: ${receipt?.ref.waitGeneration ?? '未知'}`,
     `Core: ${receipt ? `status=${receipt.status}; persistence=${receipt.persistence}; control=${receipt.control.state}; observation=${receipt.observation}` : '未知'}`,
     `admission: ${receipt ? receipt.admission === null ? 'null（本回执无输入记录，不代签此前未输入）' : '收到原输入记录（实际层次见 status，完整字段见资料）' : '未知'}`]
+  if (receipt?.control.deliveryKey) lines.push(`实际投递: ${JSON.stringify(receipt.control.deliveryKey)}`)
   const dispatch = receipt?.admission?.admission
   if (dispatch) lines.push(`admission.admission: ${JSON.stringify({ transport: dispatch.transport,
     nativeOutcome: dispatch.native?.outcome, acknowledged: dispatch.acknowledged, notApplied: dispatch.notApplied,
