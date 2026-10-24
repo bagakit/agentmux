@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { setTimeout as delay } from 'node:timers/promises'
 import { AgentMuxError } from '../src/errors.js'
-import { retryAgentCreationResources } from '../src/agent-creation-resource-retry.js'
+import { retryAgentCreationResources, type AgentCreationResourceContext } from '../src/agent-creation-resource-retry.js'
 
 vi.mock('node:timers/promises', () => ({ setTimeout: vi.fn(async (_ms, _value, options) => options.signal.throwIfAborted()) }))
 
@@ -62,4 +62,32 @@ it('cancellation returns the original failure without another Start', async () =
   await expect(retryAgentCreationResources({ operationId: 'original', signal: controller.signal, attempt,
     waiting: () => controller.abort() })).rejects.toBe(error)
   expect(attempt).toHaveBeenCalledTimes(1)
+})
+
+it('waits only the narrow preparation read, preserving its original failure and the enclosing execution', async () => {
+  const error = Object.assign(new Error('Any presentation'), { code: 'ENOSPC' }), waiting = vi.fn()
+  let reads = 0
+  const attempt = vi.fn(async ({ preparation }: AgentCreationResourceContext) => {
+    return await preparation(async () => { if (++reads === 1) throw error; return 'same-original-read' })
+  })
+  expect(await retryAgentCreationResources({ operationId: () => undefined, signal: new AbortController().signal, attempt, waiting })).toBe('same-original-read')
+  expect(attempt).toHaveBeenCalledTimes(1); expect(reads).toBe(2); expect(waiting).toHaveBeenCalledWith(error, 1000)
+})
+
+it.each(['cause', 'aggregate'])('does not swallow any creation receipt hidden in the %s tree as raw preparation capacity', async kind => {
+  const receipt = capacity('foreign', 'unknown')
+  const error = kind === 'cause' ? Object.assign(new Error('wrapper', { cause: receipt }), { code: 'ENOSPC' })
+    : new AggregateError([Object.assign(new Error('full'), { code: 'ENOSPC' }), receipt], 'all full')
+  const read = vi.fn(async () => { throw error }), waiting = vi.fn()
+  await expect(retryAgentCreationResources({ operationId: 'original', signal: new AbortController().signal,
+    attempt: async ({ preparation }) => await preparation(read), waiting })).rejects.toBe(error)
+  expect(read).toHaveBeenCalledTimes(1); expect(waiting).not.toHaveBeenCalled()
+})
+
+it('cancels after an in-flight preparation read before executing its caller continuation', async () => {
+  const controller = new AbortController(), continuation = vi.fn()
+  await expect(retryAgentCreationResources({ operationId: () => undefined, signal: controller.signal,
+    attempt: async ({ preparation }) => { await preparation(async () => { controller.abort(); return 'read' }); continuation() }, waiting: vi.fn()
+  })).rejects.toThrow()
+  expect(continuation).not.toHaveBeenCalled()
 })

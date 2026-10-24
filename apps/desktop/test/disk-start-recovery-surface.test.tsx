@@ -38,7 +38,8 @@ it('routes the original storage wait through actual Store and Pane, keeps read f
   const window = dom.container.querySelector('.service-window')
   expect(window?.getAttribute('role')).toBe('status')
   expect(window?.textContent).toContain(notice.event.type === 'agent-error' ? notice.event.message : '')
-  expect(window?.textContent).toContain('The Agent has not started')
+  expect(window?.textContent).toContain('The original Session, request and initial prompt are retained')
+  expect(window?.textContent).not.toContain('has not started')
   expect(window?.textContent).toContain('will continue automatically')
   expect(window?.querySelector('.surface-state__title')?.textContent ?? window?.textContent).toContain('Waiting for storage')
   const details = window?.querySelector('details')
@@ -72,6 +73,22 @@ it('routes the original storage wait through actual Store and Pane, keeps read f
   expect(useAppStore.getState().notificationEvents).toEqual([])
   expect(dom.container.textContent).not.toContain('will continue automatically')
   expect(runtimeDiagnosticNotice(useAppStore.getState(), event('another-host'))?.message).toContain('another-host')
+})
+
+it('keeps uncertain preparation facts neutral in the original pending Region without admitting a new launch', async () => {
+  const original = useAppStore.getState()
+  await mount()
+  await receive(event('local', sid, 'Storage is unavailable while checking the original creation. Its result is not confirmed.'))
+  const notice = dom.container.querySelector('.service-window')
+  expect(notice?.textContent).toContain('Its result is not confirmed')
+  expect(notice?.textContent).toContain('The original request and initial prompt are kept')
+  expect(notice?.textContent).not.toContain('has not started')
+  expect(dom.container.textContent).toContain('Original submitted prompt')
+  expect([...dom.container.querySelectorAll('button')].some(button => button.textContent?.trim() === 'Check original')).toBe(true)
+  expect(useAppStore.getState().tabs).toBe(original.tabs)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
+  expect(useAppStore.getState().pendingAgentLaunches[sid]?.request?.createOperationId).toBe('original-operation')
+  expect(api.sessions.launchAgent).not.toHaveBeenCalled()
 })
 
 it.each(['wrong-host', 'wrong-session', 'no-pending', 'accepted'] as const)('keeps diagnostics without a matching active pending owner: %s', kind => {
