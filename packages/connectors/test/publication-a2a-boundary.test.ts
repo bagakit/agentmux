@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { projectConversationTimeline, type ConversationCheckpoint, type ConversationUnit } from '@agentmux/core/conversation'
 import { createNativeInputCorrelation } from '../../core/src/native-input-correlation.js'
-import { publicationNotifications } from '../src/publication-a2a.js'
+import { publicationMessageTargets } from '../src/publication-a2a.js'
 
 const key = { kind: 'prompt' as const, agentSessionId: 'recipient', expectedRun: { runId: 'original-run' }, submissionId: 'original-notice' }
 const source = { providerId: 'codex', nativeSessionId: 'original-native' }
@@ -23,11 +23,11 @@ function unit(withNative = true): ConversationUnit {
 it('keeps a before-start captured notification and its canonical native alias outside the shared boundary', () => {
   const original = unit(), captured = original.records.find(record => record.original.kind === 'captured')!
   captured.order = { kind: 'captured-stream', epoch: 'original-epoch', firstSequence: 10 }
-  expect(publicationNotifications(original, start)).toEqual([])
+  expect(publicationMessageTargets(original, start)).toEqual([])
   captured.order = { kind: 'captured-stream', epoch: 'other-epoch', firstSequence: 11 }
-  expect(publicationNotifications(original, start)).toEqual([])
+  expect(publicationMessageTargets(original, start)).toEqual([])
   captured.order = { kind: 'captured-stream', epoch: 'original-epoch', firstSequence: 11 }
-  expect(publicationNotifications(original, start)).toHaveLength(2)
+  expect(publicationMessageTargets(original, start)).toHaveLength(2)
 })
 
 it('uses the exact captured input-journal origin without letting a native alias reopen an earlier input', () => {
@@ -39,15 +39,15 @@ it('uses the exact captured input-journal origin without letting a native alias 
     { queueId: 'original-queue', incarnation: 'other-incarnation', sequence: 11 }
   ]) {
     captured.original.item.inputOrigin = origin
-    expect(publicationNotifications(original, start)).toEqual([])
+    expect(publicationMessageTargets(original, start)).toEqual([])
   }
   captured.original.item.inputOrigin = { queueId: 'original-queue', incarnation: 'original-incarnation', sequence: 11 }
-  expect(publicationNotifications(original, start)).toHaveLength(2)
+  expect(publicationMessageTargets(original, start)).toHaveLength(2)
 })
 
 it('retains a qualified empty native notification by its real record, without inventing a content selector', () => {
   const original = unit(), native = original.records.filter(record => record.original.kind === 'native')
-  const targets = publicationNotifications({ ...original, records: native }, start)
+  const targets = publicationMessageTargets({ ...original, records: native }, start)
   expect(targets).toHaveLength(1)
   expect(targets[0]).toMatchObject({ notificationId: key.submissionId, key, record: native[0]!.reference, revision: native[0]!.revision })
   expect(targets[0]!.part).toBeUndefined()

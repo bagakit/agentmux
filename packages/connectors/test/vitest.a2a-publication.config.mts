@@ -14,9 +14,14 @@ export default defineConfig({ ...native, cacheDir: '.cache/a2a-publication', plu
       code = code.replace(before, 'const originals = new Map()')
     }
     if (process.env.A2A_PUBLICATION_MUTANT === 'start-cut-disconnect' && path === 'packages/connectors/src/publication-a2a.ts') {
-      const before = 'if (origin.sequence <= cut.inputJournal.sequence) continue'
+      const before = 'return origin.sequence > cut.inputJournal.sequence'
       if (code.split(before).length !== 2) throw Error('Original input cut mutation did not load exactly once')
-      code = code.replace(before, 'if (false) continue')
+      code = code.replace(before, 'return true')
+    }
+    if (process.env.A2A_PUBLICATION_MUTANT === 'direct-disconnect' && path === 'packages/connectors/src/publication-a2a.ts') {
+      const before = "notice ? notice.messageIds : [target.key.kind === 'message' ? target.key.messageId : '']"
+      if (code.split(before).length !== 2) throw Error('Original direct consumer mutation did not load exactly once')
+      code = code.replace(before, 'notice ? notice.messageIds : []')
     }
     if (process.env.A2A_PUBLICATION_LOADED) {
       const hash = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -24,4 +29,4 @@ export default defineConfig({ ...native, cacheDir: '.cache/a2a-publication', plu
     }
     if (code !== original) return code
   }
-}], test: { ...native.test, include: ['packages/connectors/test/connection-services-owner.test.ts', 'packages/connectors/test/a2a-publication-consumer.test.ts', 'packages/connectors/test/ordinary-conversation-publication.test.ts', 'packages/connectors/test/publication-a2a-boundary.test.ts'], testTimeout: 30_000 } })
+}], test: { ...native.test, include: ['packages/connectors/test/direct-a2a-gap.test.ts', 'packages/core/test/message-read-origin.test.ts', 'packages/connectors/test/connection-services-owner.test.ts', 'packages/connectors/test/a2a-publication-consumer.test.ts', 'packages/connectors/test/ordinary-conversation-publication.test.ts', 'packages/connectors/test/publication-a2a-boundary.test.ts'], testTimeout: 30_000 } })
