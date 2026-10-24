@@ -436,7 +436,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal}
             commands={commandSuggestions} onCommand={item => { void insertSuggestion(item) }}
             {...(isWorking && available && Boolean(draft.trim()) ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})} />}
-          {...(postureControl && available ? { postureTool: <MobilePosturePicker control={postureControl} disabled={!available} onSet={modeId => { void changePosture(modeId) }} /> } : {})}
+          {...(postureControl && available && reading.activity?.process !== 'exited' && reading.activity?.process !== 'interrupted' ? { postureTool:
+            <MobilePosturePicker control={postureControl} disabled={!available} onSet={modeId => { void changePosture(modeId) }} />
+          } : {})}
+          {...(postureControl && available && !reading.activity ? { feedback: <small className="composer-feedback" role="status">Run 状态未确认；模式切换由原服务核验。</small> } : {})}
           primaryAction={isWorking && !draft.trim() ? 'stop' : 'send'}
           {...(isWorking && available ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})}
           mailbox={<MobileMailbox key={historyConnection.current.generation} client={client} session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
