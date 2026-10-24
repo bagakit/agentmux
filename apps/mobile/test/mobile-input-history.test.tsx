@@ -52,7 +52,7 @@ function consumer() {
 }
 async function openHistory(element: HTMLElement) {
   const trigger = element.querySelector<HTMLButtonElement>('.mobile-message-tools__trigger')!
-  expect(trigger).not.toBeNull(); await click(trigger)
+  expect(trigger).not.toBeNull(); expect(trigger.textContent).toContain('历史'); expect(trigger.getAttribute('aria-label')).toContain('输入历史'); await click(trigger)
   const sheet = document.body.querySelector<HTMLElement>('[role="dialog"]')!
   expect(sheet).not.toBeNull(); return sheet
 }
