@@ -339,8 +339,8 @@ export class AgentMuxSpatialStateStore {
         if (!tab?.regionIds.includes(agentRegion.regionId) || !original ||
             !((original.kind === 'launcher' && original.agentSessionId === null) ||
               (original.kind === 'agent' && original.agentSessionId === agentRegion.agentSessionId &&
-                (original.runId === null || original.runId === agentRegion.runId))) ||
-            (original.execution !== null && (original.execution.hostId !== agentRegion.execution.hostId || original.execution.cwd !== agentRegion.execution.cwd)))
+                (original.runId === null || original.runId === agentRegion.runId) &&
+                (original.execution === null || (original.execution.hostId === agentRegion.execution.hostId && original.execution.cwd === agentRegion.execution.cwd)))))
           throw new AgentMuxError('The exact Region no longer matches this Agent attachment. Its original binding and all Runs are retained.', 'SPATIAL_RESOURCE_TARGET_CONFLICT');
         graph.regions[index] = { tabId: agentRegion.tabId, regionId: agentRegion.regionId, kind: 'agent',
           agentSessionId: agentRegion.agentSessionId, runId: agentRegion.runId, execution: agentRegion.execution };
