@@ -29,7 +29,7 @@ import { completedNativeReply } from '../lib/conversation-files.js'
 import { conversationA2ANotificationId, conversationItemRef, type ConversationItemRef } from '@agentmux/core/conversation'
 
 type ReadingProps = Pick<ConversationMessageProps,
-  'sourceLabelsInDetails' | 'active' | 'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace' | 'traceDisclosure'>
+  'sourceLabelsInDetails' | 'detailsOnlyMetadata' | 'active' | 'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace' | 'traceDisclosure'>
 
 /** Existing Reader facts only. Unknown/newly selected source scopes stay static. */
 export type ConversationReadActivity = {

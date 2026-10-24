@@ -386,7 +386,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {workingObservedAt !== undefined ? <p className="mobile-active-state" role="status" data-activity-current={currentActivity}
           title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</p> : null}
         {agentSessionId ? <>
-          <ConversationView readProcessDetail={reading.readProcessDetail} sourceLabelsInDetails coverageSummary="阅读范围与来源" readingGeometry={{ viewport: () => feed.current,
+          <ConversationView readProcessDetail={reading.readProcessDetail} sourceLabelsInDetails detailsOnlyMetadata coverageSummary="阅读范围与来源" readingGeometry={{ viewport: () => feed.current,
             following: () => follow.current.following && !reading.olderWindow,
             pinToBottom: () => { if (feed.current) { feed.current.scrollTop = feed.current.scrollHeight; markProgrammaticReadingScroll(feed.current) } } }} presentation={{ controller: presentation, pending: reading.held, onRelease: reading.acceptHeld, intent: presentationIntent.current }} page={reading.page} readActivity={reading.readActivity} expandSubmissions={Boolean(reading.readError)} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} records={reading.projection?.records ?? []} originalRecords={reading.projection?.originalRecords ?? []} coverage={reading.projection?.timeline.coverage ?? []} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
             renderProcess={props => <NativeProcessObservation {...props} compact />}
