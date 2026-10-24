@@ -1,4 +1,5 @@
 import { isBackgroundLocalAgentOpen } from '@agentmux/core/spatial-graph'
+import { hostGoalRecord } from '@agentmux/host/goal-projection'
 import { restoredManualConnectionIntents, restoredManualConnectionSelections, manualConnectionScope, type ManualConnectionIntent } from "./lib/manual-connection-intent"
 import { emptyApplicationAccess, restoredApplicationAccess, type ApplicationAccessContinuation } from './lib/application-member-intent'
 import { restoreToolkitPresentations, updateToolkitPresentation, type ToolkitPresentations, type ToolkitPresentationPatch } from './lib/toolkit-presentation'
@@ -149,6 +150,7 @@ import { inspectSpaceIconOverrides } from '../../shared/space-object-appearance'
 import { sessionNameMetadataRecord, type SessionNameMetadata } from './lib/session-name-metadata'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
+  AGENTMUX_CONTROL_SCHEMA_VERSION,
   type AgentMuxArrangeMode,
   type AgentMuxControlErrorCode,
   type AgentMuxControlRequest,
@@ -1641,6 +1643,10 @@ function sessionOwnsControl(session: SessionSnapshot, control: SessionControl): 
     session.control.run.runId === control.run.runId
 }
 
+function isGoalBusinessRequest(request: AgentMuxControlRequest): request is Extract<AgentMuxControlRequest, { operation: `demand.${string}` }> {
+  return request.operation.startsWith('demand.')
+}
+
 function demandRecordFromFilesystem(demand: FilesystemDemand, retained?: DemandRecord): DemandRecord {
   if (retained?.delegationReadCut && demand.updatedAt < retained.delegationReadCut.goalUpdatedAt) return retained
   return {
@@ -1655,6 +1661,7 @@ function demandRecordFromFilesystem(demand: FilesystemDemand, retained?: DemandR
     supervisorSessionId: demand.supervisorSessionId,
     participations: [...demand.participations],
     ...(demand.creationOrigin === undefined ? {} : { creationOrigin: demand.creationOrigin }),
+    ...(demand.discussionOperationId === undefined ? {} : { discussionOperationId: demand.discussionOperationId }),
     tags: [...demand.tags],
     plannedStartAt: demand.plannedStartAt,
     targetAt: demand.targetAt,
@@ -4844,226 +4851,36 @@ function gitNavigationTarget(state: AppState) {
     surface.file ? [surface.file.path, surface.file.origPath] : null]) : null
 }
 
-async function openGoalPmo(demandId: string, prompt?: string, userRequest?: string, options?: { creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }, promptGoal?: DemandRecord): Promise<string> {
-  const get = useAppStore.getState
-  const set = useAppStore.setState
-  const state = get()
-  const demand = state.demands[demandId]
-  if (!demand) throw new Error(`Demand ${demandId} is unavailable`)
-  const projectContext = goalProjectContextText(goalProjectContext(state.config, demand.projectId, state.activeWorkspaceId), demand.projectId)
-  const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
-  if (!workspace) throw new Error('Scratch workspace is unavailable')
-  const body = userRequest ?? ''
-  const discussionName = `${demand.title.trim() || 'New goal'} · PMO`
-  const discussionNames = { agentName: discussionName, tabName: discussionName, nameSource: 'derived' as const }
-  const intent: GoalPmoIntent = { goalId: demandId, ...(options?.creationOperationId === undefined ? {} : { creationOperationId: options.creationOperationId }) }
-  let receiptSessionId: string | null = null
-  const done = (tabId: string, agentSessionId: string | null = receiptSessionId): string => { options?.onReceipt?.({ tabId, agentSessionId }); return tabId }
-  const launchedReceipt = (result: AgentLaunchResult): void => { receiptSessionId = result.created.agentSessionId; options?.onReceipt?.({ tabId: mappedTabId ?? pmoTabId!, agentSessionId: result.created.agentSessionId }) }
-  let pmoTabId: string | undefined
-  const executionContext = executionFocusContextText(
-    state.agentFocus,
-    state.sessions,
-    (session) => state.agentNames[session.id] ?? session.label
-  )
-  const pmoNote = (fresh = false): string => [
-      ...(!fresh ? [MOTE_COORDINATION_ROLE] : []),
-      ...(fresh ? [goalRoleGuidance({ role: 'manager', goalId: demandId, source: { kind: 'goal-pmo-launch', ...(intent.creationOperationId ? { operationId: intent.creationOperationId } : {}) } })] : []),
-      prompt?.trim(),
-      projectContext,
-      executionContext,
-      ...(fresh ? [`This is a fresh dedicated PMO context for Demand ${demand.id}.`,
-        ...(promptGoal === demand ? [] : [`Title: ${demand.title}`, `Description: ${demand.description || '(empty)'}`])] : [])
-    ].filter(Boolean).join('\n\n')
-  const focusPmoTabSession = (tabId: string): void => {
-    const current = get()
-    if (current.mainSurface !== state.mainSurface || current.selectedDemandId !== state.selectedDemandId ||
-      current.activeWorkspaceId !== state.activeWorkspaceId || current.agentFocus.pmo !== state.agentFocus.pmo) return
-    const tab = get().tabs[tabId]
-    const surface = tab?.regions[tab.layout.activeRegionId]
-    if (surface?.kind !== 'agent') return
-    const session = get().sessions.find((candidate) => candidate.id === surface.sessionId)
-    if (session && focusLaneForSession(topicIdForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)),
-      scratchTopicsForWorkspace(get().scratchTopicSnapshots, workspaceForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)))) === 'pmo') {
-      get().focusPmoSession(session.id)
+async function openGoalPmo(demandId: string, mode: 'open' | 'grill' | 'grounding', options?: { onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string> {
+  const state = useAppStore.getState(), originalNavigation = fileNavigationSelection(state)
+  const retained = goalDiscussionTarget(state, demandId)
+  // The original client may navigate a retained exact workface without adopting
+  // its private relation into the background domain or creating a replacement.
+  if (mode === 'open' && retained.kind === 'existing') {
+    const region = retained.region, session = region.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
+    const sessionId = session?.kind === 'agent' ? session.control.agentSessionId : null
+    if (session?.kind === 'agent') state.revealFocusAgent({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }, session.id)
+    else {
+      const layout = state.layouts[retained.tab.workspaceId], groupId = layout && tabGroupForTab(layout, retained.tab.id)
+      if (groupId) state.activateTab(retained.tab.workspaceId, groupId, retained.tab.id)
     }
+    options?.onReceipt?.({ tabId: retained.tabId, agentSessionId: sessionId }); return retained.tabId
   }
-
-  const discussionTarget = goalDiscussionTarget(state, demandId)
-  const mappedTabId = discussionTarget.kind === 'new' ? undefined : discussionTarget.tabId
-  const mappedTab = discussionTarget.kind === 'existing' ? discussionTarget.tab : undefined
-  if (discussionTarget.kind === 'unconfirmed') throw new Error('The original Goal discussion placement is unconfirmed. Keep its Tab and Session; restore that workface before opening this discussion.')
-  const layout = state.layouts[workspace.id]
-  const originalSource = intent.creationOperationId === undefined ? undefined : demand.participations?.find(source => source.id === demand.creationOrigin?.requesterParticipationId && source.kind === 'discussion')
-  let originalPmoSessionId: string | undefined
-  if (originalSource) {
-    const presentations = (agentSessionPresentationIndex(state.sessions).get(originalSource.agentSessionId) ?? []).filter(session =>
-      session.control.agentSessionId === originalSource.agentSessionId && session.control.hostId === originalSource.hostId && session.hostId === originalSource.hostId)
-    const originalPending = state.pendingAgentLaunches[originalSource.agentSessionId]?.request
-    const pendingOriginalSource = presentations.length === 0 && originalPending?.hostId === originalSource.hostId &&
-      originalPending.goalPmo?.goalId === demandId && originalPending.goalPmo.creationOperationId === intent.creationOperationId
-    if (presentations.length !== 1 && !pendingOriginalSource) throw new Error('The original PMO Session presentation is unconfirmed or ambiguous on its recorded Host. The Goal, Tab and healthy Session are kept; refresh the original observation before retrying.')
-    originalPmoSessionId = pendingOriginalSource ? originalSource.agentSessionId : presentations[0]!.id
-  } else if (intent.creationOperationId !== undefined) {
-    const originalRecipients = new Set([
-      ...Object.entries(state.pendingAgentLaunches).filter(([, launch]) => launch.request?.goalPmo?.goalId === demandId && launch.request.goalPmo.creationOperationId === intent.creationOperationId).map(([id]) => id),
-      ...Object.entries(state.agentSteerQueues).filter(([, queue]) => queue.some(entry => entry.goalPmo?.goalId === demandId && entry.goalPmo.creationOperationId === intent.creationOperationId)).map(([id]) => id)
-    ])
-    if (originalRecipients.size > 1) throw new Error('The original PMO request has ambiguous retained recipients. The Goal and original requests are kept; inspect the same operation before retrying.')
-    originalPmoSessionId = [...originalRecipients][0]
-  }
-  const originalRegions = originalPmoSessionId && mappedTab ? Object.values(mappedTab.regions).filter(surface => surface.kind === 'agent' && surface.sessionId === originalPmoSessionId) : []
-  if (originalPmoSessionId && originalRegions.length !== 1) throw new Error('The original PMO Region is unconfirmed or ambiguous. The Goal, original Tab and Session are kept; restore that exact workface before retrying.')
-  const mappedRegion = originalPmoSessionId ? originalRegions[0] :
-    discussionTarget.kind === 'existing' ? discussionTarget.region : undefined
-  const mappedTabIsUsable = Boolean(
-    mappedTab &&
-    mappedTab.workspaceId === workspace.id &&
-    mappedTab.topicId === PMO_TEAMS_TOPIC_ID &&
-    layout &&
-    tabGroupForTab(layout, mappedTab.id) !== null &&
-    mappedRegion !== undefined && isAgentOrLauncherSurface(mappedRegion)
-  )
-  if (originalPmoSessionId && !mappedTabIsUsable) throw new Error('The original PMO workface placement is unconfirmed. The Goal and Session are kept; restore the same Tab before retrying.')
-  if (mappedTabIsUsable && mappedTab) {
-    const recipient = mappedRegion?.kind === 'agent' ? sessionPresentationById(state.sessions).get(mappedRegion.sessionId) : undefined
-    const pending = mappedRegion?.kind === 'agent' ? state.pendingAgentLaunches[mappedRegion.sessionId]?.request : undefined
-    let canonicalRecipientId = recipient?.kind === 'agent' && recipient.control?.kind === 'agent' ? recipient.control.agentSessionId : undefined
-    if (!canonicalRecipientId && intent.creationOperationId !== undefined && pending?.hostId && pending.createOperationId && pending.goalPmo?.goalId === demandId && pending.goalPmo.creationOperationId === intent.creationOperationId) {
-      canonicalRecipientId = await api.sessions.resolveCreationSessionId(pending.hostId, pending.createOperationId)
-    }
-    receiptSessionId = canonicalRecipientId ?? null
-    // Opening an existing discussion is navigation only, including a retained launcher.
-    if (!prompt?.trim()) { focusPmoTabSession(mappedTab.id); return done(mappedTab.id) }
-    if (mappedRegion?.kind === 'agent' && prompt?.trim()) {
-      // The live recipient already has its exact owner. Topic file preparation cannot gate input.
-      const recipientId = mappedRegion.sessionId
-      if (intent.creationOperationId === undefined) {
-        if (get().send(recipientId, body, undefined, undefined, pmoNote(), { goalPmo: intent }) === false) throw new Error('The Mote task was not queued. The goal is kept; retry from its detail.')
-        focusPmoTabSession(mappedTab.id)
-        return done(mappedTab.id)
-      }
-      if (!canonicalRecipientId) throw new Error('The original PMO canonical Session is unconfirmed. The Goal and original Region are kept; refresh its exact control before retrying.')
-      if (intent.creationOperationId !== undefined && demand.creationOrigin?.requesterParticipationId) return done(mappedTab.id)
-      if (intent.creationOperationId !== undefined) {
-        const hostId = recipient?.kind === 'agent' ? recipient.control.hostId : pending?.hostId
-        if (!hostId) throw new Error('The original PMO Host is unconfirmed. Keep this Session and inspect the original operation without starting again.')
-        const createOperationId = await goalPmoOperation(intent, 'create')
-        const reserved = await api.sessions.resolveCreationSessionId(hostId, createOperationId)
-        if (canonicalRecipientId === reserved) {
-          await api.demands.reconcilePmoCreation(intent, hostId, canonicalRecipientId, createOperationId)
-          await get().refreshDemand(demandId)
-          if (get().pendingAgentLaunches[recipientId]) {
-            const created = await api.sessions.creation(hostId, canonicalRecipientId)
-            if (created.kind === 'retired-agent') throw new Error('The original PMO Session was closed. Its Goal, request and history are retained; explicitly recover that Session before attaching it.')
-            const snapshot = await api.sessions.snapshot()
-            const session = snapshot.sessions.find((item): item is Extract<SessionSnapshot, { kind: 'agent' }> => item.kind === 'agent' && item.control.agentSessionId === canonicalRecipientId && item.control.hostId === hostId && item.control.run.runId === created.run.runId)
-            const timeline = snapshot.timelines[canonicalRecipientId]
-            const result = await get().canonicalizeAgentLaunch({ created, projectionFailures: [], ...(session ? { session } : {}), ...(timeline ? { timeline } : {}) })
-            if (!result) throw new Error('The original PMO display remains unconfirmed. Its confirmed Session is kept; inspect the same creation.')
-            let gap: string | undefined
-            set(current => {
-              const owner = findWorkbenchRegion(current.tabs, mappedRegion.regionId)
-              const attached = ownsSessionLaunch(owner?.surface, 'agent', recipientId)
-                ? reduceAgentSessionLaunchAttached(current, mappedRegion.regionId, result)
-                : reduceDetachedAgentLaunch(current, result)
-              gap = attached.timelineGapSessionId
-              return attached.state
-            })
-            if (gap) void get().resyncTimeline(gap)
-          }
-          return done(mappedTab.id)
-        }
-      }
-      const operationId = intent.creationOperationId === undefined ? mintObjectId() : await goalPmoOperation(intent, 'discussion')
-      const previous = get().agentSteerQueues[recipientId]?.find(entry => entry.operationId === operationId)
-      if (previous && recipient?.kind === 'agent') {
-        await api.demands.reconcilePmoInput(intent, recipient.control, operationId)
-        await get().refreshDemand(demandId)
-        set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
-          [recipientId]: (current.agentSteerQueues[recipientId] ?? []).filter(entry => entry.operationId !== operationId) } }))
-        return done(mappedTab.id)
-      }
-      if (admitAgentSteer(recipientId, body, undefined, operationId, undefined, pmoNote(), { goalPmo: intent }) === false) throw new Error('The Mote task was not queued. The goal is kept; retry from its detail.')
-      void get().sendQueuedAgentSteer(recipientId, operationId).catch(error => get().reportError(error))
-      focusPmoTabSession(mappedTab.id)
-      return done(mappedTab.id)
-    }
-    if (mappedRegion?.kind === 'launcher') {
-      const note = pmoNote(true)
-      set(current => ({
-        agentComposerDrafts: { ...current.agentComposerDrafts, [mappedTab.layout.activeRegionId]: body },
-        agentComposerNotes: { ...current.agentComposerNotes, [mappedTab.layout.activeRegionId]: note }
-      }))
-      try { await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id }) }
-      catch (cause) {
-        get().reportError(cause, { kind: 'indeterminate', summary: 'PMO Topic preparation is unconfirmed. The Goal, dedicated Tab and original request are kept; retry Start agent here.' })
-        return done(mappedTab.id)
-      }
-      const liveLayout = get().layouts[workspace.id]
-      const groupId = liveLayout ? tabGroupForTab(liveLayout, mappedTab.id) : null
-      if (!groupId) throw new Error('Dedicated PMO Tab is no longer placed')
-      const choice = primaryMoteExecutorChoice(get())
-      const executorId = choice.executorId
-      if (!executorId) {
-        get().reportError(new Error(choice.issue ?? 'The primary Mote Agent configuration is unconfirmed. This Goal, dedicated Tab and request are kept; choose an Agent and Start agent here.'), { kind: 'indeterminate' })
-        return done(mappedTab.id)
-      }
-      await get().launchAgent(executorId, body, groupId, {
-        tabId: mappedTab.id,
-        regionId: mappedTab.layout.activeRegionId
-      }, undefined, discussionNames, note, { intent, onCreated: launchedReceipt })
-    } else await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id })
-    focusPmoTabSession(mappedTab.id)
-    return done(mappedTab.id)
-  }
-
-  const current = get()
-  const currentLayout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
-  const tab = newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID)
-  pmoTabId = tab.id
-  const nextLayout = addTabPlacement(currentLayout, currentLayout.activeGroupId, tab.id)
-  if (!nextLayout) throw new Error('The Scratch Tab Group is no longer available')
-  const note = pmoNote(true)
-  set((next) => ({
-    tabs: { ...next.tabs, [tab.id]: tab },
-    layouts: { ...next.layouts, [workspace.id]: nextLayout },
-    demandPmoTabIds: { ...next.demandPmoTabIds, [demandId]: tab.id },
-    agentComposerDrafts: { ...next.agentComposerDrafts, [tab.layout.activeRegionId]: body },
-    agentComposerNotes: { ...next.agentComposerNotes, [tab.layout.activeRegionId]: note }
-  }))
-  // A generated title has its original owner and provenance even if preparation fails.
-  // Naming is independent of starting the requested discussion and never gates it.
-  void commitDisplayName({ kind: 'tab', id: tab.id }, discussionName, 'derived', 0)
-    .catch(error => get().reportWorkbenchSaveFailure(error))
-  let preparedTopic: ScratchTopicSnapshot
-  try { preparedTopic = await api.scratch.ensureTopic(workspace.id, PMO_TEAMS_TOPIC_ID) }
-  catch (cause) {
-    get().reportError(cause, { kind: 'indeterminate', summary: 'PMO Topic preparation is unconfirmed. The Goal, dedicated Tab and original request are kept; retry Start agent here.' })
-    return done(tab.id)
-  }
-  const liveWorkspace = get().config?.workspaces.find(item => item.id === workspace.id)
-  // This request's new Launcher cannot erase its original unique primary target.
-  // The prepared file and current Host configuration still decide explicit new-chat defaults.
-  const choice = liveWorkspace?.hostId === workspace.hostId && liveWorkspace.path === workspace.path && preparedTopic.id === PMO_TEAMS_TOPIC_ID
-    ? primaryMoteExecutorChoice({ ...state, config: get().config, executorDetections: get().executorDetections, hostExecutorInventories: get().hostExecutorInventories }, undefined, preparedTopic)
-    : { executorId: undefined, issue: 'The original Mote directory or Host changed during preparation. The Goal and request are kept; inspect this target before starting.' }
-  const executorId = choice.executorId
-  if (!executorId) {
-    get().reportError(new Error(choice.issue ?? 'The primary Mote Agent configuration is unconfirmed. This Goal, dedicated Tab and request are kept; choose an Agent and Start agent here.'), { kind: 'indeterminate' })
-    return done(tab.id)
-  }
-  // The new Tab already has its own name operation; launching writes only the new Session name.
-  await get().launchAgent(executorId, body, currentLayout.activeGroupId, {
-    tabId: tab.id,
-    regionId: tab.layout.activeRegionId
-  }, undefined, { ...discussionNames, tabName: undefined }, note, { intent, onCreated: launchedReceipt })
-  focusPmoTabSession(tab.id)
-  return done(tab.id)
+  const choice = primaryMoteExecutorChoice(state)
+  const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.discuss', requestId: mintObjectId(), demandId, mode, ...(choice.executorId ? { executorId: choice.executorId } : {}) })
+  if (result.operation !== 'demand.discuss') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original discussion returned another operation.')
+  const goal = hostGoalRecord(result.demand)
+  useAppStore.setState(current => ({ demands: { ...current.demands, [goal.id]: demandRecordFromFilesystem(goal, current.demands[goal.id]) } }))
+  const receipt = { tabId: result.receipt.tabId, agentSessionId: result.receipt.agentSessionId }
+  options?.onReceipt?.(receipt)
+  if (receipt.agentSessionId && fileNavigationSelection(useAppStore.getState()) === originalNavigation)
+    useAppStore.getState().revealFocusAgent({ hostId: 'local', agentSessionId: receipt.agentSessionId })
+  return receipt.tabId
 }
 
 // Undelivered display projections retain the exact native creation event, never a URL replay.
 const pendingNativeBrowsers = new Map<string, Extract<BrowserEvent, { type: 'native-opened' }>>()
+
 function settleNativeBrowserProjectionNotice(state: AppState, browserId: string): Partial<AppState> {
   const key = `native-browser:${browserId}`
   const records = state.notificationEvents.filter(notice => notice.context?.event?.source === 'spatial' && notice.context.event.key === key)
@@ -5353,7 +5170,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const disposeMoteStartupRecovery = beginMoteStartupRecovery()
     const disposeRunServiceProjection = initializeRunServiceProjection()
     const disposeInputOccupation = initializeAgentInputOccupation()
-    const disposeGoalResponsibilities = initializeGoalResponsibilityObservation()
+    let startupGoalInvalidations: Set<string> | null = new Set()
+    const disposeGoalResponsibilities = initializeGoalResponsibilityObservation(ids => { for (const id of ids) startupGoalInvalidations?.add(id) })
     const pendingSessionEvents = sessionMembershipEventBuffer()
     const pendingBrowserEvents = createBrowserProjectionEventQueue()
     let booting = true
@@ -5648,10 +5466,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           'The saved Board Demand projection remains visible; retry the Demand store when the filesystem is available.')))
         else {
           set(state => ({ demands: { ...state.demands, ...Object.fromEntries(result.value
-            .filter(demand => state.demands[demand.id] === demandsBeforeRead[demand.id])
+            .filter(demand => !startupGoalInvalidations?.has(demand.id) && state.demands[demand.id] === demandsBeforeRead[demand.id])
             .map(demand => [demand.id, demandRecordFromFilesystem(demand, state.demands[demand.id])])) } }))
           refreshKnownGoalResponsibilities(result.value.map(goal => goal.id))
         }
+        startupGoalInvalidations = null
       })
       const queuedNotesStorage = pendingNotesStorage; pendingNotesStorage = null
       void (queuedNotesStorage ? Promise.resolve(queuedNotesStorage) : api.notesStorage.inspect())
@@ -6003,8 +5822,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async executeControl(request, signal, options): Promise<AgentMuxControlResult> {
     if (request.operation === 'demand.patrol-all') return await executeGlobalGoalPatrol({
-      get, subscribe: (listener): (() => void) => useAppStore.subscribe(listener), list: () => api.demands.list(),
-      execute: (inner, spatialOptions) => get().executeControl(inner, signal, spatialOptions)
+      get, execute: inner => api.goals.execute(inner)
     }, request)
     if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') {
       return await (await import('./lib/mote-preferences-control')).executeMotePreferencesControl(request, signal)
@@ -6442,255 +6260,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
       return { ...record, assigneeSessionIds: [...(record.assigneeSessionIds ?? [])], supervisorSessionId: record.supervisorSessionId ?? null, participations: record.participations ?? [] }
     }
-    if (request.operation === 'demand.list' || request.operation === 'demand.show') {
-      const facts = await api.demands.list()
-      const retained = get().demands
-      const records = Object.fromEntries(facts.map(demand => [demand.id, demandRecordFromFilesystem(demand, retained[demand.id])]))
-      set(state => ({ demands: { ...state.demands, ...records } }))
-      refreshKnownGoalResponsibilities(facts.map(goal => goal.id))
-      const projected = projectDemands(get().config, get().sessions, records)
-      if (request.operation === 'demand.list') {
-        return { operation: request.operation, demands: projected.map(({ sessions: _sessions, workspacePath: _workspacePath, ...record }) => ({ ...record, assigneeSessionIds: [...(record.assigneeSessionIds ?? [])], supervisorSessionId: record.supervisorSessionId ?? null, participations: record.participations ?? [] })) }
-      }
-      const demand = projected.find((candidate) => candidate.id === request.demandId)
-      if (!demand) return { operation: request.operation, demand: null, goalContinuations: await api.continuousProgress.goals(request.demandId) }
-      const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
-      return { operation: request.operation, demand: { ...record, assigneeSessionIds: [...(record.assigneeSessionIds ?? [])], supervisorSessionId: record.supervisorSessionId ?? null, participations: record.participations ?? [] }, goalContinuations: await api.continuousProgress.goals(request.demandId) }
-    }
-    if (request.operation === 'demand.activity.append') {
-      const saved = await api.demands.activity(request.demandId, { kind: request.kind, message: request.message, actorId: null, operationId: request.requestId }, request.requestId)
-      const activity = saved.demand.activities.find(item => item.operationId === request.requestId)
-      if (!activity) throw controlFailure('CONTROL_FAILED', 'The original activity commit is unconfirmed. Inspect this same operation; the Goal and Agent are retained.')
-      set(state => ({ demands: { ...state.demands, [saved.demand.id]: demandRecordFromFilesystem(saved.demand, state.demands[saved.demand.id]) } }))
-      return { operation: request.operation, demand: demandRecord(request.demandId), activity,
-        receipt: { demandId: request.demandId, requestId: request.requestId, activityId: activity.id, diskDurability: 'confirmed', replayed: saved.replayed === true } }
-    }
-    if (request.operation === 'demand.activity.inspect') {
-      const inspected = await api.demands.inspectActivity(request.demandId, request.requestId)
-      return { operation: request.operation, demandId: inspected.demandId, requestId: inspected.operationId, activity: inspected.activity, diskDurability: inspected.diskDurability }
-    }
-    if (request.operation === 'demand.activity.read') {
-      return { operation: request.operation, ...await api.demands.readActivities(request.demandId) }
-    }
-    if (request.operation === 'demand.discuss') {
-      await get().refreshDemand(request.demandId)
-      let receipt: GoalPmoReceipt | undefined
-      const capture = (value: GoalPmoReceipt): void => { receipt = value }
-      const tabId = request.mode === 'open' ? await get().openDemandPmo(request.demandId, capture) : await get().requestDemandPmoTask(request.demandId, request.mode, { onReceipt: capture })
-      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, requestId: request.requestId, mode: request.mode, tabId, agentSessionId: receipt?.agentSessionId ?? null } }
-    }
-    if (request.operation === 'demand.confirm') {
-      await get().confirmDemandGoal(request.demandId, request.expectedRevision)
-      const demand = demandRecord(request.demandId)
-      return { operation: request.operation, demand, receipt: { demandId: demand.id, confirmedRevision: demand.alignment!.revision, confirmedAt: demand.alignment!.confirmedAt! } }
-    }
-    if (request.operation === 'demand.accept') {
-      await get().acceptDemandResult(request.demandId, request.expectedAlignmentRevision, request.expectedSubmissionId, request.acceptGaps, request.finish)
-      const demand = demandRecord(request.demandId)
-      return { operation: request.operation, demand, receipt: { demandId: demand.id, alignmentRevision: demand.grounding!.alignmentRevision, submissionId: demand.grounding!.submissionId, acceptedAt: demand.grounding!.acceptedAt!, acceptedWithGaps: demand.grounding!.checks.some(check => check.outcome === 'gap') } }
-    }
-    if (request.operation === 'demand.continuation-action') {
-      const continuation = await api.continuousProgress.goalAction(request.demandId, request.loopId, request.action, request.expectedRevision, request.requestId, request.caller)
-      return { operation: request.operation, demandId: request.demandId, continuation, diskDurability: 'confirmed' }
-    }
-    if (request.operation === 'demand.create') {
-      const project = request.projectId ? controlProject(request.projectId) : undefined
-      if (request.projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${request.projectId}`)
-      const policy = demandWriteDecision({
-        mode: 'risk-confirm',
-        risk: request.decision?.risk ?? 'unknown',
-        projectKnown: request.projectId === undefined || Boolean(project),
-        hasConfirmation: request.decision?.confirmation === 'user' || request.decision?.confirmation === 'automatic'
-      })
-      if (policy !== 'automatic') throw controlFailure('CONTROL_FAILED', policy === 'blocked' ? 'Demand routing is unresolved; choose a Project before writing.' : 'Demand write requires explicit confirmation.')
-      const id = await get().createDemand({
-        ...(request.demandId === undefined ? {} : { id: request.demandId }),
-        title: request.title,
-        ...(request.description === undefined ? {} : { description: request.description }),
-        projectId: request.projectId ?? null,
-        projectName: project?.name ?? null,
-        ...(request.priority === undefined ? {} : { priority: request.priority }),
-        ...(request.status === undefined ? {} : { status: request.status }),
-        ...(request.sessionIds === undefined ? {} : { sessionIds: request.sessionIds }),
-        ...(request.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: request.assigneeSessionIds }),
-        ...(request.supervisorSessionId === undefined ? {} : { supervisorSessionId: request.supervisorSessionId }),
-        ...(request.contentRefs === undefined ? {} : { contentRefs: request.contentRefs }),
-        ...(request.decision === undefined ? {} : { decisionLog: [request.decision] })
-      }, request.requestId)
-      const demand = demandRecord(id)
-      return { operation: request.operation, demand, receipt: { demandId: id, createdAt: demand.createdAt } }
-    }
-    if (request.operation === 'demand.update') {
-      const current = demandRecord(request.demandId)
-      const projectId = request.patch.projectId === undefined ? current.projectId : request.patch.projectId
-      const project = projectId ? controlProject(projectId) : undefined
-      if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
-      await get().updateDemand(request.demandId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) }, request.requestId, request.expectedUpdatedAt)
-      const demand = demandRecord(request.demandId)
-      return { operation: request.operation, demand, receipt: { demandId: demand.id, updatedAt: demand.updatedAt } }
-    }
-    const appendDemandActivity = async (demandId: string, message: string) => {
-      const current = demandRecord(demandId)
-      await get().updateDemand(demandId, { activityLog: [...(current.activityLog ?? []), message] })
-    }
-    const startDemand = async (demandId: string, sessionId?: string, continuation?: { intervalMs: number; alignmentRevision: number }, businessOperationId?: string, caller?: import('@agentmux/core').AgentMuxControlCaller, expectedUpdatedAt?: number) => {
-      let savedContinuation: import('@agentmux/core').ContinuousProgressLoop | undefined
-      const sourceForStart = (canonicalSessionId: string, hostId?: string) => {
-        const matches = get().sessions.filter((candidate): candidate is Extract<SessionSnapshot, { kind: 'agent' }> => candidate.kind === 'agent' && candidate.control.agentSessionId === canonicalSessionId && (hostId === undefined || candidate.control.hostId === hostId))
-        if (matches.length !== 1) throw controlFailure(matches.length > 1 ? 'CONTROL_REQUEST_CONFLICT' : 'UNKNOWN_AGENT_SESSION', `The exact responsible Agent Session has ${matches.length > 1 ? 'ambiguous' : 'unconfirmed'} presentation: ${canonicalSessionId}. Its saved identity and manual input are retained.`)
-        const source = matches[0]!
-        if (source.hostId !== source.control.hostId) throw controlFailure('STALE_AGENT_SESSION', 'The original Goal Session Host mapping is unconfirmed. Manual input is retained.')
-        return source
-      }
-      if (continuation) {
-        if (!sessionId || !businessOperationId) throw controlFailure('INVALID_CONTROL_REQUEST', 'Continuation needs an exact Session and stable business operation.')
-        const originalStarts = (await api.continuousProgress.goals(demandId)).filter(loop => loop.creationOperationId === businessOperationId)
-        if (originalStarts.length > 1) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original start has ambiguous durable loop facts. Your Agent and input are retained.')
-        const originalStart = originalStarts[0]
-        if (originalStart) {
-          savedContinuation = await api.continuousProgress.prepareGoal({ goalId: demandId, agentSessionId: sessionId, hostId: originalStart.hostId, providerId: originalStart.providerId, workspacePath: originalStart.workspacePath, alignmentRevision: continuation.alignmentRevision, intervalMs: continuation.intervalMs, operationId: businessOperationId, prompt: originalStart.initialDelivery?.prompt ?? '' }, caller)
-          if (savedContinuation.initialDelivery?.state === 'confirmed') {
-            // Preserve the original Loop receipt first. Dispatch bookkeeping is an observation
-            // of its original Core input; failure cannot revoke that confirmed delivery.
-            try {
-              const reference = { goalId: demandId, operationId: businessOperationId }
-              let dispatch = await api.demands.inspectDispatch(reference)
-              if (dispatch && dispatch.stage !== 'confirmed') {
-                const receipt = await api.demands.reconcileDispatch(reference)
-                dispatch = receipt.demand.id === demandId ? receipt.demand.dispatches?.find(entry => entry.operationId === businessOperationId) ?? null : null
-              }
-              if (dispatch?.stage === 'confirmed') {
-                set(state => ({ agentSteerQueues: Object.fromEntries(Object.entries(state.agentSteerQueues).map(([id, queue]) => [id,
-                  queue.filter(entry => entry.goalDispatch?.goalId !== demandId || entry.goalDispatch.operationId !== businessOperationId)])) }))
-              }
-            } catch (error) { get().reportError(error, { kind: 'indeterminate', summary: 'The original Loop input is confirmed. Its Goal dispatch record is unconfirmed; inspect the same operation without sending again.' }) }
-            try { await get().refreshDemand(demandId) }
-            catch (error) { get().reportError(error, { kind: 'indeterminate', summary: 'The original start is confirmed. Reading the current Goal is unconfirmed; its saved view and original receipt are retained. Refresh this same Goal to reconnect its latest state.' }) }
-            return { sessionId: savedContinuation.agentSessionId, startedAt: savedContinuation.initialDelivery.startedAt, demand: demandRecord(demandId), continuation: savedContinuation }
-          }
-        }
-      }
-      if (!businessOperationId) throw controlFailure('INVALID_CONTROL_REQUEST', 'Goal Start needs its stable original operation.')
-      const dispatchReference = { goalId: demandId, operationId: businessOperationId }
-      let originalDispatch = await api.demands.inspectDispatch(dispatchReference)
-      if (originalDispatch) {
-        if (sessionId !== undefined && originalDispatch.agentSessionId !== sessionId || Boolean(continuation) !== (originalDispatch.execution === 'continue') ||
-            continuation && continuation.alignmentRevision !== originalDispatch.alignmentRevision) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The original Start target or confirmed scope changed. Inspect the same operation without resending.')
-        if (originalDispatch.stage !== 'confirmed') {
-          try { await api.demands.reconcileDispatch(dispatchReference); originalDispatch = await api.demands.inspectDispatch(dispatchReference) }
-          catch (error) { if (!(error instanceof Error) || (error as Error & { code?: string }).code !== 'CONTROL_UNAVAILABLE') throw error }
-        }
-        if (originalDispatch?.stage === 'confirmed') {
-          // A read of the original receipt needs neither a live Run nor present-day assignees.
-          set(state => ({ agentSteerQueues: Object.fromEntries(Object.entries(state.agentSteerQueues).map(([id, queue]) => [id,
-            queue.filter(entry => entry.goalDispatch?.goalId !== demandId || entry.goalDispatch.operationId !== businessOperationId)])) }))
-          try { await get().refreshDemand(demandId) } catch (error) { get().reportError(error) }
-          let originalLoop = originalDispatch.loopId ? (await api.continuousProgress.goals(demandId)).find(loop => loop.loopId === originalDispatch!.loopId) : undefined
-          if (originalLoop && originalLoop.initialDelivery?.state !== 'confirmed') {
-            try { originalLoop = await api.continuousProgress.initialGoalInput(originalLoop, originalLoop.loopId, businessOperationId, 'confirm') }
-            catch (error) { get().reportError(error, { kind: 'indeterminate', summary: 'The original Core input is confirmed. Its Loop receipt is unconfirmed; inspect the same Loop without sending again.' }) }
-          }
-          return { sessionId: originalDispatch.agentSessionId, startedAt: originalLoop?.initialDelivery?.startedAt ?? originalDispatch.preparedAt, demand: demandRecord(demandId), ...(originalLoop ? { continuation: originalLoop } : {}) }
-        }
-      }
-      const facts = await api.demands.list()
-      const fresh = facts.find(goal => goal.id === demandId)
-      if (!fresh) throw controlFailure('CONTROL_UNAVAILABLE', 'The original Goal is unavailable. Its Agent, input and saved continuation are retained.')
-      set(state => ({ demands: { ...state.demands, [demandId]: demandRecordFromFilesystem(fresh, state.demands[demandId]) } }))
-      refreshKnownGoalResponsibilities([demandId])
-      const current = demandRecord(demandId)
-      const assigneeSessionIds = current.assigneeSessionIds ?? []
-      if (continuation) {
-        if (!sessionId || !businessOperationId) throw controlFailure('INVALID_CONTROL_REQUEST', 'Continuation needs an exact Session and stable business operation.')
-        if (!savedContinuation) {
-          if (!assigneeSessionIds.includes(sessionId) || current.supervisorSessionId !== sessionId) throw controlFailure('INVALID_CONTROL_REQUEST', 'Choose and save this exact responsible Session as the Goal Supervisor before starting Continue.')
-          const selected = sourceForStart(sessionId)
-          if (selected.processState !== 'running') throw controlFailure('STALE_AGENT_SESSION', 'The original Goal Session running target is unconfirmed. Manual input is retained.')
-          savedContinuation = await api.continuousProgress.prepareGoal({ goalId: demandId, agentSessionId: selected.control.agentSessionId, hostId: selected.control.hostId, providerId: selected.providerId, workspacePath: selected.workspacePath, alignmentRevision: continuation.alignmentRevision, intervalMs: continuation.intervalMs, operationId: businessOperationId, prompt: current.description.trim() || current.title }, caller)
-        }
-        const live = sourceForStart(sessionId, savedContinuation.hostId)
-        if (live.control.agentSessionId !== savedContinuation.agentSessionId || live.providerId !== savedContinuation.providerId || live.workspacePath !== savedContinuation.workspacePath || live.control.run.runId !== savedContinuation.initialDelivery?.condition.expectedRun.runId) throw controlFailure('STALE_AGENT_SESSION', 'The original Session changed after its start was saved. Its loop and healthy Agent are retained.')
-      }
-      const attachedSessionId = originalDispatch?.agentSessionId ?? sessionId ?? (assigneeSessionIds.length === 1 ? assigneeSessionIds[0] : null)
-      let session: Extract<SessionSnapshot, { kind: 'agent' }>
-      try {
-        if (!attachedSessionId || !originalDispatch && !savedContinuation && !assigneeSessionIds.includes(attachedSessionId)) throw controlFailure('INVALID_CONTROL_REQUEST', 'Choose an exact responsible Session before starting. With multiple assignees, select this start’s Agent explicitly; creating or saving an Agent does not start work.')
-        session = sourceForStart(attachedSessionId, originalDispatch?.hostId ?? savedContinuation?.hostId)
-      } catch (error) {
-        // Only local rejection before this fresh finite preparation is known not applied.
-        // Existing operations, Loop preparation and any owner/transport call keep unknown.
-        if (!originalDispatch && !continuation && error instanceof Error) Object.assign(error, { controlFailure: { disposition: 'not_applied', confirmedInputBytes: null } })
-        throw error
-      }
-      const original = savedContinuation?.initialDelivery
-      const prompt = originalDispatch?.prompt ?? original?.prompt ?? (current.description.trim() || current.title)
-      const prepared = await api.demands.prepareGoalStart(demandId, originalDispatch ? { operationId: originalDispatch.operationId, agentSessionId: originalDispatch.agentSessionId, hostId: originalDispatch.hostId, runId: originalDispatch.runId, execution: originalDispatch.execution, prompt: originalDispatch.prompt, ...(originalDispatch.loopId ? { loopId: originalDispatch.loopId, alignmentRevision: originalDispatch.alignmentRevision } : {}) } : {
-        operationId: businessOperationId, agentSessionId: session.control.agentSessionId, hostId: session.control.hostId,
-        runId: session.control.run.runId, execution: savedContinuation ? 'continue' : 'finite', prompt,
-        ...(savedContinuation ? { loopId: savedContinuation.loopId, alignmentRevision: continuation!.alignmentRevision } : {})
-      }, options?.admittedControlRequestId, expectedUpdatedAt ?? current.updatedAt)
-      if ('conflict' in prepared) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The Goal changed. Read its current content before starting this task. No input was submitted.', { controlFailure: { disposition: 'not_applied', confirmedInputBytes: null } })
-      set(state => ({ demands: { ...state.demands, [demandId]: demandRecordFromFilesystem(prepared.demand, state.demands[demandId]) } }))
-      refreshKnownGoalResponsibilities([demandId])
-      const operationId = admitAgentSteer(session.id, prompt, undefined, businessOperationId, undefined, undefined,
-        original && savedContinuation ? { goalDispatch: dispatchReference, goalContinuation: { goalId: demandId, loopId: savedContinuation.loopId, condition: original.condition } } : { goalDispatch: dispatchReference, execution: 'default' })
-      if (!operationId) throw controlFailure('CONTROL_FAILED', 'The message could not be queued. Its content is kept.')
-      await get().sendQueuedAgentSteer(session.id, operationId)
-      const retained = get().agentSteerQueues[session.id]?.find(entry => entry.operationId === operationId)
-      if (retained) throw controlFailure('CONTROL_FAILED', retained.error ?? 'The execution message is queued; delivery is not yet confirmed.')
-      await get().updateDemand(demandId, { status: 'in_progress' })
-      await appendDemandActivity(demandId, attachedSessionId ? `Execution started with Session ${attachedSessionId}.` : 'Execution start requested.')
-      if (savedContinuation && attachedSessionId) savedContinuation = await api.continuousProgress.initialGoalInput(savedContinuation, savedContinuation.loopId, businessOperationId!, 'confirm')
-      return { sessionId: attachedSessionId, startedAt: savedContinuation?.initialDelivery?.startedAt ?? prepared.demand.dispatches!.find(dispatch => dispatch.operationId === businessOperationId)!.preparedAt, demand: demandRecord(demandId), ...(savedContinuation ? { continuation: savedContinuation } : {}) }
-    }
-    if (request.operation === 'demand.assign') {
-      const current = demandRecord(request.demandId)
-      const projectId = request.projectId === undefined ? current.projectId : request.projectId
-      const project = projectId ? controlProject(projectId) : undefined
-      if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
-      await get().updateDemand(request.demandId, { ...(request.projectId === undefined ? {} : { projectId, projectName: project?.name ?? null }), ...(request.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: request.assigneeSessionIds }), ...(request.supervisorSessionId === undefined ? {} : { supervisorSessionId: request.supervisorSessionId }) }, request.requestId, request.expectedUpdatedAt ?? current.updatedAt)
-      await appendDemandActivity(request.demandId, request.start ? 'Assigned and start requested.' : 'Assigned without starting execution.')
-      if (request.start) {
-        const started = await startDemand(request.demandId, request.sessionId, undefined, request.requestId)
-        return { operation: request.operation, demand: started.demand, receipt: { demandId: request.demandId, assignedAt: Date.now(), startRequested: true } }
-      }
-      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, assignedAt: Date.now(), startRequested: false } }
-    }
-    if (request.operation === 'demand.start') {
-      const started = await startDemand(request.demandId, request.sessionId, request.continuation, request.requestId, request.caller, request.expectedUpdatedAt)
-      return { operation: request.operation, demand: started.demand, ...(started.continuation ? { continuation: started.continuation } : {}), receipt: { demandId: request.demandId, startedAt: started.startedAt, sessionId: started.sessionId } }
-    }
-    if (request.operation === 'demand.handoff') {
-      const current = demandRecord(request.demandId)
-      await get().updateDemand(request.demandId, { ...(request.assigneeSessionIds === undefined ? request.sessionId ? { assigneeSessionIds: [request.sessionId] } : {} : { assigneeSessionIds: request.assigneeSessionIds }), ...(request.supervisorSessionId === undefined ? {} : { supervisorSessionId: request.supervisorSessionId }) }, request.requestId, request.expectedUpdatedAt ?? current.updatedAt)
-      await appendDemandActivity(request.demandId, `Handoff to ${(request.assigneeSessionIds ?? (request.sessionId ? [request.sessionId] : [])).join(', ') || 'unassigned'}.`)
-      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, handedOffAt: Date.now(), sessionId: request.sessionId ?? null } }
-    }
-    if (request.operation === 'demand.delete') {
-      const demand = demandRecord(request.demandId)
-      await api.demands.delete(request.demandId)
-      set((state) => {
-        const { [request.demandId]: _removed, ...demands } = state.demands
-        return { demands, ...(state.selectedDemandId === request.demandId ? { selectedDemandId: null } : {}) }
-      })
-      return { operation: request.operation, demand, receipt: { demandId: request.demandId, deletedAt: Date.now() } }
-    }
-    if (request.operation === 'demand.link-session') {
-      const current = demandRecord(request.demandId)
-      if (!get().sessions.some((session) => session.id === request.sessionId)) throw controlFailure('UNKNOWN_AGENT_SESSION', `Agent Session is not available: ${request.sessionId}`)
-      const sessionIds = current.sessionIds.includes(request.sessionId) ? current.sessionIds : [...current.sessionIds, request.sessionId]
-      await get().updateDemand(request.demandId, { sessionIds })
-      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, sessionId: request.sessionId } }
-    }
-    if (request.operation === 'demand.link-project') {
-      const project = controlProject(request.projectId)
-      if (!project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${request.projectId}`)
-      await get().updateDemand(request.demandId, { projectId: project.id, projectName: project.name })
-      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, projectId: project.id } }
-    }
-    if (request.operation === 'demand.decision-log') {
-      const demand = demandRecord(request.demandId)
-      return { operation: request.operation, demandId: request.demandId, decisions: demand.decisionLog ?? [] }
+    if (isGoalBusinessRequest(request)) {
+      const result = await api.goals.execute(request)
+      const records = result.operation === 'demand.list' ? result.demands : 'demand' in result && result.demand ? [result.demand] : []
+      if (records.length) set(state => ({ demands: { ...state.demands, ...Object.fromEntries(records.map(goal => [goal.id, demandRecordFromFilesystem(hostGoalRecord(goal), state.demands[goal.id])])) } }))
+      if (result.operation === 'demand.delete') set(state => { const { [result.demand.id]: _removed, ...demands } = state.demands; return { demands } })
+      refreshKnownGoalResponsibilities(records.map(goal => goal.id))
+      return result
     }
     if (request.operation === 'focus') {
       const originalNavigation = fileNavigationSelection(get())
@@ -8081,142 +7657,87 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set({ demandArrangement: arrangement })
   },
   async openDemandPmo(demandId, onReceipt) {
-    return openGoalPmo(demandId, undefined, undefined, onReceipt === undefined ? undefined : { onReceipt })
+    return openGoalPmo(demandId, 'open', onReceipt === undefined ? undefined : { onReceipt })
   },
   async requestDemandPmoTask(demandId, mode, options) {
-    const demand = get().demands[demandId]
-    if (!demand) throw new Error(`Goal ${demandId} is unavailable`)
-    const quote = (value: string): string => "'" + value.replaceAll("'", "'\"'\"'") + "'"
-    const proposal = mode === 'grill'
-      ? { summary: 'Current goal in the user’s words', criteria: [{ id: 'criterion-1', text: 'Observable success condition' }], openQuestions: [] }
-      : { alignmentRevision: demand.alignment?.revision ?? 1, summary: 'Observed results', checks: [{ criterionId: demand.alignment?.criteria[0]?.id ?? 'criterion-1', outcome: 'unknown', evidence: [], note: 'State what remains unverified.' }] }
-    const prompt = [
-      `You coordinate delivery and closeout for existing Goal ${demand.id}. Current request: ${mode === 'grill' ? 'Grill: align the goal' : 'Grounding: align the results'}.`,
-      ...(!demand.alignment && !demand.description.trim() ? ['This is an existing undefined Goal draft. Its placeholder title is not the user’s intent. Ask what they want to achieve and update this same Goal ID; do not invent an outcome, success criteria or human approval.'] : []),
-      'Preserve the user’s original intent. Do not create another Goal, invent requirements, or overwrite description with your summary.',
-      'Inspect this same Goal for its current Supervisor, assignees and criteria. Keep its delivery and naming responsibilities from the coordination guide. This request asks for discussion or inspection; continue execution only within authorization the user actually gave.',
-      mode === 'grill'
-        ? 'Discuss only choices that change the goal. Propose a readable summary, stable success criterion IDs, and actual unresolved questions. The person confirms the goal in Goals.'
-        : 'Inspect the actual work and report every current criterion with met/gap/unknown, locatable evidence references and concrete gaps. A reference is not proof by itself. The person accepts results in Goals; never claim their acceptance.',
-      `Current durable Goal facts:\n${JSON.stringify({ id: demand.id, title: demand.title, description: demand.description, projectId: demand.projectId, sessionIds: demand.sessionIds, supervisorSessionId: demand.supervisorSessionId, assigneeSessionIds: demand.assigneeSessionIds, alignment: demand.alignment, grounding: demand.grounding }, null, 2)}`,
-      'Read the current Goal before submitting. Use the public CLI below; replace the example with your actual proposal, not its placeholder content. Owner generates revision/submission IDs and acknowledgement timestamps.',
-      `"$AGENTMUX_CLI" goal inspect --goal ${quote(demand.id)}`,
-      `"$AGENTMUX_CLI" goal update --goal ${quote(demand.id)} --${mode === 'grill' ? 'alignment' : 'grounding'} ${quote(JSON.stringify(proposal))}`
-    ].join('\n\n')
-    return openGoalPmo(demandId, prompt, mode === 'grill' ? demand.alignment ? 'Discuss changes' : 'Clarify goal' : demand.grounding ? 'Ask agent to check again' : 'Ask agent to check work', options, demand)
+    return openGoalPmo(demandId, mode, options)
   },
   async createDemand(input, controlRequestId) {
-    const presentation = get()
-    const catalog = workbenchSelectionCatalog(presentation)
+    const presentation = get(), catalog = workbenchSelectionCatalog(presentation)
     const sourceSessionIds = input.decisionLog?.flatMap(decision => decision.sourceSessionId ? [decision.sourceSessionId] : [])
     const inferred = goalContentSource(catalog, sourceSessionIds?.length ? sourceSessionIds : input.sessionIds ?? []).contentRef
     const contentRefs = input.contentRefs ?? (inferred ? [inferred] : undefined)
     if (contentRefs?.some(ref => !confirmedGoalContentReference(catalog, ref))) throw controlFailure('INVALID_CONTROL_REQUEST', 'The exact Goal content resource is unconfirmed. Existing work is retained.')
-    let receipt = await api.demands.create({
-      ...(input.id === undefined ? {} : { id: input.id }),
-      title: input.title.trim(),
-      description: input.description ?? '',
-      ...(input.status === undefined ? {} : { status: input.status }),
-      ...(input.priority === undefined ? {} : { priority: input.priority }),
-      projectId: input.projectId ?? null,
-      projectName: input.projectName ?? null,
-      ...(input.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: [...input.assigneeSessionIds] }),
-      ...(input.supervisorSessionId === undefined ? {} : { supervisorSessionId: input.supervisorSessionId }),
-      ...(input.tags === undefined ? {} : { tags: input.tags }),
-      ...(input.plannedStartAt === undefined ? {} : { plannedStartAt: input.plannedStartAt }),
-      ...(input.targetAt === undefined ? {} : { targetAt: input.targetAt }),
-      ...(input.parentDemandId === undefined ? {} : { parentDemandId: input.parentDemandId }),
+    const operationId = controlRequestId ?? mintObjectId()
+    const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.create', requestId: operationId,
+      ...(input.id ? { demandId: input.id } : {}), title: input.title.trim(), description: input.description ?? '', ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(input.priority ? { priority: input.priority } : {}), ...(input.status ? { status: input.status } : {}),
+      ...(input.assigneeSessionIds ? { assigneeSessionIds: [...input.assigneeSessionIds] } : {}), ...(input.supervisorSessionId === undefined ? {} : { supervisorSessionId: input.supervisorSessionId }),
+      sessionIds: [...(input.sessionIds ?? [])], ...(contentRefs ? { contentRefs: [...contentRefs] } : {}),
+      ...(input.tags ? { tags: [...input.tags] } : {}), ...(input.plannedStartAt === undefined ? {} : { plannedStartAt: input.plannedStartAt }),
+      ...(input.targetAt === undefined ? {} : { targetAt: input.targetAt }), ...(input.parentDemandId === undefined ? {} : { parentDemandId: input.parentDemandId }),
       ...(input.phaseIndex === undefined ? {} : { phaseIndex: input.phaseIndex }),
-      sessionIds: input.sessionIds ?? [],
-      ...(contentRefs === undefined ? {} : { contentRefs: [...contentRefs] })
-    }, controlRequestId)
-    const id = receipt.demand.id
-    const decisionLog: AgentMuxDemandDecision[] = []
-    const publish = (): void => {
-      const record = { ...demandRecordFromFilesystem(receipt.demand), source: input.source ?? 'default-topic', decisionLog: [...decisionLog] }
-      set(state => ({ demands: { ...state.demands, [id]: record },
-        ...(state.mainSurface === presentation.mainSurface && state.activeWorkspaceId === presentation.activeWorkspaceId &&
-          (state.selectedDemandId === presentation.selectedDemandId || state.selectedDemandId === id) ? { selectedDemandId: id } : {}) }))
+      decision: input.decisionLog?.[0] ?? { input: input.title, candidates: [], selectedProjectId: input.projectId ?? null, risk: 'low', confirmation: 'user', wikiVersion: null, recordedAt: Date.now(), sourceSessionId: null } })
+    if (result.operation !== 'demand.create') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal create returned another operation.')
+    const goal = hostGoalRecord(result.demand)
+    set(state => ({ demands: { ...state.demands, [goal.id]: demandRecordFromFilesystem(goal) },
+      ...(state.mainSurface === presentation.mainSurface && state.activeWorkspaceId === presentation.activeWorkspaceId && state.selectedDemandId === presentation.selectedDemandId ? { selectedDemandId: goal.id } : {}) }))
+    for (const [index, message] of (input.activityLog ?? []).entries()) {
+      const appended = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.activity.append', requestId: operationId + ':activity:' + index, demandId: goal.id, kind: 'board', message })
+      if (appended.operation !== 'demand.activity.append') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal activity returned another operation. The saved Goal is retained.')
+      set(state => ({ demands: { ...state.demands, [goal.id]: demandRecordFromFilesystem(hostGoalRecord(appended.demand), state.demands[goal.id]) } }))
     }
-    publish()
-    try {
-      for (const message of input.activityLog ?? []) {
-        receipt = await api.demands.activity(id, { kind: 'board', message, actorId: null })
-        publish()
-      }
-      for (const decision of input.decisionLog ?? []) {
-        receipt = await api.demands.decision(id, { question: decision.input, decision: decision.selectedProjectId ?? '(unassigned)', rationale: decision.candidates.map(candidate => candidate.reason).join('; ') || 'Explicit routing decision', actorId: decision.sourceSessionId })
-        decisionLog.push(decision)
-        publish()
-      }
-    } catch (error) {
-      throw new Error(`Goal ${id} was saved, but its activity or routing record was not saved. The goal is retained; review it before retrying. ${error instanceof Error ? error.message : String(error)}`)
+    for (const [index, decision] of (input.decisionLog?.slice(1) ?? []).entries()) {
+      const appended = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.update', requestId: operationId + ':decision:' + index, demandId: goal.id, patch: {}, decision })
+      if (appended.operation !== 'demand.update') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal decision returned another operation. The saved Goal is retained.')
+      set(state => ({ demands: { ...state.demands, [goal.id]: demandRecordFromFilesystem(hostGoalRecord(appended.demand), state.demands[goal.id]) } }))
     }
-    return id
+    return goal.id
   },
   async updateDemand(id, patch, controlRequestId, expectedUpdatedAt) {
     const current = get().demands[id]
     if (!current) throw new Error(`Goal ${id} is unavailable`)
     if (patch.contentRefs?.some(ref => !confirmedGoalContentReference(workbenchSelectionCatalog(get()), ref))) throw controlFailure('INVALID_CONTROL_REQUEST', 'The exact Goal content resource is unconfirmed. Existing work is retained.')
-    const decisionLog = [...(current.decisionLog ?? [])]
-    let receipt = await api.demands.update(id, {
-      ...(patch.title === undefined ? {} : { title: patch.title }),
-      ...(patch.description === undefined ? {} : { description: patch.description }),
-      ...(patch.status === undefined ? {} : { status: patch.status }),
-      ...(patch.priority === undefined ? {} : { priority: patch.priority }),
-      ...(patch.projectId === undefined ? {} : { projectId: patch.projectId }),
-      ...(patch.projectName === undefined ? {} : { projectName: patch.projectName }),
-      ...(patch.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: patch.assigneeSessionIds }),
-      ...(Object.hasOwn(patch, 'supervisorSessionId') ? { supervisorSessionId: patch.supervisorSessionId ?? null } : {}),
-      ...(patch.sessionIds === undefined ? {} : { sessionIds: patch.sessionIds }),
-      ...(patch.tags === undefined ? {} : { tags: patch.tags }),
-      ...(patch.plannedStartAt === undefined ? {} : { plannedStartAt: patch.plannedStartAt }),
-      ...(patch.targetAt === undefined ? {} : { targetAt: patch.targetAt }),
-      ...(patch.parentDemandId === undefined ? {} : { parentDemandId: patch.parentDemandId }),
-      ...(patch.phaseIndex === undefined ? {} : { phaseIndex: patch.phaseIndex }),
-      ...(patch.alignment === undefined ? {} : { alignment: patch.alignment }),
-      ...(patch.grounding === undefined ? {} : { grounding: patch.grounding }),
-      ...(patch.contentRefs === undefined ? {} : { contentRefs: patch.contentRefs })
-    }, controlRequestId, expectedUpdatedAt ?? current.updatedAt)
-    const publish = (): void => {
-      const record = { ...demandRecordFromFilesystem(receipt.demand), source: current.source, decisionLog: [...decisionLog] }
-      set(state => ({ demands: { ...state.demands, [id]: record } }))
-      refreshKnownGoalResponsibilities([id])
-    }
-    publish()
-    try {
-      for (const message of patch.activityLog?.slice(current.activityLog?.length ?? 0) ?? []) {
-        receipt = await api.demands.activity(id, { kind: 'board', message, actorId: null })
-        publish()
-      }
-      for (const decision of patch.decisionLog?.slice(current.decisionLog?.length ?? 0) ?? []) {
-        receipt = await api.demands.decision(id, { question: decision.input, decision: decision.selectedProjectId ?? '(unassigned)', rationale: decision.candidates.map(candidate => candidate.reason).join('; ') || 'Explicit routing decision', actorId: decision.sourceSessionId })
-        decisionLog.push(decision)
-        publish()
-      }
-    } catch (error) {
-      throw new Error(`Goal changes were saved, but a Session link, activity or routing record was not saved. Saved changes are retained; review the goal before retrying. ${error instanceof Error ? error.message : String(error)}`)
-    }
+    const { decisionLog, ...input } = patch
+    const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.update', requestId: controlRequestId ?? mintObjectId(),
+      demandId: id, patch: input, expectedUpdatedAt: expectedUpdatedAt ?? current.updatedAt,
+      ...(decisionLog?.length ? { decision: decisionLog.at(-1)! } : {}) })
+    if (result.operation !== 'demand.update') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal update returned another operation.')
+    set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(hostGoalRecord(result.demand), state.demands[id]) } }))
+    refreshKnownGoalResponsibilities([id])
   },
   async confirmDemandGoal(id, expectedRevision) {
-    const receipt = await api.demands.confirmAlignment(id, expectedRevision)
-    set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(receipt.demand, state.demands[id]) } }))
+    const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.confirm', requestId: mintObjectId(), demandId: id, expectedRevision })
+    if (result.operation !== 'demand.confirm') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal confirmation changed.')
+    set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(hostGoalRecord(result.demand), state.demands[id]) } }))
     refreshKnownGoalResponsibilities([id])
   },
   async acceptDemandResult(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps, finish) {
-    const receipt = await api.demands.acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps, finish)
-    set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(receipt.demand, state.demands[id]) } }))
+    const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.accept', requestId: mintObjectId(), demandId: id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps: acceptGaps ?? false, ...(finish === undefined ? {} : { finish }) })
+    if (result.operation !== 'demand.accept') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal acceptance changed.')
+    set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(hostGoalRecord(result.demand), state.demands[id]) } }))
     refreshKnownGoalResponsibilities([id])
   },
   async refreshDemand(id) {
-    const facts = await api.demands.list()
-    const demand = facts.find(demand => demand.id === id)
-    if (!demand) throw Object.assign(new Error(get().demands[id] ? 'The Goal owner did not return this goal. Its saved view is kept; retry loading the current proposal.' : 'The complete Goal owner read confirms this ID is not saved. Save this same ID explicitly to continue.'), { code: 'GOAL_OWNER_NOT_FOUND' })
-    set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(demand, state.demands[id]) } }))
+    const before = get().demands[id]
+    const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.show', requestId: mintObjectId(), demandId: id })
+    if (result.operation !== 'demand.show') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal read returned another operation. Its saved view is retained.')
+    const demand = result.demand ? hostGoalRecord(result.demand) : null
+    set(state => {
+      const current = state.demands[id]
+      if (!demand) {
+        if (!current || current !== before) return state
+        const { [id]: _removed, ...demands } = state.demands
+        return { demands, ...(state.selectedDemandId === id ? { selectedDemandId: null } : {}) }
+      }
+      if (current && current.updatedAt > demand.updatedAt) return state
+      return { demands: { ...state.demands, [id]: demandRecordFromFilesystem(demand, current) } }
+    })
+    if (!demand) throw Object.assign(new Error('The original Goal owner confirms this ID is not saved. Save the same ID explicitly to continue.'), { code: 'GOAL_OWNER_NOT_FOUND' })
     refreshKnownGoalResponsibilities([id])
   },
   deleteDemand(id) {
-    void api.demands.delete(id).catch((error) => get().reportError(error))
+    void api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.delete', requestId: mintObjectId(), demandId: id, confirmation: 'delete' }).catch((error) => get().reportError(error))
     set((state) => {
       if (!state.demands[id]) return state
       const { [id]: _removed, ...demands } = state.demands
@@ -11713,7 +11234,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               })
             } finally { if (preparationRetryCalls.get(retryKey) === retryCall) preparationRetryCalls.delete(retryKey) }
             deliveryAttempt.stage = 'receipt-confirmation'
-            if (pending.goalContinuation) await api.continuousProgress.initialGoalInput({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }, pending.goalContinuation.loopId, pending.operationId, 'confirm')
             if (pending.goalPmo) await get().refreshDemand(pending.goalPmo.goalId)
             if (pending.goalDispatch) await get().refreshDemand(pending.goalDispatch.goalId)
             drain.submitted.add(entry.operationId)

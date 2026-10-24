@@ -69,12 +69,31 @@ export function useGoalDelegationObservation(goal: DemandRecord, active = true):
 }
 
 /** App-lifetime domain consumer. Closing a detail or Region does not stop responsibility reads. */
-export function initializeGoalResponsibilityObservation(): () => void {
-  const releaseChanges = api.demands.onChanged(goalIds => {
-    refreshKnownGoalResponsibilities(goalIds)
-  })
-  refreshKnownGoalResponsibilities(Object.keys(useAppStore.getState().demands))
-  return releaseChanges
+export function initializeGoalResponsibilityObservation(invalidated?: (goalIds: readonly string[]) => void): () => void {
+  let active = true
+  const factReads = new Map<string, { reread: boolean; promise: Promise<void> }>()
+  const refresh = (id: string) => {
+    const current = factReads.get(id)
+    if (current) { current.reread = true; return }
+    const flight = { reread: false, promise: Promise.resolve() }
+    flight.promise = Promise.resolve().then(async () => {
+      do {
+        flight.reread = false
+        try { await useAppStore.getState().refreshDemand(id) }
+        catch (error) { if (active && (error as { code?: string })?.code !== 'GOAL_OWNER_NOT_FOUND') useAppStore.getState().reportError(error) }
+      } while (active && flight.reread)
+    }).finally(() => { if (factReads.get(id) === flight) factReads.delete(id) })
+    factReads.set(id, flight)
+  }
+  const changed = (goalIds: readonly string[], snapshot: boolean) => {
+    const ids = [...new Set(snapshot ? [...goalIds, ...Object.keys(useAppStore.getState().demands)] : goalIds)]
+    invalidated?.(ids)
+    for (const id of ids) refresh(id)
+  }
+  const releaseChanges = api.demands.onChanged(changed)
+  const releaseIssue = api.demands.onObservationIssue(message => { if (message) useAppStore.getState().reportError(message) })
+  changed(Object.keys(useAppStore.getState().demands), false)
+  return () => { active = false; releaseChanges(); releaseIssue() }
 }
 
 /** Startup supplies its actual original ids once; subsequent invalidations already name affected Goals. */

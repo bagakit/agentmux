@@ -1526,8 +1526,6 @@ export const BROWSER_EVENT_CHANNEL = 'agentmux:browser-event'
 export const NATIVE_BROWSER_VISIBILITY_CHANNEL = 'ui:nativeBrowserVisibility'
 export const NATIVE_BROWSER_INPUT_CHANNEL = 'ui:nativeBrowserInput'
 export const NATIVE_OVERLAY_WARNING_CHANNEL = 'ui:nativeOverlayWarning'
-export const CONTINUOUS_PROGRESS_CHANGED = 'continuous-progress:changed'
-export const SCHEDULE_CHANGED = 'schedule:changed'
 /** Main -> renderer: Toolkit observation and execution lifecycle events. */
 export { TOOLKIT_CHANGED_CHANNEL, TOOLKIT_ENDED_CHANNEL } from './toolkit.js'
 /** Main -> renderer: a watched workspace file changed on disk; re-read it. */
@@ -1728,26 +1726,16 @@ export type AgentMuxDesktopApi = {
     setWikiEnabled(workspaceId: string, topicId: string, enabled: boolean): Promise<ScratchTopicSnapshot>
     resetWiki(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
   }
+  goals: { execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult> }
   demands: {
     delegation<M extends 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue'>(method: M, input: import('@agentmux/core/goal-delegation').GoalDelegationParamsMap[M]): Promise<import('@agentmux/core/goal-delegation').GoalDelegationResult>
-    onChanged(listener: (goalIds: string[]) => void): () => void
-    prepareGoalStart(goalId: string, intent: import('@agentmux/demand').DemandDispatchIntent, controlRequestId?: string, expectedUpdatedAt?: number): Promise<import('@agentmux/demand').DemandReceipt | { conflict: 'goal-version'; goalId: string; operationId: string; currentUpdatedAt: number }>
+    onObservationIssue(listener: (message: string) => void): () => void
+    onChanged(listener: (goalIds: string[], snapshot: boolean) => void): () => void
     inspectDispatch(reference: import('./goal-dispatch').GoalDispatchReference): Promise<import('@agentmux/demand').DemandDispatch | null>
-    reconcileDispatch(reference: import('./goal-dispatch').GoalDispatchReference): Promise<import('@agentmux/demand').DemandReceipt>
+    reconcileDispatch(reference: import('./goal-dispatch').GoalDispatchReference): Promise<Pick<import('@agentmux/demand').DemandReceipt, 'demand'>>
     list(): Promise<import('@agentmux/demand').Demand[]>
-    create(input: import('@agentmux/demand').CreateDemandInput, controlRequestId?: string): Promise<import('@agentmux/demand').DemandReceipt>
-    reconcilePmoCreation(intent: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, hostId: string, agentSessionId: string, createOperationId: string): Promise<import('@agentmux/demand').DemandReceipt>
-    reconcilePmoInput(intent: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, session: AgentSessionControl, operationId: string): Promise<import('@agentmux/demand').DemandReceipt>
-    update(id: string, patch: import('@agentmux/demand').UpdateDemandInput, controlRequestId?: string, expectedUpdatedAt?: number): Promise<import('@agentmux/demand').DemandReceipt>
-    confirmAlignment(id: string, expectedRevision: number): Promise<import('@agentmux/demand').DemandReceipt>
-    acceptGrounding(id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean, finish?: boolean): Promise<import('@agentmux/demand').DemandReceipt>
-    delete(id: string): Promise<import('@agentmux/demand').DemandReceipt>
-    linkSession(id: string, sessionId: string): Promise<import('@agentmux/demand').DemandReceipt>
-    unlinkSession(id: string, sessionId: string): Promise<import('@agentmux/demand').DemandReceipt>
-    activity(id: string, input: Omit<import('@agentmux/demand').DemandActivity, 'id' | 'createdAt'>, controlRequestId?: string): Promise<import('@agentmux/demand').DemandReceipt>
-    inspectActivity(id: string, operationId: string): Promise<import('@agentmux/demand').DemandActivityInspection>
-    readActivities(id: string): Promise<import('@agentmux/demand').DemandActivityRead>
-    decision(id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>): Promise<import('@agentmux/demand').DemandReceipt>
+    reconcilePmoCreation(intent: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, hostId: string, agentSessionId: string, createOperationId: string): Promise<Pick<import('@agentmux/demand').DemandReceipt, 'demand'>>
+    reconcilePmoInput(intent: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, session: AgentSessionControl, operationId: string): Promise<Pick<import('@agentmux/demand').DemandReceipt, 'demand'>>
   }
   ui: {
     readLoadedIdentity(): Promise<import('./client-observation').DesktopLoadedIdentity>
@@ -1849,7 +1837,6 @@ export type AgentMuxDesktopApi = {
   }
   continuousProgress: ContinuousProgressApi
   schedule: {
-    onChanged(listener: (loop: import('@agentmux/core').ContinuousProgressLoop) => void): () => void
     list(params: AgentMuxRpcParams<'schedule.list'>): Promise<AgentMuxRpcResult<'schedule.list'>>
     inspect(params: AgentMuxRpcParams<'schedule.inspect'>): Promise<AgentMuxRpcResult<'schedule.inspect'>>
     create(params: AgentMuxRpcParams<'schedule.create'>): Promise<AgentMuxRpcResult<'schedule.create'>>

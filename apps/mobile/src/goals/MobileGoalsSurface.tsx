@@ -238,7 +238,7 @@ function GoalDetail({ goalId, goal, factScope, visible, decisions, client, conne
       <dl><dt>目标 ID</dt><dd>{goal.id}</dd><dt>项目</dt><dd>{goal.projectId ? `${goal.projectName ?? '名称未确认'} · ${goal.projectId}` : '未分配项目'}</dd><dt>负责人</dt><dd>{goal.assigneeSessionIds?.join('、') || '未分配'}</dd><dt>Supervisor</dt><dd>{goal.supervisorSessionId ?? '未指定'}</dd><dt>标签</dt><dd>{goal.tags?.join('、') || '无'}</dd><dt>父目标</dt><dd>{goal.parentGoalId ?? '无'}</dd><dt>计划开始</dt><dd>{goal.plannedStartAt ? new Date(goal.plannedStartAt).toLocaleString() : '未设置'}</dd><dt>目标日期</dt><dd>{goal.targetAt ? new Date(goal.targetAt).toLocaleString() : '未设置'}</dd><dt>最后更新</dt><dd>{new Date(goal.updatedAt).toLocaleString()}</dd></dl>
     </details>
     <details><summary>活动与决策记录</summary><ul>{goal.activityLog?.map((entry, index) => <li key={index}>{entry}</li>)}</ul>
-      {decisions === null ? <p>决策记录尚未确认。</p> : decisions.map((decision, index) => <div key={index}><p>{decision.input}</p><p>{decision.risk} · {decision.confirmation} · {decision.selectedProjectId ?? '未选择项目'}</p><ul>{decision.candidates.map(candidate => <li key={candidate.projectId}>{candidate.projectId}：{candidate.reason}</li>)}</ul></div>)}
+      {decisions === null ? <p>决策记录尚未确认。</p> : decisions.map((decision, index) => <div key={index}><p>{decision.question}</p><p>{decision.decision}</p><p>{decision.rationale}</p></div>)}
     </details>
     <button onClick={refresh}>读取当前目标</button>
   </article>

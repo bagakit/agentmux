@@ -20,12 +20,13 @@ export class GoalDispatchInputOwner {
     return original
   }
 
-  async reconcile(reference: GoalDispatchReference) {
+  async reconcile(reference: GoalDispatchReference, assertCurrent?: () => Promise<void>) {
     const original = await this.original(reference)
-    if (original.stage === 'confirmed') return this.demands.recordDispatchPhase(reference.goalId, reference.operationId, { stage: 'confirmed', receipt: original.receipt! })
+    if (original.stage === 'confirmed') { await assertCurrent?.(); return this.demands.recordDispatchPhase(reference.goalId, reference.operationId, { stage: 'confirmed', receipt: original.receipt! }) }
     const timeline = await this.runtime.sessionTimeline({ hostId: original.hostId, agentSessionId: original.agentSessionId })
     const receipt = timeline.agentSessionId === original.agentSessionId ? receiptFor(original, timeline.items) : undefined
     if (!receipt) throw new AgentMuxError('The original Goal input remains unconfirmed. Inspect the same operation; the saved intent and manual input are retained.', 'CONTROL_UNAVAILABLE')
+    await assertCurrent?.()
     return this.demands.recordDispatchPhase(reference.goalId, reference.operationId, { stage: 'confirmed', receipt })
   }
 

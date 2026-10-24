@@ -26,37 +26,50 @@ function mergeSchedules(previous: readonly ContinuousProgressLoop[], incoming: r
 /** Local reading projection over the original owner; no independent schedule Store. */
 export function useScheduleRecords(queries: readonly ScheduleQuery[], enabled: boolean) {
   const key = JSON.stringify(queries), current = useRef(key); current.current = key
-  const reading = useRef<{ key: string; concurrent: ContinuousProgressLoop[] } | null>(null)
+  const reading = useRef(new Map<string, { concurrent: ContinuousProgressLoop[]; promise: Promise<void> }>())
   const [held, setHeld] = useState<{ key: string; records: ContinuousProgressLoop[]; observed: boolean; error?: string | undefined }>({ key, records: [], observed: false })
   const [refresh, setRefresh] = useState(0)
   const accept = useCallback((record: ContinuousProgressLoop) => {
     const scope = JSON.parse(key) as ScheduleQuery[]
     if (!scope.some(query => matchesScheduleQuery(record, query))) throw new Error('The Host returned another arrangement target. Original input is kept.')
-    if (reading.current?.key === key) reading.current.concurrent = mergeSchedules(reading.current.concurrent, [record])
+    const pending = reading.current.get(key)
+    if (pending) pending.concurrent = mergeSchedules(pending.concurrent, [record])
     if (current.current === key) setHeld(previous => ({ ...previous, key, records: mergeSchedules(previous.key === key ? previous.records : [], [record]) }))
   }, [key])
   useEffect(() => {
     if (!enabled || !queries.length) return
-    let alive = true
-    const read = { key, concurrent: [] as ContinuousProgressLoop[] }; reading.current = read
-    setHeld(previous => previous.key === key ? { ...previous, error: undefined } : { key, records: [], observed: false })
-    const dispose = api.schedule.onChanged(record => {
-      if (alive && queries.some(query => matchesScheduleQuery(record, query))) accept(record)
-    })
-    void Promise.all(queries.map(query => api.schedule.list(query))).then(results => {
-      if (!alive || current.current !== key) return
-      const records = results.flatMap((result, index) => {
-        if (!result.schedules.every(record => matchesScheduleQuery(record, queries[index]!))) throw new Error('The Host returned arrangements outside this original scope.')
-        return result.schedules
-      })
-      // A fresh snapshot supersedes old equal-version cache; only observations
-      // concurrent with this read can supersede the snapshot on an equal version.
-      setHeld(previous => ({ key, records: mergeSchedules(mergeSchedules(previous.key === key ? previous.records : [], records), read.concurrent), observed: true }))
-      if (reading.current === read) reading.current = null
-    }).catch(error => {
-      if (alive && current.current === key) setHeld(previous => ({ ...previous, key, error: presentError(error) }))
-    })
-    return () => { alive = false; dispose(); if (reading.current === read) reading.current = null }
+    const scope = JSON.parse(key) as ScheduleQuery[]
+    let alive = true, cut = 0, waiting = false
+    const read = () => {
+      if (!alive || document.hidden) return
+      const pending = reading.current.get(key)
+      if (pending) {
+        // Reopening this exact scope waits for its old reader, then takes one fresh cut.
+        if (!waiting) { waiting = true; void pending.promise.then(() => { waiting = false; read() }) }
+        return
+      }
+      const started = cut, flight = { concurrent: [] as ContinuousProgressLoop[], promise: Promise.resolve() }
+      reading.current.set(key, flight)
+      setHeld(previous => previous.key === key ? previous : { key, records: [], observed: false })
+      flight.promise = Promise.resolve().then(async () => {
+        if (!alive || current.current !== key || document.hidden || started !== cut) return
+        const results = await Promise.all(scope.map(query => api.schedule.list(query)))
+        if (!alive || current.current !== key || document.hidden || started !== cut) return
+        const records = results.flatMap((result, index) => {
+          if (!result.schedules.every(record => matchesScheduleQuery(record, scope[index]!))) throw new Error('The Host returned arrangements outside this original scope.')
+          return result.schedules
+        })
+        // Later action receipts win over a snapshot that began before the action.
+        setHeld(previous => ({ key, records: mergeSchedules(mergeSchedules(previous.key === key ? previous.records : [], records), flight.concurrent), observed: true }))
+      }).catch(error => {
+        if (alive && current.current === key && !document.hidden && started === cut && !flight.concurrent.length) setHeld(previous => ({ ...previous, key, error: presentError(error) }))
+      }).finally(() => { if (reading.current.get(key) === flight) reading.current.delete(key) })
+    }
+    read()
+    const foreground = () => { cut++; if (!document.hidden) read() }
+    document.addEventListener('visibilitychange', foreground)
+    const timer = window.setInterval(() => { if (!reading.current.has(key)) read() }, 5000)
+    return () => { alive = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
   // The serialized query is the exact immutable observation scope.
   }, [key, enabled, refresh, accept])
   return { records: held.key === key ? held.records : [], observed: held.key === key && held.observed,

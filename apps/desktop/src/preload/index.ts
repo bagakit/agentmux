@@ -6,7 +6,7 @@ import { createPreloadNotebookObservation } from './notebook-observation'
 import { readInputObservation } from '@agentmux/core/control'
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '../shared/browser-result-artifact'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInput } from '../shared/browser-task-assets'
-import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
+import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
@@ -374,30 +374,24 @@ const api: AgentMuxPreloadApi = {
     resetWiki: (workspaceId: string, topicId: string) =>
       ipcRenderer.invoke('scratch:resetWiki', workspaceId, topicId)
   },
+  goals: { execute: request => ipcRenderer.invoke('goals:execute', request) },
   demands: {
     delegation: (method, input) => ipcRenderer.invoke('demands:delegation', method, input),
+    onObservationIssue(listener) {
+      const wrapped = (_event: Electron.IpcRendererEvent, message: string) => listener(message)
+      ipcRenderer.on('demands:observationIssue', wrapped)
+      return () => { ipcRenderer.removeListener('demands:observationIssue', wrapped) }
+    },
     onChanged(listener) {
-      const wrapped = (_event: Electron.IpcRendererEvent, goalIds: string[]) => listener(goalIds)
+      const wrapped = (_event: Electron.IpcRendererEvent, goalIds: string[], snapshot: boolean) => listener(goalIds, snapshot)
       ipcRenderer.on('demands:changed', wrapped)
       return () => { ipcRenderer.removeListener('demands:changed', wrapped) }
     },
-    prepareGoalStart: (goalId, intent, controlRequestId, expectedUpdatedAt) => ipcRenderer.invoke('demands:prepareGoalStart', goalId, intent, controlRequestId, expectedUpdatedAt),
-    inspectDispatch: (reference) => ipcRenderer.invoke('demands:inspectDispatch', reference),
-    reconcileDispatch: (reference) => ipcRenderer.invoke('demands:reconcileDispatch', reference),
+    inspectDispatch: reference => ipcRenderer.invoke('demands:inspectDispatch', reference),
+    reconcileDispatch: reference => ipcRenderer.invoke('demands:reconcileDispatch', reference),
     list: () => ipcRenderer.invoke('demands:list'),
-    create: (input, controlRequestId) => ipcRenderer.invoke('demands:create', input, controlRequestId),
     reconcilePmoCreation: (intent, hostId, agentSessionId, createOperationId) => ipcRenderer.invoke('demands:reconcilePmoCreation', intent, hostId, agentSessionId, createOperationId),
-    reconcilePmoInput: (intent, session, operationId) => ipcRenderer.invoke('demands:reconcilePmoInput', intent, session, operationId),
-    update: (id, patch, controlRequestId, expectedUpdatedAt) => ipcRenderer.invoke('demands:update', id, patch, controlRequestId, expectedUpdatedAt),
-    confirmAlignment: (id, expectedRevision) => ipcRenderer.invoke('demands:confirmAlignment', id, expectedRevision),
-    acceptGrounding: (id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps, finish) => ipcRenderer.invoke('demands:acceptGrounding', id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps, finish),
-    delete: (id) => ipcRenderer.invoke('demands:delete', id),
-    linkSession: (id, sessionId) => ipcRenderer.invoke('demands:linkSession', id, sessionId),
-    unlinkSession: (id, sessionId) => ipcRenderer.invoke('demands:unlinkSession', id, sessionId),
-    activity: (id, input, controlRequestId) => ipcRenderer.invoke('demands:activity', id, input, controlRequestId),
-    inspectActivity: (id, operationId) => ipcRenderer.invoke('demands:inspectActivity', id, operationId),
-    readActivities: (id) => ipcRenderer.invoke('demands:readActivities', id),
-    decision: (id, input) => ipcRenderer.invoke('demands:decision', id, input)
+    reconcilePmoInput: (intent, session, operationId) => ipcRenderer.invoke('demands:reconcilePmoInput', intent, session, operationId)
   },
   ui: {
     readLoadedIdentity: () => ipcRenderer.invoke('ui:readLoadedIdentity'),
@@ -520,25 +514,13 @@ const api: AgentMuxPreloadApi = {
   },
   continuousProgress: {
     goals: goalId => ipcRenderer.invoke('continuousProgress:goals', goalId),
-    prepareGoal: (input, caller) => ipcRenderer.invoke('continuousProgress:prepareGoal', input, caller),
-    initialGoalInput: (target, loopId, operationId, phase) => ipcRenderer.invoke('continuousProgress:initialGoalInput', target, loopId, operationId, phase),
     goalAction: (goalId, loopId, action, revision, operationId, caller) => ipcRenderer.invoke('continuousProgress:goalAction', goalId, loopId, action, revision, operationId, caller),
     list: (target: ContinuousProgressTarget) => ipcRenderer.invoke('continuousProgress:list', target),
     create: (target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => ipcRenderer.invoke('continuousProgress:create', target, intervalMs, prompt, taskSource),
-    action: (target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check') => ipcRenderer.invoke('continuousProgress:action', target, loopId, action),
+    action: (target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', expectedLoop: import('@agentmux/core').ContinuousProgressLoop, operationId: string) => ipcRenderer.invoke('continuousProgress:action', target, loopId, action, expectedLoop, operationId),
     pauseForInput: (control: AgentSessionControl) => ipcRenderer.invoke('continuousProgress:pauseForInput', control),
-    onChanged(listener: (loop: ContinuousProgressLoop) => void) {
-      const wrapped = (_event: Electron.IpcRendererEvent, loop: ContinuousProgressLoop): void => listener(loop)
-      ipcRenderer.on(CONTINUOUS_PROGRESS_CHANGED, wrapped)
-      return () => ipcRenderer.off(CONTINUOUS_PROGRESS_CHANGED, wrapped)
-    }
   },
   schedule: {
-    onChanged: listener => {
-      const wrapped = (_event: Electron.IpcRendererEvent, loop: ContinuousProgressLoop): void => listener(loop)
-      ipcRenderer.on(SCHEDULE_CHANGED, wrapped)
-      return () => ipcRenderer.off(SCHEDULE_CHANGED, wrapped)
-    },
     list: (params: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => ipcRenderer.invoke('schedule:list', params),
     inspect: (params: import('@agentmux/core').ScheduleParamsMap['schedule.inspect']) => ipcRenderer.invoke('schedule:inspect', params),
     create: (params: import('@agentmux/core').ScheduleParamsMap['schedule.create']) => ipcRenderer.invoke('schedule:create', params),

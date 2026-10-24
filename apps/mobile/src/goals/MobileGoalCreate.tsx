@@ -44,11 +44,11 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
   async function discussion(value: Creation, goal: AgentMuxRpcGoal) {
     const original = owner.snapshot().record.goalIntents?.find(item => item.operationId === value.input.operationId)
     setRequest({ ...value, phase: 'pmo', issue: '原目标已确认保存，正在打开它的主 Mote 讨论。' })
-    const input = { goalId: value.input.goalId, mode: 'open' as const, operationId: randomClientRequestId() }
+    const input = { goalId: value.input.goalId, mode: 'grill' as const, operationId: randomClientRequestId() }
     try {
       assertGoalIntentScope(client, owner, intent(value))
       const result = await client!.forwardRpc!('goal.discuss', input)
-      if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.operationId !== input.operationId || result.receipt.mode !== 'open') throw new Error('原讨论回执身份未匹配。')
+      if (result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.operationId !== input.operationId || result.receipt.mode !== 'grill') throw new Error('原讨论回执身份未匹配。')
       setRequest({ ...value, phase: 'ready', issue: result.receipt.agentSessionId ? '原目标已保存，并打开了它的原主 Mote 讨论。' : '原目标已保存，专属 Tab 已保留。Agent 尚未接上；请在 Mac 的原主 Mote 工作面选择 Agent 并启动。' })
       await owner.settleGoalIntent(intent(value), 'confirmed', value.recordId, original)
       if (value.present()) openDiscussion(result.receipt)

@@ -39,7 +39,7 @@ export function observeAgentInputOccupation(store: {
       // Launcher drafts belong to Regions. Only an original Agent presentation owns this input.
       const matches = (sessions.get(id) ?? []).filter(session => session.id === id)
       const unknown = state.loading || matches.length !== 1 || matches.some(session => session.hostId !== session.control.hostId)
-      if (!unknown && !agentInputOccupied(state, id)) continue
+      if (!unknown && (!agentInputOccupied(state, id) || agentInputOccupied(previous, id))) continue
       for (const session of matches) {
         const control = session.control
         const ref = JSON.stringify([control.hostId, control.agentSessionId, control.run.runId])
