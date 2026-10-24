@@ -5943,7 +5943,7 @@ export class AgentMuxClient {
   }
 
   /** Save an exact future message through the same durable Session owner as Input. */
-  async saveAgentFuturePromptIntent(input: { agentSessionId: string; intentId: string; operationId: string; prompt: string; agentMuxNote?: string; active: boolean;
+  async saveAgentFuturePromptIntent(input: { agentSessionId: string; intentId: string; operationId: string; prompt: string; agentMuxNote?: string; active: boolean; expectedRun?: AgentMuxAgentSession['run'];
     caller?: { agentSessionId: string; capability: string }; sourceDevice?: import('./types.js').AgentOperationDevice }): Promise<void> {
     this.requireConnected()
     if ('authorHuman' in input || 'authorAgentSessionId' in input) throw new AgentMuxError('Future-message authors come from the original authenticated owner.', 'MESSAGE_SENDER_MISMATCH')
@@ -5955,6 +5955,7 @@ export class AgentMuxClient {
     if (!composed.text.trim()) throw new AgentMuxError('A future message needs nonempty original content or AgentMux context.', 'INVALID_AGENT_PROMPT')
     assertAgentPromptSize(composed.text)
     const session = this.requireAgentSession(input.agentSessionId)
+    if (input.expectedRun && !sameRun(session.run, input.expectedRun)) throw new AgentMuxError('The original future intent belongs to another Run. No later automatic intent was changed.', 'STALE_AGENT_SESSION')
     await this.store.withPromptSubmission(session.agentSessionId, async () => {
       let authorAgentSessionId: string | undefined
       if (input.caller) {
