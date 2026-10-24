@@ -111,7 +111,9 @@ export class AgentMuxHostExecutorOwner {
       contents = await readFile(this.options.path, 'utf8')
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
-      throw new AgentMuxError('The original Host Executor configuration could not be read. Its file and existing Agents are retained.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
+      const failure = new AgentMuxError('The original Host Executor configuration could not be read. Its file and existing Agents are retained.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
+      Object.defineProperty(failure, 'cause', { value: error })
+      throw failure
     }
     try {
       const state = record(JSON.parse(contents), ['schema', 'runtimeId', 'executors'])

@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { AgentMuxError } from './errors.js'
 
-/** Machine resource facts explain a failure; only the exact creation receipt permits retry. */
+/** Capacity comes from machine facts, within a named read or the exact negative creation receipt. */
 function capacityFailure(error: unknown, seen = new Set<unknown>()): boolean {
   if (!error || typeof error !== 'object' || seen.has(error)) return false
   seen.add(error)
@@ -15,29 +15,61 @@ function capacityFailure(error: unknown, seen = new Set<unknown>()): boolean {
 
 type FailedCreation = AgentMuxError & { cleanup?: unknown[]; retryCreationCleanup?: () => Promise<void> }
 
+// A read has no creation disposition of its own. Do not strip a nested receipt.
+function hasCreationFailure(error: unknown, operationId?: string, seen = new Set<unknown>()): boolean {
+  if (!error || typeof error !== 'object' || seen.has(error)) return false
+  seen.add(error)
+  const receipt = (error as { creationFailure?: AgentMuxError['creationFailure'] }).creationFailure
+  return receipt !== undefined && (!operationId || !receipt || receipt.operationId !== operationId || receipt.disposition !== 'not_applied') ||
+    error instanceof AggregateError && error.errors.some(value => hasCreationFailure(value, operationId, seen)) ||
+    hasCreationFailure((error as { cause?: unknown }).cause, operationId, seen)
+}
+export type AgentCreationPreparation = <T>(read: () => Promise<T>) => Promise<T>
+export type AgentCreationResourceContext = { preparation: AgentCreationPreparation; waitRevision(): number }
+
 /** Only the original live call owns this wait. No reader, timer, or missing Run creates authority. */
 export async function retryAgentCreationResources<T>(input: {
-  operationId: string; signal: AbortSignal; attempt(): Promise<T>
-  waiting(error: AgentMuxError, retryAfterMs: number): void
+  operationId: string | (() => string | undefined); signal: AbortSignal
+  attempt(context: AgentCreationResourceContext): Promise<T>
+  waiting(error: unknown, retryAfterMs: number): void
 }): Promise<T> {
   let retryAfterMs = 1_000
-  let lastFailure: AgentMuxError | undefined
+  let waitRevision = 0
+  let lastFailure: unknown
+  const wait = async (error: unknown) => {
+    lastFailure = error
+    waitRevision++
+    input.waiting(error, retryAfterMs)
+    try { await delay(retryAfterMs, undefined, { signal: input.signal }) } catch { throw error }
+    if (input.signal.aborted) throw error
+    retryAfterMs = Math.min(retryAfterMs * 2, 30_000)
+  }
+  const preparation: AgentCreationPreparation = async read => {
+    for (;;) {
+      input.signal.throwIfAborted()
+      try {
+        const result = await read()
+        input.signal.throwIfAborted()
+        return result
+      } catch (error) {
+        if (input.signal.aborted || hasCreationFailure(error) || !capacityFailure(error)) throw error
+        await wait(error)
+      }
+    }
+  }
   for (;;) {
     if (input.signal.aborted && lastFailure) throw lastFailure
     input.signal.throwIfAborted()
-    try { return await input.attempt() }
+    try { return await input.attempt({ preparation, waitRevision: () => waitRevision }) }
     catch (error) {
-      if (!(error instanceof AgentMuxError) || error.creationFailure?.operationId !== input.operationId ||
-        error.creationFailure.disposition !== 'not_applied' || !capacityFailure(error)) throw error
+      const operationId = typeof input.operationId === 'function' ? input.operationId() : input.operationId
+      if (!operationId || !(error instanceof AgentMuxError) || error.creationFailure?.operationId !== operationId ||
+        error.creationFailure.disposition !== 'not_applied' || hasCreationFailure(error, operationId) || !capacityFailure(error)) throw error
       lastFailure = error
       const failure = error as FailedCreation
       for (;;) {
         if (failure.cleanup?.length && !failure.retryCreationCleanup) throw error
-        input.waiting(error, retryAfterMs)
-        try { await delay(retryAfterMs, undefined, { signal: input.signal }) }
-        catch { throw error } // Cancellation retains the last exact not-applied receipt.
-        if (input.signal.aborted) throw error
-        retryAfterMs = Math.min(retryAfterMs * 2, 30_000)
+        await wait(error)
         if (!failure.cleanup?.length) break
         try { await failure.retryCreationCleanup!() }
         catch (cleanupError) {

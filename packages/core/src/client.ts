@@ -5,7 +5,7 @@ import { TerminalRecoveryOwner } from './terminal-recovery-owner.js'
 import { parseTerminalRecoveryInput, type AgentMuxTerminalRecoveryInput, type AgentMuxTerminalRecoveryResult } from './terminal-recovery.js'
 import type { AgentMuxCreationRuntime, AgentMuxTerminalCreationRetirement, AgentMuxTerminalCreationRetirementObservation } from './terminal-creation-retirement.js'
 import { AgentSessionRecoveryService } from './agent-session-recovery/service.js'
-import { retryAgentCreationResources } from './agent-creation-resource-retry.js'
+import { retryAgentCreationResources, type AgentCreationResourceContext } from './agent-creation-resource-retry.js'
 import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput } from './agent-session-recovery/resume-contract.js'
 import { assertAgentPromptSize, runRef, safeId, hookBindingIdentity, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from './agent-runtime-helpers.js'
 import { parseExternalConversationReference, parseExternalConversationAuthority, externalConversationAuthor, externalConversationRecordId, type AgentExternalConversationAuthorityPort, type AgentExternalConversationReceipt, type AgentExternalConversationReference } from './external-conversation.js'
@@ -270,6 +270,21 @@ export type AgentMuxHostAgentCreateInput = Pick<AgentMuxAgentCreateInput,
   /** Existing signed creation intent admission; an initial body is optional. */
   initialMessageAdmission?: AgentMuxCreationAdmission
   threadId?: string
+}
+
+type AgentCreationAdmission = { intentDigest: string; origin?: AgentMuxCreationOrigin; threadId?: string; executorRevision?: string }
+type AgentCreationExecution = AgentCreationResourceContext & {
+  signal: AbortSignal
+  sources?: { author: AgentMuxStoredAgentSession | undefined; creator: AgentMuxStoredAgentSession | undefined }
+  initialEnvelope?: Parameters<DurableAgentMuxMessageQueue['append']>[0]
+  assertHostCurrent?: () => Promise<void>
+}
+type ActiveAgentCreation = {
+  kind: 'direct' | 'host'
+  input: AgentMuxAgentCreateInput | AgentMuxHostAgentCreateInput
+  agentSessionId?: string
+  controller: AbortController
+  pending: ReturnType<AgentMuxClient['createAgentWithDelivery']>
 }
 
 export function hostAgentCreationIntent(input: AgentMuxHostAgentCreateInput): string {
@@ -659,44 +674,70 @@ export class AgentMuxClient {
       input.agentMuxTask !== undefined && typeof input.agentMuxTask !== 'string') {
       throw new AgentMuxError('Target creation requires exact Session, operation and Executor revision, without command overrides.', 'INVALID_CONTROL_REQUEST')
     }
-    const intentDigest = hostAgentCreationIntent(input)
-    const authority = this.requireCreationAuthority()
-    const { runtimeId } = await authority.identity()
-    const origin = input.initialMessageAdmission ? await authority.verify(input.initialMessageAdmission, { runtimeId, intentDigest }) : undefined
-    // Resolve an existing intent before reading a possibly changed Executor configuration. Never
-    // restart or re-input an operation whose original delivery is unknown.
-    const existing = await this.readCreationSession(input.agentSessionId, input.createOperationId)
-    if (existing?.kind === 'retired-agent') throw new AgentMuxError(
-      'The original creation belongs to a retired Agent. Inspect that operation; only an explicit reopen or a new creation intent can continue work.',
-      'AGENT_CREATION_RETIRED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
-    if (existing) {
-      if (existing.creation?.createOperationId !== input.createOperationId || existing.creation.intentDigest !== intentDigest ||
-        JSON.stringify(existing.creation.initialMessageOrigin) !== JSON.stringify(origin)) {
-        throw new AgentMuxError('This operation belongs to another creation intent.', 'AGENT_CREATION_OPERATION_CONFLICT')
+    let admitted: AgentCreationAdmission | undefined
+    let resolved: AgentMuxAgentCreateInput | undefined
+    return await this.runAgentCreation('host', input, async (request, execution) => {
+      const input = request as AgentMuxHostAgentCreateInput
+      const { preparation } = execution
+      const intentDigest = hostAgentCreationIntent(input)
+      const authority = this.requireCreationAuthority()
+      if (!admitted) {
+        const identity = await preparation(() => authority.identity())
+        const origin = input.initialMessageAdmission ? await preparation(() => authority.verify(input.initialMessageAdmission!, { runtimeId: identity.runtimeId, intentDigest })) : undefined
+        admitted = { intentDigest, executorRevision: input.executorRevision, ...(origin ? { origin } : {}), ...(input.threadId ? { threadId: input.threadId } : {}) }
+        execution.assertHostCurrent = async () => {
+          const current = await preparation(() => authority.identity())
+          if (!isDeepStrictEqual(current, identity)) throw new AgentMuxError('The original target creation authority changed.', 'AGENT_CREATION_TARGET_MISMATCH')
+          const verified = input.initialMessageAdmission ? await preparation(() => authority.verify(input.initialMessageAdmission!, { runtimeId: identity.runtimeId, intentDigest })) : undefined
+          if (!isDeepStrictEqual(verified, origin)) throw new AgentMuxError('The original creation admission changed.', 'AGENT_CREATION_ADMISSION_INVALID')
+          const { config, descriptor } = await preparation(() => this.hostExecutorOwner!.resolve(input.executorId))
+          if (descriptor.configRevision !== input.executorRevision || resolved &&
+            !isDeepStrictEqual({ providerId: config.providerId, injectAgentMuxGuide: config.injectAgentMuxGuide, args: config.args, env: config.env, commandOverride: config.command },
+              { providerId: resolved.providerId, injectAgentMuxGuide: resolved.injectAgentMuxGuide, args: resolved.args, env: resolved.env, commandOverride: resolved.commandOverride })) {
+            throw new AgentMuxError('Target Executor configuration changed. Refresh its inventory before a new operation.', 'EXECUTOR_REVISION_CONFLICT')
+          }
+        }
       }
-      return { session: existing, creation: existing.creation, promptConfirmed: creationPromptConfirmed(existing.creation) }
-    }
-    const pending = await this.registry.claimCreate(input.agentSessionId, agentLifecycleOperationIdentity('create', input.agentSessionId, input.createOperationId), intentDigest)
-    if (pending) {
-      const session = await this.completePreparedCreate(pending, await this.kernel.inspectCreation(pending.operationId))
-      return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: creationPromptConfirmed(session.creation!) }
-    }
-    const { config, descriptor } = await this.hostExecutorOwner.resolve(input.executorId)
-    if (descriptor.configRevision !== input.executorRevision) throw new AgentMuxError('Target Executor configuration changed. Refresh its inventory before a new operation.', 'EXECUTOR_REVISION_CONFLICT')
-    return await this.createAgentWithDeliveryAuthorized({
-      agentSessionId: input.agentSessionId, createOperationId: input.createOperationId,
-      ...(input.spatialIntent === undefined ? {} : { spatialIntent: input.spatialIntent }),
-      providerId: config.providerId, executorId: input.executorId, workspacePath: input.workspacePath,
-      injectAgentMuxGuide: config.injectAgentMuxGuide, args: config.args, env: config.env, commandOverride: config.command,
-      ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
-      ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }),
-      ...(input.agentMuxTask === undefined ? {} : { agentMuxTask: input.agentMuxTask }),
-      ...(input.optionalContext === undefined ? {} : { optionalContext: input.optionalContext }),
-      ...(input.nativeResumeSource === undefined ? {} : { nativeResumeSource: input.nativeResumeSource }),
-      ...(input.launchOptions === undefined ? {} : { launchOptions: input.launchOptions }),
-      ...(input.cols === undefined ? {} : { cols: input.cols }), ...(input.rows === undefined ? {} : { rows: input.rows })
-    }, { intentDigest, executorRevision: input.executorRevision, ...(origin ? { origin } : {}), ...(input.threadId ? { threadId: input.threadId } : {}) })
+      const origin = admitted.origin
+      // Resolve an existing intent before reading a possibly changed Executor configuration. Never
+      // restart or re-input an operation whose original delivery is unknown.
+      const existing = await preparation(() => this.readCreationSession(input.agentSessionId!, input.createOperationId))
+      if (existing?.kind === 'retired-agent') throw new AgentMuxError(
+        'The original creation belongs to a retired Agent. Inspect that operation; only an explicit reopen or a new creation intent can continue work.',
+        'AGENT_CREATION_RETIRED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+      if (existing) {
+        if (existing.creation?.createOperationId !== input.createOperationId || existing.creation!.intentDigest !== intentDigest ||
+          JSON.stringify(existing.creation!.initialMessageOrigin) !== JSON.stringify(origin)) {
+          throw new AgentMuxError('This operation belongs to another creation intent.', 'AGENT_CREATION_OPERATION_CONFLICT')
+        }
+        return { session: existing, creation: existing.creation!, promptConfirmed: creationPromptConfirmed(existing.creation!) }
+      }
+      const pending = await preparation(() => this.registry.claimCreate(input.agentSessionId!, agentLifecycleOperationIdentity('create', input.agentSessionId!, input.createOperationId!), intentDigest))
+      if (pending) {
+        const session = await this.completePreparedCreate(pending, await this.kernel.inspectCreation(pending.operationId))
+        return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: creationPromptConfirmed(session.creation!) }
+      }
+      if (!resolved) {
+        const { config, descriptor } = await preparation(() => this.hostExecutorOwner!.resolve(input.executorId))
+        if (descriptor.configRevision !== input.executorRevision) throw new AgentMuxError('Target Executor configuration changed. Refresh its inventory before a new operation.', 'EXECUTOR_REVISION_CONFLICT')
+        resolved = {
+          agentSessionId: input.agentSessionId!, createOperationId: input.createOperationId!,
+          ...(input.spatialIntent === undefined ? {} : { spatialIntent: input.spatialIntent }),
+          providerId: config.providerId, executorId: input.executorId, workspacePath: input.workspacePath,
+          injectAgentMuxGuide: config.injectAgentMuxGuide, args: config.args, env: config.env, commandOverride: config.command,
+          ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
+          ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }),
+          ...(input.agentMuxTask === undefined ? {} : { agentMuxTask: input.agentMuxTask }),
+          ...(input.optionalContext === undefined ? {} : { optionalContext: input.optionalContext }),
+          ...(input.nativeResumeSource === undefined ? {} : { nativeResumeSource: input.nativeResumeSource }),
+          ...(input.launchOptions === undefined ? {} : { launchOptions: input.launchOptions }),
+          ...(input.cols === undefined ? {} : { cols: input.cols }), ...(input.rows === undefined ? {} : { rows: input.rows })
+        }
+      }
+      return await this.createAgentWithDeliveryAttempt(resolved!, admitted, execution)
+    })
   }
+
   readonly providers: AgentProviderRegistry
   private readonly recovery: AgentSessionRecoveryService
   private readonly kernel: CtxmuxRunAdapter
@@ -704,13 +745,9 @@ export class AgentMuxClient {
   private readonly registry: AgentMuxAgentSessionRegistry
   private readonly deliveryAttempts: DeliveryAttemptStore
   private readonly store: AgentMuxAgentSessionStore
-  /** Single-flight execution only; durable creation facts remain in the original Store. */
-  private readonly activeCreations = new Map<string, {
-    input: AgentMuxAgentCreateInput
-    admitted: Parameters<AgentMuxClient['createAgentWithDeliveryAttempt']>[1]
-    controller: AbortController
-    pending: ReturnType<AgentMuxClient['createAgentWithDelivery']>
-  }>()
+  /** CID exists before the first asynchronous read; SID indexes this same owner. */
+  private readonly activeCreations = new Map<string, ActiveAgentCreation>()
+  private readonly activeCreationSessions = new Map<string, ActiveAgentCreation>()
   /** Only concurrent Provider reads are shared; every caller projects its own Core ownership. */
   private readonly nativeSessionCatalogReads = new WeakMap<AgentProvider, Map<string, Promise<Omit<AgentNativeSessionCatalog, 'capabilities'>>>>()
   private readonly messageQueue: DurableAgentMuxMessageQueue
@@ -4652,47 +4689,75 @@ export class AgentMuxClient {
     return await this.createAgentWithDeliveryAuthorized(input)
   }
 
-  private async createAgentWithDeliveryAuthorized(input: AgentMuxAgentCreateInput,
-    admitted?: Parameters<AgentMuxClient['createAgentWithDeliveryAttempt']>[1]): ReturnType<AgentMuxClient['createAgentWithDelivery']> {
+  private async createAgentWithDeliveryAuthorized(input: AgentMuxAgentCreateInput): ReturnType<AgentMuxClient['createAgentWithDelivery']> {
     this.requireConnected()
+    return await this.runAgentCreation('direct', input, async (frozen, execution) =>
+      await this.createAgentWithDeliveryAttempt(frozen as AgentMuxAgentCreateInput, undefined, execution))
+  }
+
+  private async runAgentCreation(kind: ActiveAgentCreation['kind'], input: ActiveAgentCreation['input'],
+    execute: (input: ActiveAgentCreation['input'], execution: AgentCreationExecution) => ReturnType<AgentMuxClient['createAgentWithDelivery']>
+  ): ReturnType<AgentMuxClient['createAgentWithDelivery']> {
     const frozen = structuredClone(input)
     if (frozen.spatialIntent !== undefined) frozen.spatialIntent = parseAgentCreationSpatialIntent(frozen.spatialIntent)
     frozen.createOperationId ??= mintObjectId()
-    frozen.agentSessionId ??= await this.resolveAgentCreationSessionId(frozen.createOperationId)
-    const authority = structuredClone(admitted)
-    const key = frozen.agentSessionId
-    const active = this.activeCreations.get(key)
+    const cid = frozen.createOperationId
+    const conflict = () => new AgentMuxError(
+      'This active creation belongs to another original request. Keep its identity and inspect the original operation.', 'AGENT_FORK_OPERATION_CONFLICT')
+    const active = this.activeCreations.get(cid)
     if (active) {
-      if (!isDeepStrictEqual(active.input, frozen) || !isDeepStrictEqual(active.admitted, authority)) throw new AgentMuxError(
-        'This active creation belongs to another original request. Keep its identity and inspect the original operation.', 'AGENT_FORK_OPERATION_CONFLICT')
+      if (active.kind !== kind || !isDeepStrictEqual(active.input, frozen)) throw conflict()
       return await active.pending
     }
     const controller = new AbortController()
-    const operationId = agentLifecycleOperationIdentity('create', key, frozen.createOperationId)
+    const entry: ActiveAgentCreation = { kind, input: frozen, controller, pending: undefined! }
+    const bind = (sid: string) => {
+      const occupied = this.activeCreationSessions.get(sid)
+      if (occupied && occupied !== entry) throw conflict()
+      entry.agentSessionId = sid
+      this.activeCreationSessions.set(sid, entry)
+    }
+    if (frozen.agentSessionId) bind(safeId(frozen.agentSessionId, 'Agent Session id'))
     let waiting = false
-    const pending = retryAgentCreationResources({ operationId, signal: controller.signal,
-      attempt: () => this.createAgentWithDeliveryAttempt(frozen, authority, controller.signal),
-      waiting: (error, retryAfterMs) => { waiting = true; this.publisher.publish({ type: 'agent-error', agentSessionId: key,
-        code: 'AGENT_CREATION_WAITING_FOR_STORAGE',
-        message: `Storage is unavailable; this Agent has not started. Retrying the original request in ${retryAfterMs / 1_000}s. ${error.message}`,
-        evidence: { source: 'agentmux', observedAt: Date.now() } }) } })
-    this.activeCreations.set(key, { input: frozen, admitted: authority, controller, pending })
+    // Defer execution so CID/controller/Promise are installed before any Store or authority read.
+    const pending = Promise.resolve().then(async () => {
+      let execution: AgentCreationExecution | undefined
+      return await retryAgentCreationResources({
+        operationId: () => entry.agentSessionId ? agentLifecycleOperationIdentity('create', entry.agentSessionId, cid) : undefined,
+        signal: controller.signal,
+        attempt: async ({ preparation, waitRevision }) => {
+          if (!entry.agentSessionId) bind(await preparation(() => this.resolveAgentCreationSessionId(cid)))
+          execution ??= { preparation, waitRevision, signal: controller.signal }
+          return await execute({ ...frozen, agentSessionId: entry.agentSessionId! }, execution)
+        },
+        waiting: (error, retryAfterMs) => { waiting = true; this.publisher.publish({ type: 'agent-error',
+          ...(entry.agentSessionId ? { agentSessionId: entry.agentSessionId } : {}), code: 'AGENT_CREATION_WAITING_FOR_STORAGE',
+          message: `Storage is unavailable while checking and preparing the original creation. Its request and input are retained; retrying in ${retryAfterMs / 1_000}s. ${error instanceof Error ? error.message : String(error)}`,
+          evidence: { source: 'agentmux', observedAt: Date.now() } }) }
+      })
+    })
+    entry.pending = pending
+    this.activeCreations.set(cid, entry)
     try { return await pending }
     catch (error) {
-      if (waiting) this.publisher.publish({ type: 'agent-error', agentSessionId: key,
+      if (waiting) this.publisher.publish({ type: 'agent-error', ...(entry.agentSessionId ? { agentSessionId: entry.agentSessionId } : {}),
         code: 'AGENT_CREATION_RESOURCE_RETRY_STOPPED',
         message: `Automatic creation retry ended. ${error instanceof Error ? error.message : String(error)}`,
         evidence: { source: 'agentmux', observedAt: Date.now() } })
       throw error
+    } finally {
+      if (this.activeCreations.get(cid) === entry) this.activeCreations.delete(cid)
+      if (entry.agentSessionId && this.activeCreationSessions.get(entry.agentSessionId) === entry) this.activeCreationSessions.delete(entry.agentSessionId)
     }
-    finally { if (this.activeCreations.get(key)?.pending === pending) this.activeCreations.delete(key) }
   }
 
   private async createAgentWithDeliveryAttempt(input: AgentMuxAgentCreateInput,
-    admitted?: { intentDigest: string; origin?: AgentMuxCreationOrigin; threadId?: string; executorRevision?: string }, signal?: AbortSignal): Promise<{
+    admitted: AgentCreationAdmission | undefined, execution: AgentCreationExecution): Promise<{
     session: AgentMuxAgentSession; promptConfirmed: boolean; creation: NonNullable<AgentMuxAgentSession['creation']>
   }> {
     this.requireConnected()
+    const { signal } = execution
+    const { preparation } = execution
     const forkSource = input.forkSource === undefined ? undefined : parseAgentForkSource(input.forkSource)
     const nativeResumeSource = input.nativeResumeSource === undefined ? undefined : parseAgentNativeResumeSource(input.nativeResumeSource)
     if (nativeResumeSource && (forkSource || nativeResumeSource.nativeHandle.providerId !== input.providerId || nativeResumeSource.workspacePath !== input.workspacePath)) {
@@ -4704,17 +4769,26 @@ export class AgentMuxClient {
     const createOperationId = input.createOperationId ?? mintObjectId()
     const agentSessionId = safeId(input.agentSessionId ?? await this.resolveAgentCreationSessionId(createOperationId), 'Agent Session id')
     const executorId = safeId(input.executorId, 'Agent Executor id')
-    let initialAuthor: AgentMuxStoredAgentSession | undefined
-    if (input.initialMessage) {
-      if (!input.prompt?.trim()) throw new AgentMuxError('An initial Agent message needs a body.', 'INVALID_AGENT_PROMPT')
-      initialAuthor = await this.currentStoredAgentSession(input.initialMessage.callerAgentSessionId)
-      this.resolveMessageAuthor(input.initialMessage.capability, input.initialMessage.callerAgentSessionId, initialAuthor)
+    const readCallers = async () => {
+      let author: AgentMuxStoredAgentSession | undefined
+      if (input.initialMessage) {
+        if (!input.prompt?.trim()) throw new AgentMuxError('An initial Agent message needs a body.', 'INVALID_AGENT_PROMPT')
+        author = await preparation(() => this.currentStoredAgentSession(input.initialMessage!.callerAgentSessionId))
+        this.resolveMessageAuthor(input.initialMessage.capability, input.initialMessage.callerAgentSessionId, author)
+      }
+      let creator = author
+      if (input.creationCaller) {
+        creator = await preparation(() => this.currentStoredAgentSession(input.creationCaller!.agentSessionId))
+        this.resolveMessageAuthor(input.creationCaller.capability, input.creationCaller.agentSessionId, creator)
+      }
+      if (execution.sources && (!isDeepStrictEqual(execution.sources.author?.run, author?.run) ||
+        !isDeepStrictEqual(execution.sources.creator?.run, creator?.run))) {
+        throw new AgentMuxError('The original creation caller Run changed; the original request was retained.', 'AGENT_CREATION_SOURCE_CHANGED')
+      }
+      execution.sources ??= structuredClone({ author, creator })
+      return { initialAuthor: author, creator }
     }
-    let creator = initialAuthor
-    if (input.creationCaller) {
-      creator = await this.currentStoredAgentSession(input.creationCaller.agentSessionId)
-      this.resolveMessageAuthor(input.creationCaller.capability, input.creationCaller.agentSessionId, creator)
-    }
+    const { initialAuthor, creator } = await readCallers()
     const createdBy: AgentMuxSpawnCreator | undefined = creator
       ? { agentSessionId: creator.agentSessionId, run: { ...creator.run }, owner: { kind: 'local' } }
       : admitted?.origin ? { agentSessionId: admitted.origin.source.agentSessionId,
@@ -4724,7 +4798,7 @@ export class AgentMuxClient {
       Boolean(createdBy || forkSource || input.injectAgentMuxGuide || input.agentMuxNote?.trim() || input.agentMuxTask?.trim() || input.optionalContext?.length)
     const lifecycleOperationId = agentLifecycleOperationIdentity('create', agentSessionId, createOperationId)
     // A replay reads the original created identity and receipt before checking a now-changed parent.
-    const existing = await this.readCreationSession(agentSessionId, createOperationId)
+    const existing = await preparation(() => this.readCreationSession(agentSessionId, createOperationId))
     if (existing?.kind === 'retired-agent') throw new AgentMuxError(
       'The original creation belongs to a retired Agent. Inspect that operation; only an explicit reopen or a new creation intent can continue work.',
       'AGENT_CREATION_RETIRED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
@@ -4736,7 +4810,7 @@ export class AgentMuxClient {
       }
       return { session: structuredClone(existing), promptConfirmed: creationPromptConfirmed(existing.creation, contextRequested), creation: existing.creation }
     }
-    const pending = await this.registry.claimCreate(agentSessionId, lifecycleOperationId, intentDigest)
+    const pending = await preparation(() => this.registry.claimCreate(agentSessionId, lifecycleOperationId, intentDigest))
     if (pending) {
       const session = await this.completePreparedCreate(pending, await this.kernel.inspectCreation(pending.operationId))
       return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: creationPromptConfirmed(session.creation!, contextRequested) }
@@ -4744,11 +4818,11 @@ export class AgentMuxClient {
     if (forkSource) {
       // A new fork needs only its exact source adopted. Original receipts and prepared
       // operations above remain readable even after that source later changes.
-      await this.resolveRawAgentSession(forkSource.agentSessionId)
-      assertAgentForkSource(forkSource, await this.currentStoredAgentSession(forkSource.agentSessionId), input)
+      await preparation(() => this.resolveRawAgentSession(forkSource.agentSessionId))
+      assertAgentForkSource(forkSource, await preparation(() => this.currentStoredAgentSession(forkSource.agentSessionId)), input)
     }
     if (nativeResumeSource) {
-      const managed = await this.managedNativeSessions(nativeResumeSource)
+      const managed = await preparation(() => this.managedNativeSessions(nativeResumeSource))
       if (managed.length) throw new AgentMuxError('This native conversation already has Core ownership. Continue its original Session; no Run was started.',
         managed.length > 1 ? 'AGENT_NATIVE_SESSION_AMBIGUOUS' : 'AGENT_NATIVE_SESSION_ALREADY_MANAGED', JSON.stringify({ managed }))
     }
@@ -4759,7 +4833,7 @@ export class AgentMuxClient {
       const threadId = input.initialMessage?.threadId ?? admitted?.threadId
       const messageId = threadId ? `${threadId}:0`
         : `initial-${createHash('sha256').update(createOperationId).digest('base64url').slice(0, 22)}`
-      const queued = await this.messageQueue.append({
+      execution.initialEnvelope ??= {
         messageId, operationId: createOperationId, createdAt: Date.now(),
         sender: { kind: 'agent-session', agentSessionId: author.agentSessionId },
         recipient: { kind: 'agent-session', agentSessionId },
@@ -4767,7 +4841,8 @@ export class AgentMuxClient {
         recipientSessionId: agentSessionId, recipientRunId: null,
         threadId: threadId ?? messageId, correlationId: messageId,
         replyTo: null, workspaceId: null, body: input.prompt
-      })
+      }
+      const queued = await preparation(() => this.messageQueue.append(execution.initialEnvelope!))
       initialEnvelope = queued.envelope
       // A creation retry reads the original receipt. It never resubmits an uncertain launch prompt.
       const existing = this.registry.list().find(session => session.agentSessionId === agentSessionId)
@@ -4782,22 +4857,23 @@ export class AgentMuxClient {
       }
     }
     const originalPrompt = initialEnvelope ? renderAgentMuxMessageEnvelope(initialEnvelope) : input.prompt
-    await this.prepareExecutionEnvironment()
+    await preparation(() => this.prepareExecutionEnvironment())
     if (signal?.aborted) throw signal.reason
-    let reservation = await this.registry.reserveNew(agentSessionId, lifecycleOperationId)
+    let reservation: Awaited<ReturnType<AgentMuxAgentSessionRegistry['reserveNew']>> | undefined
     let hookBinding: AgentHookBinding | null = null
     let persisted: AgentMuxStoredAgentSession | null = null
     let preservePreparedCreation = false
     let startAttempted = false
     let creationError: unknown
     try {
+      reservation = await preparation(async () => reservation = await this.registry.reserveNew(agentSessionId, lifecycleOperationId))
       const provider = this.providers.get(input.providerId)
       if (nativeResumeSource && !provider.assertNativeResumeSource) {
         throw new AgentMuxError(`${provider.label} does not support exact persisted conversation discovery.`, 'AGENT_NATIVE_SESSION_DISCOVERY_UNSUPPORTED')
       }
       const assertNativeSource = nativeResumeSource ? async () => await provider.assertNativeResumeSource!({ source: nativeResumeSource,
         workspacePath: input.workspacePath, env: input.env ?? {}, signal: new AbortController().signal }) : undefined
-      await assertNativeSource?.()
+      if (assertNativeSource) await preparation(assertNativeSource)
       // 这个 Run 的说话凭证。raw 只进受管进程的环境，Core 侧只留 hash。
       const invocationCapability = issueAgentCapability()
       // `post-launch-only` 的 Provider 在启动期收不到任何 prompt（它的交互 UI 没有那个入口，
@@ -4820,7 +4896,7 @@ export class AgentMuxClient {
       }
       let assertForkCurrent: (() => Promise<void>) | undefined
       if (forkSource) {
-        const source = await this.currentStoredAgentSession(forkSource.agentSessionId)
+        const source = await preparation(() => this.currentStoredAgentSession(forkSource.agentSessionId))
         assertAgentForkSource(forkSource, source, input)
         const sourceRun = await this.requireCurrentAgentRun(source)
         if (sourceRun.state.type === 'running') {
@@ -4831,7 +4907,7 @@ export class AgentMuxClient {
             throw new AgentMuxError('The fork source has no confirmed current native witness. Refresh or confirm it; its raw input is retained.', 'AGENT_FORK_SOURCE_CHANGED')
           }
           assertForkCurrent = async () => { await witness.assertCurrent() }
-          await assertForkCurrent()
+          await preparation(assertForkCurrent)
         }
       }
       const launchContext = {
@@ -4895,11 +4971,6 @@ export class AgentMuxClient {
         reservation = await this.registry.prepareCreate(reservation, preparedCreation!)
         this.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
       }
-      if (forkSource) {
-        assertAgentForkSource(forkSource, await this.currentStoredAgentSession(forkSource.agentSessionId), input)
-        await assertForkCurrent?.()
-      }
-      await assertNativeSource?.()
       const startInput = {
         operationKey: lifecycleOperationId,
         program: plan.command,
@@ -4917,6 +4988,18 @@ export class AgentMuxClient {
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
       }
+      // If any final read had to wait, earlier authority reads must be fresh too.
+      let checkedRevision: number
+      do {
+        checkedRevision = execution.waitRevision()
+        if (forkSource) {
+          assertAgentForkSource(forkSource, await preparation(() => this.currentStoredAgentSession(forkSource.agentSessionId)), input)
+          if (assertForkCurrent) await preparation(assertForkCurrent)
+        }
+        if (assertNativeSource) await preparation(assertNativeSource)
+        await readCallers()
+        await execution.assertHostCurrent?.()
+      } while (checkedRevision !== execution.waitRevision())
       signal?.throwIfAborted()
       preservePreparedCreation = true
       startAttempted = true
@@ -5121,7 +5204,7 @@ export class AgentMuxClient {
     } catch (error) {
       // Successful reservation is this new creation's exclusive no-Start boundary.
       // Existing, claimed and replayed creations never enter this catch.
-      creationError = !startAttempted ? agentCreationNotAppliedError(error, lifecycleOperationId) : error
+      creationError = reservation && !startAttempted ? agentCreationNotAppliedError(error, lifecycleOperationId) : error
       throw creationError
     } finally {
       const cleanup: Array<() => Promise<void>> = []
@@ -5134,8 +5217,9 @@ export class AgentMuxClient {
         // A readable started Session has either committed (which atomically
         // releases creation) or still needs its original uncertain preparation.
         // Neither case authorizes cleanup to release a later Stop reservation.
-        if (!persisted) {
-          cleanup.push(async () => { await this.registry.releaseLifecycle(reservation) })
+        if (!persisted && reservation) {
+          const ownedReservation = reservation
+          cleanup.push(async () => { await this.registry.releaseLifecycle(ownedReservation) })
         }
       }
       if (cleanup.length) await finishAgentCreationCleanup(creationError, cleanup)

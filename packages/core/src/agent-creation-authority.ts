@@ -9,7 +9,11 @@ import { parseAgentMuxCreationAdmission, parseAgentMuxCreationOrigin, parseAgent
   type AgentMuxCreationSource, type AgentMuxCreationTarget, type AgentMuxCreationTrust, type AgentMuxCreationTrustInput, type AgentMuxCreationUserPrincipal } from './agent-creation-admission.js'
 
 const hash = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex')
-const failure = (message: string, code: string): never => { throw new AgentMuxError(message, code) }
+const failure = (message: string, code: string, cause?: unknown): never => {
+  const error = new AgentMuxError(message, code)
+  if (cause !== undefined) Object.defineProperty(error, 'cause', { value: cause })
+  throw error
+}
 const absent = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
 
 /** Canonical JSON intent hash; text bytes and array order are never normalized. */
@@ -96,7 +100,7 @@ export class AgentMuxCreationAuthority {
       if (privateKey.asymmetricKeyType !== 'ed25519' || privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url') !== p.privateKey ||
         createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).toString('base64url') !== pub.encoded) throw new Error('Mismatched identity')
       return { identity: { runtimeId: this.runtimeId, publicKey: pub.encoded, fingerprint: pub.fingerprint }, privateKey }
-    } catch { return failure('The original Agent creation identity cannot be verified. Its file was retained; restore that identity before creating a new attestation.', 'AGENT_CREATION_AUTHORITY_INVALID') }
+    } catch (error) { return failure('The original Agent creation identity cannot be verified. Its file was retained; restore that identity before creating a new attestation.', 'AGENT_CREATION_AUTHORITY_INVALID', error) }
   }
   async identity(): Promise<AgentMuxCreationAuthorityIdentity> { return (await this.loadIdentity()).identity }
   private trustPath(sourceRuntimeId: string): string { return join(this.trustDirectory, hash(sourceRuntimeId) + '.json') }
@@ -108,7 +112,7 @@ export class AgentMuxCreationAuthority {
       return trust
     } catch (error) {
       if (absent(error)) throw error
-      return failure('The original Agent creation source pin cannot be verified. Its file was retained.', 'AGENT_CREATION_TRUST_INVALID')
+      return failure('The original Agent creation source pin cannot be verified. Its file was retained.', 'AGENT_CREATION_TRUST_INVALID', error)
     }
   }
   async trust(input: AgentMuxCreationTrustInput, principal: AgentMuxCreationUserPrincipal): Promise<AgentMuxCreationTrust> {
