@@ -8,9 +8,18 @@ const references = 'keeps unrelated whole node references and camera through sel
 const detour = 'renders and selects an actual Worker detour while both original endpoint cards are offscreen'
 const graph = 'components/AgentCollaborationGraph.tsx'
 const labels = 'components/CollaborationRegionLabels.tsx'
+const camera = 'lib/collaboration-map-camera.ts'
 const metadata = 'rebuilds only one exact offscreen Agent node for metadata without another layout job or unrelated card render'
 const motion = 'the formal motion control changes only original event presentation and resumes its elapsed phase'
 export const collaborationCanvasMutations = [
+  { file: camera, name: 'folded-descendant-camera-summary', before: '?.box ?? foldedSummary', after: '?.box', assertion: 'reads a real folded descendant summary through its large parent heading without expanding the subtree' },
+  { file: 'styles/collaboration.css', name: 'continuous-avatar-ring-owner', before: '.collaboration-agent__dot .agent-avatar { grid-area: 1 / 1; }', after: '.collaboration-agent__dot .agent-avatar { grid-area: 1 / 1; } .collaboration-agent__dot:has(.agent-avatar) { box-shadow: 0 0 0 1px var(--line); }', assertion: 'keeps one continuous body ring when the original avatar button crosses the overview identity boundary' },
+  { file: 'styles/collaboration.css', name: 'continuous-avatar-ring-progress', before: 'calc((1 - var(--collaboration-identity, 1)) * 50%)', after: '50%', assertion: 'keeps one continuous body ring when the original avatar button crosses the overview identity boundary' },
+  { file: camera, name: 'subtree-camera-census', before: 'const members = (area: CollaborationArea) => hierarchy.members.get(area.id)!', after: 'const members = (area: CollaborationArea) => area.members', assertion: 'reads an exact deep occurrence when its original large parent heading is clicked' },
+  { file: camera, name: 'descendant-camera-occurrence', before: 'owner.id === subtreeId || hierarchy.ancestors.get(owner.id)!.includes(subtreeId)', after: 'owner.id === subtreeId', assertion: 'reads an exact deep occurrence when its original large parent heading is clicked' },
+  { file: camera, name: 'exact-camera-subtree', before: 'areas.filter(owner => owner.id === subtreeId || hierarchy.ancestors.get(owner.id)!.includes(subtreeId))', after: 'areas', assertion: 'reads a real active descendant of a three-level large parent without inventing a parent or other Host occurrence' },
+  { file: camera, name: 'folded-camera-summary', before: ' || box.folded', after: '', assertion: 'keeps an explicitly folded parent on its original summary rather than an absent descendant' },
+  { file: camera, name: 'empty-camera-center', before: ' || !members(area).length', after: '', assertion: 'centers the original empty parent even when it has empty descendants and a large hull' },
   { file: 'lib/collaboration-map-geometry.ts', name: 'short-port-clip', before: 'if (distance(port) >= 0)', after: 'if (true)', assertion: 'clips original short creation ports at overview circles without reversing their terminal tangents' },
   { file: graph, name: 'fold-screen-anchor', before: "foldAnchor.current = anchor && box?.kind === 'area' ?", after: "foldAnchor.current = false && box?.kind === 'area' ?", assertion: 'keeps a clamped region label and its Expand action visible after the original world heading folds offscreen' },
   { file: labels, name: 'natural-heading-fold-anchor', before: 'onToggle={() => data.onToggle({ x, y: y + height })}', after: 'onToggle={() => data.onToggle(context ? { x, y: y + height } : undefined)}', assertion: 'keeps a natural nested heading and its Expand action at the actual clicked screen position' },
@@ -99,4 +108,4 @@ export default defineConfig({ ...shared, cacheDir: '.cache/collaboration-canvas'
       JSON.stringify({ path, originalSHA256: hash(source), effectiveSHA256: hash(code), mutant: applied ? selected : null }) + '\n')
     if (source !== code) return { code, map: null }
   }, buildEnd() { if (selected && !loaded) throw Error('The actual canvas mutation source must be loaded') }
-}], test: { ...shared.test, css: { include: [/\/styles\/(?:base|collaboration)\.css/u] }, include: ['apps/desktop/test/collaboration-canvas-product.test.tsx', 'apps/desktop/test/collaboration-map-geometry.test.ts', 'apps/desktop/test/collaboration-motion-cascade.test.tsx'], passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 20000 } })
+}], test: { ...shared.test, css: { include: [/\/styles\/(?:base|collaboration)\.css/u] }, include: ['apps/desktop/test/collaboration-canvas-product.test.tsx', 'apps/desktop/test/collaboration-map-geometry.test.ts', 'apps/desktop/test/collaboration-map-camera.test.ts', 'apps/desktop/test/collaboration-motion-cascade.test.tsx'], passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 20000 } })
