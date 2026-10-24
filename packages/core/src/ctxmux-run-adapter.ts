@@ -1213,22 +1213,12 @@ export class CtxmuxRunAdapter {
           throw new AgentMuxError('The exact Run does not match the original complete prepared launch. The Run was preserved.', 'TERMINAL_PREPARATION_RUN_MISMATCH')
         return this.projectRun(run)
       }
-      const summaries = await this.requireClient().list()
-      const candidates = await mapWithConcurrency(summaries, RUN_STATUS_CONCURRENCY, async summary => {
-        try {
-          const run = await this.requireClient().status(summary.id)
-          return run.spec?.env.AGENTMUX_LIFECYCLE_OPERATION_ID === operationKey ? run : null
-        } catch (error) {
-          if (translateCtxmuxError(error).code === 'CTXMUX_run_not_found') return null
-          throw error
-        }
-      })
-      const matches = candidates.filter((run): run is RunInfo => run !== null)
-      if (!matches.length) return null
-      if (matches.length !== 1 || !isDeepStrictEqual(matches[0]!.spec, request)) throw new AgentMuxError(
-        'The original creation has no single Run matching its complete frozen launch. Preserve the operation without resending.',
+      const { observation } = await this.requireClient().observeCreation(createOperationKey(operationKey))
+      if (observation.outcome === 'not_retained') return null
+      if (!isDeepStrictEqual(observation.run.spec, request)) throw new AgentMuxError(
+        'The original creation does not match its complete frozen launch. Preserve the operation without resending.',
         'TERMINAL_CREATION_UNCONFIRMED')
-      return this.projectRun(matches[0]!)
+      return this.projectRun(observation.run)
     } catch (error) { throw translateCtxmuxError(error) }
   }
 
