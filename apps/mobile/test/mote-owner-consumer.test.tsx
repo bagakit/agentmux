@@ -1,6 +1,17 @@
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../test/fixture-values.mjs'
-import { act } from 'react'
+import { act, useState } from 'react'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
+import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
+import { desktopSpatialGraph } from '../../desktop/src/renderer/src/lib/desktop-spatial-state'
+import { useAppStore } from '../../desktop/src/renderer/src/store'
+import { api } from '../../desktop/src/renderer/src/lib/api'
+import { initializeSpatialControlFixture } from '../../desktop/test/helpers/spatial-control-owner-fixture'
+import { MobileAgentMenuContext, type MobileAgentMenuTarget } from '../src/navigation/MobileAgentRow'
+import { MobileAgentActions } from '../src/conversation/MobileAgentActions'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '../../../packages/layout/src/index'
 import type { AgentMuxSpaceCatalog, AgentMuxMotePresentation } from '../../../packages/core/src/space-control'
@@ -23,9 +34,12 @@ import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-w
 import { button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
 
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+const publicBindingDirectories = new Set<string>()
 afterEach(async () => {
   for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }
   document.body.replaceChildren(); vi.restoreAllMocks()
+  for (const directory of publicBindingDirectories) await rm(directory, { recursive: true, force: true })
+  publicBindingDirectories.clear()
 })
 function publicCatalog(value: unknown): AgentMuxSpaceCatalog {
   const receipt = parseSpaceControlSuccessReceipt({ schemaVersion: 5, requestId: 'original-read', ok: true, operation: 'space.ls', result: { catalog: value } })
@@ -70,13 +84,148 @@ function clientFor(value: ReturnType<typeof original>) {
   const rpc = vi.fn().mockImplementation(async (method: string, params: any) => {
     if (method === 'file.read') return parseFileReadResult(await owner.read(params), params)
     if (method === 'app.snapshot') return { agents: [] }
-    if (method === 'agent.inspect') return { session: f.client.agentSession(params.target.agentSessionId), displayName: { override: null, availability: 'observed' } }
+    if (method === 'agent.inspect') return { routeHostId: 'host-original', session: f.client.agentSession(params.target.agentSessionId), displayName: { override: null, availability: 'observed' } }
     const result = { operation: 'space.ls' as const, catalog: publicCatalog(selectSpatialCatalog(value.catalog, params.target ?? {})) }
     return parseRpcControlResult('space.ls', rpcControlResult('space.ls', result), params)
   })
   f.client.forwardRpc = rpc
   return { ...f, rpc, read }
 }
+
+async function publicMissingSnapshot(mismatch?: 'SID' | 'Host' | 'alias' | 'Tab' | 'multiple aliases' | 'multiple Hosts') {
+  const value = original(true), previous = useAppStore.getState(), directory = await mkdtemp(join(tmpdir(), 'mobile-public-binding-'))
+  publicBindingDirectories.add(directory)
+  const store = new AgentMuxSpatialStateStore(join(directory, 'spatial.json'))
+  if (mismatch === 'multiple aliases' || mismatch === 'multiple Hosts') {
+    value.state.sessions = [value.state.sessions[0], { ...value.state.sessions[0], id: 'neighbor-renderer-alias',
+      ...(mismatch === 'multiple Hosts' ? { hostId: 'another-host', control: { ...value.state.sessions[0].control, hostId: 'another-host' } } : {}) }]
+    const tab = value.state.tabs['neighbor-tab']
+    value.state.tabs = { ...value.state.tabs, [tab.id]: { ...tab, regions: { ...tab.regions,
+      'neighbor-region': { ...tab.regions['neighbor-region'], sessionId: 'neighbor-renderer-alias' } } } }
+  }
+  const graph = desktopSpatialGraph(value.state, [value.topic])
+  if (mismatch === 'multiple Hosts') {
+    const data = graph.resources['region:neighbor-region'] as { agentPresentation: { sessionId: string } }
+    data.agentPresentation.sessionId = 'renderer-original-alias'
+    const tab = value.state.tabs['neighbor-tab']
+    value.state.tabs = { ...value.state.tabs, [tab.id]: { ...tab, regions: { ...tab.regions,
+      'neighbor-region': { ...tab.regions['neighbor-region'], sessionId: 'renderer-original-alias' } } } }
+  }
+  if (mismatch === 'SID' || mismatch === 'Host') {
+    const data = graph.resources['region:main-region'] as { agentPresentation: { agentSessionId: string; hostId: string } }
+    if (mismatch === 'SID') data.agentPresentation.agentSessionId = 'another-core-session'
+    else data.agentPresentation.hostId = 'another-host'
+  }
+  await store.commit({ expectedRevision: 0, graph })
+  vi.spyOn(api.spatial, 'read').mockImplementation(() => store.read())
+  vi.spyOn(api.spatial, 'commit').mockImplementation(input => store.commit(input))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => store.subscribe(listener))
+  useAppStore.setState({ ...value.state, sessions: [], timelines: {}, agentComposerDrafts: { 'renderer-original-alias': 'Original unsent alias draft' } })
+  await initializeSpatialControlFixture([value.topic])
+  if (mismatch === 'alias' || mismatch === 'Tab') {
+    const state = useAppStore.getState(), tab = state.tabs['main-tab']!
+    if (mismatch === 'alias') useAppStore.setState({ tabs: { ...state.tabs, [tab.id]: { ...tab, regions: {
+      ...tab.regions, 'main-region': { ...tab.regions['main-region']!, sessionId: 'another-renderer-alias' } as any
+    } } } })
+    else {
+      const { [tab.id]: _, ...tabs } = state.tabs, id = 'replacement-tab'
+      useAppStore.setState({ tabs: { ...tabs, [id]: { ...tab, id } }, layouts: Object.fromEntries(Object.entries(state.layouts).map(([key]) =>
+        [key, createWorkspaceLayout(key === 'first-display' ? 'first-group' : 'saved-group', [id, 'neighbor-tab'])])) })
+    }
+  }
+  const f = fixture(), metadataRead = vi.fn(async (id: string) => f.client.agentSession(id))
+  const service = new AgentMuxRpcService({ spatialState: store, execute: request => useAppStore.getState().executeControl(request), coreClients: () => [{
+    hostId: 'host-original', client: { runtimeOwnerIdentity: () => ({ availability: 'connected' }),
+      agentSession: (id: string) => f.client.agentSession(id), readAgentSession: metadataRead,
+      statusAgent: async () => { throw new Error('Run status is not observed by this metadata fixture.') }
+    } as any
+  }] })
+  const calls: Array<{ method: string; params: any }> = []
+  f.client.forwardRpc = (async (method: string, params: any) => { calls.push({ method, params }); return await service.call(method as any, params) }) as any
+  return { ...value, ...f, service, store, calls, metadataRead, async cleanup() {
+    await service.dispose(); useAppStore.setState(previous, true); await rm(directory, { recursive: true, force: true }); publicBindingDirectories.delete(directory)
+  } }
+}
+
+it('actual Service and Desktop Store preserve the canonical missing-observation binding through Mobile membership and menu inspection', async () => {
+  const f = await publicMissingSnapshot(), open = vi.fn()
+  try {
+    expect(useAppStore.getState().sessions).toEqual([])
+    const report = await f.service.call('space.ls', { target: {}, presentation: true })
+    expect(report.catalog.regions.find(region => region.regionId === 'main-region')).toMatchObject({
+      agentSessionId: 'session-original', runId: 'run-original', execution: { hostId: 'host-original', cwd: fixturePath('relocated/mote') }
+    })
+    expect(report.catalog.locations).toEqual(expect.arrayContaining([expect.objectContaining({
+      tabId: f.main.tabId, regionId: f.main.regionId, displayWorkspaceId: f.main.displayWorkspaceId, groupId: f.main.groupId
+    })]))
+    function Scene() {
+      const [menu, setMenu] = useState<MobileAgentMenuTarget | null>(null)
+      return <MobileAgentMenuContext.Provider value={setMenu}>
+        <MobileSpatialNavigation home="mote" client={f.client} connected sessions={[]} openSession={open} />
+        {menu && <MobileAgentActions client={f.client} agentSessionId={menu.agentSessionId} connected copyText={vi.fn()} />}
+      </MobileAgentMenuContext.Provider>
+    }
+    const view = await mount(<Scene />)
+    await click([...view.element.querySelectorAll<HTMLButtonElement>('.mobile-space-row')].find(item => item.textContent?.includes(f.topic.title))!)
+    const row = view.element.querySelector<HTMLElement>('.mobile-mote-agents .mobile-agent-row')!
+    expect(row).not.toBeNull()
+    await click(row.querySelector('.mobile-agent-row__open')!)
+    expect(open).toHaveBeenCalledWith('session-original', expect.anything())
+    await click(row.querySelector('.mobile-session-locations summary')!)
+    await click([...row.querySelectorAll<HTMLButtonElement>('.mobile-session-locations button')].find(item => item.textContent?.includes('second-display'))!)
+    expect(open).toHaveBeenCalledWith('session-original', expect.objectContaining({ context: expect.objectContaining({
+      tabId: 'main-tab', regionId: 'main-region', displayWorkspaceId: 'second-display', groupId: 'saved-group'
+    }) }))
+    await click(row.querySelector('.mobile-agent-row__more')!)
+    await click(button(view.element, '查看消耗'))
+    await act(async () => await vi.waitFor(() => expect(f.metadataRead).toHaveBeenCalledExactlyOnceWith('session-original')))
+    expect(f.calls.filter(call => call.method === 'agent.inspect')).toEqual([{ method: 'agent.inspect', params: {
+      target: { kind: 'agent-session', agentSessionId: 'session-original' }
+    } }])
+    expect(f.calls.some(call => call.method === 'agent.open')).toBe(false)
+    expect(useAppStore.getState().sessions).toEqual([])
+    expect(useAppStore.getState().tabs['main-tab']!.regions['main-region']).toHaveProperty('sessionId', 'renderer-original-alias')
+  } finally { await f.cleanup() }
+})
+
+it.each(['SID', 'Host', 'alias', 'Tab'] as const)('actual Service keeps an unconfirmed %s descriptor visible without publishing an alias as Core identity', async mismatch => {
+  const f = await publicMissingSnapshot(mismatch)
+  try {
+    const before = useAppStore.getState().tabs, report = await f.service.call('space.ls', { target: {}, presentation: true })
+    const region = report.catalog.regions.find(region => region.regionId === 'main-region')!
+    expect(region.kind).toBe('agent'); expect(region.agentSessionId).toBeNull()
+    expect(report.catalog.tabs.find(tab => tab.tabId === region.tabId)?.issue).toContain('original Agent binding is unconfirmed')
+    expect(report.catalog.locations.some(place => place.regionId === 'main-region')).toBe(true)
+    expect(useAppStore.getState().tabs).toBe(before)
+    expect(f.metadataRead).not.toHaveBeenCalled()
+  } finally { await f.cleanup() }
+})
+
+it('actual Service Agent view reads and writes the original saved alias while Runtime membership is absent', async () => {
+  const f = await publicMissingSnapshot()
+  try {
+    const before = useAppStore.getState(), read = await f.service.call('agent.view', { agentSessionId: 'session-original' })
+    expect(read).toMatchObject({ sessionFacts: 'unconfirmed', outcome: 'read', effectiveMode: 'terminal' })
+    const changed = await f.service.call('agent.view', { agentSessionId: 'session-original', mode: 'activity' })
+    expect(changed).toMatchObject({ sessionFacts: 'unconfirmed', effectiveMode: 'activity', storedOverride: 'activity', changed: true })
+    expect(useAppStore.getState().viewModes['renderer-original-alias']).toBe('activity')
+    expect(useAppStore.getState().viewModes['session-original']).toBeUndefined()
+    expect(await f.service.call('agent.view', { agentSessionId: 'session-original' })).toMatchObject({ outcome: 'read', effectiveMode: 'activity' })
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(useAppStore.getState().sessions).toEqual([]); expect(f.metadataRead).not.toHaveBeenCalled()
+  } finally { await f.cleanup() }
+})
+
+it.each(['multiple aliases', 'multiple Hosts'] as const)('actual Service Agent view retains %s as unknown rather than choosing its first saved key', async mismatch => {
+  const f = await publicMissingSnapshot(mismatch)
+  try {
+    const before = useAppStore.getState(), result = await f.service.call('agent.view', { agentSessionId: 'session-original', mode: 'activity' })
+    expect(result).toMatchObject({ outcome: 'unknown', changed: false, save: null })
+    expect(useAppStore.getState().viewModes).toBe(before.viewModes)
+    expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().sessions).toEqual([])
+  } finally { await f.cleanup() }
+})
 
 describe('original Mote owner → typed catalog → Mobile consumers', () => {
   it('selects the saved second occurrence among two Sessions without borrowing the first tuple', async () => {
@@ -97,7 +246,7 @@ describe('original Mote owner → typed catalog → Mobile consumers', () => {
 
   it('keeps original Core SID and full occurrence when the renderer alias differs, including Focus and avatar activities', async () => {
     const value = original(true), f = clientFor(value), open = vi.fn()
-    expect(value.catalog.regions.find(region => region.regionId === value.main.regionId)?.agentSessionId).toBe('renderer-original-alias')
+    expect(value.catalog.regions.find(region => region.regionId === value.main.regionId)?.agentSessionId).toBe('session-original')
     expect(value.fact.conversation).toEqual(value.main)
     expect(value.catalog.agentPresentation?.map(row => row.agentSessionId)).toContain('session-original')
     const appearance = await readSpatialAppearance(value.state, value.base, undefined, [value.topic], vi.fn())
@@ -144,11 +293,64 @@ describe('original Mote owner → typed catalog → Mobile consumers', () => {
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={f.client.agentSessions()} openSession={open} openProfile={profile} />)
     await click([...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(item => item.textContent?.includes(value.topic.title))!)
     expect(open).not.toHaveBeenCalled(); expect(view.element.textContent).toContain('not confirmed at its original location')
-    await click(button(view.element, '查看 Mote 资料')); expect(profile).toHaveBeenCalledOnce()
-    const mainRows = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list > li > button')].filter(item => item.textContent?.includes('继续原协调工作'))
-    expect(mainRows).toHaveLength(2)
-    await click(mainRows[1]!)
+    await click(button(view.element, `查看 Mote 资料 · ${value.topic.title}`)); expect(profile).toHaveBeenCalledOnce()
+    const mainRows = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-mote-agents .mobile-agent-row__open')].filter(item => item.textContent?.includes('继续原协调工作'))
+    expect(mainRows).toHaveLength(1)
+    const places = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-locations button')]
+    const originalPlace = places.find(item => item.textContent?.includes('second-display'))!
+    expect(originalPlace).toBeDefined(); await click(originalPlace)
     expect(open).toHaveBeenCalledWith('session-original', expect.objectContaining({ context: expect.objectContaining({ displayWorkspaceId: 'second-display', groupId: 'saved-group' }) }))
+    expect(f.submit).not.toHaveBeenCalled()
+  })
+
+  it('keeps the saved main entry before disclosure and without a confirmed occurrence, preserving the exact Host and SID', async () => {
+    const value = original(true), f = clientFor(value), open = vi.fn(), main = vi.fn()
+    value.catalog = publicCatalog({ ...value.catalog, motePresentation: [{ ...value.fact, conversation: null }] })
+    const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={[]} openSession={open} openMainAgent={main} />)
+    expect(view.element.querySelector('.mobile-space-children')).toBeNull()
+    expect(button(view.element, `继续主对话 · ${value.topic.title}`)).toBeDefined()
+    expect(main).not.toHaveBeenCalled()
+    await click(button(view.element, `继续主对话 · ${value.topic.title}`))
+    expect(main).toHaveBeenCalledExactlyOnceWith('session-original', expect.objectContaining({ mote: expect.objectContaining({ spaceId: value.spaceId }) }), 'host-original')
+    expect(main.mock.calls[0]![1].context).toBeUndefined()
+    expect(open).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
+  })
+
+  it.each(['missing', 'unconfirmed'] as const)('keeps Profile and Agents with a fixed setup entry while default is %s, hiding file and Launcher Tabs', async status => {
+    const value = original(), f = clientFor(value), profile = vi.fn(), main = vi.fn(), create = vi.fn()
+    const extra = createWorkbenchTab('file-only-tab', { kind: 'file', regionId: 'file-only-region', workspaceId: value.workspace.id, path: 'SOUL.md' })
+    value.state.tabs[extra.id] = { ...extra, topicId: value.topic.id }
+    const topic = { ...value.topic, quickMode: status === 'missing' ? { status: 'missing' as const } : { status: 'unconfirmed' as const, message: '原配置暂未确认' } }
+    const base = spatialCatalog(value.state, [topic])
+    value.catalog = publicCatalog({ ...base, agentPresentation: readAgentPresentation(value.state), motePresentation: readMotePresentation(value.state, base, [topic]) })
+    const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={[]} openSession={vi.fn()} openMainAgent={main} openProfile={profile} onCreateAgent={create} />)
+    await click(button(view.element, `${status === 'missing' ? '设置主 Agent' : '核对主 Agent'} · ${value.topic.title}`))
+    expect(profile).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ mote: expect.objectContaining({ spaceId: value.spaceId }) }))
+    await click(view.element.querySelector('.mobile-space-row')!)
+    expect(view.element.querySelector('.mobile-space-children')?.textContent).toContain('Profile')
+    expect(view.element.querySelector('.mobile-space-children')?.textContent).toContain('Agents')
+    expect(view.element.querySelector('.mobile-space-children')?.textContent).not.toContain('SOUL.md')
+    expect(view.element.querySelector('.mobile-spatial-tab')).toBeNull()
+    expect(view.element.querySelectorAll('.mobile-mote-agents .mobile-agent-row__open')).toHaveLength(2)
+    expect(view.element.querySelector('.mobile-space-row > small')?.textContent).toBe('2')
+    expect(main).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled()
+    await click(button(view.element, `在 ${value.topic.title} 新建 Agent`))
+    expect(create).toHaveBeenCalledExactlyOnceWith({ spaceId: value.spaceId, zoneId: value.fact.content!.zoneId })
+    expect(f.rpc.mock.calls.every(([method]) => method === 'space.ls')).toBe(true); expect(f.submit).not.toHaveBeenCalled()
+  })
+
+  it('closes the actual App main-entry click through the same retained manual recovery without starting during directory reads', async () => {
+    localStorage.setItem('agentmux-mobile-home', 'mote')
+    const value = original(), f = clientFor(value)
+    const recover = vi.fn(async (input: any) => ({ kind: 'reattachable', agentSessionId: input.agentSessionId, previousRun: input.expectedRun }))
+    f.client.ensureAgentContinuity = recover as never
+    const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原 Mac' }} platform={createBrowserPlatform()} />)
+    expect(recover).not.toHaveBeenCalled()
+    await click(button(view.element, `继续主对话 · ${value.topic.title}`))
+    await vi.waitFor(() => expect(recover).toHaveBeenCalledOnce())
+    expect(recover).toHaveBeenCalledWith(expect.objectContaining({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, trigger: 'manual' }))
+    expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
+    expect(getDeviceWorkface().snapshot().record.agentResumes?.at(-1)).toMatchObject({ phase: 'confirmed', hostId: 'host-original' })
     expect(f.submit).not.toHaveBeenCalled()
   })
 

@@ -7,7 +7,7 @@ afterEach(async () => { for (const item of mounted.splice(0)) { await act(async 
 it('keeps compact anonymous resource rows, meaningful groups and exact Launcher identity without creating on disclosure', async () => {
   const f = fixture(), create = vi.fn(), open = vi.fn()
   const tab = (id: string, name: string, regionIds: string[]) => ({ tabId: id, zoneId: 'original-zone', workspaceId: 'original-workspace', name, regionIds })
-  const catalog = { spaces: [{ spaceId: 'original-space', kind: 'mote', name: '资料协作', hostId: 'original-host', directoryPath: '', projectId: null }],
+  const catalog = { spaces: [{ spaceId: 'original-space', kind: 'folder', name: '资料协作', hostId: 'original-host', directoryPath: '', projectId: null }],
     zones: [{ zoneId: 'original-zone', workspaceId: 'original-workspace', hostId: 'original-host', kind: 'home', directoryPath: '', branch: null }],
     bindings: [{ spaceId: 'original-space', zoneId: 'original-zone' }], locations: [],
     tabs: [tab('launch-tab','',['launch']),tab('file-tab','',['file']),tab('duplicate-tab','',['duplicate']),tab('named-tab','合作资料',['named']),tab('multiple-tab','',['browser','terminal']),tab('missing-tab','',['unobserved']),tab('named-duplicate','NOTES.md',['named-same'])],
@@ -15,7 +15,7 @@ it('keeps compact anonymous resource rows, meaningful groups and exact Launcher 
       ...[['file-tab','file'],['duplicate-tab','duplicate'],['named-tab','named'],['named-duplicate','named-same']].map(([tabId,regionId])=>({tabId,regionId,kind:'file',file:{path:'NOTES.md',workspaceId:'original-workspace'}})),
       {tabId:'multiple-tab',regionId:'browser',kind:'browser',browserId:'original-browser'}, {tabId:'multiple-tab',regionId:'terminal',kind:'terminal'}] }
   const rpc = vi.fn().mockResolvedValue({catalog}); Object.assign(f.client,{forwardRpc:rpc})
-  const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={[]} openSession={open} onCreateAgent={create} />)
+  const view = await mount(<MobileSpatialNavigation home="space" client={f.client} connected sessions={[]} openSession={open} onCreateAgent={create} />)
   await click(view.element.querySelector('.mobile-space-row')!)
   const headings = [...view.element.querySelectorAll('.mobile-spatial-tab > h3')].map(node=>node.textContent)
   expect(headings).toEqual(['合作资料','多个工作面','内容待确认'])

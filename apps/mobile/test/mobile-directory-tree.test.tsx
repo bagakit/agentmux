@@ -28,7 +28,29 @@ afterEach(async () => { for (const view of mounted.splice(0)) { await act(async 
 const decoded = (value: AgentMuxSpaceCatalog) => (parseSpaceControlSuccessReceipt({ schemaVersion: 5, requestId: 'original-tree-read', operation: 'space.ls', ok: true, result: { catalog: value } }).result as { catalog: AgentMuxSpaceCatalog }).catalog
 
 describe('original mobile directory tree consumers', () => {
-  it('opens original Mote Tabs inline even with a default conversation, shows owner recap, then explicitly opens the exact original occurrence', async () => {
+  it('retains a Mote binding diagnostic after hiding Tabs without treating unknown Agents as absent', async () => {
+    const f = fixture(), open = vi.fn(), main = vi.fn()
+    const unknown = { ...catalog, tabs: [{ ...catalog.tabs[0]!, issue: 'The original Agent binding is unconfirmed.' },
+      { ...catalog.tabs[0]!, tabId: 'unrelated-tab', zoneId: 'unrelated-zone', issue: 'Unrelated diagnostic' }],
+      regions: [{ ...catalog.regions[0]!, agentSessionId: null }] }
+    f.client.forwardRpc = vi.fn(async () => ({ catalog: decoded(unknown) })) as never
+    const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={[]} openSession={open} openMainAgent={main} />)
+    const notice = view.element.querySelector<HTMLDetailsElement>('.mobile-directory-notice')!
+    expect(notice).not.toBeNull()
+    expect(notice.textContent).toContain('The original Agent binding is unconfirmed.')
+    expect(notice.textContent).not.toContain('Unrelated diagnostic')
+    expect(notice.open).toBe(false)
+    await click(notice.querySelector('summary')!); expect(notice.open).toBe(true)
+    await click(notice.querySelector('summary')!); expect(notice.open).toBe(false)
+    await click(view.element.querySelector('.mobile-space-row')!)
+    expect(view.element.querySelector('.mobile-mote-contents')?.textContent).toContain('原 Agent 绑定尚未确认')
+    expect(view.element.querySelector('.mobile-mote-contents')?.textContent).not.toContain('尚无已绑定 Agent')
+    expect(view.element.querySelector('.mobile-spatial-tab')).toBeNull()
+    await click(view.element.querySelector('.mobile-mote-quick-open')!)
+    expect(main).toHaveBeenCalledExactlyOnceWith('session-original', expect.anything(), 'host-original')
+    expect(open).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
+  })
+  it('opens original Mote Agents inline even with a default conversation, shows owner recap, then explicitly opens the exact original occurrence', async () => {
     const f = fixture(), open = vi.fn(), rpc = vi.fn(async () => ({ catalog: decoded(catalog) })); f.client.forwardRpc = rpc as never
     if (process.env.MOBILE_TREE_EVIDENCE) await writeFile(resolve(process.env.MOBILE_TREE_EVIDENCE, 'mote-owner-catalog.json'), JSON.stringify(decoded(catalog)))
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={f.client.agentSessions()} openSession={open} />)
@@ -37,10 +59,10 @@ describe('original mobile directory tree consumers', () => {
     expect(open).not.toHaveBeenCalled()
     expect(view.element.querySelector('h1')?.textContent).toBe('Mote')
     expect(view.element.querySelector('.mobile-space-row')?.getAttribute('aria-expanded')).toBe('true')
-    expect(view.element.querySelector('.mobile-space-children')?.textContent).toContain('原计划 Tab')
+    expect(view.element.querySelector('.mobile-space-children')?.textContent).toContain('Agents')
     expect(view.element.querySelector('.mobile-session-recap')?.textContent).toBe('从原 owner 读回的 recap')
     expect(rpc).toHaveBeenCalledExactlyOnceWith('space.ls', { target: {}, presentation: true })
-    await click(view.element.querySelector('.mobile-spatial-tab button')!)
+    await click(view.element.querySelector('.mobile-mote-agents .mobile-agent-row__open')!)
     expect(open).toHaveBeenCalledExactlyOnceWith('session-original', expect.objectContaining({ context: catalog.locations[0] }))
     expect(f.submit).not.toHaveBeenCalled()
   })
@@ -52,7 +74,7 @@ describe('original mobile directory tree consumers', () => {
     f.client.forwardRpc = vi.fn(async () => ({ catalog: decoded(split) })) as never
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={f.client.agentSessions()} openSession={open} />)
     await click(view.element.querySelector('.mobile-space-row')!)
-    const rows = view.element.querySelectorAll<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list button')
+    const rows = view.element.querySelectorAll<HTMLButtonElement>('.mobile-mote-agents .mobile-agent-row__open')
     expect([...rows].map(row => row.querySelector('strong')?.textContent)).toEqual(['Original left', 'Original right'])
     await click(rows[1]!);expect(open).toHaveBeenLastCalledWith('peer', expect.objectContaining({ context: split.locations[1] }))
     await click(rows[0]!);expect(open).toHaveBeenLastCalledWith('session-original', expect.objectContaining({ context: split.locations[0] }))
@@ -64,9 +86,9 @@ describe('original mobile directory tree consumers', () => {
     await click(view.element.querySelector('.mobile-space-row')!);fail = true;await click(button(view.element, '刷新空间目录'))
     expect(view.element.querySelector('.mobile-directory-notice')?.textContent).toContain('original observation failed')
     expect(view.element.querySelector('.mobile-directory-notice')?.hasAttribute('open')).toBe(false)
-    expect(view.element.querySelector('.mobile-spatial-tab')).not.toBeNull()
+    expect(view.element.querySelector('.mobile-mote-contents')).not.toBeNull()
     await act(async () => back.mock.calls.at(-1)![0]())
-    expect(view.element.querySelector('.mobile-spatial-tab')).toBeNull()
+    expect(view.element.querySelector('.mobile-mote-contents')).toBeNull()
     expect(view.element.querySelector('.mobile-space-row')).not.toBeNull()
     expect(open).not.toHaveBeenCalled()
   })

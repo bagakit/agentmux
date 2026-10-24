@@ -119,12 +119,12 @@ export function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-/** Directory disclosure is presentation; entering a Session requires its explicit original Tab row. */
+/** Directory disclosure is presentation; entering a Session requires its explicit original Agent row. */
 export async function openTreeSession(element: HTMLElement): Promise<void> {
   const branch = element.querySelector<HTMLButtonElement>('.mobile-space-row')
   expect(branch, 'Original tree branch').not.toBeNull()
   if (branch!.getAttribute('aria-expanded') !== 'true') await click(branch!)
-  const target = element.querySelector<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list button')
-  expect(target, 'Original Tab Session row').not.toBeNull()
+  const target = element.querySelector<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list button, .mobile-mote-agents .mobile-agent-row__open')
+  expect(target, 'Original Agent Session row').not.toBeNull()
   await click(target!)
 }
