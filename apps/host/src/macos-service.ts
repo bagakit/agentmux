@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
-import { AgentMuxError, connectAgentMuxRpc, defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory, durableWriteFile, type AgentMuxRuntimeOwnerIdentity } from '@agentmux/core'
+import { AgentMuxError, connectAgentMuxRpc, defaultAgentMuxMessageQueuePath, defaultAgentMuxRuntimeDirectory, defaultAgentMuxSpatialStatePath, defaultAgentMuxStateDirectory, durableWriteFile, type AgentMuxRuntimeOwnerIdentity } from '@agentmux/core'
 
 const exec = promisify(execFile)
 const wait = (ms: number) => new Promise<void>(yes => setTimeout(yes, ms))
@@ -100,7 +100,9 @@ export function normalizeMacosHostServiceDefinition(definition: unknown, storePa
     Object.values(environment).some(value => typeof value !== 'string')) return definition
   const original = environment as Record<string, string>
   return { ...fields, EnvironmentVariables: { ...original,
+    AGENTMUX_RUNTIME_DIRECTORY: defaultAgentMuxRuntimeDirectory(original),
     AGENTMUX_STATE_DIRECTORY: defaultAgentMuxStateDirectory(original),
+    AGENTMUX_SPATIAL_STATE_STORE: defaultAgentMuxSpatialStatePath(original),
     // Undefined would borrow this launcher's environment through the helper's default argument.
     AGENTMUX_MESSAGE_QUEUE_PATH: defaultAgentMuxMessageQueuePath(storePath, original.AGENTMUX_MESSAGE_QUEUE_PATH ?? '')
   } }
