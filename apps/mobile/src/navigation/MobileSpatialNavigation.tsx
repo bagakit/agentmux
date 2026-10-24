@@ -23,6 +23,7 @@ import './navigation.css'
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
 export type MobileSpatialContext = { spaceId: string | null; tabId: string | null; regionId: string | null }
 export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxHostedClient | null; connected: boolean;
+  openMainAgent?(id: string, identity: MobileObjectIdentity, hostId: string): void;
   visible?: boolean; sessions: AgentMuxAgentSession[]; openSession(id: string, identity: MobileObjectIdentity): void; openProfile?(identity: MobileObjectIdentity): void;
   openHttpLink?: OpenHttpLink; initialContext?: MobileSpatialContext; onContextChange?(context: MobileSpatialContext): void;
   onCreateAgent?(target: MobileAgentCreateTarget): void; onBackChange?(back: (() => void) | null): void }
@@ -32,7 +33,7 @@ type SessionReference = Pick<AgentMuxAgentSession, 'agentSessionId'> & Partial<P
 type ContentTarget = { key: string; spaceId: string; spaceName: string; tabName: string; tabId: string; zoneId: string | null; region: Region; zone?: Catalog['zones'][number] }
 const EMPTY_CONTEXT: MobileSpatialContext = { spaceId: null, tabId: null, regionId: null }
 const contentKey = (spaceId: string, zoneId: string | null, region: Region) => JSON.stringify([spaceId, zoneId, region.tabId, region.regionId, region.kind, region.browserId ?? null, region.file ?? null])
-export function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, visible = true }: MobileSpatialNavigationProps) {
+export function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, visible = true }: MobileSpatialNavigationProps) {
   const observeCatalog = useMobileWebCatalogObservation()
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [issue, setIssue] = useState('')
@@ -119,9 +120,9 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
       ...(context ? { context } : {}), ...(owner?.kind === 'mote' ? { mote: moteIdentity(owner) } : {}) }
   }
   const name = (session: SessionReference) => identity(session).name
-  const sessionRow = (session: SessionReference, key = session.agentSessionId, context?: AgentMuxSpaceAddress | null, tabName?: string | null) => {
+  const sessionRow = (session: SessionReference, key = session.agentSessionId, context?: AgentMuxSpaceAddress | null, tabName?: string | null, places?: AgentMuxSpaceAddress[]) => {
     const object = identity(session, context), row = catalog?.agentPresentation?.find(value => value.agentSessionId === session.agentSessionId), status = row?.state ?? 'unknown'
-    const candidates = context === undefined ? locations(session.agentSessionId) : []
+    const candidates = places ?? (context === undefined ? locations(session.agentSessionId) : [])
     const providerId = row?.providerId || session.providerId
     return <li key={key} className="mobile-agent-row"><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} onOpen={() => openSession(session.agentSessionId, object)}>
       <span className="mobile-executor-avatar"><AgentAvatarFace providerId={providerId} appearance={row?.avatar} /></span>
@@ -141,7 +142,9 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
   }
   const presentationIssues = catalog?.spaces.filter(owner => home === 'mote' ? owner.kind === 'mote' : home === 'space' ? owner.kind !== 'mote' : true).flatMap(owner => {
     const moteIssue = catalog.motePresentation?.find(value => value.spaceId === owner.spaceId)?.issue
-    const messages = [...new Set([owner.issue, moteIssue, catalog.appearance?.find(value => value.spaceId === owner.spaceId)?.issue].filter((value): value is string => Boolean(value)))]
+    const boundZones = new Set(catalog.bindings.filter(binding => binding.spaceId === owner.spaceId).map(binding => binding.zoneId))
+    const tabIssues = owner.kind === 'mote' ? catalog.tabs.filter(tab => tab.zoneId !== null && boundZones.has(tab.zoneId)).map(tab => tab.issue) : []
+    const messages = [...new Set([owner.issue, moteIssue, ...tabIssues, catalog.appearance?.find(value => value.spaceId === owner.spaceId)?.issue].filter((value): value is string => Boolean(value)))]
     return messages.map(message => ({ source: owner.name, message }))
   }) ?? []
   const zoneIds = new Set(catalog?.bindings.filter(binding => binding.spaceId === spaceId).map(binding => binding.zoneId))
@@ -165,35 +168,45 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
   const selectionChanged = Boolean(selected && (!space || !current || contentKey(selected.spaceId, selected.zoneId, current) !== selected.key
     || !tabs.some(tab => tab.tabId === selected.tabId && tab.zoneId === selected.zoneId && tab.regionIds.includes(selected.region.regionId))
     || selected.zone && (!currentZone || currentZone.hostId !== selected.zone.hostId || currentZone.workspaceId !== selected.zone.workspaceId || currentZone.directoryPath !== selected.zone.directoryPath)))
+  const mainAction = (owner: Catalog['spaces'][number]) => {
+    const facts = catalog?.motePresentation?.find(value => value.spaceId === owner.spaceId)
+    const main = facts?.quickMode.status === 'saved' ? facts.quickMode.defaults.conversation : undefined
+    const configure = () => openProfile?.(spaceIdentity(owner))
+    return <button type="button" className="mobile-mote-quick-open" aria-label={`${main ? '继续主对话' : facts?.quickMode.status === 'unconfirmed' ? '核对主 Agent' : '设置主 Agent'} · ${owner.name}`}
+      onClick={() => {
+        if (!main) { configure(); return }
+        const places = facts?.conversation ? catalog?.locations.filter(place => place.spaceId === owner.spaceId &&
+          place.displayWorkspaceId === main.displayWorkspaceId && place.groupId === main.groupId && place.tabId === main.tabId && place.regionId === main.regionId) ?? [] : []
+        const session = sessionById.get(main.sessionId) ?? { agentSessionId: main.sessionId }
+        const object = { ...identity(session, places.length === 1 ? places[0] : null), project: owner.name, mote: moteIdentity(owner) }
+        if (openMainAgent) openMainAgent(main.sessionId, object, main.hostId)
+        else openSession(main.sessionId, object)
+      }}><SemanticIcon name="object.conversation" size={16} /><span>主 Agent</span></button>
+  }
   const renderSpaceContents = (owner: Catalog['spaces'][number]) => {
     const ownerZones = new Set(catalog?.bindings.filter(binding => binding.spaceId === owner.spaceId).map(binding => binding.zoneId))
     const ownerTabs = catalog?.tabs.filter(tab => tab.zoneId !== null && ownerZones.has(tab.zoneId)) ?? []
-    const moteFact = owner.kind === 'mote' ? catalog?.motePresentation?.find(value => value.spaceId === owner.spaceId) : undefined
-    const confirmedMain = moteFact?.conversation
-    const mainSession = confirmedMain ? sessionById.get(confirmedMain.sessionId) ?? { agentSessionId: confirmedMain.sessionId } : undefined
-    const mainOccurrence = confirmedMain ? catalog?.locations.find(place =>
-      place.spaceId === owner.spaceId &&
-      place.displayWorkspaceId === confirmedMain.displayWorkspaceId &&
-      place.groupId === confirmedMain.groupId &&
-      place.tabId === confirmedMain.tabId &&
-      place.regionId === confirmedMain.regionId
-    ) ?? {
-      spaceId: owner.spaceId,
-      zoneId: catalog?.tabs.find(tab => tab.tabId === confirmedMain.tabId)?.zoneId ?? '',
-      workspaceId: catalog?.tabs.find(tab => tab.tabId === confirmedMain.tabId)?.workspaceId ?? '',
-      displayWorkspaceId: confirmedMain.displayWorkspaceId,
-      groupId: confirmedMain.groupId,
-      tabId: confirmedMain.tabId,
-      regionId: confirmedMain.regionId
-    } : undefined
+    if (owner.kind === 'mote') {
+      const facts = catalog?.motePresentation?.find(value => value.spaceId === owner.spaceId)
+      const members = new Map<string, { session: SessionReference; places: AgentMuxSpaceAddress[] }>()
+      const tabIds = new Set(ownerTabs.map(tab => tab.tabId))
+      const unconfirmedAgent = catalog?.regions.some(region => region.kind === 'agent' && !region.agentSessionId && tabIds.has(region.tabId) && ownerTabs.some(tab => tab.tabId === region.tabId && tab.regionIds.includes(region.regionId)))
+      for (const region of catalog?.regions ?? []) {
+        if (region.kind !== 'agent' || !region.agentSessionId || !tabIds.has(region.tabId) || !ownerTabs.some(tab => tab.tabId === region.tabId && tab.regionIds.includes(region.regionId))) continue
+        const id = region.agentSessionId, member = members.get(id) ?? { session: sessionById.get(id) ?? { agentSessionId: id }, places: [] }
+        member.places.push(...catalog?.locations.filter(place => place.spaceId === owner.spaceId && place.tabId === region.tabId && place.regionId === region.regionId) ?? [])
+        members.set(id, member)
+      }
+      return <div className="mobile-mote-contents">
+        {openProfile && <button type="button" className="mobile-mote-profile-action" aria-label={`查看 Mote 资料 · ${owner.name}`} onClick={() => openProfile(spaceIdentity(owner))}>
+          <SemanticIcon name="object.mote" size={18} /><span><strong>Profile</strong><small>身份、合作方式与主 Agent</small></span><SemanticIcon name="navigation.disclosure" size={15} /></button>}
+        <div className="mobile-mote-agents-heading"><h3>Agents</h3>{onCreateAgent && <button type="button" className="mobile-icon-button" aria-label={`在 ${owner.name} 新建 Agent`} onClick={() => onCreateAgent({ spaceId: owner.spaceId, ...(facts?.content && ownerZones.has(facts.content.zoneId) ? { zoneId: facts.content.zoneId } : {}) })}><SemanticIcon name="action.create-agent" size={16} /></button>}</div>
+        <ul className="mobile-session-list mobile-mote-agents" aria-label={`${owner.name} 的 Agents`}>{[...members].map(([id, member]) => sessionRow(member.session, id, member.places.length === 1 ? member.places[0] : null, undefined, member.places))}</ul>
+        {!members.size && <p className="mobile-spatial-empty">{unconfirmedAgent ? '原 Agent 绑定尚未确认；主 Agent 入口与原工作面保留。' : '尚无已绑定 Agent；可从主 Agent 入口设置，或明确新建。'}</p>}
+        {facts?.issue && <MobileNotice identity={[owner.spaceId,facts.issue]} className="mobile-spatial-notice" role="status">{facts.issue}</MobileNotice>}
+      </div>
+    }
     return <>
-      {owner.kind === 'mote' && confirmedMain && mainSession && mainOccurrence && <button type="button" className="mobile-mote-main-action"
-        aria-label={`继续主对话 · ${owner.name}`}
-        onClick={() => openSession(mainSession.agentSessionId, identity(mainSession, mainOccurrence))}>
-        <SemanticIcon name="object.conversation" size={15} />
-        <span><strong>继续主对话</strong><small>{catalog?.agentPresentation?.find(row => row.agentSessionId === mainSession.agentSessionId)?.name ?? owner.name} · {confirmedMain.displayWorkspaceId} / {confirmedMain.groupId}</small></span>
-      </button>}
-      {moteFact?.issue && <MobileNotice identity={[moteFact?.spaceId,moteFact?.issue]} className="mobile-spatial-notice" role="status">{moteFact.issue}</MobileNotice>}
       {[...ownerZones].map(zoneId => <section className="mobile-spatial-zone" key={zoneId} data-zone-id={zoneId}>
         {catalog?.zones.find(zone => zone.zoneId === zoneId)?.kind === 'worktree' && <h3 className="mobile-spatial-zone-name">{catalog.zones.find(zone => zone.zoneId === zoneId)?.branch ?? 'Worktree'}</h3>}
         {ownerTabs.filter(tab => tab.zoneId === zoneId).map(tab => {
@@ -215,7 +228,6 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
               : <div className="mobile-spatial-resource"><SemanticIcon name={region.kind === 'launcher' ? 'object.launcher' : 'object.region'} size={18} /><span>{region.kind === 'launcher' ? 'Launcher' : region.kind}<small>{region.agentSessionId ? '会话状态尚未核实' : '此内容在 Mac 上查看'}</small></span></div>}</li>
         })}</ul></section>})}</section>)}
       {!ownerTabs.length && <p className="mobile-spatial-empty">此空间暂无已绑定 Tab。原空间和资料仍保留。</p>}
-      {owner.kind === 'mote' && openProfile && <button type="button" className="mobile-tree-profile" aria-label="查看 Mote 资料" onClick={() => openProfile(spaceIdentity(owner))}>查看 Mote 资料</button>}
     </>
   }
   const filteredSessions = (values: SessionReference[]) => values.filter(session => matching(name(session) + ' ' + identity(session).project + ' ' + session.providerId))
@@ -245,7 +257,7 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
       {catalog ? <MobileSpaceDirectory key={home} catalog={catalog} home={home === 'mote' ? 'mote' : 'space'} query={query} selectedSpaceId={spaceId}
         onSelect={owner => { setContext(owner ? { spaceId: owner.spaceId, tabId: null, regionId: null } : EMPTY_CONTEXT); setSelectedKey(null) }}
         renderIdentity={owner => <MobileIdentity appearanceRevision={revision} objectSpaceId={owner.spaceId} appearance={catalog.appearance?.find(value => value.spaceId === owner.spaceId)} identity={spaceIdentity(owner)} client={client} connected={connected} visible={visible} size={28} />}
-        renderContents={renderSpaceContents} /> : <p className="mobile-spatial-empty">{pending ? '正在读取 Mac 上的空间…' : '空间目录尚未核实，可在 Focus 中继续原会话。'}</p>}
+        {...(home === 'mote' ? { renderPrimary: mainAction } : {})} renderContents={renderSpaceContents} /> : <p className="mobile-spatial-empty">{pending ? '正在读取 Mac 上的空间…' : '空间目录尚未核实，可在 Focus 中继续原会话。'}</p>}
     </>}
     {visited.map(target => <div key={target.key} hidden={home === 'focus' || target.key !== selectedKey || !context.regionId}>
       {(target.region.kind === 'file' || target.region.kind === 'browser') && <MobileRegionContent client={client} connected={connected} showTitle={false}
