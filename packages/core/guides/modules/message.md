@@ -28,7 +28,10 @@ Authenticated Agent participants and trusted users/devices may explicitly use me
 for original MIDs in one durable recipient Session. The new notification freezes that Session's current Run once; historical envelope Runs
 stay unchanged. After an unknown reply use message notify inspect --host ID --operation-id ID:
 it reads the original notification and its own input receipt without preparing or sending.
-null only means this read did not find the original notice, never permission to replay unknown input.
+The read also returns inputOrigin for exact recorded input membership (queueId, incarnation and
+sequence), or null when that claim has no recorded membership. This is not the notification's
+preparation position or proof of input dispatch, native adoption or task acceptance.
+A null notification only means this read did not find the original notice, never permission to replay unknown input.
 Managed Agents notify and inspect only references in which they are original participants,
 at their authenticated Host; every selected MID must satisfy this same boundary.
 These observations are not
