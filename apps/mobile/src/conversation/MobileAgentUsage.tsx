@@ -23,7 +23,7 @@ export function MobileAgentUsage({ client, agentSessionId, connected, beforeRead
   const [observed, setObserved] = useState<{ client: AgentMuxHostedClient; agentSessionId: string; scope: string; session: AgentMuxAgentSession } | null>(null)
   let cached: AgentMuxAgentSession | undefined
   try { const value = client?.agentSession(agentSessionId); if (value?.agentSessionId === agentSessionId) cached = value } catch { /* Metadata may not have hydrated; the original public read remains available. */ }
-  const remote = observed?.client === client && observed.agentSessionId === agentSessionId && observed.scope === scope &&
+  const remote = observed && observed.client === client && observed.agentSessionId === agentSessionId && observed.scope === scope &&
     (!cached || observed.session.hostId === cached.hostId && observed.session.run.runId === cached.run.runId) ? observed.session : undefined
   const session = cached?.turnUsage && (!remote?.turnUsage || cached.turnUsage.observedAt > remote.turnUsage.observedAt) ? cached : remote ?? cached
   useEffect(() => client?.onEvent(event => {

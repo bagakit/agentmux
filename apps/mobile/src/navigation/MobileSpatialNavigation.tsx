@@ -122,7 +122,7 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     if (sessions !== undefined) return { sessions, issue: '' }
     const previous = retainedMetadata.current && retainedMetadata.current.client === client ? retainedMetadata.current.value : { sessions: [], issue: '' }
     if (!needsMetadataDirectory) return previous
-    if (retainedMetadata.current?.client === client && retainedMetadata.current.epoch === metadataEpoch.current && retainedMetadata.current.scope === metadataScope && retainedMetadata.current.revision === revision) return previous
+    if (retainedMetadata.current && retainedMetadata.current.client === client && retainedMetadata.current.epoch === metadataEpoch.current && retainedMetadata.current.scope === metadataScope && retainedMetadata.current.revision === revision) return previous
     let value
     try { value = { sessions: client?.agentSessions() ?? [], issue: '' } }
     catch { value = { sessions: previous.sessions, issue: '原会话元信息目录暂不可读；原空间与已有会话引用保留，可刷新核对。' } }
