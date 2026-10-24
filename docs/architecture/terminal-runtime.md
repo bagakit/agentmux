@@ -75,11 +75,12 @@ Desktop Main 组合跨进程控制，通过公开 Core API 执行 Agent lifecycl
 
 | 分类／分派 | 源码 owner | 当前机制 |
 | --- | --- | --- |
-| 需要原 Native 的准确操作 | `AGENTMUX_HOSTED_RUNTIME_METHODS` → `RUNTIME_METHODS` | 调用 `connectRuntime()`；包括原终端附着、物理事实投影与准确 Agent 创建。每个方法仍守自己的业务前提 |
-| 不以 Native 或全局恢复完成为通用前置 | `OFFLINE_METHODS` | 例如 `sessionTimeline` 从原持久来源读取；每个方法仍守自身目标、权限和存储合同，offline 不表示缓存成功或事实已知 |
-| 其余方法的默认分派 | Host service 的调用分支与各操作 owner | 当前默认调用 `connect()`，受控输入保留既有例外；默认分派不证明每项都确需全局恢复，必要前提仍沿准确操作的真实依赖判定。权限、意图和回执继续由原 owner 核对 |
+| 需要原 Native 的准确操作 | `AGENTMUX_HOSTED_PREPARATION` 的 `runtime` | 调用 `connectRuntime()`；包括原终端附着、物理事实投影、准确 Agent 创建与 Stop。每个方法仍守自己的业务前提 |
+| 不以 Native 或全局恢复完成为通用前置 | 同一声明的 `owner` | 分派层不预先连接，例如 `sessionTimeline` 从原持久来源读取；每个业务 owner 仍守自身目标、权限、连接与存储合同，不表示缓存成功或事实已知 |
+| 明确需要 Session 观察准备 | 同一声明的 `session-observation` | 保留原 `connect()`；声明只描述传输层准备，不代签业务授权或成功 |
+| 由本次输入意图决定准备 | 同一声明的 `input-admission` | Host service 沿原人工／原生对话准入和引用消息 intake 合同处理，不让传输分类改变原输入资格 |
 
-这张表解释前提，完整方法与例外以源码为准；它不建立第二份方法白名单。默认 Desktop connector 使用 [Hosted client](../../packages/core/src/hosted-client.ts)，不在 Desktop 内另建语义 Core。
+这张表解释前提，完整方法与例外以源码为准；它不建立第二份方法白名单。有限 SDK 的每个方法均须在唯一准备声明中分类，新增方法不能隐式落入全局恢复；分派穷尽各类，原目标、权限、fence、持久事务与回执仍归业务 owner。默认 Desktop connector 使用 [Hosted client](../../packages/core/src/hosted-client.ts)，不在 Desktop 内另建语义 Core。Main Stop 选择已有 Runtime scope，冷 Stop 仅沿 Core 原 metadata owner 采用准确持久 Session，不加载无关 Session。
 
 一次 GUI 原终端附着的实际链路是：
 
@@ -92,7 +93,7 @@ Desktop Main 组合跨进程控制，通过公开 Core API 执行 Agent lifecycl
 
 Main 新建 Agent 经 `launchAdmittedAgent` → Hosted `createAgentWithDelivery`，远端目标使用 `createHostAgentWithDelivery`；SDK 的 `createAgent` 复用同一 Core 创建 owner。三者沿 shared Runtime 准入，Core 保留原 SID／operation、意图摘要、prepared seed、Provider／Executor、授权、原生启动与首次投递回执合同。新的 fork 在核对准确 source 时仅通过 `resolveRawAgentSession` 采用其原绑定，后续 Store、Run、native witness 和最终来源检查仍成立；已有回执与 prepared 操作先于新的来源采用处理。
 
-`inspectAgentCreation` 和 `attestAgentCreation` 使用现有 offline 分派，分别消费原创建记录和来源授权事实。inspect 读到原 durable 回执可直接返回；原已确认／待确认结果如实保留，没有原结果与 prepared 关联时明确未知。只有需要 reconcile 原 prepared 创建时才 `connectRuntime()` 并核对原 Native 列表，不执行新启动或输入。attest 沿原 Store、来源能力和签名 owner，不由 Runtime 连通性授予权限。offline 是连接前提分类，不是业务授权或成功结果。
+`inspectAgentCreation` 和 `attestAgentCreation` 使用 `owner` 准备分类，分别消费原创建记录和来源授权事实。inspect 读到原 durable 回执可直接返回；原已确认／待确认结果如实保留，没有原结果与 prepared 关联时明确未知。只有需要 reconcile 原 prepared 创建时才 `connectRuntime()` 并核对原 Native 列表，不执行新启动或输入。attest 沿原 Store、来源能力和签名 owner，不由 Runtime 连通性授予权限。`owner` 不免除原业务的必要条件，也不表示成功结果。
 
 准确恢复消费者 `ensureAgentContinuity`、`resumeAgent` 和 `statusAgent` 也使用原 Runtime 准入，各自在 Core 采用准确 Session 元数据与退休事实；`readRetiredAgentSession(id)` 由原 Memory/File Store 按原严格 codec 读取，避免为一个目标扫描所有退休记录。活动／退休冲突、错误 Host 与读取失败不能冒充不存在，退休记录也不授予恢复执行。原 Run 存活时可先返回 reattachable；新 Run 的 Level B 恢复仍沿原 Provider-native 目标、权限与 lifecycle prepare/commit。
 

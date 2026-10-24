@@ -118,6 +118,10 @@ Core `connect()` 的**整组恢复观察**则包括 lifecycle 收口、Session �
 
 准确 Run 的 Runtime 连接与 Session 目录、持久写入收口、Hook 和语义恢复观察分别确认。观察尚未完成或失败时，已确认的原终端输入、输出、尺寸与控制沿原连接继续可用；Hosted 与直接 Core 使用同一边界，不因重复等待整体恢复而截断健康通道。这条边界覆盖物理调用的完整必要依赖，包括取得 Attachment 后、为交付同一次回执所需的准确对象投影；不能只放行首个入口，再由后置投影重新等待无关 Session 或整体恢复观察。各步骤仍须从原 owner 取得准确目标及其真正必要的权威事实，观察独立不等于目标元数据自动可用。原输入仍保准确 owner、Run、operation 与字节前驱，结构化投递所需的权限及语义条件不被连接成功代签。
 
+准确 Stop 沿原 Session／Run 的业务 owner 取得本次必要事实；Desktop、Hosted 与直接 Core 的连接准备保持同一边界，不等待无关 Session 的握手、Hook 或整体恢复观察。冷语义 owner 的内存尚无绑定时，只读取并核对准确原持久 Session；原权限、Runtime fence、Stop 操作与生命周期预留、持久收口和未知回执继续成立。
+
+单条 Attachment 抛错或未报告终局就结束，只确认该 reader 的输出观察不可用，保留原 Run、view、已交付 cursor 和未知终局，沿原服务窗与准确刷新入口恢复。其他健康 Attachment 与输入继续服务；连接入口暂不可达也不能代签已建流失效。只有与原 Runtime／连接代次相符、足以证明共享故障范围的权威事实，才进入原全局恢复；旧 reader 的迟到结果不能改变新观察或连接。局部恢复保留原字节顺序与 Gap，不重复输出或重放输入，也不以无关成功清除该观察失败。
+
 新建 Agent 同样只等待本次创建真正需要的 Runtime、Provider、Executor、权限与原创建操作事实，不把其它 Session 的恢复作为统一前置。读取原创建回执、确认原来源授权与执行新的创建分别证明：已有回执和无 prepared 关联的未知读取不要求 Native；prepared 操作仅连接原 Runtime 核对原操作，不另起 Run 或重放首句。新的 fork 沿准确原来源补足当前绑定并保留来源校验；原操作已经存在的回执不因来源后来变化而失去可读性。原终端附着成功、普通 shell 创建成功与 Agent 创建成功是不同消费者的证据，不能互相代签。
 
 Core 语义 owner 的原持久身份、Session／空间元数据读取与 Native 连接分别就绪。Native 启动尚未确认或完整恢复观察未完成时，仍活着的唯一语义 owner 保留原 namespace 与本次激活的 completion 观察，原持久工作面可先读取并显示；不能因此退出并换 Host、丢弃原启动观察或把未知当死亡。Native／Run 输入与控制仍取得准确原权威准入；当前步骤、最后确认与未知沿原服务窗表达。一次 reader 等待结束仅释放该 reader，不停止原 owner、child 或健康 Run。
