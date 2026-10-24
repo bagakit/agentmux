@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
-import { relative } from 'node:path'
+import { relative, resolve } from 'node:path'
 import base from './toolkit-tui-ui.config.mts'
 
 const edits = {
@@ -21,6 +21,11 @@ const mutation = process.env.AGENTMUX_TOOLKIT_PRESENTATION_MUTATION
 assert.ok(!mutation || Object.hasOwn(edits, mutation), 'Known presentation mutation')
 const edit = mutation ? edits[mutation as keyof typeof edits] : null
 export default { ...base,
+  // Fresh checkouts consume the same source owners instead of requiring unrelated dist builds.
+  resolve: { ...base.resolve, alias: [...(base.resolve.alias as { find: RegExp; replacement: string }[]),
+    { find: /^@agentmux\/identity$/, replacement: resolve(base.root!, 'packages/identity/src/index.ts') },
+    { find: /^@agentmux\/host\/mote-model$/, replacement: resolve(base.root!, 'apps/host/src/mote-model.ts') }
+  ] },
   plugins: [{ name: 'toolkit-presentation-consumers', enforce: 'pre' as const, transform(source: string, id: string) {
     const path = relative(base.root!, id.split('?')[0]!)
     if (path.startsWith('../') || path.includes('/node_modules/') || !/\.[cm]?[jt]sx?$/u.test(path)) return
