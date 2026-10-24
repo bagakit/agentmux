@@ -16,7 +16,20 @@ await mkdir(directory, { recursive: true })
 const receipt = { schema: 'agentmux.mobile-desktop-independence.v1', passed: false,
   scope: 'Actual compiled main Desktop and Mobile, private Chrome mobile context, compiled original Node Host library, official ctxmux and the maintained native Provider CLI fixture. Desktop quit/reopen and manual Host restart are real. Platform automatic recovery is joined separately from the same-candidate launchd proof. No installed user App, commercial Provider CLI, physical phone, cloud deployment, logout or power-loss qualification.',
   phases: [], cleanup: {} }
-let candidate, fixture, browser, failed
+let candidate, fixture, browser, failed, stopCoreErrors
+const coreErrors = { events: [], omitted: 0 }
+const observeCoreErrors = () => {
+  stopCoreErrors?.()
+  stopCoreErrors = fixture.sdk.onEvent(event => {
+    if (event.type !== 'agent-error') return
+    const text = JSON.stringify(event), bytes = Buffer.byteLength(text)
+    coreErrors.events.push(bytes <= 65536 ? structuredClone(event) : {
+      type: event.type, agentSessionId: event.agentSessionId, code: event.code,
+      failure: { logId: event.failure?.logId }, omitted: { bytes, digest: digest(text) }
+    })
+    if (coreErrors.events.length > 16) { coreErrors.events.shift(); coreErrors.omitted++ }
+  })
+}
 const phase = (name, result) => { receipt.phases.push({ name, result }); process.stdout.write(JSON.stringify({ phase: name, confirmed: true }) + '\n') }
 const expectSameRun = (observed, original) => {
   assert.equal(observed.session.agentSessionId, original.session.agentSessionId)
@@ -168,6 +181,7 @@ try {
   for (const [path, sha] of Object.entries(service.sources)) assert.equal(candidate.input.sourceHashes[path], sha, 'Platform proof must belong to this exact candidate: ' + path)
   receipt.platform = { digest: digest(JSON.stringify(service)), scope: service.scope }
   fixture = await compiledHostFixture(candidate)
+  observeCoreErrors()
   const noteDocument = await import(pathToFileURL(join(repository, 'packages/client-ui/dist/note/note-document.js')).href)
   await writeFile(join(fixture.workspace, 'original.note.md'), noteDocument.serializeNoteDocument(noteDocument.newNoteDocument(
     'Original retained Mobile paragraph.', 'original-note', 'original-block', 'Original mobile Note')))
@@ -334,6 +348,7 @@ try {
   const draft = 'Original unsent Mobile draft survives Host restart.'
   const mobileBeforeRestart = await browser.action('retain-original-mobile-draft', browserState, { sessionId: sid, draft })
   const restart = await fixture.restartHost()
+  observeCoreErrors()
   assert.equal(restart.owner.runtimeId, owner.runtimeId); assert.notEqual(restart.owner.ownerInstanceId, owner.ownerInstanceId)
   assert.deepEqual(restart.owner.ctxmux, owner.ctxmux); assert.equal(fixture.nativeProcessId, nativeProcessId)
   expectSameRun(await fixture.sdk.statusAgent(sid), original)
@@ -377,6 +392,16 @@ try {
   receipt.passed = true
 } catch (error) {
   failed = error; receipt.error = { name: error.name, message: error.message, stack: error.stack }
+  if (fixture) {
+    stopCoreErrors?.(); stopCoreErrors = undefined
+    const logIds = [...new Set(coreErrors.events.flatMap(event => event.failure?.logId ? [event.failure.logId] : []))]
+    receipt.coreErrors = { ...coreErrors, deliveryAttempts: await Promise.all(logIds.map(async logId => {
+      try {
+        const value = await fixture.sdk.readDeliveryAttempt(logId), text = JSON.stringify(value), bytes = Buffer.byteLength(text)
+        return { logId, ...(bytes <= 131072 ? { status: 'observed', value } : { status: 'omitted', bytes, digest: digest(text) }) }
+      } catch (observation) { return { logId, status: 'unavailable', failure: fixture.core.deliveryFailure(observation) } }
+    })) }
+  }
   if (error.privateBrowserFailure) {
     receipt.browserFailure = error.privateBrowserFailure
     if (fixture) {
@@ -410,6 +435,7 @@ try {
   }
 }
 finally {
+  stopCoreErrors?.()
   for (const [name, close] of [['browser', () => browser?.close()], ['fixture', () => fixture?.close()], ['candidate', () => candidate?.assertUnchanged()]]) {
     try { await close(); receipt.cleanup[name] = 'confirmed' }
     catch (error) { receipt.cleanup[name] = error.message; receipt.passed = false; failed ??= error }
