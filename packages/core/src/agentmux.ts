@@ -46,6 +46,16 @@ let outputAbandoned = false
 function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (!result || typeof result !== 'object') return false
   const body = result as Record<string, unknown>
+  if (method.startsWith('native.')) {
+    if (body.state === 'unknown' || body.error !== undefined) return true
+    const native = body.result as Record<string, unknown> | undefined
+    if (method === 'native.capture' && native?.state === 'failed') return true
+    if (method === 'native.operation.inspect' && native?.state === 'unknown') return true
+    if (method === 'native.action') {
+      const verification = (native?.action as { verification?: { state?: string } } | undefined)?.verification
+      if (!verification || verification.state === 'unverified' || verification.state === 'failed') return true
+    }
+  }
   if (['space.focus', 'goal.focus', 'app.focus'].includes(method) && body.partial === true) return true
   if ((method === 'file.share' || method === 'file.share.undo') && body.status !== 'committed') return true
   if (method === 'file.share.inspect') {

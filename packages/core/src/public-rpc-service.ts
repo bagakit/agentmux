@@ -75,6 +75,7 @@ import { isFileMethod, parseFileHistoryParams, parseFileHistoryResult, parseFile
 import { isGitMethod, parseGitParams, parseGitResult, type AgentMuxRpcGitOwner, type GitMethod } from './public-rpc-git.js'
 import { isAppWindowMethod, parseAppWindowPage, parseAppWindowParams, type AgentMuxRpcWindowsOwner, type AppWindowActor, type AppWindowMethod } from './public-rpc-windows.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
+import { isNativeDesktopMethod, parseNativeDesktopParams, parseNativeDesktopResult, type AgentMuxRpcNativeDesktopOwner, type NativeDesktopMethod } from './public-rpc-native-desktop.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { displayLabel, type AgentMuxNameContext } from './display-label.js'
 import { createHash } from 'node:crypto'
@@ -169,6 +170,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
 
   appearance?: AgentMuxAppearanceObservationPort
   schedules?: AgentMuxRpcSchedulesOwner
+  nativeDesktop?: AgentMuxRpcNativeDesktopOwner
   spatialState?: AgentMuxSpatialStateStore
   /** Optional host aggregation of original named owners; Core interprets no host target kinds. */
   nameHistory?(query: import('./display-label.js').AgentMuxNameHistoryQuery): Promise<import('./display-label.js').AgentMuxNameHistoryPage>
@@ -334,7 +336,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | NativeDesktopMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -574,6 +576,24 @@ export class AgentMuxRpcService {
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
+    if (isNativeDesktopMethod(method)) {
+      const caller = await this.authenticated(context)
+      if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim()))
+        throw new AgentMuxError('Native desktop operations require an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
+      const nativeMethod: NativeDesktopMethod = method
+      const input = parseNativeDesktopParams<NativeDesktopMethod>(nativeMethod, params)
+      if (caller && caller.hostId !== input.hostId) throw new AgentMuxError('Native desktop operations require the authenticated Agent’s exact Host.', 'CONTROL_PERMISSION_DENIED')
+      const ownerContext: AgentMuxRpcCallContext = { ...context, assertCurrent: async () => {
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        if (caller) await this.authenticated(context)
+      } }
+      await ownerContext.assertCurrent!()
+      if (!this.ports.nativeDesktop && !this.ports.forwardControl)
+        throw new AgentMuxError('This Host has no native desktop implementation. Existing Agents and page capture remain available.', 'CONTROL_UNAVAILABLE')
+      const result = this.ports.nativeDesktop ? await this.ports.nativeDesktop.call<NativeDesktopMethod>(nativeMethod, input, ownerContext)
+        : await this.ports.forwardControl!<NativeDesktopMethod>(nativeMethod, input, ownerContext)
+      return parseNativeDesktopResult<NativeDesktopMethod>(nativeMethod, result, input) as AgentMuxRpcResult<M>
+    }
     if (isAgentLearningMethod(method)) {
       const caller = await this.authenticated(context)
       if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim()))
