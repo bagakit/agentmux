@@ -12,6 +12,8 @@ export type AgentComposerProps = ComposerCompletionProps & {
   surfaceRef?: Ref<HTMLDivElement>
   active?: boolean
   value: string
+  /** The host may own selected content that becomes text when explicitly submitted. */
+  hasPendingContent?: boolean
   readPastedImage?: ReadPastedImage
   disabled: boolean
   placeholder: string
@@ -47,6 +49,7 @@ export function AgentComposer({
   surfaceRef,
   active = true,
   value,
+  hasPendingContent = false,
   readPastedImage,
   disabled,
   placeholder,
@@ -80,7 +83,8 @@ export function AgentComposer({
   historyNavigation,
   promptKeywords = []
 }: AgentComposerProps) {
-  const canSubmit = !disabled && Boolean(onSubmit) && Boolean(value.trim())
+  const hasContent = Boolean(value.trim()) || hasPendingContent
+  const canSubmit = !disabled && Boolean(onSubmit) && hasContent
   const referenceTools = <>
           <ComposerReferenceTool disabled={disabled} onSelect={onAttach}
             label="Reference files for the Agent to read" />
@@ -136,7 +140,7 @@ export function AgentComposer({
           // Bare Enter follows the parent's queue intent, including a pending interaction. Stop is
           // a separate action and must not decide whether a waiting/blocked Agent can retain a draft.
           // Cmd/Ctrl+Enter follows immediate submission when available; Shift+Enter and IME stay editing.
-          if (shortcut === 'message-tool.send' && onQueue && value.trim()) {
+          if (shortcut === 'message-tool.send' && onQueue && hasContent) {
             event.preventDefault()
             onQueue()
             return

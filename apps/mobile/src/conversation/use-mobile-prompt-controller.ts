@@ -73,6 +73,11 @@ type MobilePromptControllerOptions = {
   visible: boolean
   refresh: () => Promise<unknown>
 }
+export type MobilePromptPreparation = {
+  prepare(body: string): Promise<string>
+  /** Called only after the complete original message has been retained. */
+  commit(): Promise<void>
+}
 
 /** Coordinates original device intents with Core; local-drafts remains the durable owner. */
 export function useMobilePromptController({ local, client, agentSessionId, session, timeline, connection,
@@ -81,6 +86,8 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
   const drafts = useRef(local.drafts), attempts = useRef(local.attempts)
   const [diagnostics] = useState(() => new ClientDeliveryDiagnostics())
   const [revision, redraw] = useState(0)
+  const preparingKeys = useRef(new Set<string>())
+  const [preparationIssue, setPreparationIssue] = useState<{ client: AgentMuxHostedClient | null; sessionId: string | null; message: string } | null>(null)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId })
@@ -267,10 +274,34 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     if (attempts.current.get(key) === original) local.save()
     if (mounted.current) redraw(value => value + 1)
   }
-  async function submit(explicit = true, originalBody?: PromptAttempt, selectedKey = draftKey): Promise<void> {
+  async function submit(explicit = true, originalBody?: PromptAttempt, selectedKey = draftKey, preparation?: MobilePromptPreparation | null): Promise<void> {
     const existing = attempts.current.get(selectedKey)
-    const body = originalBody?.draft ?? draft
-    if (existing?.phase === 'sending' || !body.trim() || originalBody && originalBody !== existing) return
+    const initialBody = originalBody?.draft ?? drafts.current.get(selectedKey) ?? ''
+    let body = initialBody
+    if (preparingKeys.current.has(selectedKey) || existing?.phase === 'sending' || !body.trim() && !preparation || originalBody && originalBody !== existing) return
+    setPreparationIssue(null)
+    const preparedTarget = preparation && client && session ? {
+      client, sessionId: session.agentSessionId, hostId: session.hostId, runId: session.run.runId,
+      runtimeId: client.runtimeOwnerIdentity?.()?.runtimeId ?? null
+    } : null
+    const assertPreparedTarget = () => {
+      if (!preparation) return
+      const selected = preparedTarget?.client.agentSession(preparedTarget.sessionId)
+      if (!preparedTarget || current.current.client !== preparedTarget.client || current.current.agentSessionId !== preparedTarget.sessionId ||
+          selected?.hostId !== preparedTarget.hostId || selected.run.runId !== preparedTarget.runId ||
+          preparedTarget.client.runtimeOwnerIdentity?.()?.runtimeId !== preparedTarget.runtimeId) {
+        throw new Error('原附件消息的客户端、Mac、Session 或 Run 已改变；正文和附件保留，本次没有请求输入。')
+      }
+    }
+    if (preparation) {
+      preparingKeys.current.add(selectedKey); redraw(value => value + 1)
+      try { body = await preparation.prepare(initialBody); assertPreparedTarget() }
+      catch (error) {
+        if (mounted.current) setPreparationIssue({ client, sessionId: agentSessionId, message: errorMessage(error) })
+        return
+      } finally { preparingKeys.current.delete(selectedKey); if (mounted.current) redraw(value => value + 1) }
+      if (!body.trim()) return
+    }
     const refused = existing?.manualInput ? existing.inputReceipt?.status === 'not-applied'
       : originalPromptRefused(session, agentSessionId, existing, client?.runtimeOwnerIdentity?.()?.runtimeId)
     if (originalBody && !refused) return
@@ -298,6 +329,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     }
     attempts.current.set(originalKey, original)
     let stage = 'client-validation'
+    let rpcRequested = false
     try {
       if (!available || !originalClient || !originalId) throw Object.assign(new Error(
         `原会话当前不能投递：${connection.issue ?? connection.message}${disconnected ? '；会话连接已断开' : ''}。草稿已保留，可继续点击发送重试。`), { code: 'CONTROL_UNAVAILABLE' })
@@ -313,12 +345,16 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
       seed = Object.freeze({ ...seed, expectedRunId: original.runId,
         afterSubmissionId: original.request?.condition.afterSubmissionId ?? null,
         conditionAvailable: Boolean(original.request), execution: explicit ? 'immediate' : 'default' })
+      if (preparation && drafts.current.get(originalKey) === initialBody) drafts.current.set(originalKey, body)
       if (!await local.save()) throw new Error('设备工作面已被替换；本次未请求输入，原正文保留。')
       redraw(value => value + 1)
       if (attempts.current.get(originalKey) !== original) throw new Error('另一页面已保全原消息；本次未请求输入，请核对原请求和两份正文。')
+      if (preparation) { assertPreparedTarget(); await preparation.commit(); assertPreparedTarget() }
       stage = 'core-submit'
       original.inputRequested = true; if (!await local.save()) throw new Error('设备工作面已被替换；本次未请求输入。')
       if (attempts.current.get(originalKey) !== original) throw new Error('原消息记录已改变；本次未请求输入，请核对原记录。')
+      assertPreparedTarget()
+      rpcRequested = true
       const receipt = await originalClient.submitAgentPrompt({ agentSessionId: originalId, operationId: original.operationId,
         prompt: expandSemanticReferences(original.draft), authorHuman: true,
         ...(original.manualInput ? { expectedRun: original.manualInput.expectedRun, admissionIntent: { kind: 'manual-actor' as const }, execution: 'immediate' as const }
@@ -329,7 +365,10 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
         if (!receipt) throw Object.assign(new Error('原消息的 Core 保存或输入回执尚未确认；原正文和身份保留，可核对原请求。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
       } else confirmPrompt(originalKey, original)
       if (mounted.current && current.current.client === originalClient && current.current.agentSessionId === originalId) void refresh()
-    } catch (error) { await retainFailure(original, seed, error, stage, originalClient, originalKey, false) }
+    } catch (error) {
+      if (!rpcRequested) original.inputRequested = false
+      await retainFailure(original, seed, error, stage, originalClient, originalKey, false)
+    }
   }
 
   async function retryOriginalPrompt(selectedKey = draftKey): Promise<void> {
@@ -408,6 +447,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
       ...(original.manualInput && original.originalHostId ? { inputOrigin: { hostId: original.originalHostId, key: manualKey(original) } } : {}) }))
   const retainedAttempts = allAttempts.filter(([key, original]) => key !== draftKey && original.phase !== 'confirmed')
   return { draftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput,
+    preparing: preparingKeys.current.has(draftKey), preparationIssue: preparationIssue?.client === client && preparationIssue.sessionId === agentSessionId ? preparationIssue.message : null,
     historyLocalEntries, retainedAttempts, sessionAttempts: allAttempts,
     promptWasRefused: (original: PromptAttempt) => originalPromptRefused(session, agentSessionId, original, client?.runtimeOwnerIdentity?.()?.runtimeId) }
 }
