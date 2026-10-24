@@ -11,7 +11,7 @@ export default defineConfig({
     // The shared Note schema runs in Main too. Keep its existing dependencies
     // and required peers in the bundle rather than relying on workspace modules.
     plugins: [externalizeDepsPlugin({ exclude: [
-      '@agentmux/host', '@agentmux/connectors', '@agentmux/client-ui', '@tiptap/core', '@tiptap/extension-unique-id', '@tiptap/starter-kit',
+      '@agentmux/host', '@agentmux/connectors', '@agentmux/client-ui', '@agentmux/native-desktop', '@tiptap/core', '@tiptap/extension-unique-id', '@tiptap/starter-kit',
       'unified', 'remark-parse', 'remark-gfm', 'remark-directive', 'remark-stringify'
     ], include: ['@larksuiteoapi/node-sdk', '@discordjs/ws', '@discordjs/rest', 'discord-api-types'] })],
     resolve: {

@@ -38,6 +38,7 @@ import {
   readPackageIdentity
 } from './package-identity.mjs'
 import { preflightMacosSigning, signMacosApplication, verifyMacosSigning } from './macos-signing.mjs'
+import { verifyNativeDesktopCopy, verifyNativeDesktopSigning } from './native-desktop-package.mjs'
 
 const PRODUCT_NAME = 'AgentMux'
 const BUNDLE_ID = 'dev.agentmux.desktop'
@@ -1134,8 +1135,10 @@ async function main() {
     const stagedWorkspaceMoveHelper = join(stagedApp, 'Contents', 'Resources', 'app', 'resources', 'bin', 'agentmux-workspace-move')
     await verifyWorkspaceMoveHelper(stagedWorkspaceMoveHelper,
       await sha256(join(desktopRoot, 'resources', 'bin', 'agentmux-workspace-move')))
+    await verifyNativeDesktopCopy(stagedApp, repositoryRoot)
     await signMacosApplication(stagedApp, signingPlan)
     const signature = await verifyMacosSigning(stagedApp, signingPlan)
+    await verifyNativeDesktopSigning(stagedApp, signingPlan)
     const signedWorkspaceMoveHelperSha256 = await sha256(stagedWorkspaceMoveHelper)
 
     if (appOnly) {

@@ -8,11 +8,11 @@
   "scripts": {
     "build:workspace-move-helper": "node scripts/build-workspace-move-helper.mjs",
     "build:brand-assets": "node scripts/build-brand-assets.mjs",
-    "predev": "pnpm --filter @agentmux/host... build && pnpm build:workspace-move-helper && pnpm build:brand-assets && pnpm build:browser-extension-identity",
+    "predev": "pnpm --filter @agentmux/host... build && pnpm --filter @agentmux/native-desktop build && pnpm build:native-desktop --development && pnpm build:workspace-move-helper && pnpm build:brand-assets && pnpm build:browser-extension-identity",
     "dev": "node scripts/dev-desktop.mjs",
     "dev:web": "vite --config vite.web.config.ts --host 127.0.0.1",
     "build:gallery": "vite build --config vite.gallery.config.ts",
-    "prebuild": "pnpm --filter @agentmux/host... build && pnpm --filter @agentmux/git build && pnpm build:workspace-move-helper && pnpm build:brand-assets && pnpm build:browser-extension-identity",
+    "prebuild": "pnpm --filter @agentmux/host... build && pnpm --filter @agentmux/git build && pnpm --filter @agentmux/native-desktop build && pnpm build:native-desktop && pnpm build:workspace-move-helper && pnpm build:brand-assets && pnpm build:browser-extension-identity",
     "build": "pnpm --filter @agentmux/mobile build && electron-vite build && node scripts/build-renderer-release.mjs && node scripts/copy-mobile.mjs",
     "package:mac": "node scripts/package-macos.mjs",
     "package:mac:install": "node scripts/package-macos.mjs --install",
@@ -25,7 +25,8 @@
     "measure:desktop": "pnpm build && node scripts/measure-desktop-resources.mjs",
     "icons:dev": "node scripts/icon-review/dev.mjs",
     "icons:build": "node scripts/icon-review/build.mjs",
-    "build:browser-extension-identity": "node scripts/prepare-browser-extension-identity.mjs"
+    "build:browser-extension-identity": "node scripts/prepare-browser-extension-identity.mjs",
+    "build:native-desktop": "node scripts/build-native-desktop.mjs"
   },
   "dependencies": {
     "@agentmux/capsule": "workspace:*",
@@ -35,6 +36,7 @@
     "@agentmux/git": "workspace:*",
     "@agentmux/host": "workspace:*",
     "@agentmux/layout": "workspace:*",
+    "@agentmux/native-desktop": "workspace:*",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
