@@ -1,5 +1,6 @@
 /* One local HTML composition box; semantics and live-state eligibility belong to callers. */
 .semantic-icon-motion {
+  position: relative;
   display: inline-flex;
   flex: none;
   vertical-align: middle;
@@ -16,30 +17,17 @@
 .semantic-icon > use,
 [data-semantic-icon-sprite] symbol { animation-play-state: inherit; }
 .semantic-icon { --icon-work-part-animation: none; }
-.semantic-icon > foreignObject[data-semantic-icon-work] {
-  overflow: visible;
-  animation-play-state: inherit;
-}
-.semantic-icon-work-model {
-  position: relative;
-  width: 24px;
-  height: 24px;
-}
-.semantic-icon-work-model,
-.semantic-icon-work-model > div,
-.semantic-icon-work-model > div > svg { animation-play-state: inherit; }
-.semantic-icon-work-model > div {
+.semantic-icon-work-pen {
   position: absolute;
   inset: 0;
-  width: 24px;
-  height: 24px;
+  display: block;
 }
-.semantic-icon-work-model > div > svg { display: block; overflow: visible; }
+.semantic-icon-work-pen > svg { display: block; animation-play-state: inherit; }
 .semantic-icon-work-body { --icon-work-pen-display: none; }
 [data-semantic-icon-part="writing-pen"] { display: var(--icon-work-pen-display, inline); }
 .semantic-icon-work-pen {
   transform-box: view-box;
-  transform-origin: 10px 18px;
+  transform-origin: 41.6667% 75%;
   animation: var(--icon-work-part-animation, none) 2.4s ease-in-out infinite;
   animation-play-state: inherit;
 }
@@ -119,13 +107,13 @@
 @keyframes semantic-icon-hourglass-flow { 0%, 4%, 68%, 100% { opacity: 0; } 5%, 65% { opacity: 1; } }
 @keyframes semantic-icon-work-pen {
   0%, 8%, 78%, 100% { transform: translate(0, 0) rotate(0); }
-  14% { transform: translate(.7px, -.2px) rotate(-3deg); }
-  22% { transform: translate(-.8px, .5px) rotate(2deg); }
-  30% { transform: translate(.9px, -.1px) rotate(-4deg); }
-  38% { transform: translate(-.5px, .7px) rotate(1deg); }
-  46% { transform: translate(.8px, .1px) rotate(-2deg); }
-  54% { transform: translate(.25px, -1.25px) rotate(-9deg); }
-  66% { transform: translate(-.8px, -1px) rotate(-7deg); }
+  14% { transform: translate(2.9167%, -.8333%) rotate(-3deg); }
+  22% { transform: translate(-3.3333%, 2.0833%) rotate(2deg); }
+  30% { transform: translate(3.75%, -.4167%) rotate(-4deg); }
+  38% { transform: translate(-2.0833%, 2.9167%) rotate(1deg); }
+  46% { transform: translate(3.3333%, .4167%) rotate(-2deg); }
+  54% { transform: translate(1.0417%, -5.2083%) rotate(-9deg); }
+  66% { transform: translate(-3.3333%, -4.1667%) rotate(-7deg); }
 }
 @keyframes semantic-icon-stream-caret {
   0%, 12%, 100% { transform: translateX(0); }

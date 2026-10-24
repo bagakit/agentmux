@@ -44,28 +44,6 @@ export function workIconHref(name: SemanticIconId, part: typeof WORK_ICON_PARTS[
   return `${semanticIconHref(name)}${part === 'pen' ? '--work-pen' : ''}`
 }
 
-/** The work bone references live sprite geometry, including while detached. */
-function populateWorkIcon(element: SVGForeignObjectElement, name: SemanticIconId): void {
-  const document = element.ownerDocument
-  const model = document.createElement('div')
-  model.className = 'semantic-icon-work-model'
-  for (const part of WORK_ICON_PARTS) {
-    const layer = document.createElement('div')
-    layer.className = `semantic-icon-work-${part}`
-    if (part === 'pen') layer.setAttribute('data-semantic-icon-part', 'writing-pen')
-    const drawing = document.createElementNS(SVG_NS, 'svg')
-    drawing.setAttribute('viewBox', '0 0 24 24')
-    drawing.setAttribute('width', '24')
-    drawing.setAttribute('height', '24')
-    const use = document.createElementNS(SVG_NS, 'use')
-    use.setAttribute('href', workIconHref(name, part))
-    drawing.append(use)
-    layer.append(drawing)
-    model.append(layer)
-  }
-  element.replaceChildren(model)
-}
-
 /** The document root owns one sprite. Existing React and editor DOM keep stable references. */
 export function updateIconSprite(document: Document, theme: Pick<ThemeValue, 'icons' | 'iconStyle'>, nativeTextColor: string): void {
   let sprite = sprites.get(document)
@@ -123,7 +101,7 @@ export function updateIconSprite(document: Document, theme: Pick<ThemeValue, 'ic
     symbols.append(symbol)
     if (pen.childElementCount) {
       symbols.append(pen)
-      workRules.push(`.semantic-icon[data-semantic-icon="${name}"]{--icon-work-part-animation:semantic-icon-work-pen}`)
+      workRules.push(`.semantic-icon-motion[data-semantic-work="${name}"]{--icon-work-part-animation:semantic-icon-work-pen}`)
     }
   }
   const workStyle = document.createElementNS(SVG_NS, 'style')
@@ -151,30 +129,33 @@ export function createSemanticIconElement(name: SemanticIconId, document: Docume
   element.setAttribute('aria-hidden', 'true')
   element.setAttribute('focusable', 'false')
   element.setAttribute('data-semantic-icon', name)
-  element.setAttribute('class', ['semantic-icon', options.className].filter(Boolean).join(' '))
+  element.setAttribute('class', ['semantic-icon', options.animation === 'work' && 'semantic-icon-work-body', options.className].filter(Boolean).join(' '))
   element.style.pointerEvents = 'none'
   element.style.overflow = 'hidden'
   if (options.color !== undefined) element.style.color = options.color
   element.style.strokeWidth = String(options.strokeWidth ?? SEMANTIC_ICON_PEN.strokeWidth)
   element.style.strokeLinecap = options.strokeLinecap ?? SEMANTIC_ICON_PEN.strokeLinecap as 'round'
   element.style.strokeLinejoin = options.strokeLinejoin ?? SEMANTIC_ICON_PEN.strokeLinejoin as 'round'
-  if (options.animation === 'work') {
-    const articulation = document.createElementNS(SVG_NS, 'foreignObject')
-    articulation.setAttribute('width', '24')
-    articulation.setAttribute('height', '24')
-    articulation.setAttribute('data-semantic-icon-work', name)
-    populateWorkIcon(articulation, name)
-    element.append(articulation)
-  } else {
-    const use = document.createElementNS(SVG_NS, 'use')
-    use.setAttribute('href', semanticIconHref(name))
-    element.append(use)
-  }
+  const use = document.createElementNS(SVG_NS, 'use')
+  use.setAttribute('href', semanticIconHref(name))
+  element.append(use)
   if (!options.animation || options.animation === 'none') return element
   const carrier = document.createElement('span')
   carrier.className = 'semantic-icon-motion'
   carrier.dataset.iconAnimation = options.animation
   carrier.append(element)
+  if (options.animation === 'work') {
+    carrier.dataset.semanticWork = name
+    const bone = document.createElement('span')
+    bone.className = 'semantic-icon-work-pen'
+    bone.dataset.semanticIconPart = 'writing-pen'
+    const drawing = element.cloneNode(false) as SVGSVGElement
+    drawing.removeAttribute('class'); drawing.removeAttribute('data-semantic-icon')
+    drawing.setAttribute('width', '100%'); drawing.setAttribute('height', '100%')
+    const pen = document.createElementNS(SVG_NS, 'use')
+    pen.setAttribute('href', workIconHref(name, 'pen'))
+    drawing.append(pen); bone.append(drawing); carrier.append(bone)
+  }
   return carrier
 }
 
