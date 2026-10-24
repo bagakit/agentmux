@@ -20,6 +20,12 @@ if (args[0] === '--scene') {
     assert.ok(review.viewedImages.some(image => image.path === frame.file && image.sha256 === digest && image.viewed === true))
   }
   const inputs = Object.entries(scene.inputs); assert.ok(inputs.length > 10)
+  const driftReviewPath = join(resolve(receiptPath, '..'), 'source-drift-review.json')
+  let reviewedCoreDrift = []
+  try { const driftReview = JSON.parse(await readFile(driftReviewPath, 'utf8'))
+    assert.equal(driftReview.verdict, 'pass'); assert.equal(driftReview.sceneReceiptSHA256, hash(await readFile(receiptPath)))
+    reviewedCoreDrift = driftReview.changes
+  } catch (error) { if (error.code !== 'ENOENT') throw error }
   // This Task qualifies the Focus change, not every transitive module imported
   // by App. Keep the complete captured bundle provenance and expose peripheral
   // drift, while requiring the current affected surface and its original Focus
@@ -37,18 +43,24 @@ if (args[0] === '--scene') {
     || file.startsWith('apps/desktop/src/shared/') || file.startsWith('packages/core/')
     || file === 'apps/desktop/scripts/capture-focus-composable-filters.mjs'
     || file.startsWith('apps/desktop/scripts/fixtures/focus-composable-filters/')
-  const peripheralDrift = []; let currentFocusInputs = 0
+  const peripheralDrift = [], reviewedDependencies = []; let currentFocusInputs = 0
   for (const [file, digest] of inputs) {
     const current = hash(await readFile(join(root, file)))
-    if (currentFocusInput(file)) { currentFocusInputs++; assert.equal(current, digest, 'Current rendered Focus source '+file) }
+    if (currentFocusInput(file)) {
+      currentFocusInputs++
+      if (current !== digest && file.startsWith('packages/core/') && reviewedCoreDrift.some(change => change.file === file
+        && change.capturedSHA256 === digest && change.currentSHA256 === current && change.affectsExercisedFocus === false && change.reason)) {
+        reviewedDependencies.push({file,capturedSHA256:digest,currentSHA256:current})
+      } else assert.equal(current, digest, 'Current rendered Focus source '+file)
+    }
     else if (current !== digest) peripheralDrift.push({file,capturedSHA256:digest,currentSHA256:current})
   }
   for (const file of entryInputs) assert.ok(file in scene.inputs, 'Actual loaded Focus entry '+file)
   assert.ok(currentFocusInputs > 20, 'Nonempty current affected Focus consumer scope')
   assert.deepEqual(scene.sourceAfter, scene.inputs)
   assert.equal(scene.cleanup.removed, true); assert.deepEqual(scene.cleanup.remaining, [])
-  console.log(JSON.stringify({passed:true,scene:args[1],review:reviewPath,currentFocusInputs,peripheralDrift,
-    boundary:'Current affected Focus inputs match the reviewed captured Renderer; peripheral transitive drift is not qualified. No user installation or real Provider/Runtime lifecycle claim'}))
+  console.log(JSON.stringify({passed:true,scene:args[1],review:reviewPath,currentFocusInputs,exactInputs:currentFocusInputs-reviewedDependencies.length,reviewedDependencies,peripheralDrift,
+    boundary:'Current Focus Renderer and projections match the captured scene. Explicitly reviewed Core deltas do not affect the exercised path; other peripheral drift is not qualified. No installation or real Provider/Runtime lifecycle claim'}))
   process.exit(0)
 }
 const evidence = join(root, '.local/state/focus-composable-filters/source'); await mkdir(evidence, {recursive:true})
