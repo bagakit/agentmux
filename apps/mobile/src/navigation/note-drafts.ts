@@ -52,8 +52,8 @@ export function noteDrafts(identity: readonly string[]) {
   const key = prefix + JSON.stringify(identity)
   let observed: string | null = null, inspected: string | null = null
   let initial: NoteEditState | undefined, issue = '', readable = true
-  const listener = (raw: string, durable = true) => { if (durable) observed = raw; for (const callback of callbacks) callback(parse(raw)) }
-  const callbacks = new Set<(value: NoteEditState) => void>()
+  const listener = (raw: string, durable = true) => { if (durable) observed = raw; for (const callback of callbacks) callback(parse(raw), durable ? undefined : '本机保存回执未持久保存；已确认的原文件回执与当前草稿仍保留。恢复本机存储后可核对当前原文以重试保全。') }
+  const callbacks = new Set<(value: NoteEditState, issue?: string) => void>()
   const current = (raw: string): NoteEditState => {
     const value = parse(raw)
     return value.attempt && value.attempt.phase !== 'written' && !pending.get(key) ? { ...value, attempt: { ...value.attempt, phase: 'unknown' } } : value
@@ -121,7 +121,7 @@ export function noteDrafts(identity: readonly string[]) {
       for (const callback of callbacks) callback(next)
       return true
     },
-    subscribe(callback: (value: NoteEditState) => void) {
+    subscribe(callback: (value: NoteEditState, issue?: string) => void) {
       callbacks.add(callback)
       if (!observers.has(key)) observers.set(key, new Set())
       observers.get(key)!.add(listener)

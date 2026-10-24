@@ -201,7 +201,7 @@ function RichContent({ content, onChange, onCompositionChange, onSnapshotIssue, 
 export type NoteEditing = {
   initial?: NoteEditState | undefined
   onDraft(state: NoteEditState): void
-  subscribe?: ((listener: (state: NoteEditState) => void) => () => void) | undefined
+  subscribe?: ((listener: (state: NoteEditState, issue?: string) => void) => () => void) | undefined
   readDeviceDraft?: (() => NoteEditState | undefined) | undefined
   adoptDeviceDraft?: ((state: NoteEditState) => void) | undefined
   save(content: string, expectedRevision: string): Promise<FileWriteReceipt>
@@ -267,7 +267,7 @@ export function NoteReader({ resource, agentNames, content, path, workspaceId, r
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}
     </section>}
-    {editing && original.revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={original.content} revision={original.revision} original={original} onWritten={document => setWritten({ source: observed, document })} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent key={readingScope} highlightBlockIds={highlightBlockIds} content={topBlockIndex !== undefined ? { type: 'doc', content: parsed.note.content.content?.[topBlockIndex] ? [clipBlocks ? readingExcerpt(parsed.note.content.content[topBlockIndex]!, highlightBlockIds) : parsed.note.content.content[topBlockIndex]!] : [] } : excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : previewBlockCount === undefined ? parsed.note.content : { ...parsed.note.content, content: parsed.note.content.content?.slice(0, previewBlockCount).map(node => readingExcerpt(node, highlightBlockIds)) ?? [] }} />}
+    {editing && original.revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={original.content} revision={original.revision} original={original} onWritten={document => setWritten({ source: observed, document })} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!((state, issue) => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state, issue) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent key={readingScope} highlightBlockIds={highlightBlockIds} content={topBlockIndex !== undefined ? { type: 'doc', content: parsed.note.content.content?.[topBlockIndex] ? [clipBlocks ? readingExcerpt(parsed.note.content.content[topBlockIndex]!, highlightBlockIds) : parsed.note.content.content[topBlockIndex]!] : [] } : excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : previewBlockCount === undefined ? parsed.note.content : { ...parsed.note.content, content: parsed.note.content.content?.slice(0, previewBlockCount).map(node => readingExcerpt(node, highlightBlockIds)) ?? [] }} />}
     {showDocumentMetadata && <NoteReaderMetadata noteProvenance={original.noteProvenance} />}
   </div></Scope.Provider></NoteFileContext.Provider> : <><p role="status">原笔记读取问题：{parsed.message}</p><pre>{content}</pre></>
 }
@@ -292,7 +292,7 @@ function EditableNote({ note, content, revision, editing, original, onWritten }:
   const unretained = useRef(false)
   const draftWriter = useRef(editing.onDraft); draftWriter.current = editing.onDraft
   const subscribe = useRef(editing.subscribe); subscribe.current = editing.subscribe
-  useEffect(() => subscribe.current?.(value => {
+  useEffect(() => subscribe.current?.((value, durabilityIssue) => {
     if (value.noteId !== note.noteId) return
     const previous = current.current
     let retained = value
@@ -319,6 +319,7 @@ function EditableNote({ note, content, revision, editing, original, onWritten }:
       try { draftWriter.current(retained); setNotice('本机存储已恢复，两份原编辑均已保全。') }
       catch (error) { unretained.current = true; setNotice(`两份编辑在当前工作面保留，本机保存仍未确认：${String(error)}`) }
     }
+    if (durabilityIssue) { unretained.current = true; setNotice(durabilityIssue) }
   }), [note.noteId])
   const baseline = useMemo(() => { const read = parseNoteFile({ ...original, content: state.input?.proposedContent ?? state.draft }); return read.status === 'valid' ? read.note.content : note.content }, [opened, externalDraft, original, state.input])
   const persist = (value: NoteEditState) => {
@@ -403,7 +404,14 @@ function EditableNote({ note, content, revision, editing, original, onWritten }:
       } else complete()
     }
     else if (result.status === 'unknown') { const latest = current.current as NoteEditState; if (!ownsAttempt() || latest.attempt?.phase === 'written') return; persist({ ...latest, attempt: { ...attempt, phase: 'unknown', ...(result.noteHistory ? { noteHistory: result.noteHistory } : {}) } }); setNotice(`保存回执未知：${result.message}。草稿保留，请核对原文件；不会重复写入。`) }
-    else { const latest = current.current as NoteEditState; if (!ownsAttempt() || latest.attempt?.phase === 'written') return; const { attempt: pending, ...kept } = latest; persist(kept); setNotice(result.status === 'conflict' ? '原文件已改变，草稿保留；请核对当前原文后明确处理冲突。' : `保存失败：${result.message}。草稿保留。`) }
+    else {
+      const latest = current.current as NoteEditState
+      // The device owner may already have published this exact non-write result
+      // and cleared its pending intent. The original live call still owns its
+      // notice; a different pending request or adopted revision does not.
+      const clearedOriginal = !latest.attempt && latest.expectedRevision === attempt.expectedRevision
+      if ((!ownsAttempt() && !clearedOriginal) || latest.attempt?.phase === 'written') return
+      const { attempt: pending, ...kept } = latest; persist(kept); setNotice(result.status === 'conflict' ? '原文件已改变，草稿保留；请核对当前原文后明确处理冲突。' : `保存失败：${result.message}。草稿保留。`) }
   }
   async function inspect() {
     const epoch = inspectionEpoch.current
@@ -418,6 +426,9 @@ function EditableNote({ note, content, revision, editing, original, onWritten }:
       const complete = () => {
         if (!alive.current || epoch !== inspectionEpoch.current) return
         setRemote({ document, note: parsed.note })
+        // Retrying device retention saves the already observed receipt and draft;
+        // reading equal remote bytes never settles an unknown write.
+        if (unretained.current && !persist(current.current)) return
         const accepted = acknowledgeNoteCanonicalRead(current.current, document)
         if (accepted !== current.current) {
           if (persist(accepted)) {
