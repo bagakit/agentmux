@@ -94,7 +94,7 @@ export async function permissionActionsFixture(initialCoreAvailable = true) {
     await cli(['connection', 'configure', '--input', '-'], { operationId: 'permission-configure', expectedRevision: null, connection: { ...feishuConfig, credentialRef: credential.credentialRef } })
     const bound = await cli(['connection', 'bind', '--input', '-'], { operationId: 'permission-bind', bindingId: 'original-binding', connectionId: feishuConfig.connectionId,
       expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: 'original-agent', regionAnchor: { regionId: 'original-region' }, externalConversationId: 'original-room',
-      expectedSource: { providerId: 'codex', nativeSessionId: 'original-native' }, scope: { input: 'all-messages', publication: 'future-native-user-facing' } })
+      expectedSource: { providerId: 'codex', nativeSessionId: 'original-native' }, scope: { input: 'all-messages', publication: 'future-shared-conversation' } })
     expect(bound.state).toBe('applied')
     services.publication!.refresh()
     await vi.waitFor(() => expect(services.publication!.store.list(bound.binding).some(value => value.payload.kind === 'binding-lifecycle' && value.state === 'confirmed')).toBe(true))
