@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, statfsSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, statfsSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -21,6 +21,10 @@ for (let index = 0; index < args.length; index++) {
   throw new Error(`Unknown argument: ${args[index]}`)
 }
 assert.equal(process.platform, 'darwin', 'The exact CoreGraphics production branch requires macOS')
+if (!args.includes('--output')) {
+  mkdirSync(output, { recursive: true })
+  output = mkdtempSync(join(output, 'run-'))
+}
 mkdirSync(output, { recursive: true })
 const macos = join(repository, 'packages/native-desktop/macos')
 const core = ['NativeCaptureGeometry.swift', 'NativeImageLimits.swift', 'NativeSelectionCaptureLease.swift'].map(name => join(macos, 'Sources/AgentMuxNativeMacOSCore', name))

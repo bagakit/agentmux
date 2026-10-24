@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync, statfsSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, statfsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -24,7 +24,9 @@ for (let i = 0; i < args.length; i++) {
   throw new Error(`Unknown argument: ${args[i]}`)
 }
 assert.equal(process.platform, 'darwin')
-const output = resolve(outputIndex >= 0 ? args[outputIndex + 1] : join(repository, '.local/state/screenshot-experience/native-selection'))
+const outputRoot = join(repository, '.local/state/screenshot-experience/native-selection')
+mkdirSync(outputRoot, { recursive: true })
+const output = outputIndex >= 0 ? resolve(args[outputIndex + 1]) : mkdtempSync(join(outputRoot, 'run-'))
 mkdirSync(output, { recursive: true })
 const cache = join(output, 'module-cache')
 mkdirSync(cache, { recursive: true })
