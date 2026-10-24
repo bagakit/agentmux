@@ -4,7 +4,8 @@ import { expect, it } from 'vitest'
 import { AGENTMUX_CLI_COMMANDS } from '../src/agentmux-cli-commands.js'
 import { parseConnectionIngressRecord } from '../src/ingress-codec.js'
 import { isMoteChatMethod, moteChatDiagnosisCode, moteChatDiagnosisKey, parseMoteChatParams, parseMoteChatResult,
-  moteChatPreparationReason, type MoteChatDiagnosis, type MoteChatDiagnosisInput, type MoteChatDiagnosisIntake } from '../src/mote-chat.js'
+  moteChatPreparationReason, moteChatInputFailureCode, moteChatInputFailureCodes,
+  type MoteChatDiagnosis, type MoteChatDiagnosisInput, type MoteChatDiagnosisIntake } from '../src/mote-chat.js'
 import { parseConnectionDiagnosisWaiting } from '../src/connection-diagnosis-codec.js'
 import type { AgentInputSubmissionReceipt, AgentInputWaitReason } from '../src/agent-input-wait.js'
 import { fixturePath } from './helpers/fixture-values.js'
@@ -14,7 +15,7 @@ const input: MoteChatDiagnosisInput = { target: { spaceId: 'private-mote', zoneI
   expectedResource: { hostId: 'original-host', workspaceId: 'private-workspace', workspacePath: fixturePath('private-mote-home') } } }
 const stage = { state: 'ready' as const }
 const inputObservation = (overrides: Partial<MoteChatDiagnosisIntake['input']> = {}): MoteChatDiagnosisIntake['input'] => ({
-  status: null, observation: 'not-started', controlState: null, receiptObservation: null, waiting: null, preparationReason: null, ...overrides
+  status: null, observation: 'not-started', controlState: null, receiptObservation: null, waiting: null, preparationReason: null, failureCode: null, ...overrides
 })
 const diagnosis = (): MoteChatDiagnosis => ({
   targetKey: moteChatDiagnosisKey(input.target), limit: 5,
@@ -116,12 +117,46 @@ it('reuses exact safe waiting combinations while separating receipt ownership fr
     { ...original, status: 'unknown', receiptObservation: 'owned' },
     { ...original, controlState: null }, { ...original, status: null },
     { ...original, waiting: null, preparationReason: 'native-busy' },
+    { ...original, waiting: null, failureCode: 'AGENT_INTERACTION_PENDING' },
+    { ...original, failureCode: 'PRIVATE_EXCEPTION_CODE' },
+    { ...original, failureCode: { code: 'AGENT_INTERACTION_PENDING' } },
+    { ...original, preparationReason: 'native-busy', failureCode: 'AGENT_INTERACTION_PENDING' },
     { ...original, preparationReason: 'private-code' }, { ...original, gateId: 'private gate' }
   ]
   for (const value of malformed) {
     const bad = { ...report, incoming: { rows: [{ ...row, input: value }], more: false } }
     expect(() => parseMoteChatResult(method, bad, input)).toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
   }
+})
+
+it('publishes only explicitly enumerated original wait failure codes, never messages or nested errors', () => {
+  const key = { kind: 'message' as const, agentSessionId: 'private-session', expectedRun: { runId: 'private-run' }, messageId: 'private-input' }
+  const receipt: AgentInputSubmissionReceipt = { key, ref: { key, waitGeneration: 1 }, persistence: 'confirmed',
+    control: { ref: { key, waitGeneration: 1 }, state: 'enabled', at: 1 }, admission: null, status: 'waiting', observation: 'rejoin-needed' }
+  const failure = (code: string) => ({ name: 'AgentMuxError', code, message: 'Private message AGENT_INTERACTION_PENDING',
+    detail: '{"code":"AGENT_INTERACTION_PENDING"}', stack: 'Private stack' })
+  const report = diagnosis(), row = report.incoming!.rows[0]!
+  row.input = inputObservation({ status: 'waiting', observation: 'observed', controlState: 'enabled', receiptObservation: 'rejoin-needed',
+    waiting: { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin' } })
+  for (const code of moteChatInputFailureCodes) {
+    receipt.control.waiting = { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin', failure: failure(code) }
+    expect(moteChatInputFailureCode(receipt)).toBe(code)
+    row.input.failureCode = code
+    expect(parseMoteChatResult(method, report, input).incoming!.rows[0]!.input.failureCode).toBe(code)
+  }
+  receipt.control.waiting = { phase: 'native-environment', reason: 'original-environment-unconfirmed', wake: 'explicit-rejoin',
+    observation: { phase: 'original-observation', failure: failure('AGENT_INTERACTION_PENDING') } }
+  expect(moteChatInputFailureCode(receipt)).toBe('AGENT_INTERACTION_PENDING')
+  for (const code of ['PRIVATE_EXCEPTION_CODE', 'AGENT_PROMPT_PREPARATION_FAILED', 'AGENT_INTERACTION_PENDING private-id', '']) {
+    receipt.control.waiting = { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin', failure: failure(code) }
+    expect(moteChatInputFailureCode(receipt)).toBeNull()
+  }
+  receipt.control.waiting = { phase: 'runtime', reason: 'runtime-unavailable', wake: 'runtime-restored' }
+  expect(moteChatInputFailureCode(receipt)).toBeNull()
+  delete receipt.control.waiting
+  expect(moteChatInputFailureCode(receipt)).toBeNull()
+  const missing = { ...row.input } as Record<string, unknown>; delete missing.failureCode
+  expect(() => parseMoteChatResult(method, { ...report, incoming: { rows: [{ ...row, input: missing }], more: false } }, input)).toThrow()
 })
 
 it('exports only an existing preparation reason after matching the original input key, never its private fence or retry permission', () => {

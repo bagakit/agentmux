@@ -21,7 +21,7 @@ it('diagnoses the original Core wait and preparation reason through the default 
   const report = await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
   const input = report.incoming!.rows.find(row => row.key === key)!.input
   if (process.env.T031_FACTS) appendFileSync(process.env.T031_FACTS, JSON.stringify({ phase: 'runtime-wait', input }) + '\n')
-  expect(input).toEqual({ status: 'waiting', observation: 'observed', controlState: 'enabled', receiptObservation: 'owned', waiting: runtimeWait, preparationReason: null })
+  expect(input).toEqual({ status: 'waiting', observation: 'observed', controlState: 'enabled', receiptObservation: 'owned', waiting: runtimeWait, preparationReason: null, failureCode: null })
   await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
   expect(rejoin).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
   expect(f.start).toHaveBeenCalledOnce()
@@ -37,7 +37,7 @@ it('diagnoses the original Core wait and preparation reason through the default 
     .toMatchObject({ status: 'waiting', observation: 'rejoin-needed', control: { waiting: { phase: 'input-environment', reason: 'original-input-unconfirmed' } } }))
   const preparation = await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
   expect(preparation.incoming!.rows[0]!.input).toEqual({ status: 'waiting', observation: 'observed', controlState: 'enabled',
-    receiptObservation: 'rejoin-needed', waiting: { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin' }, preparationReason: 'context-compaction' })
+    receiptObservation: 'rejoin-needed', waiting: { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin' }, preparationReason: 'context-compaction', failureCode: null })
   expect(rejoin).toHaveBeenCalledOnce(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
   const serialized = JSON.stringify(preparation)
   for (const privateValue of [f.root, f.creator.userId, record.body, record.ingressId, record.input!.agentSessionId,
@@ -47,7 +47,7 @@ it('diagnoses the original Core wait and preparation reason through the default 
   await f.services.ingress!.rejoin(record.ingressId)
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   await vi.waitFor(async () => expect((await f.sdk.call('space.mote.chat.diagnose', { target: f.target })).incoming!.rows[0]!.input)
-    .toEqual({ status: 'terminal-confirmed', observation: 'observed', controlState: 'dispatch-authorized', receiptObservation: 'closed', waiting: null, preparationReason: null }))
+    .toEqual({ status: 'terminal-confirmed', observation: 'observed', controlState: 'dispatch-authorized', receiptObservation: 'closed', waiting: null, preparationReason: null, failureCode: null }))
   expect((await f.records())[0]!.input).toEqual(record.input)
   expect(f.start).toHaveBeenCalledOnce(); expect(f.submission).toHaveBeenCalledOnce(); expect(rejoin).toHaveBeenCalledTimes(2)
   expect(f.wire.effects).toHaveLength(0)
