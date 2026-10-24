@@ -13,6 +13,7 @@ const metadata = 'rebuilds only one exact offscreen Agent node for metadata with
 const motion = 'the formal motion control changes only original event presentation and resumes its elapsed phase'
 const adaptive = 'presents real adaptive membership with one geometry clock and reclaims a deleted interior while preserving the reader'
 export const collaborationCanvasMutations = [
+  { file: 'lib/use-collaboration-layout.ts', name: 'animation-rebuilds-structure', before: 'useMemo(() => collaborationLayoutStructureKey(input), [input.areas, input.nodes])', after: 'collaborationLayoutStructureKey(input)', assertion: adaptive },
   { file: 'components/AgentContextContent.tsx', name: 'custom-information-status', before: 'disclosure?.status ?? 1', after: '1', assertion: 'shows cumulative identity, status and summary on the actual shared card while retaining mandatory service information' },
   { file: 'components/AgentContextContent.tsx', name: 'custom-information-summary', before: 'disclosure?.summary ?? 1', after: '1', assertion: 'shows cumulative identity, status and summary on the actual shared card while retaining mandatory service information' },
   { file: graph, name: 'custom-profile-body', before: 'const lod = collaborationMapLod(zoom, preferences)', after: 'const lod = collaborationMapLod(zoom)', assertion: 'uses custom boundary and LOD for actual bodies, ports and summary leases without changing the world or camera' },

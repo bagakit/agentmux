@@ -857,6 +857,7 @@ it('keeps explicit Zoom and Fit intent when original Worker placement arrives af
 it('presents real adaptive membership with one geometry clock and reclaims a deleted interior while preserving the reader', async () => {
   const fixture = await adaptiveScene(), { added, previous, target, reading, farthest, mark, fresh, camera } = fixture
   const clock = presentationClock()
+  const signature = vi.spyOn(engine, 'collaborationLayoutStructureKey')
   try {
     await deliverHeldPlacement(); await clock.advance(0); await clock.advance(110); await clock.advance(0)
     const middle = renderedBox(farthest.id), before = previous.get(farthest.id)!, after = target.get(farthest.id)!
@@ -881,6 +882,7 @@ it('presents real adaptive membership with one geometry clock and reclaims a del
     }
     await clock.advance(110); await clock.advance(0)
     expect(renderedBox(farthest.id)).toEqual(after); expectVisibleEndpoints()
+    expect(signature).not.toHaveBeenCalled() // Pure presented frames do not sort the unchanged world again.
     const freshBox = target.get(collaborationAgentNode('work', fresh.id))!
     const internal = added.areas[0]!.members.map(id => collaborationAgentNode('work', id)).filter(id => id !== reading && id !== farthest.id && id !== freshBox.id)
       .map(id => target.get(id)!).sort((a, b) => centerDistance(a, freshBox) - centerDistance(b, freshBox) || a.id.localeCompare(b.id))[0]!
@@ -906,7 +908,7 @@ it('presents real adaptive membership with one geometry clock and reclaims a del
     for (const id of [reading, JSON.stringify(['area', 'control']), collaborationAgentNode('control', subject('canvas-12'))]) expect(renderedBox(id)).toBe(previous.get(id))
     expect(document.activeElement).toBe(mark); expect(captured.store!.getState().transform).toBe(camera); expectVisibleEndpoints(); expect(requests).toHaveLength(3)
     console.info(JSON.stringify({ candidate: 'actual-graph-adaptive', oldNeighborMovement: centerDistance(before, after), removed: internal.id, holeBefore: hole(target), holeAfter: hole(survivors) }))
-  } finally { clock.restore() }
+  } finally { signature.mockRestore(); clock.restore() }
 })
 
 it.each(['motion-off', 'gesture', 'new-structure'] as const)('lets a later %s supersede the original finite geometry transition without another reading intent', async intent => {
