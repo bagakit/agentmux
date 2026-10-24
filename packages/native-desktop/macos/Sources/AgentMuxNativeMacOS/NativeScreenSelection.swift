@@ -10,7 +10,7 @@ struct NativeScreenSelectionError: Error {
 /// preview. Its normal event loop leaves unrelated native queries available.
 final class NativeScreenSelection: NSView {
     private static var active: NativeScreenSelection?
-    private var selection: NativeSelectionState
+    private(set) var selection: NativeSelectionState
     private var overlay: NSWindow?
     private var previousApp: NSRunningApplication?
     private var primaryTop: CGFloat = 0

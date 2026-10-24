@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync, statfsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -11,7 +11,7 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const macos = join(repository, 'packages/native-desktop/macos')
 const args = process.argv.slice(2)
 if (args.includes('--help')) {
-  console.log('verify-native-selection.mjs --source | --preview [--output DIRECTORY]\nCompiles only the real selection/Core sources and bare AppKit host; no App assembly/signing/install. --source drives real AppKit events and buttons, captures actual display frames and kills nonempty behavioral mutants. --preview opens the same production picker for manual interaction. macOS may show consent for real capture; the runner never approves it.')
+  console.log('verify-native-selection.mjs --source | --preview [--output DIRECTORY]\nCompiles only the real selection/Core sources and bare AppKit host; no App assembly/signing/install. --source drives real AppKit events and buttons, exports explicitly scoped AppKit view-layout frames and kills nonempty behavioral mutants. --preview opens the same production picker for manual interaction. No screen capture or permission request is used by the view-layout export; WindowServer layering and system focus remain unverified.')
   process.exit(0)
 }
 const preview = args.includes('--preview')
@@ -33,10 +33,12 @@ const picker = ['NativeScreenSelection.swift', 'NativeSelectionRequest.swift'].m
 const hostSource = join(macos, 'Verification/SelectionPreview.swift')
 const checksSource = join(macos, 'Verification/SelectionStateChecks.swift')
 const leaseChecksSource = join(macos, 'Verification/SelectionLeaseChecks.swift')
-const sources = [...core, ...picker, join(macos, 'Sources/AgentMuxNativeMacOS/NativeDesktopOperations.swift'), hostSource, checksSource, leaseChecksSource, fileURLToPath(import.meta.url)]
+const consumerChecksSource = join(macos, 'Verification/SelectionCaptureConsumerChecks.swift')
+const operationsSource = join(macos, 'Sources/AgentMuxNativeMacOS/NativeDesktopOperations.swift')
+const sources = [...core, ...picker, operationsSource, hostSource, checksSource, leaseChecksSource, consumerChecksSource, fileURLToPath(import.meta.url)]
 const hashes = Object.fromEntries(sources.map(path => [path.slice(repository.length + 1), createHash('sha256').update(readFileSync(path)).digest('hex')]))
 const report = { schema: 'agentmux.native-selection-verification.v1', sourceHashes: hashes, featureAccepted: false,
-  boundary: 'Real production NativeSelectionRequest/picker in a bare AppKit host; synthetic own-window NSEvents and real NSButton actions. Not global physical shortcut, production signing, TCC continuity or installed-app proof.' }
+  boundary: 'Real production NativeSelectionRequest/picker in a bare AppKit host; direct AppKit responder dispatch after exact own-view hit testing and real NSButton actions. WindowServer key/foreground and physical dispatch remain unknown. Not global shortcut, production signing, TCC continuity or installed-app proof.' }
 
 function command(command, parameters, log) {
   const space = statfsSync(output)
@@ -63,10 +65,23 @@ function build(directory, change) {
   command('swiftc', [...link, ...picker.map(substitute), hostSource, '-o', join(directory, 'selection-preview')], join(directory, 'picker-build.log'))
   command('swiftc', [...link, checksSource, '-o', join(directory, 'selection-state-checks')], join(directory, 'checks-build.log'))
   command('swiftc', [...link, leaseChecksSource, '-o', join(directory, 'selection-lease-checks')], join(directory, 'lease-checks-build.log'))
+  let operations = readFileSync(operationsSource, 'utf8')
+  if (change?.path === operationsSource) {
+    assert.equal(operations.split(change.before).length, 2, 'Production consumer mutation must change one actual branch')
+    operations = operations.replace(change.before, change.after)
+  }
+  const start = operations.indexOf('    static func capture(_ params:')
+  const end = operations.indexOf('    static func listDisplays()', start)
+  assert(start >= 0 && end > start, 'Exact production capture consumer cannot be extracted')
+  const template = readFileSync(consumerChecksSource, 'utf8')
+  assert.equal(template.split('/* PRODUCTION_CAPTURE_METHODS */').length, 2)
+  const consumer = join(directory, 'CompiledSelectionCaptureConsumer.swift')
+  writeFileSync(consumer, template.replace('/* PRODUCTION_CAPTURE_METHODS */', operations.slice(start, end)))
+  command('swiftc', [...link, consumer, '-o', join(directory, 'selection-consumer-checks')], join(directory, 'consumer-checks-build.log'))
   return directory
 }
 function checks(directory) {
-  const reports = ['selection-state-checks', 'selection-lease-checks'].map(name => {
+  const reports = ['selection-state-checks', 'selection-lease-checks', 'selection-consumer-checks'].map(name => {
     const result = spawnSync(join(directory, name), [], { encoding: 'utf8' })
     assert.equal(result.signal, null, 'State tests terminated outside an assertion')
     let value
@@ -112,6 +127,7 @@ class Host {
   }
   request(method, params = {}) {
     const id = ++this.sequence
+    this.events.push({ direction: 'request', id, method, params })
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(Object.assign(new Error(`Actual AppKit ${method} did not return`), { receipt: { id, method, params, state: 'unknown' } })) }, 15000)
       this.pending.set(id, { resolve, reject, timer })
@@ -127,6 +143,7 @@ class Host {
     let closed = await Promise.race([this.closed, delay(2000).then(() => null)])
     if (!closed) { this.child.kill('SIGTERM'); closed = await Promise.race([this.closed, delay(2000).then(() => null)]) }
     assert(closed, `Exact preview process ${this.child.pid} closure is unknown`)
+    return { pid: this.child.pid, ...closed }
   }
 }
 const behavioral = (condition, message) => { if (!condition) throw Object.assign(new Error(message), { assertion: true }) }
@@ -145,62 +162,17 @@ async function exercise(directory, capture) {
     const point = (x, y) => ({ x, y })
     const drag = (from, to) => host.request('drag', { from, to })
     const images = []
-    let fixtureCaptureUnavailable
-    let externalOwner
-    const nativeCLI = (action, input, receiptPath) => {
-      assert(process.env.AGENTMUX_CLI, 'No explicitly available AgentMux capture owner')
-      const result = spawnSync(process.env.AGENTMUX_CLI, ['native', ...action, '--data', '-'], {
-        input: JSON.stringify(input), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 30000,
-      })
-      // Retain the original request and response even after a timeout/unknown.
-      // This function is called once per original operation and never retries it.
-      writeFileSync(receiptPath, JSON.stringify({ input, exitCode: result.status, signal: result.signal,
-        error: result.error?.message, stdout: result.stdout, stderr: result.stderr }, null, 2) + '\n')
-      if (result.error) throw result.error
-      assert.equal(result.status, 0, `External native capture failed; original receipt: ${receiptPath}`)
-      const envelope = JSON.parse(result.stdout)
-      assert.equal(envelope.ok, true)
-      return envelope.result
-    }
     const image = async name => {
       if (!capture) return
-      await delay(100)
-      let path = join(directory, name + '.png')
-      let value, external
-      if (!fixtureCaptureUnavailable) {
-        const fixturePath = join(directory, name + '-fixture.png')
-        try { value = await host.request('capture', { path: fixturePath }); path = fixturePath } catch (error) { fixtureCaptureUnavailable = error.receipt ?? { message: error.message } }
-      }
-      if (!value) {
-        try {
-          if (!externalOwner) {
-            const capabilities = nativeCLI(['capabilities'], { hostId: 'local' }, join(directory, 'capture-capabilities.json'))
-            assert.equal(capabilities.state, 'responded')
-            assert.equal(capabilities.result.provider, 'agentmux-native-macos')
-            externalOwner = { hostId: 'local', instanceId: capabilities.instanceId }
-          }
-          const operationId = randomUUID(), receiptPath = join(directory, name + '-native-receipt.json')
-          assert(Number.isSafeInteger(ready.displayId) && ready.displayId > 0, 'The actual preview display identity is unknown')
-          const input = { ...externalOwner, operationId, capture: { mode: 'display', displayId: ready.displayId } }
-          const response = nativeCLI(['capture'], input, receiptPath)
-          assert.equal(response.instanceId, externalOwner.instanceId)
-          assert.equal(response.operationId, operationId)
-          assert.equal(response.state, 'responded')
-          assert.equal(response.result.state, 'captured')
-          const screenshot = response.result.screenshot
-          assert.equal(screenshot.format, 'png')
-          writeFileSync(path, Buffer.from(screenshot.data, 'base64'))
-          value = { width: screenshot.width, height: screenshot.height, source: 'AgentMux-native-owner-composed-display' }
-          external = { ...externalOwner, operationId, receiptPath }
-        } catch (error) {
-          images.push({ name, state: 'unavailable', fixtureCapture: fixtureCaptureUnavailable, externalCaptureError: error.message })
-          return
-        }
-      }
+      await delay(60)
+      const path = join(directory, name + '-layout.png')
+      const value = await host.request('layout', { path })
+      assert.equal(value.source, 'AppKit-view-layout-only')
+      assert.equal(value.windowServerFrame, false)
       const bytes = readFileSync(path)
-      assert(bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && bytes.readUInt32BE(16) === value.width && bytes.readUInt32BE(20) === value.height, 'Actual native frame PNG metadata mismatch')
+      assert(bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && bytes.readUInt32BE(16) === value.width && bytes.readUInt32BE(20) === value.height, 'Actual AppKit layout PNG metadata mismatch')
       images.push({ name, state: 'captured', path, width: value.width, height: value.height, source: value.source,
-        ...(external ? { external, fixtureCapture: fixtureCaptureUnavailable } : {}), sha256: createHash('sha256').update(bytes).digest('hex') })
+        windowServerFrame: false, sha256: createHash('sha256').update(bytes).digest('hex') })
     }
     await image('initial')
     await drag(point(rectangle.x, rectangle.y), point(rectangle.x + rectangle.width, rectangle.y + rectangle.height))
@@ -249,8 +221,12 @@ async function exercise(directory, capture) {
     const redrawResult = await host.completion(4)
     verify(redrawResult.state === 'confirmed' && Math.abs(redrawResult.rect.width - redrawn.width) < 0.01 && Math.abs(redrawResult.rect.height - redrawn.height) < 0.01, 'Outside drag redraws and Return confirms the new selection')
     return { tests: cases.length, cases, completions: host.completions, images, events: host.events }
-  } catch (error) { primary = error; throw error } finally {
-    try { await host.stop() } catch (cleanup) { if (primary) throw new AggregateError([primary, cleanup], 'Picker test and exact-host cleanup failed'); throw cleanup }
+  } catch (error) {
+    error.diagnostics = { events: host.events, completions: host.completions, stderr: host.errors }
+    primary = error
+    throw error
+  } finally {
+    try { const cleanup = await host.stop(); if (primary) primary.diagnostics.cleanup = cleanup } catch (cleanup) { if (primary) throw new AggregateError([primary, cleanup], 'Picker test and exact-host cleanup failed'); throw cleanup }
   }
 }
 
@@ -266,14 +242,17 @@ try {
     report.state = 'preview-closed'
   } else {
     report.appKit = await exercise(baseline, true)
-    report.nativeFrames = report.appKit.images.length > 0 && report.appKit.images.every(image => image.state === 'captured') ? 'captured-awaiting-review' : 'incomplete'
+    report.nativeFrames = 'not-verified'
+    report.viewLayoutFrames = report.appKit.images.length > 0 && report.appKit.images.every(image => image.source === 'AppKit-view-layout-only') ? 'exported-awaiting-independent-review' : 'incomplete'
+    report.unverified = ['WindowServer fullscreen/layering', 'system foreground/focus and physical event delivery', 'screen capture permissions and installed application']
     const state = core[1], view = picker[0]
     const mutations = [
       { name: 'move', path: state, before: 'rectangle = translated(original, dx: location.x - anchor.x, dy: location.y - anchor.y)', after: 'rectangle = original' },
       { name: 'nudge', path: state, before: 'self.rectangle = translated(rectangle, dx: dx, dy: dy)', after: 'self.rectangle = rectangle' },
       { name: 'resize', path: state, before: 'right = min(bounds.maxX, max(location.x, left + minimumWidth))', after: 'right = original.maxX' },
       { name: 'panel-bounds', path: state, before: 'x: min(max(preferredOrigin.x, available.minX), available.maxX - width)', after: 'x: preferredOrigin.x' },
-      { name: 'capture-lease', path: core[3], before: 'guard lock.try()', after: 'guard false' },
+      { name: 'capture-lease', path: core[3], before: '        guard lock.try() else { throw Failure.busy }\n        defer { lock.unlock() }', after: '        // Test mutant: operation runs without the capture lease.' },
+      { name: 'consumer-lease', path: operationsSource, before: 'return try NativeSelectionCaptureLease.shared.withCapture {', after: 'return try unleasedCapture {' },
       { name: 'release', path: view, before: 'selection.pointerUp(convert(event.locationInWindow, from: nil)); refresh()', after: 'selection.pointerUp(convert(event.locationInWindow, from: nil)); refresh(); confirm()' },
       { name: 'escape', path: view, before: 'case 53: cancel()', after: 'case 53: confirm()' },
       { name: 'toolbar', path: view, before: 'confirmButton.action = #selector(confirm)', after: 'confirmButton.action = #selector(cancel)' },
@@ -295,7 +274,8 @@ try {
   }
 } catch (error) {
   report.state = 'failed'
-  report.error = { message: error.message, ...(error instanceof AggregateError ? { errors: error.errors.map(error => error.message) } : {}) }
+  report.error = { message: error.message, ...(error.diagnostics ? { diagnostics: error.diagnostics } : {}),
+    ...(error instanceof AggregateError ? { errors: error.errors.map(error => ({ message: error.message, diagnostics: error.diagnostics })) } : {}) }
   process.exitCode = 1
 }
 writeFileSync(join(output, 'receipt.json'), JSON.stringify(report, null, 2) + '\n')
