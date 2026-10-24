@@ -701,12 +701,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('message.notify.inspect', '--host ID --operation-id ID', 'Read the original notification and its own input receipt without sending.',
     { '--host': 'data', '--operation-id': 'data' }, f => ({ hostId: id(f, '--host', true), operationId: id(f, '--operation-id', true) }),
     'Trusted user/device read only; managed Agents cannot inspect arbitrary notification operations. Keeps the original frozen Run, input key and references. Never prepares, submits, reads message bodies or acknowledges input. null means no original notification was found by this read; it does not prove that an unknown remote operation was never applied. Keep the same operation ID; do not automatically notify again.'),
-  command('message.read', '(--message-id ID|--operation-id ID) [--host ID]', 'Read one original message before input or dispatch exists.',
-    { '--message-id': 'data', '--operation-id': 'data', '--host': 'data' }, f => {
+  command('message.read', '(--message-id ID|--operation-id ID) [--notification-id ID] [--host ID]', 'Read one original message and its exact notification metadata without consuming it.',
+    { '--message-id': 'data', '--operation-id': 'data', '--notification-id': 'data', '--host': 'data' }, f => {
       const selected = one(f, ['--message-id', '--operation-id'], 'Original message read')
-      return { [selected === '--message-id' ? 'messageId' : 'operationId']: id(f, selected), ...fields(f, { '--host': 'hostId' }) }
+      return { [selected === '--message-id' ? 'messageId' : 'operationId']: id(f, selected), ...fields(f, { '--host': 'hostId', '--notification-id': 'notificationId' }) }
     },
-    'Managed Agents read their original participation at their original Host. A trusted user/device must select the exact Host. null means that journal was successfully read and the selected original message is absent; an unavailable read remains an error. Reading never sends or acknowledges input.'),
+    'Managed Agents read their original participation at their original Host. A trusted user/device must select the exact Host. --notification-id selects only that original notification for this MID and recipient; an unassociated result preserves the body and never substitutes another notice. Notification mode and preparedAt/resultRecordedAt come from the original journal, with null for unrecorded historical times; submitted is notification confirmation, not model adoption. Original execution is separate from notification mode. null message means that journal was successfully read and the selected original message is absent; an unavailable read remains an error. Reading never sends or acknowledges input.'),
   command('message.ls', '--direction incoming|outgoing [--host ID] [--participant SESSION] [--before-sequence N] [--limit N]', 'Browse original A2A metadata and bounded body previews without consuming messages.',
     { '--direction': 'value', '--host': 'data', '--participant': 'data', '--before-sequence': 'value', '--limit': 'value' }, f => {
       const direction = value(f, '--direction', true)

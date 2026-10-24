@@ -66,7 +66,9 @@ export function useMailboxNotifications(reference: SessionHistoryReference, mess
     const observation = observations[mailboxNotificationIntentKey(intent)]
     const metadata = message.notification?.notificationId === intent.operationId ? message.notification : undefined
     const confirmed = metadata?.state === 'submitted'
-    return { ...intent, ...observation, state: confirmed ? 'submitted' : observation?.state ?? metadata?.state ?? 'unchecked',
+    // A missing association cannot establish this retained manual operation's outcome.
+    const metadataState = metadata?.state === 'unassociated' ? 'unconfirmed' : metadata?.state
+    return { ...intent, ...observation, state: confirmed ? 'submitted' : observation?.state ?? metadataState ?? 'unchecked',
       reason: observation ? observation.reason : metadata?.reason,
       ...(confirmed ? { sending: false, checking: undefined, reason: undefined } : {}),
       pending: !confirmed && Boolean(observation?.sending || observation?.checking) }

@@ -79,7 +79,7 @@ export function ConversationResourceText({ sources, active = true, part, partInd
       {prefix?.sourceLabel ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
       <ConversationInputText visible={active} text={text} prefix={prefix} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
         embedIdentity={embedIdentity}
-        a2aReferenceScope={a2aReferenceScope} describeSpeaker={describeSpeaker}
+        a2aReferenceScope={a2aReferenceScope} a2aNotificationId={a2aNotificationId} describeSpeaker={describeSpeaker}
         inputContext={inputContext} inputContextSource={inputContextSource}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
     </div> :

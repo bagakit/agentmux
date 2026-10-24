@@ -115,7 +115,7 @@ export function parseMessageEventsPage(value: unknown, input: AgentMuxMessageEve
     if (event.reason !== undefined && typeof event.reason !== 'string') return fail()
     if (String(event.kind).startsWith('a2a-notification') && !id(event.notificationId)) return fail()
     const notification = event.kind === 'a2a-notification' || event.kind === 'a2a-notification-result'
-    if (notification ? event.at !== null : event.at === null) return fail()
+    if (!notification && event.at === null) return fail()
     if (event.notificationId !== undefined && !notification || event.state !== undefined && !notification && event.kind !== 'delivery' ||
         event.reason !== undefined && !['delivery', 'delivery-issue', 'a2a-notification-result'].includes(String(event.kind)) ||
         (event.replyMessageId !== undefined || event.eventKind !== undefined) && event.kind !== 'dispatch-event') return fail()

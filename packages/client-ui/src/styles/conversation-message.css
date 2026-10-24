@@ -1,6 +1,7 @@
 @import './conversation-browser-context.css';
 @import './conversation-protocol.css';
 @import './conversation-collaboration.css';
+@import './conversation-a2a.css';
 
 .log-row__chip { padding:1px var(--sp-2); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font-size: var(--fs-micro); letter-spacing: .06em; }
 .log-row__chip--failed { color: var(--red-text); background: var(--red-wash); }

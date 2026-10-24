@@ -332,7 +332,7 @@ const NATIVE_FIELDS = {
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
   'message.notify': ['operationId', 'messageIds', 'hostId'],
   'message.notify.inspect': ['operationId', 'hostId'],
-  'message.read': ['operationId', 'messageId', 'hostId'],
+  'message.read': ['operationId', 'messageId', 'notificationId', 'hostId'],
   'message.ls': ['hostId', 'participantSessionId', 'direction', 'beforeSequence', 'limit'],
   'message.events': ['hostId', 'participantSessionId', 'afterSequence', 'latest', 'beforeSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'limit'],
   'message.dispatch.open': ['sourceMessageId'], 'message.dispatch.inspect': ['sourceMessageId'],
@@ -2091,9 +2091,10 @@ export class AgentMuxRpcService {
           'Message reading requires an authenticated Agent participant or a transport-approved user/device. Original communication and Runs are retained.', 'CONTROL_PERMISSION_DENIED')
         if (method === 'message.read' && (p.operationId !== undefined) === (p.messageId !== undefined)) throw new AgentMuxError(
           'Choose exactly one original message operationId or messageId.', 'INVALID_CONTROL_REQUEST')
-        const messageSelector = method !== 'message.read' ? undefined : p.messageId === undefined
-          ? { operationId: rpcString(p.operationId, 'Original message operation ID') }
-          : { messageId: rpcString(p.messageId, 'Original message ID') }
+        const messageSelector: import('./agent-message-query.js').AgentMuxMessageRead | undefined = method !== 'message.read' ? undefined : {
+          ...(p.messageId === undefined ? { operationId: rpcString(p.operationId, 'Original message operation ID') }
+            : { messageId: rpcString(p.messageId, 'Original message ID') }),
+          ...(p.notificationId === undefined ? {} : { notificationId: rpcString(p.notificationId, 'Original notification ID') }) }
         const hostId = p.hostId === undefined ? caller?.hostId : rpcString(p.hostId, 'Original message Host ID')
         if (hostId === undefined) throw new AgentMuxError('A trusted reader must select the exact original message Host.', 'INVALID_CONTROL_REQUEST')
         if (caller && caller.hostId !== hostId) throw new AgentMuxError('Agent authority cannot read another semantic Host journal.', 'CONTROL_PERMISSION_DENIED')

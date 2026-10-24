@@ -2588,8 +2588,8 @@ export class RuntimeController {
     return { ...await this.configuredClient(reference.hostId).listAgentSpawns({ ...options, participantSessionId: reference.agentSessionId }), hostId: reference.hostId }
   }
 
-  async sessionMessage(reference: SessionHistoryReference, messageId: string) {
-    const message = await this.configuredClient(reference.hostId).readMessage({ messageId })
+  async sessionMessage(reference: SessionHistoryReference, messageId: string, notificationId?: string) {
+    const message = await this.configuredClient(reference.hostId).readMessage({ messageId, ...(notificationId === undefined ? {} : { notificationId }) })
     if (message && message.envelope.senderSessionId !== reference.agentSessionId && message.envelope.recipientSessionId !== reference.agentSessionId) throw new AgentMuxError(
       'This original message belongs to another participant. The current Session and reading window are retained.', 'MESSAGE_PARTICIPANT_MISMATCH')
     return { message, hostId: reference.hostId }

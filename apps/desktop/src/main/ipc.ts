@@ -1689,9 +1689,9 @@ export async function registerIpc(args: {
     requireTrustedSender('sessions:messages', event)
     return await args.runtime.sessionMessages(session, options)
   })
-  handleWithEvent('sessions:message', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string) => {
+  handleWithEvent('sessions:message', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, notificationId?: string) => {
     requireTrustedSender('sessions:message', event)
-    return await args.runtime.sessionMessage(session, messageId)
+    return await args.runtime.sessionMessage(session, messageId, notificationId)
   })
   handleWithEvent('sessions:notifyMessage', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, operationId: string) => {
     assertManualPromptSenderTrusted(event.sender, contents)
