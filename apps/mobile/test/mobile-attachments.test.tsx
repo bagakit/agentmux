@@ -588,7 +588,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
     await paste(ui.element, '请阅读这份资料。')
     await click(button(ui.element, 'Reference files for the Agent to read'))
-    expect(pick).toHaveBeenCalledExactlyOnceWith({ limit: 1, readData: false })
+    expect(pick).toHaveBeenCalledExactlyOnceWith({ limit: 1, readData: false }, expect.any(AbortSignal))
     expect(f.calls).toHaveLength(0); expect(f.submit).not.toHaveBeenCalled()
     await click(button(ui.element, '上传并加入 资料.md')); await settled('inserted')
     expect(f.calls.filter(call => call.method === 'file.upload')).toHaveLength(1)
