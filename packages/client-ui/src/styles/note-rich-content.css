@@ -1,4 +1,16 @@
-.note-rich-insert { max-width: 100%; min-height: 28px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: inherit; padding: var(--sp-1) var(--sp-2); }
+.note-rich-insert { flex: 0 1 104px; width: 104px; min-width: 0; max-width: 100%; height: 28px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: var(--fs-meta, 12px)/1 var(--font-sans, sans-serif); padding: 0 var(--sp-2); }
+.note-reader-metadata, .note-reader-source { color: var(--text-3); font-size: var(--fs-meta, 12px); line-height: 1.6; overflow-wrap: anywhere; }
+.note-reader-metadata > summary, .note-reader-source > summary { display: flex; align-items: center; justify-content: center; width: 28px; min-height: 28px; border-radius: var(--radius-sm, 4px); cursor: pointer; list-style: none; }
+.note-reader-metadata > summary::-webkit-details-marker, .note-reader-source > summary::-webkit-details-marker { display: none; }
+.note-reader-metadata > summary:hover, .note-reader-source > summary:hover { background: var(--wash-1); color: var(--text-2); }
+.note-reader-metadata > summary:focus-visible, .note-reader-source > summary:focus-visible { outline: 2px solid var(--focus-line, var(--green)); outline-offset: 2px; }
+.mobile-note-body .mobile-note-reference:has(> .note-reader-source) { position: relative; padding-inline-end: 36px; }
+.mobile-note-reference > .note-reader-source > summary { position: absolute; inset-block-start: 2px; inset-inline-end: 2px; }
+.note-reader-source[open] { padding-block-start: 4px; }
+.note-reader-metadata { margin-block-start: 8px; padding-block-start: 4px; border-top: 1px solid var(--line-soft, var(--line)); }
+.note-reader-metadata > summary { margin-inline-start: auto; }
+.note-reader-metadata > p { margin: 4px 0 8px; }
+.note-reader-source > strong, .note-reader-source > code { display: block; font-size: inherit; font-weight: normal; }
 .note-formula { max-width: 100%; }
 .note-formula--block { display: block; position: relative; margin-block: var(--sp-3); }
 .note-formula__preview { display: inline-block; max-width: 100%; border: 0; border-radius: var(--radius-sm); color: inherit; background: transparent; padding: 0; text-align: inherit; cursor: text; }

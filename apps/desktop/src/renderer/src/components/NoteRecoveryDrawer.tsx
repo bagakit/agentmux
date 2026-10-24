@@ -22,7 +22,6 @@ export function NoteRecoverySummary({ surface, observation, onView }: {
   const doc = useAppStore(state => state.documents[key])
   const issue = useAppStore(state => state.documentIssues[key])
   const drafts = useAppStore(state => state.retainedDocumentDrafts[key])
-  const receipt = doc?.noteEditing?.receipt
   const facts: string[] = []
   if (issue?.kind === 'changed' || issue?.kind === 'deleted') facts.push('Changes need review')
   else if (issue?.kind === 'read-error') facts.push('File check unavailable')
@@ -33,9 +32,6 @@ export function NoteRecoverySummary({ surface, observation, onView }: {
   else if (issue?.kind === 'write-unknown') facts.push('Save outcome unconfirmed')
   if (doc?.noteConversion?.unconfirmedWrite || drafts?.some(draft => draft.noteConversion?.unconfirmedWrite)) facts.push('Earlier save unconfirmed')
   if (drafts?.some(draft => draft.noteEditing?.attempt)) facts.push('Kept save request needs review')
-  if (receipt?.noteHistory?.status === 'unconfirmed') facts.push('History unconfirmed')
-  if (receipt?.noteTitleProjection?.status === 'unconfirmed') facts.push('Page-list title unconfirmed')
-  if (doc?.noteProvenance?.status === 'unconfirmed' || doc?.noteWriteAttribution?.status === 'unconfirmed') facts.push('Authorship unconfirmed')
   if (observation.issues.length || observation.observationIssue) facts.push('Conversion check needs review')
   if (!facts.length) return null
   return <div className="note-recovery-summary" role="status"><span title={facts.join(' · ')}>{facts.slice(0, 2).join(' · ')}{facts.length > 2 ? ` · +${facts.length - 2} more to review` : ''}</span><button type="button" className="note-text-button" onClick={event => onView(event.currentTarget)}>View</button></div>

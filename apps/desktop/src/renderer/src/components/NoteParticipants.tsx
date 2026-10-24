@@ -1,10 +1,13 @@
-import { useId, type ReactNode, type Ref } from 'react'
+import { type ReactNode, type Ref } from 'react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { notebookFingerprint, type NotebookActor, type NoteResource } from '@agentmux/core/notebook-catalog'
 import type { FileDocument } from '../../../shared/contracts'
 import { sameNoteResource } from '../lib/notebook-library'
 import { useAppStore } from '../store'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
+
+const UnknownIcon = semanticIconComponent('status.unknown')
 
 export type NoteParticipant = { actor: NotebookActor; detail?: ReactNode }
 export type NoteSavedEditor = { actor: NotebookActor; createdBlocks: number; lastEditedBlocks: number; lastAt: number }
@@ -52,14 +55,12 @@ export function NoteParticipantStack({ group, participants, unknown, self, expan
   group: 'Editors' | 'Followers'; participants: readonly NoteParticipant[]; unknown?: string | undefined; self: NotebookActor | null
   expanded: boolean; onOpen: () => void; triggerRef: Ref<HTMLButtonElement>
 }) {
-  const id = useId()
-  return <button ref={triggerRef} type="button" className="note-participants__trigger" aria-label={`Page ${group.toLowerCase()}`} aria-expanded={expanded} aria-describedby={unknown ? id : undefined}
+  return <button ref={triggerRef} type="button" className="note-participants__trigger" aria-label={`Page ${group.toLowerCase()}`} aria-expanded={expanded} title={unknown}
     aria-description={unknown && !participants.length ? unknown : `${participants.length} ${group.toLowerCase()}${unknown ? ' confirmed; some authors are unknown' : ''}`} onClick={onOpen}>
     <span className="note-participants__group">{group}</span>
     {participants.length ? <span className="note-participants__stack">{participants.slice(0, 3).map(participant => <span className="note-participants__avatar" key={notebookFingerprint(participant.actor)}><Participant {...participant} self={self} compact /></span>)}
       {participants.length > 3 ? <span className="note-participants__overflow" aria-label={`${participants.length - 3} more ${group.toLowerCase()}`}>+{participants.length - 3}</span> : null}</span> : null}
-    {unknown && !participants.length ? <span className="note-participants__unknown">Unknown</span> : null}
-    {unknown ? <span id={id} className="note-participants__uncertainty">{participants.length ? 'Partial' : null}<span hidden>{unknown}</span></span> : null}
+    {unknown ? <UnknownIcon className="note-participants__uncertainty" size={12} /> : null}
   </button>
 }
 

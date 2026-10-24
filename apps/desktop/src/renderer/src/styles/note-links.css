@@ -45,6 +45,7 @@ button.note-links-excerpt:hover { color: var(--text); text-decoration: underline
 .note-links-actions button { min-height: 28px; border: 0; padding: 3px 0; background: transparent; color: var(--blue); font-size: 11px; }
 .note-links-source-details { margin-top: 9px; }
 .note-links-coverage { margin-top: 8px; }
+.note-links-coverage > summary > svg { margin-left: 6px; vertical-align: -2px; }
 .note-links-section-title { margin: 12px 0 6px; color: var(--text-2); font-size: 11px; font-weight: 500; }
 .note-links-shared-original { margin: 8px 0 12px; }
 .note-links-shared-original > .note-links-source-heading > button { flex: 1; font-size: 13px; }
