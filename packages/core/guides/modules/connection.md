@@ -249,8 +249,10 @@ actors, replays input or changes an Agent's capabilities.
 Group conversation sharing uses an exact Binding and future source cut. The publication scope
 future-native-user-facing retains public Agent replies only. future-shared-conversation shares
 ordinary public human/Agent messages, progress, questions/answers and their supported resources.
-It excludes tool input/output, reasoning, generated context and internal Agent collaboration,
-even when a source marks those parts public. Sharing a conversation is not authority to drive
+It also shares original independent AgentMux Session messages after their exact typed
+notification, recipient and original message association are verified. Notification/reference
+wrappers are not speech. It excludes tool input/output, reasoning, generated context and
+Provider-internal subagent collaboration, even when a source marks those parts public. Sharing a conversation is not authority to drive
 the Agent: member input grants and the Binding trigger scope govern execution separately.
 
 Application member defaults are managed with connection application access get, configure
