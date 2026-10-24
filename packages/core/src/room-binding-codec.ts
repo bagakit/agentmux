@@ -5,7 +5,7 @@ import { parseConversationCheckpoint } from './conversation-changes.js'
 import { validateAgentDirectedPromptTarget } from './agent-prompt-condition.js'
 import { dequal } from 'dequal'
 import type { ConnectionActor, ConnectionApplication, ConnectionGrant } from './connections-contract.js'
-import type { RoomBinding, RoomBindingAuthority, RoomBindingMethod, RoomBindingOperation, RoomBindingParamsMap, RoomBindingResultMap, RoomBindingScope } from './room-binding-contract.js'
+import type { RoomBinding, RoomBindingAuthority, RoomBindingMethod, RoomBindingOperation, RoomBindingParamsMap, RoomBindingResultMap, RoomBindingScope, RoomBindingRecordedBindInput, RoomBindingRecordedRelinkInput } from './room-binding-contract.js'
 
 export const ROOM_BINDING_RPC_METHODS = { 'connection.binding.member.inherit': 'long', 'connection.bind': 'long', 'connection.binding.inspect': 'long', 'connection.binding.ls': 'long', 'connection.binding.pause': 'long', 'connection.binding.resume': 'long', 'connection.binding.detach': 'long', 'connection.binding.relink': 'long', 'connection.grant': 'long' } as const
 export const isRoomBindingMethod = (value: unknown): value is RoomBindingMethod => typeof value === 'string' && Object.hasOwn(ROOM_BINDING_RPC_METHODS, value)
@@ -100,6 +100,11 @@ export function parseRoomBindingNotices(value: unknown): import('./room-binding-
   if (new Set(notices.map(item => item.deliveryOperationId)).size !== notices.length) fail()
   return notices
 }
+/** Read an original recorded correlation without granting new dispatch eligibility. */
+export function parseRecordedRoomBindingInput<M extends 'connection.bind' | 'connection.binding.relink'>(method: M, value: unknown): M extends 'connection.bind' ? RoomBindingRecordedBindInput : RoomBindingRecordedRelinkInput {
+  const p = object(value, ['operationId', 'bindingId', 'connectionId', 'expectedConnectionRevision', 'externalConversationId', 'scope', 'inputTarget', 'expectedSource', 'executionHostId', 'agentSessionId', 'regionAnchor', ...(method === 'connection.binding.relink' ? ['expectedRevision'] : [])])
+  return { ...target(p), operationId: id(p.operationId), bindingId: id(p.bindingId), connectionId: id(p.connectionId), expectedConnectionRevision: revision(p.expectedConnectionRevision), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), ...(p.inputTarget === undefined ? {} : { inputTarget: inputTarget(p.inputTarget) }), expectedSource: source(p.expectedSource), ...(method === 'connection.binding.relink' ? { expectedRevision: revision(p.expectedRevision) } : {}) } as M extends 'connection.bind' ? RoomBindingRecordedBindInput : RoomBindingRecordedRelinkInput
+}
 export function parseRoomBindingParams<M extends RoomBindingMethod>(method: M, value: unknown): RoomBindingParamsMap[M] {
   if (method === 'connection.binding.inspect') {
     const p = object(value, ['bindingId', 'revision', 'operationId'])
@@ -117,8 +122,9 @@ export function parseRoomBindingParams<M extends RoomBindingMethod>(method: M, v
     if (p.state !== 'active' && p.state !== 'revoked') fail()
     return { operationId: id(p.operationId), bindingId: id(p.bindingId), expectedBindingRevision: revision(p.expectedBindingRevision), grantId: id(p.grantId), expectedRevision: p.expectedRevision === null ? null : revision(p.expectedRevision), actor: parseConnectionActor(p.actor), capabilities: parseConnectionGrantCapabilities(p.capabilities), state: p.state as ConnectionGrant['state'] } as RoomBindingParamsMap[M]
   }
-  const p = object(value, ['operationId', 'bindingId', 'connectionId', 'expectedConnectionRevision', 'externalConversationId', 'scope', 'inputTarget', 'expectedSource', 'executionHostId', 'agentSessionId', 'regionAnchor', ...(method === 'connection.binding.relink' ? ['expectedRevision'] : [])])
-  return { ...target(p), operationId: id(p.operationId), bindingId: id(p.bindingId), connectionId: id(p.connectionId), expectedConnectionRevision: revision(p.expectedConnectionRevision), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), ...(p.inputTarget === undefined ? {} : { inputTarget: inputTarget(p.inputTarget) }), expectedSource: source(p.expectedSource), ...(method === 'connection.binding.relink' ? { expectedRevision: revision(p.expectedRevision) } : {}) } as RoomBindingParamsMap[M]
+  const input = parseRecordedRoomBindingInput(method as 'connection.bind' | 'connection.binding.relink', value)
+  if (input.scope.publication !== 'future-shared-conversation') fail()
+  return input as RoomBindingParamsMap[M]
 }
 export function parseRoomBindingResult<M extends RoomBindingMethod>(method: M, value: unknown, input: RoomBindingParamsMap[M]): RoomBindingResultMap[M] {
   if (method === 'connection.binding.ls') {
