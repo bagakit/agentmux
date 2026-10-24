@@ -36,6 +36,7 @@
 .log-turn[data-compact='true'][data-native-collaboration] > .log-turn__head > .log-turn__actions[data-copy-state='failed'] { opacity: 1; }
 @media (hover: none) { .log-turn[data-compact='true'][data-native-collaboration] > .log-turn__head > .log-turn__actions { opacity: 1; } }
 @container collaboration (max-width: 440px) {
+  .log-turn[data-native-collaboration] > .log-turn__head > .log-turn__title { flex-basis: 0; }
   .log-turn__collaboration-toggle { flex-wrap: wrap; }
   .log-turn__collaboration-path { flex: 1 1 100%; order: 1; padding-inline-start: 20px; white-space: normal; overflow-wrap: anywhere; }
   .log-turn__collaboration-recipient { margin-inline-start: auto; max-width: 55%; white-space: normal; overflow-wrap: anywhere; }
