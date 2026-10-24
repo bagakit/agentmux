@@ -115,11 +115,12 @@ function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byt
     ...(index !== selected.length - 1 || payload.questions === undefined ? {} : { questions: payload.questions }) }))
 }
 
-type RepresentationPart = { text: string; part?: ConversationContentRef; image?: PublicationImage; file?: PublicationFile }
+type RepresentationPart = { text: string; part?: ConversationContentRef; image?: PublicationImage; file?: PublicationFile; segments?: Array<{ text: string; image?: PublicationImage }> }
 type ContentPayload = Exclude<PublicationPayload, PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload>
 type RepresentationPayload = Extract<PublicationPayload, { kind: 'speech' }> | { kind: 'sequence'; parts: ContentPayload[] }
 type MaterializedPlan = PublicationContentPlan & { resourceParts?: RepresentationPart[] }
 function representation(parts: readonly RepresentationPart[], phase?: 'progress' | 'final', relay?: ConnectionDelivery['relay'], separator = '\n\n', inputSubmission?: import('@agentmux/core').AgentInputSubmissionObservation): RepresentationPayload {
+  parts = parts.flatMap<RepresentationPart>(part => part.segments ? part.segments.map(segment => ({ ...segment, ...(part.part ? { part: part.part } : {}) })) : [part])
   const fields = { ...(phase ? { phase } : {}), ...(relay ? { relay } : {}), ...(inputSubmission ? { inputSubmission } : {}) }
   if (!parts.some(part => part.image || part.file)) return { kind: 'speech', text: parts.map(part => part.text).filter(Boolean).join(separator), ...fields }
   const result: ContentPayload[] = [], texts: string[] = []
@@ -131,9 +132,16 @@ function representation(parts: readonly RepresentationPart[], phase?: 'progress'
   }
   flush(); return { kind: 'sequence', parts: result }
 }
-function representationFragments(value: RepresentationPayload, bytes: number, fragmentText?: PublicationPageOptions['fragmentText']): ContentPayload[] {
-  return value.kind === 'speech' ? value.text ? fragments(value, bytes, fragmentText) as ContentPayload[] : []
-    : value.parts.flatMap(part => part.kind === 'speech' ? fragments(part, bytes, fragmentText) as ContentPayload[] : [part])
+type QuestionRepresentation = QuestionPublicationPayload | { kind: 'sequence'; parts: Array<ContentPayload | QuestionPublicationPayload> }
+const questionText = (value: RepresentationPayload): string => value.kind === 'speech' ? value.text : value.parts.flatMap(part => part.kind === 'speech' ? [part.text] : []).join('\n\n')
+/** The original form follows its media, with text from the converted representation, never raw image paths. */
+function questionRepresentation(value: RepresentationPayload, original: QuestionPublicationPayload): QuestionRepresentation {
+  const question = { ...original, text: questionText(value) }
+  return value.kind === 'speech' ? question : { kind: 'sequence', parts: [...value.parts, question] }
+}
+function representationFragments(value: RepresentationPayload | QuestionRepresentation, bytes: number, fragmentText?: PublicationPageOptions['fragmentText']): PublicationPayload[] {
+  return value.kind === 'question' ? [value] : value.kind === 'speech' ? value.text ? fragments(value, bytes, fragmentText) : []
+    : value.parts.flatMap<PublicationPayload>(part => part.kind === 'speech' ? fragments(part, bytes, fragmentText) : [part])
 }
 /** Connector-owned publication facts, not another Agent history or lifecycle. Borrows the Host database. */
 export class PublicationStore {
@@ -347,26 +355,29 @@ export class PublicationStore {
         this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...row.value, projectionId }), row.ordinal)
     }
     const covered = new Set(unit.records.map(record => record.id)), blocked = new Set(plan.gaps.flatMap(gap => gap.part ? [conversationRecordId(gap.part.record)] : []))
-    const pieces = new Map(plan.pieces.map(piece => [publicationPartKey(piece.part), piece])), preserveLegacy = new Set<string>()
+    const pieces = new Map(plan.pieces.map(piece => [publicationPartKey(piece.part), piece])), preserveLegacy = new Set<string>(), preserveResources = new Set<string>()
     for (const row of this.representationRows(boundary, projectionId)) {
       const value = row.value, recordId = conversationRecordId(value.kind === 'representation' ? value.part.record : value.record)
       if (!covered.has(recordId)) continue
       if (selected && (value.kind === 'legacy-representation' || publicationPartKey(value.part) !== publicationPartKey(selected))) continue
       if (value.kind === 'legacy-representation') {
         if (blocked.has(recordId)) { preserveLegacy.add(recordId); continue }
-      } else if (plan.gaps.some(gap => gap.part && publicationPartKey(gap.part) === publicationPartKey(value.part))) continue
+      } else if (plan.gaps.some(gap => gap.part && publicationPartKey(gap.part) === publicationPartKey(value.part))) {
+        if (value.image || value.file || value.segments?.some(segment => segment.image)) preserveResources.add(publicationPartKey(value.part))
+        continue
+      }
       else if (pieces.has(publicationPartKey(value.part))) continue
       // A complete accepted original record proves which selectors are present.
       // Missing records and failed resources never authorize this removal.
       this.database.prepare('DELETE FROM connector_publication_decision WHERE rowid=?').run(row.ordinal)
     }
     for (const piece of plan.pieces) {
-      if (preserveLegacy.has(conversationRecordId(piece.part.record))) continue
+      if (preserveLegacy.has(conversationRecordId(piece.part.record)) || preserveResources.has(publicationPartKey(piece.part))) continue
       this.saveDecision(boundary, 'part-' + digest(publicationPartKey(piece.part)), 'current', { kind: 'representation', projectionId, ...piece } satisfies RepresentationIntent)
     }
     const rows = this.representationRows(boundary, projectionId, records)
     const sources = rows.flatMap(row => row.value.kind === 'representation' && row.value.text && row.value.relay ? [row.value.relay] : [])
-    return { ...plan, ...(rows.some(row => row.value.kind === 'representation' && (row.value.image || row.value.file)) ? { resourceParts: rows.map(row => row.value) } : {}), text: rows.map(row => row.value.text).filter(Boolean).join('\n\n'), ...(sources.length ? { relay: { sender: 'application', sources } } : {}) }
+    return { ...plan, ...(rows.some(row => row.value.kind === 'representation' && (row.value.image || row.value.file || row.value.segments)) ? { resourceParts: rows.map(row => row.value) } : {}), text: rows.map(row => row.value.text).filter(Boolean).join('\n\n'), ...(sources.length ? { relay: { sender: 'application', sources } } : {}) }
   }
   coverage(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, limit = 30, after?: string): ConnectionDeliveryCoverage {
     const pending = "json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved'"
@@ -545,12 +556,16 @@ export class PublicationStore {
     // An unresolved part never withdraws a prior complete platform representation.
     if (!plan.text && !plan.resourceParts?.some(part => part.image || part.file) && !plan.complete) return
     const payload = representation(plan.resourceParts ?? [{ text: plan.text }], plan.phase, plan.relay, '\n\n', plan.inputSubmission)
-    const representedQuestion = question && plan.complete && plan.text && payload.kind === 'speech' ? { ...question, text: plan.text, ...(plan.phase ? { phase: plan.phase } : {}) } : undefined
-    const revision = digest(representedQuestion ?? payload), parts: PublicationPayload[] = representedQuestion ? [representedQuestion] : representationFragments(payload, fragmentBytes, fragmentText)
+    const represented = question && plan.text && (plan.complete || plan.gaps.every(gap => gap.reason === 'resource-unavailable'))
+      ? questionRepresentation(payload, { ...question, ...(plan.phase ? { phase: plan.phase } : {}) }) : payload
+    const revision = digest(represented), parts = representationFragments(represented, fragmentBytes, fragmentText)
     if (parts.length && latest.length && latest.every(o => o.sourceRevision === revision && o.state !== 'cancelled')) return
+    // A form status update has its own original receipt; unchanged media must not be sent again.
+    if (question && payload.kind === 'sequence' && parts.length === latest.length && latest.every((operation, index) => operation.effect === 'upsert' && !['cancelled', 'superseded'].includes(operation.state) && same(operation.payload, parts[index]))) return
     const previous = new Map(latest.map(o => [o.fragment.ordinal, o])), count = Math.max(parts.length, ...latest.map(o => o.fragment.ordinal + 1))
     for (let ordinal = 0; ordinal < count; ordinal++) {
       const prior = previous.get(ordinal), body = parts[ordinal]
+      if (body && prior?.effect === 'upsert' && same(prior.payload, body) && (['confirmed', 'unknown', 'dispatching'].includes(prior.state) || prior.attempt !== undefined || !!prior.uploads?.length)) continue
       if (!body && prior?.effect === 'withdraw' && prior.state !== 'cancelled') continue
       // Keep an already queued withdrawal as the barrier for a replacement.
       const direct = prior?.predecessorOperationId ? this.inspect(prior.predecessorOperationId) : null
@@ -641,7 +656,7 @@ export class PublicationStore {
         ...(predecessor ? { predecessorOperationId: predecessor.operationId } : {}) }
       delete next.attempt; delete next.prepared; delete next.mapping
       this.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
-        .run(operationId, next.projectionId, revision, 0, next.bindingId, next.bindingRevision, encode(next), next.state)
+        .run(operationId, next.projectionId, revision, next.fragment.ordinal, next.bindingId, next.bindingRevision, encode(next), next.state)
     })
   }
   latestProjection(projectionId: string): PublicationOperation | null {
@@ -734,23 +749,34 @@ export class PublicationStore {
           failures.push({ reason: 'public-content-unconfirmed', part, frontier: original.frontier }); continue
         }
         const piece = plan.pieces.find(piece => publicationPartKey(piece.part) === publicationPartKey(part))
-        if (!plan.complete || !piece || piece.text !== retained.text || (!same(piece.image, retained.image) || !same(piece.file, retained.file))) { failures.push({ reason: 'version-unavailable', part, frontier: original.frontier }); continue }
+        if (!plan.complete || !piece || piece.text !== retained.text || (!same(piece.image, retained.image) || !same(piece.file, retained.file) || !same(piece.segments, retained.segments))) { failures.push({ reason: 'version-unavailable', part, frontier: original.frontier }); continue }
         this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...retained, part, purpose: 'conversation', ...(record.original.kind === 'native' ? { contentEligibility: 'public' } : {}) }), row.ordinal)
         qualified.push({ part, frontier: original.frontier })
       }
       // Verify the original whole payload and its exact stored fragments as well as each qualified slot.
       if (!failures.length) {
         const payload = representation(rows.map(row => row.value), content.phase, content.relay, '\n\n', content.kind === 'speech' ? content.inputSubmission : undefined)
-        const fragments = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE projection_id=? AND source_revision=? ORDER BY fragment_ordinal,ordinal')
+        const original = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE projection_id=? AND source_revision=? ORDER BY fragment_ordinal,ordinal')
           .all(operation.projectionId, operation.sourceRevision).map(row => this.read(row)!).filter(value => value.effect === 'upsert')
-        const latest = [...new Map(fragments.map(value => [value.fragment.ordinal, value])).values()]
-        if (operation.payload.kind === 'question' && payload.kind === 'speech' && operation.payload.text === payload.text &&
-            digest(operation.payload) === operation.sourceRevision && latest.length === 1 && same(latest[0]!.payload, operation.payload)) return 'qualified'
-        const retained = representation(latest.map(value => value.payload.kind === 'image' ? { text: '', part: value.payload.part, image: value.payload.image }
-          : value.payload.kind === 'file' ? { text: '', part: value.payload.part, file: value.payload.file }
-          : { text: value.payload.kind === 'speech' ? value.payload.text : '' }), content.phase, content.relay, '', content.kind === 'speech' ? content.inputSubmission : undefined)
-        if (digest(payload) === operation.sourceRevision && latest.length === operation.fragment.count && latest.every(value => ['speech', 'image', 'file'].includes(value.payload.kind)) &&
-          same(payload, retained) && latest.some(value => value.operationId === operation.operationId && same(value.payload, operation.payload))) return 'qualified'
+        const frozen = [...new Map(original.map(value => [value.fragment.ordinal, value])).values()]
+        const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal')
+          .all(operation.projectionId).map(row => this.read(row)!).filter(value => value.effect === 'upsert')
+        const assemble = (operations: PublicationOperation[]) => {
+          const questions = operations.filter(value => value.payload.kind === 'question')
+          if (questions.length > 1 || questions.length && operations.at(-1) !== questions[0]) return
+          const body = representation(operations.filter(value => value.payload.kind !== 'question').map(value => value.payload.kind === 'image' ? { text: '', part: value.payload.part, image: value.payload.image }
+            : value.payload.kind === 'file' ? { text: '', part: value.payload.part, file: value.payload.file }
+            : { text: value.payload.kind === 'speech' ? value.payload.text : '' }), content.phase, content.relay, '', content.kind === 'speech' ? content.inputSubmission : undefined)
+          return { body, whole: questions.length ? questionRepresentation(body, questions[0]!.payload as QuestionPublicationPayload) : body }
+        }
+        const retained = assemble(latest), prior = assemble(frozen)
+        const current = latest.some(value => value.operationId === operation.operationId && same(value.payload, operation.payload))
+        if (current && operation.payload.kind === 'question' && operation.payload.text === questionText(payload) &&
+            digest(operation.payload) === operation.sourceRevision && frozen.length === 1 && same(frozen[0]!.payload, operation.payload)) return 'qualified'
+        // A neighbor may change while a started original fragment remains exact. Verify both
+        // the current accepted representation and its original immutable frozen cohort.
+        if (current && retained && same(payload, retained.body) && latest.every(value => ['speech', 'image', 'file', 'question'].includes(value.payload.kind)) &&
+          (digest(retained.whole) === operation.sourceRevision && latest.length === operation.fragment.count || prior && digest(prior.whole) === operation.sourceRevision && frozen.length === operation.fragment.count)) return 'qualified'
         failures.push({ reason: 'version-unavailable' })
       }
       // An already attempted request retains its prepared bytes and original receipt. It is never requalified into another effect.

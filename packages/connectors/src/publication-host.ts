@@ -1,3 +1,4 @@
+import { publicationMarkdown } from './publication-markdown.js'
 import { AgentMuxError, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
 import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
 import { connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
@@ -234,7 +235,23 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const record = unit.records.find(record => record.id === slot.recordId)!
       if (record.original.kind !== 'native' || record.reference!.source.kind !== 'native' || slot.selector.kind !== 'native-part') continue
       const item = record.original.item, part = item.contentParts[slot.selector.partIndex]!
-      if (!isConversationPublicationPart(record, slot.selector, unit.event.author) || part.contentEligibility !== 'public' || part.kind !== 'resource') continue
+      if (!isConversationPublicationPart(record, slot.selector, unit.event.author) || part.contentEligibility !== 'public') continue
+      const nativeSource = record.reference!.source, partIndex = slot.selector.partIndex
+      const markdown = async (text: string) => item.kind !== 'assistant-message' ? undefined : publicationMarkdown(text, {
+        source: { providerId: nativeSource.providerId, nativeSessionId: nativeSource.nativeSessionId },
+        recordId: item.id, ...(item.turnId ? { turnId: item.turnId } : {}), partIndex,
+        ...(part.kind === 'resource' ? { expectedReference: part.reference } : {})
+      }, async input => {
+        const response = await this.options.conversation.resource(reference, input, signal)
+        if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign Markdown resource Session')
+        return response
+      }, adapter.images, signal)
+      if (part.kind === 'text') {
+        const value = await markdown(part.text)
+        if (value) result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), value)
+        continue
+      }
+      if (part.kind !== 'resource') continue
       const deferred = part.resourceType === 'text' && part.content?.kind === 'resource'
       if (binding.scope.publication === 'future-shared-conversation' &&
         ((part.resourceType === 'image' || deferred) && adapter.images || (part.resourceType === 'file' || deferred) && adapter.files)) {
@@ -275,7 +292,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
             if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign resource Session')
             return response
           }, signal)
-        result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), value)
+        result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), value.kind === 'text' ? await markdown(value.text) ?? value : value)
       } catch { signal.throwIfAborted() /* Exact unresolved part is durably accounted; other contents keep flowing. */ }
     }
     return result

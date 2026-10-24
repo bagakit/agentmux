@@ -5,9 +5,10 @@ import type { PublicationEffectContext, PreparedPublicationResource } from './pu
 import { AgentMuxError } from '@agentmux/core'
 
 /** Exact bytes accepted from the original resource owner, retained by the existing representation. */
-export type PublicationImage = Omit<Extract<AgentSessionHistoryResourceReadResult['result'], { status: 'read' }>, 'status'> & { sha256: string }
+export type PublicationImage = Omit<Extract<AgentSessionHistoryResourceReadResult['result'], { status: 'read' }>, 'status'> & { sha256: string; alt?: string }
 export type PublicationFile = Omit<Extract<AgentSessionHistoryResourceReadResult['result'], { status: 'file' }>, 'status'> & { sha256: string; displayName: string }
-export type ResolvedPublicationPart = AgentSessionHistoryContentPart | { kind: 'image'; image: PublicationImage } | { kind: 'file'; file: PublicationFile } | { kind: 'image-unavailable' | 'file-unavailable' }
+export type PublicationMarkdown = { kind: 'markdown'; text: string; segments: Array<{ text: string; image?: PublicationImage }>; complete: boolean }
+export type ResolvedPublicationPart = AgentSessionHistoryContentPart | PublicationMarkdown | { kind: 'image'; image: PublicationImage } | { kind: 'file'; file: PublicationFile } | { kind: 'image-unavailable' | 'file-unavailable' }
 export type ImageUploadReceipt = { state: 'confirmed'; imageKey: string } | { state: 'unknown' }
 export type FileUploadReceipt = { state: 'confirmed'; fileKey: string } | { state: 'unknown' }
 export type ResourceUploadReceipt = ImageUploadReceipt | FileUploadReceipt

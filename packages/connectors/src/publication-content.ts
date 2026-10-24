@@ -1,10 +1,10 @@
 import { conversationRecordAuthor, conversationRecordId, type ConversationSourceRecord, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
-import type { PublicationImage, PublicationFile, ResolvedPublicationPart } from './publication-resource.js'
+import type { PublicationImage, PublicationFile, PublicationMarkdown, ResolvedPublicationPart } from './publication-resource.js'
 import type { ConnectionDeliveryGap, ConnectionDeliveryRelay, ConnectionOriginRepresentation, RoomBinding } from '@agentmux/core/connections'
 
 export type PublicationContentPlan = {
   text: string
-  pieces: Array<{ part: ConversationContentRef; text: string; image?: PublicationImage; file?: PublicationFile; contentEligibility?: 'public'; purpose?: 'conversation'; relay?: ConnectionDeliveryRelay['sources'][number] }>
+  pieces: Array<{ part: ConversationContentRef; text: string; image?: PublicationImage; file?: PublicationFile; segments?: PublicationMarkdown['segments']; contentEligibility?: 'public'; purpose?: 'conversation'; relay?: ConnectionDeliveryRelay['sources'][number] }>
   relay?: ConnectionDeliveryRelay
   phase?: 'progress' | 'final'
   inputSubmission?: import('@agentmux/core').AgentInputSubmissionObservation
@@ -90,16 +90,20 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
       if (origin) { origins.push({ event, part, origin }); continue }
       gap('public-content-unconfirmed'); continue
     }
-    let value: string | undefined
+    let value: string | undefined, segments: PublicationMarkdown['segments'] | undefined
     if (original.kind === 'native' && slot.selector.kind === 'native-part') {
       const raw = original.item.contentParts[slot.selector.partIndex]!, body = options.resolved.get(key) ?? raw
-      if (narrow && body.kind !== 'text' && !(body.kind === 'resource' && body.content?.kind === 'text')) { excluded.push(part); continue }
+      if (narrow && body.kind !== 'text' && body.kind !== 'markdown' && !(body.kind === 'resource' && body.content?.kind === 'text')) { excluded.push(part); continue }
       phase ??= original.item.messagePhase
       if ((body.kind === 'image-unavailable' || body.kind === 'file-unavailable')) { gap('resource-unavailable'); continue }
       if (body.kind === 'image') { pieces.push({ part, text: '', image: body.image, contentEligibility: 'public', purpose: 'conversation' }); continue }
       if (body.kind === 'file') { pieces.push({ part, text: '', file: body.file, contentEligibility: 'public', purpose: 'conversation' }); continue }
       switch (body.kind) {
         case 'text': value = body.text; break
+        case 'markdown':
+          value = body.text; segments = [...body.segments]
+          if (!body.complete) gap('resource-unavailable')
+          break
         case 'tool-call': case 'tool-result': break // Only the typed question/answer below is shared.
         case 'reasoning': excluded.push(part); continue
         case 'resource': gap(body.content && body.content.kind !== 'resource' ? 'resource-unavailable' : 'transport-unsupported'); continue
@@ -117,6 +121,7 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
         questions.add(record.id + ':answers')
         value = [value, ...original.item.questionAnswers.map(answer => `Recorded answer (${answer.questionId})${value?.includes(answer.answer) ? '' : `: ${answer.answer}`}`)].filter(Boolean).join('\n\n')
       }
+      if (body.kind === 'markdown' && value && value.length > body.text.length) segments!.push({ text: value.slice(body.text.length) })
     } else if (original.kind === 'captured' && slot.selector.kind === 'captured-field') {
       value = original.item[slot.selector.field]
     }
@@ -128,7 +133,7 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
         : narrow || unit.event.role === 'message' && unit.event.author.kind === 'agent' && slot.placement === 'body' ? ''
         : `[${unit.event.role} · ${source} · ${unit.event.author.kind}${original.kind === 'captured' ? ` · ${original.item.status}` : ''}${unit.event.role === 'message' ? ' · via amux' : ' · read-only'}]\n`
       const text = value ? label + value : ''
-      pieces.push({ part, text, purpose: 'conversation', ...(original.kind === 'native' ? { contentEligibility: 'public' as const } : {}), ...(author && author.kind !== 'system' ? { relay: { part, author } } : {}) })
+      pieces.push({ part, text, ...(segments ? { segments: label ? [{ text: label }, ...segments] : segments } : {}), purpose: 'conversation', ...(original.kind === 'native' ? { contentEligibility: 'public' as const } : {}), ...(author && author.kind !== 'system' ? { relay: { part, author } } : {}) })
       if (text) sections.push(text)
     }
   }
