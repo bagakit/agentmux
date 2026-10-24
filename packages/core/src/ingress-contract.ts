@@ -32,7 +32,10 @@ export type ConnectionIngressMessage = {
   body: string
   addressing?: ConnectionIngressAddressing
   /** Captured at authenticated group intake, before ACK. null means no active relationship then. */
-  group?: { target: { hostId: string; agentSessionId: string; connectionId: string; bindingId: string; bindingRevision: number; authoritySource?: import('./external-author.js').AgentExternalAuthoritySource } | null; recorded?: import('./external-conversation.js').AgentExternalConversationReceipt; recording?: { state: 'unavailable' | 'refused'; code: string } }
+  group?: { target: { hostId: string; agentSessionId: string; connectionId: string; bindingId: string; bindingRevision: number;
+    /** Original owner-qualified publication boundary at intake, before an input is claimed. */
+    publicationRevision?: number;
+    authoritySource?: import('./external-author.js').AgentExternalAuthoritySource } | null; recorded?: import('./external-conversation.js').AgentExternalConversationReceipt; recording?: { state: 'unavailable' | 'refused'; code: string } }
   state: 'received' | 'refused' | 'claimed'
   /** Refusal reason, or the latest recoverable preparation observation while still received. */
   code?: string
