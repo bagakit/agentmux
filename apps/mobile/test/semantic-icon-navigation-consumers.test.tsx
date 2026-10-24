@@ -20,7 +20,7 @@ it('the real Topics and Focus navigation use separate semantic drawings and pres
   const select = vi.fn()
   await render(<MobilePrimaryNavigation current="topics" onSelect={select} />)
   const topics = host.querySelector('[data-workface="topics"]')!, focus = host.querySelector('[data-workface="focus"]')!, space = host.querySelector('[data-workface="space"]')!
-  drawing(topics, 'object.topic'); drawing(focus, 'action.focus'); drawing(space, 'object.spaces')
+  drawing(topics, 'object.topic'); drawing(focus, 'navigation.focus'); drawing(space, 'navigation.space')
   const theme = structuredClone(GRAPHITE_THEME); theme.id = 'custom.mobile-topics'; theme.name = 'Original Topics'; theme.icons = { 'object.topic': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] } }
   await act(async () => { expect(previewTheme(theme).applied).toBe(true) })
   expect(document.getElementById(semanticIconHref('object.topic').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')

@@ -22,6 +22,10 @@ waiting.pendingInteraction = { request: { kind: 'permission', id: 'request-origi
   permissionHook: { receiptId: 'request-original' },
   options: [{ id: 'allow-original', label: '允许本次读取', kind: 'allow-once' }, { id: 'deny-original', label: '拒绝本次读取', kind: 'reject-once' }] } }
 const sessions = [main, waiting, result]
+const category = { categoryId: 'category-original', title: '产品与研究', hostId: 'host-original', spaceId: 'category-space', directoryPath: fixturePath('category'), revision: 'category-revision' }
+const topic = { topicId: 'topic-original', title: '让小实验更容易开始', summary: '保留依据，把讨论变成可以验证的一步。', hostId: 'host-original', zoneId: 'zone-other', directoryPath: fixturePath('other'), categorySpaceIds: ['category-space'], chatIds: ['tab-result'], spatialRevision: 1 }
+const knowledge = { topicId: topic.topicId, entryId: '11111111-1111-4111-8111-111111111111', title: '第一周的实验依据', content: '# 从一个小实验开始\n\n先验证最不确定的假设，再扩大范围。\n\n- 保留原始材料和反例。\n- 用一次实际观察决定下一步。', form: 'reference', certainty: 'fact', revision: 'sha256:' + 'd'.repeat(64), updatedAt: 1,
+  sources: [{ kind: 'survey', zoneId: 'zone-other', tabId: 'tab-result', regionId: 'region-result' }] }
 // Same SID occurs first outside the Mote and then at its intended original Mote location.
 const catalog = {
   spaces: [{ spaceId: 'other-space', kind: 'folder', name: '并行项目', hostId: 'host-original', directoryPath: fixturePath("other"), projectId: null },
@@ -47,7 +51,8 @@ const catalog = {
   motePresentation: [{ spaceId: 'mote-original', content: { zoneId: 'zone-mote', hostId: 'host-original', workspaceId: 'workspace-original', workspacePath: fixturePath("mote-original") },
     quickMode: { status: 'saved', version: 'sha256:' + 'b'.repeat(64), defaults: { executorId: 'fixture-original', recovery: 'on-open', conversation: {
       hostId: 'host-original', sessionId: main.agentSessionId, displayWorkspaceId: 'display-original', groupId: 'group-mote', tabId: 'tab-mote', regionId: 'region-mote' } } },
-    conversation: { hostId: 'host-original', sessionId: main.agentSessionId, displayWorkspaceId: 'display-original', groupId: 'group-mote', tabId: 'tab-mote', regionId: 'region-mote' } }]
+    conversation: { hostId: 'host-original', sessionId: main.agentSessionId, displayWorkspaceId: 'display-original', groupId: 'group-mote', tabId: 'tab-mote', regionId: 'region-mote' } }],
+  survey: { items: [{ zoneId: 'zone-other', name: '本周实验资料' }], selection: null }
 } as AgentMuxRpcResult<'space.ls'>['catalog']
 const goal: AgentMuxRpcGoal = { id: 'goal-original', title: '把两个想法变成一个小实验', description: '比较已有资料，选择本周可以开始的方向。', status: 'in_progress', priority: 'normal', projectId: null,
   sessionIds: [main.agentSessionId, result.agentSessionId], source: 'session', activityLog: [], createdAt: 1, updatedAt: 2,
@@ -153,11 +158,17 @@ const client = {
   forwardRpc: async (method: string, params: Record<string, unknown>) => {
     record(method, params)
     if (!connected) throw Error('原 Host 连接中断；原对象、历史与草稿保留。')
+    if (method === 'skill.ls') {
+      const original = sessions.find(session => session.agentSessionId === params.agentSessionId)!
+      return { hostId: 'local', sourceHostId: original.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId,
+        workspacePath: original.workspacePath, skills: [{ name: 'review-evidence', description: '核对原始资料与实验依据', path: fixturePath('skills/review-evidence/SKILL.md'), source: 'project' }] }
+    }
     if (method === 'space.ls' || method === 'space.inspect') return { catalog }
     if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: [], unavailable: [] }
     if (method === 'agent.inspect') return { session: sessions.find(session => session.agentSessionId === (params.target as { agentSessionId: string }).agentSessionId), displayName: { override: '原 Agent', availability: 'observed' } }
     if (method === 'goal.ls') return { goals: [goal] }
     if (method === 'goal.inspect') return { goal, goalContinuations: [] }
+    if (method === 'goal.decisions') return { decisions: [] }
     if (method === 'file.read') {
       if (params.zoneId !== 'zone-mote' || params.spaceId !== 'mote-original'
         || JSON.stringify(params.expectedResource) !== JSON.stringify({ hostId: 'host-original', workspaceId: 'workspace-original', workspacePath: fixturePath("mote-original") })) throw Error('Wrong original Mote file scope')
@@ -165,7 +176,11 @@ const client = {
         result: { status: 'read', document: { path: params.path, revision: 'sha256:' + 'c'.repeat(64),
           content: '# 合作方式\n\n我们围绕你的原始目标继续讨论，先把事实和未知分清，再选本周能验证的一小步。\n\n- 保留原对象、历史和草稿。\n- 需要你回应时说明具体决定。\n- 结果可阅读、可追溯，再由你决定是否接受。' } } }
     }
-    if (method === 'topic.category.ls') return { categories: [], unavailable: [] }
+    if (method === 'topic.category.ls') return { categories: [category], unavailable: [] }
+    if (method === 'topic.ls') return { topics: [topic], unavailable: [] }
+    if (method === 'topic.inspect') return { topic, unavailable: [] }
+    if (method === 'topic.knowledge.ls' || method === 'topic.knowledge.search') return { entries: [knowledge], unavailable: [] }
+    if (method === 'topic.knowledge.read') return { entry: knowledge }
     if (method === 'message.delivery.report') return { stored: true }
     throw Error('Unsupported controlled public method: ' + method)
   }
