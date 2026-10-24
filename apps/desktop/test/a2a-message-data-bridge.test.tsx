@@ -16,12 +16,12 @@ import { localRuntimeConnector } from './helpers/local-runtime-connector'
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, Function>(), directory: '',
   listeners: new Map<string, Set<Function>>() }))
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => bridge.directory }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   safeStorage: { isAsyncEncryptionAvailable: async () => false, encryptStringAsync: vi.fn(async () => {}), decryptStringAsync: vi.fn(async () => {}) },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api; Object.defineProperty(window, 'agentmux', { configurable: true, value: api }) } },
   ipcRenderer: { invoke: bridge.invoke, send: vi.fn(), on: (channel: string, listener: Function) => { const set = bridge.listeners.get(channel) ?? new Set(); set.add(listener); bridge.listeners.set(channel, set) },
     off: (channel: string, listener: Function) => bridge.listeners.get(channel)?.delete(listener) }, webFrame: { getZoomFactor: () => 1 },
-  app: { getPath: () => bridge.directory, getAppPath: () => join(process.cwd(), 'apps/desktop'), isPackaged: false },
+  app: { once: vi.fn(), getPath: () => bridge.directory, getAppPath: () => join(process.cwd(), 'apps/desktop'), isPackaged: false },
   ipcMain: { handle: (channel: string, handler: Function) => bridge.handlers.set(channel, handler), removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(), AgentMuxControlServer: class { async start() {} async stop() {} } }))
@@ -145,11 +145,9 @@ it('the visible bounded hook reaches the original SDK through production Rendere
     const { ConversationMessage } = await import('@agentmux/client-ui/components/ConversationMessage')
     const { renderAgentMuxMessageReferences } = await import('@agentmux/core/agent-message-render')
     const notice = <DesktopClientUiProvider><ConversationMessage speaker={{ role: 'system', id: 'agentmux' }}
-      a2aNotificationId="original-platform-notice" executionHostId={reference.hostId} conversationSessionId={reference.agentSessionId}
+      a2aNotificationId="original-platform-notice" itemRef={{ ...reference, source: { kind: 'captured', recordId: 'original-platform-notice' } }} executionHostId={reference.hostId} conversationSessionId={reference.agentSessionId}
       content={renderAgentMuxMessageReferences([{ senderSessionId: 'sender', messageId: 'incoming' }])} /></DesktopClientUiProvider>
     await act(async () => render.render(notice))
-    expect(bodyRead).not.toHaveBeenCalled()
-    await act(async () => container!.querySelector<HTMLButtonElement>('.log-turn__system-toggle')!.click())
     await vi.waitFor(() => expect(container!.querySelector('[data-a2a-original-message-id="incoming"]')?.textContent).toContain(body.trimEnd()))
     expect(bodyRead).toHaveBeenCalledExactlyOnceWith({ messageId: 'incoming' })
     expect(bridge.invoke).toHaveBeenCalledWith('sessions:message', reference, 'incoming')
@@ -159,10 +157,9 @@ it('the visible bounded hook reaches the original SDK through production Rendere
     const originalRead = await api.sessions.readMessage(reference, 'incoming')
     const wrongHost = vi.spyOn(api.sessions, 'readMessage').mockResolvedValueOnce({ ...originalRead, hostId: 'wrong-response-host' })
     await act(async () => render.render(<DesktopClientUiProvider key="wrong-response-host"><ConversationMessage
-      speaker={{ role: 'system', id: 'agentmux' }} a2aNotificationId="same-original-platform-notice"
+      speaker={{ role: 'system', id: 'agentmux' }} a2aNotificationId="same-original-platform-notice" itemRef={{ ...reference, source: { kind: 'captured', recordId: 'same-original-platform-notice' } }}
       executionHostId={reference.hostId} conversationSessionId={reference.agentSessionId}
       content={renderAgentMuxMessageReferences([{ senderSessionId: 'sender', messageId: 'incoming' }])} /></DesktopClientUiProvider>))
-    await act(async () => container!.querySelector<HTMLButtonElement>('.log-turn__system-toggle')!.click())
     await vi.waitFor(() => expect(container!.querySelector('.conversation-a2a-originals__pending')?.textContent).toContain('Host could not be confirmed'))
     expect(container!.querySelector('[data-a2a-original-message-id]')).toBeNull()
     expect(wrongHost).toHaveBeenCalledExactlyOnceWith(reference, 'incoming'); wrongHost.mockRestore()
