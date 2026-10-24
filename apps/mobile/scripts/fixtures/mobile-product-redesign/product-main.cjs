@@ -59,7 +59,7 @@ app.whenReady().then(async () => {
   const openMote = async () => {
     await button('Mote', '.mobile-navigation')
     await until('!![...document.querySelectorAll(".mobile-spatial-panel button")].find(n=>n.textContent.includes("我的 Mote"))')
-    if (await read('document.querySelector(\'[data-space-id="mote-original"] > .mobile-space-row\')?.getAttribute("aria-expanded") !== "true"')) {
+    if (await read('document.querySelector(\'[data-space-id="mote-original"] .mobile-space-row\')?.getAttribute("aria-expanded") !== "true"')) {
       await button('我的 Mote', '.mobile-spatial-panel')
     }
     if (!await visible('.mobile-conversation-panel')) {
@@ -69,6 +69,56 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
   }
+  if (mode === 'mote-home') {
+    assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.ensureAgentContinuity"||call.method==="agent.open").length'),0)
+    assert.equal(await read('document.querySelectorAll(".mobile-mote-quick-open").length'),2)
+    await capture('mote-home-collapsed-phone')
+    await button('我的 Mote', '.mobile-spatial-panel')
+    await until('document.querySelectorAll(".mobile-mote-agents .mobile-agent-row__open").length===2')
+    assert.equal(await read('document.querySelectorAll(".mobile-spatial-tab").length'),0)
+    await button('资料协作', '.mobile-spatial-panel')
+    assert.equal(await read('document.querySelectorAll(".mobile-spatial-tab").length'),0)
+    for (const [width,height,label] of [[390,844,'phone'],[320,760,'narrow'],[840,900,'wide']]) {
+      await resize(width,height); await capture('mote-home-expanded-'+label)
+      const actions = await read('Array.from(document.querySelectorAll(".mobile-mote-quick-open")).map(node=>node.getBoundingClientRect().toJSON())')
+      assert.ok(actions.every(rect=>rect.height>=44&&rect.left>=0&&rect.right<=width),'Permanent main actions retain original touch targets')
+    }
+    await resize(390,844); await button('设置主 Agent · 资料协作', '.mobile-spatial-panel')
+    await until('!!document.querySelector(".mobile-mote-profile")'); await capture('mote-home-profile-phone')
+    assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.ensureAgentContinuity"||call.method==="agent.open").length'),0)
+    await button('关闭面板', '[role=dialog]')
+    await button('继续主对话 · 我的 Mote', '.mobile-spatial-panel')
+    await until('mobileProductScene.facts().calls.some(call=>call.method==="sdk.ensureAgentContinuity")')
+    assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'),'session-mote')
+    assert.equal(await read('mobileProductScene.facts().calls.find(call=>call.method==="sdk.ensureAgentContinuity").params.trigger'),'manual')
+    await capture('mote-home-main-conversation-phone')
+    await button('Focus', '.mobile-navigation')
+    await until('document.querySelectorAll(".mobile-focus-project .agent-provider-icon").length>=4 && document.querySelector(".mobile-focus-project")?.getClientRects().length>0')
+    for (const [width,height,label] of [[390,844,'phone'],[320,760,'narrow']]) {
+      await resize(width,height)
+      const marks = await read('Array.from(document.querySelectorAll(".mobile-focus-project .agent-provider-icon")).map(node=>({provider:node.dataset.agentProvider,rect:node.getBoundingClientRect().toJSON(),display:getComputedStyle(node).display,lineHeight:getComputedStyle(node).lineHeight,source:node.firstElementChild.getBoundingClientRect().toJSON()}))')
+      result.operations.push({action:'shared-provider-artwork-geometry',width,marks})
+      assert.ok(marks.length>=4); assert.ok(marks.some(mark=>mark.provider==='claude'))
+      assert.ok(marks.every(mark=>mark.rect.width===14&&mark.rect.height===14&&mark.source.width===14&&mark.source.height===14&&['flex','inline-flex'].includes(mark.display)),'Original shared Provider artwork retains its compact geometry')
+      const ids=await read('Array.from(document.querySelectorAll(".agent-avatar__filters filter")).map(node=>node.id)')
+      assert.equal(new Set(ids).size,ids.length,'Every repeated original Agent artwork owns a distinct filter definition')
+      result.operations.push({action:'shared-provider-filter-identities',width,filterIds:ids})
+      await capture('provider-icons-'+label)
+    }
+    await read('mobileProductScene.unconfirmMoteBindings()')
+    await button('Mote', '.mobile-navigation'); await button('刷新空间目录', '.mobile-spatial-panel')
+    await button('我的 Mote', '.mobile-spatial-panel')
+    await until('!!document.querySelector(".mobile-directory-notice")&&document.querySelector(\'[data-space-id="mote-original"] .mobile-mote-contents\')?.textContent.includes("原 Agent 绑定尚未确认")')
+    assert.equal(await read('document.querySelector(\'[data-space-id="mote-original"] .mobile-mote-contents\').textContent.includes("尚无已绑定 Agent")'),false)
+    await capture('mote-binding-unknown-narrow')
+    await tap('.mobile-directory-notice summary', 'Expand original binding diagnostic')
+    assert.equal(await read('document.querySelector(".mobile-directory-notice").open'),true)
+    await capture('mote-binding-diagnostic-narrow')
+    await tap('.mobile-directory-notice summary', 'Collapse original binding diagnostic')
+    assert.equal(await read('document.querySelector(".mobile-directory-notice").open'),false)
+    assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="agent.open"||call.method==="sdk.submitAgentPrompt").length'),0)
+    result.passed=true; return
+  }
   if (mode === 'spatial-resources' && phase === 'restore') {
     await until('typeof mobileProductScene!=="undefined"&&mobileProductScene.facts().record.agentCreates?.length===2')
     const saved = JSON.parse(await fs.readFile(path.join(evidence, 'renderer-result.json'), 'utf8')).recoveryOriginal
@@ -77,7 +127,7 @@ app.whenReady().then(async () => {
     await until('document.querySelector("[contenteditable=true]")?.textContent.includes("原草稿在重启后保留")')
     await capture('spatial-recovery-draft-phone')
     await button('Mote', '.mobile-navigation')
-    await button('资料协作', '.mobile-spatial-panel')
+    await button('Space', '.mobile-navigation'); await button('资料工作区', '.mobile-spatial-panel')
     await button('在此启动位新建 Agent', '.mobile-spatial-panel')
     await until('document.querySelectorAll(".mobile-create-receipt").length===2')
     await capture('spatial-recovery-intents-phone')
@@ -99,7 +149,7 @@ app.whenReady().then(async () => {
     assert.equal(result.palette['--fs-body'], '13px', 'Mobile typography remains client-owned')
   }
   if (mode === 'spatial-resources') {
-    await button('资料协作', '.mobile-spatial-panel')
+    await button('Space', '.mobile-navigation'); await button('资料工作区', '.mobile-spatial-panel')
     await until('document.querySelectorAll(".mobile-spatial-tab").length===5')
     assert.equal(await read('document.querySelectorAll(".mobile-spatial-tab > h3").length'), 0)
     for (const [width,height,name] of [[390,844,'phone'],[320,760,'narrow'],[840,900,'wide']]) {
@@ -112,7 +162,7 @@ app.whenReady().then(async () => {
     }
     await resize(390,844); await button('在此启动位新建 Agent', '.mobile-spatial-panel')
     await until('!!document.querySelector(".mobile-create-target")')
-    assert.equal(await read(`document.querySelector('[aria-label="新 Agent 空间"]').value`), "mote-resources")
+    assert.equal(await read(`document.querySelector('[aria-label="新 Agent 空间"]').value`), "space-resources")
     assert.equal(await read(`document.querySelector('[aria-label="新 Agent Zone"]').value`), "zone-resources")
     await capture('spatial-launcher-phone'); await resize(320,760); await capture('spatial-launcher-narrow')
     await button('关闭新建 Agent', '[role=dialog]')

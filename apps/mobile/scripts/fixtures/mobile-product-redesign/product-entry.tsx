@@ -56,16 +56,23 @@ const catalog = {
     conversation: { hostId: 'host-original', sessionId: main.agentSessionId, displayWorkspaceId: 'display-original', groupId: 'group-mote', tabId: 'tab-mote', regionId: 'region-mote' } }],
   survey: { items: [{ zoneId: 'zone-other', name: '本周实验资料' }], selection: null }
 } as AgentMuxRpcResult<'space.ls'>['catalog']
-// A file-only Mote exercises the same anonymous single-Region shape as a normal resource directory.
+// A file-only Mote stays a Profile/Agents view; its full resources remain in Space.
 const resourceNames = ['BEHAVIOR.md', 'SOUL.md', 'MEMORY.md', '一份保留完整来源的协作资料说明.md']
 catalog.spaces.push({ spaceId: 'mote-resources', kind: 'mote', name: '资料协作', hostId: 'host-original', directoryPath: fixturePath('mote-resources'), projectId: null })
 catalog.zones.push({ zoneId: 'zone-resources', workspaceId: 'workspace-original', kind: 'home', hostId: 'host-original', directoryPath: fixturePath('mote-resources'), branch: null })
 catalog.bindings.push({ spaceId: 'mote-resources', zoneId: 'zone-resources' })
+catalog.spaces.push({ spaceId: 'space-resources', kind: 'folder', name: '资料工作区', hostId: 'host-original', directoryPath: fixturePath('mote-resources'), projectId: null })
+catalog.bindings.push({ spaceId: 'space-resources', zoneId: 'zone-resources' })
+catalog.motePresentation!.push({ spaceId: 'mote-resources', content: { zoneId: 'zone-resources', hostId: 'host-original', workspaceId: 'workspace-original', workspacePath: fixturePath('mote-resources') }, quickMode: { status: 'missing' }, conversation: null })
 for (const [index, name] of ['', ...resourceNames].entries()) {
   const tabId = `resource-tab-${index}`, regionId = `resource-region-${index}`
   catalog.tabs.push({ tabId, zoneId: 'zone-resources', workspaceId: 'workspace-original', name: '', regionIds: [regionId] })
   catalog.regions.push(index === 0 ? { tabId, regionId, kind: 'launcher' } : { tabId, regionId, kind: 'file', file: { workspaceId: 'workspace-original', path: name } })
 }
+const claude = { ...original('session-claude'), providerId: 'claude', executorId: 'fixture-claude' }
+sessions.push(claude)
+catalog.agentPresentation![1]!.avatar = { tint: '#6d9ee7', badge: 'shield' }
+catalog.agentPresentation!.push({ ...catalog.agentPresentation![2]!, agentSessionId: claude.agentSessionId, name: '视觉方向评审', providerId: 'claude', avatar: { tint: '#ae55e8', badge: 'spark' }, recap: { text: '保留原身份图和颜色，核对手机上的实际观感。', source: 'native-hook' } })
 const goal: AgentMuxRpcGoal = { id: 'goal-original', title: '把两个想法变成一个小实验', description: '比较已有资料，选择本周可以开始的方向。', status: 'in_progress', priority: 'normal', projectId: null,
   sessionIds: [main.agentSessionId, result.agentSessionId], source: 'session', activityLog: [], createdAt: 1, updatedAt: 2,
   alignment: { revision: 1, summary: '给出小步可验证的建议，保留两种方案的依据。', criteria: [{ id: 'criterion-original', text: '形成可开始的实验步骤' }], openQuestions: [], confirmedAt: 1 },
@@ -85,6 +92,10 @@ const client = {
   catalog: () => { record('sdk.catalog'); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
   onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); record('sdk.onEvent'); return () => { listeners.delete(listener); record('sdk.releaseEvent') } },
   runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', availability: connected ? 'connected' : 'disconnected' }),
+  ensureAgentContinuity: async (input: { agentSessionId: string; expectedRun: { runId: string }; operationId: string; trigger: string }) => {
+    record('sdk.ensureAgentContinuity', input)
+    return { kind: 'reattachable', agentSessionId: input.agentSessionId, previousRun: input.expectedRun }
+  },
   sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); return { agentSessionId: id, source: { providerId: 'codex', nativeSessionId: `native-${id}` }, nextCursor: null,
     items: [{ id: `${id}-user-original`, kind: 'user-message', contentParts: [{ kind: 'text', text: '这两个想法，先从哪一个做成小实验比较好？请保留原来的依据。' }] },
       { id: `${id}-answer-original`, kind: 'assistant-message', contentParts: [{ kind: 'text', text: id === result.agentSessionId ? '我建议先试方案 A。它的范围更清晰，一天就能取得第一批反馈。\n\n1. 保留现有资料和两种方案。\n2. 选三个最关键的问题。\n3. 先观察真实反馈，再决定是否继续。\n\n方案 B 仍有价值，原依据已经保留。' : '可以。我们先确认你想解决的问题，再比较这两种想法。\n\n我会保留原材料、已经确认的进展和还需要你决定的地方；不会把未知回执当作完成。' }] },
@@ -190,7 +201,7 @@ const client = {
     if (method === 'space.inspect' && (params.target as { spaceId?: string }).spaceId === 'space-original') return { catalog: { ...catalog, appearance: [...catalog.appearance!, { spaceId: 'space-original', preset: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.kind, image: { dataUrl: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.icon } }] } }
     if (method === 'space.ls' || method === 'space.inspect') return { catalog }
     if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: [], unavailable: [] }
-    if (method === 'agent.inspect') return { session: sessions.find(session => session.agentSessionId === (params.target as { agentSessionId: string }).agentSessionId), displayName: { override: '原 Agent', availability: 'observed' } }
+    if (method === 'agent.inspect') return { routeHostId: 'host-original', session: sessions.find(session => session.agentSessionId === (params.target as { agentSessionId: string }).agentSessionId), displayName: { override: '原 Agent', availability: 'observed' } }
     if (method === 'goal.ls') return { goals: [goal] }
     if (method === 'goal.inspect') return { goal, goalContinuations: [] }
     if (method === 'goal.decisions') return { decisions: [] }
@@ -219,6 +230,12 @@ const platform = createBrowserPlatform()
 function Scene() {
   const [, refresh] = useState(0)
   Object.assign(window, { mobileProductScene: {
+    unconfirmMoteBindings: () => {
+      const tab = catalog.tabs.find(tab => tab.tabId === 'tab-mote')!
+      tab.issue = 'The original Agent binding is unconfirmed; its saved workface is preserved.'
+      for (const region of catalog.regions) if (region.tabId === tab.tabId && region.kind === 'agent') region.agentSessionId = null
+      catalog.motePresentation!.find(value => value.spaceId === 'mote-original')!.conversation = null
+    },
     setPromptReadFailure: (fail: boolean) => { promptReadFails = fail },
     seedSpatialRecovery: async () => {
       const owner = getDeviceWorkface(), runtimeId = client.runtimeOwnerIdentity!()!.runtimeId!, deviceHostId = owner.snapshot().record.host?.hostId ?? null
