@@ -53,6 +53,11 @@ const fakeElectron = vi.hoisted(() => {
       this.listeners.set(event, bucket)
       return this
     })
+    readonly prependListener = vi.fn((event: string, listener: Listener) => {
+      const bucket = this.listeners.get(event) ?? []
+      this.listeners.set(event, [listener, ...bucket])
+      return this
+    })
     readonly once = vi.fn(() => this)
     readonly removeListener = vi.fn(() => this)
     isDestroyed(): boolean { return this.destroyed }

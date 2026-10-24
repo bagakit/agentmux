@@ -47,10 +47,11 @@ describe('the single native spatial link ingress', () => {
       originalOperation = operationId
       return { ...capsuleResult(operationId), rendering: { status: 'unavailable', reason: 'The native document is unconfirmed.' } }
     })
-    ingress.ready(p.execute, p.report, open); ingress.receive(capsule()); await settled()
+    ingress.ready(p.execute, p.report, open); const opening = ingress.receive(capsule()); await settled()
     expect(p.report).toHaveBeenCalledTimes(1)
     expect(p.report.mock.calls[0]![0]).toContain(originalOperation)
     expect(p.report.mock.calls[0]![0]).toContain('native document is unconfirmed')
+    await expect(opening).resolves.toBe(p.report.mock.calls[0]![0])
     expect(p.execute).not.toHaveBeenCalled()
     ingress.ready(p.execute, p.report, open); await settled(); expect(open).toHaveBeenCalledTimes(1)
   })
@@ -138,10 +139,11 @@ describe('the single native spatial link ingress', () => {
       if (request.operation !== 'focus') throw new Error('Expected focus')
       return focusFacts(request)
     })
-    ingress.ready(p.execute, p.report); ingress.receive(space('original')); await settled()
+    ingress.ready(p.execute, p.report); const opening = ingress.receive(space('original')); await settled()
     expect(p.execute).toHaveBeenCalledTimes(1)
     expect(p.report.mock.calls[0]![0]).toContain('Navigation: applied; presentation: unknown')
     expect(p.report.mock.calls[0]![0]).toContain('healthy Agents are kept')
+    await expect(opening).resolves.toBe(p.report.mock.calls[0]![0])
   })
 })
 
@@ -229,4 +231,83 @@ it('does not focus an old Agent location when a newer intent arrives during disc
   expect(p.requests.map(request => request.target)).toEqual([{ kind: 'space', zoneId: 'newer' }])
   expect(p.execute).toHaveBeenCalledTimes(2)
   expect(p.report).not.toHaveBeenCalled()
+})
+
+describe('each original opening completes independently', () => {
+  it('resolves a malformed cold request with its own diagnostic while Main reporting waits for readiness', async () => {
+    const ingress = new SpatialLinkIngress(), p = ports()
+    const issue = await ingress.receive('amux://agent/not-exact?query=1')
+    expect(issue).toContain('Your current workface is kept')
+    expect(p.report).not.toHaveBeenCalled(); expect(p.execute).not.toHaveBeenCalled()
+    ingress.ready(p.execute, p.report)
+    expect(p.report).toHaveBeenCalledExactlyOnceWith(issue)
+  })
+
+  it('settles a superseded cold request once and executes only the still-pending exact request', async () => {
+    const ingress = new SpatialLinkIngress(), p = ports(), firstDone = vi.fn(), nextDone = vi.fn()
+    const first = ingress.receive(zone('first')).then(firstDone)
+    const next = ingress.receive(zone('next')).then(nextDone)
+    await settled()
+    expect(firstDone).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('superseded'))
+    await first
+    expect(nextDone).not.toHaveBeenCalled(); expect(p.execute).not.toHaveBeenCalled()
+    ingress.unavailable(); expect(nextDone).not.toHaveBeenCalled()
+    ingress.ready(p.execute, p.report); await next
+    expect(nextDone).toHaveBeenCalledExactlyOnceWith(null)
+    expect(p.requests.map(request => request.target)).toEqual([{ kind: 'space', zoneId: 'next' }])
+    ingress.ready(p.execute, p.report); await settled()
+    expect(p.execute).toHaveBeenCalledTimes(1); expect(p.report).not.toHaveBeenCalled()
+  })
+
+  it('settles supersession immediately without waiting for the old owner and ignores its later rejection', async () => {
+    const ingress = new SpatialLinkIngress(), p = ports(), firstDone = vi.fn()
+    let fail!: (error: Error) => void
+    p.execute.mockImplementationOnce(async (_request, signal) => {
+      p.signals.push(signal)
+      return await new Promise<AgentMuxControlResult>((_resolve, reject) => { fail = reject })
+    })
+    ingress.ready(p.execute, p.report)
+    const first = ingress.receive(zone('first')).then(firstDone)
+    const next = ingress.receive(zone('next'))
+    await settled()
+    expect(firstDone).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('superseded'))
+    await first; await expect(next).resolves.toBeNull()
+    expect(p.signals[0]!.aborted).toBe(true)
+    fail(new Error('Late old-owner failure')); await settled()
+    expect(firstDone).toHaveBeenCalledTimes(1); expect(p.report).not.toHaveBeenCalled()
+  })
+
+  it('settles an interrupted execution once and never replays it after the renderer returns', async () => {
+    const ingress = new SpatialLinkIngress(), p = ports(), done = vi.fn()
+    let fail!: (error: Error) => void
+    p.execute.mockImplementationOnce(async (_request, signal) => {
+      p.signals.push(signal)
+      return await new Promise<AgentMuxControlResult>((_resolve, reject) => { fail = reject })
+    })
+    ingress.ready(p.execute, p.report)
+    const opening = ingress.receive(zone('original')).then(done)
+    ingress.unavailable(); await opening
+    expect(done).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('interrupted before confirmation'))
+    expect(p.signals[0]!.aborted).toBe(true)
+    ingress.ready(p.execute, p.report)
+    expect(p.report).toHaveBeenCalledExactlyOnceWith(done.mock.calls[0]![0])
+    fail(new Error('Late interrupted failure')); await settled()
+    expect(done).toHaveBeenCalledTimes(1); expect(p.execute).toHaveBeenCalledTimes(1)
+    await expect(ingress.receive(zone('explicit-retry'))).resolves.toBeNull()
+    expect(p.requests.map(request => request.target)).toEqual([{ kind: 'space', zoneId: 'explicit-retry' }])
+  })
+
+  it('keeps a reporting failure separate from the original diagnostic and does not reject fire-and-forget consumers', async () => {
+    const ingress = new SpatialLinkIngress(), p = ports(), unavailableReport = vi.fn(() => { throw new Error('Renderer reporting unavailable') })
+    ingress.ready(p.execute, unavailableReport)
+    const issue = await ingress.receive('amux://agent/broken?query=1')
+    expect(issue).toContain('Your current workface is kept')
+    ingress.ready(p.execute, p.report)
+    expect(p.report).toHaveBeenCalledExactlyOnceWith(issue)
+    p.execute.mockRejectedValueOnce(new Error('Original focus owner unavailable'))
+    void ingress.receive(zone('fire-and-forget'))
+    await settled()
+    expect(p.report).toHaveBeenLastCalledWith(expect.stringContaining('Original focus owner unavailable'))
+    await expect(ingress.receive(zone('healthy-retry'))).resolves.toBeNull()
+  })
 })
