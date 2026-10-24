@@ -1,11 +1,42 @@
 const assert = require('node:assert/strict')
+const readerSelector = '.agent-information-reader'
+
+function verifyInformation(samples) {
+  assert.deepEqual(samples?.map(sample => sample.budget), ['summary', 'status', 'identity'], 'All three actual information budgets must be observed in order')
+  const first = samples[0]
+  assert.ok(first.nodeId && first.expectedName)
+  for (const [index, sample] of samples.entries()) {
+    assert.deepEqual(sample.subject, { hostId: 'local', agentSessionId: 'fixture-terrain-a' }, 'Information changes retain the exact original subject')
+    assert.equal(sample.nodeId, first.nodeId, 'Information changes use the same original occurrence')
+    assert.ok(Math.abs(sample.zoom - [1.12, .75, .47][index]) < .002, 'Actual native wheel scale reaches this information budget')
+    assert.equal(sample.readers, 0, 'A held Reader does not substitute for the original budget')
+    const owners = sample.layers.filter(layer => layer.semantic)
+    assert.equal(owners.length, 1, 'Exactly one original layer owns Agent input')
+    assert.equal(owners[0].kind, index === 0 ? 'detail' : 'identity')
+    assert.deepEqual(owners[0].buttonSubjects, ['fixture-terrain-a'])
+    const names = sample.ink.names.filter(ink => ink.visible), statuses = sample.ink.statuses.filter(ink => ink.visible), summaries = sample.ink.summaries.filter(ink => ink.visible)
+    assert.equal(names.length, 1, 'One readable original name remains visible')
+    assert.equal(names[0].text, first.expectedName)
+    assert.ok(names[0].screenFont >= 10.9, 'The actual projected name respects its screen text budget')
+    assert.equal(statuses.length, index < 2 ? 1 : 0, 'Status-only adds actual visible status to identity-only')
+    assert.equal(summaries.length, index === 0 ? 1 : 0, 'Only the summary budget exposes the optional content region')
+    if (statuses.length) assert.ok(statuses[0].text && statuses[0].text === first.ink.statuses.find(ink => ink.visible)?.text)
+    if (summaries.length) assert.ok(summaries[0].text)
+    for (const kind of ['conversation', 'body']) {
+      assert.ok(Number.isInteger(sample.readsBefore[kind]) && sample.readsBefore[kind] >= 0 && Number.isInteger(sample.readsAfter[kind]) && sample.readsAfter[kind] >= 0)
+      if (index) assert.equal(sample.readsAfter[kind], sample.readsBefore[kind], 'A settled lower information budget does not acquire summary or original body reads')
+    }
+    if (index) assert.equal(sample.zeroBodyDemand, true, 'Lower information budgets relinquish the visible body working set')
+  }
+}
 
 /** Original settings and Map, driven by Chromium input. Reads never assign a
  * control value, camera transform, world coordinate or product identity. */
 module.exports = async function settings({ win, result, read, click, key, move, frame, check, intact, closeDetails, locate, pause, until, matrix }) {
-  const evidence = result.mapSettings = { phases: [], hitTests: [], controlEdits: [], boundary: 'Original App/Focus settings/ConfigOwner and original Graph/Reader; controlled platform facts only. No real user configuration, Session or Run touched.' }
+  const evidence = result.mapSettings = { phases: [], hitTests: [], controlEdits: [], informationSamples: [], boundary: 'Original App/Focus settings/ConfigOwner and original Graph/Reader; controlled platform facts only. No real user configuration, Session or Run touched.' }
   const profile = () => read('window.graphCapture.preferences()?.map')
   const layout = () => read('window.graphCapture.deliveredLayout().boxes')
+  const readerCount = () => read(`document.querySelectorAll(${JSON.stringify(readerSelector)}).length`)
   const settled = () => until('original settings world has settled', () => read('window.graphCapture.deliveredLayout()?.busy===false'))
   async function reveal(selector) { await read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Original control missing');e.scrollIntoView({block:'center'});return true})()`); await pause(60) }
   async function choose(label, value) {
@@ -42,6 +73,37 @@ module.exports = async function settings({ win, result, read, click, key, move, 
     await until('original Focus durable save completes', () => read(`document.querySelector('[data-settings-pane="focus"] [data-settings-save-bar]').textContent.includes('Changes saved')`))
   }
   async function close() { await click('[aria-label="Close settings"]'); await until('original settings closes', () => read(`!document.querySelector('.settings-page:not([hidden])')`)); await settled() }
+  async function wheelTo(target) {
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const current = await read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`)
+      if (Math.abs(Math.log(target / current)) < .0008) return current
+      const point = await read(`(()=>{const canvas=document.querySelector('.collaboration-canvas'),r=canvas.getBoundingClientRect(),candidates=[[.52,.52],[.82,.3],[.18,.3],[.82,.72],[.18,.72],...Array.from({length:36},(_,i)=>[(i%6+2)/9,(Math.floor(i/6)+2)/9])];for(const [x,y] of candidates){const p={x:r.x+r.width*x,y:r.y+r.height*y};if(document.elementFromPoint(p.x,p.y)?.classList.contains('react-flow__pane'))return p}throw Error('No actual Map background for native information-budget wheel input')})()`)
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: Math.max(-180, Math.min(180, -Math.log2(target / current) / .002)) })
+      await pause(120)
+    }
+    assert.ok(Math.abs(Math.log(target / await read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`))) < .002, 'Native wheel reaches the information-budget scale')
+  }
+  const bodyReads = () => read(`(()=>{const reads=window.graphCapture.facts().reads;return{conversation:reads.filter(row=>row.kind==='conversation').length,body:reads.filter(row=>row.kind==='body').length}})()`)
+  async function informationSample(budget, expectedName, inputReads) {
+    const lower = budget !== 'summary'
+    if (lower) await until('the lower information budget releases body demand', () => read(`document.querySelector('[aria-label="Map sources"]').title.includes('0 participants observed')&&!document.querySelector('.collaboration-map__reading')`))
+    const readsBefore = inputReads ?? await bodyReads(); await pause(250)
+    const sample = await read(`(()=>{
+      const subjectKey=JSON.stringify(['local','fixture-terrain-a']),nodes=[...document.querySelectorAll('[data-collaboration-agent]')].filter(node=>node.dataset.collaborationAgent===subjectKey);
+      if(nodes.length!==1)throw Error('Exactly one original terrain-a occurrence must be mounted');
+      const node=nodes[0],surface=document.querySelector('.collaboration-canvas').getBoundingClientRect(),zoom=new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a;
+      const ink=selector=>[...node.querySelectorAll(selector)].map(element=>{const rect=element.getBoundingClientRect(),style=getComputedStyle(element);let opacity=1,shown=true;for(let e=element;e;e=e.parentElement){const s=getComputedStyle(e);opacity*=Number(s.opacity);if(s.display==='none'||s.visibility!=='visible'||e.hidden)shown=false}return{text:element.textContent.trim(),opacity,screenFont:parseFloat(style.fontSize)*zoom,visible:shown&&opacity>.05&&rect.width>0&&rect.height>0&&rect.right>surface.left&&rect.left<surface.right&&rect.bottom>surface.top&&rect.top<surface.bottom}});
+      const [hostId,agentSessionId]=JSON.parse(node.dataset.collaborationAgent);
+      return{subject:{hostId,agentSessionId},nodeId:node.closest('.react-flow__node').dataset.id,zoom,readers:document.querySelectorAll(${JSON.stringify(readerSelector)}).length,
+        layers:[...node.querySelectorAll('[data-map-layer]')].map(layer=>({kind:layer.dataset.mapLayer,semantic:!layer.inert&&layer.getAttribute('aria-hidden')!=='true',buttonSubjects:[...layer.querySelectorAll('button[data-session-id]')].map(button=>button.dataset.sessionId)})),
+        ink:{names:ink('.collaboration-agent__mark strong,.focus-context__identity strong'),statuses:ink('.collaboration-agent__status small,.focus-context__state small'),summaries:ink('.focus-context__detail')},
+        zeroBodyDemand:document.querySelector('[aria-label="Map sources"]').title.includes('0 participants observed')};
+    })()`)
+    const record = { ...sample, budget, expectedName, readsBefore, readsAfter: await bodyReads() }
+    evidence.informationSamples.push(record)
+    return record
+  }
   await check('settings-original-edit-save-reopen-and-map-consumers', async () => {
     await closeDetails(); await settled()
     const before = { profile: await profile(), boxes: await layout(), camera: await matrix(), jobs: await read('window.graphCapture.workerSamples().length') }
@@ -80,6 +142,17 @@ module.exports = async function settings({ win, result, read, click, key, move, 
     const outlines = await read(`[...document.querySelectorAll('.collaboration-area__envelope path')].map(path=>path.getAttribute('d'))`)
     assert.ok(outlines.length > 0 && outlines.every(path => !path.includes(' Q ')), 'Actual Map draws the saved polygon profile')
     await frame('settings-polygon-map-custom-reading')
+    const expectedName = (await read('window.graphCapture.terrain()')).agents.find(agent => agent.id === 'fixture-terrain-a').name
+    const informationGeometry = await layout()
+    await informationSample('summary', expectedName)
+    const statusInputReads = await bodyReads()
+    await wheelTo(.75); await informationSample('status', expectedName, statusInputReads); await frame('settings-status-only-map')
+    const identityInputReads = await bodyReads()
+    await wheelTo(.47); await informationSample('identity', expectedName, identityInputReads); await frame('settings-identity-only-map')
+    verifyInformation(evidence.informationSamples)
+    assert.deepEqual(await layout(), informationGeometry, 'Changing information budget by native wheel changes no world slot')
+    await locate('fixture-terrain-a'); await closeDetails(); await settled()
+    assert.ok(Math.abs(await read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`) - 1.12) < .002, 'The next explicit locate restores the same saved reading endpoint')
     evidence.phases.push({ phase: 'custom-saved-reopened', before, saved, zoom, outlines })
     await intact()
 
@@ -95,6 +168,8 @@ module.exports = async function settings({ win, result, read, click, key, move, 
     const pointSelector = '.collaboration-agent[data-collaboration-agent=' + JSON.stringify(JSON.stringify(['local', 'fixture-terrain-a'])) + '] .collaboration-agent__dot'
     await move(pointSelector); await click(pointSelector); await key('ArrowDown')
     await until('original point opens its accurate Reader', () => read(`Boolean(document.querySelector('.agent-information-reader'))`))
+    evidence.readerMeasurement = { selector: readerSelector, count: await readerCount() }
+    assert.equal(evidence.readerMeasurement.count, 1, 'The same actual Reader selector must also observe the existing positive Reader case')
     assert.equal(await read(`document.querySelector('.collaboration-agent[data-reading="true"] [data-session-id="fixture-terrain-a"]')!==null`), true)
     await frame('settings-all-point-accurate-reader')
     evidence.phases.push({ phase: 'point-only-real-hit-and-reader', profile: await profile(), zoom: await read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`) })
@@ -111,5 +186,8 @@ module.exports.verify = (evidence, frames) => {
   assert.ok(evidence?.phases?.length === 3, 'All three original settings consumer phases must execute')
   assert.deepEqual(evidence.phases.map(phase => phase.phase), ['custom-saved-reopened', 'point-only-real-hit-and-reader', 'defaults-restored'])
   assert.ok(evidence.hitTests.length > 0 && evidence.hitTests.every(hit => hit.readerBefore === false && hit.readerAfter === false))
-  for (const label of ['settings-two-level-draft', 'settings-invalid-kept-draft', 'settings-custom-four-level-dark', 'settings-custom-narrow-dark', 'settings-custom-narrow-light', 'settings-saved-profile-reopened', 'settings-polygon-map-custom-reading', 'settings-all-point-accurate-reader', 'settings-map-defaults-restored']) assert.ok(frames.some(frame => frame.label === label), 'Missing original native settings frame ' + label)
+  assert.deepEqual(evidence.readerMeasurement, { selector: readerSelector, count: 1 }, 'Reader absence samples require a nonempty measurement of the existing actual Reader')
+  verifyInformation(evidence.informationSamples)
+  for (const label of ['settings-two-level-draft', 'settings-invalid-kept-draft', 'settings-custom-four-level-dark', 'settings-custom-narrow-dark', 'settings-custom-narrow-light', 'settings-saved-profile-reopened', 'settings-polygon-map-custom-reading', 'settings-status-only-map', 'settings-identity-only-map', 'settings-all-point-accurate-reader', 'settings-map-defaults-restored']) assert.ok(frames.some(frame => frame.label === label), 'Missing original native settings frame ' + label)
 }
+module.exports.verifyInformation = verifyInformation
