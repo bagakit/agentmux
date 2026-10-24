@@ -18,7 +18,9 @@ it('the actual installer observes the exact public Headless owner and closes its
     )
     expect(result.exitCode, 'The actual installer must observe the fenced owner and close its RPC connection successfully').toBe(0)
     expect(JSON.parse(result.stdout), 'The installer must obtain the original public semantic owner and Store').toEqual({
-      hostProcessId: scope.owner.processId, storePath: scope.env.AGENTMUX_AGENT_SESSION_STORE
+      hostProcessId: scope.owner.processId, storePath: scope.env.AGENTMUX_AGENT_SESSION_STORE,
+      owner: expect.objectContaining({ runtimeId: scope.owner.runtimeId, ownerInstanceId: scope.owner.ownerInstanceId, processId: scope.owner.processId }),
+      socketPath: scope.socketPath
     })
     const client = await scope.client()
     expect(client.runtimeOwnerIdentity()?.ownerInstanceId).toBe(scope.owner.ownerInstanceId)
