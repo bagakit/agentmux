@@ -81,6 +81,8 @@ import {
 } from './hook-turn-phase.js'
 import { runBoundedReconnect } from './ctxmux-reconnect.js'
 import { judgeReconnectFlap, shouldClearFlapLedger } from './ctxmux-reconnect-budget.js'
+import { AgentSessionObservationRetries, sessionObservationSource,
+  type SessionObservationKind, type SessionObservationTarget } from './session-observation-retry.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { composeAgentLaunchPrompt, composeAgentPrompt, type AgentMuxOptionalContext } from './agent-outbound-message.js'
@@ -795,6 +797,15 @@ export class AgentMuxClient {
   private inputPreparationLifetime = new AbortController()
   private connected = false
   private connectionNeedsObservation = false
+  private readonly sessionObservationRetries = new AgentSessionObservationRetries(
+    target => this.currentSessionObservation(target),
+    (target, kind, signal) => this.retrySessionObservation(target, kind, signal),
+    target => {
+      if (!this.currentSessionObservation(target) || this.connectionNeedsObservation || this.sessionObservationsUnconfirmed()) return
+      this.publisher.publish({ type: 'connection-state', state: 'restored',
+        observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
+        evidence: { source: 'agentmux', observedAt: Date.now() } })
+    })
   /**
    * 跨成功幸存的抖动账（见 ctxmux-reconnect-budget.ts）。刻意**不复用** `connectionEpoch`：
    * 那个只在调用方主动 `disconnect()` 时自增，半死 daemon 的反复抖动一次都不会碰它。
@@ -807,7 +818,7 @@ export class AgentMuxClient {
   // Only pending snapshot readers retain removals. No durable terminal registry or completed-Run set.
   private readonly pendingRunSnapshots = new Map<string | null, Set<Set<string>>>()
   private readonly hookBindings = new Map<string, AgentHookBinding>()
-  private readonly hookRestorations = new Map<string, Promise<void>>()
+  private readonly hookRestorations = new Map<string, { source: string; epoch: number; pending: Promise<void> }>()
   private readonly hookIngressObservations = new Map<string, NonNullable<AgentMuxAgentSession['hookIngressObservation']> & {
     nativeTarget?: AgentNativeSessionHandle
   }>()
@@ -1190,7 +1201,7 @@ export class AgentMuxClient {
       await this.connectOnce(epoch)
       this.assertConnectionEpoch(epoch)
       if (recovering) await this.finishReconnect(epoch, generation)
-      else if (observationNeeded && !this.connectionNeedsObservation) this.publisher.publish({ type: 'connection-state', state: 'restored',
+      else if (observationNeeded && !this.connectionNeedsObservation && !this.sessionObservationsUnconfirmed()) this.publisher.publish({ type: 'connection-state', state: 'restored',
         observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
         evidence: { source: 'run-process', observedAt: Date.now() } })
     } catch (error) {
@@ -1235,7 +1246,7 @@ export class AgentMuxClient {
             // Join the original attempt without cancelling its fast/slow recovery lane.
             await this.connectOnce(epoch)
             if (recovery && this.reconnectController === recovery) await this.finishReconnect(epoch, generation)
-            else if (!recovery && epoch === this.connectionEpoch && !this.connectionNeedsObservation) this.publisher.publish({ type: 'connection-state', state: 'restored',
+            else if (!recovery && epoch === this.connectionEpoch && !this.connectionNeedsObservation && !this.sessionObservationsUnconfirmed()) this.publisher.publish({ type: 'connection-state', state: 'restored',
               observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' }, evidence: { source: 'run-process', observedAt: Date.now() } })
           } catch { /* The original attempt/lane retains its scoped failure and next observation. */ }
         })
@@ -1283,7 +1294,6 @@ export class AgentMuxClient {
 
   private async open(epoch: number): Promise<void> {
     let phase = 'Runtime connection'
-    let auxiliaryObservationIncomplete = false
     const observing = (step: string): void => {
       phase = step
       this.publisher.publish({ type: 'connection-state', state: 'restored',
@@ -1315,7 +1325,11 @@ export class AgentMuxClient {
       observing('Hook restoration')
       await this.tryRestoreHookIngress(runs)
       this.assertConnectionEpoch(epoch)
-      auxiliaryObservationIncomplete = this.registry.list().some(session => this.currentHookIngressObservation(session) !== undefined)
+      for (const session of this.registry.list()) {
+        const observation = this.currentHookIngressObservation(session)
+        if (observation?.phase === 'listen' || observation?.phase === 'binding')
+          this.sessionObservationRetries.queue({ session, epoch }, 'hook')
+      }
       // Each optional probe retains its exact Session. Shared transport, epoch and
       // Store/identity invariants still fail this observation; auxiliary errors do not.
       observing('terminal capability observation')
@@ -1353,7 +1367,7 @@ export class AgentMuxClient {
             handshakeErrors.push(error)
             return
           }
-          auxiliaryObservationIncomplete = true
+          this.sessionObservationRetries.queue({ session, epoch }, 'terminal')
           this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
             code: error instanceof AgentMuxError ? error.code : 'AGENT_TERMINAL_OBSERVATION_UNCONFIRMED',
             message: `Terminal capability observation is unconfirmed. ${error instanceof Error ? error.message : String(error)}. The original Run and exact-Run capabilities remain available; inspect this Session to retry observation.`,
@@ -1371,14 +1385,14 @@ export class AgentMuxClient {
       observing('native status observation')
       await Promise.all(this.registry.list().filter(session => runs.some(run =>
         run.runId === session.run.runId && run.state.type === 'running')).map(async session => {
-        if (!await this.ensureNativeStatusObservation(session)) auxiliaryObservationIncomplete = true
+        await this.ensureNativeStatusObservation(session)
       }))
       // 缓刑期的起点。写在这里而不是只写在 `restored` 那侧，是因为首次 connect 也是「连接变健康」——
       // 少了这一句，`connectionHealthySince` 会停在 0，于是第一次掉线时 `now - 0` 必然超过缓刑期、
       // 账被无条件清零，跨成功的界永远攒不起来（即：这道界会变成死代码）。
       this.assertConnectionEpoch(epoch)
       if (!this.kernel.isConnected()) throw new AgentMuxError('Connection changed during recovery observation.', 'CTXMUX_DISCONNECTED')
-      this.connectionNeedsObservation = auxiliaryObservationIncomplete
+      this.connectionNeedsObservation = false
       this.connectionHealthySince = Date.now()
       void this.messageNotifications.restore()
       this.recovery.restore(this.registry.list())
@@ -1387,13 +1401,12 @@ export class AgentMuxClient {
           this.queueNativeIdentityCapture(session)
         }
       }
-      if (auxiliaryObservationIncomplete) {
+      if (this.sessionObservationsUnconfirmed()) {
         this.publisher.publish({ type: 'connection-state', state: 'restored',
           observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
           diagnostic: { code: 'CTXMUX_CONNECTION_OBSERVATION_UNCONFIRMED',
             message: 'The Runtime is available. Some exact Session observations remain unconfirmed; original Run capabilities remain available. Inspect the affected Session or retry observation on this endpoint.' },
           evidence: { source: 'agentmux', observedAt: Date.now() } })
-        if (!this.reconnectController) this.scheduleSlowReconnect(epoch, false)
       }
     } catch (error) {
       if (epoch !== this.connectionEpoch) throw error
@@ -1431,6 +1444,7 @@ export class AgentMuxClient {
     if (this.reconnecting && !this.connected) return
     this.cancelReconnect()
     epoch = ++this.connectionEpoch
+    this.cancelSessionObservations()
     this.cancelInputPreparationObservations()
     this.runtimeConnecting = null
     this.connecting = null
@@ -1571,6 +1585,7 @@ export class AgentMuxClient {
     if (!current() || !this.connected || !this.kernel.isConnected()) return
     if (this.connectionNeedsObservation) { this.scheduleSlowReconnect(epoch, false); return }
     this.cancelReconnect()
+    if (this.sessionObservationsUnconfirmed()) return
     this.publisher.publish({ type: 'connection-state', state: 'restored',
       observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
       evidence: { source: 'run-process', observedAt: restoredAt } })
@@ -1616,6 +1631,62 @@ export class AgentMuxClient {
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
     this.reconnecting = false
+  }
+
+  private currentSessionObservation(target: SessionObservationTarget): boolean {
+    if (this.reopensDisposed || target.epoch !== this.connectionEpoch || !this.connected || !this.kernel.isConnected() ||
+        this.endedRuns.has(target.session.run.runId)) return false
+    const current = this.registry.findByRun(target.session.run)
+    return current?.agentSessionId === target.session.agentSessionId &&
+      sessionObservationSource(current) === sessionObservationSource(target.session)
+  }
+
+  private sessionObservationsUnconfirmed(): boolean {
+    if (this.sessionObservationRetries.has()) return true
+    for (const [id, observation] of this.hookIngressObservations) {
+      const session = this.registry.findByRun(observation.run)
+      if (session?.agentSessionId === id && this.currentHookIngressObservation(session)) return true
+    }
+    return false
+  }
+
+  private cancelSessionObservations(): void {
+    this.sessionObservationRetries.clear()
+    for (const watch of this.nativeStatusWatches.values()) { watch.controller.abort(); watch.observer?.dispose() }
+    this.nativeStatusWatches.clear()
+    for (const watch of this.terminalFrontendWatches.values()) watch.controller.abort()
+    this.terminalFrontendWatches.clear()
+  }
+
+  /** Retry one failed observer; no lifecycle claim, Store reload, directory scan or unrelated handshake. */
+  private async retrySessionObservation(target: SessionObservationTarget, kind: SessionObservationKind, signal: AbortSignal): Promise<boolean> {
+    const { session } = target
+    const current = (): boolean => !signal.aborted && this.currentSessionObservation(target)
+    try {
+      if (!current()) return false
+      const run = await this.kernel.status(session.run.runId)
+      if (!current()) return false
+      this.assertAgentRun(session, run)
+      if (run.state.type !== 'running') { this.backfillEndedRuns([run]); return false }
+      if (kind === 'hook') {
+        await this.restoreHookBinding(session)
+        return current() && !this.currentHookIngressObservation(session)
+      }
+      if (kind === 'native-status') return await this.ensureNativeStatusObservation(session, true) && current()
+      await this.ensureTerminalHandshakeOrDegrade(session, run)
+      return current()
+    } catch (error) {
+      if (!current()) return false
+      this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+        code: error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_OBSERVATION_UNCONFIRMED',
+        message: `${kind} observation is unconfirmed. ${error instanceof Error ? error.message : String(error)}. The original Session, Run and input remain available; observation will retry.`,
+        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+      if (error instanceof AgentMuxError && ['INVALID_AGENT_SESSION_STORE', 'AGENT_SESSION_IDENTITY_CONFLICT'].includes(error.code)) {
+        this.connectionNeedsObservation = true
+        if (!this.reconnectController) this.scheduleSlowReconnect(target.epoch, false)
+      }
+      return false
+    }
   }
 
   protected reconnectSleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -1917,6 +1988,7 @@ export class AgentMuxClient {
   disconnect(): void {
     for (const creation of this.activeCreations.values()) creation.controller.abort()
     this.cancelReconnect()
+    this.cancelSessionObservations()
     this.cancelProviderReads()
     this.cancelNativeIdentityCaptures()
     this.connectionEpoch += 1
@@ -1941,11 +2013,6 @@ export class AgentMuxClient {
     this.stopRequestedRuns.clear()
     this.endedRuns.clear()
     this.hookTurnPhases.clear()
-    const nativeStatusWatches = [...this.nativeStatusWatches.values()]
-    for (const watch of nativeStatusWatches) { watch.controller.abort(); watch.observer?.dispose() }
-    this.nativeStatusWatches.clear()
-    for (const watch of this.terminalFrontendWatches.values()) watch.controller.abort()
-    this.terminalFrontendWatches.clear()
     this.agentInputCursors.clear()
     for (const lane of this.agentInputTails.values()) {
       for (const observation of lane.renderObservations) {
@@ -1993,7 +2060,7 @@ export class AgentMuxClient {
         'History observer client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED'))
     }
 
-    await Promise.allSettled(this.hookRestorations.values())
+    await Promise.allSettled([...this.hookRestorations.values()].map(entry => entry.pending))
     await this.hookServer.stop()
     this.disconnect()
     await Promise.all(this.nativeStatusSettlements)
@@ -2281,17 +2348,15 @@ export class AgentMuxClient {
     this.requireConnected()
     await this.resolveRawAgentSession(agentSessionId)
     const session = await this.registry.refresh(agentSessionId, expectedRun)
+    const observationTarget = { session, epoch: this.connectionEpoch }
+    this.sessionObservationRetries.prune(observationTarget)
     this.hookNativeWitnesses.delete(session.run.runId)
     this.queueNativeIdentityCapture(session)
     const hookObservation = this.currentHookIngressObservation(session)
     if (hookObservation) {
-      try {
-        const run = await this.kernel.status(session.run.runId)
-        this.assertAgentRun(session, run)
-        if (run.state.type === 'running') await this.restoreHookBinding(session)
-        else this.backfillEndedRuns([run])
-      } catch (error) { this.observeHookRestoreFailure(session, 'binding', error) }
+      this.sessionObservationRetries.queue(observationTarget, 'hook')
     }
+    await this.sessionObservationRetries.refresh(observationTarget)
     this.recovery.observe(session, true)
     return this.projectSession(session)
   }
@@ -7360,6 +7425,7 @@ export class AgentMuxClient {
     let current: AgentMuxStoredAgentSession
     try { current = this.registry.get(session.agentSessionId) }
     catch (error) { if (error instanceof AgentMuxError && error.code === 'UNKNOWN_AGENT_SESSION') return; throw error }
+    this.sessionObservationRetries.prune({ session: current, epoch: this.connectionEpoch })
     const frontendWatch = this.terminalFrontendWatches.get(current.agentSessionId)
     if (frontendWatch && frontendWatch.key !== JSON.stringify([current.run.runId, current.nativeActor])) {
       frontendWatch.controller.abort(); this.terminalFrontendWatches.delete(current.agentSessionId)
@@ -7376,11 +7442,13 @@ export class AgentMuxClient {
 
   private observeHookRestoreFailure(session: AgentMuxStoredAgentSession, phase: 'listen' | 'binding', error: unknown): void {
     const current = this.registry.findByRun(session.run)
-    if (!current || current.agentSessionId !== session.agentSessionId || this.endedRuns.has(session.run.runId)) return
+    if (!current || current.agentSessionId !== session.agentSessionId || this.endedRuns.has(session.run.runId) ||
+        sessionObservationSource(current) !== sessionObservationSource(session)) return
     const code = error instanceof AgentMuxError ? error.code : (error as NodeJS.ErrnoException)?.code ?? 'HOOK_INGRESS_RESTORE_FAILED'
     this.hookIngressObservations.set(session.agentSessionId, { run: { ...session.run }, phase, code,
       message: `Native Hook observation could not restore its ${phase === 'listen' ? 'local listener' : 'original Run binding'}. ${error instanceof Error ? error.message : String(error)}`,
       observedAt: Date.now() })
+    this.sessionObservationRetries.queue({ session, epoch: this.connectionEpoch }, 'hook')
     this.publishSession(current)
   }
 
@@ -7389,7 +7457,10 @@ export class AgentMuxClient {
     if (!observation || !sameRun(observation.run, session.run) || observation.code === 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE') return
     this.hookIngressObservations.delete(session.agentSessionId)
     const current = this.registry.findByRun(session.run)
-    if (current?.agentSessionId === session.agentSessionId) this.publishSession(current)
+    if (current?.agentSessionId === session.agentSessionId) {
+      this.sessionObservationRetries.settle({ session: current, epoch: this.connectionEpoch }, 'hook')
+      this.publishSession(current)
+    }
   }
 
   /** Both native exit events and reconnected terminal facts release the same exact Hook owner. */
@@ -7400,17 +7471,24 @@ export class AgentMuxClient {
       ...(session ? { agentSessionId: session.agentSessionId } : {}), code: 'HOOK_BINDING_RELEASE_UNCONFIRMED',
       message: `The original Run ended, but draining its Hook binding is unconfirmed. ${error instanceof Error ? error.message : String(error)}`,
       evidence: { source: 'agentmux', run: { ...run }, observedAt: Date.now() } }))
-    if (session) this.hookIngressObservations.delete(session.agentSessionId)
+    if (session) {
+      this.hookIngressObservations.delete(session.agentSessionId)
+      this.sessionObservationRetries.cancel(session.agentSessionId)
+    }
   }
 
   /** One in-flight binding restoration per exact Run; no independent reconnect or input owner. */
   private restoreHookBinding(session: AgentMuxStoredAgentSession): Promise<void> {
     if (this.reopensDisposed) return Promise.resolve()
-    const pending = this.hookRestorations.get(session.run.runId)
-    if (pending) return pending
+    const target = { session, epoch: this.connectionEpoch }
+    const source = sessionObservationSource(session), previous = this.hookRestorations.get(session.run.runId)
+    if (previous) return previous.epoch === target.epoch && previous.source === source ? previous.pending :
+      previous.pending.then(() => this.restoreHookBinding(session))
+    const current = (): boolean => this.currentSessionObservation(target)
     const restoring = (async () => {
       try { await this.hookServer.start() }
-      catch (error) { this.observeHookRestoreFailure(session, 'listen', error); return }
+      catch (error) { if (current()) this.observeHookRestoreFailure(session, 'listen', error); return }
+      if (!current()) return
       const retained = this.hookBindings.get(session.run.runId)
       if (retained) {
         try {
@@ -7418,28 +7496,28 @@ export class AgentMuxClient {
           if (observation?.phase === 'binding') {
             await retained.bindRun(session.run.runId)
           }
+          if (!current()) return
           this.settleHookRestore(session)
-        } catch (error) { this.observeHookRestoreFailure(session, 'binding', error) }
+        } catch (error) { if (current()) this.observeHookRestoreFailure(session, 'binding', error) }
         return
       }
       let binding: AgentHookBinding | undefined
       try {
         binding = this.hookServer.createBinding(session.agentSessionId, session.providerId, session.hookBindingId, session.hookToken)
         await binding.bindRun(session.run.runId)
-        const current = this.registry.findByRun(session.run)
-        if (!current || current.agentSessionId !== session.agentSessionId || this.endedRuns.has(session.run.runId)) {
+        if (!current()) {
           await binding.close()
           return
         }
         this.hookBindings.set(session.run.runId, binding)
         this.settleHookRestore(session)
       } catch (error) {
-        this.observeHookRestoreFailure(session, 'binding', error)
+        if (current()) this.observeHookRestoreFailure(session, 'binding', error)
         try { await binding?.close() }
-        catch (releaseError) { this.observeHookRestoreFailure(session, 'binding', releaseError) }
+        catch (releaseError) { if (current()) this.observeHookRestoreFailure(session, 'binding', releaseError) }
       }
-    })().finally(() => { if (this.hookRestorations.get(session.run.runId) === restoring) this.hookRestorations.delete(session.run.runId) })
-    this.hookRestorations.set(session.run.runId, restoring)
+    })().finally(() => { if (this.hookRestorations.get(session.run.runId)?.pending === restoring) this.hookRestorations.delete(session.run.runId) })
+    this.hookRestorations.set(session.run.runId, { source, epoch: target.epoch, pending: restoring })
     return restoring
   }
 
@@ -8446,11 +8524,14 @@ export class AgentMuxClient {
   }
 
   private publishNativeStatusFailure(session: AgentMuxStoredAgentSession | AgentMuxAgentSession, error: unknown): void {
-    if (this.reopensDisposed || this.registry.findByRun(session.run)?.agentSessionId !== session.agentSessionId) return
+    const current = this.registry.findByRun(session.run)
+    if (this.reopensDisposed || current?.agentSessionId !== session.agentSessionId || current.providerId !== session.providerId ||
+        !sameNativeHandle(current.nativeHandle, session.nativeHandle)) return
     this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
       code: error instanceof AgentMuxError ? error.code : 'AGENT_NATIVE_STATUS_UNAVAILABLE',
       message: `${error instanceof Error ? error.message : 'Native status observation is unavailable.'} The retained Session, Run and input remain available. Inspect the Session to retry observation.`,
       evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+    this.sessionObservationRetries.queue({ session: current, epoch: this.connectionEpoch }, 'native-status')
   }
 
   private async ensureTerminalFrontendObservation(session: AgentMuxStoredAgentSession | AgentMuxAgentSession): Promise<boolean> {
@@ -8553,9 +8634,14 @@ export class AgentMuxClient {
     }
   }
 
-  private async ensureNativeStatusObservation(session: AgentMuxStoredAgentSession | AgentMuxAgentSession): Promise<boolean> {
+  private async ensureNativeStatusObservation(requested: AgentMuxStoredAgentSession | AgentMuxAgentSession, retry = false): Promise<boolean> {
+    const session = this.registry.findByRun(requested.run)
+    if (session?.agentSessionId !== requested.agentSessionId || session.providerId !== requested.providerId ||
+        !sameNativeHandle(session.nativeHandle, requested.nativeHandle)) return false
+    const target = { session, epoch: this.connectionEpoch }
+    if (!retry && this.sessionObservationRetries.has(target, 'native-status')) return false
     await this.ensureTerminalFrontendObservation(session)
-    if (this.reopensDisposed) return false
+    if (!this.currentSessionObservation(target)) return false
     const provider = this.providers.get(session.providerId)
     if (!provider.observeSessionStatus || !session.nativeHandle) return true
     const key = JSON.stringify([session.run.runId, session.nativeHandle])
@@ -8571,7 +8657,7 @@ export class AgentMuxClient {
     this.nativeStatusWatches.set(session.agentSessionId, watch)
     let unavailableObservation = false
     const unavailable = (code: string, message: string): void => {
-      if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
+      if (!this.currentSessionObservation(target) || watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
       unavailableObservation = true
       this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code,
         message: `${message} The retained Session, Run and input remain available. Inspect the Session to retry observation.`,
@@ -8579,6 +8665,7 @@ export class AgentMuxClient {
       if (code !== 'AGENT_NATIVE_STATUS_GAP') {
         this.nativeStatusWatches.delete(session.agentSessionId)
         watch.controller.abort(); watch.observer?.dispose()
+        this.sessionObservationRetries.queue(target, 'native-status')
       }
     }
     try {
@@ -8588,7 +8675,7 @@ export class AgentMuxClient {
         signal: watch.controller.signal, onUnavailable: unavailable,
         onStatus: observation => {
           watch.pending = watch.pending.then(async () => {
-            if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch ||
+            if (!this.currentSessionObservation(target) || watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch ||
               observation.recordId === watch.recordId || (watch.sequence !== undefined && observation.sequence !== undefined && observation.sequence <= watch.sequence)) return
             const current = this.requireAgentSession(session.agentSessionId)
             if (!sameRun(current.run, session.run) || current.providerId !== session.providerId || !sameNativeHandle(current.nativeHandle, session.nativeHandle) || this.endedRuns.has(current.run.runId)) return
@@ -8695,7 +8782,7 @@ export class AgentMuxClient {
           void pending.then(() => this.nativeStatusSettlements.delete(pending))
         }
       })
-      if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) {
+      if (!this.currentSessionObservation(target) || watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) {
         watch.observer.dispose()
         return false
       }
@@ -8703,6 +8790,7 @@ export class AgentMuxClient {
     } catch (error) {
       unavailable(error instanceof AgentMuxError ? error.code : 'AGENT_NATIVE_STATUS_UNAVAILABLE', error instanceof Error ? error.message : 'Native status observation is unavailable.')
     }
+    if (!unavailableObservation) this.sessionObservationRetries.settle(target, 'native-status')
     return !unavailableObservation
   }
 
