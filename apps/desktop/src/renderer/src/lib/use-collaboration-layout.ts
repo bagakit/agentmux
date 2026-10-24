@@ -1,5 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import type { CollaborationLayoutInput, CollaborationLayoutBox, CollaborationLayoutRequest, CollaborationLayoutResponse, CollaborationLayoutStructure } from './collaboration-layout-engine'
 import { collaborationLayoutStructureKey, translateCollaborationPath, type CollaborationPath } from './collaboration-layout-engine'
 import { COLLABORATION_LAYOUT_TRANSITION_MS, interpolateCollaborationGeometry, type CollaborationGeometryFrame } from './collaboration-map-transition'
@@ -17,7 +18,7 @@ export function useCollaborationLayout(input: CollaborationLayoutInput, active: 
   const [transitioning, setTransitioning] = useState(false)
   const [busy, setBusy] = useState(false), [issues, setIssues] = useState<ReadonlyMap<string, string>>(new Map())
   const geometry = useRef({ structure: '', arrange: -1, ...frame, held: new Map<string, CollaborationLayoutBox>(), structureInput: null as CollaborationLayoutStructure | null }), epoch = useRef(0)
-  const presented = useRef(frame), animation = useRef<number | null>(null), motionEnabled = useRef(motion)
+  const presented = useRef(frame), animation = useRef<{ frame: number } | null>(null), motionEnabled = useRef(motion)
   const window = useWorkbenchDocument().defaultView!
   motionEnabled.current = motion
   const publish = useCallback((next: CollaborationGeometryFrame) => {
@@ -25,7 +26,7 @@ export function useCollaborationLayout(input: CollaborationLayoutInput, active: 
     presented.current = next; setFrame(next)
   }, [])
   const settle = useCallback((complete = true) => {
-    if (animation.current !== null) window.cancelAnimationFrame(animation.current)
+    if (animation.current !== null) window.cancelAnimationFrame(animation.current.frame)
     animation.current = null; setTransitioning(false)
     if (complete) publish({ boxes: geometry.current.boxes, paths: geometry.current.paths })
   }, [window, publish])
@@ -34,18 +35,30 @@ export function useCollaborationLayout(input: CollaborationLayoutInput, active: 
     const from = presented.current
     if (!animate || !motionEnabled.current || !from.boxes.size || ![...target.boxes].some(([id, box]) => from.boxes.has(id) && from.boxes.get(id) !== box)) { publish(target); return }
     setTransitioning(true)
+    const clock = { frame: 0 }
+    animation.current = clock
     let started: number | undefined
     const step = (time: number) => {
+      if (animation.current !== clock) return
       started ??= time
       const progress = Math.min(1, (time - started) / COLLABORATION_LAYOUT_TRANSITION_MS), eased = progress * progress * (3 - 2 * progress)
-      publish(interpolateCollaborationGeometry(from, target, eased))
-      if (progress < 1) animation.current = window.requestAnimationFrame(step)
-      else { animation.current = null; setTransitioning(false) }
+      // Commit this one complete browser frame before xyflow's synchronous
+      // ResizeObserver store update can flush a pending geometry render inside
+      // the same delivery cycle. Worker/effect publication remains asynchronous.
+      flushSync(() => {
+        publish(interpolateCollaborationGeometry(from, target, eased))
+        if (progress === 1) setTransitioning(false)
+      })
+      // This commit may have flushed Off/hidden/unmount effects or a newer
+      // placement. The cancelled clock must not schedule itself again.
+      if (animation.current !== clock) return
+      if (progress < 1) clock.frame = window.requestAnimationFrame(step)
+      else animation.current = null
     }
-    animation.current = window.requestAnimationFrame(step)
+    clock.frame = window.requestAnimationFrame(step)
   }, [window, publish, settle])
   useEffect(() => { if (!motion || !active) settle() }, [motion, active, settle])
-  useEffect(() => () => { if (animation.current !== null) window.cancelAnimationFrame(animation.current) }, [window])
+  useEffect(() => () => { if (animation.current !== null) window.cancelAnimationFrame(animation.current.frame); animation.current = null }, [window])
   const latest = useRef(input); latest.current = input
   const latestStructure = useRef(structure); latestStructure.current = structure
   useEffect(() => {
