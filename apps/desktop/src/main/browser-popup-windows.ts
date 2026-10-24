@@ -433,7 +433,7 @@ export class BrowserPopupWindows {
     try { await this.host.appLinks.openExternal(target) }
     catch (error) {
       if (!current()) return
-      popup.error = `Could not open this link in another app: ${message(error)}`
+      popup.error = `Could not open this link: ${message(error)}`
       this.emit(popup)
     }
   }
