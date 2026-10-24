@@ -21,6 +21,7 @@ import { generateKeyPair, exportPublicKey } from '../../../packages/relay/src/e2
 import { parseConnectionOfferUrl } from '../../../packages/relay/src/connection-offer'
 import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client'
 import { HostedRelayRpcPort } from '../../../packages/core/src/relay-hosted'
+import { mobileRelease } from '../../host/test/helpers/mobile-web-fixture'
 import { AgentMuxError } from '../../../packages/core/src/errors'
 
 const repository = resolve(import.meta.dirname, '../../..')
@@ -241,7 +242,7 @@ describe('original Host file upload owner and public transport', () => {
     const assets = join(directory, 'mobile'), socketPath = join(runtime, 'control.sock')
     await Promise.all([mkdir(home, { recursive: true }), mkdir(runtime, { recursive: true, mode: 0o700 }),
       mkdir(join(state, 'ctxmux'), { recursive: true, mode: 0o700 }), mkdir(join(assets, 'assets'), { recursive: true })])
-    await writeFile(join(assets, 'index.html'), '<!doctype html><title>Private upload fixture</title>')
+    await mobileRelease(assets, 'private-upload-build')
     const env: NodeJS.ProcessEnv = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))),
       HOME: home, ZDOTDIR: home, SHELL: '/bin/zsh', AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: state,
       AGENTMUX_AGENT_SESSION_STORE: join(state, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(state, 'messages.ndjson') }
