@@ -41,6 +41,10 @@
 .mobile-tree-folder-group > summary > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; font-size: 10px; }
 .mobile-tree-folder-group[open] > summary > svg { transform: rotate(90deg); }
 .mobile-spatial-panel .mobile-tree-profile { display: block; min-height: 44px; padding: 4px; font-size: 11px; background: transparent; color: var(--text-3); text-align: left; }
+.mobile-mote-main-action { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; margin: 2px 0 4px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-1); color: var(--green); text-align: left; }
+.mobile-mote-main-action > span { display: grid; gap: 1px; min-width: 0; flex: 1; }
+.mobile-mote-main-action strong { font-size: 12px; font-weight: 550; }
+.mobile-mote-main-action small { font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-tree-unconfirmed { padding: 8px; font-size: 11px; color: var(--text-3); overflow-wrap: anywhere; }
 .mobile-directory-notice { color: var(--amber-text); font-size: 11px; margin-block: 0 2px; }
 .mobile-directory-notice > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 4px; cursor: pointer; list-style: none; }
