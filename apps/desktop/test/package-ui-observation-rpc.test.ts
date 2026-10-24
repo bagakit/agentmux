@@ -23,6 +23,9 @@ const observation: DesktopClientObservation = {
       localStorage: 'present', detail: null }, runtimes: [] },
   workbench: { loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
     focus: { executionSessionId: null, pmoSessionId: null },
+    survey: { collectedZoneIds: ['saved-missing-zone', 'original-zone'],
+      organization: { ungrouped: ['original-zone'], groups: [{ groupId: 'original-group', name: 'Retained group', collapsed: true, zoneIds: ['saved-missing-zone', 'closed-slot'] }] },
+      selection: { zoneId: 'original-zone', selection: [{ tabId: 'tab', regionId: 'file' }], active: { tabId: 'tab', regionId: 'file' } } },
     desktop: {
       selection: { surface: 'space', mainSurface: 'workbench', focusView: null, space: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace',
         tabId: 'tab', groupId: 'group', regionId: 'file', topicId: null }, goalId: null },

@@ -36,6 +36,8 @@ vi.mock('node:child_process', async original => {
 vi.mock('../scripts/package-process-scope.mjs', async original => ({
   ...await original<typeof import('../scripts/package-process-scope.mjs')>(),
   observeApplicationProcesses: async () => ({ serving: io.pid ? [io.pid] : [], crashReporter: [],
+    admissions: io.pid ? [{ uid: process.getuid!(), pid: io.pid, ppid: 1, birth: `private-birth-${io.pid}`,
+      classification: 'gui', source: 'private-observed-main', initial: { classification: 'gui', source: 'private-observed-main' } }] : [],
     processes: io.pid ? [{ pid: io.pid, ppid: 1, birth: `private-birth-${io.pid}`, command: `${io.app}/Contents/MacOS/AgentMux` }] : [] })
 }))
 vi.mock('../scripts/package-semantic-host.mjs', async original => ({
@@ -86,6 +88,9 @@ async function fixture() {
       storage: { userData: root, sessionData: root, directory: root, localStorage: 'present', detail: null }, runtimes: [] },
     workbench: { loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
       focus: { executionSessionId: 'agent-session', pmoSessionId: null },
+      survey: { collectedZoneIds: ['zone-missing', 'zone-a'],
+        organization: { ungrouped: ['zone-a'], groups: [{ groupId: 'survey-group', name: 'Retained research', collapsed: true, zoneIds: ['zone-missing', 'closed-zone-slot'] }] },
+        selection: { zoneId: 'zone-a', selection: [{ tabId: 'tab-b', regionId: 'browser' }], active: { tabId: 'tab-b', regionId: 'browser' } } },
       desktop: { selection: { surface: 'space', mainSurface: 'workbench', focusView: null, space: null, goalId: null },
         presentation: { provenance: 'observed', state: 'main-visible', tabId: 'tab-a', regionId: 'agent', blockers: [] },
         input: { provenance: 'observed', scope: 'main', ownerKind: 'terminal', tabId: 'tab-a', regionId: 'agent', sessionId: 'agent-session', connected: true, visible: true, inert: false },
@@ -115,13 +120,57 @@ async function fixture() {
 async function install(f: Awaited<ReturnType<typeof fixture>>) {
   const { installApplication } = await import('../scripts/package-macos.mjs')
   return installApplication(f.candidate, { intent: 'ui-only', homeDirectory: f.home,
-    quit: async () => { expect(io.pid).toBe(201); io.pid = 0; return { wasRunning: true, pids: [201] } },
+    quit: async (_path: string, admissions: unknown[]) => { expect(io.pid).toBe(201); io.pid = 0; return { wasRunning: true, pids: [201], admissions } },
     launch: async () => { io.pid = 202; io.cutovers++; expect(JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')).sourceCommit).toBe('c'.repeat(40)); return [202] }
   })
 }
 const after = () => io.after!.workbench
 const agent = () => after().tabs[0]!.regions[0]! as Extract<DesktopClientObservation['workbench']['tabs'][number]['regions'][number], { kind: 'agent' }>
 const browser = () => after().tabs[1]!.regions[0]! as Extract<DesktopClientObservation['workbench']['tabs'][number]['regions'][number], { kind: 'browser' }>
+
+it.each(['before', 'after', 'both'] as const)('[survey-install] a missing %s Survey observation keeps the activated GUI and healthy Runs without certifying complete continuity', async missing => {
+  const f = await fixture()
+  if (missing !== 'after') delete io.before!.workbench.survey
+  if (missing !== 'before') delete after().survey
+  const result = await install(f)
+  expect(result.ui.status).toBe('unknown')
+  expect(result.ui.reason).toContain('Survey')
+  if (missing !== 'before') expect(result.ui.observation.workbench).not.toHaveProperty('survey')
+  expect(result.ui.continuity).toEqual({ before: io.before, after: io.after })
+  expect(io.pid).toBe(202); expect(io.cutovers).toBe(1)
+  expect(agent().control!.run.runId).toBe('agent-run')
+})
+
+it('[survey-install] observes an explicitly empty saved Survey as known empty', async () => {
+  const f = await fixture(), empty = { collectedZoneIds: [], organization: { ungrouped: [], groups: [] }, selection: null }
+  io.before!.workbench.survey = structuredClone(empty); after().survey = structuredClone(empty)
+  const result = await install(f)
+  expect(result.ui.status).toBe('committed'); expect(result.ui.observation.workbench.survey).toEqual(empty)
+  expect(io.pid).toBe(202); expect(io.cutovers).toBe(1)
+})
+
+it.each([
+  ['membership', () => { after().survey!.collectedZoneIds = [] }],
+  ['implicit ungrouped order', () => {
+    io.before!.workbench.survey!.organization = { ungrouped: [], groups: [] }
+    after().survey!.organization = { ungrouped: [], groups: [] }
+    after().survey!.collectedZoneIds.reverse()
+  }],
+  ['stored missing reference', () => { after().survey!.organization.groups[0]!.zoneIds = ['closed-zone-slot'] }],
+  ['stored closed slot', () => { after().survey!.organization.groups[0]!.zoneIds = ['zone-missing'] }],
+  ['group collapse', () => { after().survey!.organization.groups[0]!.collapsed = false }],
+  ['group name', () => { after().survey!.organization.groups[0]!.name = 'Other collection' }],
+  ['member order', () => { after().survey!.organization.groups[0]!.zoneIds.reverse() }],
+  ['independent selection', () => { after().survey!.selection = null }]
+] as const)('[survey-install] changed %s cannot borrow unchanged Tabs to certify continuity', async (_field, change) => {
+  const f = await fixture(), tabs = structuredClone(io.before!.workbench.tabs)
+  change(); const before = structuredClone(io.before), expected = structuredClone(io.after)
+  const error = await install(f).catch(error => error)
+  expect(error.message).toBe('The original workbench, Region descriptors or focus have not been restored.')
+  expect(error.transaction.ui.status).toBe('unknown'); expect(error.transaction.ui.continuity).toEqual({ before, after: expected })
+  expect(after().tabs).toEqual(tabs); expect(io.pid).toBe(202); expect(io.cutovers).toBe(1)
+  expect(agent().control!.run.runId).toBe('agent-run')
+})
 
 it.each([
   { hostId: 'local', current: 0, total: 2, pending: true, waiting: true },

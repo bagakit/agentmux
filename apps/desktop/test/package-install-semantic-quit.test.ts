@@ -116,7 +116,8 @@ vi.mock('../scripts/package-runtime-upgrade.mjs', async importOriginal => {
     observeUiClient: async () => {
       const f = boundary.scope!
       return { main: { pid: f.gui?.pid, package: JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')),
-        renderer: { identity: { shell: 'original-shell', ctxmux: 'original-native' } } }, workbench: { loading: false, tabs: [] } }
+        renderer: { identity: { shell: 'original-shell', ctxmux: 'original-native' } } }, workbench: { loading: false, tabs: [],
+          survey: { collectedZoneIds: ['original-survey-zone'], organization: { ungrouped: ['original-survey-zone'], groups: [] }, selection: null } } }
     },
     requireOutgoingWorkbenchStorage: () => {},
     prepareUiRuntime: async () => { await boundary.scope?.beforeQuit?.(); return { privateObservation: true } },
