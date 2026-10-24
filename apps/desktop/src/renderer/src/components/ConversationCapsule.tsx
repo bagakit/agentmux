@@ -120,8 +120,8 @@ function CapsulePage({ uri, capsuleId, title, visible, browserId, owner }: Capsu
       {notice ? <div className="conversation-capsule__notice" role="status"><span>{notice}</span><button type="button" className="small-button" onClick={() => setRetry(value => value + 1)}>Retry original page</button></div> : null}
       {active && browser ? <CapsuleNativePage browser={browser} presentation={presentation} release={release} />
         : <div className="conversation-capsule__placeholder" role={loading ? 'status' : undefined}>{loading ? 'Connecting saved page…' : !visible ? 'Page preview paused while outside the reading window' : 'The original page reference is kept below.'}</div>}
-      {active && browser?.capsuleId === capsuleId ? <><span className="conversation-capsule__questions" ref={setToolbar} /><CapsuleInteractionChrome capsuleId={browser.capsuleId} active={browser.capsuleActive === true} visible={active} toolbarHost={toolbar} /></> : null}
     </> : null}
+    {browser?.capsuleId === capsuleId ? <div hidden={!active} inert={!active}><span className="conversation-capsule__questions" ref={setToolbar} /><CapsuleInteractionChrome browserId={browser.id} capsuleId={browser.capsuleId} active={browser.capsuleActive === true} visible={active} toolbarHost={toolbar} /></div> : null}
     <details className="conversation-capsule__source"><summary>Page reference</summary><code>{uri}</code>{browser ? <code>Browser {browser.id}</code> : null}</details>
   </section>
 }

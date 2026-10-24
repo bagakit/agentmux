@@ -10,8 +10,8 @@ import { CapsuleQuestionReply } from './CapsuleQuestionReply'
 const QuestionsIcon = semanticIconComponent('object.collaboration')
 const RefreshIcon = semanticIconComponent('action.refresh')
 
-export function CapsuleInteractionChrome({ capsuleId, active, visible = true, toolbarHost }: {
-  capsuleId: string; active: boolean; visible?: boolean; toolbarHost: HTMLElement | null
+export function CapsuleInteractionChrome({ capsuleId, browserId, active, visible = true, toolbarHost }: {
+  capsuleId: string; browserId?: string; active: boolean; visible?: boolean; toolbarHost: HTMLElement | null
 }) {
   const [page, setPage] = useState<CapsuleInspection | null>(null)
   const [questions, setQuestions] = useState<CapsuleInteraction[] | null>(null)
@@ -61,7 +61,7 @@ export function CapsuleInteractionChrome({ capsuleId, active, visible = true, to
       {notice ? <p className="capsule-chrome__notice" role="status">{notice}</p> : null}
       {questions?.length === 0 ? <p className="capsule-chrome__empty">No saved questions. Refresh after the page creates a request.</p> : null}
       {questions === null && loading ? <p className="capsule-chrome__empty" role="status">Reading the original page requests…</p> : null}
-      {questions?.map(question => <CapsuleQuestionReply key={question.interactionId} interaction={question} onUpdated={updated} />)}
+      {questions?.map(question => <CapsuleQuestionReply key={question.interactionId} {...(browserId ? { browserId } : {})} visible={visible && open} interaction={question} onUpdated={updated} />)}
       <details className="capsule-chrome__source"><summary>Page identity and source</summary><code>{formatAmuxObjectLink({ kind: 'capsule', capsuleId })}</code>
         {page ? <><code>{page.record.contentRoot}</code>{page.endpoint.status === 'available' ? <code>{page.endpoint.url}</code> : <p>{page.endpoint.issue.message}</p>}</> : null}</details>
     </section>

@@ -3,7 +3,8 @@ import { lazy, Suspense, useMemo, type ReactNode } from 'react'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { desktopElementVisible } from '../lib/desktop-presentation'
-import { useAppStore } from '../store'
+import { useAppStore, compareAndSwapCapsuleQuestionEditor, flushCapsuleQuestionEditors } from '../store'
+import { CapsuleQuestionEditorsContext, type CapsuleQuestionEditorPort } from '../lib/capsule-question-editors'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { ProjectIcon } from './ProjectIcon'
@@ -54,6 +55,15 @@ function SenderProject({ project }: { project: NonNullable<ConversationSenderDet
   return <small title={displayPath(project.path, hostId)}>{project.name}{project.branch ? ` · ${project.branch}` : ''}</small>
 }
 
+const capsuleQuestionEditors: CapsuleQuestionEditorPort = {
+  get: key => useAppStore.getState().capsuleQuestionEditors[key],
+  compareAndSwap: compareAndSwapCapsuleQuestionEditor,
+  subscribe: changed => useAppStore.subscribe((state, previous) => {
+    if (state.capsuleQuestionEditors !== previous.capsuleQuestionEditors) changed()
+  }),
+  flush: flushCapsuleQuestionEditors
+}
+
 const desktopPlatform: ClientUiPlatform = {
   copyText: copyTextToClipboard,
   overlayContainer: resolveOverlayContainer,
@@ -86,5 +96,5 @@ export function DesktopClientUiProvider({ children, document: presentationDocume
   const platform = useMemo<ClientUiPlatform>(() => ({ ...desktopPlatform, ownerDocument,
     overlayContainer: () => resolveOverlayContainer(undefined, ownerDocument)
   }), [ownerDocument])
-  return <ClientUiProvider platform={platform}>{children}</ClientUiProvider>
+  return <CapsuleQuestionEditorsContext.Provider value={capsuleQuestionEditors}><ClientUiProvider platform={platform}>{children}</ClientUiProvider></CapsuleQuestionEditorsContext.Provider>
 }

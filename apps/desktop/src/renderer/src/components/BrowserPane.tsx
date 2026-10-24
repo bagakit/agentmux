@@ -1353,7 +1353,7 @@ function BrowserPaneContent({
           </DropdownMenu.Root>
         {regionCloseButton}
       </form>
-      {tab.capsuleId ? <CapsuleInteractionChrome key={tab.capsuleId} capsuleId={tab.capsuleId} active={tab.capsuleActive === true} visible={visible} toolbarHost={capsuleToolbarHost} /> : null}
+      {tab.capsuleId ? <CapsuleInteractionChrome key={tab.capsuleId} browserId={tab.id} capsuleId={tab.capsuleId} active={tab.capsuleActive === true} visible={visible} toolbarHost={capsuleToolbarHost} /> : null}
       {bookmarkSaving ? <p className="browser-bookmark-result" role="status">
         <ThemeStatusLoadingIcon size={12} animation="spin" aria-hidden="true" /><span>Saving bookmark…</span>
       </p> : null}
