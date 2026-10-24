@@ -113,7 +113,7 @@ export function createHostGoals(options: {
   })()
   const discussions = createHostGoalDiscussions({ configurationPath: options.configurationPath, demands, ...(options.spatial ? { spatial: options.spatial } : {}), runtime,
     confirmParticipation: (input, context) => participation.confirm(input, context),
-    call: (method, params, context) => options.coreCall('local', method, params, context) })
+    call: (method, params, context, hostId = 'local') => options.coreCall(hostId, method, params, context) })
   const participation = createGoalParticipationOwner({ demands, client: exact,
     discussion: (goal, hostId, sessionId) => discussions.ownsRecipient(goal, hostId, sessionId),
     activeContinuation: async id => (await progress.listGoals(id)).some(loop => loop.status !== 'stopped'),

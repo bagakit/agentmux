@@ -819,7 +819,7 @@ export type AgentMuxControlResult =
   | { operation: 'demand.show'; demand: AgentMuxDemand | null; goalContinuations: ContinuousProgressLoop[] }
   | { operation: 'demand.create'; demand: AgentMuxDemand; receipt: { demandId: string; createdAt: number } }
   | { operation: 'demand.update'; demand: AgentMuxDemand; receipt: { demandId: string; updatedAt: number } }
-  | { operation: 'demand.discuss'; demand: AgentMuxDemand; receipt: { demandId: string; requestId: string; mode: 'open' | 'grill' | 'grounding'; tabId: string; agentSessionId: string | null } }
+  | { operation: 'demand.discuss'; demand: AgentMuxDemand; receipt: { demandId: string; requestId: string; mode: 'open' | 'grill' | 'grounding'; tabId: string; regionId: string; hostId: string | null; agentSessionId: string | null } }
   | { operation: 'demand.confirm'; demand: AgentMuxDemand; receipt: { demandId: string; confirmedRevision: number; confirmedAt: number } }
   | { operation: 'demand.accept'; demand: AgentMuxDemand; receipt: { demandId: string; alignmentRevision: number; submissionId: string; acceptedAt: number; acceptedWithGaps: boolean } }
   | { operation: 'demand.assign'; demand: AgentMuxDemand; receipt: { demandId: string; assignedAt: number; startRequested: boolean } }
