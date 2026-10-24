@@ -268,8 +268,10 @@ try {
   assert.equal(creationReport.agent.createOperationId, pendingCreate.input.operationId)
   assert.ok(creationReport.to?.tabId && creationReport.to?.regionId)
   const addedTab = { ...creationReport.to, agentSessionId: createdSid }
-  const newOriginal = await until('actual Run of Mobile-created Agent', () => fixture.sdk.statusAgent(createdSid),
-    value => value.run.state === 'running' && value.run.pid > 1 && Boolean(value.session.nativeHandle))
+  const newOriginal = await until('actual input-ready Run of Mobile-created Agent', () => fixture.sdk.statusAgent(createdSid),
+    value => value.run.state === 'running' && value.run.pid > 1 && Boolean(value.session.nativeHandle) &&
+      value.session.terminalPromptReadiness?.run.runId === creationReport.agent.runId &&
+      value.session.terminalPromptReadiness.readyThroughByte !== undefined)
   assert.equal(newOriginal.session.run.runId, creationReport.agent.runId)
   assert.equal(newOriginal.session.workspacePath, fixture.workspace)
   const graphAfterMobileCreate = (await fixture.rpc.call('space.state', {})).state.graph
