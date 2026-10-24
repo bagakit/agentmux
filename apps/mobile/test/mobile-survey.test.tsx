@@ -303,81 +303,92 @@ describe('T-006 existing Note editing and original cross-file references', () =>
 })
 
 
+/** Hold only the original RPC acknowledgement after its real file owner has finished. */
+function holdOriginalNoteWrite(view: Awaited<ReturnType<typeof realNoteView>>) {
+  const invoke = view.rpc.getMockImplementation()!
+  let enter!: (value: any) => void, fail!: (error: unknown) => void, resume!: () => void
+  const entered = new Promise<any>((resolve, reject) => { enter = resolve; fail = reject })
+  const held = new Promise<void>(resolve => { resume = resolve })
+  view.rpc.mockImplementation(async (method: string, params: unknown) => {
+    try {
+      const result = await invoke(method, params)
+      if (method === 'file.write') { enter(result); await held }
+      return result
+    } catch (error) { if (method === 'file.write') fail(error); throw error }
+  })
+  return { entered, restore: () => view.rpc.mockImplementation(invoke), finish: async () => {
+    resume()
+    await Promise.allSettled(view.rpc.mock.results.filter(result => result.type === 'return').map(result => result.value))
+  } }
+}
+
 describe('Note save uncertainty and durable device intent', () => {
   it('does not clear an unsettled write from a matching read or send a second write', async () => {
     localStorage.clear()
-    const view = await realNoteView()
-    const invoke = view.rpc.getMockImplementation()!
-    let settle!: (value: unknown) => void
-    view.rpc.mockImplementation(async (method: string, params: unknown) => {
-      const result = await invoke(method, params)
-      return method === 'file.write' ? await new Promise(resolve => { settle = () => resolve(result) }) : result
-    })
-    await view.click('编辑原笔记'); await view.edit('等待第一次保存')
-    await view.click('保存原笔记', true); await view.click('核对当前原文')
-    expect(view.element.textContent).toContain('原保存请求仍在等待回执')
-    const save = [...view.element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === '保存原笔记')!
-    expect(save.disabled).toBe(true)
-    await view.click('保存原笔记'); expect(view.fileWrite).toHaveBeenCalledTimes(1)
-    await act(async () => settle(undefined))
-    expect(view.element.textContent).toContain('原文件保存已确认'); expect(save.disabled).toBe(false)
+    const view = await realNoteView(), pending = holdOriginalNoteWrite(view)
+    try {
+      await view.click('编辑原笔记'); await view.edit('等待第一次保存')
+      await view.click('保存原笔记', true)
+      await act(async () => { await pending.entered })
+      await view.click('核对当前原文')
+      expect(view.element.textContent).toContain('原保存请求仍在等待回执')
+      const save = [...view.element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === '保存原笔记')!
+      expect(save.disabled).toBe(true)
+      await view.click('保存原笔记'); expect(view.fileWrite).toHaveBeenCalledTimes(1)
+      await act(async () => pending.finish())
+      expect(view.element.textContent).toContain('原文件保存已确认'); expect(save.disabled).toBe(false)
+    } finally { await act(async () => pending.finish()); pending.restore() }
   })
   it.each([[false, 'none'], [true, 'none'], [true, 'setItem'], [true, 'getItem']])('shares a pending write and preserves the newer draft after ACK (unmount=%s, device fault=%s)', async (unmountFirst, deviceFault) => {
     localStorage.clear()
-    const view = await realNoteView(), invoke = view.rpc.getMockImplementation()!
-    let finish!: (value: any) => void, saved: any
-    view.rpc.mockImplementation(async (method: string, params: unknown) => {
-      const result = await invoke(method, params)
-      if (method !== 'file.write') return result
-      saved = result
-      return new Promise(resolve => { finish = resolve })
-    })
-    await view.click('编辑原笔记'); await view.edit('第一工作面提交')
-    await act(async () => { [...view.element.querySelectorAll('button')].find(button => button.textContent === '保存原笔记')!.click() })
-    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
-    view.element.hidden = true
-    if (unmountFirst) await act(async () => view.root.render(null))
-    const element = document.createElement('div'); document.body.append(element)
-    const root = createRoot(element); mounted.push({ element, root })
-    const render = () => root.render(<MobileNoteFile rpc={view.rpc as any} params={view.params} read={view.originalRead} />)
-    await act(async () => render())
-    const click = async (text: string) => act(async () => {
-      const start = view.rpc.mock.calls.length
-      ;[...element.querySelectorAll('button')].find(button => button.textContent === text)!.click()
-      if (text === '核对当前原文') {
-        const readIndex = view.rpc.mock.calls.findIndex((call, index) => index >= start && call[0] === 'file.read')
-        expect(readIndex).toBeGreaterThanOrEqual(start)
-        await view.rpc.mock.results[readIndex]!.value
-      } else {
-        await new Promise(resolve => setTimeout(resolve, 80))
-        const writeIndex = view.rpc.mock.calls.findIndex((call, index) => index >= start && call[0] === 'file.write')
-        if (text === '保存原笔记' && writeIndex >= start) await Promise.allSettled([view.rpc.mock.results[writeIndex]!.value])
-      }
-    })
-    await click('核对当前原文')
-    expect(element.textContent).toContain('原保存请求仍在等待回执')
-    expect([...element.querySelectorAll('button')].find(button => button.textContent === '保存原笔记')!.disabled).toBe(true)
-    const node = element.querySelector<HTMLElement>('[contenteditable=true]') as any
-    await act(async () => node.editor.commands.insertContent('第二工作面较新编辑'))
-    const fault = deviceFault !== 'none' ? vi.spyOn(localStorage, deviceFault as 'getItem' | 'setItem').mockImplementation(() => { throw new Error('ACK durable storage failed') }) : null
-    await act(async () => finish(saved))
-    fault?.mockRestore()
-    if (deviceFault !== 'none') {
-      expect(element.textContent).toContain('本机保存回执未持久保存')
-      const key = Object.keys(localStorage).find(key => key.startsWith('agentmux-mobile-note-draft:'))!
-      expect(JSON.parse(localStorage.getItem(key)!).attempt.phase).toBe('sending')
+    const view = await realNoteView(), pending = holdOriginalNoteWrite(view)
+    try {
+      await view.click('编辑原笔记'); await view.edit('第一工作面提交')
+      await act(async () => { [...view.element.querySelectorAll('button')].find(button => button.textContent === '保存原笔记')!.click() })
+      const saved = await act(async () => pending.entered)
+      view.element.hidden = true
+      if (unmountFirst) await act(async () => view.root.render(null))
+      const element = document.createElement('div'); document.body.append(element)
+      const root = createRoot(element); mounted.push({ element, root })
+      const render = () => root.render(<MobileNoteFile rpc={view.rpc as any} params={view.params} read={view.originalRead} />)
+      await act(async () => render())
+      const click = async (text: string) => act(async () => {
+        const start = view.rpc.mock.calls.length
+        ;[...element.querySelectorAll('button')].find(button => button.textContent === text)!.click()
+        if (text === '核对当前原文') {
+          const readIndex = view.rpc.mock.calls.findIndex((call, index) => index >= start && call[0] === 'file.read')
+          expect(readIndex).toBeGreaterThanOrEqual(start)
+          await view.rpc.mock.results[readIndex]!.value
+        } else {
+          await new Promise(resolve => setTimeout(resolve, 80))
+          const writeIndex = view.rpc.mock.calls.findIndex((call, index) => index >= start && call[0] === 'file.write')
+          if (text === '保存原笔记' && writeIndex >= start) await Promise.allSettled([view.rpc.mock.results[writeIndex]!.value])
+        }
+      })
       await click('核对当前原文')
-      const retained = JSON.parse(localStorage.getItem(key)!)
-      expect(retained.attempt).toBeUndefined(); expect(retained.receipt.revision).toBe(saved.result.revision)
-      expect(retained.draft).toContain('第二工作面较新编辑'); expect(view.fileWrite).toHaveBeenCalledTimes(1)
-    }
-    expect(element.querySelector('[contenteditable=true]')?.textContent).toContain('第二工作面较新编辑')
-    expect([...element.querySelectorAll('button')].find(button => button.textContent === '保存原笔记')!.disabled).toBe(false)
-    await act(async () => root.render(null)); await act(async () => render())
-    expect(element.querySelector('[contenteditable=true]')?.textContent).toContain('第二工作面较新编辑')
-    view.rpc.mockImplementation(invoke); await click('保存原笔记')
-    expect(view.fileWrite).toHaveBeenCalledTimes(2)
-    await vi.waitFor(async () => { await act(async () => new Promise(resolve => setTimeout(resolve, 20))); expect(await readFile(join(view.directory, 'original.note.md'), 'utf8')).toContain('第二工作面较新编辑') })
+      expect(element.textContent).toContain('原保存请求仍在等待回执')
+      expect([...element.querySelectorAll('button')].find(button => button.textContent === '保存原笔记')!.disabled).toBe(true)
+      const node = element.querySelector<HTMLElement>('[contenteditable=true]') as any
+      await act(async () => node.editor.commands.insertContent('第二工作面较新编辑'))
+      const fault = deviceFault !== 'none' ? vi.spyOn(localStorage, deviceFault as 'getItem' | 'setItem').mockImplementation(() => { throw new Error('ACK durable storage failed') }) : null
+      try { await act(async () => pending.finish()) } finally { fault?.mockRestore() }
+      if (deviceFault !== 'none') {
+        expect(element.textContent).toContain('本机保存回执未持久保存')
+        const key = Object.keys(localStorage).find(key => key.startsWith('agentmux-mobile-note-draft:'))!
+        expect(JSON.parse(localStorage.getItem(key)!).attempt.phase).toBe('sending')
+        await click('核对当前原文')
+        const retained = JSON.parse(localStorage.getItem(key)!)
+        expect(retained.attempt).toBeUndefined(); expect(retained.receipt.revision).toBe(saved.result.revision)
+        expect(retained.draft).toContain('第二工作面较新编辑'); expect(view.fileWrite).toHaveBeenCalledTimes(1)
+      }
+      expect(element.querySelector('[contenteditable=true]')?.textContent).toContain('第二工作面较新编辑')
+      expect([...element.querySelectorAll('button')].find(button => button.textContent === '保存原笔记')!.disabled).toBe(false)
+      await act(async () => root.render(null)); await act(async () => render())
+      expect(element.querySelector('[contenteditable=true]')?.textContent).toContain('第二工作面较新编辑')
+      pending.restore(); await click('保存原笔记')
+      expect(view.fileWrite).toHaveBeenCalledTimes(2)
+      await vi.waitFor(async () => { await act(async () => new Promise(resolve => setTimeout(resolve, 20))); expect(await readFile(join(view.directory, 'original.note.md'), 'utf8')).toContain('第二工作面较新编辑') })
+    } finally { await act(async () => pending.finish()); pending.restore() }
   })
   it('keeps a reader’s unretained local edit when another reader publishes after storage recovers', async () => {
     localStorage.clear()
