@@ -2,7 +2,7 @@ import { isFolderWorkspace, type AppConfig, type WorkspaceRecord } from '../../.
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { executionFocusHistory, type AgentFocusContext } from './agent-focus'
 import { primaryMoteExecutorId } from './primary-mote-executor'
-import { goalProjectContext, goalProjectContextText, type GoalProjectContext } from './goal-project-context'
+import { goalProjectContext, goalProjectContextText, type GoalProjectContext } from '@agentmux/host/goal-project-context'
 import { workspaceProjectId } from './workspace-projects'
 import { useAppStore } from '../store'
 
