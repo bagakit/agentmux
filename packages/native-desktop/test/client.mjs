@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdtemp, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -59,6 +59,28 @@ test('real Unix socket authenticates and correlates concurrent query results', a
     await chmod(socketPath, 0o666)
     await assert.rejects(NativeConnection.connect({ socketPath, token: 'exact-token' }), { code: 'unsafe_socket' })
   }, request => ({ method: request.method }))
+})
+
+test('unsafe socket paths are rejected before any protocol frame', async () => {
+  await fixture(async ({ calls, socketPath }) => {
+    const before = calls.length
+    const link = socketPath + '.link', regular = socketPath + '.file'
+    await symlink(socketPath, link)
+    await writeFile(regular, 'not a socket', { mode: 0o600 })
+    const options = path => ({ socketPath: path, token: 'exact-token' })
+    await assert.rejects(NativeConnection.connect(options(link)), { code: 'unsafe_socket' })
+    await assert.rejects(NativeConnection.connect(options(regular)), { code: 'unsafe_socket' })
+    await chmod(socketPath, 0o666)
+    await assert.rejects(NativeConnection.connect(options(socketPath)), { code: 'unsafe_socket' })
+    await chmod(socketPath, 0o600)
+    // Exercise the actual owner guard without changing ownership of user files.
+    const getuid = process.getuid
+    try {
+      process.getuid = () => getuid() + 1
+      await assert.rejects(NativeConnection.connect(options(socketPath)), { code: 'unsafe_socket' })
+    } finally { process.getuid = getuid }
+    assert.equal(calls.length, before)
+  })
 })
 
 test('lost mutation retains original operation and never replays', async () => {
