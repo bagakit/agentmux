@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config'
 import base from './vitest.mote-context.config.mts'
 
 const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.AGENTMUX_MOTE_HISTORY_MUTATION
-if (mutation && !['all-people', 'wrong-input-host'].includes(mutation)) throw Error('Unknown Mote history mutation')
+if (mutation && !['all-people', 'wrong-input-host', 'unstable-diagnosis-target'].includes(mutation)) throw Error('Unknown Mote history mutation')
 const connectors = JSON.parse(readFileSync(resolve(root, 'packages/connectors/package.json'), 'utf8'))
 const aliases = Object.entries(connectors.exports).map(([entry, value]) => ({
   find: '@agentmux/connectors' + (entry === '.' ? '' : entry.slice(1)),
@@ -21,7 +21,12 @@ export default defineConfig({ ...base, cacheDir: resolve(root, '.cache/mote-priv
     const file = relative(root, id.split('?')[0]!)
     if (!file.startsWith('apps/desktop/src/') && !file.startsWith('packages/')) return
     let code = source
-    if (mutation && file === 'apps/desktop/src/renderer/src/components/MoteChatHistory.tsx') {
+    if (mutation === 'unstable-diagnosis-target' && file === 'apps/desktop/src/renderer/src/components/MotePrivateChat.tsx') {
+      const from = 'const target = useRef(initialTarget).current'
+      if (source.split(from).length !== 2) throw Error('Missing unique actual Profile target capture')
+      code = source.replace(from, 'const target = initialTarget')
+    }
+    if (mutation && mutation !== 'unstable-diagnosis-target' && file === 'apps/desktop/src/renderer/src/components/MoteChatHistory.tsx') {
       const [from, to] = mutation === 'all-people' ? ["{ target, actor, ...(cursor ?", "{ target, ...(cursor ?"]
         : ['{ hostId, agentSessionId }, input)', "{ hostId: 'wrong-host', agentSessionId }, input)"]
       if (source.split(from!).length !== 2) throw Error('Missing unique actual Mote history consumer mutation')
