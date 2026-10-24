@@ -306,7 +306,9 @@ async function run() {
     await capture(main, 'restored-workspace')
     receipt.assertions.push({ label: 'actual-process-restart-same-workface', previous: expected, recovered: await facts(), child: restored, spatial: await spatial.read() })
     const sourceTab = Object.values((await facts()).tabs).find((tab: any) => Object.values(tab.regions).some((region: any) => region.browserId === expected.sourceId)) as any
-    await js(`window.childrenUi.close(${JSON.stringify(sourceTab.id)},${JSON.stringify(expected.sourceId)})`)
+    assert.equal(Object.keys(sourceTab.regions).length, 1, 'The original promoted source is a single-Region Tab')
+    assert.equal(await js(`window.childrenUi.closeTab(${JSON.stringify(sourceTab.id)})`), true, 'The existing whole-Tab close owns removal of its last Region')
+    await until('original source display actually closed', async () => !(await facts()).tabs[sourceTab.id])
     await click(main, 'button[aria-label="Go to source Browser"]')
     await until('closed source notice preserves original child', () => js('document.body.textContent.includes("source page no longer has an available display")'))
     assert.equal(browsers.target(expected.childId)?.id, expected.childId)
