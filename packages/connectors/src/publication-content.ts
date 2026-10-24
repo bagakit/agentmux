@@ -1,3 +1,4 @@
+import { AgentMuxError } from '@agentmux/core'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { conversationRecordAuthor, conversationRecordId, type ConversationSourceRecord, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
 import type { PublicationImage, PublicationFile, PublicationMarkdown, ResolvedPublicationPart } from './publication-resource.js'
@@ -52,21 +53,15 @@ export function isConversationPublicationPart(record: ConversationSourceRecord, 
 
 /** Platform representation only. Identity, role, author, order and relations are accepted Core facts. */
 export function publicationContent(unit: ConversationUnit, binding: RoomBinding, frontier: ConversationCheckpoint, options: PublicationContentOptions): PublicationContentPlan {
+  if (unit.records.some(record => !isCompleteConversationRecord(record))) throw new AgentMuxError('Publication requires complete original records; read the same checkpoint without deferred process details.', 'PUBLICATION_COMPLETE_RECORDS_REQUIRED')
   const records = new Map(unit.records.map(record => [record.id, record])), gaps: ConnectionDeliveryGap[] = [], origins: ConnectionOriginRepresentation[] = [], excluded: ConversationContentRef[] = []
   const event = { id: unit.event.id, revision: unit.event.revision }, sections: string[] = [], pieces: PublicationContentPlan['pieces'] = [], questions = new Set<string>()
   const narrow = binding.scope.publication === 'future-native-user-facing'
   let phase: 'progress' | 'final' | undefined
-  // Reading headers retain their exact frontier, but do not prove absent original content.
-  for (const record of unit.records) if (!isCompleteConversationRecord(record) &&
-    (!options.selected || conversationRecordId(options.selected.record) === record.id)) {
-    gaps.push({ gapId: 'deferred-' + record.id, event, reason: 'public-content-unconfirmed',
-      code: 'PUBLICATION_PROCESS_DETAILS_DEFERRED', record: record.reference!,
-      anchor: { record: record.reference!, revision: record.revision, frontier } })
-  }
   for (const slot of unit.event.content) {
     const record = records.get(slot.recordId)!
     const part: ConversationContentRef = { record: record.reference!, recordRevision: record.revision, selector: slot.selector }
-    if (!isCompleteConversationRecord(record)) continue // The exact missing-body gap was recorded above.
+    if (!isCompleteConversationRecord(record)) continue // Complete originals were required before planning or mutation.
     const original = record.original, key = publicationPartKey(part)
     if (options.selected && publicationPartKey(options.selected) !== key) continue
     if (narrow && (original.kind !== 'native' || !['message', 'interaction'].includes(unit.event.role) || unit.event.author.kind !== 'agent')) { excluded.push(part); continue }
