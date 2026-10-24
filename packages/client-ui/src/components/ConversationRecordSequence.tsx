@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { conversationPresentationKey, type ConversationSequence, type ConversationSequenceInsertion } from '../lib/conversation-record-sequence.js'
+import { conversationPresentationKey, conversationProcessPeer, type ConversationSequence, type ConversationSequenceInsertion } from '../lib/conversation-record-sequence.js'
 import type { ConversationRecord } from '../lib/conversation-records.js'
 import { projectConversationMetrics, type ConversationMetricsObservation } from '../lib/conversation-metrics.js'
 import { ConversationMetrics } from './ConversationMetrics.js'
@@ -108,10 +108,10 @@ export function ConversationRecordSequence({ records, sequence, sourceKey, rende
       {(() => {
         const disclosure = disclosureFor(row.records)
         if (!renderProcess) return row.entries.map(entry => entry.kind === 'record' ? renderOne(entry.record, undefined, disclosure) : renderAnchor(entry.insertion.key))
-        const observed = row.records.flatMap(record => record.source.kind === 'native' && metrics.has(record.rawId) ? [metrics.get(record.rawId)!] : [])
+        const observed = row.records.flatMap(record => !conversationProcessPeer(record) && record.source.kind === 'native' && metrics.has(record.rawId) ? [metrics.get(record.rawId)!] : [])
         const summary = observed.length === 1 && row.records.every(record => record.source.kind === 'native') ? observed[0] : undefined
         return renderProcess({ id: row.id, records: row.records,
-          renderRecord: (record, wrapBody) => renderOne(record, wrapBody, disclosure, false, !summary),
+          renderRecord: (record, wrapBody) => renderOne(record, wrapBody, disclosure, conversationProcessPeer(record), !summary || conversationProcessPeer(record)),
           entries: row.entries.map(entry => entry.kind === 'record' ? entry : { kind: 'anchor', key: entry.insertion.key, content: renderAnchor(entry.insertion.key) }),
           disclosure, ...(summary ? { metrics: summary } : {}) })
       })()}

@@ -1,7 +1,7 @@
 import { ConversationRetainedDetails } from './ConversationRetainedDetails.js'
 import { NATIVE_CONVERSATION_SOURCE } from '../lib/conversation-sources.js'
 import type { AgentSessionHistoryItem, AgentSessionHistorySource } from '@agentmux/core'
-import { conversationPresentationKey } from '../lib/conversation-record-sequence.js'
+import { conversationPresentationKey, conversationProcessPeer } from '../lib/conversation-record-sequence.js'
 import type { ConversationProcessProps } from './ConversationRecordSequence.js'
 import { describeActivityRecordTime } from '../lib/activity-record-time.js'
 import { stepTitle } from '../lib/activity-step-summary.js'
@@ -58,9 +58,9 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
   const [readOnce, setReadOnce] = useState(expanded)
   useEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
   const layout = entries
-  const records = sourceRecords.filter(record => record.role !== 'observation')
-  const items = sourceRecords.flatMap(record => record.original.kind === 'native' ? [record.original.item] : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? [{ ...record.original.item.item, ...(record.original.item.collaboration ? { collaboration: record.original.item.collaboration } : {}) }] : [])
-  const anchored = layout.some(entry => entry.kind === 'anchor' || entry.record.role === 'observation')
+  const records = sourceRecords.filter(record => !conversationProcessPeer(record))
+  const items = records.flatMap(record => record.original.kind === 'native' ? [record.original.item] : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? [{ ...record.original.item.item, ...(record.original.item.collaboration ? { collaboration: record.original.item.collaboration } : {}) }] : [])
+  const anchored = layout.some(entry => entry.kind === 'anchor' || conversationProcessPeer(entry.record))
   const nativeOnly = records.every(record => record.source.kind === 'native')
   const states = items.map(recordedStatus)
   const recordedStepStatus = states.includes('failed') ? 'failed' : states.includes('running') ? 'running'
@@ -77,7 +77,7 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
     {layout.map(entry => {
       if (entry.kind === 'anchor') return <div key={JSON.stringify(['anchor', entry.key])}>{entry.content}</div>
       const record = entry.record, key = conversationPresentationKey(record)
-      if (record.role === 'observation') return <div key={key}>{renderRecord(record)}</div>
+      if (conversationProcessPeer(record)) return <div key={key}>{renderRecord(record)}</div>
       const item = record.original.kind === 'native' ? record.original.item : undefined
       return <div key={key} className="native-process-observation__step" hidden={!expanded} inert={!expanded}>{expanded || readOnce ? item ? renderRecord(record, body =>
         <NativeProcessStep item={item} {...(first?.startedAt === undefined ? {} : { origin: first.startedAt })}
