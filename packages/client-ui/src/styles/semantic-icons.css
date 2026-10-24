@@ -1,7 +1,8 @@
 /* One local HTML composition box; semantics and live-state eligibility belong to callers. */
 .semantic-icon-motion {
   position: relative;
-  display: inline-flex;
+  /* An SVG flex item propagates part-animation layout past this containment box. */
+  display: inline-block;
   flex: none;
   vertical-align: middle;
   line-height: 0;
