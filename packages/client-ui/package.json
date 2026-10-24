@@ -6,6 +6,7 @@
   "main": "./dist/index.js",
   "types": "./src/index.ts",
   "exports": {
+    "./agent-icons/*": "./src/assets/agent-icons/*",
     "./input": {
       "types": "./src/input/index.ts",
       "browser": "./src/input/index.ts",
