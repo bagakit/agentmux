@@ -387,6 +387,45 @@ describe('finite collaboration Worker engine', () => {
     expect(responses.at(-1)?.type).toBe('complete')
   })
 
+  it.each(['remove', 'shrink'] as const)('releases a cleared %s obstacle detour through the original Worker while retaining unrelated paths', async change => {
+    const area = (id: string, x: number, y: number, width: number, height: number): CollaborationLayoutBox => ({
+      kind: 'area', id, areaId: id, x, y, width, height, folded: false, heading: { x: 24, y: 0, width: 184, height: 40 }
+    })
+    const boxes: CollaborationLayoutBox[] = [
+      area('left', -24, -90, 300, 220), box('a', 0, 0, 250, 94, 'left'),
+      area('right', 626, -90, 300, 220), box('b', 650, 0, 250, 94, 'right'),
+      area('middle', 276, -180, 300, 375), box('obstacle', 300, -80, 250, 250, 'middle'),
+      area('control', -24, 480, 950, 240), box('d', 0, 600, 250, 94, 'control'), box('e', 650, 600, 250, 94, 'control')
+    ]
+    const connections = [edge('a-b', 'a', 'b'), edge('d-e', 'd', 'e')], paths = await successfulRoutes(boxes, connections)
+    const previousStructure = { areas: [
+      { id: 'left', name: 'Left', members: ['a'], folded: false }, { id: 'right', name: 'Right', members: ['b'], folded: false },
+      { id: 'middle', name: 'Obstacle', members: ['obstacle'], folded: false }, { id: 'control', name: 'Control', members: ['d', 'e'], folded: false }
+    ], nodes: boxes.filter(box => box.kind === 'agent').map(({ id, areaId, width, height }) => ({ id, areaId, width, height })) }
+    const input = { areas: previousStructure.areas.map(area => change === 'remove' && area.id === 'middle' ? { ...area, members: [] } : area),
+      nodes: change === 'remove' ? previousStructure.nodes.filter(node => node.id !== 'obstacle')
+        : previousStructure.nodes.map(node => node.id === 'obstacle' ? { ...node, width: 24, height: 24 } : node), connections }
+    const responses: CollaborationLayoutResponse[] = []
+    measurements.length = 0
+    await handleCollaborationLayoutRequest({ id: 'cleared-' + change, type: 'reconcile', input, previousStructure, boxes, paths, anchor: 'a' }, response => responses.push(response))
+    const placement = responses.find(response => response.type === 'boxes')!
+    if (placement.type !== 'boxes') throw Error('Original Worker geometry required')
+    for (const id of ['a', 'b', 'control', 'd', 'e']) expect(placement.boxes.find(box => box.id === id)).toEqual(boxes.find(box => box.id === id))
+    expect(placement.retainedPaths).toEqual(['d-e'])
+    const routed = responses.filter(response => response.type === 'paths').flatMap(response => Object.values(response.paths))
+    expect(routed.map(path => path.id)).toEqual(['a-b'])
+    // The old curve genuinely detours around the original body. Once cleared,
+    // the unchanged endpoints have a direct original-router corridor.
+    const controlLength = (path: typeof paths[number]) => path.points.slice(1).reduce((sum, point, index) =>
+      sum + Math.hypot(point.x - path.points[index]!.x, point.y - path.points[index]!.y), 0)
+    expect(paths.find(path => path.id === 'a-b')!.points.length).toBeGreaterThan(4)
+    expect(routed[0]!.points).toHaveLength(4)
+    expect(controlLength(routed[0]!)).toBeLessThan(controlLength(paths.find(path => path.id === 'a-b')!) * .9)
+    expect(responses.filter(response => response.type === 'error')).toEqual([])
+    expect(responses.at(-1)?.type).toBe('complete')
+    expect(measurements).toEqual([])
+  })
+
   it('keeps empty areas as heading-sized original places while retaining isolated closed members', async () => {
     const input: CollaborationLayoutInput = { areas: [
       { id: 'empty', name: 'Empty original area', members: [], folded: false },
