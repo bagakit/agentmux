@@ -94,6 +94,24 @@ it('prepares the immutable ordinary creation before native Start and uses one or
   f.noReplay()
 })
 
+it('retains the exact spatial creation intent through native Start and a reopened original Session without replay', async () => {
+  const f = await fixture(), spatialIntent = { tabId: 'original-tab', regionId: 'original-region', executionWorkspaceId: 'explicit-execution-workspace' }
+  f.start.mockImplementation(async (input: any) => {
+    expect((await f.store.loadCreationCorrelation(f.sid))?.preparedCreation?.creation?.spatialIntent).toEqual(spatialIntent)
+    return await f.nativeStart(input)
+  })
+  const creation = f.create({ spatialIntent })
+  await expect(creation).resolves.toMatchObject({ creation: { spatialIntent } })
+  const original = await creation
+  await f.client.dispose()
+  const reopened = await f.reader()
+  await expect(reopened.client.inspectAgentCreation(f.sid)).resolves.toMatchObject({ agentSessionId: f.sid, run: original.session.run, creation: { spatialIntent } })
+  await expect(f.create({ spatialIntent }, reopened)).resolves.toMatchObject({ session: { run: original.session.run }, creation: { spatialIntent } })
+  await expect(f.create({ spatialIntent: { ...spatialIntent, regionId: 'another-region' } }, reopened)).rejects.toMatchObject({ code: 'AGENT_FORK_OPERATION_CONFLICT' })
+  expect((await reopened.store.readMetadata(f.sid))?.creation?.spatialIntent).toEqual(spatialIntent)
+  f.noReplay()
+})
+
 it('keeps acknowledged native work and its original prepared seed when Session commit was not applied', async () => {
   const f = await fixture(), commit = f.store.commitLifecycle.bind(f.store)
   vi.spyOn(f.store, 'commitLifecycle').mockRejectedValueOnce(new Error('Controlled persistence rejected before commit'))
