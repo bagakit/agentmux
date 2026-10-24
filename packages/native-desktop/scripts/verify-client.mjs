@@ -13,7 +13,9 @@ const mutations = [
   { file: 'client.js', before: 'response.instanceId !== this.instance', after: 'false', test: 'spoofed response instance' },
   { file: 'client.js', before: 'response.operationId !== pending.operation?.operationId', after: 'false', test: 'wrong operation receipt' },
   { file: 'image.js', before: 'dimensions.width !== image.width', after: 'false', test: 'PNG limits and metadata' },
-  { file: 'client.js', before: "pending.operation.state = 'unknown'", after: "pending.operation.state = 'failed'", test: 'lost mutation retains original' }
+  { file: 'client.js', before: "pending.operation.state = 'unknown'", after: "pending.operation.state = 'failed'", test: 'lost mutation retains original' },
+  { file: 'client.js', before: 'async request(method, params, options = {}) {\n        await options.beforeSubmit?.();', after: 'async request(method, params, options = {}) {', test: 'submission rechecks the original authority' },
+  { file: 'client.js', before: 'freezeReceivedJson(response.result)', after: 'response.result', test: 'callers cannot rewrite' }
 ]
 for (const mutation of mutations) {
   const directory = await mkdtemp(join(tmpdir(), 'amux-native-mutation-'))
