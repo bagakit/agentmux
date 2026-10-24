@@ -1,8 +1,8 @@
-import { DEFAULT_THEME_ID, getThemeCatalog, getSemanticIconCatalog, isBuiltinThemeId, themeIdSchema, themeValueSchema, themeDocumentSchema, themeValue, serializeThemeFile } from '@agentmux/client-ui/theme'
+import { themeResourceItem as item, readSettingsResource } from '@agentmux/host/settings-resource-read'
+import { DEFAULT_THEME_ID, isBuiltinThemeId, themeIdSchema, themeValueSchema, themeDocumentSchema, themeValue, serializeThemeFile } from '@agentmux/client-ui/theme'
 import type { AgentMuxControlSettingsResourceFields as Fields, AgentMuxControlSettingsResourceRequest as Request,
   AgentMuxControlSettingsResourceResult as Result } from '@agentmux/core'
 import { ConfigConflict, configValuesEqual } from '../shared/config-edit.js'
-import type { AppConfig } from '../shared/contracts.js'
 import type { ConfigOwner } from './config-owner.js'
 
 function fail(code: 'INVALID_SETTING_VALUE' | 'SETTING_RESOURCE_NOT_FOUND' | 'SETTING_RESOURCE_EXISTS' | 'SETTING_IDENTITY_IMMUTABLE', message: string): never {
@@ -27,29 +27,9 @@ function matchesExpected(raw: unknown, expected: unknown, id: string): boolean {
   const parsed = themeValueSchema.safeParse(raw)
   return parsed.success && configValuesEqual(parsed.data, expected)
 }
-function item(config: AppConfig, id: string) {
-  const catalog = getThemeCatalog(config.appearance.customThemes)
-  const found = catalog.items.find(candidate => candidate.id === id)
-  if (found) return { ...found, value: found.value as Fields }
-  if (catalog.issues.some(issue => issue.id === id)) fail('INVALID_SETTING_VALUE', `Theme “${id}” is unavailable or unsupported. Its original data is retained. Inspect the theme catalog, then replace it with a valid theme or explicitly delete this exact record with its raw expected value.`)
-  return fail('SETTING_RESOURCE_NOT_FOUND', `Theme “${id}” does not exist.`)
-}
-
 /** The resource protocol carries plain JSON; the Main client owner alone interprets the theme schema. */
 export async function executeSettingsThemesControl(request: Request, owner: ConfigOwner): Promise<Result> {
-  if (request.operation === 'settings.resource.list') {
-    const catalog = getThemeCatalog(owner.current.appearance.customThemes)
-    return { operation: request.operation, resource: 'themes', partial: true,
-      items: catalog.items.map(candidate => ({ ...candidate, value: candidate.value as Fields })), issues: catalog.issues,
-      iconCatalog: getSemanticIconCatalog() }
-  }
-  if (request.operation === 'settings.resource.get') {
-    if (request.id === undefined) fail('INVALID_SETTING_VALUE', 'A theme lookup requires its exact ID.')
-    const found = item(owner.current, request.id)
-    const document = themeDocumentSchema.parse({ id: found.id, ...found.value })
-    serializeThemeFile(document)
-    return { operation: request.operation, resource: 'themes', item: { ...found, document: document as Fields } }
-  }
+  if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get') return readSettingsResource(owner.current, request)
   const id = request.id
   if (isBuiltinThemeId(id) && !(request.operation === 'settings.resource.remove' &&
       Object.hasOwn(owner.current.appearance.customThemes ?? {}, id))) fail('SETTING_IDENTITY_IMMUTABLE', `Built-in theme “${id}” is read-only. Save an editable copy with a custom. identity.`)

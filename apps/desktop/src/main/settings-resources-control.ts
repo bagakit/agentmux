@@ -1,8 +1,9 @@
+import { settingsResourceItem as find, settingsResourceItemOptional as findOptional, readSettingsResource } from '@agentmux/host/settings-resource-read'
 import { executeSettingsThemesControl } from './settings-themes-control.js'
 import { isPromptReactionCode } from '@agentmux/core/prompt-reaction'
 import type {
   AgentMuxControlErrorCode, AgentMuxControlSettingsResourceFields as Fields,
-  AgentMuxControlSettingsResourceItem as Item, AgentMuxControlSettingsResourceKind as Kind,
+  AgentMuxControlSettingsResourceKind as Kind,
   AgentMuxControlSettingsResourceRequest as Request, AgentMuxControlSettingsResourceResult as Result
 } from '@agentmux/core'
 import { ZodError } from 'zod'
@@ -17,23 +18,6 @@ const promptFields = composerShortcutSchema.omit({ id: true })
 const schemas = { executors: executorSchema, prompts: promptFields }
 function fail(code: AgentMuxControlErrorCode, message: string): never {
   throw Object.assign(new Error(message), { code })
-}
-function items(config: AppConfig, resource: BasicKind): Item[] {
-  return resource === 'executors'
-    ? Object.entries(config.executors).map(([id, value]) => ({ id, value: structuredClone(value) as Fields }))
-    : (config.composerShortcuts ?? []).map(({ id, ...value }) => ({ id, value: structuredClone(value) }))
-}
-function find(config: AppConfig, resource: BasicKind, id: string): Item {
-  const item = findOptional(config, resource, id)
-  return item ?? fail('SETTING_RESOURCE_NOT_FOUND', `${resource} “${id}” does not exist.`)
-}
-function findOptional(config: AppConfig, resource: BasicKind, id: string): Item | undefined {
-  if (resource === 'executors') return Object.hasOwn(config.executors, id)
-    ? { id, value: structuredClone(config.executors[id]!) as Fields } : undefined
-  const prompt = config.composerShortcuts?.find((candidate) => candidate.id === id)
-  if (!prompt) return undefined
-  const { id: _identity, ...value } = prompt
-  return { id, value: structuredClone(value) }
 }
 function validate(resource: BasicKind, value: Fields, partial: boolean): Fields {
   if (Object.hasOwn(value, 'id')) fail('SETTING_IDENTITY_IMMUTABLE', 'Resource identity belongs in the command, never in its editable value.')
@@ -92,13 +76,7 @@ function replace(config: AppConfig, resource: BasicKind, id: string, value: Fiel
 export async function executeSettingsResourcesControl(request: Request, owner: ConfigOwner): Promise<Result> {
   if (request.resource === 'themes') return executeSettingsThemesControl(request, owner)
   const { resource } = request
-  if (request.operation === 'settings.resource.list') return { operation: request.operation, resource, items: items(owner.current, resource), partial: true }
-  if (request.operation === 'settings.resource.get') {
-    const item = request.keyword === undefined ? find(owner.current, resource, request.id)
-      : items(owner.current, 'prompts').find(candidate => candidate.value.keyword === request.keyword)
-        ?? fail('SETTING_RESOURCE_NOT_FOUND', `Prompt keyword “${request.keyword}” does not exist.`)
-    return { operation: request.operation, resource, item }
-  }
+  if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get') return readSettingsResource(owner.current, request)
   if (resource === 'executors' && !executorIdSchema.safeParse(request.id).success) fail('INVALID_SETTING_VALUE', `Invalid Executor identity: ${request.id}`)
   let changed = false
   const saved = await owner.update((current) => {

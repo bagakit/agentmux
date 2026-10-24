@@ -3,7 +3,7 @@ import type { ITheme, ITerminalOptions } from '@xterm/xterm'
 export { activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '@agentmux/client-ui/terminal/unicode'
 import type { TerminalThemeId } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
-import { terminalPalette } from '../../../shared/terminal-palettes'
+import { terminalPalette } from '@agentmux/client-ui/theme'
 
 export type TerminalThemeDefinition = {
   id: TerminalThemeId

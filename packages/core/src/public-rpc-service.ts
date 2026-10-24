@@ -173,6 +173,9 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   topics?: AgentMuxRpcTopicsOwner
 
   appearance?: AgentMuxAppearanceObservationPort
+  /** Original Host resource reads; editable application settings keep their existing owner. */
+  settingsResources?(request: Extract<import('./control.js').AgentMuxControlSettingsResourceRequest,
+    { operation: 'settings.resource.list' | 'settings.resource.get' }>): Promise<import('./control.js').AgentMuxControlSettingsResourceResult>
   schedules?: AgentMuxRpcSchedulesOwner
   nativeDesktop?: AgentMuxRpcNativeDesktopOwner
   spatialState?: AgentMuxSpatialStateStore
@@ -572,8 +575,12 @@ export class AgentMuxRpcService {
           save:{layoutApplied:true,localStorageWritten:false,storageFlushRequested:false,diskDurability:'confirmed',reason:null},issues:[]}
       }
     }
-    if (!this.ports.execute) throw new AgentMuxError('The original Desktop business owner is unavailable.', 'CONTROL_UNAVAILABLE')
-    const result = await this.ports.execute(request, context)
+    let result: AgentMuxControlResult | undefined = request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get'
+      ? await this.ports.settingsResources?.(request) : undefined
+    if (!result) {
+      if (!this.ports.execute) throw new AgentMuxError('The original business owner is unavailable. Original objects, input and healthy Agents remain available.', 'CONTROL_UNAVAILABLE')
+      result = await this.ports.execute(request, context)
+    }
     if (result.operation !== request.operation) throw new AgentMuxError('Business owner returned another operation.', 'CONTROL_PROTOCOL_ERROR')
     const { operation, ...body } = result
     const parsed = parseAgentMuxControlReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
@@ -1454,6 +1461,12 @@ export class AgentMuxRpcService {
       return parseMotePreferencesSaveResult(result, input) as AgentMuxRpcResult<M>
     }
     if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
+      const originalControlOperation = AGENTMUX_RPC_CONTROL_METHODS[method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS]
+      if (originalControlOperation === 'settings.resource.list' || originalControlOperation === 'settings.resource.get') {
+        const request = rpcControlRequest(method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS, params)
+        if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', method, params, context)
+        if (this.ports.settingsResources) return rpcControlResult(method, await this.execute(request, undefined, context)) as AgentMuxRpcResult<M>
+      }
       if (method === 'toolkit.run' || method === 'toolkit.action' || method === 'toolkit.evaluate') {
         await this.assertToolkitExecutionAuthority(p.toolId, context)
       }
@@ -2733,7 +2746,7 @@ export class AgentMuxRpcService {
         forwardOutput = true
       }
     }
-    if (this.ports.forwardSubscription && (forwardOutput || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch')) {
+    if (this.ports.forwardSubscription && (forwardOutput || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch' && !this.ports.appearance)) {
       let initial: AgentMuxRpcStreamInitial<M> | undefined
       const subscription = await this.ports.forwardSubscription(method, params as import('./public-rpc.js').AgentMuxRpcStreamParams<M>, {
         onInitial: value => { initial = value }, onEvent: event => { void onEvent(event) },

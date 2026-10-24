@@ -39,6 +39,8 @@ export function useHostAppearance(client: AgentMuxHostedClient | null, connectio
     if (!client.subscribeRpc) { setIssue(`这个 Mac 尚未提供主题同步。${retained}`); return }
     const controller = new AbortController()
     let subscription: Awaited<ReturnType<NonNullable<AgentMuxHostedClient['subscribeRpc']>>> | undefined
+    let retry: ReturnType<typeof setTimeout> | undefined
+    let reader: object | undefined
     let previous: AgentMuxAppearanceObservation | undefined
     const accept = (raw: AgentMuxAppearanceObservation) => {
       if (controller.signal.aborted) return
@@ -59,13 +61,26 @@ export function useHostAppearance(client: AgentMuxHostedClient | null, connectio
         setIssue(`主题同步未完成。${retained} ${cause instanceof Error ? cause.message : ''}`)
       }
     }
-    void client.subscribeRpc('settings.appearance.watch', {}, {
-      signal: controller.signal, onInitial: initial => accept(initial.observation), onEvent: event => { if (event.type === 'snapshot') accept(event.data) },
-      onEnd: error => { if (!controller.signal.aborted) setIssue(`主题同步连接已结束。${retained} ${error?.message ?? ''}`) }
-    }).then(reader => { if (controller.signal.aborted) void reader.dispose(); else subscription = reader }, cause => {
-      if (!controller.signal.aborted) setIssue(`主题同步暂时不可用。${retained} ${cause instanceof Error ? cause.message : ''}`)
-    })
-    return () => { controller.abort(); void subscription?.dispose() }
+    const reopen = (cause: unknown) => {
+      if (controller.signal.aborted || retry) return
+      setIssue(`主题同步暂时不可用。${retained} 将自动重试。${cause instanceof Error ? cause.message : ''}`)
+      retry = setTimeout(() => { retry = undefined; void open() }, 1000)
+    }
+    const open = async () => {
+      if (controller.signal.aborted) return
+      const original = {}; reader = original; previous = undefined
+      const current = () => !controller.signal.aborted && reader === original
+      try {
+        const active = await client.subscribeRpc!('settings.appearance.watch', {}, {
+          signal: controller.signal, onInitial: initial => { if (current()) accept(initial.observation) },
+          onEvent: event => { if (current() && event.type === 'snapshot') accept(event.data) },
+          onEnd: error => { if (current()) { reader = undefined; subscription = undefined; reopen(error) } }
+        })
+        if (!current()) void active.dispose(); else subscription = active
+      } catch (cause) { if (current()) { reader = undefined; reopen(cause) } }
+    }
+    void open()
+    return () => { controller.abort(); reader = undefined; if (retry) clearTimeout(retry); void subscription?.dispose() }
   }, [client, connectionState, mounted])
   return { issue, terminalPalette }
 }

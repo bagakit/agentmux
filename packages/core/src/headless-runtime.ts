@@ -11,7 +11,7 @@ import { durableWriteFile } from './durable-write.js'
 import { defaultAgentMuxControlSocketPath, defaultAgentMuxStateDirectory, defaultCtxmuxSocketPath,
   defaultCtxmuxStateDirectory, defaultAgentMuxHookPort } from './runtime-paths.js'
 import { AgentMuxControlServer, type AgentMuxRpcHttpOptions, type AgentMuxControlServerOptions } from './public-rpc-server.js'
-import type { AgentMuxRpcServiceOptions } from './public-rpc-service.js'
+import type { AgentMuxRpcCoreClient, AgentMuxRpcServiceOptions } from './public-rpc-service.js'
 import { AgentMuxHostedRuntimeService } from './hosted-runtime-service.js'
 import { AgentMuxHostExecutorOwner } from './executor-owner.js'
 import { AgentMuxCreationAuthority } from './agent-creation-authority.js'
@@ -25,6 +25,8 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   forwardingPeer?: AgentMuxControlServerOptions['forwardingPeer']
   /** Existing client-owned business ports mounted on this one public endpoint. */
   service?: Omit<AgentMuxRpcServiceOptions, 'coreClients' | 'hostedRuntime' | 'endpoint'>
+  /** Borrow original remote Hosts; this Runtime owns only its local client's lifecycle. */
+  coreClients?: () => readonly AgentMuxRpcCoreClient[]
   /** Borrow the original external input owner; the semantic Host never duplicates its grants or journal. */
   inputContextCaptureReader?: import('./agent-input-context-capture.js').AgentInputContextCaptureReader
   externalInputAuthority?: import('./external-author.js').AgentExternalInputAuthorityPort
@@ -106,7 +108,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       capsuleRuntime: options.service?.capsuleRuntime ?? capsules.runtime,
       deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
       diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
-      coreClients: () => [{ hostId: 'local', client: client! }],
+      coreClients: () => [{ hostId: 'local', client: client! }, ...(options.coreClients?.() ?? [])],
       hostedRuntime: () => hosted!,
       onControlEndpointState: state => hosted?.publishControlEndpointState(state) })
     await server.start()
