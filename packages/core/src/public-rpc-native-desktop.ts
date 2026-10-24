@@ -291,7 +291,13 @@ export function parseNativeDesktopResult<M extends NativeDesktopMethod>(method: 
     }
   } else if (method === 'native.capture') {
     rpcRecord(result, ['state', 'screenshot', 'engine', 'selectionRect', 'error'], code)
-    if (result.state === 'captured') { png(result.screenshot, code); if (result.error !== undefined) invalid('Captured result also claims failure.', code) }
+    if (result.state === 'captured') {
+      png(result.screenshot, code)
+      text(result.engine, code)
+      const rect = rpcRecord(result.selectionRect, ['x', 'y', 'width', 'height'], code)
+      number(rect.x, code); number(rect.y, code); number(rect.width, code, true); number(rect.height, code, true)
+      if (result.error !== undefined) invalid('Captured result also claims failure.', code)
+    }
     else if (result.state === 'failed') errorData(result.error, code)
     else if (result.state !== 'cancelled' || result.error !== undefined) invalid('Native capture must return a typed outcome.', code)
     if (result.state !== 'captured' && result.screenshot !== undefined) invalid('Uncaptured native result contains pixels.', code)
