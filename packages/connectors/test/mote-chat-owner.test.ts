@@ -202,7 +202,7 @@ it('uses durable accepted activity when an extra observation fails and isolates 
   expect(f.host.publicationAuthority(binding.bindingId, 1).authorized).toBe(true)
   const unrelated = { ...binding, bindingId: 'unrelated-group', agentSessionId: 'another-agent' }
   const groups = { readExact: () => unrelated, readCurrent: () => unrelated, findActiveAudience: () => unrelated, listActive: () => [unrelated],
-    publicationAuthority: () => ({ binding: unrelated, authorized: true }), readGrant: () => null, findGrant: () => null }
+    publicationAuthority: () => ({ binding: unrelated, authorized: true }), readGrant: () => null, findGrant: () => null, effectiveGrant: () => null, effectiveGrants: () => ({ grants: [], issue: null }) }
   const combined = composeMoteChatBindings(groups, f.host)
   await f.host.configure({ ...f.input, operationId: 'pause-route', expectedRevision: 1, values: { ...f.input.values, enabled: false } }, context)
   expect(combined.readCurrent(binding.bindingId)?.state).toBe('paused')
@@ -221,7 +221,7 @@ it('keeps a known private audience from borrowing a manual binding while paused 
   const group = { ...manual, bindingId: 'unrelated-group', externalConversationId: 'original-group' }
   const find = vi.fn((input: { application: typeof application; externalConversationId: string }) => input.externalConversationId === group.externalConversationId ? group : { ...manual, externalConversationId: input.externalConversationId })
   const groups = { readExact: () => manual, readCurrent: () => manual, findActiveAudience: find, listActive: () => [manual, group],
-    publicationAuthority: () => ({ binding: manual, authorized: true }), readGrant: () => null, findGrant: () => null }
+    publicationAuthority: () => ({ binding: manual, authorized: true }), readGrant: () => null, findGrant: () => null, effectiveGrant: () => null, effectiveGrants: () => ({ grants: [], issue: null }) }
   const combined = composeMoteChatBindings(groups, f.host), audience = { application, externalConversationId: binding.externalConversationId }
   expect(combined.findActiveAudience(audience)?.bindingId).toBe(binding.bindingId)
   expect(find).not.toHaveBeenCalled()
@@ -277,4 +277,30 @@ it('rejects malformed public parameters and another target receipt without accep
   Object.defineProperty(fabricated, '0', { enumerable: true, get() { getterReads++; return {} } })
   expect(() => parseMoteChatResult('space.mote.chat.history', { generations: fabricated, next: null }, { target })).toThrow()
   expect(getterReads).toBe(0)
+})
+
+it('derives native API identity from current private-chat lane and selected policy independently of automatic sync', async () => {
+  const f = await fixture(), first = await f.host.prepareIncoming(f.incoming('first-native-api'))
+  expect(first).not.toBeNull()
+  expect(f.host.apiBinding(first!.bindingId)).toEqual(first)
+  await f.connections.service.configure({ operationId: 'pause-sync-for-native-api', expectedRevision: 0, service: { enabled: false } })
+  expect(f.host.apiBinding(first!.bindingId)).toEqual(first)
+  await f.connections.service.configure({ operationId: 'resume-sync-for-next-generation', expectedRevision: 1, service: { enabled: true } })
+  f.time(500)
+  const next = await f.host.prepareIncoming(f.incoming('next-native-api'))
+  expect(next?.bindingId).not.toBe(first!.bindingId)
+  expect(f.host.apiBinding(first!.bindingId)).toBeNull()
+  expect(f.host.apiBinding(next!.bindingId)).toEqual(next)
+  await f.host.configure({ ...f.input, operationId: 'disable-native-chat', expectedRevision: 1, values: { ...f.input.values, enabled: false } }, context)
+  expect(f.host.apiBinding(next!.bindingId)).toBeNull()
+  await f.host.configure({ ...f.input, operationId: 'reenable-native-chat', expectedRevision: 2 }, context)
+  expect(f.host.apiBinding(next!.bindingId)).toEqual(next)
+  const replacement = { ...f.connection, connectionId: 'replacement-same-application' }
+  await f.connections.configure({ operationId: 'save-replacement-native-bot', expectedRevision: null, connection: replacement })
+  f.profile.mockResolvedValueOnce({ ...(await f.profile()), connectionId: replacement.connectionId })
+  await f.host.configure({ ...f.input, operationId: 'select-replacement-native-bot', expectedRevision: 3,
+    values: { ...f.input.values, connection: { connectionId: replacement.connectionId, application } } }, context)
+  expect(f.host.apiBinding(next!.bindingId)).toBeNull()
+  expect(f.host.readExact(first!.bindingId, 1)).toEqual(first)
+  expect(f.agents.create).toHaveBeenCalledTimes(2)
 })
