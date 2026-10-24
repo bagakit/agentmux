@@ -110,9 +110,9 @@ const variants = [
   },
   {
     "name": "wait-for-native-before-cancel",
-    "path": "packages/core/src/hosted-runtime-service.ts",
-    "from": "const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([\n  'controlAgentContinuity',",
-    "to": "const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([",
+    "path": "packages/core/src/hosted-client-contract.ts",
+    "from": "controlAgentContinuity: 'owner'",
+    "to": "controlAgentContinuity: 'runtime'",
     "target": "Hosted cancellation works without Native readiness and reader disposal does not cancel the durable intent",
     "expected": "promise rejected"
   },
