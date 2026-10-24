@@ -1,0 +1,85 @@
+import { createContext, createElement, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
+import { getDeviceWorkface } from '../recovery/device-workface'
+import { mobileUpdateFragment } from '../connection/reload-identity'
+
+export type MobileWebUpdateResult = { status: 'navigating' } | { status: 'blocked'; message: string }
+type SafetyOwner = () => string | null
+type ConnectionCheck = () => Promise<() => boolean>
+type SafetyContext = { apply(): Promise<MobileWebUpdateResult>; register(owner: SafetyOwner): () => void }
+const unavailable = '当前页面无法确认原连接；请保留工作内容并恢复原 Mac 连接后重试。'
+const Safety = createContext<SafetyContext | null>(null)
+
+/** Owners report live, document-local facts, not rendered labels or a selected Session. */
+export function useMobileWebUpdateSafetyOwner(owner: SafetyOwner): void {
+  const context = useContext(Safety), current = useRef(owner)
+  current.current = owner
+  useLayoutEffect(() => context?.register(() => current.current()), [context])
+}
+
+export function useMobileWebUpdateSafety(): Pick<SafetyContext, 'apply'> {
+  const context = useContext(Safety)
+  return context ?? { apply: async () => ({ status: 'blocked', message: unavailable }) }
+}
+
+/** Explicit navigation retains the page when any preservation check is unknown. */
+export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prepareReload, native = false }: {
+  children: ReactNode; verifyConnection: ConnectionCheck; prepareReload?: () => () => void; native?: boolean
+}) {
+  const owners = useRef(new Set<SafetyOwner>()), ownersRevision = useRef(0), current = useRef({ verifyConnection, prepareReload, native })
+  current.current = { verifyConnection, prepareReload, native }
+  const context = useMemo<SafetyContext>(() => ({
+    register(owner) {
+      owners.current.add(owner); ownersRevision.current++
+      return () => { if (owners.current.delete(owner)) ownersRevision.current++ }
+    },
+    async apply() {
+      const blocked = (message: string): MobileWebUpdateResult => ({ status: 'blocked', message })
+      if (current.current.native) return blocked('当前不是手机网页，请使用设备的应用更新方式。')
+      const originalOwnersRevision = ownersRevision.current
+      const checkOwners = () => { for (const owner of owners.current) { const issue = owner(); if (issue) return issue } return null }
+      const issue = checkOwners()
+      if (issue) return blocked(issue)
+      const original = current.current
+      let connectionStillOriginal: () => boolean, finalConnectionStillOriginal: () => boolean, workfaceStillSaved: () => boolean
+      const abort = new AbortController()
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      try {
+        const result = await Promise.race([
+          (async () => {
+            const connection = await original.verifyConnection()
+            const workface = await getDeviceWorkface().preparePageReload()
+            const response = await fetch('/', { method: 'GET', cache: 'no-store', credentials: 'same-origin', redirect: 'follow', signal: abort.signal })
+            const finalConnection = await original.verifyConnection()
+            return { connection, finalConnection, workface, response }
+          })(),
+          new Promise<never>((_, reject) => { timeout = setTimeout(() => { abort.abort(); reject(new Error('Observation ended')) }, 15000) })
+        ])
+        connectionStillOriginal = result.connection
+        finalConnectionStillOriginal = result.finalConnection
+        workfaceStillSaved = result.workface
+        const response = result.response
+        const destination = new URL(response.url)
+        if (!response.ok || destination.origin !== location.origin || !/^\/mobile\/[^/]+\/[a-f0-9]{64}\/index\.html$/u.test(destination.pathname)) {
+          return blocked('新版入口暂时无法确认；当前页面和工作内容保留，请恢复连接后重试。')
+        }
+      } catch {
+        return blocked('原连接或新版入口暂时无法确认；当前页面和工作内容保留，请恢复连接及设备存储后重试。')
+      } finally { clearTimeout(timeout); abort.abort() }
+      const finalIssue = checkOwners()
+      if (finalIssue) return blocked(finalIssue)
+      if (ownersRevision.current !== originalOwnersRevision || current.current.verifyConnection !== original.verifyConnection || current.current.prepareReload !== original.prepareReload || current.current.native !== original.native || !connectionStillOriginal() || !finalConnectionStillOriginal() || !workfaceStillSaved()) {
+        return blocked('连接或设备工作面在检查期间发生变化，或尚未保存；当前页面保留，请核对并重试。')
+      }
+      // No asynchronous boundary between the last owner checks and the navigation.
+      let rollback: (() => void) | undefined
+      try {
+        rollback = original.prepareReload?.()
+        if (checkOwners() || ownersRevision.current !== originalOwnersRevision || !finalConnectionStillOriginal() || !workfaceStillSaved()) {
+          rollback?.(); return blocked('连接或工作面发生变化；当前页面保留，请核对后重试。')
+        }
+        location.assign('/' + mobileUpdateFragment); return { status: 'navigating' }
+      } catch { try { rollback?.() } catch { /* Retain any unresolved handoff. */ } return blocked('原身份交接或网页重开未确认；当前页面保留，请恢复设备存储后重试。') }
+    }
+  }), [])
+  return createElement(Safety.Provider, { value: context }, children)
+}
