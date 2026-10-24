@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { parseTopicResult, type TopicKnowledge } from '@agentmux/core/control'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
@@ -63,6 +64,9 @@ export function useKnowledgeDraft(target: MobileKnowledgeEditTarget, client: Age
   const [localCopies, setLocalCopies] = useState<EditableDraft[]>([])
   const conflict = useRef<{ canonical: MobileKnowledgeDraft | null } | null>(null)
   const flight = useRef(false), mounted = useRef(true)
+  const reloadDirty = useRef(false), reloadRevision = useRef(0), reloadCopies = useRef(false)
+  useMobileWebUpdateSafetyOwner(() => reloadCopies.current ? '本页保留了知识冲突副本；请先复制保全并关闭编辑器，再更新网页。'
+    : reloadDirty.current || flight.current ? '知识草稿或保存操作尚未确认；请保存或复制保全后再更新网页。' : null)
   const newIntentRetained = useRef(initial.current.saved !== null || target.isNew !== true)
   const edited = useRef(false), baselineKnown = useRef(initial.current.saved !== null || target.entry !== undefined || target.isNew === true)
   const context = useRef({ client, epoch: 0 }); if (context.current.client !== client) context.current = { client, epoch: context.current.epoch + 1 }
@@ -83,6 +87,8 @@ export function useKnowledgeDraft(target: MobileKnowledgeEditTarget, client: Age
   }, [target.entry, target.scope, client, owner, recordId])
 
   function retain(next: EditableDraft, originalOwner?: () => boolean): Promise<{ canForward: boolean; committed: boolean }> {
+    reloadDirty.current = true
+    const revision = ++reloadRevision.current
     display(next)
     const work = queue.current.catch(() => {}).then(async () => {
       if (originalOwner && !originalOwner()) {
@@ -112,6 +118,7 @@ export function useKnowledgeDraft(target: MobileKnowledgeEditTarget, client: Age
       }
     })
     queue.current = work
+    void work.then(result => { if (revision === reloadRevision.current && result.committed) reloadDirty.current = false })
     return work
   }
   useEffect(() => {
@@ -156,6 +163,7 @@ export function useKnowledgeDraft(target: MobileKnowledgeEditTarget, client: Age
     if (flight.current || owner.recordIdentity() !== recordId) return
     // This explicit choice never guesses a Runtime. Keep the unsaved local
     // version available for copying before adopting the selected stored key.
+    reloadCopies.current = true
     setLocalCopies(values => [...values, current.current])
     durable.current = value; conflict.current = null; setChecked(null); setNotice('已明确采用这份原草稿；其 Host 未匹配时不会发送。')
     baselineKnown.current = true
