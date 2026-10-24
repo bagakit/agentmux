@@ -424,7 +424,7 @@ it('[terminal-install] admits only proven interrupted raw replacement and record
   expect((await readFile(f.reads, 'utf8')).trim().split('\n').map(row => JSON.parse(row).id)).toEqual(['terminal-run', 'replacement-run'])
   expect(io.before).toEqual(original); expect(io.after).toEqual(expected); expect(io.pid).toBe(202); expect(io.cutovers).toBe(1)
 })
-it.each(['old-running', 'old-exited', 'reason', 'new-ended', 'cwd', 'missing-cwd', 'wrong-run', 'unknown', 'Native-owner', 'UI-owner', 'Host', 'control', 'healthy-Terminal', 'Agent-SID', 'focus', 'layout', 'missing-plan'] as const)(
+it.each(['old-running', 'old-exited', 'reason', 'new-ended', 'cwd', 'missing-cwd', 'wrong-run', 'unknown', 'Native-owner', 'UI-owner', 'Host', 'control', 'healthy-Terminal', 'Agent-SID', 'focus', 'layout', 'missing-plan', 'same-SID-control-run', 'same-SID-host'] as const)(
   '[terminal-install] refuses unproven replacement %s and retains the activated GUI and original evidence', async field => {
     const f = await terminalRebindingFixture(), previous = f.state.states['terminal-run'], current = f.state.states['replacement-run']
     if (field === 'old-running') Object.assign(previous, { state: { type: 'running' } })
@@ -444,6 +444,8 @@ it.each(['old-running', 'old-exited', 'reason', 'new-ended', 'cwd', 'missing-cwd
     if (field === 'focus') after().focus.executionSessionId = 'different-focus'
     if (field === 'layout') after().layouts.workspace!.groups[0]!.tabOrder.reverse()
     if (field === 'missing-plan') io.nativePlan = null
+    if (field === 'same-SID-control-run') rawTerminal().sessionId = 'terminal-run'
+    if (field === 'same-SID-host') Object.assign(rawTerminal(), { sessionId: 'terminal-run', control: { kind: 'terminal', hostId: 'foreign-host', runId: 'terminal-run', run: { runId: 'terminal-run' } } })
     await f.save()
     const before = structuredClone(io.before), expected = structuredClone(io.after), error = await install(f).catch(error => error)
     expect(error.transaction?.ui.status, 'No generic Terminal-ID exemption may certify unproved continuity').toBe('unknown')
