@@ -78,7 +78,7 @@ reader 生命周期归原宿主；复用一个 query 实例承担 service 总在
 | mote.context.client | client route hostId、原 resource scope、prepare/open-space action；open-space 另含完整 reference | 原 client action owner 的 latest-per-scope-action 事实；无 logId、持久化或健康结论 |
 | reading.lifecycle | hostId、logId、可选原 Core instance authority，或 recent 范围 | 原 Core read／watch 的有限阶段；仅当前实例，metadata-only，原 scope 与访问路线分开 |
 | agent.startup | hostId、logId、可选原 Core authority，或 recent 范围 | Core 已接受的原启动 unknown／failed 及其后来 ready；[领域类型](../../packages/core/src/startup-diagnostic.ts)保留原 Run／actor／lifecycle、来源时间与接收者，默认隐藏私有失败文本 |
-| client.incident | client route hostId、logId、可选原 archive authority，或 recent 范围 | 原 client 档案的有限 Terminal／连接／探测／读取阶段；[公共类型](../../packages/core/src/client-incident.ts) 持字段全集，保原 producer 和原 reading ID，确认状态逐记录表达 |
+| client.incident | client route hostId、logId、可选原 archive authority，或可带准确 archive authority 的 recent 范围 | 原 client 档案的有限 Terminal／连接／探测／读取阶段；[公共类型](../../packages/core/src/client-incident.ts) 持字段全集，保原 producer 和原 reading ID，确认状态逐记录表达 |
 | client.notifications | client route hostId、原通知 ID，或有界列表筛选 | 原通知 client 当前问题和保留活动；[公共类型](../../packages/core/src/client-notifications.ts)持字段与严格解析，无日志档案，读取不标读或恢复 |
 | native-recorder-failure | hostId、agentSessionId、runId | 当前缺原 producer，not-exposed/null 原引用；不冒根因已取得 |
 
@@ -98,7 +98,7 @@ managed Agent 沿原 capability 认证，受自身 Host 路线限定，不能借
 
 `recent` 是有界发现，不指一条原记录，因此 `recordRef=null`；每个候选保自己的准确引用，再以其原 authority 和 route 读取。cursor 只续接原来源、namespace 和筛选范围，不跨重启猜测重用。`reading.lifecycle` 的来源仅有 instance authority，不能声明 durable；exact 的 observedAt 和 completeness 与原事件时间和覆盖缺口一致。`client.incident` 的原档案 authority 不等于当时 Renderer producer；接收时间不能覆盖内嵌 reading 的来源时间。两种目标都沿原公共入口，不提供任意 payload 或本地文件读面。
 
-客户端故障档案的 recent 只发现当前保留候选，空页不能签此前没有故障；准确原件读取保原 authority 与持久确认语义。报告的执行 Host、Main 接收身份、Renderer 文档代次和原观察时刻分别保真。关联仅沿报告已得的 typed references 交给原 reader，重复目标按 JSON 对象语义去重；对象属性顺序不改变目标身份，数组顺序仍保留。查询不为补关联触发输入、刷新、探测或采集；没有公共 reader 的来源仍为缺证。
+客户端故障档案的 recent 可通过原 `authority` 限定准确档案与其 cursor；未限定来源的范围沿[手机网页有限观察](../design/diagnostic-evidence.md#手机网页的有限观察)。recent 只发现当前保留候选，空页不能签此前没有故障；准确原件读取保原 authority 与持久确认语义。报告的执行 Host、Main 接收身份、Renderer 文档代次和原观察时刻分别保真。关联仅沿报告已得的 typed references 交给原 reader，重复目标按 JSON 对象语义去重；对象属性顺序不改变目标身份，数组顺序仍保留。查询不为补关联触发输入、刷新、探测或采集；没有公共 reader 的来源仍为缺证。
 
 Mote scope 的 host/path 来自原 action 捕获的 resource Workspace，不能用 Mote 的 physical/HomeZone/logical topic 目录替代。客户端路由和资源 Host 可以不同；读取不连接资源 Runtime。原 pending attempt 与保留 failure 的 target/time 分开，后来的发现不改写它们。该 point observation 的 recordRef/readAuthority/persistence 为 null，envelope observedAt 为 null；实际 action/failure 时刻留在 data，readAt 只表示本次读取。source absent 的 not-found/unknown 不签历史无错误。
 

@@ -134,13 +134,13 @@ Terminal 的间歇空白、输出观察中断及刷新后恢复，须能沿原 o
 
 ### 手机网页的有限观察
 
-手机网页的诊断沿原认证 Relay／forwarding 进入 Main 既有 `client.incident` 档案，不另建手机错误 Store。原 device principal 由认证 owner 提供，documentId、编译 buildId、原文档内容 namespaceDigest、occurrence 与来源时间保真；缺证为未知，不能从当前 HTTP 版本、设备名称或错误文案回填。原 Desktop producer、档案 authority 和记录仍按原合同读取。
+手机网页的诊断沿原认证 Relay／forwarding 进入独立 Host 的 `client.incident` producer，复用原档案实现与公共读取合同。原 Main 档案和记录继续属于原 authority；Host 的 Mobile producer 使用独立持久 authority，不复制旧记录或维护竞争的错误事实。原 device principal 由认证 owner 提供，documentId、编译 buildId、原文档内容 namespaceDigest、occurrence 与来源时间保真；缺证为未知，不能从当前 HTTP 版本、设备名称或错误文案回填。原 Desktop producer、档案 authority 和记录仍按原合同读取。
 
 首批覆盖原 `space.ls` 成功但 Space 存在 `issue` 字段的 partial，以及原 typed connection-state 的 boundary／state。原调用失败若报送，只接受有限 typed 失败码，不读取任意错误正文。partial 只保存字段存在、数量和有限完整 opaque Space 引用，不保存或分析 issue 文本；完整原因仍沿原 Space CLI 读取。连接观察不升级为 Session 终局或手机输入资格，Native 与手机消费连接分别保其原边界。
 
-Agent 沿既有 `system diagnostics inspect` 的 `client.incident` recent 索引发现原 producer，再以准确 device principal／document／可选 build 和 namespace 过滤，或按返回的原 logId／authority 读取；查询不授予设备管理。报送接纳与档案耐久性分别表达，未报过、暂不可达、保留外与真实空结果不得互相代签。
+Agent 沿既有 `system diagnostics inspect` 的 `client.incident` recent 索引发现原 producer，再以准确 device principal／document／可选 build 和 namespace 过滤，或按返回的原 logId／authority 读取；查询不授予设备管理。recent 可指定准确原 authority，结果和 cursor 只属于该档案。未指定 authority 时，固定读取 Host 已知的 Mobile 来源并标明 partial 与未观察的 Main 历史，不随 Desktop 在线状态切换来源，也不拼接聚合 cursor。准确旧 Main authority 仅沿原档案读取，离线或 namespace 无法确认时如实 unavailable，不改读另一份档案。报送接纳与档案耐久性分别表达，未报过、暂不可达、保留外与真实空结果不得互相代签。
 
-页面只保有限待报和去重元数据，不复制草稿、图片、消息、堆栈或任意错误正文。实际在途报送和原档案写入分别守各自预算；超界只影响本次诊断，并保可见的覆盖缺口与原 occurrence 重试入口。Main 档案缺失或诊断失败不改变健康手机连接、原业务或 Agent；重试诊断不重发上传、输入或恢复。独立无 Desktop 的 Host 不据此宣称已有历史档案。
+页面只保有限待报和去重元数据，不复制草稿、图片、消息、堆栈或任意错误正文。实际在途报送和原档案写入分别守各自预算；超界只影响本次诊断，并保可见的覆盖缺口与原 occurrence 重试入口。Main 档案缺失或诊断失败不改变健康手机连接、原业务或 Agent；重试诊断不重发上传、输入或恢复。独立无 Desktop 的 Host 不据此宣称已观察原 Main 历史档案。
 
 ### 对话读取的连续留证
 
