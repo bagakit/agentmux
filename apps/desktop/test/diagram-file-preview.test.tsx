@@ -16,6 +16,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('IntersectionObserver', class { target?: Element; disconnect = vi.fn(); constructor(public callback: (entries: any[]) => void) { observers.push(this) }; observe(target: Element) { this.target = target } })
   vi.stubGlobal('Worker', class { onmessage: any; onerror: any; terminate = vi.fn(); postMessage = vi.fn(); constructor() { workers.push(this) } })
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:diagram')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
@@ -108,6 +109,44 @@ describe('current visible diagram consumers', () => {
     await act(async () => viewport(true))
     expect(container.querySelector('[role=alert]')?.textContent).toContain('could not start')
     expect(container.querySelector('code')?.textContent).toBe('digraph { CurrentDraft }')
+    expect(container.querySelector('button')?.textContent).toBe('Retry preview')
+  })
+  it.each(['mermaid', 'plantuml', 'drawio'] as const)('opens the same %s SVG without another render and retires its viewer on source change', async kind => {
+    jobs.render.mockImplementation(async request => ({ id: request.id, svg: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="1200" />' }))
+    await act(async () => root.render(<DiagramFilePreview kind={kind} content="current source" />))
+    await act(async () => viewport(true))
+    const trigger = container.querySelector<HTMLButtonElement>('.md-diagram-image')!
+    expect(trigger).not.toBeNull()
+    await act(async () => trigger.click())
+    expect(document.querySelector('.md-conversation-image__full')?.getAttribute('src')).toBe('blob:diagram')
+    expect(jobs.render).toHaveBeenCalledTimes(1)
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+    await act(async () => root.render(<DiagramFilePreview kind={kind} content="new source" />))
+    expect(document.querySelector('.md-conversation-image__full')).toBeNull()
+  })
+  it('enlarges DOT from its completed Worker result and closes it on hide', async () => {
+    await act(async () => root.render(<DotFilePreview content="digraph { A->B }" />))
+    await act(async () => viewport(true))
+    const worker = workers[0], request = worker.postMessage.mock.calls[0][0]
+    await act(async () => worker.onmessage({ data: { id: request.id, svg: '<svg />' } }))
+    await act(async () => container.querySelector<HTMLButtonElement>('.md-diagram-image')!.click())
+    expect(document.querySelector('.md-conversation-image__full')?.getAttribute('src')).toBe('blob:diagram')
+    expect(workers).toHaveLength(1)
+    await act(async () => viewport(false))
+    expect(document.querySelector('.md-conversation-image__full')).toBeNull()
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:diagram')
+  })
+  it.each(['mermaid', 'dot'])('returns %s decode failures to the original source and retry', async kind => {
+    jobs.render.mockImplementation(async request => ({ id: request.id, svg: '<svg />' }))
+    await act(async () => root.render(kind === 'dot' ? <DotFilePreview content="original source" /> : <DiagramFilePreview kind="mermaid" content="original source" />))
+    await act(async () => viewport(true))
+    if (kind === 'dot') {
+      const worker = workers[0], request = worker.postMessage.mock.calls[0][0]
+      await act(async () => worker.onmessage({ data: { id: request.id, svg: '<svg />' } }))
+    }
+    await act(async () => container.querySelector('img')!.dispatchEvent(new Event('error')))
+    expect(container.querySelector('[role=alert]')?.textContent).toContain('could not be decoded')
+    expect(container.querySelector('code')?.textContent).toBe('original source')
     expect(container.querySelector('button')?.textContent).toBe('Retry preview')
   })
 })
