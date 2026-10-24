@@ -1,5 +1,5 @@
 import type { AgentMuxSpaceControlRequest, AgentMuxSurveyListReport, AgentMuxSurveyOrganization, AgentMuxSpatialSave } from '@agentmux/core/control'
-import { parseSurveyOrganization } from '@agentmux/core/control'
+import { parseSurveyOrganization, parseSurveyCollectionChange } from '@agentmux/core/control'
 
 export const EMPTY_SURVEY_ORGANIZATION: AgentMuxSurveyOrganization = { ungrouped: [], groups: [] }
 
@@ -36,32 +36,52 @@ export function effectiveSurveyOrganization(organization: AgentMuxSurveyOrganiza
 }
 
 type State = { surveyOrganization: AgentMuxSurveyOrganization; surveyCollectedZones: Record<string, true> }
-type Ports = { get(): State; set(organization: AgentMuxSurveyOrganization): void; save(): Promise<AgentMuxSpatialSave> }
+type Ports = { get(): State; set(state: State): void; hasZone(zoneId: string): boolean; save(): Promise<AgentMuxSpatialSave> }
 type Request = Extract<AgentMuxSpaceControlRequest, { operation: 'space.survey-list' }>
+
+export const surveyCollectedZoneIds = (collected: Readonly<Record<string, true>>): string[] => Object.keys(collected).filter(id => collected[id] === true)
+const sameMembers = (left: string[], right: string[]) => { const members = new Set(right); return left.length === members.size && left.every(id => members.has(id)) }
+
+/** Original references may remain unavailable; only an explicit new member needs a confirmed Zone. */
+export function changeSurveyCollection(before: Record<string, true>, zoneIds: string[], hasZone: Ports['hasZone']): Record<string, true> | null {
+  if (zoneIds.some(id => before[id] !== true && !hasZone(id))) return null
+  const requested = new Set(zoneIds), original = surveyCollectedZoneIds(before)
+  const kept = original.filter(id => requested.has(id)), added = zoneIds.filter(id => before[id] !== true).sort()
+  if (kept.length === original.length && !added.length) return before
+  return Object.fromEntries([...kept, ...added].map(id => [id, true as const]))
+}
 
 /** One GUI/public owner; only this request is refused on a stale or foreign target. */
 export async function executeSurveyList(ports: Ports, request: Request): Promise<AgentMuxSurveyListReport> {
-  const state = ports.get(), before = state.surveyOrganization
+  const state = ports.get(), before = state.surveyOrganization, originalMembers = surveyCollectedZoneIds(state.surveyCollectedZones)
   const report = (outcome: AgentMuxSurveyListReport['outcome'], issues: AgentMuxSurveyListReport['issues'] = [], save: AgentMuxSpatialSave | null = null,
-    applied = before): AgentMuxSurveyListReport => ({ scope: 'survey-list', storedOrganization: applied,
-    effectiveOrganization: effectiveSurveyOrganization(applied, state.surveyCollectedZones),
-    changed: JSON.stringify(applied) !== JSON.stringify(before), outcome, save, issues })
-  if (request.organization === undefined) return report('read')
-  let next: AgentMuxSurveyOrganization, expected: AgentMuxSurveyOrganization
-  try { next = parseSurveyOrganization(request.organization); expected = parseSurveyOrganization(request.expected) }
+    applied = before, members = state.surveyCollectedZones): AgentMuxSurveyListReport => ({ scope: 'survey-list', storedOrganization: applied,
+    collectedZoneIds: surveyCollectedZoneIds(members), effectiveOrganization: effectiveSurveyOrganization(applied, members),
+    changed: JSON.stringify(applied) !== JSON.stringify(before) || !sameMembers(surveyCollectedZoneIds(members), originalMembers), outcome, save, issues })
+  if (request.organization === undefined && request.collection === undefined) return report('read')
+  let next = before, expected = before, collection: Request['collection']
+  try {
+    if (request.organization !== undefined) { next = parseSurveyOrganization(request.organization); expected = parseSurveyOrganization(request.expected) }
+    if (request.collection !== undefined) collection = parseSurveyCollectionChange(request.collection)
+  }
   catch (error) { return report('refused', [{ step: 'target', code: 'SURVEY_LIST_INVALID_ORGANIZATION',
     message: error instanceof Error ? error.message : String(error), recovery: 'Read this same list and provide each exact original item and group once. Existing work is retained.' }]) }
   if (JSON.stringify(expected) !== JSON.stringify(before)) return report('refused', [{ step: 'target', code: 'SURVEY_LIST_CONFLICT',
     message: 'The original Survey list organization changed after it was read.', recovery: 'Read this same Survey list and review its current preference before changing it.' }])
+  if (collection && !sameMembers(collection.expectedZoneIds, originalMembers)) return report('refused', [{ step: 'target', code: 'SURVEY_LIST_COLLECTION_CONFLICT',
+    message: 'The original explicit Survey membership changed after it was read.', recovery: 'Read this same list and review its current members before another change.' }])
+  const appliedMembers = collection ? changeSurveyCollection(state.surveyCollectedZones, collection.zoneIds, ports.hasZone) : state.surveyCollectedZones
+  if (!appliedMembers) return report('refused', [{ step: 'target', code: 'SURVEY_LIST_ZONE_UNCONFIRMED',
+    message: 'A new Survey member has no confirmed original Zone.', recovery: 'Inspect that exact Zone and retry this explicit change when its identity is confirmed. Existing references and work remain.' }])
   const ids = surveyOrganizationZoneIds(next)
-  const originals = new Set([...Object.keys(state.surveyCollectedZones).filter(id => state.surveyCollectedZones[id] === true), ...surveyOrganizationZoneIds(before)])
+  const originals = new Set([...surveyCollectedZoneIds(appliedMembers), ...surveyOrganizationZoneIds(before)])
   if (ids.some(id => !originals.has(id))) return report('refused', [{ step: 'target', code: 'SURVEY_LIST_MEMBER_UNCONFIRMED',
     message: 'A requested Zone is not in the original explicit Survey list or its saved organization.',
     recovery: 'Read the same Survey list. Existing references, work surfaces and healthy Runs are retained.' }])
   // Omitted originals return to the ungrouped area; organization never removes membership.
   const requested = new Set(ids)
-  const applied = { ...next, ungrouped: [...next.ungrouped, ...[...originals].filter(id => !requested.has(id))] }
-  ports.set(applied)
+  const applied = request.organization === undefined ? before : { ...next, ungrouped: [...next.ungrouped, ...[...originals].filter(id => !requested.has(id))] }
+  ports.set({ surveyOrganization: applied, surveyCollectedZones: appliedMembers })
   let save: AgentMuxSpatialSave
   try { save = await ports.save() } catch (error) { save = { layoutApplied: false, localStorageWritten: false,
     storageFlushRequested: false, diskDurability: 'unconfirmed', reason: error instanceof Error ? error.message : String(error) } }
@@ -69,5 +89,7 @@ export async function executeSurveyList(ports: Ports, request: Request): Promise
   save = { ...save, diskDurability: 'unconfirmed' }
   const issues = save.reason ? [{ step: 'save', code: 'SURVEY_LIST_SAVE_UNCONFIRMED', message: save.reason,
     recovery: 'The applied organization is retained. Read this same Survey list before another change.' }] : []
-  return report(issues.length ? 'partial' : JSON.stringify(applied) === JSON.stringify(before) ? 'unchanged' : 'changed', issues, save, applied)
+  const result = report(issues.length ? 'partial' : 'unchanged', issues, save, applied, appliedMembers)
+  if (!issues.length && result.changed) result.outcome = 'changed'
+  return result
 }

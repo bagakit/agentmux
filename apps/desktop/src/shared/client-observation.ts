@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { WorkspaceLayout, WorkbenchViewLayout } from '@agentmux/layout'
 import { desktopObservationSchema } from './desktop-focus-observation.ts'
+import { parseSurveyOrganization } from '@agentmux/core/control'
 
 const id = z.string().min(1)
 const nullableId = id.nullable()
@@ -46,6 +47,16 @@ const region = z.discriminatedUnion('kind', [
     nativeOwner: z.literal('unconfirmed').optional(), error: z.string().nullable(), loading: z.boolean() }).strict()
     .refine(region => (region.nativeOwner === 'unconfirmed') === (region.navigationId === null), 'An unconfirmed Browser owner has no confirmed navigation identity.')
 ])
+const surveyReference = z.object({ tabId: id, regionId: id }).strict()
+/** Exact stored client preferences; catalog availability never filters this observation. */
+const survey = z.object({
+  collectedZoneIds: z.array(id).refine(ids => new Set(ids).size === ids.length, 'Survey membership contains duplicate Zone IDs.'),
+  organization: z.unknown().transform((value, context) => {
+    try { return parseSurveyOrganization(value, 'CONTROL_PROTOCOL_ERROR') }
+    catch (error) { context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Invalid Survey organization.' }); return z.NEVER }
+  }),
+  selection: z.object({ zoneId: id, selection: z.array(surveyReference), active: surveyReference.nullable() }).strict().nullable()
+}).strict()
 export const desktopWorkbenchObservationSchema = z.object({
   loading: z.boolean(),
   startupProgress: z.union([
@@ -56,6 +67,8 @@ export const desktopWorkbenchObservationSchema = z.object({
     total: z.number().int().nonnegative().nullable(), pending: z.boolean() }).strict().nullable().optional(),
   activeWorkspaceId: nullableId, mainSurface: z.enum(['survey', 'agents', 'workbench', 'board', 'recall']),
   focus: z.object({ executionSessionId: nullableId, pmoSessionId: nullableId }).strict(),
+  // Older producers do not observe these preferences. Absence remains unknown, never an empty list.
+  survey: survey.optional(),
   desktop: desktopObservationSchema,
   tabs: z.array(z.object({ id, workspaceId: id, topicId: id.optional(), titleRegionId: id, name: z.string().optional(),
     layout: z.object({ root: regionTree, activeRegionId: id }).strict(), regions: z.array(region) }).strict()),

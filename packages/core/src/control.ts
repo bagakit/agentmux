@@ -32,7 +32,7 @@ export type { InputObservationReference, InputPerformanceSnapshot, InputPerforma
 import type { AgentMuxToolkitPort, ToolkitRequest, ToolkitResult } from './toolkit.js'
 export * from './toolkit.js'
 export type * from './space-control.js'
-export { parseSurveyOrganization } from './survey-organization.js'
+export { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds } from './survey-organization.js'
 export type * from './desktop-focus-control.js'
 export * from './mote-context-observation.js'
 import type { AgentMuxMoteContextEvidenceTarget, AgentMuxMoteContextObservation } from './mote-context-observation.js'

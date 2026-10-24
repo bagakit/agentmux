@@ -1,6 +1,16 @@
 import { AgentMuxError } from './errors.js'
 import { settingsResourceBudget, settingsResourceEnvelope } from './settings-resource-json.js'
-import type { AgentMuxSurveyOrganization } from './space-control.js'
+import type { AgentMuxSurveyCollectionChange, AgentMuxSurveyOrganization } from './space-control.js'
+
+/** Reuse the same exact-ID/dense-array codec for membership and organization. */
+export function parseSurveyZoneIds(value: unknown, code = 'INVALID_CONTROL_REQUEST'): string[] {
+  return parseSurveyOrganization({ ungrouped: value, groups: [] }, code).ungrouped
+}
+
+export function parseSurveyCollectionChange(value: unknown, code = 'INVALID_CONTROL_REQUEST'): AgentMuxSurveyCollectionChange {
+  const raw = settingsResourceEnvelope(value, ['zoneIds', 'expectedZoneIds'], code)
+  return { zoneIds: parseSurveyZoneIds(raw.zoneIds, code), expectedZoneIds: parseSurveyZoneIds(raw.expectedZoneIds, code) }
+}
 
 /** One portable codec for public wire and the original client preference owner. */
 export function parseSurveyOrganization(value: unknown, code = 'INVALID_CONTROL_REQUEST'): AgentMuxSurveyOrganization {

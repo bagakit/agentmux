@@ -822,8 +822,9 @@ async function relaunchInstalledApplication(appPath) {
 }
 
 // Tab/Region arrays are registries. Layout arrays retain their presentation order.
-function workbenchIdentity(workbench, { expectedAfterRestart = false } = {}) {
+function workbenchIdentity(workbench, { expectedAfterRestart = false, includeSurvey = true } = {}) {
   return { activeWorkspaceId: workbench.activeWorkspaceId, mainSurface: workbench.mainSurface, focus: workbench.focus,
+    ...(includeSurvey ? { survey: workbench.survey } : {}),
     layouts: workbench.layouts, tabs: workbench.tabs.map(tab => ({ ...tab, regions: tab.regions.map(region => {
       if (region.kind === 'agent' || region.kind === 'terminal') {
         const { control, processState, ...descriptor } = region
@@ -851,7 +852,9 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
     assert(observation.main.renderer.identity.shell === bundled.identity.shell && observation.main.renderer.identity.ctxmux === bundled.identity.ctxmux,
       'The loaded Renderer does not belong to this application contract.')
     if (before) {
-      assert(isDeepStrictEqual(workbenchIdentity(observation.workbench), workbenchIdentity(before.workbench, { expectedAfterRestart: true })),
+      // Missing older facts do not gain empty values or revoke the activated GUI. The final receipt stays unknown.
+      const includeSurvey = before.workbench.survey !== undefined && observation.workbench.survey !== undefined
+      assert(isDeepStrictEqual(workbenchIdentity(observation.workbench, { includeSurvey }), workbenchIdentity(before.workbench, { expectedAfterRestart: true, includeSurvey })),
         'The original workbench, Region descriptors or focus have not been restored.')
       for (const tab of before.workbench.tabs) for (const region of tab.regions) {
         const restored = observation.workbench.tabs.find(candidate => candidate.id === tab.id)?.regions.find(candidate => candidate.regionId === region.regionId)
@@ -1065,6 +1068,10 @@ export async function installApplication(appPath, { intent = installIntent, home
     process.stdout.write(`activated_serving_owners=${JSON.stringify(activatedOwners)}\n`)
     if (intent === 'ui-only' && !before) return { intent, ui: { status: 'unknown', path: destination, observation: observed,
       reason: 'The candidate GUI is active. Without an outgoing workbench observation, complete recovery cannot be confirmed.' }, native }
+    if (observed.workbench.survey === undefined || before && before.workbench.survey === undefined) return { intent, ui: {
+      status: 'unknown', path: destination, observation: observed,
+      reason: 'The candidate GUI is active. Complete Survey continuity is unconfirmed because an original or restored stored preference observation is unavailable.',
+      continuity: { before: structuredClone(before), after: structuredClone(observed) } }, native }
     return { intent, ui: { status: 'committed', main: observed.main, path: destination, observation: observed }, native }
   } catch (error) {
     if (!error.transaction) error.transaction = { intent, ui: { status: 'unknown', error: error.message }, native }

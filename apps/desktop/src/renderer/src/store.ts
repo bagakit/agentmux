@@ -97,7 +97,7 @@ import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { goalProjectContext, goalProjectContextText } from './lib/goal-project-context'
 import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext, type SpatialControlOptions } from './lib/space-agent-control'
 import { executeWorkfaceAgentView } from './lib/workface-agent-view'
-import { executeSurveyList, restoreSurveyOrganization } from './lib/survey-list'
+import { changeSurveyCollection, executeSurveyList, restoreSurveyOrganization, surveyCollectedZoneIds } from './lib/survey-list'
 import { executeWorkspaceAgentOrder, restoreWorkspaceAgentOrder, workspaceAgentOrderMembers } from './lib/workspace-agent-order'
 import { executeWorkfaceRegionSwap } from './lib/workface-region-swap'
 import { executeWorkfaceFileOpen } from './lib/workface-file-open'
@@ -4127,6 +4127,18 @@ export function adoptAgentRegionObservation(reference: AgentRegionReference & { 
   })
 }
 
+function confirmedSurveyZones(state: AppState): (zoneId: string) => boolean {
+  let confirmed: Set<string> | undefined
+  return zoneId => {
+    if (!confirmed) {
+      const scratch = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+      const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch) ?? []
+      confirmed = new Set(spatialCatalog(state, topics).zones.filter(zone => zone.kind !== 'unknown').map(zone => zone.zoneId))
+    }
+    return confirmed.has(zoneId)
+  }
+}
+
 const nonBrowserWorkbenchStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = {
   getItem: () => null,
   setItem: () => undefined,
@@ -5136,7 +5148,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   surveyCollectedZones: {},
   surveyOrganization: restoreSurveyOrganization(undefined),
   async setSurveyOrganization(organization, expected) {
-    return await executeSurveyList({ get, set: surveyOrganization => set({ surveyOrganization }), save: () => saveWorkbenchSelection(false) },
+    return await executeSurveyList({ get, set, hasZone: confirmedSurveyZones(get()), save: () => saveWorkbenchSelection(false) },
       { schemaVersion: 5, requestId: mintObjectId(), operation: 'space.survey-list', organization, expected })
   },
   surveyExplorationNames: {},
@@ -5167,16 +5179,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setSurveyZoneCollected(zoneId, collected) {
     const state = get()
     if ((state.surveyCollectedZones[zoneId] === true) === collected) return true
-    if (collected) {
-      const scratch = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
-      const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch) ?? []
-      const zone = spatialCatalog(state, topics).zones.find(zone => zone.zoneId === zoneId)
-      if (!zone || zone.kind === 'unknown') return false
-      set({ surveyCollectedZones: { ...state.surveyCollectedZones, [zoneId]: true } })
-    } else {
-      const { [zoneId]: _removed, ...surveyCollectedZones } = state.surveyCollectedZones
-      set({ surveyCollectedZones })
-    }
+    const members = surveyCollectedZoneIds(state.surveyCollectedZones)
+    const surveyCollectedZones = changeSurveyCollection(state.surveyCollectedZones,
+      collected ? [...members, zoneId] : members.filter(id => id !== zoneId), confirmedSurveyZones(state))
+    if (!surveyCollectedZones) return false
+    set({ surveyCollectedZones })
     // Membership is a discrete user action, not a drag that can wait for a trailing write.
     void saveWorkbenchSelection(false)
     return true
@@ -5966,7 +5973,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw Object.assign(new Error('Settings requests belong to the Main configuration owner.'), { code: 'CONTROL_FAILED' })
     }
     if (request.operation === 'space.survey-list') return { operation: request.operation, ...await executeSurveyList({ get,
-      set: surveyOrganization => set({ surveyOrganization }), save: () => saveWorkbenchSelection(false) }, request) }
+      set, hasZone: confirmedSurveyZones(get()), save: () => saveWorkbenchSelection(false) }, request) }
     if (request.operation === 'space.agent-order') return { operation: request.operation, ...await executeWorkspaceAgentOrder({ get, resolveExecution: agentRegionExecution,
       set: (id, value) => set(state => ({ workspaceAgentOrder: { ...state.workspaceAgentOrder, [id]: value } })),
       save: () => saveWorkbenchSelection(false)
@@ -6228,6 +6235,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         loading: state.loading, startupProgress: state.startupProgress, startupAgentAvailability: state.startupAgentAvailability,
         activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
         focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId },
+        survey: { collectedZoneIds: Object.keys(state.surveyCollectedZones).filter(id => state.surveyCollectedZones[id] === true),
+          organization: state.surveyOrganization, selection: persistedSurveyZoneSelection(state.surveyZoneSelection) },
         desktop: { selection, ...presentation,
           focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId, agent: readFocusAgentPresentation(state.focusAgentReveal) } },
         layouts: state.layouts,
