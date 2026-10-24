@@ -3,6 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_VIEW_IDS, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_MIN, MOTE_DIRECTORY_AVATAR_SIZE_MAX, type MoteDirectoryView } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
+import { MoteOriginStory } from './MoteOriginStory'
 import '../../styles/mote-directory.css'
 import '../../styles/settings-mote.css'
 
@@ -29,6 +30,7 @@ export function MoteDirectorySettingsPane({ view, avatarSize, onSave, onOpen }: 
     submitted.finish(await save.run(() => onSave(submitted.value, submitted.expected)))
   }
   return <div className="settings-pane-stack settings-mote">
+    <MoteOriginStory />
     <section className="settings-group">
       <header><span>Directory view</span><small>Saved: {moteDirectoryViewLabel(view)}</small></header>
       <fieldset className="mote-directory-settings" style={{ '--mote-directory-avatar-size': `${draft.value.avatarSize}px` } as CSSProperties}><legend className="sr-only">Mote directory view</legend>
