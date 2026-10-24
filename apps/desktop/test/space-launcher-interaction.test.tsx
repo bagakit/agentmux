@@ -138,7 +138,7 @@ describe('the shared Space Launcher through its original consumers', () => {
     useAppStore.getState().setAgentComposerDraft(regionId, draft)
     const send = vi.spyOn(useAppStore.getState(), 'send'), launch = vi.spyOn(api.sessions, 'launchAgent')
     await dom.render(launcher())
-    expect(dom.container.querySelector('.launcher-mote__create')?.textContent).toBe('Open')
+    expect(dom.container.querySelector('.launcher-mote__create')?.textContent).toBe('Discuss with')
     await dom.click('.launcher-mote__create')
     expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, targetTopicId: topic.id, targetTabId: 'mote-tab' })
     expect(api.scratch.ensureMote).not.toHaveBeenCalled()
@@ -151,7 +151,7 @@ describe('the shared Space Launcher through its original consumers', () => {
   it('a complete Mote request queues once through the original input owner and preserves both drafts', async () => {
     await addMote()
     await dom.render(launcher())
-    expect(dom.container.querySelector('.launcher-mote__create')?.textContent).toBe('Create with')
+    expect(dom.container.querySelector('.launcher-mote__create')?.textContent).toBe('Discuss with')
     await dom.click('.launcher-mote__create')
     const queue = useAppStore.getState().agentSteerQueues['mote-agent']
     expect(queue).toHaveLength(1)

@@ -47,7 +47,7 @@ async function choose(name: string) {
 
 describe('explicit selected Mote creation request', () => {
   it('queues one complete request through the actual send owner and preserves both independent drafts', async () => {
-    await mount(); expect(createButton().textContent).toBe('Create with'); expect(dom.container.querySelector('.launcher-mote__target')?.textContent).toBe('Mote')
+    await mount(); expect(createButton().textContent).toBe('Discuss with'); expect(dom.container.querySelector('.launcher-mote__target')?.textContent).toBe('Mote')
     const originalButton=createButton(),themed=structuredClone(GRAPHITE_THEME);themed.id='custom.mote-accepted';themed.name='Accepted request icon';themed.icons={'status.accepted':{kind:'paths',paths:[{d:'M4 4H20V20H4Z'}]}};await act(async()=>{expect(previewTheme(themed).applied).toBe(true)});await act(async () => { createButton().click(); createButton().click() });expect(createButton()).toBe(originalButton);expect(createButton().querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('status.accepted'));expect(document.getElementById(semanticIconHref('status.accepted').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
     const queue = useAppStore.getState().agentSteerQueues['selected-mote']
     expect(queue).toHaveLength(1); expect(queue![0]!.text).toContain('Help me create an Agent'); expect(queue![0]!.text).toContain(("Project: Project\nHost: local\nWorking directory: " + _hygiene_fixturePath("repo") + "\n\n")+sourcePrompt)

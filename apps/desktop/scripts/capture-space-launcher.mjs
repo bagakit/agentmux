@@ -18,11 +18,10 @@ const sources = {}, styles = {}
 // Compile isolated counterexamples without ever editing the shared working tree.
 const mutation = process.env.LAUNCHER_AFFORDANCE_MUTATION
 const mutations = {
-  overflow: ['components/AgentExecutorPicker.tsx', 'const overflow = catalog.scrollHeight > catalog.clientHeight + 1', 'const overflow = false'],
-  scroll: ['components/AgentExecutorPicker.tsx', 'scroll.atEnd ? 0 : catalog.scrollTop + catalog.clientHeight', 'catalog.scrollTop'],
-  button: ['styles/launcher.css', 'border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl);', 'border: 0; border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl);']
+  overflow: ['components/AgentExecutorPicker.tsx', 'const after = catalog.scrollTop + catalog.clientHeight < catalog.scrollHeight - 1', 'const after = false'],
+  position: null
 }
-assert(!mutation || mutations[mutation], 'Unknown Launcher affordance mutation')
+assert(!mutation || Object.hasOwn(mutations, mutation), 'Unknown Launcher affordance mutation')
 const mutationHits = []
 const receipt = { passed: false, captureOnly: true, visualReview: 'pending-independent-review',
   mutation: mutation ?? null, mutationHits,
@@ -31,13 +30,13 @@ await mkdir(evidence, { recursive: true })
 try {
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: sourceAliases },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' }, worker: { format: 'es' },
-    css: { postcss: { plugins: mutation === 'button' ? [{ postcssPlugin: 'launcher-button-counterexample', Once(css) {
-      css.walkRules('.launcher-mote__actions', rule => {
-        const border = rule.nodes.find(node => node.prop === 'border')
-        if (!border) return
-        assert.equal(border.value, '1px solid var(--line)', 'Mutate the actual Mote boundary declaration')
+    css: { postcss: { plugins: mutation === 'position' ? [{ postcssPlugin: 'launcher-position-counterexample', Once(css) {
+      css.walkRules('.launcher-mote', rule => {
+        const margin = rule.nodes.find(node => node.prop === 'margin-inline-end')
+        if (!margin) return
+        assert.equal(margin.value, 'auto', 'Mutate the actual Mote positioning declaration')
         const original = hash(rule.source.input.css)
-        border.value = '0'
+        margin.value = '0'
         mutationHits.push({ file: 'apps/desktop/src/renderer/src/styles/launcher.css', original, compiledRule: hash(rule.toString()) })
       })
     } }] : [] } },
@@ -47,7 +46,7 @@ try {
       const relative = file.slice(repository.length + 1)
       if (file.endsWith('.css')) styles[relative] = hash(source)
       else if (!id.includes('?')) sources[relative] = hash(source)
-      if (mutation && mutation !== 'button' && file === join(repository, 'apps/desktop/src/renderer/src', mutations[mutation][0])) {
+      if (mutation && mutation !== 'position' && file === join(repository, 'apps/desktop/src/renderer/src', mutations[mutation][0])) {
         const [, from, to] = mutations[mutation]
         assert.equal(source.split(from).length, 2, 'Mutation must replace exactly one actual implementation')
         const code = source.replace(from, to)
