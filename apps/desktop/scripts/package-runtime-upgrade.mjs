@@ -655,6 +655,47 @@ export function assertUiRuntimeObservation(observation, confirmation, originalOb
   }
 }
 
+/** Qualify only changed raw-shell bindings; never relax the original healthy Run pins. */
+export async function confirmUiTerminalRebindings(plan, confirmation, originalObservation, observation) {
+  if (originalObservation === null) return []
+  const original = parseDesktopClientObservation(originalObservation), observed = parseDesktopClientObservation(observation)
+  const changed = []
+  for (const tab of original.workbench.tabs) for (const region of tab.regions) {
+    if (region.kind !== 'terminal') continue
+    const current = observed.workbench.tabs.find(row => row.id === tab.id)?.regions.find(row => row.regionId === region.regionId)
+    fail(current?.kind === 'terminal', 'The original raw Terminal Region is unconfirmed.')
+    if (region.sessionId === current.sessionId) continue
+    const binding = value => value.control?.kind === 'terminal' && value.sessionId === value.control.runId &&
+      value.control.runId === value.control.run.runId
+    fail(region.processState === 'interrupted' && current.processState === 'running' && binding(region) && binding(current) &&
+      region.control.hostId === 'local' && current.control.hostId === region.control.hostId && region.workspaceId === current.workspaceId,
+    'The changed raw Terminal binding has no exact interrupted original target. Its continuity is unconfirmed.')
+    changed.push({ tabId: tab.id, regionId: region.regionId, hostId: region.control.hostId,
+      previousRunId: region.control.run.runId, currentRunId: current.control.run.runId })
+  }
+  if (!changed.length) return []
+  fail(plan && confirmation, 'The changed raw Terminal binding has no confirmed original Native owner. Its continuity is unconfirmed.')
+  assertUiRuntimeObservation(observed, confirmation, original)
+  const runtime = confirmation.runtime
+  const ids = [...new Set(changed.flatMap(row => [row.previousRunId, row.currentRunId]))]
+  const { stdout } = await exec(process.execPath, [script, '--status', plan.newSdk, plan.old.socketPath,
+    JSON.stringify(ids), JSON.stringify(runtime)], {
+    maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+  })
+  const statuses = JSON.parse(stdout)
+  fail(statuses.length === ids.length && ids.every(id => statuses.filter(run => run.id === id).length === 1),
+    'The changed raw Terminal Native observations are incomplete. Its continuity is unconfirmed.')
+  return changed.map(row => {
+    const previous = statuses.find(run => run.id === row.previousRunId), current = statuses.find(run => run.id === row.currentRunId)
+    fail(previous.state.type === 'interrupted' && previous.state.reason === 'daemon_restart' && current.state.type === 'running' &&
+      typeof previous.workspacePath === 'string' && previous.workspacePath.length > 0 && current.workspacePath === previous.workspacePath,
+    'The changed raw Terminal has no confirmed daemon-restart recovery in its original cwd. Its continuity is unconfirmed.')
+    return { ...row, runtimeId: runtime.runtimeId, daemonInstanceId: runtime.daemonInstanceId,
+      previous: { id: previous.id, state: previous.state, workspacePath: previous.workspacePath },
+      current: { id: current.id, state: current.state, workspacePath: current.workspacePath } }
+  })
+}
+
 /** Preflight before closing the GUI. Never signals or starts a Runtime. */
 export async function prepareRuntimeUpgrade(currentApp, candidateApp, { coldOnly = false } = {}) {
   const old = await artifact(currentApp), candidate = await artifact(candidateApp)
@@ -795,7 +836,7 @@ if (process.argv[1] && resolve(process.argv[1]) === script) {
       await inspectRead('status identity', process.argv[4], { runId: id }, () => {
         fail(run.id === id, 'The Runtime returned another Run instead of the requested identity.')
       })
-      statuses.push({ id: run.id, pid: run.pid, state: run.state, acceptedInputBytes: run.applied_input_bytes,
+      statuses.push({ id: run.id, pid: run.pid, state: run.state, workspacePath: run.spec?.cwd ?? null, acceptedInputBytes: run.applied_input_bytes,
         outputBytes: run.latest_output_bytes, currentSize: run.current_size })
     }
     process.stdout.write(JSON.stringify(statuses))
