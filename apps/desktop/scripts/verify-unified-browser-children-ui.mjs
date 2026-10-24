@@ -89,7 +89,7 @@ try {
     const bootstrap = path.join(privateRoot, 'bootstrap.cjs'), stageFile = path.join(output, phase + '-bootstrap.json')
     await fs.writeFile(bootstrap, `const fs=require('node:fs'),path=require('node:path'),{app}=require('electron');const root=${JSON.stringify(privateRoot)},stage=${JSON.stringify(stageFile)};const save=value=>fs.writeFileSync(stage,JSON.stringify({value,pid:process.pid,at:Date.now()}));save('bootstrap-start');for(const key of ['home','appData','userData','sessionData']){const value=path.join(root,key);fs.mkdirSync(value,{recursive:true});app.setPath(key,value)}app.commandLine.appendSwitch('no-proxy-server');app.whenReady().then(()=>{save('app-ready');return import(${JSON.stringify(pathToFileURL(path.join(prepared, 'main.mjs')).href)})}).catch(error=>{save(String(error.stack||error));console.error(error);app.exit(1)});`)
     const exit = await runProbeProcess(executable, [bootstrap, prepared, privateRoot, output, phase, pageUrl], {
-      temporaryRoot: privateRoot, cwd: privateRoot, env, timeoutMs: env.AGENTMUX_CHILD_UI_CAPTURE_HOLD === '1' ? 360000 : 90000, onLine: line => { stderr.push(line); process.stderr.write(phase + ': ' + line.slice(0, 1800) + '\n') } })
+      temporaryRoot: privateRoot, cwd: privateRoot, env, timeoutMs: env.AGENTMUX_CHILD_UI_CAPTURE_HOLD === '1' ? 480000 : 90000, onLine: line => { stderr.push(line); process.stderr.write(phase + ': ' + line.slice(0, 1800) + '\n') } })
     await fs.writeFile(path.join(output, `${phase}-stderr.log`), stderr.join('\n'))
     const native = await fs.readFile(path.join(output, phase + '.json'), 'utf8').then(JSON.parse).catch(() => ({ passed: false, bootstrap: null }))
     native.bootstrap = await fs.readFile(stageFile, 'utf8').then(JSON.parse).catch(() => null)

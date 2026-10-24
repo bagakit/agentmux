@@ -124,10 +124,10 @@ async function capture(window: BrowserWindow, label: string) {
     const release = join(output, `${phase}-${label}-capture-release`)
     const independentFilename = `${phase}-${label}-${captureProvider}.png`
     const request = { pid: process.pid, title: window.getTitle(), browserWindowId: window.id, mediaSourceId: window.getMediaSourceId(), nativeId,
-      appPath: process.execPath, provider: captureProvider, output: join(output, independentFilename), release, deadlineAt: Date.now() + 45000, alreadyComposed: composed, observation: before }
+      appPath: process.execPath, provider: captureProvider, output: join(output, independentFilename), release, deadlineAt: Date.now() + 120000, alreadyComposed: composed, observation: before }
     await writeFile(join(output, `${phase}-${label}-capture-request.json`), JSON.stringify(request))
     process.stderr.write('UI_CAPTURE_HOLD ' + JSON.stringify(request) + '\n')
-    await until('bounded independent capture hold', () => readFile(release).then(() => true).catch(() => false), 45000).catch(() => { receipt.warnings.push({ step: 'capture-hold', outcome: 'deadline', request }) })
+    await until('bounded independent capture hold', () => readFile(release).then(() => true).catch(() => false), 120000).catch(() => { receipt.warnings.push({ step: 'capture-hold', outcome: 'deadline', request }) })
     try {
       const bytes = await readFile(join(output, independentFilename)), signature = bytes.subarray(0, 8).toString('hex')
       const mimeType = signature === '89504e470d0a1a0a' ? 'image/png' : signature.startsWith('ffd8ff') ? 'image/jpeg' : null
