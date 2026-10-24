@@ -30,7 +30,7 @@ export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0, v
         if (!saved && nativeOnMiss) result = await api.connections.call('connection.metadata.refresh', { connectionId: binding.connectionId, expectedConnectionRevision: result.connectionRevision, subject }, hostingTarget)
         if (!matches(result)) { finish(request, undefined, 'Group name unconfirmed', true); return }
         const name = result.entry.observation.profile?.name
-        finish(request, name, result.entry.observation.freshness === 'stale' ? 'Saved name · refresh unconfirmed' : name ? '' : 'Group name unconfirmed')
+        finish(request, name, result.entry.observation.state === 'unavailable' ? 'Group name update unavailable' : name ? '' : 'Group name unconfirmed')
       })().catch(() => finish(request, undefined, 'Group name unconfirmed', true))
     }
     let release: (() => void) | undefined

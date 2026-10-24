@@ -30,6 +30,7 @@ export function ConnectorHeaderLinks(props: Props) {
   useEffect(() => {
     if (!props.visible || !props.hostingTarget) return
     let live = true
+    void readConnectorService(() => live, props.hostingTarget).catch(() => {})
     for (const channel of channels) void readConnectorService(() => live, props.hostingTarget, channel.adapterId).catch(() => {})
     return () => { live = false }
   }, [policyScope, props.visible, props.nameVersion, source])
