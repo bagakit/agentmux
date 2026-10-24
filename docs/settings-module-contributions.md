@@ -23,6 +23,8 @@ export const featureSettingsModule = {
 
 模块的元信息同时用于侧栏、窄窗菜单、搜索和 Overview；`SettingsSectionId` 从注册数组的 literal id 派生，不另维护一份类型名单。`overview` 是呈现页，不能作为模块 ID；ID 在注册数组内唯一，组使用现有 Preferences、Browser use、Message Tool、Remote、Conversation Channels、Resources、Work、Mote 或 Mods。组顺序和 Overview 列归属由 `settings-catalog.ts` 的唯一 `SETTINGS_GROUPS` 表达，注册数组只决定组内次序；所有导航投影沿同一目录。Work 组织 Space、Focus、Goals、Notes 的真实偏好，以及 Survey、Notes 原管理入口；Mote 是与 Preferences 平级的组，Mote Club 内容仍归原 owner。管理入口本身不生成 AppConfig 或新 CLI；只有新增实际偏好字段才补现 Main scalar 与公开调用者。Mods 的模块组 ID 是 `toolkit`，入口为 Toolkit Library。Remote 组织 Host、环境与 Mobile 设备接入；Conversation Channels 以 InApp、Lark 和 Discord 组织 App 内对话配置入口与各平台外部应用管理，准确范围见[设置行为合同](design/behavior/settings-and-observation.md#设置页的信息架构)。分组不建立另一套配置或授权 owner，不复制共享编辑表单或将只读参考包装成可写偏好。
 
+模块的 `icon` 贡献表达准确目的地；先复用共享目录中的同一产品语义，确有独立含义缺口再按[语义图标指南](guides/semantic-icons.md)扩展。已有 `semanticIconComponent` 提供稳定的语义组件，不能在业务模块复制 SVG、直接绑定库字形或再维护一张模块默认图标表。侧栏、Overview、搜索与窄窗导航消费同一贡献；外部渠道可复用本模块原 `channel.icon` 的品牌组件。辨识与用户主题边界归[模块图标身份](design/presentation/settings-and-observation.md#模块图标身份)。
+
 外部对话平台的原设置模块可通过可选 `channel` 元信息贡献准确 `adapterId`、平台域、显示名称和图标；设置目的地沿同一模块 ID 派生。公共菜单与标题栏消费原目录的唯一匹配投影，未识别的平台保原域和通用图标。该呈现不表达平台支持、权限或收发资格；实际实现能力沿原 Connection 公共记录读取，不从名称、图标或 enrollment 能力猜测。
 
 模块可用 `searchTargets` 贡献具体字段、动作或说明的静态 `id`、`title`、可选 `description` 与 `keywords`；原 Pane 用同一局部 ID 的 `data-settings-field` 标记准确位置。动作和说明分别声明 `kind: 'action'`／`'info'`，其余为设置字段。搜索只消费这些静态贡献，明确点选后才进入原 Pane 并定位；不扫描用户值、正文或隐藏页，不执行动作。动态资源仍经原库与准确对象导航；不要为其每个当前对象生成静态目标。行为与恢复边界见[设置页的信息架构](design/behavior/settings-and-observation.md#设置页的信息架构)。
