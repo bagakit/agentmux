@@ -3,6 +3,7 @@ import type { NativeConversationCheckpoint } from './session-history-changes.js'
 import type { ConversationCheckpoint } from './conversation-changes.js'
 import type { ConnectionApplication, ConnectionGrant } from './connections-contract.js'
 import type { AgentSessionHistorySource } from './types.js'
+import { dequal } from 'dequal'
 
 export type RoomBindingAuthority = { kind: 'user' | 'device' | 'agent'; id: string }
 export type RoomBindingScope = {
@@ -34,7 +35,27 @@ export type RoomBinding = Omit<RoomBindingTarget, 'regionAnchor'> & {
   /** Dedicated creation owner authorized this new conversation from its native beginning.
    * Mutually exclusive with frozen cuts; ordinary group bind/relink cannot request it. */
   publicationOrigin?: { createOperationId: string }
+  /** This owner's direct original publication boundary, unchanged by input-trigger edits. */
+  publicationBoundary?: { revision: number }
   authorizedBy: RoomBindingAuthority
+}
+export function roomPublicationReference(binding: Pick<RoomBinding, 'bindingId' | 'revision' | 'publicationBoundary'>) {
+  return { bindingId: binding.bindingId, revision: binding.publicationBoundary?.revision ?? binding.revision }
+}
+/** Exact immutable publication subjects; input triggers and navigation are independent. */
+export function sameRoomPublication(left: Omit<RoomBinding, 'state' | 'authorizedBy' | 'regionAnchor'>, right: Omit<RoomBinding, 'state' | 'authorizedBy' | 'regionAnchor'>): boolean {
+  return dequal(roomPublicationReference(left), roomPublicationReference(right)) &&
+    left.connectionId === right.connectionId && dequal(left.application, right.application) &&
+    left.externalConversationId === right.externalConversationId && left.executionHostId === right.executionHostId &&
+    left.executionRuntimeId === right.executionRuntimeId && left.agentSessionId === right.agentSessionId &&
+    left.scope.publication === right.scope.publication && dequal(left.inputTarget, right.inputTarget) &&
+    dequal(left.sourceCheckpoints, right.sourceCheckpoints) && dequal(left.sourceFrontier, right.sourceFrontier) &&
+    dequal(left.publicationOrigin, right.publicationOrigin)
+}
+/** Resolve the owner's direct original row; references never form a historical chain. */
+export function readRoomPublicationBinding(owner: Pick<RoomBindingReadPort, 'readExact'>, binding: RoomBinding): RoomBinding | null {
+  const ref = roomPublicationReference(binding), original = owner.readExact(ref.bindingId, ref.revision)
+  return original && !original.publicationBoundary && sameRoomPublication(original, binding) ? original : null
 }
 /** Original recorded request shape, not permission to dispatch a new group request. */
 export type RoomBindingRecordedBindInput = RoomBindingTarget & {
@@ -47,7 +68,7 @@ export type RoomBindingBindInput = Omit<RoomBindingRecordedBindInput, 'scope'> &
   scope: { input: RoomBindingScope['input']; publication: 'future-shared-conversation' }
 }
 export type RoomBindingRecordedRelinkInput = RoomBindingRecordedBindInput & { expectedRevision: number }
-/** Relinking includes an explicit fresh source cut, also when continuing a paused binding to the same audience. */
+/** An active unchanged full publication relationship retains its cut; changed or paused relationships take a new cut. */
 export type RoomBindingRelinkInput = RoomBindingBindInput & { expectedRevision: number }
 export type RoomBindingNoticeEvent = 'connected' | 'disconnected' | 'paused' | 'resumed' | 'updated'
 export type RoomBindingNotice = { event: RoomBindingNoticeEvent; deliveryOperationId: string }
