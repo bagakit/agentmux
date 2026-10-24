@@ -35,6 +35,7 @@ const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeObjectMapIcon = semanticIconComponent('object.map')
 const ThemeGitCompareIcon = semanticIconComponent('git.compare')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
+const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 
 
 const FileSourceEditor = lazy(loadFileSourceEditor)
@@ -114,6 +115,9 @@ export function EditorPane({
   const [drawer, setDrawer] = useState<{ key: string; section: NoteRecoverySection } | null>(null)
   const [expanded, setExpanded] = useState(false)
   const opener = useRef<{ element: HTMLElement; key: string } | null>(null)
+  // Radix returns focus after unmount; that callback must see the current workface.
+  const focusReturnKey = useRef<string | null>(null)
+  focusReturnKey.current = visible && presentation.active && !released ? key : null
   const drawerOpen = note && visible && !released && drawer?.key === key
   function openActivity(section: NoteRecoverySection, element: HTMLElement) {
     opener.current = { element, key }
@@ -208,6 +212,8 @@ export function EditorPane({
   const pendingNote = document.noteEditing?.attempt, noteReceipt = document.noteEditing?.receipt
   const historyIssue = noteReceipt?.noteHistory?.status === 'unconfirmed' ? noteReceipt.noteHistory : null
   const titleIssue = noteReceipt?.noteTitleProjection?.status === 'unconfirmed' ? noteReceipt.noteTitleProjection : null
+  const metadataIssues = [historyIssue && 'History unconfirmed', titleIssue && 'Page-list title unconfirmed',
+    (document.noteProvenance?.status === 'unconfirmed' || document.noteWriteAttribution?.status === 'unconfirmed') && 'Authorship unconfirmed'].filter(Boolean)
   const recoveryNotices = <>
         {document.noteProvenance?.status === 'unconfirmed' && document.noteWriteAttribution?.status !== 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship is unconfirmed: {document.noteProvenance.reason} Your Note remains readable and editable. <button className="small-button" onClick={() => void refresh(surface.workspaceId, surface.path)}>Check original file</button></div> : null}
         {document.noteWriteAttribution?.status === 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship from the last confirmed save is unconfirmed: {document.noteWriteAttribution.reason} Your Note remains editable; a later save with a confirmed author records its changed blocks.</div> : null}
@@ -250,7 +256,7 @@ export function EditorPane({
         <FilePathLabel path={document.path} label={previewing ? noteName : undefined} />
         <div className="editor-header__actions">
           {note ? <div className="note-view-controls" ref={noteToolbarRef} /> : null}
-          {note ? <button type="button" className="small-button" aria-label="Open versions and recovery" aria-expanded={drawerOpen} onClick={event => drawerOpen ? setDrawer(null) : openActivity('versions', event.currentTarget)}>History{keptCount ? ` · ${keptCount} kept` : ''}</button> : null}
+          {note ? <button type="button" className="small-button" aria-label="Open versions and recovery" aria-description={metadataIssues.length ? metadataIssues.join(' · ') : undefined} aria-expanded={drawerOpen} title={metadataIssues.length ? metadataIssues.join(' · ') : undefined} onClick={event => drawerOpen ? setDrawer(null) : openActivity(metadataIssues.length ? 'drafts' : 'versions', event.currentTarget)}>History{keptCount ? ` · ${keptCount} kept` : ''}{metadataIssues.length ? <ThemeStatusUnknownIcon className="note-recovery-metadata" size={12} /> : null}</button> : null}
           {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <ThemeObjectSourceCodeIcon size={13} /> : <ThemeActionPreviewIcon size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
           {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>
             : conflict ? note ? <button type="button" className="small-button" onClick={event => openActivity('drafts', event.currentTarget)}>Review changes</button> : <button className="small-button small-button--warning" disabled={saving} title="Overwrite file with this draft" aria-label="Overwrite file with this draft" onClick={() => void overwrite(tabId, surface.regionId)}><ThemeActionSaveIcon size={13} /><span className="editor-header__label">{saving ? 'Overwriting…' : 'Overwrite'}</span></button>
@@ -295,7 +301,7 @@ export function EditorPane({
       </div>
       {note ? <NoteRecoveryDrawer tabId={tabId} surface={surface} active={drawerOpen && presentation.active} section={drawer?.section ?? 'versions'}
         onSection={section => setDrawer({ key, section })} expanded={expanded} onExpand={() => setExpanded(value => !value)} observation={observation}
-        onCloseAutoFocus={event => { event.preventDefault(); if (visible && presentation.active && opener.current?.key === key && opener.current.element.isConnected && frame.current?.contains(opener.current.element)) opener.current.element.focus() }}>
+        onCloseAutoFocus={event => { event.preventDefault(); if (opener.current?.key === focusReturnKey.current && opener.current.element.isConnected && frame.current?.contains(opener.current.element)) opener.current.element.focus() }}>
         {recoveryNotices}
       </NoteRecoveryDrawer> : null}
       </div>

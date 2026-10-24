@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, ReactFlow, applyNodeChanges, useStore, useUpdateNodeInternals, type Edge, type EdgeProps, type Node, type NodeProps, type NodeChange, type Viewport, type ReactFlowInstance } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
-import { NoteReader, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteReader'
+import { NoteReader, NoteReaderMetadata, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteReader'
 import { NoteFileLinkContext } from '@agentmux/client-ui/components/NoteFileContext'
 import { useDesktopNoteLinkOpener } from '../lib/note-file-link'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -48,9 +48,9 @@ const NO_BLOCK_IDS: readonly string[] = []
 type NoteAreaBodyStatus = {
   dirty: boolean
   draftView: boolean
+  noteProvenance: NoteFileDocument['noteProvenance']
   readingMode: 'document' | 'summary' | 'related'
   headingLabel: string
-  savedBadge: string | null
   emptyMessage: string | null
   stateMessage: string | null
   stateActionLabel: string | null
@@ -172,7 +172,7 @@ const NoteBlockCard = memo(function NoteBlockCard({ id, data, selected }: NodePr
     onMouseLeave={() => data.onPeekBlock(null, undefined)}
     onDoubleClick={event => event.stopPropagation()}>
     <header className="note-canvas-block-drag">
-      <span className="note-canvas-block-badge"><NoteBlockIcon size={12} /><span>{data.topBlockIndex !== undefined ? `Block ${data.topBlockIndex + 1}` : data.blockId}</span></span>
+      <span className="note-canvas-block-badge" title={`Original block: ${data.blockId}`}><NoteBlockIcon size={12} /><span>{data.topBlockIndex !== undefined ? `Block ${data.topBlockIndex + 1}` : 'Related block'}</span></span>
       {data.openable && data.topBlockIndex === undefined && data.source?.blocks.has(data.blockId) ? <button type="button" className="note-canvas-block-open nodrag" aria-label={`Open block ${data.blockId}`} onClick={() => data.onOpen(data.noteId, data.blockId)}><OpenIcon size={11} /></button> : null}
     </header>
     {mountedPorts.map(blockId => <div key={blockId} className="note-canvas-row-endpoint note-canvas-endpoint" data-port-block-id={blockId} title={`Original block: ${blockId}`} style={{ visibility: activePorts.includes(blockId) ? 'visible' : 'hidden' }}><EndpointHandles kind="block" blockId={blockId} /></div>)}
@@ -183,7 +183,7 @@ const NoteBlockCard = memo(function NoteBlockCard({ id, data, selected }: NodePr
         data.onFocusBlock(data.noteId, block.dataset.blockId)
       }
     }}>
-      <NoteReader key={data.draftView ? 'draft' : 'saved'} resource={data.resource} agentNames={agentNames} noteProvenance={data.readable.noteProvenance} content={data.readable.content} path={data.resource.path} workspaceId={data.resource.workspaceId} revision={data.readable.revision} documents={data.documents} graph={data.snapshot.graph} draftIncludes={data.draftView ? draftIncludes : undefined} onOpenDraftSource={target => data.onOpen(target.noteId, target.blockId, target.resource)} readInclude={target => data.onRead(target.noteId)} blockIds={readerBlockIds} topBlockIndex={data.topBlockIndex} previewBlockCount={data.previewBlockCount} compactIncludes highlightBlockIds={data.draftView ? NO_BLOCK_IDS : data.highlightedBlockIds} readReference={target => data.onRead(target.noteId)} onOpenLink={data.onOpenLink} />
+      <NoteReader key={data.draftView ? 'draft' : 'saved'} resource={data.resource} agentNames={agentNames} noteProvenance={data.readable.noteProvenance} content={data.readable.content} path={data.resource.path} workspaceId={data.resource.workspaceId} revision={data.readable.revision} documents={data.documents} graph={data.snapshot.graph} draftIncludes={data.draftView ? draftIncludes : undefined} onOpenDraftSource={target => data.onOpen(target.noteId, target.blockId, target.resource)} readInclude={target => data.onRead(target.noteId)} blockIds={readerBlockIds} topBlockIndex={data.topBlockIndex} previewBlockCount={data.previewBlockCount} compactIncludes showDocumentMetadata={false} highlightBlockIds={data.draftView ? NO_BLOCK_IDS : data.highlightedBlockIds} readReference={target => data.onRead(target.noteId)} onOpenLink={data.onOpenLink} />
     </div>
     {selectedBlock && data.source?.blocks.has(selectedBlock) && data.openable ? <button type="button" className="note-canvas-open-block nodrag" onClick={() => data.onOpen(data.noteId, selectedBlock)}><OpenIcon size={12} />Open selected block</button> : null}
   </section>
@@ -260,7 +260,6 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNote
           </div> : <>
             <div className="note-canvas-saved-heading">
               <span>{bodyStatus.headingLabel}</span>
-              {bodyStatus.savedBadge ? <span>{bodyStatus.savedBadge}</span> : null}
             </div>
             {bodyStatus.emptyMessage ? <p className="note-canvas-empty-body">{bodyStatus.emptyMessage}</p>
               : data.sharedReadable && data.sharedResource ? <>
@@ -271,7 +270,7 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNote
                     data.onFocusBlock(item.id, block.dataset.blockId)
                   }
                 }}>
-                  <NoteReader key={bodyStatus.draftView ? 'draft' : 'saved'} resource={data.sharedResource} agentNames={agentNames} noteProvenance={data.sharedReadable.noteProvenance} content={data.sharedReadable.content} path={data.sharedResource.path} workspaceId={data.sharedResource.workspaceId} revision={data.sharedReadable.revision} documents={data.documents} graph={data.snapshot.graph} readInclude={target => data.onRead(target.noteId)} previewBlockCount={item.kind !== 'shared-block' && bodyStatus.readingMode === 'summary' ? 3 : undefined} compactIncludes highlightBlockIds={data.selectedBlockIds.length ? data.selectedBlockIds : data.focusedBlockIds} readReference={target => data.onRead(target.noteId)} onOpenLink={data.onOpenLink} />
+                  <NoteReader key={bodyStatus.draftView ? 'draft' : 'saved'} resource={data.sharedResource} agentNames={agentNames} noteProvenance={data.sharedReadable.noteProvenance} content={data.sharedReadable.content} path={data.sharedResource.path} workspaceId={data.sharedResource.workspaceId} revision={data.sharedReadable.revision} documents={data.documents} graph={data.snapshot.graph} readInclude={target => data.onRead(target.noteId)} previewBlockCount={item.kind !== 'shared-block' && bodyStatus.readingMode === 'summary' ? 3 : undefined} compactIncludes showDocumentMetadata={item.kind === 'shared-block'} highlightBlockIds={data.selectedBlockIds.length ? data.selectedBlockIds : data.focusedBlockIds} readReference={target => data.onRead(target.noteId)} onOpenLink={data.onOpenLink} />
                 </div>
                 {selectedSharedBlock && data.source?.blocks.has(selectedSharedBlock) ? <button type="button" className="note-canvas-open-block" onClick={() => data.onOpen(item.id, selectedSharedBlock)}><OpenIcon size={12} />Open selected block</button> : null}
               </>
@@ -284,6 +283,7 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNote
     <div className="note-canvas-degrees" aria-label={`${item.incoming} incoming, ${item.outgoing} outgoing occurrences in the saved graph`} title="Saved links and references, including notes outside this view. Unmatched links count only as outgoing."><span><SemanticIcon name="note.reference-incoming" size={10} /> {item.incoming} incoming</span><span><SemanticIcon name="note.reference-outgoing" size={10} /> {item.outgoing} outgoing</span></div>
     <footer className="nodrag">{item.kind === 'shared-block' ? <button type="button" onClick={() => data.onOpen(item.id)} disabled={!openable}><OpenIcon size={12} />Open original</button> : <button type="button" aria-expanded={data.preview} aria-label={`${data.preview ? 'Show related blocks' : 'Full note'}: ${title}`} onClick={() => { if (!data.content?.pending && (!data.content?.value || data.content.value.status !== 'read')) data.onRead(item.id); data.onPreview(item.id) }} disabled={!readable}>{data.preview ? <RelatedBlocksIcon size={12} /> : <FullNoteIcon size={12} />}{data.preview ? 'Related blocks' : 'Full note'}</button>}
       <button type="button" aria-expanded={data.expanded} aria-label={`${data.expanded ? 'Collapse' : 'Expand'} relationships: ${item.title}`} onClick={() => data.onNeighbors(item.id)} disabled={!item.neighbors}><RelationshipsIcon size={12} />{data.expanded ? 'Collapse' : 'Explore'}<small>{item.neighbors}</small></button>
+      {item.kind !== 'shared-block' && !overview ? <NoteReaderMetadata noteProvenance={bodyStatus?.noteProvenance} /> : null}
     </footer>
   </article>
 })
@@ -575,7 +575,6 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
       const displayedIds = savedSource ? projectNoteBlocks(savedSource, shown).shownBlockIds : NO_BLOCK_IDS
       const remaining = confirmed && !draftView && !whole && !summary ? related.filter(id => !displayedIds.includes(id)) : NO_BLOCK_IDS
       const headingLabel = draftView ? whole ? 'Full note' : 'Summary' : whole ? item.kind === 'shared-block' ? 'Saved original' : 'Full saved note' : summary ? 'Summary' : `${related.length} related block${related.length === 1 ? '' : 's'}`
-      const savedBadge = item.kind !== 'shared-block' ? (draftView ? 'Not saved' : 'Saved original') : null
       let stateMessage: string | null = null, stateActionLabel: string | null = null, onStateAction: (() => void) | undefined
       if (!readableDoc) {
         stateMessage = draftView
@@ -602,9 +601,9 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
       const bodyStatus: NoteAreaBodyStatus = {
         dirty,
         draftView,
+        noteProvenance: readableDoc?.noteProvenance,
         readingMode,
         headingLabel,
-        savedBadge,
         emptyMessage: readableDoc && empty ? (draftView ? 'No content in current draft.' : 'No saved content yet.') : null,
         stateMessage,
         stateActionLabel,

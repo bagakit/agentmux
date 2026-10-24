@@ -10,6 +10,7 @@ import type { AgentMuxSpaceLocation } from '@agentmux/core/control'
 import { groupIds, regionIds } from '@agentmux/layout'
 import { editorSaveAction } from '../lib/editor-save-shortcut'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { regionCaretFocusTargets } from '../lib/region-focus'
 import { loadedNoteFiles, noteFilesFromDocuments, noteKnowledge, parseNoteFile, type NoteSource } from '../lib/note-knowledge'
 import { noteDirectorySourceFacts, noteDirectorySourceKey } from '../lib/note-directory-sources'
@@ -32,6 +33,7 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { setNoteComposition } from '../lib/note-live-merge'
 
 type SourceChoice = { source: NoteSource; blockId: string; location: AgentMuxSpaceLocation; displayName: string; tabName: string; position: string }
+const SourceScopeIcon = semanticIconComponent('status.unknown')
 
 /** Rich presentation on the original File surface and its original update/save/reveal owner. */
 export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
@@ -58,6 +60,8 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
   const directoryFacts = useMemo(() => directory ? noteDirectorySourceFacts(directory, { config, documents: notes,
     workspaceFileRevisions: { [surface.workspaceId]: fileRevision }, documentIssues: Object.fromEntries(directory.paths.map((path, index) => [documentKey(surface.workspaceId, path), directoryIssues[index]])) }) : null,
     [directory, config, notes, fileRevision, directoryIssues, surface.workspaceId])
+  const directoryScope = !directoryFacts ? 'Loaded Notes only' : directoryFacts.status === 'reading' ? 'Checking this directory…'
+    : directoryFacts.status === 'unknown' ? 'Directory unconfirmed' : `${directoryFacts.confirmedPaths.length} confirmed in this directory${directoryFacts.status === 'partial' ? ' · partial' : ''}`
   const reveal = useAppStore(state => state.documentRevealTargets[key])
   const focusRequest = useAppStore(state => regionCaretFocusTargets(state.regionCaretFocus, surface.regionId) ? state.regionCaretFocus?.nonce : undefined)
   const update = useAppStore(state => state.updateNoteDocument)
@@ -219,11 +223,10 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     <NoteReadingReturn />
     <NoteSharedFileEditing target={{ workspaceId: surface.workspaceId, path: surface.path, hostId: originalResource?.hostId ?? '', workspacePath: originalResource?.path ?? '', noteId: sharedNote?.status === 'valid' ? sharedNote.note.noteId : '' }} read={sharedRead} occurrence={occurrence} active={presentation.active} hasIncludes={hasIncludes} knowledge={knowledge} onOpen={onOpen} onOpenOriginal={openOriginal}>
     <NoteFileView sourceCoverage={
-      <details className="note-directory-sources" aria-label="Note sources"><summary>Source coverage <span>{!directoryFacts ? 'Loaded Notes only' : directoryFacts.status === 'reading' ? 'Checking this directory…'
-        : directoryFacts.status === 'unknown' ? 'Directory unconfirmed' : directoryFacts.status === 'partial' ? 'Partial' : null}</span></summary>
+      <details className="note-directory-sources" aria-label="Note sources"><summary title={directoryScope} aria-description={directoryScope}>Sources{directoryFacts?.status !== 'complete' ? <SourceScopeIcon size={12} /> : null}</summary>
         <button type="button" className="note-text-button" disabled={directoryFacts?.status === 'reading'} onClick={() => void useAppStore.getState().refreshNoteDirectorySources(tabId, surface.regionId)}>Refresh directory</button>
-        {directoryFacts && directoryFacts.status !== 'reading' && directoryFacts.status !== 'unknown' && <p className="note-scope">{directoryFacts.confirmedPaths.length} confirmed in this directory{directoryFacts.status === 'partial' ? ' · partial' : ''}</p>}
-        <p className="note-scope">This checks the original Note directory. Other directories may contain more sources.</p>
+        <p className="note-scope">{directoryScope}. This checks the original Note directory. Other directories may contain more sources.</p>
+        {directoryFacts?.issues.length ? <p className="note-scope" role="status">{directoryFacts.issues.join(' ')}</p> : null}
         {directoryFacts?.unreadPaths.length ? <div className="note-scope"><strong>Not yet read</strong>{directoryFacts.unreadPaths.map(path => <div className="note-unread-source" key={path}><span>{path}</span>
           <button type="button" className="note-text-button" aria-label={`Open Note source ${surface.workspaceId} · ${path}`} onClick={() => void openUnread(path)}>Open</button></div>)}</div> : null}
         {directoryFacts?.unconfirmedPaths.length ? <div className="note-scope"><strong>Unconfirmed sources</strong>{directoryFacts.unconfirmedPaths.map(path => <div key={path}>{path}</div>)}</div> : null}

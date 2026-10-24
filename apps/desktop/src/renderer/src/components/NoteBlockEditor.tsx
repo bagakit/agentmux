@@ -451,7 +451,8 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       <NoteLinkActions editor={editor} /><EditorContent editor={editor} /><NoteBlockAuthors editor={editor} agentNames={agentNames} />
     </div>
     {wiki.popup}
-    {showBacklinks ? <details className="note-backlinks"><summary>Backlinks{selected && backlinks.length ? ` · ${backlinks.length}` : ''}<span>{knowledge.scope === 'complete' ? 'Confirmed scope' : 'Partial scope'}</span></summary>
+    {showBacklinks ? <details className="note-backlinks"><summary>Backlinks{selected && backlinks.length ? ` · ${backlinks.length}` : ''}</summary>
+      <p className="note-scope">{knowledge.scope === 'complete' ? 'Confirmed scope.' : 'Partial scope: loaded Notes only. Unread sources are not counted.'}</p>
       {selected ? backlinks.length ? backlinks.map(link => <button type="button" className="note-backlink" key={JSON.stringify([link.source.location.workspaceId, link.source.location.path, link.occurrence])}
         title={`${link.source.location.workspaceId} · ${link.source.location.path} · ${link.blockId}`} aria-label={`Open ${link.source.location.workspaceId} · ${link.source.location.path} · ${link.blockId}`}
         onClick={() => onOpen(link.source, link.blockId)}><span>{sourceName(link.source) ?? link.source.location.path}</span><small>{link.mode === 'embed' ? 'Embedded block' : 'Block reference'}</small></button>)

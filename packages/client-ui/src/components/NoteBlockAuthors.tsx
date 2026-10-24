@@ -8,9 +8,12 @@ import { Root as DismissableLayer } from '@radix-ui/react-dismissable-layer'
 import { NOTE_BLOCK_TYPES } from '../note/note-content-schema.js'
 import { readNoteBlockProvenance, type NoteBlockAuthorship, type NoteBlockProvenance } from '../note/note-provenance.js'
 import { useModalOverlayContainer } from './Modal.js'
+import { createSemanticIconElement } from '../theme/icons.js'
 
 type AgentNames = Readonly<Record<string, string>>
-type OpenAuthor = { anchor: HTMLButtonElement; provenance: NoteBlockProvenance | null; reference: boolean; item: boolean }
+type AuthorEntry = { blockId: string; provenance: NoteBlockProvenance | null; reference: boolean; item: boolean; quote: boolean; afterBlock: boolean; human: boolean; agent: boolean; unknown: boolean; label: string }
+type OpenAuthor = { anchor: HTMLButtonElement; entries: AuthorEntry[] }
+const scopeName = (entry: AuthorEntry) => entry.item ? 'Item' : entry.quote ? 'Quote' : entry.reference ? 'Reference' : 'Block'
 const EMPTY_NAMES: AgentNames = {}
 const authorsKey = new PluginKey<DecorationSet>('noteBlockAuthors')
 const authorName = (entry: NoteBlockAuthorship | null | undefined, names: AgentNames) => !entry ? 'Author unconfirmed'
@@ -26,7 +29,7 @@ export function NoteBlockAuthors({ editor, agentNames = EMPTY_NAMES }: { editor:
     if (!editor || editor.isDestroyed) return
     const decorate = (doc: typeof editor.state.doc) => {
       const decorations: Decoration[] = []
-      const widgets = new Map<number, { key: string; human: boolean; create: (document: Document) => HTMLButtonElement }[]>()
+      const widgets = new Map<number, AuthorEntry[]>()
       doc.descendants((node, position) => {
         if (!NOTE_BLOCK_TYPES.includes(node.type.name as typeof NOTE_BLOCK_TYPES[number]) || !node.attrs.blockId) return
         const provenance = readNoteBlockProvenance(node.attrs.provenance)
@@ -36,39 +39,36 @@ export function NoteBlockAuthors({ editor, agentNames = EMPTY_NAMES }: { editor:
         const human = !unknown && provenance?.created?.actor.kind !== 'agent' && provenance?.lastEdited?.actor.kind !== 'agent'
         const reference = node.type.name === 'noteInclude' || node.type.name === 'blockReference'
         const item = node.type.name === 'taskItem' || node.type.name === 'listItem'
-        const afterBlock = ['codeBlock', 'table', 'noteRawBlock'].includes(node.type.name)
-        // An item's structure/checked state has its own author. Keep that exact entry
-        // beside its first paragraph, rather than adding a line after its nested list.
-        const anchor = item && node.firstChild?.type.name === 'paragraph' ? position + node.firstChild.nodeSize
+        const afterBlock = reference || ['codeBlock', 'table', 'noteRawBlock'].includes(node.type.name)
+        const quote = node.type.name === 'blockquote'
+        // Container and paragraph keep separate records behind one nearby footnote.
+        const anchor = (item || quote) && node.firstChild?.type.name === 'paragraph' ? position + node.firstChild.nodeSize
           : position + node.nodeSize - (node.isLeaf || afterBlock ? 0 : 1)
         const entries = widgets.get(anchor) ?? []
-        entries.push({ key: JSON.stringify([node.attrs.blockId, provenance, label, reference, item]), human, create: document => {
-          const button = document.createElement('button')
-          button.type = 'button'; button.contentEditable = 'false'; button.className = 'note-block-author nodrag nopan'
-          button.dataset.authorBlock = node.attrs.blockId
-          if (item) button.dataset.authorScope = 'item'
-          if (afterBlock) button.dataset.authorPlacement = 'block-end'
-          if (human) button.dataset.humanOnly = ''
-          button.textContent = `${item ? 'Item · ' : ''}${unknown && entry?.actor.kind !== 'agent' ? 'Author unconfirmed' : label}`
-          button.setAttribute('aria-label', `${item ? 'Item' : reference ? 'Reference' : 'Block'} authors: ${label}${unknown && entry ? ' · some attribution is unconfirmed' : ''}`)
-          button.setAttribute('aria-haspopup', 'dialog'); button.setAttribute('aria-expanded', 'false')
-          button.addEventListener('mousedown', event => event.preventDefault())
-          button.addEventListener('click', event => { event.stopPropagation(); open({ anchor: button, provenance, reference, item }) })
-          return button
-        } })
+        entries.push({ blockId: node.attrs.blockId, provenance, reference, item, quote, afterBlock, human,
+          agent: entry?.actor.kind === 'agent', unknown, label })
         widgets.set(anchor, entries)
       })
       for (const [position, entries] of widgets) decorations.push(Decoration.widget(position, view => {
-        const document = view.dom.ownerDocument
-        if (entries.length === 1) return entries[0]!.create(document)
-        const group = document.createElement('span')
-        group.className = 'note-block-author-group'; group.contentEditable = 'false'
-        if (entries.every(entry => entry.human)) group.dataset.humanOnly = ''
-        // Visible Agent/unknown labels precede the non-flow human controls, so
-        // revealing a person's entry cannot cover another author's label.
-        for (const entry of [...entries].sort((a, b) => Number(a.human) - Number(b.human))) group.append(entry.create(document))
-        return group
-      }, { key: JSON.stringify(entries.map(entry => entry.key)), side: -1, marks: [], stopEvent: () => true, ignoreSelection: true }))
+        const document = view.dom.ownerDocument, button = document.createElement('button')
+        button.type = 'button'; button.contentEditable = 'false'; button.className = 'note-block-author nodrag nopan'
+        button.dataset.authorBlock = entries[0]!.blockId
+        button.dataset.authorBlocks = JSON.stringify(entries.map(entry => entry.blockId))
+        if (entries.some(entry => entry.item)) button.dataset.authorScope = 'item'
+        if (entries.every(entry => entry.human)) button.dataset.humanOnly = ''
+        const agent = entries.some(entry => entry.agent), unknown = entries.some(entry => entry.unknown)
+        button.append(createSemanticIconElement(agent ? 'object.agent' : unknown ? 'status.unknown' : 'object.user', document, { size: 12 }))
+        const description = entries.map(entry => `${scopeName(entry)} authors: ${entry.label}${entry.unknown && entry.provenance && (entry.provenance.created || entry.provenance.lastEdited) ? ' · some attribution is unconfirmed' : ''}`).join('; ')
+        button.setAttribute('aria-label', description); button.title = description
+        button.setAttribute('aria-haspopup', 'dialog'); button.setAttribute('aria-expanded', 'false')
+        button.addEventListener('mousedown', event => event.preventDefault())
+        button.addEventListener('click', event => { event.stopPropagation(); open({ anchor: button, entries }) })
+        if (!entries.some(entry => entry.afterBlock)) return button
+        button.dataset.authorPlacement = 'block-end'
+        const anchor = document.createElement('span')
+        anchor.className = 'note-block-author-anchor'; anchor.contentEditable = 'false'; anchor.append(button)
+        return anchor
+      }, { key: JSON.stringify(entries), side: -1, marks: [], stopEvent: () => true, ignoreSelection: true }))
       return DecorationSet.create(doc, decorations)
     }
     editor.registerPlugin(new Plugin<DecorationSet>({ key: authorsKey,
@@ -97,15 +97,18 @@ export function NoteBlockAuthors({ editor, agentNames = EMPTY_NAMES }: { editor:
   const close = (restoreFocus = false) => { if (restoreFocus) opened?.anchor.focus({ preventScroll: true }); open(null) }
   return opened && container ? createPortal(<DismissableLayer asChild onEscapeKeyDown={event => { event.preventDefault(); close(true) }} onPointerDownOutside={() => close()} onFocusOutside={() => close()}>
     <div ref={panel} id={id} role="dialog" aria-label="Block authors" tabIndex={-1} className="note-authorship" style={{ visibility: 'hidden' }}>
-      <header><strong>{opened.item ? 'Item authors' : opened.reference ? 'Reference authors' : 'Block authors'}</strong><button type="button" aria-label="Close block authors" onClick={() => close(true)}>×</button></header>
-      <p>{opened.item ? 'Recorded for this saved list item, including its structure and checked state.' : opened.reference ? 'Recorded for this saved reference occurrence.' : 'Recorded for the saved content.'}</p>
-      <dl>{(['created', 'lastEdited'] as const).map(kind => {
-        const entry = opened.provenance?.[kind]
-        return <div key={kind}><dt>{kind === 'created' ? 'Created by' : 'Last edited by'}</dt><dd>
-          <span>{authorName(entry, agentNames)}</span>
-          {entry ? <><time dateTime={new Date(entry.at).toJSON() ?? undefined}>{new Date(entry.at).toLocaleString()}</time><details><summary>Full identity</summary><code>{entry.actor.kind} · {entry.actor.id}</code></details></> : <small>No confirmed author record.</small>}
-        </dd></div>
-      })}</dl>
+      <header><strong>{opened.entries.length > 1 ? 'Authors' : `${scopeName(opened.entries[0]!)} authors`}</strong><button type="button" aria-label="Close block authors" onClick={() => close(true)}>×</button></header>
+      {opened.entries.map(record => <section key={record.blockId} data-author-record={record.blockId}>
+        {opened.entries.length > 1 ? <h4>{scopeName(record)} authors</h4> : null}
+        <p>{record.item ? 'Recorded for this saved list item, including its structure and checked state.' : record.quote ? 'Recorded for this saved quotation structure.' : record.reference ? 'Recorded for this saved reference occurrence.' : 'Recorded for the saved content.'}</p>
+        <dl>{(['created', 'lastEdited'] as const).map(kind => {
+          const entry = record.provenance?.[kind]
+          return <div key={kind}><dt>{kind === 'created' ? 'Created by' : 'Last edited by'}</dt><dd>
+            <span>{authorName(entry, agentNames)}</span>
+            {entry ? <><time dateTime={new Date(entry.at).toJSON() ?? undefined}>{new Date(entry.at).toLocaleString()}</time><details><summary>Full identity</summary><code>{entry.actor.kind} · {entry.actor.id}</code></details></> : <small>No confirmed author record.</small>}
+          </dd></div>
+        })}</dl>
+      </section>)}
     </div>
   </DismissableLayer>, container) : null
 }

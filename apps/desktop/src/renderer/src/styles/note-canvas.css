@@ -42,7 +42,9 @@
 .note-canvas-title > span { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .note-canvas-title:hover > svg { opacity: 1; color: var(--blue); }
 .note-canvas-note-state { display: block; margin-top: 7px; color: var(--text-3); font-size: 10px; overflow-wrap: anywhere; }
-.note-canvas-card > footer { display: flex; justify-content: space-between; align-items: center; gap: 4px; padding: 7px 10px; border-top: 1px solid var(--line-soft); }
+.note-canvas-card > footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px; padding: 7px 10px; border-top: 1px solid var(--line-soft); }
+.note-canvas-card > footer > .note-reader-metadata { margin: 0; padding: 0; border: 0; }
+.note-canvas-card > footer > .note-reader-metadata[open] { flex-basis: 100%; }
 .note-canvas-card > footer button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 5px; border: 0; border-radius: 3px; background: transparent; color: var(--text-2); font-size: 10px; line-height: 1.3; }
 .note-canvas-card > footer button:hover { color: var(--text); background: var(--wash-1); }
 .note-canvas-card > footer small { padding-inline: 4px; border-radius: 3px; color: var(--text-3); background: var(--wash-1); font-size: 9px; }
@@ -183,8 +185,8 @@
 .note-canvas-card[data-kind="shared-block"] { border-color: color-mix(in srgb, var(--green) 36%, var(--line)); }
 .note-canvas-card[data-kind="shared-block"] .note-canvas-book { color: var(--green); }
 .note-canvas-body[data-reading-mode="summary"] { max-height: 280px; }
-.note-canvas-reader .note-include-link { display: flex; flex-direction: column; gap: 3px; margin-block: 10px; padding: 7px 10px; border-left: 2px solid var(--green); background: var(--wash-1); }
-.note-canvas-reader .note-include-link > span { color: var(--text-3); font-size: 9px; }
+.note-canvas-reader .note-include-link { display: flex; align-items: baseline; gap: 6px; margin-block: 10px; padding: 7px 10px; border-left: 2px solid var(--green); background: var(--wash-1); }
+.note-canvas-reader .note-include-link > svg { flex: none; color: var(--text-3); }
 .note-canvas-reader .note-include-link > button { padding: 0; border: 0; background: transparent; color: var(--green); font-size: 11px; line-height: 1.6; text-align: left; overflow-wrap: anywhere; }
 
 .note-canvas-draft, .note-canvas-empty-body { margin-block: 10px; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
@@ -223,6 +225,11 @@
   position: relative;
   width: 100%;
   pointer-events: none;
+}
+/* Block nodes live in the canvas, so their stage must reserve its full height. */
+.note-canvas-card[data-canvas-role="note-area"] .note-canvas-body:has(> .note-canvas-area-stage) {
+  max-height: none;
+  overflow: visible;
 }
 .react-flow__node-block {
   z-index: 3 !important;

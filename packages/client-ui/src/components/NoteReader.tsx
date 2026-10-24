@@ -21,11 +21,13 @@ import { mergeLiveNote } from '../note/note-live-merge.js'
 import { noteRichContentExtensions } from './NoteRichContent.js'
 import { NoteInsertMenu } from './NoteInsertMenu.js'
 import { NoteBlockAuthors } from './NoteBlockAuthors.js'
+import { semanticIconComponent } from '../theme/icons.js'
 import { matchingNoteDraftInclude, type NoteReaderDraftInclude, type NoteReaderDraftSource } from '../note/note-draft-includes.js'
 export type { NoteEditState } from '../note/note-edit-state.js'
 export type { NoteLinkOpenRequest } from './NoteInlineLink.js'
 export type { NoteReaderDraftInclude, NoteReaderDraftSource } from '../note/note-draft-includes.js'
 
+const SourceIcon = semanticIconComponent('object.link'), SharedIcon = semanticIconComponent('object.shared-block'), UnknownIcon = semanticIconComponent('status.unknown')
 const Scope = createContext<{ knowledge: NoteKnowledge; workspaceId: string; noteId: string; agentNames?: Readonly<Record<string, string>> | undefined; graph?: NotebookGraph | undefined; trail: string[]; draftIncludes?: readonly NoteReaderDraftInclude[] | undefined; onOpenDraftSource?: ((source: NoteReaderDraftSource) => void) | undefined; compactIncludes?: boolean | undefined; readInclude?: ((target: Pick<NoteInclude, 'noteId' | 'path' | 'workspaceId'>) => void) | undefined; readReference?: ((target: NoteBlockTarget) => void) | undefined; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined } | null>(null)
 function InlineLink({ node, editor }: NodeViewProps) {
   const scope = useContext(Scope)
@@ -37,12 +39,12 @@ function Reference({ node }: NodeViewProps) {
   if (!scope || !reference.target) return <NodeViewWrapper className="mobile-note-reference" role="status">引用目标尚未确认；当前输入保留，可撤销这次粘贴后继续编辑。</NodeViewWrapper>
   const result = resolveNoteBlock(scope.knowledge, reference.target)
   const key = JSON.stringify(reference.target)
-  return <NodeViewWrapper className="mobile-note-reference" data-block-id={node.attrs.blockId}>
-    <strong>{reference.mode === 'embed' ? '引用原块' : '块引用'}</strong>
+  const kind = reference.mode === 'embed' ? 'Embedded block' : 'Block reference'
+  return <NodeViewWrapper className="mobile-note-reference" data-block-id={node.attrs.blockId} aria-label={reference.mode === 'embed' ? 'Embedded block reference' : 'Block reference'}>
     {scope.trail.includes(key) ? <p role="status">循环引用，原引用保留。</p>
       : result.status === 'resolved' ? <Scope.Provider value={{ ...scope, noteId: result.source.note.noteId, workspaceId: result.source.location.workspaceId, trail: [...scope.trail, key] }}><NoteFileContext.Provider value={resolveNoteSourceResource(parentResource, result.source.location, scope.graph)}><RichContent content={projectNoteBlocks(result.source, [result.block.blockId]).content} /></NoteFileContext.Provider></Scope.Provider>
         : <><p role="status">引用正文尚未读取，原引用保留。</p>{scope.readReference && <button type="button" onClick={() => scope.readReference!(reference.target)}>读取引用原文</button>}</>}
-    <details><summary>引用来源</summary><code>{reference.target.noteId} / {reference.target.blockId}</code></details>
+    <details className="note-reader-source"><summary aria-label={`${kind} source`} title={`${kind} source`}><SourceIcon size={12} aria-hidden="true" /></summary><strong>{kind}</strong><code>{reference.target.noteId} / {reference.target.blockId}</code></details>
   </NodeViewWrapper>
 }
 
@@ -68,14 +70,13 @@ function Include({ node }: NodeViewProps) {
   const resolved = resolveNoteInclude(scope.knowledge, include, scope.workspaceId, confirmed)
   const key = JSON.stringify(['file', include.noteId]), cycle = scope.trail.includes(key)
   if (scope.compactIncludes && confirmed) return <NodeViewWrapper className="note-include-link" contentEditable={false} data-block-id={node.attrs.blockId} data-shared-note-id={include.noteId}>
-    <span>Shared block</span><button type="button" onClick={() => scope.onOpenLink?.({ text: resolved.status === 'resolved' ? resolved.source.note.title ?? 'Shared block' : 'Shared block', target: { noteId: include.noteId } })}>{resolved.status === 'resolved' ? resolved.source.note.title ?? 'Open shared original' : 'Open shared original'}</button>
+    <SharedIcon size={13} aria-hidden={false} role="img" aria-label="Shared content" /><button type="button" onClick={() => scope.onOpenLink?.({ text: resolved.status === 'resolved' ? resolved.source.note.title ?? 'Shared block' : 'Shared block', target: { noteId: include.noteId } })}>{resolved.status === 'resolved' ? resolved.source.note.title ?? 'Open shared original' : 'Open shared original'}</button>
   </NodeViewWrapper>
-  return <NodeViewWrapper className="mobile-note-reference note-include" contentEditable={false} data-block-id={node.attrs.blockId} data-shared-note-id={include.noteId}>
-    <strong>{resolved.status === 'resolved' ? resolved.source.note.title ?? '共享内容' : '共享内容'}</strong>
+  return <NodeViewWrapper className="mobile-note-reference note-include" contentEditable={false} data-block-id={node.attrs.blockId} data-shared-note-id={include.noteId} aria-label="Shared content">
     {cycle ? <p role="status">循环引用，原共享内容与引用保留。</p> : resolved.status === 'resolved'
       ? <Scope.Provider value={{ ...scope, noteId: resolved.source.note.noteId, workspaceId: resolved.source.location.workspaceId, trail: [...scope.trail, key] }}><NoteFileContext.Provider value={resolveNoteSourceResource(parentResource, resolved.source.location, scope.graph)}><RichContent content={resolved.source.note.content} /></NoteFileContext.Provider></Scope.Provider>
       : <><p role="status">共享原文尚未确认，原引用保留。{resolved.message}</p>{scope.readInclude && <button type="button" onClick={() => scope.readInclude!({ noteId: include.noteId, path: include.path, ...(typeof include.workspaceId === 'string' ? { workspaceId: include.workspaceId } : {}) })}>读取共享原文</button>}</>}
-    <details><summary>共享来源</summary><code>{include.noteId} · {resolved.status === 'resolved' ? resolved.source.location.path : include.path}</code></details>
+    <details className="note-reader-source"><summary aria-label="Shared content source" title="Shared content source"><SharedIcon size={12} aria-hidden="true" /></summary>{resolved.status === 'resolved' && resolved.source.note.title ? <strong>{resolved.source.note.title}</strong> : null}<code>{include.noteId} · {resolved.status === 'resolved' ? resolved.source.location.path : include.path}</code></details>
   </NodeViewWrapper>
 }
 
@@ -224,13 +225,18 @@ export type NoteReaderProps = { resource?: NoteResource | undefined; agentNames?
   previewBlockCount?: number | undefined
   /** Summarize includes when the original content already has its own reading surface. */
   compactIncludes?: boolean | undefined
+  /** A host with several excerpts can disclose this document's metadata once beside them. */
+  showDocumentMetadata?: boolean | undefined
   editing?: NoteEditing | undefined
   target?: NoteBlockTarget | undefined
   onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined
 }
 const EMPTY_IDS: readonly string[] = []
 const EMPTY_DOCUMENTS: NonNullable<NoteReaderProps['documents']> = []
-export function NoteReader({ resource, agentNames, content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, graph, draftIncludes, onOpenDraftSource, readInclude, blockIds, topBlockIndex, highlightBlockIds = EMPTY_IDS, clipBlocks = true, previewBlockCount, compactIncludes, readReference, editing, target, onOpenLink }: NoteReaderProps) {
+export function NoteReaderMetadata({ noteProvenance }: { noteProvenance?: NoteProvenanceSnapshot | undefined }) {
+  return noteProvenance?.status === 'unconfirmed' ? <details className="note-reader-metadata"><summary aria-label="Authorship details: unconfirmed" title="Authorship details: unconfirmed"><UnknownIcon size={12} aria-hidden="true" /></summary><p>Authorship is unconfirmed: {noteProvenance.reason} Read the same original file again to check its metadata. The Note remains readable and editable.</p></details> : null
+}
+export function NoteReader({ resource, agentNames, content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, graph, draftIncludes, onOpenDraftSource, readInclude, blockIds, topBlockIndex, highlightBlockIds = EMPTY_IDS, clipBlocks = true, previewBlockCount, compactIncludes, showDocumentMetadata = true, readReference, editing, target, onOpenLink }: NoteReaderProps) {
   const parentResource = useNoteFileResource()
   const originalResource = resource ?? resolveNoteSourceResource(parentResource, { workspaceId, path }, graph)
   const observed = useMemo(() => ({ path, content, revision: revision ?? '', ...noteProvenance ? { noteProvenance } : {} }), [path, content, revision, noteProvenance])
@@ -258,11 +264,11 @@ export function NoteReader({ resource, agentNames, content, path, workspaceId, r
     element?.scrollIntoView?.({ block: 'center' })
   }, [target?.noteId, target?.blockId, block?.status])
   return parsed.status === 'valid' ? <NoteFileContext.Provider value={originalResource}><Scope.Provider value={{ knowledge, workspaceId, noteId: parsed.note.noteId, agentNames, graph, draftIncludes: editing ? undefined : draftIncludes, onOpenDraftSource, trail: [], compactIncludes, readInclude, readReference, onOpenLink }}><div ref={body} data-note-id={parsed.note.noteId} data-target-block={block?.status === 'resolved' ? target?.blockId : undefined}>
-    {original.noteProvenance?.status === 'unconfirmed' && <p role="status">块作者未确认：{original.noteProvenance.reason} 正文仍可阅读和编辑；重新读取同一原文件可核对元数据。</p>}
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}
     </section>}
     {editing && original.revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={original.content} revision={original.revision} original={original} onWritten={document => setWritten({ source: observed, document })} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent key={readingScope} highlightBlockIds={highlightBlockIds} content={topBlockIndex !== undefined ? { type: 'doc', content: parsed.note.content.content?.[topBlockIndex] ? [clipBlocks ? readingExcerpt(parsed.note.content.content[topBlockIndex]!, highlightBlockIds) : parsed.note.content.content[topBlockIndex]!] : [] } : excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : previewBlockCount === undefined ? parsed.note.content : { ...parsed.note.content, content: parsed.note.content.content?.slice(0, previewBlockCount).map(node => readingExcerpt(node, highlightBlockIds)) ?? [] }} />}
+    {showDocumentMetadata && <NoteReaderMetadata noteProvenance={original.noteProvenance} />}
   </div></Scope.Provider></NoteFileContext.Provider> : <><p role="status">原笔记读取问题：{parsed.message}</p><pre>{content}</pre></>
 }
 function EditableNote({ note, content, revision, editing, original, onWritten }: { note: NoteDocument; content: string; revision: string; editing: NoteEditing; original: NoteFileDocument; onWritten(document: NoteFileDocument): void }) {
