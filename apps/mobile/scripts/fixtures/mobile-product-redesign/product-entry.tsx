@@ -1,4 +1,5 @@
 declare const __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: { kind: string; icon: string | null }
+declare const __AGENTMUX_MOBILE_PROVIDER_CATALOG__: ReturnType<AgentMuxHostedClient['catalog']>
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../../../test/fixture-values.mjs'
 import { createRoot } from 'react-dom/client'
@@ -71,7 +72,7 @@ const listeners = new Set<(event: AgentMuxClientEvent) => void>()
 const client = {
   agentSession: (id: string) => { record('sdk.agentSession', { id }); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
   agentSessions: () => { record('sdk.agentSessions'); return sessions },
-  catalog: () => { record('sdk.catalog'); return [{ id: 'codex', capabilities: { promptExecution: { immediate: 'native-steer' } } }] },
+  catalog: () => { record('sdk.catalog'); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
   onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); record('sdk.onEvent'); return () => { listeners.delete(listener); record('sdk.releaseEvent') } },
   runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', availability: connected ? 'connected' : 'disconnected' }),
   sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); return { agentSessionId: id, source: { providerId: 'codex', nativeSessionId: `native-${id}` }, nextCursor: null,
