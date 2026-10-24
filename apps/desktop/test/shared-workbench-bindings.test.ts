@@ -1,3 +1,4 @@
+import { selectSpatialCatalog } from '@agentmux/core/spatial-graph'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { webcrypto } from 'node:crypto'
@@ -15,7 +16,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench, restorePersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence'
-import { spatialCatalog, selectSpatialCatalog } from '../src/renderer/src/lib/space-agent-control'
+import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { resolveDesktopSpaceSelection } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'

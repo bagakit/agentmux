@@ -1,3 +1,4 @@
+import { selectSpatialCatalog } from '@agentmux/core/spatial-graph'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -5,7 +6,7 @@ import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/w
 import { tabForFocusedSession } from '../src/renderer/src/lib/focus-tab-projection.js'
 
 import { projectWorkbenchProjection } from '../src/renderer/src/lib/workbench-projection'
-import { spatialCatalog, selectSpatialCatalog } from '../src/renderer/src/lib/space-agent-control'
+import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { api } from '../src/renderer/src/lib/api'
 
 const workbenchSource = readFileSync(new URL('../src/renderer/src/components/WorkspaceWorkbench.tsx', import.meta.url), 'utf8')
