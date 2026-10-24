@@ -36,7 +36,7 @@ const writes = () => f.calls.filter(call => /configure|\.bind$|\.relink$|\.pause
 const effects = () => f.platformCalls.filter(call => call.url?.endsWith('/messages')).length
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 8000 }) }
 async function open() { await act(async () => { trigger()!.focus(); trigger()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) }); await wait(() => expect(menu()).not.toBeNull()) }
-async function check() { await act(async () => [...menu().querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Check group status')!.click()) }
+async function check() { await act(async () => [...menu().querySelectorAll<HTMLElement>('button')].find(node => node.textContent === 'Refresh observations')!.click()) }
 async function bind(shared = false) {
   await f.mount(); await f.journey('existing'); await f.fill('Existing group ID', 'oc_header_status')
   if (shared) {
@@ -71,7 +71,7 @@ it('the actual header diagnoses a source gap separately from older unknown platf
   expect(menu().textContent).toContain('original results remain unconfirmed')
   const kinds = [...menu().querySelectorAll<HTMLElement>('[data-problem-kind]')].map(node => node.dataset.problemKind)
   expect(kinds).toContain('content-gap'); expect(kinds).toContain('outgoing-unconfirmed')
-  expect(menu().querySelector('.connector-traffic-summary__tile[aria-label="Conversation → group"]')?.textContent).toContain('unconfirmed')
+  expect(menu().querySelector('.connector-traffic-summary__tile[aria-label="Conversation → group"]')?.textContent).toContain('not confirmed')
   expect(menu().textContent).not.toContain('Needs attention')
   for (const section of ['Configuration', 'Sharing', 'Conversation → group', 'Platform requests', 'Group → Agent', 'Snapshot of bounded local observations']) expect(menu().textContent).toContain(section)
   expect(f.calls.filter(call => call.method === 'connection.diagnose').at(-1)?.input).toEqual({ ...target, bindingId: binding.bindingId, bindingRevision: binding.revision })
@@ -83,7 +83,7 @@ it('the actual header diagnoses a source gap separately from older unknown platf
 
 it('an empty checked window remains a linked snapshot, and explicit Off and paused stay configuration facts', async () => {
   const binding = await bind(); await open(); await wait(() => expect(checked()).not.toBeNull())
-  expect(menu().textContent).toContain('Linked · Sync on · Bot on')
+  expect(menu().textContent).toContain('Linked · Sync on · Platform on · Bot on')
   expect(menu().textContent).toContain('No events in this window')
   expect(trigger().getAttribute('aria-label')).not.toMatch(/healthy|working|disconnected/i)
   const service = await f.forward('connection.service.get', {})
@@ -97,15 +97,16 @@ it('an empty checked window remains a linked snapshot, and explicit Off and paus
 
 it('a later failed check retains the exact group and earlier observations, with a stable completed-check time and actions', async () => {
   await bind(); await open(); await wait(() => expect(checked()).not.toBeNull())
-  const first = checked()!.dateTime, count = f.calls.filter(call => call.method === 'connection.diagnose').length
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)) })
-  expect(checked()!.dateTime).toBe(first)
-  expect(f.calls.filter(call => call.method === 'connection.diagnose')).toHaveLength(count)
+  await wait(() => {
+    expect([...menu().querySelectorAll('summary')].some(node => node.textContent?.includes('Checking…'))).toBe(false)
+    expect(f.calls.filter(call => call.method === 'connection.diagnose').every(call => call.result)).toBe(true)
+  })
+  const first = checked()!.dateTime
   const original = f.forward
   vi.mocked(api.connections.call).mockImplementation(async (method, input) => { if (method === 'connection.diagnose') throw Error('PRIVATE credential path'); return original(method, input) })
   await check(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('unread'))
   expect(checked()!.dateTime).not.toBe(first)
-  for (const text of ['Original status group', 'Unavailable', 'Kept after this check failed', 'Connect a conversation', 'Automatic sync settings', 'Check group status']) expect(menu().textContent).toContain(text)
+  for (const text of ['Original status group', 'Unavailable', 'Kept after this check failed', 'Connect a conversation', 'Channel settings', 'Refresh observations']) expect(menu().textContent).toContain(text)
   expect(trigger().getAttribute('aria-disabled')).not.toBe('true')
   expect(menu().textContent).not.toContain('PRIVATE credential path')
   const input = document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')
@@ -122,8 +123,9 @@ it('actual recorded refusal and waiting stay separate from adoption, and typed b
   payload.header.event_id = 'header-no-access-event'
   await f.ingressTransport!.receive(payload)
   await vi.waitFor(async () => expect((await f.forward('connection.ingress.ls', { connectionId: binding.connectionId })).ingresses.find(value => value.kind !== 'action' && value.externalMessageId === 'header-no-access')?.state).toBe('refused'), { timeout: 8000 })
-  await open(); await wait(() => expect(menu().textContent).toContain('Member request access missing'))
-  expect(menu().querySelector('[data-problem-kind="member-access"]')?.textContent).toContain('Sender has no request access')
+  await open(); await wait(() => expect(menu().textContent).toContain('Member request was refused'))
+  expect(menu().querySelector('[data-problem-kind="request-refused"]')).not.toBeNull()
+  expect(menu().querySelector('[data-connection-action="members"]')).toBeNull()
   await f.forward('connection.grant', { operationId: 'header-explicit-grant', bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: 'header-input', expectedRevision: null,
     actor: { application: f.config.application, idType: 'open_id', userId: 'original-external-user' }, capabilities: ['input'], state: 'active' })
   // This case qualifies a real durable Runtime-unavailable wait, not a transient pre-dispatch read.
@@ -160,7 +162,7 @@ it('actual recorded refusal and waiting stay separate from adoption, and typed b
     const snapshot = { report: { ...group, service: report.service, incoming: { value: { ...incoming, rows: [{ ...original, coreStatus }] }, issue: null } }, checkedAt: 1, checking: false }
     expect(connectorGroupDiagnostics(snapshot).rows.find(([label]) => label === 'Group → Agent')?.[1]).toContain(text)
     const summary = connectorGroupSummary(snapshot.report)
-    expect(summary.incoming.value).toBe(coreStatus === 'terminal-confirmed' ? 'Sent; Agent acceptance unconfirmed' : text)
+    expect(summary.incoming.value).toBe(coreStatus === 'terminal-confirmed' ? 'Sent to Agent · awaiting confirmation' : text)
     expect(summary.problems.some(problem => problem.kind === 'agent-unconfirmed')).toBe(coreStatus === 'terminal-confirmed')
   }
   expect(menu().textContent).not.toContain('PRIVATE incoming original')
@@ -226,4 +228,129 @@ it('application access observation stays separate from a healthy source and save
   expect(report.groups.value!.items[0]!.binding.value).toMatchObject({ activeInputGrants: 1, activePermissionGrants: 1 })
   expect(report.groups.value!.items[0]!.outgoing.value?.sourceObservation?.state).toBe('ready')
   expect({ writes: writes(), effects: effects() }).toEqual(before)
+}, 30_000)
+
+it('recent confirmed deliveries stay neutral while an older unconfirmed original remains visible', async () => {
+  const binding = await bind(true); lose = true
+  await appendFile(f.original.transcript, row('older-unknown', 'assistant'))
+  await wait(() => expect(speech(binding)[0]?.state).toBe('unknown'))
+  lose = false
+  await appendFile(f.original.transcript, Array.from({ length: 5 }, (_, index) => row('recent-confirmed-' + index, 'assistant')).join(''))
+  await wait(() => expect(speech(binding).filter(value => value.state === 'confirmed')).toHaveLength(5))
+  const before = effects()
+  await open(); await wait(() => expect(checked()).not.toBeNull())
+  const outgoing = menu().querySelector('[data-direction="outgoing"]')!
+  expect(outgoing?.getAttribute('data-tone')).toBe('neutral')
+  expect(outgoing?.textContent).toContain('5')
+  expect(menu().querySelector('[data-problem-kind="outgoing-unconfirmed"]')).not.toBeNull()
+  expect(menu().textContent).not.toContain('All messages delivered')
+  expect(effects()).toBe(before)
+}, 30_000)
+
+it('one explicit header action resumes the exact paused group through the original form and public operation', async () => {
+  const binding = await bind()
+  const paused = await f.forward('connection.binding.pause', { operationId: 'header-one-click-pause', bindingId: binding.bindingId, expectedRevision: binding.revision })
+  await act(async () => invalidateConnectorTarget(target))
+  await open(); await wait(() => expect(menu().querySelector('[data-connection-action="resume"]')).not.toBeNull())
+  const before = f.calls.filter(call => call.method === 'connection.binding.resume').length
+  await act(async () => menu().querySelector<HTMLElement>('[data-connection-action="resume"]')!.click())
+  await wait(() => expect(f.services.bindings!.listActive().find(value => value.bindingId === binding.bindingId)?.state).toBe('active'))
+  const sent = f.calls.filter(call => call.method === 'connection.binding.resume').slice(before)
+  expect(sent).toHaveLength(1)
+  expect(sent[0]!.input).toMatchObject({ bindingId: binding.bindingId, expectedRevision: paused.binding!.revision })
+  expect(sent[0]!.result).toMatchObject({ state: 'applied', binding: { bindingId: binding.bindingId, state: 'active' } })
+  await f.button('Close'); await open(); await wait(() => expect(checked()).not.toBeNull())
+  expect(f.calls.filter(call => call.method === 'connection.binding.resume')).toHaveLength(before + 1)
+  expect(f.calls.filter(call => /connection\.grant|connection\.service\.configure/.test(call.method))).toHaveLength(0)
+}, 30_000)
+
+it('an open popover observes recovery automatically and closes without polling or replaying writes', async () => {
+  const binding = await bind()
+  let unavailable = true, entered = 0, inFlight = 0, maximum = 0, release!: () => void
+  let held: Promise<void> | null = null
+  vi.mocked(api.connections.call).mockImplementation(async (method, input, owner) => {
+    if (method !== 'connection.diagnose') return f.forward(method, input, owner)
+    entered++; maximum = Math.max(maximum, ++inFlight)
+    try { if (held) await held; if (unavailable) throw Error('Temporary observation unavailable'); return await f.forward(method, input, owner) }
+    finally { inFlight-- }
+  })
+  await open(); await wait(() => expect(menu().textContent).toContain('Unavailable'))
+  unavailable = false
+  held = new Promise(resolve => { release = resolve })
+  // No click or focus event: the open surface observes its original owner again.
+  await wait(() => expect(inFlight).toBe(1))
+  await act(async () => { window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('focus')) })
+  expect(maximum).toBe(1)
+  await act(async () => { release(); held = null })
+  await wait(() => { expect(menu().textContent).toContain('Linked'); expect(menu().textContent).not.toContain('Kept after this check failed') })
+  // The refresh only reads the existing owner; it does not change paused policies or send again.
+  expect(f.calls.filter(call => call.method === 'connection.binding.resume' || call.method === 'connection.delivery.retry')).toHaveLength(0)
+  await act(async () => menu().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await wait(() => expect(menu()).toBeNull())
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+  const closed = entered
+  await act(async () => window.dispatchEvent(new Event('focus')))
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)) })
+  expect(entered).toBe(closed)
+  expect(f.services.bindings!.listActive().find(value => value.bindingId === binding.bindingId)?.state).toBe('active')
+}, 30_000)
+
+it('opening a retained setup on another Host never carries the first group resume action', async () => {
+  const binding = await bind()
+  const paused = await f.forward('connection.binding.pause', { operationId: 'retarget-initial-pause', bindingId: binding.bindingId, expectedRevision: binding.revision })
+  await act(async () => invalidateConnectorTarget(target))
+  await open(); await wait(() => expect(menu().querySelector('[data-connection-action="resume"]')).not.toBeNull())
+  await act(async () => menu().querySelector<HTMLElement>('[data-connection-action="resume"]')!.click())
+  await wait(() => expect(f.services.bindings!.listActive().find(value => value.bindingId === binding.bindingId)?.state).toBe('active'))
+  const otherHost = { hostId: 'other-host', runtimeId: 'other-runtime' }
+  let foreignReads = 0, foreignWrites = 0
+  vi.mocked(api.connections.call).mockImplementation(async (method, input, owner) => {
+    if (owner?.hostId === otherHost.hostId) {
+      if (method === 'connection.binding.resume') { foreignWrites++; throw Error('Unexpected cross-owner resume') }
+      if (method === 'connection.binding.ls') { foreignReads++; return { bindings: [paused.binding!] } }
+      if (method === 'connection.binding.inspect' && 'bindingId' in input)
+        return { ...await f.forward(method, input, f.hostingTarget), binding: paused.binding!, current: paused.binding! }
+      return f.forward(method, input, f.hostingTarget)
+    }
+    return f.forward(method, input, owner)
+  })
+  const prior = { method: 'connection.binding.pause' as const, target, hostingTarget: otherHost, phase: 'may-have-dispatched' as const,
+    input: { operationId: 'retarget-original-unknown', bindingId: binding.bindingId, expectedRevision: binding.revision } }
+  await act(async () => useAppStore.setState(state => ({ connectorRoomIntents: { ...state.connectorRoomIntents, [prior.input.operationId]: prior } })))
+  await f.button('Open original setup')
+  await wait(() => { expect(foreignReads).toBeGreaterThan(0); expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Sharing paused') })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+  expect(foreignWrites).toBe(0)
+  expect(useAppStore.getState().connectorRoomIntents[prior.input.operationId]).toEqual(prior)
+  expect(f.services.bindings!.listActive().find(value => value.bindingId === binding.bindingId)?.state).toBe('active')
+}, 30_000)
+
+it('opening a later platform reads that platform and closing starts no new group checks', async () => {
+  const binding = await bind()
+  const bindings = Array.from({ length: 6 }, (_, i) => i === 5 ? { ...binding, bindingId: 'original-discord-binding', externalConversationId: '123456789012345678', application: { domain: 'discord.com', appId: '234567890123456789' } } : { ...binding, bindingId: i ? 'earlier-lark-' + i : binding.bindingId })
+  await renderHeader(bindings)
+  await wait(() => expect(f.calls.filter(call => call.method === 'connection.diagnose' && (call.input as { bindingId: string }).bindingId === 'earlier-lark-4').length).toBeGreaterThan(0))
+  const discord = document.querySelector<HTMLElement>('[data-channel-entry="discord"]')!
+  await act(async () => { discord.focus(); discord.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  await wait(() => expect(f.calls.filter(call => call.method === 'connection.diagnose' && (call.input as { bindingId: string }).bindingId === 'original-discord-binding').length).toBeGreaterThan(0))
+  await wait(() => expect(menu()?.querySelector('time')).not.toBeNull())
+  const before = f.calls.filter(call => call.method === 'connection.diagnose').length
+  await act(async () => menu().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await wait(() => expect(menu()).toBeNull())
+  await act(async () => { window.dispatchEvent(new Event('focus')); await new Promise(resolve => setTimeout(resolve, 50)) })
+  expect(f.calls.filter(call => call.method === 'connection.diagnose')).toHaveLength(before)
+}, 30_000)
+
+it('a disabled platform action opens the exact bot settings on its original Host', async () => {
+  const binding = await bind()
+  await f.forward('connection.grant', { operationId: 'settings-origin-member', bindingId: binding.bindingId, expectedBindingRevision: binding.revision,
+    grantId: 'settings-origin-access', expectedRevision: null, actor: { application: f.config.application, idType: 'open_id', userId: 'original-external-user' }, capabilities: ['input'], state: 'active' })
+  const policy = await f.forward('connection.service.get', { adapterId: f.config.adapterId })
+  await f.forward('connection.service.configure', { operationId: 'settings-origin-off', adapterId: f.config.adapterId, expectedRevision: policy.revision, service: { enabled: false } })
+  await act(async () => invalidateConnectorTarget(target))
+  await open(); await wait(() => expect(menu().querySelector('[data-connection-action="channel-settings"]')).not.toBeNull())
+  await act(async () => menu().querySelector<HTMLElement>('[data-connection-action="channel-settings"]')!.click())
+  expect(f.settings).toHaveBeenCalledWith({ sessionId: f.session.id, hostId: target.executionHostId, agentSessionId: target.agentSessionId, hostingTarget: f.hostingTarget,
+    connection: { connectionId: binding.connectionId, adapterId: f.config.adapterId, application: binding.application } })
+  expect((await f.forward('connection.service.get', { adapterId: f.config.adapterId })).enabled).toBe(false)
 }, 30_000)

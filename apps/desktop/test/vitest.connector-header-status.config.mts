@@ -5,6 +5,9 @@ import { defineConfig } from 'vitest/config'
 import original from '../../../vitest.config.ts'
 const root = resolve(import.meta.dirname, '../../..'), mutant = process.env.AGENTMUX_HEADER_STATUS_MUTANT
 const mutations = {
+  'resume-retarget': { path: 'apps/desktop/src/renderer/src/components/AgentConnectorDialog.tsx', before: 'resumeBinding={opened?.identity === identity ? undefined : props.resumeBinding}', after: 'resumeBinding={props.resumeBinding}' },
+  'close-reads': { path: 'apps/desktop/src/renderer/src/lib/use-connector-group-diagnosis.ts', before: 'const readKey = JSON.stringify([bindings.map(groupTarget), hostingTarget, version, request, syncEnabled])', after: 'const readKey = JSON.stringify([identity, version, request, syncEnabled])' },
+
   'access-as-source': { path: 'apps/desktop/src/renderer/src/lib/connector-group-status.ts', before: "const accessUnconfirmed = out?.observation?.reason === 'access-unconfirmed'", after: 'const accessUnconfirmed = false' },
   'policy-only': { path: 'apps/desktop/src/renderer/src/lib/connector-group-status.ts', before: 'const report = snapshot?.report', after: 'const report = snapshot?.report ? { ...snapshot.report, outgoing: { value: null, issue: null }, incoming: { value: null, issue: null } } : undefined' },
   'accept-late-source': { path: 'apps/desktop/src/renderer/src/lib/use-connector-group-diagnosis.ts', before: 'if (!accepts()) return', after: 'if (false) return' }
