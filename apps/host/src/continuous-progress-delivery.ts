@@ -1,9 +1,9 @@
 import { AgentMuxError, decideContinuousProgress, decideFutureProgress, validateAgentPromptCondition, type ContinuousProgressLoop } from '@agentmux/core'
-import type { RuntimeController } from './runtime-controller.js'
+import type { GoalRuntimePort } from './goal-runtime.js'
 
 /** Revalidate the durable claim immediately before crossing the typed input boundary. */
 export async function deliverContinuousProgress(
-  runtime: Pick<RuntimeController, 'observeContinuousProgress' | 'submitPrompt'>,
+  runtime: Pick<GoalRuntimePort, 'observeContinuousProgress' | 'submitPrompt'>,
   loop: ContinuousProgressLoop, operationId: string, isCurrent: () => boolean, signal: AbortSignal
 ): Promise<'sent' | 'skipped'> {
   const observation = await runtime.observeContinuousProgress(loop, operationId, Date.now(), signal)

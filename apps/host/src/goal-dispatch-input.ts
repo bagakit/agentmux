@@ -1,8 +1,8 @@
 import { AgentMuxError, type AgentTimelineItem } from '@agentmux/core'
 import type { DemandDispatch, DemandStore } from '@agentmux/demand'
-import type { AgentSessionControl } from '../shared/contracts.js'
-import type { GoalDispatchReference } from '../shared/goal-dispatch.js'
-import type { RuntimeController } from './runtime-controller.js'
+import type { GoalAgentControl as AgentSessionControl } from './goal-runtime.js'
+import type { GoalDispatchReference } from './goal-runtime.js'
+import type { GoalRuntimePort } from './goal-runtime.js'
 
 /** The original Core side effect is the only input receipt accepted by the business owner. */
 function receiptFor(dispatch: DemandDispatch, items: AgentTimelineItem[]): DemandDispatch['receipt'] {
@@ -12,7 +12,7 @@ function receiptFor(dispatch: DemandDispatch, items: AgentTimelineItem[]): Deman
 }
 
 export class GoalDispatchInputOwner {
-  constructor(private readonly demands: DemandStore, private readonly runtime: RuntimeController) {}
+  constructor(private readonly demands: DemandStore, private readonly runtime: Pick<GoalRuntimePort, 'sessionTimeline'>) {}
 
   async original(reference: GoalDispatchReference): Promise<DemandDispatch> {
     const original = await this.demands.inspectDispatch(reference.goalId, reference.operationId)

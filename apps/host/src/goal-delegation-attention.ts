@@ -3,10 +3,10 @@ import { agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent } 
 import type { DemandStore } from '@agentmux/demand'
 import type { DemandDelegation, DemandDelegationAttention } from '@agentmux/demand/delegations'
 import type { GoalDelegationOwner } from './goal-delegation-owner.js'
-import type { RuntimeController } from './runtime-controller.js'
+import type { GoalRuntimePort } from './goal-runtime.js'
 
 export type GoalAttentionObservation = { state: 'prepared' | 'confirmed' | 'unknown'; reason: string }
-type Runtime = Pick<RuntimeController, 'agentCreation' | 'observeCoreEvents' | 'observeOriginalRun' |
+type Runtime = Pick<GoalRuntimePort, 'agentCreation' | 'observeCoreEvents' | 'observeOriginalRun' |
   'saveGoalAttention' | 'inspectGoalAttention' | 'observeContinuousProgress' | 'submitPrompt' | 'observeInputOccupation'>
 type Reference = { goalId: string; operationId: string }
 const key = (hostId: string, id: string) => JSON.stringify([hostId, id])

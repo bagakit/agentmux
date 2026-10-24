@@ -6,9 +6,9 @@ import { demandExecutionReferences, demandResponsibilityScope, type Demand, type
 import type { GoalDelegationAuthority, GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import type { GoalPatrolObservation } from '@agentmux/core/goal-patrol'
 import type { DemandEvidence } from '@agentmux/demand/goals'
-import type { RuntimeController } from './runtime-controller.js'
+import type { GoalRuntimePort } from './goal-runtime.js'
 
-type Runtime = Pick<RuntimeController, 'resolveGoalAgent' | 'observeCoreEvents' | 'observeInputOccupation' | 'saveGoalAttention' |
+type Runtime = Pick<GoalRuntimePort, 'resolveGoalAgent' | 'observeCoreEvents' | 'observeInputOccupation' | 'saveGoalAttention' |
   'disableGoalAttention' | 'inspectGoalAttention' | 'observeContinuousProgress' | 'submitPrompt' | 'observeGoalAgent'>
 const key = (a: string, b: string) => JSON.stringify([a, b])
 const describe = (e: unknown) => e instanceof Error ? e.message : String(e)

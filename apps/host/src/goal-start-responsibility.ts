@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto'
 import { agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent, type AgentPromptSubmissionRecord } from '@agentmux/core'
 import type { Demand, DemandDispatch, DemandStore, GoalStartObservation } from '@agentmux/demand'
-import type { RuntimeController } from './runtime-controller.js'
+import type { GoalRuntimePort } from './goal-runtime.js'
 
-export type GoalStartRuntimePort = Pick<RuntimeController, 'agentCreation' | 'observeCoreEvents' | 'observeOriginalRun' |
+export type GoalStartRuntimePort = Pick<GoalRuntimePort, 'agentCreation' | 'observeCoreEvents' | 'observeOriginalRun' |
   'saveGoalAttention' | 'inspectGoalAttention' | 'observeContinuousProgress' | 'submitPrompt' | 'observeInputOccupation'> & {
   inspectGoalStart(dispatch: DemandDispatch): Promise<AgentPromptSubmissionRecord | null>
 }
@@ -174,9 +174,10 @@ export class GoalStartResponsibilityOwner {
       else {
         try {
           const receipt = await this.runtime.inspectGoalAttention(attention)
+          const message = receipt?.admission?.intent?.message
           value.attention = receipt?.agentSessionId === attention.supervisorAgentSessionId && receipt.run.runId === attention.supervisorRunId &&
             receipt.admission?.submissionId === attention.operationId && receipt.admission.acknowledged &&
-            receipt.admission.intent?.message?.systemContext === attention.agentMuxNote && !receipt.admission.intent.message.authorHuman && !receipt.admission.intent.message.authorAgentSessionId
+            message?.systemContext === attention.agentMuxNote && !message.authorHuman && !message.authorAgentSessionId
             ? { state: 'confirmed', reason: 'The original Supervisor received the Start responsibility note. Worker result attribution and human acceptance remain separate.' }
             : { state: 'unknown', reason: issue ?? 'The original Start note receipt is unconfirmed. Inspect its original Core input; it is never automatically resent.' }
         } catch (error) { value.attention = { state: 'unknown', reason: describe(error) } }
