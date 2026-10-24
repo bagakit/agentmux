@@ -1,6 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { ClientIncidentArchive } from './client-incident-archive.js'
 import { PerformanceSceneOwner } from './performance-scene.js'
+import { AppMemoryEvidenceOwner } from './app-memory-evidence.js'
 import { RendererHeapSnapshotOwner } from './renderer-heap-snapshot.js'
 import { createDesktopApplicationAccessOwner } from './application-access-owner.js'
 import { WorkbenchWindows } from './workbench-windows.js'
@@ -100,6 +101,9 @@ function startPrimaryInstance(): void {
   const loadedPackage = readLoadedPackageIdentity(join(import.meta.dirname, '../../package-identity.json'))
   const clientIncidents = new ClientIncidentArchive(join(app.getPath('userData'), 'client-incidents'))
   const performanceScene = new PerformanceSceneOwner(join(app.getPath('userData'), 'performance-scene.json'))
+  const appMemory = new AppMemoryEvidenceOwner(join(app.getPath('userData'), 'app-memory-evidence.json'))
+  void app.whenReady().then(() => appMemory.start()).catch(error => console.error('Application memory observation failed:', error))
+  app.once('will-quit', () => appMemory.dispose())
   app.once('will-quit', () => performanceScene.dispose())
   const performanceHeap = new RendererHeapSnapshotOwner(join(app.getPath('userData'), 'performance-heap'))
   app.once('will-quit', () => performanceHeap.dispose())
@@ -279,7 +283,7 @@ function startPrimaryInstance(): void {
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
     disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks, webLinks,
-      performanceScene, performanceHeap, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
+      performanceScene, appMemory, performanceHeap, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, ...(environmentWarning ? { environmentWarning } : {}) })
     reportStartupStage('after-ipc')

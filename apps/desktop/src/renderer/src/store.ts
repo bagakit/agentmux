@@ -5954,7 +5954,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'browser.release') {
       throw Object.assign(new Error('Native Browser release belongs to the Main resource owner.'), { code: 'CONTROL_FAILED' })
     }
-    if (request.operation === 'metrics.get' || request.operation === 'metrics.watch' || request.operation === 'metrics.profile.capture' || request.operation === 'metrics.trace.capture' || request.operation === 'metrics.memory.inspect' || request.operation === 'metrics.animations.inspect' || request.operation === 'metrics.allocations.capture' || request.operation === 'metrics.scene.capture' || request.operation === 'metrics.scene.inspect' || request.operation === 'metrics.heap.capture' || request.operation === 'metrics.heap.inspect') {
+    if (request.operation === 'metrics.get' || request.operation === 'metrics.watch' || request.operation === 'metrics.app-memory.inspect' || request.operation === 'metrics.profile.capture' || request.operation === 'metrics.trace.capture' || request.operation === 'metrics.memory.inspect' || request.operation === 'metrics.animations.inspect' || request.operation === 'metrics.allocations.capture' || request.operation === 'metrics.scene.capture' || request.operation === 'metrics.scene.inspect' || request.operation === 'metrics.heap.capture' || request.operation === 'metrics.heap.inspect') {
       throw Object.assign(new Error('Metrics queries belong to the Main observation owner.'), { code: 'CONTROL_FAILED' })
     }
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') {

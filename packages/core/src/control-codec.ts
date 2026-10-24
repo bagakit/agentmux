@@ -70,6 +70,7 @@ import {
 import { AgentMuxError, parseAgentMuxErrorData } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseMetricsObservation, type MetricsObservation, type MetricsSubscription } from './metrics.js'
+import { parseAppMemoryEvidence } from './app-memory-evidence.js'
 import { assertToolkitResultTarget, isToolkitOperation, parseToolkitRequest, parseToolkitResult } from './toolkit.js'
 import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
 import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBrowserTaskControlResult } from './browser-task-control.js'
@@ -335,7 +336,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     const input = parseRendererV8ProfileInput({ target: source.target, durationMs: source.durationMs })
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, ...input }
   }
-  if (source.operation === 'metrics.get' || source.operation === 'metrics.watch') {
+  if (source.operation === 'metrics.get' || source.operation === 'metrics.watch' || source.operation === 'metrics.app-memory.inspect') {
     if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation'].includes(key))) {
       throw new AgentMuxError('Metrics queries take no data parameters.', 'INVALID_CONTROL_REQUEST')
     }
@@ -1232,6 +1233,11 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
       result: { observation: parseMetricsObservation(result.observation) } }
+  }
+  if (operation === 'metrics.app-memory.inspect') {
+    settingsFields(result, ['evidence'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { evidence: parseAppMemoryEvidence(result.evidence) } }
   }
   if (operation === 'metrics.watch') {
     settingsFields(result, [], 'CONTROL_PROTOCOL_ERROR')

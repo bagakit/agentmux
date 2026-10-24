@@ -93,6 +93,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'system.crash-log.inspect': 'diagnostics.crash-log.get',
   'system.crash-log.reveal': 'diagnostics.crash-log.reveal',
   'system.metrics.get': 'metrics.get', 'system.metrics.watch': 'metrics.watch',
+  'system.metrics.app-memory.inspect': 'metrics.app-memory.inspect',
   'system.metrics.allocations.capture': 'metrics.allocations.capture',
   'system.metrics.scene.capture': 'metrics.scene.capture',
   'system.metrics.scene.inspect': 'metrics.scene.inspect',
