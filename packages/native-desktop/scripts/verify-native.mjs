@@ -37,6 +37,9 @@ if (sourceOnly && osFixture) throw new Error('--os-fixture requires --source')
 if (process.platform !== 'darwin') throw new Error('Native verification requires macOS')
 
 const assert = (condition, message) => { if (!condition) throw new Error(message) }
+const errorRecord = error => ({ name: error?.name ?? 'Error', message: error instanceof Error ? error.message : String(error),
+  ...(error?.code ? { code: error.code } : {}), ...(error?.fixture ? { fixture: error.fixture } : {}),
+  ...(error instanceof AggregateError ? { errors: error.errors.map(errorRecord) } : {}) })
 function command(command, parameters, { log, capture = false, allowFailure = false } = {}) {
   const fd = log ? openSync(log, 'w', 0o600) : undefined
   let result
@@ -105,6 +108,7 @@ class FixtureProcess {
   pending = new Map()
   sequence = 0
   constructor(executable, log) {
+    this.executablePath = executable
     this.log = openSync(log, 'w', 0o600)
     this.child = spawn(executable, [], { stdio: ['pipe', 'pipe', this.log] })
     this.closed = new Promise(resolve => this.child.once('close', () => { closeSync(this.log); resolve() }))
@@ -147,7 +151,11 @@ class FixtureProcess {
     this.child.stdin.end()
     if (!await Promise.race([this.closed.then(() => true), delay(2000).then(() => false)])) {
       this.child.kill('SIGTERM')
-      await Promise.race([this.closed, delay(2000)])
+      if (!await Promise.race([this.closed.then(() => true), delay(2000).then(() => false)])) {
+        throw Object.assign(new Error('The exact spawned fixture did not confirm closure after EOF and SIGTERM'), {
+          code: 'fixture_cleanup_unknown', fixture: { pid: this.child.pid ?? null, executablePath: this.executablePath },
+        })
+      }
     }
   }
 }
@@ -164,6 +172,7 @@ async function verifyOSFixture(desktop, instanceId, evidence, swiftArgs, pngFrom
   const binary = join(evidence, 'native-verification-fixture')
   command('swiftc', [...swiftArgs, join(root, 'Verification/Fixture.swift'), '-o', binary], { log: join(evidence, 'fixture-build.log') })
   const fixture = new FixtureProcess(binary, join(evidence, 'fixture.log'))
+  let primaryError
   try {
     const ready = await fixture.ready
     assert(ready.pid === fixture.child.pid && Number.isSafeInteger(ready.windowId) && ready.windowId > 0, 'Fixture did not identify its actual process/window')
@@ -217,7 +226,15 @@ async function verifyOSFixture(desktop, instanceId, evidence, swiftArgs, pngFrom
       operations, textMatched: actual.text === expectedText, buttonPresses: actual.presses,
       capture: { operationId, instanceId, state: captureOperation.state, pngPath,
         width: capture.screenshot.width, height: capture.screenshot.height, engine: capture.engine } }
-  } finally { await fixture.stop() }
+  } catch (error) {
+    primaryError = error
+    throw error
+  } finally {
+    try { await fixture.stop() } catch (cleanupError) {
+      if (primaryError) throw new AggregateError([primaryError, cleanupError], 'Native fixture operation and exact-process cleanup both failed')
+      throw cleanupError
+    }
+  }
 }
 
 let evidence
@@ -271,7 +288,7 @@ try {
   report.state = 'passed-requested-scope'
 } catch (error) {
   report.state = 'failed'
-  report.error = { message: error instanceof Error ? error.message : String(error) }
+  report.error = errorRecord(error)
   process.exitCode = 1
 }
 if (evidence) writeFileSync(join(evidence, 'report.json'), JSON.stringify(report, null, 2) + '\n', { mode: 0o600 })
