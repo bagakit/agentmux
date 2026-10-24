@@ -1,3 +1,4 @@
+import { instrumentCreationSource } from './mobile-creation-mutations.mjs'
 import { instrumentDiagnosticsSource } from './mobile-diagnostics-mutations.mjs'
 import { instrumentContentSource } from './mobile-content-mutations.mjs'
 import { instrumentWorkspaceSource } from './mobile-workspace-mutations.mjs'
@@ -48,7 +49,7 @@ registerHooks({
     const result = next(url, context)
     if (!url.startsWith('file:')) return result
     const path = relative(root, fileURLToPath(url))
-    const discoverySource = instrumentDiagnosticsSource(instrumentWorkspaceSource(instrumentDiscoverySource(instrumentContentSource(String(result.source), path), path), path), path)
+    const discoverySource = instrumentCreationSource(instrumentDiagnosticsSource(instrumentWorkspaceSource(instrumentDiscoverySource(instrumentContentSource(String(result.source), path), path), path), path), path)
     if (!observed.test(path)) return discoverySource === String(result.source) ? result : { ...result, source: discoverySource }
     const original = String(result.source); let source = discoverySource
     if (mutant && mutants[mutant][0] === path) {

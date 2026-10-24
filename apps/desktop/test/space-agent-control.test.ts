@@ -255,11 +255,55 @@ describe('public Desktop spatial Control owner', () => {
       { spaceId: directoryIdentity('local', _hygiene_fixturePath("repo")), zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("repo")), 'wt') }])
     expect(useAppStore.getState().tabs).toEqual({})
     const conflicting = await control({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture' },
-      destination: { spaceId: directoryIdentity('local', _hygiene_fixturePath("other")), zoneId: ambiguous.issues[0]!.candidates![0]!.zoneId }, focus: false })
+      destination: { spaceId: directoryIdentity('local', _hygiene_fixturePath("other")), zoneId: ambiguous.issues[0]!.candidates![0]!.zoneId }, focus: true })
     if (conflicting.operation !== 'agent.open') throw new Error('Wrong operation')
     expect(conflicting.issues[0]?.code).toBe('SPACE_PARENT_MISMATCH')
     expect(conflicting.issues[0]?.recovery).toBe('Use amux space ls, then choose the exact Space/Zone/Tab/Region.')
     expect(launchAgent).not.toHaveBeenCalled()
+  })
+
+  it('keeps an exact background creation on its original public owner when that request fails', async () => {
+    const original = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture', prompt: 'original first task' },
+      destination: { spaceId: directoryIdentity('local', _hygiene_fixturePath('repo')),
+        zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath('repo')), 'repo'), newTab: true }, focus: false })
+    if (original.operation !== 'agent.open') throw new Error('Wrong operation')
+    const failure = new Error('The original semantic Host is unavailable.')
+    const openAgent = vi.spyOn(api.spatial, 'openAgent').mockRejectedValue(failure)
+    const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
+    await expect(useAppStore.getState().executeControl(original)).rejects.toBe(failure)
+    expect(openAgent).toHaveBeenCalledExactlyOnceWith({ operationId: original.requestId, content: original.content,
+      destination: original.destination, focus: false })
+    expect(launchAgent).not.toHaveBeenCalled()
+    expect(useAppStore.getState().spatialRequests).toEqual({})
+    expect(useAppStore.getState().tabs).toEqual({})
+  })
+
+  it('keeps confirmed foreign Zone creation on the original Desktop execution owner', async () => {
+    const original = (await api.spatial.read())!
+    const spaceId = directoryIdentity('local', _hygiene_fixturePath('repo'))
+    const zoneId = workspaceZoneId(spaceId, 'repo')
+    const graph = structuredClone(original.graph)
+    graph.zones.find(zone => zone.zoneId === zoneId)!.hostId = 'remote'
+    graph.spaces.find(space => space.spaceId === spaceId)!.hostId = 'remote'
+    await api.spatial.commit({ expectedRevision: original.revision, graph })
+    const remoteConfig: AppConfig = { ...config,
+      hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Original foreign Host', hostname: 'private.invalid' }],
+      workspaces: config.workspaces.map(workspace => workspace.id === 'repo' ? { ...workspace, hostId: 'remote' } : workspace) }
+    vi.spyOn(api.config, 'get').mockResolvedValue(remoteConfig)
+    dispose?.(); dispose = await useAppStore.getState().initialize()
+    const openAgent = vi.spyOn(api.spatial, 'openAgent')
+    const launchAgent = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
+      const session = agent(input.agentSessionId!, input.workspacePath)
+      return launch({ ...session, hostId: 'remote', control: { ...session.control, hostId: 'remote' } }, input.createOperationId!)
+    })
+    const receipt = await control({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture', prompt: 'Original foreign first task' },
+      destination: { spaceId, zoneId, newTab: true }, focus: false })
+    if (receipt.operation !== 'agent.open') throw new Error('Wrong operation')
+    expect(receipt.outcome).toBe('opened')
+    expect(receipt.agent).toMatchObject({ hostId: 'remote', cwd: _hygiene_fixturePath('repo'), initialPrompt: 'confirmed' })
+    expect(launchAgent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ hostId: 'remote',
+      prompt: 'Original foreign first task', createOperationId: receipt.requestId }))
+    expect(openAgent).not.toHaveBeenCalled()
   })
 
   it('moves exactly one projection across Space, consumes an empty Region, and keeps execution and another projection', async () => {
