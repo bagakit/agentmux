@@ -10,18 +10,19 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 import { aliases, browserInstalledDependency, desktopRequire, root } from './fixtures/settings-connections/environment.mjs'
 
 const fixture = resolve(root, 'apps/desktop/scripts/fixtures/channel-entry')
-const headerStatus = process.argv.includes('--header-status'), main = headerStatus ? 'status-main.cjs' : 'main.cjs'
-const evidenceRoot = headerStatus ? '.local/group-readiness/connection-surface-visual' : '.local/channel-protocol/channel-entry'
+const memberAccess = process.argv.includes('--member-access'), headerStatus = process.argv.includes('--header-status'), focused = headerStatus || memberAccess
+const main = memberAccess ? 'member-main.cjs' : headerStatus ? 'status-main.cjs' : 'main.cjs'
+const evidenceRoot = memberAccess ? '.local/member-access/visual' : headerStatus ? '.local/group-readiness/connection-surface-visual' : '.local/channel-protocol/channel-entry'
 const evidence = resolve(root, evidenceRoot, 'runs', randomUUID()), temporary = await mkdtemp(resolve(tmpdir(), 'amux-channel-entry-'))
 await mkdir(evidence, { recursive: true })
 const sha = value => createHash('sha256').update(value).digest('hex')
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), inputs: {}, loadedTransforms: {},
-  scope: headerStatus ? 'Original channel header, popover and group details; controlled public DTOs and native pointer/keyboard. Header narrow uses an actual split Region; details narrow uses the actual narrow window.' : 'Original controlled channel-entry journey.' }
+  scope: memberAccess ? 'Original group Member access through native input and complete Renderer, with synthetic typed original Binding/grant/operation leaves. Real public Host/CLI authorization is qualified separately; no live grants.' : headerStatus ? 'Original channel header, popover and group details; controlled public DTOs and native pointer/keyboard. Header narrow uses an actual split Region; details narrow uses the actual narrow window.' : 'Original controlled channel-entry journey.' }
 const env = { ...process.env, pnpm_config_verify_deps_before_run: 'false' }; delete env.ELECTRON_RUN_AS_NODE
 try {
   for (const path of ['apps/desktop/scripts/capture-channel-entry.mjs', ...['entry.tsx', main, 'index.html', 'scenario.md'].map(name => 'apps/desktop/scripts/fixtures/channel-entry/' + name)]) receipt.inputs[path] = sha(await readFile(resolve(root, path)))
   // PostCSS follows local CSS @imports internally, outside Vite's transform hook.
-  if (headerStatus) {
+  if (focused) {
     const seen = new Set()
     async function pinCss(file) {
       if (seen.has(file)) return
@@ -39,14 +40,15 @@ try {
       receipt.inputs[relative(root, file)] = sha(readFileSync(file))
       receipt.loadedTransforms[relative(root, id)] = sha(code)
     } } }], build: { target: 'esnext', outDir: compiled, emptyOutDir: true } })
-  if (!headerStatus) await cp(compiled, resolve(evidence, 'compiled'), { recursive: true })
+  if (!focused) await cp(compiled, resolve(evidence, 'compiled'), { recursive: true })
   receipt.compiled = Object.fromEntries(await Promise.all((await readdir(compiled, { recursive: true })).filter(name => /\.(?:html|js|css)$/u.test(name)).map(async name => [name, sha(await readFile(resolve(compiled, name)))])))
   const visual = resolve(evidence, 'visual'); await mkdir(visual)
   const lines = [], execution = await runProbeProcess(desktopRequire('electron'), [resolve(fixture, main), resolve(compiled, 'index.html'), temporary, visual], { cwd: root, temporaryRoot: temporary, env, timeoutMs: 60000, onLine: line => lines.push(line) })
+  receipt.execution = execution
   await writeFile(resolve(visual, 'capture.log'), lines.join('\n'))
   const render = JSON.parse(await readFile(resolve(visual, 'render.json'), 'utf8'))
   assert.equal(execution.exitCode, 0, JSON.stringify(render.failure)); assert.equal(render.passed, true)
-  assert.equal(render.frames.length, 8)
+  assert.equal(render.frames.length, memberAccess ? 4 : 8)
   receipt.render = render; receipt.images = Object.fromEntries(await Promise.all(render.frames.map(async file => [file, sha(await readFile(resolve(visual, file)))])))
   for (const [file, expected] of Object.entries(receipt.inputs)) assert.equal(sha(await readFile(resolve(root, file))), expected, 'A loaded source changed during capture: ' + file)
   receipt.passed = true
