@@ -5,7 +5,7 @@ import ts from 'typescript'
 import { afterEach, expect, it } from 'vitest'
 import { preservePackageSmokeFailure } from '../scripts/package-smoke-context.mjs'
 
-const source = await readFile(new URL('../scripts/package-macos.mjs', import.meta.url), 'utf8')
+const source = await readFile(process.env.AGENTMUX_PACKAGE_SMOKE_SOURCE ?? new URL('../scripts/package-macos.mjs', import.meta.url), 'utf8')
 const ast = ts.createSourceFile('package-macos.mjs', source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS)
 const mains = ast.statements.filter(ts.isFunctionDeclaration).filter(node => node.name?.text === 'main')
 if (mains.length !== 1) throw new Error('Expected one original packaging entry')
@@ -15,12 +15,14 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amx-package-diagnostics-')); roots.push(root); return root
 }
 
-async function executeOriginalMain(appOnly: boolean, evidenceUnavailable = false) {
+async function executeOriginalMain(appOnly: boolean, evidenceUnavailable = false, options: { cleanupUnconfirmed?: boolean; stagingRemovalFails?: boolean } = {}) {
   const root = await fixture(), repositoryRoot = join(root, 'repository')
   const originalLog = join(root, 'original-user.log')
   await writeFile(originalLog, 'original user bytes retained')
   const failure = Object.assign(new AggregateError([new Error('ready-receipt: Host identity unknown'), new Error('private Runtime cleanup unknown')], 'Original verification failed'),
-    { transaction: { operationId: 'original-install-operation', ui: { status: 'unknown' } } })
+    { transaction: { operationId: 'original-install-operation', ui: { status: 'unknown' } },
+      ...(options.cleanupUnconfirmed ? { privateSmokeCleanup: { status: 'unconfirmed', hostStopped: false } } : {}) })
+  const stagingRemovalError = Object.assign(new Error('Private staging is still occupied'), { code: 'ENOTEMPTY' })
   let staging = '', receipt: Awaited<ReturnType<typeof preservePackageSmokeFailure>> | undefined, output = ''
   const verification = async (_app: string, temporary: string) => {
     staging = temporary
@@ -41,9 +43,14 @@ async function executeOriginalMain(appOnly: boolean, evidenceUnavailable = false
     repositoryRoot, desktopRoot: join(repositoryRoot, 'apps/desktop'), releaseRoot: join(root, 'release'),
     PRODUCT_NAME: 'AgentMux', manifest: { version: '0.1.0' }, appOnly, installRequested: false,
     brandApplication: noop, copyRuntimeApplication: noop, verifyIdentity: noop, verifyThirdPartyNotices: noop,
+    verifyNativeDesktopCopy: noop, verifyNativeDesktopSigning: noop,
     auditBundleSymlinks: noop, auditRuntimeReferences: noop, verifyWorkspaceMoveHelper: noop,
     signMacosApplication: noop, verifyMacosSigning: async () => ({ kind: 'certificate' }), sha256: async () => 'original-digest',
-    verifyPackagedRuntime: noop, createDmg: noop, verifyLaunchServices: verification, verifyDmg: verification, rm,
+    verifyPackagedRuntime: noop, createDmg: noop, verifyLaunchServices: verification, verifyDmg: verification,
+    rm: async (...args: Parameters<typeof rm>) => {
+      if (options.stagingRemovalFails && args[0] === staging) throw stagingRemovalError
+      return await rm(...args)
+    },
     preservePackageSmokeFailure: async (...args: Parameters<typeof preservePackageSmokeFailure>) => {
       if (evidenceUnavailable) throw new Error('Evidence storage unavailable')
       return receipt = await preservePackageSmokeFailure(...args)
@@ -51,7 +58,7 @@ async function executeOriginalMain(appOnly: boolean, evidenceUnavailable = false
   }
   const consume = new Function(...Object.keys(ports), `return (${mains[0]!.getText(ast)})`)(...Object.values(ports))
   const error = await consume().then(() => { throw new Error('The failed smoke must stay failed') }, (error: unknown) => error)
-  return { root, repositoryRoot, staging, receipt, failure, error, output, originalLog }
+  return { root, repositoryRoot, staging, receipt, failure, error, output, originalLog, stagingRemovalError }
 }
 
 it.each([true, false])('the original package entry preserves exact private failure evidence before removing staging, app-only=%s', async appOnly => {
@@ -78,6 +85,22 @@ it('retains the original staging and both errors when evidence storage itself fa
   expect((result.error as AggregateError).errors[0]).toBe(result.failure)
   expect((result.error as AggregateError).errors[1].message).toBe('Evidence storage unavailable')
   expect((result.error as AggregateError & { transaction: unknown }).transaction).toBe(result.failure.transaction)
+  expect((await stat(result.staging)).isDirectory()).toBe(true)
+})
+
+it('retains the App image when an exact private cleanup remains unconfirmed', async () => {
+  const result = await executeOriginalMain(false, false, { cleanupUnconfirmed: true })
+  expect(result.error).toBe(result.failure)
+  await expect(stat(result.staging).then(info => info.isDirectory())).resolves.toBe(true)
+  expect(result.receipt).toMatchObject({ cleanup: { status: 'unconfirmed', hostStopped: false } })
+  expect(result.output).toContain(`package_failure_staging=${result.staging}`)
+})
+
+it('keeps the original failure and transaction when final staging removal also fails', async () => {
+  const result = await executeOriginalMain(true, false, { stagingRemovalFails: true })
+  expect(result.error).toBeInstanceOf(AggregateError)
+  expect(result.error).toMatchObject({ cause: result.failure, transaction: result.failure.transaction })
+  expect((result.error as AggregateError).errors).toEqual([result.failure, result.stagingRemovalError])
   expect((await stat(result.staging)).isDirectory()).toBe(true)
 })
 

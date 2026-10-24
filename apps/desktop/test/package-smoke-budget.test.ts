@@ -47,6 +47,9 @@ function launch(scenario: Scenario = {}) {
   const removed: string[] = [], signals: string[] = [], launchTimeouts: number[] = [], stderrReads: string[] = []
   const boundaries = {
     privatePackageSmokeEnvironment,
+    defaultAgentMuxControlSocketPath: (env: Record<string, string>) => path.join(env.AGENTMUX_RUNTIME_DIRECTORY!, 'control.sock'),
+    macosHostService: (input: unknown) => input, macosHostServiceRegistration: async () => null,
+    cleanupSmokeHost: async () => ({ status: 'unregistered' }),
     Date: { now: () => now },
     setTimeout: (resolve: () => void, delay: number) => { now += delay; resolve() },
     join: path.join, sep: path.sep,
