@@ -36,6 +36,7 @@ const variants = [{ name: 'candidate' },
   { name: 'cancel-peers', test: '193 independent subscription leases' },
   { name: 'wrong-subscription', test: '193 independent subscription leases' },
   { name: 'replay-unknown', test: 'a lost admitted write' },
+  { name: 'queued-cancel-unknown', test: 'public shared reader cancellation preserves exact queued' },
   { name: 'restored', test: 'one Unix client delivers|193 independent Unix clients' }]
 try {
   for (const file of ['packages/core/src/public-rpc-client.ts', 'packages/core/src/rpc-stream-transport.ts',
