@@ -10,25 +10,11 @@ import { observeRead as observe } from './observation-read.js'
 import { parseAgentMuxCreationTrustInput } from './agent-creation-admission.js'
 import { rpcString } from './rpc-business-codec.js'
 import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, type AgentExternalInputAuthorityPort } from './external-author.js'
-import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RUNTIME_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
-  type AgentMuxHostedMethod, type AgentMuxHostedStreamEvent, type AgentMuxHostedTransferChunk,
+import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_PREPARATION, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
+  type AgentMuxHostedStreamEvent, type AgentMuxHostedTransferChunk,
   type AgentMuxRuntimeOwnerIdentity, type AgentMuxRuntimeFence, type AgentMuxHostedAttachmentTarget } from './hosted-client-contract.js'
 import { decodeHostedValue, encodeHostedValue, hostedTransfer, parseHostedAgentSessionRead, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
 
-const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
-  'prepareTerminal',
-  'runtimeDiagnostics', 'runtimeResourceSnapshot',
-  'controlAgentContinuity',
-  'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
-  'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation', 'replySessionQuestion',
-  'listHostExecutors', 'configureHostExecutor', 'listAgentSpawns',
-  'readDeliveryAttempt', 'readReadingDiagnostic', 'findReadingDiagnostics', 'readAgentStartupDiagnostic', 'findAgentStartupDiagnostics', 'inspectAgentPromptSubmission', 'inspectMessageNotification', 'inspectAgentInput', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'attestAgentCreation',
-  'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'releaseConversationView', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
-  'checkDeliveries', 'ackDeliveryBatch',
-  'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff', 'readMessage', 'listMessages', 'listMessageEvents', 'inspectMessageBroadcast', 'broadcastMessages', 'readDispatch', 'listDispatches'
-])
-// Connect only the Runtime here; each operation still enforces its own target and business prerequisites.
-const RUNTIME_METHODS = new Set<AgentMuxHostedMethod>(AGENTMUX_HOSTED_RUNTIME_METHODS)
 type Emit = (event: AgentMuxHostedStreamEvent) => void | Promise<void>
 type Context = { principal?: import('./public-rpc.js').AgentMuxRpcPrincipal; caller?: unknown; sourceDevice?: undefined | import('./types.js').AgentOperationDevice;
   assertCurrent?(): void | Promise<void>;
@@ -277,10 +263,19 @@ export class AgentMuxHostedRuntimeService {
     // an unattached invocation must not manufacture a consumer with no owner.
     const original = this.consumers.get(id)
     context.signal?.throwIfAborted()
-    if (RUNTIME_METHODS.has(invocation.method)) await observe(this.client.connectRuntime(), context.signal)
-    else if (!messageIntake && invocation.method !== 'notifyMessages' && !OFFLINE_METHODS.has(invocation.method) && !(
-      (invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage') &&
-      ['manual-actor', 'native-conversation'].includes((invocation.args[0] as { admissionIntent?: { kind?: string } } | undefined)?.admissionIntent?.kind ?? ''))) await observe(this.client.connect(), context.signal)
+    const preparation = AGENTMUX_HOSTED_PREPARATION[invocation.method]
+    switch (preparation) {
+      case 'owner': break
+      case 'runtime': await observe(this.client.connectRuntime(), context.signal); break
+      case 'session-observation': await observe(this.client.connect(), context.signal); break
+      case 'input-admission':
+        if (!messageIntake && !['manual-actor', 'native-conversation'].includes(
+          (invocation.args[0] as { admissionIntent?: { kind?: string } } | undefined)?.admissionIntent?.kind ?? '')) {
+          await observe(this.client.connect(), context.signal)
+        }
+        break
+      default: preparation satisfies never
+    }
     context.signal?.throwIfAborted(); this.assertFence(p.fence)
     if (attachment && this.consumers.get(id) !== original) throw new AgentMuxError('Attachment observation changed while reconnecting its original Core.', 'CONTROL_CANCELLED')
     if (invocation.method === 'submitAgentPrompt') {

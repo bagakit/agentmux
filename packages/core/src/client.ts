@@ -6687,7 +6687,7 @@ export class AgentMuxClient {
   }
 
   private async prepareAgentStop(agentSessionId: string, expectedRun: AgentMuxRunRef) {
-    const session = this.requireAgentSession(agentSessionId)
+    const session = await this.resolveRawAgentSession(agentSessionId)
     if (!sameRun(session.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before its Run was stopped.', 'STALE_AGENT_SESSION')
     }
