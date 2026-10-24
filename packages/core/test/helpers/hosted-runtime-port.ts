@@ -43,7 +43,7 @@ export async function hostedTestClient(client: AgentMuxClient) {
   }
   const sdk = await connectHostedAgentMux({ rpc: port })
   await initialProjection // Separate the SDK's initial read from the operation being tested.
-  return { sdk, service, dispose: async () => { await sdk.dispose(); await service.dispose() } }
+  return { sdk, service, port, dispose: async () => { await sdk.dispose(); await service.dispose() } }
 }
 export function logicalHostedEvents(emit: (value: unknown) => void | Promise<void>) {
   const reader = new AgentMuxHostedTransferReader()
