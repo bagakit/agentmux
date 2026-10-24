@@ -320,3 +320,25 @@ it('presents terminal byte confirmation as information, without Native admission
   expect([...surface.querySelectorAll('button')].some(button => button.textContent?.includes('重试'))).toBe(false)
   expect(retry).not.toHaveBeenCalled()
 })
+
+
+it('explains Core-owned first delivery after Session recovery without asking for another confirmation', async () => {
+  const inputReceipt = savedInput()
+  inputReceipt.observation = 'owned'
+  inputReceipt.control.waiting = { phase: 'session', reason: 'session-resume-needed', wake: 'session-restored' }
+  await render(<MessageDeliveryFailure compact error={null} inputReceipt={inputReceipt} />)
+  expect(container.querySelector('section')!.dataset.kind).toBe('saved-waiting')
+  expect(container.querySelector('.message-delivery-failure__heading')!.textContent).toBe('已保存 · 等待恢复')
+  expect(container.textContent).toContain('原 Session 语义恢复后自动继续首次投递')
+  expect(container.querySelector('.message-delivery-failure__next')!.textContent).toBe('可停止这一代等待。')
+})
+
+
+it('keeps unowned recovery waiting explicit when the original author must rejoin', () => {
+  const inputReceipt = savedInput()
+  inputReceipt.control.waiting = { phase: 'session', reason: 'session-resume-needed', wake: 'session-restored' }
+  const result = presentMessageDeliveryFailure({ error: null, inputReceipt })
+  expect(result.title).toBe('已保存 · 等待确认')
+  expect(result.state).toContain('当前等待尚未接回')
+  expect(result.action).toContain('继续确认原环境')
+})
