@@ -106,16 +106,20 @@ const signing=await import(${JSON.stringify(signing)});console.log(JSON.stringif
   await expect(readFile(join(f.root, 'home/.agentmux/signing/identity.json'))).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
-it('uses the built public allocator for the actual Semantic Host bootstrap consumer and its matching release', async () => {
+it('uses the built public allocator for fenced Semantic Host observation without an unowned consumer release', async () => {
   const f = await fixture(), port = join(f.root, 'rpc-port'), calls = join(f.root, 'rpc-calls.ndjson')
+  const failure = join(f.root, 'rpc-failure.txt')
   await mkdir(port)
   await writeFile(join(port, 'public-rpc.js'), 'export const AGENTMUX_RPC_NATIVE_METHODS={"runtime.owner.identity":true}\n')
-  await writeFile(join(port, 'public-rpc-client.js'), `import {appendFileSync} from 'node:fs';
+  await writeFile(join(port, 'public-rpc-client.js'), `import {appendFileSync,existsSync,readFileSync} from 'node:fs';
+const failure=existsSync(${JSON.stringify(failure)})?readFileSync(${JSON.stringify(failure)},'utf8'):null;
 const record=value=>appendFileSync(${JSON.stringify(calls)},JSON.stringify(value)+'\\n');
 export async function connectAgentMuxRpc(){record({kind:'connect'});return {async call(method,params){record({method,params});
+if(method===failure)throw Error('injected '+method+' failure');
+if(method==='runtime.release-consumer')throw Error('unowned semantic consumer release');
 if(method==='runtime.owner.identity')return {owner:{runtimeId:'fixture-runtime',ownerInstanceId:'fixture-owner'}};
 if(method==='runtime.bootstrap')return {hostProcessId:4242,storePath:${JSON.stringify(join(f.root, 'unopened-store.json'))}};
-return {}},async dispose(){record({kind:'dispose'})}}}\n`)
+return {}},async dispose(){record({kind:'dispose'});if(failure==='dispose')throw Error('injected dispose failure')}}}\n`)
   const args = [join(f.scripts, 'package-semantic-host.mjs'), '--bootstrap', join(port, 'public-rpc-client.js')]
   const cold = await f.run('bootstrap-needs-core', args)
   expect(cold.exitCode).toBe(1); expect(cold.stderr).toContain('ERR_MODULE_NOT_FOUND')
@@ -140,13 +144,12 @@ return {}},async dispose(){record({kind:'dispose'})}}}\n`)
   expect(JSON.parse(result.stdout)).toEqual({ hostProcessId: 4242, storePath: join(f.root, 'unopened-store.json') })
   const protocol = (await readFile(calls, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   expect(protocol.map(value => value.method ?? value.kind)).toEqual([
-    'connect', 'runtime.owner.identity', 'runtime.bootstrap', 'runtime.release-consumer', 'dispose'
+    'connect', 'runtime.owner.identity', 'runtime.bootstrap', 'dispose'
   ])
-  const bootstrap = protocol[2]!, release = protocol[3]!
+  const bootstrap = protocol[2]!
   const { isObjectId } = await import('@agentmux/core/object-id')
   expect(bootstrap.params.consumerId.startsWith('package-host-')).toBe(true)
   expect(isObjectId(bootstrap.params.consumerId.slice('package-host-'.length))).toBe(true)
-  expect(release.params).toEqual(bootstrap.params)
   expect(bootstrap.params.fence).toEqual({ runtimeId: 'fixture-runtime', ownerInstanceId: 'fixture-owner' })
   expect(result.calls.some(call => call.kind === 'allocator-resolution' && call.parentURL.endsWith('/package-semantic-host.mjs'))).toBe(true)
   await expect(readFile(join(f.root, 'unopened-store.json'))).rejects.toMatchObject({ code: 'ENOENT' })
@@ -154,4 +157,18 @@ return {}},async dispose(){record({kind:'dispose'})}}}\n`)
     boundary: 'Actual helper and Core/identity allocator; controlled RPC transport only, no Host or Store started.',
     coreObjectIdSha256: digest(await readFile(join(f.core, 'dist/object-id.js'))),
     identitySha256: digest(await readFile(join(identity, 'dist/index.js'))) }, null, 2) + '\n')
-})
+
+  for (const stage of ['runtime.owner.identity', 'runtime.bootstrap', 'dispose']) {
+    await writeFile(failure, stage)
+    await writeFile(calls, '')
+    const failed = await f.run('bootstrap-failed-' + stage, args)
+    expect(failed.exitCode).toBe(1)
+    expect(failed.stderr).toContain('injected ' + stage + ' failure')
+    const trace = (await readFile(calls, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    expect(trace.map(value => value.method ?? value.kind)).toEqual(stage === 'runtime.owner.identity'
+      ? ['connect', 'runtime.owner.identity', 'dispose']
+      : ['connect', 'runtime.owner.identity', 'runtime.bootstrap', 'dispose'])
+    if (stage === 'dispose') expect(JSON.parse(failed.stdout)).toEqual({ hostProcessId: 4242, storePath: join(f.root, 'unopened-store.json') })
+    else expect(failed.stdout).toBe('')
+  }
+}, 20_000)
