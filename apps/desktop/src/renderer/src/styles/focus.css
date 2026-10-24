@@ -608,3 +608,7 @@
 .agent-information-details .agent-usage-details__section { margin-top: 8px; padding-top: 6px; }
 .agent-information-details .agent-usage-details__observed { margin-top: 8px; }
 .workspace-agent-card > .focus-goal__trigger { top: var(--sp-2); }
+
+.focus-coordination-results { flex: none; margin: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); min-width: 0; }
+.focus-coordination-results > header { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.focus-coordination-results > header small { color: var(--text-3); }

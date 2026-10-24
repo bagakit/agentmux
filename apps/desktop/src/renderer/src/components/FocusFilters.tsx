@@ -22,8 +22,9 @@ function ExplicitFilterTrigger({ onClick, ...props }: ButtonHTMLAttributes<HTMLB
 }
 
 /** Only presentation conditions live here. Original owner facts and card membership stay at Focus. */
-export function FocusFilters({ value, onChange, options, visible, onClear, onHistory, historyAvailable }: {
+export function FocusFilters({ value, onChange, onInspectChange, options, visible, onClear, onHistory, historyAvailable }: {
   value: Selection; onChange(value: Selection): void; options: FocusFilterOptions; visible: boolean
+  onInspectChange?(open: boolean): void
   onClear(): void; onHistory(): void; historyAvailable: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -37,7 +38,8 @@ export function FocusFilters({ value, onChange, options, visible, onClear, onHis
     for (const item of value.projects) selectedNames.current.set(item.id, options.projects.find(option => option.id === item.id)?.name ?? selectedNames.current.get(item.id) ?? item.name)
     for (const id of selectedNames.current.keys()) if (!selected.has(id)) selectedNames.current.delete(id)
   }, [options.projects, value.projects])
-  useEffect(() => { if (!visible) setOpen(false) }, [visible])
+  useEffect(() => { if (!visible) { setOpen(false); onInspectChange?.(false) } }, [visible, onInspectChange])
+  const changeOpen = (next: boolean) => { setOpen(next); onInspectChange?.(next); if (!next) setOptionQuery('') }
   const projects = useMemo(() => {
     const known = new Set(options.projects.map(option => option.id))
     return [...options.projects, ...value.projects.filter(option => !known.has(option.id)).map(option => ({ ...option, name: selectedNames.current.get(option.id) ?? option.name, count: 0, unavailable: true }))]
@@ -59,10 +61,10 @@ export function FocusFilters({ value, onChange, options, visible, onClear, onHis
     {item.id !== 'all' ? <span className="focus-filter-menu__count">{item.count}</span> : null}
   </Menu.CheckboxItem>
   const chip = (field: 'projects' | 'states' | 'types', label: string, names: readonly string[]) => names.length ? <span className="focus-filter-chip" key={field}>
-    <ExplicitFilterTrigger type="button" className="focus-filter-chip__value" title={names.join(' or ')} aria-label={`Edit ${label} filter: ${names.join(' or ')}`} onClick={event => { originRef.current = event.currentTarget; setOptionQuery(''); setOpen(true) }}><span>{label}</span><strong>{names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0]}</strong></ExplicitFilterTrigger>
+    <ExplicitFilterTrigger type="button" className="focus-filter-chip__value" title={names.join(' or ')} aria-label={`Edit ${label} filter: ${names.join(' or ')}`} onClick={event => { originRef.current = event.currentTarget; setOptionQuery(''); changeOpen(true) }}><span>{label}</span><strong>{names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0]}</strong></ExplicitFilterTrigger>
     <button type="button" className="focus-filter-chip__remove" aria-label={`Remove ${label} filter`} onClick={() => { onChange({ ...value, [field]: [] }); triggerRef.current?.focus() }}><CloseIcon size={11} /></button>
   </span> : null
-  return <Menu.Root open={visible && open} onOpenChange={next => { setOpen(next); if (!next) setOptionQuery('') }}>
+  return <Menu.Root open={visible && open} onOpenChange={changeOpen}>
     <div className="focus-filter-chips" aria-label="Applied Focus filters">{chip('projects', 'Project', projectNames)}{chip('states', 'State', stateNames)}{chip('types', 'Type', typeNames)}</div>
       <Menu.Trigger asChild><button ref={triggerRef} type="button" className="focus-filter-trigger" aria-label="Focus filters" aria-description={summary} title={summary} data-active={count > 0 || undefined} onPointerDown={() => { originRef.current = triggerRef.current }} onKeyDown={() => { originRef.current = triggerRef.current }}>
         <FilterIcon size={14} /><span className="focus-filter-trigger__summary">Filter</span>{count ? <span className="focus-filter-trigger__count">{count}</span> : null}
@@ -81,7 +83,7 @@ export function FocusFilters({ value, onChange, options, visible, onClear, onHis
           ;(origin.isConnected && origin.getClientRects().length ? origin : triggerRef.current)?.focus()
         }
       }}>
-        <Menu.Label className="focus-filter-menu__heading">Filter execution contexts</Menu.Label>
+        <Menu.Label className="focus-filter-menu__heading">Filter contexts</Menu.Label>
         <div className="focus-filter-menu__search"><TextInput ref={optionSearchRef} aria-label="Find Focus filter options" placeholder="Find a project, state or type…" value={optionQuery} onChange={event => setOptionQuery(event.target.value)} onKeyDown={event => {
           if (event.key === 'ArrowDown') { event.preventDefault(); event.currentTarget.closest('[role="menu"]')?.querySelector<HTMLElement>('[role="menuitemcheckbox"]')?.focus() }
           else if (event.key !== 'Escape' && event.key !== 'Tab') event.stopPropagation()

@@ -18,7 +18,8 @@ const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 
 
-export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins }: {
+export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins, leading }: {
+  leading?: ReactNode
   origins?: ReadonlyMap<string, FocusLaneOrigin>
   visible?: boolean
   rowsRef?: Ref<HTMLDivElement>
@@ -38,8 +39,9 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
     const timer = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(timer)
   }, [visible])
-  return <section className="focus-project-lanes" aria-label="Project contexts">
+  return <section className="focus-project-lanes" aria-label="Focus context scan">
     <div className="focus-project-lanes__rows" ref={rowsRef}>
+      {leading}
       {lanes.map(lane => <FocusLaneArticle name={lane.name} summary={lane.summary} visible={visible} className={`focus-project-lanes__row${selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId) ? ' is-selected' : ''}`} data-focus-source={origins?.get(lane.id)?.kind} data-focus-current={currentLaneId === lane.id || undefined} data-project-id={lane.projectId} data-project-key={focusProjectKey(lane.hostId, lane.projectId)} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
         <div className="focus-project-lanes__track">{renderLane(lane,
         <span className="focus-project-lanes__heading">
@@ -61,7 +63,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
         <FocusProjectObservation project={project} recent onRead={item => onRead?.(item)} />
       </article>)}
     </div>
-    {lanes.length === 0 && recentProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
+    {!leading && lanes.length === 0 && recentProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
   </section>
 }
 

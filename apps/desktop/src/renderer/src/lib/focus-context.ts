@@ -299,26 +299,29 @@ export function createWorkspaceAgentContextsSelector() {
     return result
   }
 }
-export type FocusProjection = { contexts: FocusContext[]; laneContexts: FocusContext[]; pmoAttention: string[] }
+export type FocusProjection = { contexts: FocusContext[]; laneContexts: FocusContext[]; pmoAttention: string[]; coordinationContexts: FocusContext[] }
 function sameItems<T>(a: readonly T[], b: readonly T[]): boolean { return a.length === b.length && a.every((item, index) => item === b[index]) }
 function sameLaneFacts(a: FocusContext, b: FocusContext): boolean {
   return a.workspace === b.workspace && a.hostId === b.hostId && a.workspacePath === b.workspacePath && a.topicId === b.topicId
     && a.workspaceId === b.workspaceId && a.workspaceName === b.workspaceName && a.liveAgent === b.liveAgent && a.bucket === b.bucket && a.lastActivityAt === b.lastActivityAt
 }
-/** One existing per-surface cache owns execution rows and the separate PMO attention projection. */
+/** One per-surface cache owns execution, the compact PMO reminder and explicitly
+ * requested coordination metadata. Coordination never enters execution history. */
 function createFocusProjectionCache() {
   let groupSequence = 0
-  const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; stamp: FocusTimelineStamp | undefined; deferred: boolean; conversation: FocusConversationFacts | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null }>()
+  const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; stamp: FocusTimelineStamp | undefined; deferred: boolean; conversation: FocusConversationFacts | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null; coordinationModel: FocusContext | null }>()
   let previous: Inputs | undefined
   let previousMode: 'full' | 'metadata' | undefined
-  let result: FocusProjection = {contexts: [], laneContexts: [], pmoAttention: []}
-  const select = (input: Inputs, active = true, mode?: 'full' | 'metadata'): FocusProjection => {
+  let previousCoordination = false
+  let result: FocusProjection = {contexts: [], laneContexts: [], pmoAttention: [], coordinationContexts: []}
+  const select = (input: Inputs, active = true, mode?: 'full' | 'metadata', coordination = false): FocusProjection => {
     if (!active) return result
-    if (sameFocusInputs(previous, input) && previousMode === mode && (mode === undefined
+    if (sameFocusInputs(previous, input) && previousMode === mode && previousCoordination === coordination && (mode === undefined
       || [...cache].every(([id, row]) => row.timeline === input.timelines[id] && sameTimelineStamp(row.stamp, input.timelines[id])))) return result
     const rows: FocusContext[] = []
     const laneRows: FocusContext[] = []
     const pmoAttention: string[] = []
+    const coordinationRows: FocusContext[] = []
     const retained = new Set<string>()
     const now = Date.now()
     for (const session of input.sessions) {
@@ -331,9 +334,12 @@ function createFocusProjectionCache() {
       // their result classification and detail never consume conversation text.
       const deferred = mode === 'metadata' && (session.processState === 'interrupted' || session.runUnobserved === true)
         && !session.pendingInteraction && !isNeedsYouState(session.status.state) && session.status.state !== 'error'
-      if (old && old.deferred === deferred && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && (mode !== undefined ? sameTimelineStamp(old.stamp, timeline) : !old.conversation || sameConversationFacts(old.conversation, timeline)) && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
+      if (old && (!coordination || old.lane !== 'pmo' || old.coordinationModel) && old.deferred === deferred && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && (mode !== undefined ? sameTimelineStamp(old.stamp, timeline) : !old.conversation || sameConversationFacts(old.conversation, timeline)) && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
         if (old.model) { rows.push(old.model); laneRows.push(old.laneModel!) }
-        else if (old.lane === 'pmo' && focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
+        else if (old.lane === 'pmo') {
+          if (coordination) coordinationRows.push(old.coordinationModel!)
+          if (focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
+        }
         continue
       }
       const sameOwner = old && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots && old.config === input.config && old.session.hostId === session.hostId && old.session.workspacePath === session.workspacePath
@@ -341,10 +347,18 @@ function createFocusProjectionCache() {
       let group: { key: string; enteredAt: number | null; sequence: number } | null = null
       let model: FocusContext | null = null
       let laneModel: FocusContext | null = null
+      let coordinationModel: FocusContext | null = null
       let conversation: FocusConversationFacts | undefined
       const lane = focusLaneForSession(topicId, scratchTopicsForWorkspace(input.scratchTopicSnapshots, workspace))
       if (lane === 'pmo') {
         if (focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
+        if (coordination) {
+          // Metadata only: no first prompt, retained body or new conversation
+          // projection. Explicit null also prevents an unsolicited card recap read.
+          const next = agentContextWithConversation(session, undefined, name, workspace, topicId, focusConversationFacts(undefined))
+          coordinationModel = old?.coordinationModel && Object.keys(next).length === Object.keys(old.coordinationModel).length && Object.keys(next).every(key => next[key as keyof FocusContext] === old.coordinationModel![key as keyof FocusContext]) ? old.coordinationModel : next
+          coordinationRows.push(coordinationModel)
+        }
       } else {
         conversation = deferred ? undefined : focusConversationFacts(timeline, old)
         const next = agentContextWithConversation(session, timeline, name, workspace, topicId, conversation)
@@ -366,7 +380,7 @@ function createFocusProjectionCache() {
         laneModel = old?.laneModel && sameLaneFacts(old.laneModel, model) ? old.laneModel : model
         laneRows.push(laneModel)
       }
-      cache.set(session.id, { group, session, activitySemantic, timeline, stamp: conversation ?? (mode !== undefined ? focusTimelineStamp(timeline) : undefined), deferred, conversation, name, config: input.config, workspace, topicId, lane, model, laneModel })
+      cache.set(session.id, { group, session, activitySemantic, timeline, stamp: conversation ?? (mode !== undefined ? focusTimelineStamp(timeline) : undefined), deferred, conversation, name, config: input.config, workspace, topicId, lane, model, laneModel, coordinationModel })
     }
     for (const id of cache.keys()) if (!retained.has(id)) cache.delete(id)
     // Only Focus card order changes. Lane facts keep their original input order and priorities.
@@ -374,9 +388,11 @@ function createFocusProjectionCache() {
       const first = cache.get(a.id)!.group!, second = cache.get(b.id)!.group!
       return (second.enteredAt ?? -Infinity) - (first.enteredAt ?? -Infinity) || first.sequence - second.sequence
     })
-    result = {contexts: sameItems(result.contexts, rows) ? result.contexts : rows, laneContexts: sameItems(result.laneContexts, laneRows) ? result.laneContexts : laneRows, pmoAttention: sameItems(result.pmoAttention, pmoAttention) ? result.pmoAttention : pmoAttention}
+    result = {contexts: sameItems(result.contexts, rows) ? result.contexts : rows, laneContexts: sameItems(result.laneContexts, laneRows) ? result.laneContexts : laneRows, pmoAttention: sameItems(result.pmoAttention, pmoAttention) ? result.pmoAttention : pmoAttention,
+      coordinationContexts: sameItems(result.coordinationContexts, coordinationRows) ? result.coordinationContexts : coordinationRows}
     previous = focusInputs(input)
     previousMode = mode
+    previousCoordination = coordination
     return result
   }
   return select
