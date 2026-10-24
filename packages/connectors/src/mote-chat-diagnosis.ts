@@ -1,11 +1,12 @@
 import { AgentMuxError } from '@agentmux/core'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import { moteChatDiagnosisCode, moteChatDiagnosisKey, moteChatDiagnosisWindowLimit, moteChatInputFailureCode, moteChatPreparationReason,
-  type MoteChatDiagnosis, type MoteChatTarget } from '@agentmux/core/mote-chat'
+import { moteChatDiagnosisCode, moteChatDiagnosisKey, moteChatDiagnosisGenerationKey, moteChatDiagnosisWindowLimit, moteChatInputFailureCode, moteChatPreparationReason,
+  type MoteChatDiagnosis, type MoteChatDiagnosisPublication, type MoteChatTarget } from '@agentmux/core/mote-chat'
+import { connectionDiagnosisSourceCode, parseConnectionDeliveryResult } from '@agentmux/core/connections'
 import { isDeepStrictEqual } from 'node:util'
 import type { ConnectionHost } from './connection-host.js'
 import type { DurableIngressHost } from './durable-ingress.js'
-import type { MoteChatStore } from './mote-chat-store.js'
+import type { MoteChatGenerationRow, MoteChatStore } from './mote-chat-store.js'
 
 export type MoteChatDiagnosisOwner = {
   store: MoteChatStore
@@ -16,12 +17,30 @@ export type MoteChatDiagnosisOwner = {
 }
 const safeCode = (error: unknown) => moteChatDiagnosisCode(error instanceof AgentMuxError ? error.code : undefined)
 
+async function publication(target: MoteChatTarget, generation: MoteChatGenerationRow, intakeKeys: string[], connections: ConnectionHost): Promise<MoteChatDiagnosisPublication> {
+  const result: MoteChatDiagnosisPublication = { generationKey: moteChatDiagnosisGenerationKey(target, generation.generation.generationId), intakeKeys,
+    reading: generation.binding ? 'unavailable' : 'not-started', observation: null, sourceObservation: null, effectObservation: null, coverage: null, effects: null, more: false }
+  if (!generation.binding || !connections.delivery) return result
+  const binding = generation.binding, input = { connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision, order: 'newest' as const, limit: moteChatDiagnosisWindowLimit }
+  try {
+    const page = parseConnectionDeliveryResult('connection.delivery.ls', await connections.delivery.list(input), input)
+    return { ...result, reading: 'observed', observation: page.observation ?? null, sourceObservation: page.sourceObservation ?? null, effectObservation: page.effectObservation ?? null,
+      coverage: page.coverage ? { state: page.coverage.state, more: page.coverage.nextContent !== null || page.coverage.gaps.length > moteChatDiagnosisWindowLimit, originCount: page.coverage.origins.length,
+        gaps: page.coverage.gaps.slice(0, moteChatDiagnosisWindowLimit).map(gap => ({ reason: gap.reason, code: connectionDiagnosisSourceCode(gap.code), codeRecorded: gap.code !== undefined })) } : null,
+      effects: page.deliveries.map(effect => ({ kind: effect.queryFeedback ? 'query-feedback' : effect.reference.source.kind === 'interaction' ? 'interaction'
+      : effect.reference.source.kind === 'binding-operation' ? 'binding-notice' : 'conversation', effect: effect.effect, state: effect.state,
+      receipt: effect.receipt ? { state: effect.receipt.state, reason: effect.receipt.state === 'confirmed' ? null : effect.receipt.reason } : null,
+      resourceUpload: effect.resourceUpload?.state ?? null })), more: page.next !== null }
+  } catch { /* Preserve original input/runtime facts when its publication owner cannot be read. */ }
+  return result
+}
+
 /** Read original local owners. Private DTOs and exception text never cross this diagnostic edge. */
 export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteChatDiagnosisOwner): Promise<MoteChatDiagnosis> {
   const report: MoteChatDiagnosis = {
     targetKey: moteChatDiagnosisKey(target), limit: moteChatDiagnosisWindowLimit,
     configuration: null, readiness: { state: 'unavailable', code: null },
-    service: null, adapterService: null, connection: null, incoming: null, issues: []
+    service: null, adapterService: null, connection: null, incoming: null, publications: [], issues: []
   }
   let configuration: ReturnType<MoteChatStore['configuration']> = null
   try {
@@ -66,14 +85,19 @@ export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteC
     const page = ingress.listDirect(ref.application, moteChatDiagnosisWindowLimit)
     const rows: NonNullable<MoteChatDiagnosis['incoming']>['rows'] = []
     const runtimes = new Map<string, ReturnType<DurableIngressHost['inspectInputRuntime']>>()
+    const generations = new Map<string, { row: MoteChatGenerationRow; intakeKeys: string[] }>()
     for (const record of page.ingresses) {
       let preparation: NonNullable<MoteChatDiagnosis['incoming']>['rows'][number]['preparation'] = 'not-admitted'
       const admission = owner.store.admissionByIngress(record.ingressId)
       if (admission) {
-        const generation = owner.store.generation(admission.generationId)
+        const retained = generations.get(admission.generationId), generation = retained?.row ?? owner.store.generation(admission.generationId)
         if (!generation) throw new AgentMuxError('The original private-chat preparation cannot be observed.', 'MOTE_CHAT_STORAGE_UNCONFIRMED')
         if (!sameMotePreferencesTarget(generation.generation.target, target)) preparation = 'other-route'
-        else preparation = generation.binding ? 'ready' : generation.dispatched ? 'creation-dispatched' : generation.prepared ? 'prepared' : 'reserved'
+        else {
+          preparation = generation.binding ? 'ready' : generation.dispatched ? 'creation-dispatched' : generation.prepared ? 'prepared' : 'reserved'
+          const known = retained ?? { row: generation, intakeKeys: [] }
+          known.intakeKeys.push(moteChatDiagnosisKey(target, record.ingressId)); generations.set(admission.generationId, known)
+        }
       }
       let input: NonNullable<MoteChatDiagnosis['incoming']>['rows'][number]['input'] = {
         status: null, observation: record.input ? 'unavailable' : 'not-started',
@@ -89,7 +113,7 @@ export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteC
               waiting: waiting ? { phase: waiting.phase, reason: waiting.reason, wake: waiting.wake } : null,
               preparationReason: receipt ? moteChatPreparationReason(receipt) : null,
               failureCode: receipt ? moteChatInputFailureCode(receipt) : null, runtime: null }
-            if (receipt?.status === 'waiting') {
+            if (receipt?.status === 'waiting' || receipt?.status === 'terminal-confirmed' || receipt?.status === 'admitted') {
               const key = JSON.stringify([record.input.hostId, record.input.author.authoritySource?.executionRuntimeId ?? null,
                 record.input.agentSessionId, record.input.expectedRun.runId])
               let pending = runtimes.get(key)
@@ -103,6 +127,7 @@ export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteC
         code: moteChatDiagnosisCode(record.code), codeRecorded: record.code !== undefined, preparation, input })
     }
     report.incoming = { rows, more: page.more }
+    report.publications = await Promise.all([...generations.values()].map(generation => publication(target, generation.row, generation.intakeKeys, owner.connections)))
   } catch { report.issues.push('intake-unavailable') }
   return report
 }
