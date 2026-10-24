@@ -16,7 +16,7 @@ afterEach(async () => {
   vi.unstubAllEnvs()
 })
 
-function request(): RunSpec {
+function request(): RunSpec & { cwd: string } {
   return {
     program: process.execPath,
     args: ['capsule-runtime-entry', 'serve'],
@@ -76,7 +76,10 @@ async function fixture(stored?: AgentMuxStoredAgentSession) {
   const runs = new Map<string, RunInfo>()
   const close = vi.fn()
   const sdk = {
-    list: vi.fn(async () => [...runs.values()].map(({ id }) => ({ id }))),
+    list: vi.fn(async () => { throw new Error('Unrelated inventory must not be consulted.') }),
+    observeCreation: vi.fn(async (operationKey: string) => ({ observation: runs.has('original-run')
+      ? { outcome: 'retained', operation_key: operationKey, run: structuredClone(runs.get('original-run')!) }
+      : { outcome: 'not_retained', operation_key: operationKey } })),
     status: vi.fn(async (id: string): Promise<RunInfo> => {
       const found = runs.get(id)
       if (!found) throw new AgentMuxError('The exact native Run is absent.', 'CTXMUX_run_not_found')
@@ -134,7 +137,7 @@ describe('Capsule terminal preparation consumes the original Native seams', () =
     expect(f.sdk.list).not.toHaveBeenCalled()
   })
 
-  it('observes an unknown creation without Start and requires one complete matching frozen RunSpec', async () => {
+  it('observes only the original creation key and requires its complete frozen RunSpec', async () => {
     const f = await fixture(),
       launch = prepared()
     expect(await f.client.inspectPreparedTerminal(launch)).toBeNull()
@@ -147,10 +150,12 @@ describe('Capsule terminal preparation consumes the original Native seams', () =
       code: 'TERMINAL_CREATION_UNCONFIRMED',
     })
     f.runs.set('original-run', info('original-run'))
-    f.runs.set('duplicate-run', info('duplicate-run'))
-    await expect(f.client.inspectPreparedTerminal(launch)).rejects.toMatchObject({
-      code: 'TERMINAL_CREATION_UNCONFIRMED',
-    })
+    for (let index = 0; index < 1514; index += 1) f.runs.set('unrelated-' + index, info('unrelated-' + index))
+    f.sdk.status.mockRejectedValue(new Error('Unrelated status must not affect the original creation.'))
+    expect(await f.client.inspectPreparedTerminal(launch)).toMatchObject({ runId: 'original-run' })
+    expect(f.sdk.observeCreation.mock.calls).toEqual(Array.from({ length: 4 }, () => ['original-create']))
+    expect(f.sdk.list).not.toHaveBeenCalled()
+    expect(f.sdk.status).not.toHaveBeenCalled()
     expect(f.sdk.start).not.toHaveBeenCalled()
     expect(f.sdk.attachRecoverableStop).not.toHaveBeenCalled()
   })
