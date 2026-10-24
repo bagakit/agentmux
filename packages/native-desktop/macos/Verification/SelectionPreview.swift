@@ -131,7 +131,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         }
     }
     private func observation(id: Int) -> [String: Any] {
-        var value: [String: Any] = ["id": id, "ok": true, "completions": completions, "controls": controls(), "toolbar": toolbarFrame()]
+        var value: [String: Any] = ["id": id, "ok": true, "completions": completions, "controls": controls(),
+                                  "toolbar": panelFrame("native-selection-toolbar"), "dimensions": panelFrame("native-selection-dimensions")]
         if let view = current {
             value["rectangle"] = view.selection.rectangle.map(rect) as Any? ?? NSNull()
             value["isInteracting"] = view.selection.isInteracting
@@ -145,9 +146,9 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         }
         return value
     }
-    private func toolbarFrame() -> [String: Double] {
-        guard let view = current, let toolbar = descendants(view).first(where: { $0.identifier?.rawValue == "native-selection-toolbar" }) else { return [:] }
-        return rect(toolbar.convert(toolbar.bounds, to: view))
+    private func panelFrame(_ identifier: String) -> [String: Double] {
+        guard let view = current, let panel = descendants(view).first(where: { $0.identifier?.rawValue == identifier }), !panel.isHidden else { return [:] }
+        return rect(panel.convert(panel.bounds, to: view))
     }
     private func descendants(_ view: NSView) -> [NSView] { view.subviews.flatMap { [$0] + descendants($0) } }
     private func point(_ value: Any?) throws -> NSPoint {
@@ -163,26 +164,53 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             let crop = background.frame.offsetBy(dx: -window.frame.minX, dy: -window.frame.minY)
             backdrop.displayIfNeeded()
             view.displayIfNeeded()
-            guard let base = backdrop.bitmapImageRepForCachingDisplay(in: backdrop.bounds),
-                  let overlay = view.bitmapImageRepForCachingDisplay(in: crop) else {
-                throw PreviewFailure("AppKit did not create layout bitmap representations")
+            // A non-key bare window may cache only its layer-backed controls.
+            // Explicitly execute the real background/root view draw methods;
+            // use AppKit caches only for the actual child controls.
+            let children: [(NSImage, NSRect)] = try view.subviews.filter { !$0.isHidden }.map { child in
+                guard let bitmap = child.bitmapImageRepForCachingDisplay(in: child.bounds) else {
+                    throw PreviewFailure("AppKit did not create a control bitmap representation")
+                }
+                child.cacheDisplay(in: child.bounds, to: bitmap)
+                let image = NSImage(size: child.bounds.size)
+                image.addRepresentation(bitmap)
+                return (image, child.frame)
             }
-            backdrop.cacheDisplay(in: backdrop.bounds, to: base)
-            view.cacheDisplay(in: crop, to: overlay)
-            guard let composite = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: base.pixelsWide, pixelsHigh: base.pixelsHigh,
-                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
-                  let context = NSGraphicsContext(bitmapImageRep: composite) else { throw PreviewFailure("Layout composite allocation failed") }
-            composite.size = backdrop.bounds.size
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = context
-            base.draw(in: backdrop.bounds)
-            overlay.draw(in: backdrop.bounds)
-            NSGraphicsContext.restoreGraphicsState()
+            let base = try raster(size: backdrop.bounds.size) { backdrop.draw(backdrop.bounds) }
+            let overlay = try raster(size: crop.size) {
+                NSGraphicsContext.current?.cgContext.translateBy(x: -crop.minX, y: -crop.minY)
+                view.draw(crop)
+                for (image, frame) in children { image.draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1) }
+            }
+            let composite = try raster(size: backdrop.bounds.size) {
+                for bitmap in [base, overlay] {
+                    let image = NSImage(size: backdrop.bounds.size)
+                    image.addRepresentation(bitmap)
+                    image.draw(in: backdrop.bounds, from: .zero, operation: .sourceOver, fraction: 1)
+                }
+            }
             guard let data = composite.representation(using: .png, properties: [:]) else { throw PreviewFailure("Layout PNG encoding failed") }
             try data.write(to: URL(fileURLWithPath: path), options: .atomic)
             emit(["id": id, "ok": true, "width": composite.pixelsWide, "height": composite.pixelsHigh,
-                  "source": "AppKit-view-layout-only", "windowServerFrame": false])
+                  "source": "AppKit-view-layout-only", "windowServerFrame": false,
+                  "rasterization": "actual-root-draw-and-cached-controls", "compositing": "source-over", "scale": 1])
         } catch { emit(["id": id, "ok": false, "message": String(describing: error)]) }
+    }
+
+    private func raster(size: NSSize, draw: () -> Void) throws -> NSBitmapImageRep {
+        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(ceil(size.width)), pixelsHigh: Int(ceil(size.height)),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else {
+            throw PreviewFailure("Layout bitmap allocation failed")
+        }
+        bitmap.size = size
+        guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else { throw PreviewFailure("Layout bitmap context failed") }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        context.cgContext.clear(CGRect(origin: .zero, size: size))
+        draw()
+        context.flushGraphics()
+        return bitmap
     }
 
     func applicationWillTerminate(_ notification: Notification) {
