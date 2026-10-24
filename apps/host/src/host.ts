@@ -68,7 +68,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       ...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {}) })
   }
   const configurationPath = options.configurationPath ?? options.connections?.moteConfigurationPath
-  const moteAvatars = configurationPath ? createHostMoteAvatarRead({ configurationPath }) : undefined
+  const avatarConfigurationPath = options.connections?.moteConfigurationPath ?? configurationPath
+  const moteAvatars = avatarConfigurationPath ? createHostMoteAvatarRead({ configurationPath: avatarConfigurationPath }) : undefined
   const agentLearning = configurationPath && options.store instanceof AgentMuxFileAgentSessionStore ? createHostAgentLearning({
     configurationPath, directory: join(dirname(options.store.path), 'agent-learning'),
     ...(connectionOwner ? { spatial: connectionOwner.spatial } : {}),
