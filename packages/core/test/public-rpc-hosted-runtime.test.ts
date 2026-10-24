@@ -147,6 +147,27 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
         detail, details: error.details, candidates: error.candidates })
     }
   })
+  it.each(['not_applied', 'unknown'] as const)('preserves exact creation and storage %s facts through Hosted creation', async disposition => {
+    const f = await hostedFixture()
+    const failure = new AgentMuxError('Original storage owner decision.', 'CTXMUX_storage', 'original detail',
+      { disposition, confirmedInputBytes: null }, undefined,
+      { operationId: 'original-lifecycle-operation', disposition },
+      { stage: 'start', sqlitePrimaryCode: 13, sqliteExtendedCode: 13, systemErrno: 28, transactionOutcome: 'not_started' })
+    vi.spyOn(f.client, 'createAgentWithDelivery').mockRejectedValue(failure)
+    const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted,
+      http: { host: '127.0.0.1', port: 0, token: 'private-creation' } })
+    const request = { agentSessionId: 'original-session', createOperationId: 'original-operation', providerId: 'claude', workspacePath: f.root }
+    for (const carrier of [{ transport: 'unix' as const, path: h.path },
+      { transport: 'http' as const, url: h.url(), token: 'private-creation' }]) {
+      const rpc = await connectAgentMuxRpc({ endpoint: carrier }); cleanups.push(() => rpc.dispose())
+      const reader = await connectHostedAgentMux({ rpc }); cleanups.push(() => reader.dispose())
+      await expect(reader.createAgentWithDelivery(request)).rejects.toMatchObject({ code: failure.code,
+        message: failure.message, detail: failure.detail, controlFailure: failure.controlFailure,
+        creationFailure: failure.creationFailure, storageFailure: failure.storageFailure })
+    }
+    expect(f.client.createAgentWithDelivery).toHaveBeenCalledTimes(2)
+    expect(f.client.createAgentWithDelivery).toHaveBeenCalledWith(request)
+  })
   it('passes a real Web request to the original route/authority and keeps unmatched RPC on the same endpoint', async () => {
     const routes: Array<{ method: string; path: string }> = [], dispose = vi.fn(), authorized: Array<{ cookie: string | null; body: unknown; connected: boolean }> = []
     const h = await endpoint({ http: { host: '127.0.0.1', port: 0,
