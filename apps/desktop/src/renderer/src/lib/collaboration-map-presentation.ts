@@ -23,4 +23,11 @@ export function collaborationRecency(at: number | null | undefined, now = Date.n
   return { radius: 4 + 7 * weight, depth: .35 + .65 * weight, label: `Last activity ${new Date(at).toLocaleString()}` }
 }
 
+/** One visual glyph contract, shared by its body and the directed route projection. */
+export function collaborationAgentGlyph(agent: CollaborationAgent | undefined) {
+  const tier = agent?.tier ?? (agent?.context ? 'active' : 'unknown')
+  const identity = Boolean((agent?.providerId ?? agent?.context?.providerId) && tier !== 'closed')
+  return { identity, overviewRadius: identity ? 14 : 6, pointRadius: collaborationRecency(agent?.lastActivityAt).radius }
+}
+
 export const collaborationAgentName = (agent: CollaborationAgent | undefined) => agent?.name ?? agent?.context?.name ?? agent?.sessionId ?? ''

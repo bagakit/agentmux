@@ -1,4 +1,5 @@
-import type { CollaborationLayoutBox, CollaborationLayoutBounds, CollaborationLayoutPoint, CollaborationPath } from './collaboration-layout-engine'
+import type { CollaborationLayoutBox, CollaborationLayoutPoint, CollaborationPath } from './collaboration-layout-engine'
+import { collaborationVisibleHull, type CollaborationVisibleHull } from './collaboration-map-lod'
 
 const cross = (a: CollaborationLayoutPoint, b: CollaborationLayoutPoint, c: CollaborationLayoutPoint) =>
   (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
@@ -32,39 +33,43 @@ export function collaborationEnvelope(area: Extract<CollaborationLayoutBox, { ki
     `L ${start.x} ${start.y} Q ${point.x} ${point.y} ${end.x} ${end.y}`).join(' ') + ' Z'
 }
 
-export const COLLABORATION_OVERVIEW_MARK_SIZE = 28
-/** Small original point slots never expand into overlapping giant overview marks. */
-export const collaborationOverviewScale = (box: CollaborationLayoutBounds, zoom: number) => Math.min(1 / zoom, Math.min(box.width, box.height) / (COLLABORATION_OVERVIEW_MARK_SIZE / 2))
-export function collaborationOverviewHitBounds(box: CollaborationLayoutBounds, zoom: number): CollaborationLayoutBounds {
-  const size = COLLABORATION_OVERVIEW_MARK_SIZE * collaborationOverviewScale(box, zoom)
-  return { x: box.x + (box.width - size) / 2, y: box.y + (box.height - size) / 2, width: size, height: size }
-}
-
-/** Keep the original obstacle-safe route; connect its terminal stems to visible overview marks.
+/** Keep the original obstacle-safe route; connect its terminal stems to the continuous visible body.
  * This is a cheap projection at the camera layer, never a new Worker route or relationship. */
-export function collaborationOverviewPath(route: CollaborationPath, source: CollaborationLayoutBox, target: CollaborationLayoutBox, zoom: number, sourceRadius: number, targetRadius: number) {
+export function collaborationVisiblePath(route: CollaborationPath, source: CollaborationLayoutBox, target: CollaborationLayoutBox, zoom: number, sourceRadius: number, targetRadius: number, sourcePointRadius = 6, targetPointRadius = 6) {
   const split = (curve: readonly CollaborationLayoutPoint[], t: number) => {
     const mix = (a: CollaborationLayoutPoint, b: CollaborationLayoutPoint) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
     const [a, b, c, d] = curve as [CollaborationLayoutPoint, CollaborationLayoutPoint, CollaborationLayoutPoint, CollaborationLayoutPoint]
     const ab = mix(a, b), bc = mix(b, c), cd = mix(c, d), abc = mix(ab, bc), bcd = mix(bc, cd), at = mix(abc, bcd)
     return [[a, ab, abc, at], [at, bcd, cd, d]] as const
   }
-  const projectStart = (points: readonly CollaborationLayoutPoint[], box: CollaborationLayoutBox, radius: number): CollaborationLayoutPoint[] => {
+  const projectStart = (points: readonly CollaborationLayoutPoint[], box: CollaborationLayoutBox, radius: number, pointRadius: number): CollaborationLayoutPoint[] => {
     if (box.kind !== 'agent') return [...points]
-    const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }, visibleRadius = radius * collaborationOverviewScale(box, zoom)
-    const distance = (point: CollaborationLayoutPoint) => Math.hypot(point.x - center.x, point.y - center.y)
-    const port = points[0]!, length = distance(port)
-    if (length >= visibleRadius) {
-      const ratio = length ? visibleRadius / length : 0
-      const visible = { x: center.x + (port.x - center.x) * ratio, y: center.y + (port.y - center.y) * ratio }
+    const hull = collaborationVisibleHull(box, zoom, radius, pointRadius)
+    const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    // Signed distance to the same rounded rectangle used by the visual shell.
+    const distance = (point: CollaborationLayoutPoint, body: CollaborationVisibleHull = hull) => {
+      const x = Math.abs(point.x - center.x) - body.width / 2 + body.radius
+      const y = Math.abs(point.y - center.y) - body.height / 2 + body.radius
+      return Math.hypot(Math.max(x, 0), Math.max(y, 0)) + Math.min(Math.max(x, y), 0) - body.radius
+    }
+    const port = points[0]!
+    if (Math.abs(distance(port)) < 1e-7) return [...points]
+    if (distance(port) >= 0) {
+      let low = 0, high = 1
+      for (let iteration = 0; iteration < 32; iteration++) {
+        const middle = (low + high) / 2
+        const candidate = { x: center.x + (port.x - center.x) * middle, y: center.y + (port.y - center.y) * middle }
+        if (distance(candidate) <= 0) low = middle; else high = middle
+      }
+      const visible = { x: center.x + (port.x - center.x) * low, y: center.y + (port.y - center.y) * low }
       return [visible, visible, port, ...points]
     }
     // A short top/bottom port (and even its 8px stem) can lie inside the
     // overview avatar. Clip that hidden prefix along the original Bezier,
     // preserving its outgoing tangent and every later obstacle detour.
     const exit = (curve: readonly CollaborationLayoutPoint[], low = 0, high = 1, depth = 0): [number, number] | undefined => {
-      if (curve.every(point => distance(point) <= visibleRadius)) return
-      if (depth === 16) return distance(curve[3]!) > visibleRadius ? [low, high] : undefined
+      if (curve.every(point => distance(point) <= 0)) return
+      if (depth === 16) return distance(curve[3]!) > 0 ? [low, high] : undefined
       const [left, right] = split(curve, .5), middle = (low + high) / 2
       return exit(left, low, middle, depth + 1) ?? exit(right, middle, high, depth + 1)
     }
@@ -74,16 +79,16 @@ export function collaborationOverviewPath(route: CollaborationPath, source: Coll
       let [low, high] = bracket
       for (let iteration = 0; iteration < 24; iteration++) {
         const middle = (low + high) / 2
-        if (distance(split(curve, middle)[1][0]!) <= visibleRadius) low = middle; else high = middle
+        if (distance(split(curve, middle)[1][0]!) <= 0) low = middle; else high = middle
       }
       return [...split(curve, (low + high) / 2)[1], ...points.slice(index + 4)]
     }
     // No part of this original curve leaves the visible endpoint body.
     return []
   }
-  const from = projectStart(route.points, source, sourceRadius)
+  const from = projectStart(route.points, source, sourceRadius, sourcePointRadius)
   if (!from.length) return ''
-  const points = projectStart([...from].reverse(), target, targetRadius).reverse()
+  const points = projectStart([...from].reverse(), target, targetRadius, targetPointRadius).reverse()
   if (!points.length) return ''
   const path = [`M ${points[0]!.x} ${points[0]!.y}`]
   for (let index = 1; index < points.length; index += 3) path.push(`C ${points.slice(index, index + 3).map(point => `${point.x} ${point.y}`).join(' ')}`)

@@ -40,7 +40,7 @@ export function createCollaborationAreasSelector(resolve: WorkspaceAgentExecutio
     const parents = new Map(projectRailTree(projects).flatMap(group => group.nodes.map(node => [node.project.id, node.parentId] as const)))
     for (const project of projects) {
       const lists = project.workspaces.map(workspace => list('workspace:' + workspace.id, workspace, null))
-      areas.push({ id: project.id, name: project.name, kind: 'project', parentId: parents.get(project.id), iconTarget: folderSpaceIconTarget(project),
+      areas.push({ id: project.id, name: project.name, kind: 'project', parentId: parents.get(project.id) ?? null, iconTarget: folderSpaceIconTarget(project),
         workspaceId: project.preferredWorkspaceId, hostId: project.hostId, ...areaMembers(lists),
         issue: [...new Set(lists.flatMap(value => value.issue ? [value.issue] : []))].join(' ') || null })
     }
