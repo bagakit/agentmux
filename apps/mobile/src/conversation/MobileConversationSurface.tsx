@@ -1,3 +1,4 @@
+import { useMobileCommands } from './use-mobile-commands'
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import type { ConversationPresentationController } from '@agentmux/client-ui/use-conversation-record-layout'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
@@ -122,14 +123,12 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   })()
   const questionCapability = { route: providerCapabilities.route, issue: providerCapabilities.issue }
   const postureControl = providerCapabilities.postureControl
-  const commandSuggestions = useMemo<ComposerSuggestion[]>(() => (providerCapabilities.commands ?? []).map(command => ({
-    id: `command:${command.text}`,
-    text: command.text,
-    label: command.text,
-    description: command.description,
-    searchText: `${command.text} ${command.description}`,
-    insertText: command.text
-  })), [providerCapabilities.commands])
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false)
+  const [composerFocused, setComposerFocused] = useState(false)
+  const mobileCommands = useMobileCommands({ client, agentSessionId, providerId: session?.providerId,
+    commands: providerCapabilities.commands, visible, connected: connection.state === 'connected' && !reading.disconnected,
+    demand: commandMenuOpen || composerFocused })
+  const commandSuggestions = mobileCommands.commands
   const agentReferences = useMemo<ComposerSuggestion[]>(() => {
     try {
       return (client?.agentSessions() ?? []).map(peer => {
@@ -154,7 +153,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       return
     }
     try {
-      await insertion.current.insert(async () => item.insertText ?? item.text, { separate: true })
+      const original = { client, agentSessionId, editor: insertion.current }
+      await original.editor.insert(() => mounted.current && current.current.client === original.client &&
+        current.current.agentSessionId === original.agentSessionId && insertion.current === original.editor
+        ? item.insertText ?? item.text : null, { separate: true })
     } catch (error) {
       setCopyNotice(errorMessage(error))
     }
@@ -422,7 +424,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       </div> : null}
       {retainedResponses.map(([key, attempt]) => responseStatus(key, attempt))}
       {unidentifiedResponses.map(([key, attempt]) => <MobileNotice identity={[key,attempt.original?.input.operationId,attempt.phase,attempt.message]} key={key} role="status">{attempt.message}</MobileNotice>)}
-      <div className="mobile-conversation__composer">
+      <div onFocusCapture={event => { if ((event.target as HTMLElement).isContentEditable) setComposerFocused(true) }} onBlurCapture={event => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setComposerFocused(false)
+        }} className="mobile-conversation__composer">
         <AgentComposer insertionRef={insertion} aboveInput={<MobileAttachments client={client} session={session ?? null}
           connected={connection.state === 'connected' && !reading.disconnected} controls={attachmentControls}
           onPendingContentChange={setHasPendingAttachments}
@@ -446,9 +450,12 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
               return appendNamedFileReference('', path, original.identity.name)
             }, { separate: true })
           }} />}
-          commands={commandSuggestions} references={agentReferences}
+          commands={commandSuggestions} promptKeywords={mobileCommands.promptKeywords} references={agentReferences}
           tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal}
+            key={JSON.stringify([historyScope, session?.providerId])}
             commands={commandSuggestions} onCommand={item => { void insertSuggestion(item) }}
+            onCommandsOpenChange={setCommandMenuOpen} commandsLoading={mobileCommands.loading}
+            commandsIssue={mobileCommands.issue} retryCommands={mobileCommands.retry}
             skills={<MobileSkillsPicker client={client} session={session} scope={JSON.stringify([historyScope, session?.providerId, session?.workspacePath, session?.run.runId])}
               connected={connection.state === 'connected' && !reading.disconnected} visible={visible} onSelect={item => { void insertSuggestion(item) }} />}
             {...(isWorking && available && Boolean(draft.trim()) ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})} />}

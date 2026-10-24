@@ -8,7 +8,7 @@ import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import type { ComposerShortcut } from '../src/shared/contracts'
-import { composerShortcutsForProvider } from '../src/shared/composer-shortcut-library'
+import { composerShortcutsForProvider } from '@agentmux/client-ui/composer-command-candidates'
 import { configOwnerFixture } from './helpers/config-owner-fixture'
 import { composerDOM } from './helpers/composer-dom-fixture'
 

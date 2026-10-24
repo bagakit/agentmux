@@ -1,3 +1,4 @@
+import { composerCommandCandidates } from '@agentmux/client-ui/composer-command-candidates'
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { formatSessionAddress } from '@agentmux/core/sharing'
@@ -8,7 +9,7 @@ import { encodeSemanticReference, semanticReferenceKind, semanticReferenceLabel 
 import { appendSelectedFileReferences } from '@agentmux/client-ui/composer-file-reference'
 import { resolveComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { AGENT_COMMAND_GROUP_LABEL, composerShortcutsForProvider, resolveComposerShortcuts } from '../../../shared/composer-shortcut-library'
+import { resolveComposerShortcuts } from '../../../shared/composer-shortcut-library'
 import type { AppConfig, WorkspaceDirectoryEntry, WorkspaceRecord } from '../../../shared/contracts'
 import { ConversationMessageAvatar } from '../components/ConversationMessageAvatar'
 import { SemanticIcon } from '../components/semantic-icons'
@@ -125,17 +126,11 @@ export function useComposerCandidates({ scope: callerScope, active, config, work
       icon: <SemanticIcon name={entry.isDirectory ? 'object.folder' : 'object.file'} size={15} /> }))]
   }, [rosterFacts, files, fileScope, workspace?.id, workspace?.path, inputConfig.reference])
 
-  const shortcuts = composerShortcutsForProvider(resolveComposerShortcuts(config), providerId)
-  const shortcutCandidates: ComposerSuggestion[] = shortcuts.map(shortcut => ({
-    id: `shortcut:${shortcut.id}`, text: `/${shortcut.keyword}`, label: shortcut.label, group: 'Shortcuts',
-    description: `${shortcut.keyword} · Insert prompt`, searchText: `${shortcut.keyword} ${shortcut.label}`,
-    insertText: encodeSemanticReference({ kind: 'subcommand', token: `/${shortcut.keyword}`, label: shortcut.label, reference: shortcut.body }),
-    icon: <SemanticIcon name="object.subcommand" size={15} />
-  }))
-  const commandCandidates: ComposerSuggestion[] = [...shortcutCandidates, ...commands.map(command => ({ ...command,
-    id: `command:${command.text}`, label: command.text, group: AGENT_COMMAND_GROUP_LABEL, insertText: command.text,
-    icon: <SemanticIcon name="object.subcommand" size={15} /> }))]
-  const keywordCandidates = shortcutCandidates.map((item, index) => ({ ...item, text: shortcuts[index]!.keyword, label: shortcuts[index]!.keyword }))
+  const candidates = composerCommandCandidates(resolveComposerShortcuts(config), providerId, commands)
+  const withIcon = (item: ComposerSuggestion): ComposerSuggestion => ({ ...item, icon: <SemanticIcon name="object.subcommand" size={15} /> })
+  const shortcuts = candidates.shortcuts
+  const commandCandidates = candidates.commands.map(withIcon)
+  const keywordCandidates = candidates.promptKeywords.map(withIcon)
   const insertCandidate = useCallback(async (item: ComposerSuggestion) => {
     if (current.current !== scope) return
     await insertion.current?.insert(() => current.current === scope ? item.insertText ?? item.text : null, { separate: true })
