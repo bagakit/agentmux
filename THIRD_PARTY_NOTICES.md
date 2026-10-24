@@ -4,6 +4,10 @@
 
 Parts of the Browser screenshot drawing model, Canvas renderer, editor interaction, PNG composition, element-selection overlay, and annotation marker overlay are adapted from Orca commit `4fd93ead1999dc34e13ac5915693ad8467a39a6e`.
 
+## Orca native macOS layer
+
+The macOS source in `packages/native-desktop/macos` is adapted from Orca commit `a886dcd1fe946758158a954abb819a99fcc1c23e`, `native/computer-use-macos`. AgentMux changes include precise OS targets, screen selection, clipboard, authenticated transport and operation receipts. The original MIT license below also applies; the source and bundled Native App retain `LICENSE.orca`, `UPSTREAM.md` and package notices.
+
 ## Orca browser page snapshot engine
 
 The accessibility-tree walk and cursor-interactive element promotion in `apps/desktop/src/main/browser-page-snapshot.ts` are adapted from the same project. The error model is not: where the original skips an unreachable cross-origin iframe silently, this implementation surfaces it as a named failure.
