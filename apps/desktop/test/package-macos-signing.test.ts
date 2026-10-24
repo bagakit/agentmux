@@ -125,7 +125,7 @@ it('uses the maintained signer with default certificate DR and no new runtime/de
   const receipt = await verifyMacosSigning(app, plan, { run })
   expect(signer).toHaveBeenCalledTimes(1)
   expect(receipt).toEqual({ kind: 'certificate', teamId, designatedRequirement: requirement, authorizationContinuity: 'unverified', notarized: false })
-  expect(run.mock.calls[0]).toEqual(['/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', '--test-requirement', `=identifier "dev.agentmux.desktop" and anchor apple generic and certificate leaf[subject.OU] = "${teamId}"`, app]])
+  expect(run.mock.calls[0]).toEqual(['/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', '--test-requirement', `=identifier "dev.agentmux.desktop" and anchor apple generic and certificate leaf[subject.OU] = "${teamId}" and certificate leaf = H"${identity}"`, app]])
   const file = signer.mock.calls[0][0].optionsForFile(app).entitlements
   await expect(access(file)).rejects.toThrow()
 })
