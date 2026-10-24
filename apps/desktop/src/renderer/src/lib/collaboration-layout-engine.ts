@@ -68,7 +68,9 @@ export function translateCollaborationPath(path: CollaborationPath, offset: Coll
     bounds: { ...path.bounds, x: path.bounds.x + offset.x, y: path.bounds.y + offset.y } }
 }
 function fixedNodes(nodes: readonly { id: string; width: number; height: number }[]) {
-  return nodes.map(node => ({ name: node.id, attributes: { width: node.width / 72, height: node.height / 72 } }))
+  // Compound fdp packing can leave touching rectangles despite graph sep. Include
+  // the routing corridor in its physical boxes; published bodies retain their exact size.
+  return nodes.map(node => ({ name: node.id, attributes: { width: (node.width + gap) / 72, height: (node.height + gap) / 72 } }))
 }
 function layoutMembers(input: CollaborationLayoutInput) {
   const nodes = new Map(input.nodes.map(node => [node.id, node])), areas = new Map(input.areas.map(area => [area.id, area]))
@@ -240,7 +242,7 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
   }
   // Only completely empty root subtrees leave the force solve.
   const occupied = output.length ? bounds(output.filter(box => box.kind === 'area').flatMap(box => [{ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }])) : { x: 0, y: 0, width: 0, height: 0 }
-  const emptyWidth = 184, emptyHeight = 32, shelfGap = 12
+  const emptyWidth = 184, emptyHeight = 32, shelfGap = gap
   let shelfX = occupied.x, shelfY = occupied.y + occupied.height + (occupiedAreas.length ? gap : 0), rowHeight = 0
   const shelfRight = occupied.x + (occupiedAreas.length ? Math.max(emptyWidth, occupied.width) : 4 * (emptyWidth + shelfGap))
   for (const area of emptyAreas) {
