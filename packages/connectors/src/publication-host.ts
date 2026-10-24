@@ -28,7 +28,8 @@ export interface PublicationPermissionsPort {
   authorized(operation: PublicationOperation): boolean
 }
 export type PublicationObservation = ConnectionDeliveryObservation
-type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; inspectionAfter?: string; watch?: ConversationObservationHandle | undefined; watchViewId?: string | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
+type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | undefined; failure?: { code?: string } }
+type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; speaker?: PublicationSpeakerReader }
 
 
@@ -55,7 +56,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const authority = this.authority(lane.binding)
       if (authority === null) { lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }; continue }
       if (current.get(id)?.revision !== lane.binding.revision || !authority.authorized) {
-        lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.dispose() } catch { /* Cancels only this original reader. */ }; this.lanes.delete(id)
+        lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.handle?.dispose() } catch { /* Cancels only this original reader. */ }; this.lanes.delete(id)
       }
     }
     for (const binding of active) {
@@ -69,7 +70,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
           lane.permissionStop = adapter?.permissionActions === true || adapter?.questionActions === true ? this.options.permissions?.observe(binding, () => this.wake(current)) : undefined
         } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
         this.wake(lane)
-      } else if (!recoveryOnly || lane.observation.state !== 'ready' || !lane.watch || lane.watch.closed?.aborted) this.wake(lane)
+      } else if (!recoveryOnly || lane.observation.state !== 'ready' || !lane.watch?.handle || lane.watch.failure || lane.watch.handle.closed.aborted) this.wake(lane)
     }
   }
   /** Optional feedback has no network work on the ingress path; its durable effect wakes only this audience. */
@@ -203,21 +204,32 @@ export class PublicationHost implements ConnectionDeliveryPort {
     catch (error) { this.sourceUnavailable(lane, 'source-unconfirmed', error); return }
     after ??= this.store.checkpoint(binding, sourceHostId)
     const acceptedSources = after.frontier.scope.sources
-    if (!lane.watch || lane.watch.closed.aborted || lane.watchViewId !== lane.viewId) {
-      lane.watch?.dispose(); lane.watch = undefined
+    if (!lane.watch?.handle || lane.watch.failure || lane.watch.handle.closed.aborted || lane.watch.viewId !== lane.viewId) {
+      const previous = lane.watch
+      const watch: LaneWatch = { viewId: lane.viewId }
+      lane.watch = watch // Fence callbacks before releasing the previous original subscription.
+      previous?.handle?.dispose()
+      const unavailable = (code?: string) => {
+        if (signal.aborted || lane.watch !== watch) return
+        watch.failure = { ...(code ? { code } : {}) }
+        this.sourceUnavailable(lane, 'source-unconfirmed', code ? new AgentMuxError('The original publication subscription is unavailable.', code) : undefined)
+      }
       try {
-        const watch = await this.options.conversation.observe({ ...reference, ...(lane.view ? { view: lane.view } : {}) }, observation => {
-          if (signal.aborted) return
-          if (observation.hostId !== reference.hostId || observation.agentSessionId !== reference.agentSessionId || observation.sourceHostId !== sourceHostId) { lane.observation = { state: 'unavailable', reason: 'source-gap' }; return }
+        const handle = await this.options.conversation.observe({ ...reference, ...(lane.view ? { view: lane.view } : {}) }, observation => {
+          if (signal.aborted || lane.watch !== watch) return
+          if (observation.hostId !== reference.hostId || observation.agentSessionId !== reference.agentSessionId || observation.sourceHostId !== sourceHostId) return
           if (!acceptedSources.some(source => conversationSourceKey(source) === conversationSourceKey(observation.source))) return
-          if (observation.kind === 'unavailable') { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }; return }
+          if (observation.kind === 'unavailable') { unavailable(observation.code); return }
           this.wake(lane)
         }, signal)
-        if (signal.aborted) { watch.dispose(); return }
-        if (watch.hostId !== reference.hostId || watch.agentSessionId !== reference.agentSessionId || watch.sourceHostId !== sourceHostId) { watch.dispose(); throw Error('Foreign observation owner') }
-        lane.watch = watch; lane.watchViewId = lane.viewId
-        watch.closed.addEventListener('abort', () => { if (!signal.aborted) lane.observation = { state: 'unknown', reason: 'source-unconfirmed' } }, { once: true })
-      } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
+        if (signal.aborted || lane.watch !== watch) { handle.dispose(); return }
+        if (handle.hostId !== reference.hostId || handle.agentSessionId !== reference.agentSessionId || handle.sourceHostId !== sourceHostId) { handle.dispose(); throw Error('Foreign observation owner') }
+        watch.handle = handle
+        const failed = handle.coverage.find(value => acceptedSources.some(source => conversationSourceKey(source) === conversationSourceKey(value.source)) && ['unavailable', 'unsupported'].includes(value.current))
+        if (failed) unavailable(failed.gaps[0]?.code)
+        handle.closed.addEventListener('abort', () => unavailable(), { once: true })
+        if (handle.closed.aborted) unavailable()
+      } catch (error) { unavailable(error instanceof AgentMuxError ? error.code : undefined) }
     }
     // Transient fragment state is bounded to one original batch. A restart discards
     // it and resumes the original durable cut, preserving all unknown effects.
@@ -242,14 +254,16 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const questions = adapter.questionActions ? this.options.permissions?.questions?.(binding, ordered) : undefined
       this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, ...(this.options.queryFeedback && adapter.queryFeedback ? { queryFeedback: true } : {}), fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) } : {}), ...(questions ? { questions } : {}) })
       after = page.checkpoint; lane.view = page.window.view!; lane.viewId = page.window.id; lane.read = { after }
-      if (lane.watchViewId !== lane.viewId) lane.dirty = true
+      if (lane.watch?.viewId !== lane.viewId) lane.dirty = true
       if (!page.more) { lane.read = undefined; break }
       if (reads === 7) lane.dirty = true
     }
-    lane.sourceObservation = { state: 'ready', code: null, codeRecorded: false, checkpointKey: connectionDiagnosisCheckpointKey(after) }
+    const failure = lane.watch?.failure
+    if (failure) this.sourceUnavailable(lane, 'source-unconfirmed', failure.code ? new AgentMuxError('The original publication subscription is unavailable.', failure.code) : undefined, connectionDiagnosisCheckpointKey(after))
+    else lane.sourceObservation = { state: 'ready', code: null, codeRecorded: false, checkpointKey: connectionDiagnosisCheckpointKey(after) }
     await this.recoverContent(lane, adapter)
     lane.observation = this.store.coverage(binding).state === 'incomplete' ? { state: 'unavailable', reason: 'content-unconfirmed' }
-      : lane.watch ? { state: 'ready' } : { state: 'unavailable', reason: 'source-unconfirmed' }
+      : lane.watch?.handle && !lane.watch.failure && !lane.watch.handle.closed.aborted ? { state: 'ready' } : { state: 'unavailable', reason: 'source-unconfirmed' }
   }
   private sourceUnavailable(lane: Lane, reason: 'source-unconfirmed' | 'source-gap', error: unknown, checkpointKey = lane.sourceObservation?.checkpointKey ?? null): void {
     const code = error instanceof AgentMuxError ? error.code : undefined
@@ -574,7 +588,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
   close(): void {
     if (this.closed) return
     this.closed = true; clearInterval(this.timer)
-    for (const lane of this.lanes.values()) { lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.dispose() } catch { /* Release failure cannot change an Agent lifecycle. */ } }
+    for (const lane of this.lanes.values()) { lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.handle?.dispose() } catch { /* Release failure cannot change an Agent lifecycle. */ } }
     this.lanes.clear()
     for (const lane of this.notices.values()) lane.abort.abort()
     this.notices.clear()
