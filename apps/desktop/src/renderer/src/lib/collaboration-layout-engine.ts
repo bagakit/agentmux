@@ -2,9 +2,9 @@ import type { Graph, Subgraph, Viz } from '@viz-js/viz'
 import { CollaborationBoundsIndex, collaborationBoundsOverlap as overlap, type CollaborationBounds } from './collaboration-spatial-index'
 
 export type CollaborationLayoutKind = 'communication' | 'creation' | 'supervision'
-export type CollaborationLayoutConnection = { id: string; source: string; target: string; kind: CollaborationLayoutKind }
+export type CollaborationLayoutConnection = { id: string; source: string; target: string; kind: CollaborationLayoutKind; strength?: number }
 export type CollaborationLayoutInput = {
-  areas: readonly { id: string; name: string; members: readonly string[]; folded: boolean }[]
+  areas: readonly { id: string; name: string; members: readonly string[]; folded: boolean; parentId?: string | null }[]
   nodes: readonly { id: string; areaId: string; width: number; height: number }[]
   connections: readonly CollaborationLayoutConnection[]
 }
@@ -32,8 +32,9 @@ export const COLLABORATION_AREA_HEADER = 40
 const padding = 24, gap = 28, headingWidth = 184
 const kinds = ['communication', 'creation', 'supervision'] as const
 let engine: Promise<Viz> | undefined
-async function graphviz(signal?: AbortSignal) {
+async function graphviz(signal?: AbortSignal, fresh = false) {
   signal?.throwIfAborted()
+  if (fresh) engine = undefined
   engine ??= import('@viz-js/viz').then(module => module.instance()).catch(error => { engine = undefined; throw error })
   const viz = await engine
   signal?.throwIfAborted()
@@ -80,54 +81,98 @@ function layoutMembers(input: CollaborationLayoutInput) {
     seen.add(id)
   }
   if (seen.size !== nodes.size) throw Error('Some original members have no original area. Existing map positions are kept.')
-  return { nodes, areas }
+  const children = new Map<string | null, typeof input.areas[number][]>()
+  for (const area of input.areas) {
+    if (area.parentId && !areas.has(area.parentId)) throw Error('An original parent area is unavailable. Existing map positions are kept.')
+    const siblings = children.get(area.parentId ?? null) ?? []; siblings.push(area); children.set(area.parentId ?? null, siblings)
+    const ancestors = new Set([area.id])
+    let parent = area.parentId
+    while (parent) {
+      if (ancestors.has(parent)) throw Error('Original map containment is inconsistent. Existing map positions are kept.')
+      ancestors.add(parent); parent = areas.get(parent)?.parentId
+    }
+  }
+  for (const siblings of children.values()) siblings.sort((a, b) => a.id.localeCompare(b.id))
+  const hidden = (area: typeof input.areas[number]) => {
+    let parent = area.parentId ? areas.get(area.parentId) : undefined
+    while (parent) { if (parent.folded) return true; parent = parent.parentId ? areas.get(parent.parentId) : undefined }
+    return false
+  }
+  return { nodes, areas, children, hidden }
 }
-/** Finite structural work only. Every real member and cross-area endpoint participates in one solve. */
+/** One compound solve: exact occurrences stay in real containment, springs live at their LCA. */
 export async function arrangeCollaboration(input: CollaborationLayoutInput, signal?: AbortSignal): Promise<CollaborationLayoutBox[]> {
   signal?.throwIfAborted()
   if (!input.areas.length && !input.nodes.length) return []
-  const { nodes, areas } = layoutMembers(input)
+  const { nodes, areas, children } = layoutMembers(input)
   const emptyAreas: typeof input.areas[number][] = [], occupiedAreas: typeof input.areas[number][] = []
   const clusterNames = new Map<string, string>(), usedNames = new Set([...nodes.keys(), ...areas.keys()])
   const clusters = new Map<string, Subgraph>()
   const visible = new Map<string, { id: string; width: number; height: number }>(), endpoints = new Map<string, string>()
   const graph: Graph = { directed: false,
-    graphAttributes: { start: 42, overlap: 'prism', sep: `+${gap}`, splines: false, pack: gap },
+    graphAttributes: { start: 42, overlap: 'prism', sep: '+' + gap, splines: false, pack: gap },
     nodeAttributes: { shape: 'box', fixedsize: true, label: '', margin: 0 }, nodes: [], subgraphs: [], edges: [] }
   const labelWidth = headingWidth + padding * 2, labelHeight = COLLABORATION_AREA_HEADER + padding
-  for (const area of input.areas) {
+  const counts = new Map<string, number>()
+  const memberCount = (area: typeof input.areas[number]): number => {
+    if (counts.has(area.id)) return counts.get(area.id)!
+    const value = area.members.length + (children.get(area.id) ?? []).reduce((total, child) => total + memberCount(child), 0)
+    counts.set(area.id, value); return value
+  }
+  function addArea(area: typeof input.areas[number], owner: Graph | Subgraph) {
     signal?.throwIfAborted()
-    const members = area.members.map(id => nodes.get(id)!)
-    if (!members.length) { emptyAreas.push(area); continue }
+    const members = area.members.map(id => nodes.get(id)!).sort((a, b) => a.id.localeCompare(b.id))
     occupiedAreas.push(area)
-    if (area.folded) {
-      const shell = { id: area.id, width: 276, height: 54 }
-      visible.set(shell.id, shell); graph.nodes!.push(...fixedNodes([shell]))
-      endpoints.set(area.id, area.id)
-      for (const member of members) endpoints.set(member.id, area.id)
-      continue
+    if (area.folded || !members.length && !children.get(area.id)?.length) {
+      const shell = { id: area.id, width: memberCount(area) ? 276 : 184, height: memberCount(area) ? 54 : 32 }
+      visible.set(shell.id, shell); owner.nodes!.push(...fixedNodes([shell]))
+      const hideMembers = (current: typeof area) => {
+        endpoints.set(current.id, area.id)
+        for (const id of current.members) endpoints.set(id, area.id)
+        for (const child of children.get(current.id) ?? []) hideMembers(child)
+      }
+      hideMembers(area); return
     }
     let name = 'cluster_' + area.id
     while (usedNames.has(name)) name += '_'
     usedNames.add(name); clusterNames.set(area.id, name)
     for (const member of members) { visible.set(member.id, member); endpoints.set(member.id, member.id) }
     const cluster: Subgraph = { name, graphAttributes: { margin: padding, labeljust: 'l', labelloc: 't', fontsize: 1,
-      // This blank label reserves the real title, not a synthetic Agent or a relationship.
-      label: { html: `<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="${labelWidth}" HEIGHT="${labelHeight}" FIXEDSIZE="TRUE"> </TD></TR></TABLE>` } }, nodes: fixedNodes(members), edges: [] }
-    clusters.set(area.id, cluster); graph.subgraphs!.push(cluster)
+      // Reserve the actual heading without manufacturing an Agent or a relationship.
+      label: { html: '<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="' + labelWidth + '" HEIGHT="' + labelHeight + '" FIXEDSIZE="TRUE"> </TD></TR></TABLE>' } }, nodes: fixedNodes(members), edges: [], subgraphs: [] }
+    clusters.set(area.id, cluster); owner.subgraphs!.push(cluster)
+    for (const child of children.get(area.id) ?? []) addArea(child, cluster)
   }
-  const pairs = new Set<string>()
-  for (const edge of input.connections) {
+  for (const area of children.get(null) ?? []) {
+    if (!memberCount(area)) { emptyAreas.push(area); continue }
+    addArea(area, graph)
+  }
+  type Spring = { source: string; target: string; messages: number; other: number }
+  const pairs = new Map<string, Spring>()
+  for (const edge of [...input.connections].sort((a, b) => a.id.localeCompare(b.id))) {
     const source = endpoints.get(edge.source), target = endpoints.get(edge.target)
     if (!source || !target || source === target) continue
-    const key = JSON.stringify([source, target].sort())
-    if (pairs.has(key)) continue
-    // fdp solves each cluster with its own edges; root-only internal edges do not influence that solve.
-    const areaId = nodes.get(source)?.areaId, cluster = areaId && areaId === nodes.get(target)?.areaId ? clusters.get(areaId) : undefined
-    pairs.add(key); (cluster ?? graph).edges!.push({ tail: source, head: target })
+    const [from, to] = [source, target].sort(), key = JSON.stringify([from, to])
+    const pair = pairs.get(key) ?? { source: from!, target: to!, messages: 0, other: 1 }
+    const strength = Number.isFinite(edge.strength) && edge.strength! >= 1 ? edge.strength! : 1
+    if (edge.kind === 'communication') pair.messages += strength
+    else pair.other = Math.max(pair.other, strength)
+    pairs.set(key, pair)
   }
-  signal?.throwIfAborted()
-  const result = occupiedAreas.length ? render(await graphviz(signal), graph, 'fdp') : { objects: [] }
+  const ancestors = (id: string) => {
+    const values: string[] = []
+    let parent = nodes.get(id)?.areaId ?? areas.get(id)?.parentId
+    while (parent) { values.push(parent); parent = areas.get(parent)?.parentId }
+    return values
+  }
+  for (const pair of pairs.values()) {
+    const targetAncestors = new Set(ancestors(pair.target)), areaId = ancestors(pair.source).find(id => targetAncestors.has(id))
+    const cluster = areaId ? clusters.get(areaId) : undefined
+    // Original messages count once; their dispatch overlay never strengthens the same spring again.
+    const strength = Math.min(6, Math.log2(Math.max(1, pair.messages || pair.other)))
+    ;(cluster ?? graph).edges!.push({ tail: pair.source, head: pair.target, attributes: { weight: 1 + strength * 2, len: .3 / (1 + strength * .45) } })
+  }
+  const result = occupiedAreas.length ? render(await graphviz(signal, true), graph, 'fdp') : { objects: [] }
   const objects = new Map((result.objects ?? []).map(item => [item.name, item]))
   const placed = new Map<string, CollaborationLayoutPoint>()
   for (const id of visible.keys()) {
@@ -135,12 +180,46 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
     if (Number.isFinite(x) && Number.isFinite(y)) placed.set(id, { x: x!, y: y! })
   }
   if (placed.size !== visible.size) throw Error('Layout did not return every original member. Existing map positions are kept.')
+  // fdp removes rectangle overlaps after its spring solve. Refine identity-to-slot
+  // assignment within equal-size siblings so that this final packing still respects
+  // strong communication. Swaps cannot change any footprint, containment or heading.
+  const incident = new Map<string, Spring[]>()
+  for (const pair of pairs.values()) for (const id of [pair.source, pair.target]) {
+    const values = incident.get(id) ?? []; values.push(pair); incident.set(id, values)
+  }
+  const slots = new Map<string, string[]>()
+  for (const node of input.nodes) if (placed.has(node.id) && incident.has(node.id)) {
+    const key = JSON.stringify([node.areaId, node.width, node.height]), values = slots.get(key) ?? []
+    values.push(node.id); slots.set(key, values)
+  }
+  for (const [, members] of [...slots].sort(([a], [b]) => a.localeCompare(b))) {
+    members.sort()
+    for (let pass = 0; pass < 2; pass++) {
+      let improved = false
+      for (let left = 0; left < members.length; left++) for (let right = left + 1; right < members.length; right++) {
+        signal?.throwIfAborted()
+        const a = members[left]!, b = members[right]!, from = placed.get(a)!, to = placed.get(b)!
+        const related = new Set([...(incident.get(a) ?? []), ...(incident.get(b) ?? [])])
+        const cost = (swapped: boolean) => {
+          let value = 0
+          const at = (id: string) => swapped && id === a ? to : swapped && id === b ? from : placed.get(id)!
+          for (const pair of related) {
+            const source = at(pair.source), target = at(pair.target)
+            value += (1 + Math.min(6, Math.log2(Math.max(1, pair.messages || pair.other))) * 2) * Math.hypot(source.x - target.x, source.y - target.y)
+          }
+          return value
+        }
+        if (cost(true) + .01 < cost(false)) { placed.set(a, to); placed.set(b, from); improved = true }
+      }
+      if (!improved) break
+    }
+  }
   const output: CollaborationLayoutBox[] = []
   for (const area of occupiedAreas) {
     signal?.throwIfAborted()
-    if (area.folded) {
+    if (visible.has(area.id)) {
       const shell = visible.get(area.id)!, point = placed.get(area.id)!
-      output.push({ ...shell, areaId: area.id, kind: 'area', folded: true, x: point.x - shell.width / 2, y: point.y - shell.height / 2,
+      output.push({ ...shell, areaId: area.id, kind: 'area', folded: area.folded, x: point.x - shell.width / 2, y: point.y - shell.height / 2,
         heading: { x: 0, y: 0, width: shell.width, height: shell.height } })
       continue
     }
@@ -153,22 +232,37 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
     const heading = { x: labelX! - x - labelWidth / 2 + padding, y: labelY! - y - labelHeight / 2 + padding,
       width: headingWidth, height: COLLABORATION_AREA_HEADER }
     output.push({ id: area.id, areaId: area.id, kind: 'area', folded: false, x, y, width, height, heading })
-    for (const id of area.members) {
+    for (const id of [...area.members].sort()) {
       const node = nodes.get(id)!, point = placed.get(id)!
       output.push({ id, areaId: area.id, kind: 'agent', folded: false,
         x: point.x - node.width / 2, y: point.y - node.height / 2, width: node.width, height: node.height })
     }
   }
-  // Empty original places remain discoverable without exerting force on occupied work areas.
+  // Only completely empty root subtrees leave the force solve.
   const occupied = output.length ? bounds(output.filter(box => box.kind === 'area').flatMap(box => [{ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }])) : { x: 0, y: 0, width: 0, height: 0 }
   const emptyWidth = 184, emptyHeight = 32, shelfGap = 12
-  const columns = occupiedAreas.length ? Math.max(1, Math.floor((occupied.width + shelfGap) / (emptyWidth + shelfGap))) : 4
-  const shelfY = occupied.y + occupied.height + (occupiedAreas.length ? gap : 0)
-  for (const [index, area] of emptyAreas.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).entries()) {
-    signal?.throwIfAborted()
-    output.push({ id: area.id, areaId: area.id, kind: 'area', folded: area.folded,
-      x: occupied.x + index % columns * (emptyWidth + shelfGap), y: shelfY + Math.floor(index / columns) * (emptyHeight + shelfGap), width: emptyWidth, height: emptyHeight,
-      heading: { x: 0, y: 0, width: emptyWidth, height: emptyHeight } })
+  let shelfX = occupied.x, shelfY = occupied.y + occupied.height + (occupiedAreas.length ? gap : 0), rowHeight = 0
+  const shelfRight = occupied.x + (occupiedAreas.length ? Math.max(emptyWidth, occupied.width) : 4 * (emptyWidth + shelfGap))
+  for (const area of emptyAreas) {
+    const tree: CollaborationLayoutBox[] = []
+    const emptyTree = (current: typeof area, depth: number, top: number): number => {
+      const descendants = current.folded ? [] : children.get(current.id) ?? []
+      const heading = { x: descendants.length ? padding : 0, y: descendants.length ? padding : 0, width: emptyWidth, height: emptyHeight }
+      const box: Extract<CollaborationLayoutBox, { kind: 'area' }> = { id: current.id, areaId: current.id, kind: 'area', folded: current.folded, x: depth * padding, y: top, width: emptyWidth, height: emptyHeight, heading }
+      const start = tree.length; tree.push(box)
+      let bottom = top + heading.y + emptyHeight
+      for (const child of descendants) bottom = emptyTree(child, depth + 1, bottom + shelfGap)
+      if (descendants.length) {
+        box.width += padding * 2; box.height = bottom - top + padding
+        for (const child of tree.slice(start + 1)) box.width = Math.max(box.width, child.x + child.width - box.x + padding)
+      }
+      return top + box.height
+    }
+    emptyTree(area, 0, 0)
+    const root = tree[0]!
+    if (shelfX > occupied.x && shelfX + root.width > shelfRight) { shelfX = occupied.x; shelfY += rowHeight + shelfGap; rowHeight = 0 }
+    for (const box of tree) output.push({ ...box, x: box.x + shelfX, y: box.y + shelfY })
+    shelfX += root.width + shelfGap; rowHeight = Math.max(rowHeight, root.height)
   }
   return output
 }
@@ -192,7 +286,7 @@ class Obstacles {
 
 /** Preserve established positions. Only new or genuinely colliding geometry needs a nearby slot. */
 export function reconcileCollaborationLayout(input: CollaborationLayoutInput, previous: readonly CollaborationLayoutBox[], anchor: string | null, signal?: AbortSignal): CollaborationLayoutBox[] {
-  const { nodes, areas } = layoutMembers(input), held = new Map(previous.map(box => [box.id, box]))
+  const { nodes, areas, children, hidden } = layoutMembers(input), held = new Map(previous.map(box => [box.id, box]))
   const occupied = new Obstacles([]), placed = new Map<string, CollaborationLayoutBox>()
   const headings = new Map<string, CollaborationLayoutBounds>()
   const neighbors = new Map<string, string[]>()
@@ -233,20 +327,25 @@ export function reconcileCollaborationLayout(input: CollaborationLayoutInput, pr
       x: old.x + (old.width - node.width) / 2, y: old.y + (old.height - node.height) / 2 }
   }
   // The actual reading occurrence goes first, before its newly expanded body can displace it.
-  const anchored = anchor && nodes.has(anchor) && !areas.get(nodes.get(anchor)!.areaId)?.folded ? originalNode(anchor) : null
+  const anchored = anchor && nodes.has(anchor) && !areas.get(nodes.get(anchor)!.areaId)?.folded && !hidden(areas.get(nodes.get(anchor)!.areaId)!) ? originalNode(anchor) : null
   if (anchored) place(anchored)
-  const orderedAreas = [...input.areas].sort((a, b) => Number(b.id === anchor) - Number(a.id === anchor) || Number(held.has(b.id)) - Number(held.has(a.id)) || a.id.localeCompare(b.id))
+  const orderedAreas = input.areas.filter(area => !hidden(area)).sort((a, b) => Number(b.id === anchor) - Number(a.id === anchor) || Number(held.has(b.id)) - Number(held.has(a.id)) || a.id.localeCompare(b.id))
   function placeTitle(area: CollaborationLayoutInput['areas'][number]) {
     const old = held.get(area.id)
     const peers = area.members.flatMap(id => (neighbors.get(id) ?? []).flatMap(peer => { const box = held.get(peer); return box ? [box] : [] }))
+    const parent = area.parentId ? held.get(area.parentId) : undefined
+    const child = (children.get(area.id) ?? []).map(value => held.get(value.id)).find(Boolean)
     const header = old?.kind === 'area' ? { x: old.x + old.heading.x, y: old.y + old.heading.y }
-      : peers.length ? { x: peers.reduce((sum, box) => sum + box.x + box.width, 0) / peers.length + gap, y: peers.reduce((sum, box) => sum + box.y, 0) / peers.length } : { x: 0, y: 0 }
-    const width = area.folded && area.members.length ? 276 : headingWidth, height = area.members.length ? area.folded ? 54 : COLLABORATION_AREA_HEADER : 32
+      : child ? { x: child.x, y: child.y - COLLABORATION_AREA_HEADER - gap }
+      : peers.length ? { x: peers.reduce((sum, box) => sum + box.x + box.width, 0) / peers.length + gap, y: peers.reduce((sum, box) => sum + box.y, 0) / peers.length }
+      : parent?.kind === 'area' ? { x: parent.x + parent.heading.x, y: parent.y + parent.heading.y + parent.heading.height + gap } : { x: 0, y: 0 }
+    const hasContent = area.members.length > 0 || Boolean(children.get(area.id)?.length)
+    const width = area.folded && hasContent ? 276 : headingWidth, height = hasContent ? area.folded ? 54 : COLLABORATION_AREA_HEADER : 32
     const title = place({ id: area.id, areaId: area.id, kind: 'area', folded: area.folded, ...header, width, height, heading: { x: 0, y: 0, width, height } })
     headings.set(area.id, { x: title.x, y: title.y, width, height })
   }
   for (const area of orderedAreas) if (held.get(area.id)?.kind === 'area') placeTitle(area)
-  const visible = input.nodes.filter(node => !areas.get(node.areaId)!.folded && node.id !== anchored?.id)
+  const visible = input.nodes.filter(node => !areas.get(node.areaId)!.folded && !hidden(areas.get(node.areaId)!) && node.id !== anchored?.id)
   visible.sort((a, b) => {
     const left = held.get(a.id), right = held.get(b.id)
     const rank = (node: typeof a, old: CollaborationLayoutBox | undefined) => old?.kind === 'agent' && !held.get(node.areaId)?.folded ? old.width === node.width && old.height === node.height ? 0 : 1 : 2
@@ -270,13 +369,16 @@ export function reconcileCollaborationLayout(input: CollaborationLayoutInput, pr
     place(box)
   }
   const output: CollaborationLayoutBox[] = []
-  for (const area of input.areas) {
+  const enclose = (area: typeof input.areas[number]): CollaborationLayoutBox => {
     const title = headings.get(area.id)!, members = area.folded ? [] : area.members.map(id => placed.get(id)!)
-    if (!members.length) { output.push(placed.get(area.id)!); continue }
-    const extent = bounds([title, ...members].flatMap(box => [{ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }]))
-    output.push({ id: area.id, areaId: area.id, kind: 'area', folded: false, x: extent.x - padding, y: extent.y - padding, width: extent.width + padding * 2, height: extent.height + padding * 2,
-      heading: { ...title, x: title.x - extent.x + padding, y: title.y - extent.y + padding } }, ...members)
+    const descendants = area.folded ? [] : (children.get(area.id) ?? []).map(enclose)
+    if (!members.length && !descendants.length) { const box = placed.get(area.id)!; output.push(box); return box }
+    const extent = bounds([title, ...members, ...descendants].flatMap(box => [{ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }]))
+    const box: CollaborationLayoutBox = { id: area.id, areaId: area.id, kind: 'area', folded: false, x: extent.x - padding, y: extent.y - padding, width: extent.width + padding * 2, height: extent.height + padding * 2,
+      heading: { ...title, x: title.x - extent.x + padding, y: title.y - extent.y + padding } }
+    output.push(box, ...members); return box
   }
+  for (const area of children.get(null) ?? []) enclose(area)
   return output
 }
 const expand = (box: CollaborationLayoutBounds, amount: number) => ({ x: box.x - amount, y: box.y - amount, width: box.width + amount * 2, height: box.height + amount * 2 })
@@ -284,10 +386,16 @@ function routeNode(box: Obstacle) {
   return { name: box.id, attributes: { pos: `${box.x + box.width / 2},${-box.y - box.height / 2}!`, width: box.width / 72, height: box.height / 72 } }
 }
 type PortSide = 'left' | 'right' | 'top' | 'bottom'
-function pointAt(box: Obstacle, kind: CollaborationLayoutKind, outgoing: boolean, side: PortSide) {
+function pointAt(box: Obstacle, peer: Obstacle, kind: CollaborationLayoutKind, outgoing: boolean, side: PortSide) {
   // Facing sides use the same physical slot for one direction, so reciprocal
   // curves remain parallel instead of swapping lanes halfway between neighbors.
-  const fraction = (kinds.indexOf(kind) * 2 + (outgoing === (side === 'right' || side === 'bottom') ? .5 : 1.5)) / 6
+  const vertical = side === 'top' || side === 'bottom'
+  const dx = peer.x + peer.width / 2 - box.x - box.width / 2, dy = peer.y + peer.height / 2 - box.y - box.height / 2
+  // Bearing gives a stable, ordered fan-out independent of arrival batches.
+  // The same physical lane is used at both facing ends, including reciprocal roles.
+  const bearing = Math.atan2(vertical ? dx : dy, Math.abs(vertical ? dy : dx)) / Math.PI
+  const radial = .1 * (1 - Math.exp(-Math.hypot(dx, dy) / 512))
+  const fraction = (kinds.indexOf(kind) * 2 + (outgoing === (side === 'right' || side === 'bottom') ? .5 : 1.5) + bearing * .8 + radial) / 6
   return side === 'top' || side === 'bottom'
     ? { x: box.x + fraction * box.width, y: box.y + (side === 'bottom' ? box.height : 0) }
     : { x: box.x + (side === 'right' ? box.width : 0), y: box.y + fraction * box.height }
@@ -302,17 +410,72 @@ function crosses(points: readonly CollaborationLayoutPoint[], obstacle: Collabor
   const ab = midpoint(a, b), bc = midpoint(b, c), cd = midpoint(c, d), abc = midpoint(ab, bc), bcd = midpoint(bc, cd), middle = midpoint(abc, bcd)
   return crosses([a, ab, abc, middle], obstacle, depth + 1) || crosses([middle, bcd, cd, d], obstacle, depth + 1)
 }
-async function route(obstacles: Obstacles, connection: CollaborationLayoutConnection, signal?: AbortSignal): Promise<CollaborationPath> {
+function sampleCurve(points: readonly CollaborationLayoutPoint[]) {
+  const samples: CollaborationLayoutPoint[] = [points[0]!]
+  for (let segment = 0; segment < points.length - 1; segment += 3) {
+    const [a, b, c, d] = points.slice(segment, segment + 4) as [CollaborationLayoutPoint, CollaborationLayoutPoint, CollaborationLayoutPoint, CollaborationLayoutPoint]
+    for (let index = 1; index <= 12; index++) {
+      const t = index / 12, u = 1 - t
+      samples.push({ x: u ** 3 * a.x + 3 * u * u * t * b.x + 3 * u * t * t * c.x + t ** 3 * d.x,
+        y: u ** 3 * a.y + 3 * u * u * t * b.y + 3 * u * t * t * c.y + t ** 3 * d.y })
+    }
+  }
+  return samples
+}
+class RoutedChannels {
+  private index = new CollaborationBoundsIndex<CollaborationLayoutBounds & { key: string; points: readonly CollaborationLayoutPoint[] }>([])
+  private seen = new Set<string>()
+  private key(connection: CollaborationLayoutConnection) { return JSON.stringify([connection.kind, connection.source, connection.target]) }
+  add(path: CollaborationPath, connection: CollaborationLayoutConnection) {
+    const key = this.key(connection)
+    if (this.seen.has(key)) return
+    this.seen.add(key); this.index.add({ ...path.bounds, key, points: sampleCurve(path.points) })
+  }
+  crossings(curve: readonly CollaborationLayoutPoint[], connection: CollaborationLayoutConnection) {
+    const points = sampleCurve(curve), key = this.key(connection)
+    const orient = (a: CollaborationLayoutPoint, b: CollaborationLayoutPoint, c: CollaborationLayoutPoint) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+    let count = 0
+    for (const channel of this.index.query(bounds(points))) {
+      if (channel.key === key) continue
+      let crossing = false
+      for (let left = 1; !crossing && left < points.length; left++) for (let right = 1; right < channel.points.length; right++) {
+        const a = points[left - 1]!, b = points[left]!, c = channel.points[right - 1]!, d = channel.points[right]!
+        if (orient(a, b, c) * orient(a, b, d) < 0 && orient(c, d, a) * orient(c, d, b) < 0) { crossing = true; break }
+      }
+      if (crossing) count++
+    }
+    return count
+  }
+}
+async function route(obstacles: Obstacles, connection: CollaborationLayoutConnection, channels: RoutedChannels, signal?: AbortSignal): Promise<CollaborationPath> {
   const source = obstacles.byId.get(connection.source), target = obstacles.byId.get(connection.target)
   if (!source || !target || source.id === target.id) throw Error('The original connection endpoints are unavailable. Its source remains readable.')
   const dxCenter = target.x + target.width / 2 - source.x - source.width / 2
   const dyCenter = target.y + target.height / 2 - source.y - source.height / 2
-  // Prefer the larger free corridor between bodies, rather than the aspect ratio of a wide card.
-  const vertical = Math.abs(dyCenter) - (source.height + target.height) / 2 > Math.abs(dxCenter) - (source.width + target.width) / 2
-  const forward = vertical ? dyCenter > 0 : dxCenter > 0
-  const sourceSide: PortSide = vertical ? forward ? 'bottom' : 'top' : forward ? 'right' : 'left'
-  const targetSide: PortSide = vertical ? forward ? 'top' : 'bottom' : forward ? 'left' : 'right'
-  const sourcePoint = pointAt(source, connection.kind, true, sourceSide), targetPoint = pointAt(target, connection.kind, false, targetSide)
+  const preferredVertical = Math.abs(dyCenter) - (source.height + target.height) / 2 > Math.abs(dxCenter) - (source.width + target.width) / 2
+  const candidate = (vertical: boolean) => {
+    const forward = vertical ? dyCenter > 0 : dxCenter > 0
+    const sourceSide: PortSide = vertical ? forward ? 'bottom' : 'top' : forward ? 'right' : 'left'
+    const targetSide: PortSide = vertical ? forward ? 'top' : 'bottom' : forward ? 'left' : 'right'
+    const sourcePoint = pointAt(source, target, connection.kind, true, sourceSide), targetPoint = pointAt(target, source, connection.kind, false, targetSide)
+    const tangent = Math.max(8, Math.abs(vertical ? targetPoint.y - sourcePoint.y : targetPoint.x - sourcePoint.x) * .45) * (forward ? 1 : -1)
+    const direct = [sourcePoint, { x: sourcePoint.x + (vertical ? 0 : tangent), y: sourcePoint.y + (vertical ? tangent : 0) },
+      { x: targetPoint.x - (vertical ? 0 : tangent), y: targetPoint.y - (vertical ? tangent : 0) }, targetPoint]
+    const selected = new Set(obstacles.query(expand(bounds(direct), 8)).filter(box => box.id !== source.id && box.id !== target.id && crosses(direct, expand(box, 8))))
+    for (const endpoint of [source, target]) {
+      const interior = { x: endpoint.x + .2, y: endpoint.y + .2, width: endpoint.width - .4, height: endpoint.height - .4 }
+      if (crosses(direct, interior)) selected.add(endpoint)
+    }
+    const points = sampleCurve(direct)
+    const length = points.slice(1).reduce((sum, point, index) => sum + Math.hypot(point.x - points[index]!.x, point.y - points[index]!.y), 0)
+    const detour = [...selected].reduce((cost, box) => cost + Math.min(box.width, box.height) + gap * 2, 0)
+    return { vertical, forward, sourceSide, targetSide, sourcePoint, targetPoint, direct, selected,
+      cost: length + detour + channels.crossings(direct, connection) * 48 }
+  }
+  // Compare two genuine facing corridors before asking the library for a detour.
+  const preferred = candidate(preferredVertical), alternative = candidate(!preferredVertical)
+  const chosen = preferred.selected.size && alternative.cost + 16 < preferred.cost ? alternative : preferred
+  const { vertical, forward, sourceSide, targetSide, sourcePoint, targetPoint, direct, selected } = chosen
   function projected(points: readonly CollaborationLayoutPoint[]): CollaborationPath {
     const middle = Math.floor((points.length - 1) / 6) * 3, segment = points.slice(middle, middle + 4)
     return { id: connection.id, path: cubicPath(points), points, bounds: bounds(points),
@@ -320,10 +483,6 @@ async function route(obstacles: Obstacles, connection: CollaborationLayoutConnec
       labelX: (segment[0]!.x + 3 * segment[1]!.x + 3 * segment[2]!.x + segment[3]!.x) / 8,
       labelY: (segment[0]!.y + 3 * segment[1]!.y + 3 * segment[2]!.y + segment[3]!.y) / 8 }
   }
-  const tangent = Math.max(8, Math.abs(vertical ? targetPoint.y - sourcePoint.y : targetPoint.x - sourcePoint.x) * .45) * (forward ? 1 : -1)
-  const direct = [sourcePoint, { x: sourcePoint.x + (vertical ? 0 : tangent), y: sourcePoint.y + (vertical ? tangent : 0) },
-    { x: targetPoint.x - (vertical ? 0 : tangent), y: targetPoint.y - (vertical ? tangent : 0) }, targetPoint]
-  const selected = new Set(obstacles.query(expand(bounds(direct), 8)).filter(box => box.id !== source.id && box.id !== target.id && crosses(direct, expand(box, 8))))
   // A clear pair needs one smooth curve. Only real obstructions enter the library's detour solve.
   if (!selected.size) return projected(direct)
   // Terminal stems are part of every route. Real endpoint rectangles remain obstacles too:
@@ -386,10 +545,10 @@ export async function routeCollaborationLayout(boxes: readonly CollaborationLayo
 } = {}): Promise<CollaborationPath[]> {
   options.signal?.throwIfAborted()
   if (!connections.length) return []
-  const obstacles = new Obstacles(boxes), output: CollaborationPath[] = []
-  for (const [index, connection] of connections.entries()) {
+  const obstacles = new Obstacles(boxes), channels = new RoutedChannels(), output: CollaborationPath[] = []
+  for (const [index, connection] of [...connections].sort((a, b) => (b.strength ?? 1) - (a.strength ?? 1) || a.id.localeCompare(b.id)).entries()) {
     options.signal?.throwIfAborted()
-    try { const path = await route(obstacles, connection, options.signal); output.push(path); options.onPath?.(path) }
+    try { const path = await route(obstacles, connection, channels, options.signal); channels.add(path, connection); output.push(path); options.onPath?.(path) }
     catch (error) { options.signal?.throwIfAborted(); if (!options.onError) throw error; options.onError(connection.id, error) }
     // Yield between finite library calls so a superseding generation does not start more work.
     if ((index + 1) % 8 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0))
