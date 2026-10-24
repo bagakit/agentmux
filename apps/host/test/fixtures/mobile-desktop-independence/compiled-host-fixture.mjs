@@ -153,7 +153,10 @@ export async function compiledHostFixture(candidate) {
     original = await sdk.createAgent({ providerId: 'codex', executorId: 'codex', createOperationId: 'original-mobile-session',
       workspacePath: workspace, commandOverride: command, args: [], env: executorEnv, injectAgentMuxGuide: false })
     ownedSessions.add(original.agentSessionId)
-    original = await until('original Provider-native identity', () => sdk.statusAgent(original.agentSessionId), value => Boolean(value.session.nativeHandle)).then(value => value.session)
+    original = await until('original Provider-native identity and ready input frame', () => sdk.statusAgent(original.agentSessionId), value =>
+      value.run.state === 'running' && Boolean(value.session.nativeHandle) &&
+      value.session.terminalPromptReadiness?.run.runId === original.run.runId &&
+      value.session.terminalPromptReadiness.readyThroughByte !== undefined).then(value => value.session)
     const launch = desktop.desktopFixture({ desktopRoot: join(candidate.root, 'apps/desktop'), root, privateHome, environment: { ...environment, ELECTRON_RUN_AS_NODE: undefined }, children, connections, waitFor })
     return { root, privateHome, userData, workspace, environment, children, cleanup, core, get sdk() { return sdk }, get rpc() { return rpc },
       get ready() { return ready }, get ownerProcess() { return owner }, original, nativeProcessId: daemon.pid,
