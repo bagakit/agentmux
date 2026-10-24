@@ -49,7 +49,7 @@ import { WebUrlIngress, receiveDesktopUrl, receiveDesktopUrlArguments } from './
 import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
 import { windowSecurityWebPreferences } from './window-security.js'
 import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
-import { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { installRecoverySeedBeforeLoad, summarizeRecoverySessionStore, summarizeRecoveryStorage } from './recovery-probe.js'
 
