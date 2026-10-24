@@ -103,7 +103,7 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
     if (region.agentSessionId) openSession(region.agentSessionId, { name: row?.name ?? '名称未确认', project: row?.project ?? item?.name ?? '项目未确认', ...(address ? { context: address } : {}) })
   }
   return <section className="mobile-survey" aria-label="Survey">
-    <header>{activeBack && <button className="mobile-text-button" type="button" onClick={activeBack}>{context.regionId ? '返回研究内容' : '返回研究列表'}</button>}
+    <header className="mobile-page-header">{activeBack && <button className="mobile-text-button" type="button" onClick={activeBack}>{context.regionId ? '返回研究内容' : '返回研究列表'}</button>}
       <h1>{context.regionId ? selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '原文件' : selected?.region.kind === 'browser' ? '原网页' : '原内容' : context.zoneId ? item?.name ?? selected?.zoneName ?? '原选择的研究' : 'Survey'}</h1>
       <button className="mobile-text-button" type="button" onClick={refresh}>刷新原研究</button></header>
     {[issue, survey?.issue].filter(Boolean).map((message, index) => <p className="mobile-survey-issue" key={index} role="status">{message}</p>)}

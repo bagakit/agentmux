@@ -6,7 +6,7 @@ import { useMarkdownCopyText, type ClientUiPlatform } from '@agentmux/client-ui/
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 
 export function MobileGoalEvidence({ evidence, client, copyText }: { evidence: readonly DemandEvidence[]; client: AgentMuxHostedClient | null; copyText?: ClientUiPlatform['copyText'] | undefined }) {
-  return <ul>{evidence.map((reference, index) => <Evidence key={`${index}:${demandEvidenceText(reference)}`} reference={reference} client={client} copyText={copyText} />)}</ul>
+  return <ul className="mobile-goal-evidence">{evidence.map((reference, index) => <Evidence key={`${index}:${demandEvidenceText(reference)}`} reference={reference} client={client} copyText={copyText} />)}</ul>
 }
 function Evidence({ reference, client, copyText }: { reference: DemandEvidence; client: AgentMuxHostedClient | null; copyText?: ClientUiPlatform['copyText'] | undefined }) {
   const inheritedCopy = useMarkdownCopyText(), copy = copyText ?? inheritedCopy
