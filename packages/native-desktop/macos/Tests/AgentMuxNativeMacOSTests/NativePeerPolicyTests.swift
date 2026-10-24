@@ -10,6 +10,12 @@ final class NativePeerPolicyTests: XCTestCase {
         XCTAssertFalse(NativePeerPolicy.isAuthorized(expectedPID: 4321, actualPID: 4321, expectedUID: 501, actualUID: nil))
     }
 
+    func testExplicitPixelsCannotUseTheReadOnlySnapshotPath() {
+        XCTAssertFalse(NativeOperationPolicy.isMutation("getAppState"))
+        XCTAssertFalse(NativeOperationPolicy.isMutation("getAppState", includesScreenshot: false))
+        XCTAssertTrue(NativeOperationPolicy.isMutation("getAppState", includesScreenshot: true))
+    }
+
     func testEveryGlobalSideEffectIsInstanceCorrelated() {
         for method in ["click", "performSecondaryAction", "setValue", "typeText", "pressKey", "hotkey", "pasteText", "scroll", "drag", "clipboardWrite", "captureScreenshot"] {
             XCTAssertTrue(NativeOperationPolicy.isMutation(method), method)

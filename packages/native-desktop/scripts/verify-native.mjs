@@ -16,6 +16,8 @@ if (args.includes('--source-only')) {
   const core = join(root, 'Sources', 'AgentMuxNativeMacOSCore')
   run('swiftc', ['-frontend', '-parse', ...readdirSync(source).filter(n => n.endsWith('.swift')).map(n => join(source, n))])
   run('swiftc', ['-frontend', '-parse', ...readdirSync(core).filter(n => n.endsWith('.swift')).map(n => join(core, n))])
+  const test = join(root, 'Tests', 'AgentMuxNativeMacOSTests')
+  run('swiftc', ['-frontend', '-parse', ...readdirSync(test).filter(n => n.endsWith('.swift')).map(n => join(test, n))])
   process.stdout.write('Native syntax parse passed; this is not compilation or behavior acceptance.\n')
 } else {
   run('swift', ['test', '--package-path', root, '--scratch-path', scratch, '--jobs', '1'])
