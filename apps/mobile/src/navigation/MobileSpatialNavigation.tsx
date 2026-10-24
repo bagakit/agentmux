@@ -1,7 +1,7 @@
 import type { MobileAgentCreateTarget } from './MobileAgentCreate'
 import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -24,7 +24,7 @@ type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
 export type MobileSpatialContext = { spaceId: string | null; tabId: string | null; regionId: string | null }
 export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxHostedClient | null; connected: boolean;
   openMainAgent?(id: string, identity: MobileObjectIdentity, hostId: string): void;
-  visible?: boolean; sessions: AgentMuxAgentSession[]; openSession(id: string, identity: MobileObjectIdentity): void; openProfile?(identity: MobileObjectIdentity): void;
+  visible?: boolean; sessions?: AgentMuxAgentSession[]; openSession(id: string, identity: MobileObjectIdentity): void; openProfile?(identity: MobileObjectIdentity): void;
   openHttpLink?: OpenHttpLink; initialContext?: MobileSpatialContext; onContextChange?(context: MobileSpatialContext): void;
   onCreateAgent?(target: MobileAgentCreateTarget): void; onBackChange?(back: (() => void) | null): void }
 type Region = Catalog['regions'][number]
@@ -95,33 +95,131 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     onBackChange(activeBack)
     return () => onBackChange(null)
   }, [visible, onBackChange, activeBack])
-  const sessionById = new Map(sessions.map(session => [session.agentSessionId, session]))
+  const [metadataRevision, refreshMetadata] = useState(0)
+  const missingMetadata = useMemo(() => catalog?.agentPresentation === undefined ? null : new Set(catalog.agentPresentation.filter(row => !row.providerId).map(row => row.agentSessionId)), [catalog])
+  const memberReferences = useMemo(() => new Map<string, SessionReference>(), [client, catalog])
+  const metadataScope = missingMetadata === null ? '*' : JSON.stringify([...missingMetadata])
+  const needsMetadataDirectory = visible && home === 'focus' && (missingMetadata === null || missingMetadata.size > 0) && sessions === undefined
+  const metadataEpoch = useRef(0)
+  useEffect(() => {
+    if (sessions !== undefined) return
+    return client?.onEvent(event => {
+      if (event.type === 'agent-session' && (missingMetadata === null || missingMetadata.has(event.session.agentSessionId) || memberReferences.has(event.session.agentSessionId)) ||
+        event.type === 'run-removed' && (!event.agentSessionId || missingMetadata === null || missingMetadata.has(event.agentSessionId) || memberReferences.has(event.agentSessionId)) || event.type === 'connection-state') {
+        metadataEpoch.current += 1
+        const memberChanged = event.type === 'agent-session' ? memberReferences.delete(event.session.agentSessionId)
+          : event.type === 'run-removed' && event.agentSessionId ? memberReferences.delete(event.agentSessionId)
+            : memberReferences.size > 0
+        if (event.type === 'connection-state' || event.type === 'run-removed' && !event.agentSessionId) memberReferences.clear()
+        if (needsMetadataDirectory || visible && home !== 'focus' && memberChanged) refreshMetadata(value => value + 1)
+      }
+    })
+  }, [client, sessions, missingMetadata, needsMetadataDirectory, memberReferences, visible, home])
+  const retainedMetadata = useRef<{ client: typeof client; epoch: number; scope: string; revision: number; value: { sessions: AgentMuxAgentSession[]; issue: string } } | null>(null)
+  const metadata = useMemo(() => {
+    if (sessions !== undefined) return { sessions, issue: '' }
+    const previous = retainedMetadata.current?.client === client ? retainedMetadata.current.value : { sessions: [], issue: '' }
+    if (!needsMetadataDirectory) return previous
+    if (retainedMetadata.current?.client === client && retainedMetadata.current.epoch === metadataEpoch.current && retainedMetadata.current.scope === metadataScope && retainedMetadata.current.revision === revision) return previous
+    let value
+    try { value = { sessions: client?.agentSessions() ?? [], issue: '' } }
+    catch { value = { sessions: previous.sessions, issue: '原会话元信息目录暂不可读；原空间与已有会话引用保留，可刷新核对。' } }
+    retainedMetadata.current = { client, epoch: metadataEpoch.current, scope: metadataScope, revision, value }
+    return value
+  }, [client, sessions, needsMetadataDirectory, metadataRevision, metadataScope, revision])
+  const sessionById = useMemo(() => new Map(metadata.sessions.map(session => [session.agentSessionId, session])), [metadata.sessions])
   const spaces = catalog?.spaces ?? []
+  const directory = useMemo(() => {
+    const rows = new Map<string, NonNullable<Catalog['agentPresentation']>[number]>()
+    const owners = new Map<string, Catalog['spaces'][number]>()
+    const motes = new Map<string, NonNullable<Catalog['motePresentation']>[number]>()
+    const appearances = new Map<string, NonNullable<Catalog['appearance']>[number]>()
+    const zonesByOwner = new Map<string, Set<string>>()
+    const ownersByZone = new Map<string, Set<string>>()
+    const tabsByOwner = new Map<string, Catalog['tabs']>()
+    const tabsById = new Map<string, Catalog['tabs'][number]>()
+    const regionsByTab = new Map<string, Region[]>()
+    const bindings = new Map<string, Set<string>>()
+    const places = new Map<string, AgentMuxSpaceAddress[]>()
+    const occurrences = new Map<string, AgentMuxSpaceAddress[]>()
+    for (const row of catalog?.agentPresentation ?? []) if (!rows.has(row.agentSessionId)) rows.set(row.agentSessionId, row)
+    for (const owner of catalog?.spaces ?? []) if (!owners.has(owner.spaceId)) owners.set(owner.spaceId, owner)
+    for (const mote of catalog?.motePresentation ?? []) if (!motes.has(mote.spaceId)) motes.set(mote.spaceId, mote)
+    for (const appearance of catalog?.appearance ?? []) if (!appearances.has(appearance.spaceId)) appearances.set(appearance.spaceId, appearance)
+    for (const binding of catalog?.bindings ?? []) {
+      const zones = zonesByOwner.get(binding.spaceId) ?? new Set<string>(); zones.add(binding.zoneId); zonesByOwner.set(binding.spaceId, zones)
+      const spaces = ownersByZone.get(binding.zoneId) ?? new Set<string>(); spaces.add(binding.spaceId); ownersByZone.set(binding.zoneId, spaces)
+    }
+    for (const tab of catalog?.tabs ?? []) {
+      if (!tabsById.has(tab.tabId)) tabsById.set(tab.tabId, tab)
+      if (tab.zoneId !== null) for (const owner of ownersByZone.get(tab.zoneId) ?? []) {
+        const values = tabsByOwner.get(owner) ?? []; values.push(tab); tabsByOwner.set(owner, values)
+      }
+    }
+    for (const region of catalog?.regions ?? []) {
+      const values = regionsByTab.get(region.tabId) ?? []; values.push(region); regionsByTab.set(region.tabId, values)
+    }
+    for (const region of catalog?.regions ?? []) if (region.agentSessionId) {
+      const key = JSON.stringify([region.tabId, region.regionId]), ids = bindings.get(key) ?? new Set<string>()
+      ids.add(region.agentSessionId); bindings.set(key, ids)
+    }
+    for (const location of catalog?.locations ?? []) {
+      const key = JSON.stringify([location.spaceId, location.tabId, location.regionId]), addresses = occurrences.get(key) ?? []
+      addresses.push(location); occurrences.set(key, addresses)
+      for (const id of bindings.get(JSON.stringify([location.tabId, location.regionId])) ?? []) {
+        const values = places.get(id) ?? []; values.push(location); places.set(id, values)
+      }
+    }
+    const issues = (catalog?.spaces ?? []).flatMap(owner => {
+      const tabIssues = owner.kind === 'mote' ? (tabsByOwner.get(owner.spaceId) ?? []).map(tab => tab.issue) : []
+      return [...new Set([owner.issue, motes.get(owner.spaceId)?.issue, appearances.get(owner.spaceId)?.issue, ...tabIssues].filter((value): value is string => Boolean(value)))].map(message => ({ source: owner.name, message, kind: owner.kind }))
+    })
+    return { rows, owners, motes, appearances, zonesByOwner, tabsByOwner, tabsById, regionsByTab, places, occurrences, issues }
+  }, [catalog])
+  const reference = (id: string): SessionReference => {
+    const known = sessionById.get(id), row = directory.rows.get(id)
+    if (sessions !== undefined && known) return known
+    if (row?.providerId) return { agentSessionId: id, providerId: row.providerId }
+    if (home !== 'focus') {
+      const previous = memberReferences.get(id)
+      if (previous) return previous
+      if (visible && client) {
+        let value: SessionReference = { agentSessionId: id, ...(known?.providerId ? { providerId: known.providerId } : {}) }
+        try {
+          const member = client.agentSession(id)
+          if (member.agentSessionId === id) value = { agentSessionId: id, providerId: member.providerId }
+        } catch { /* Missing metadata keeps the original spatial reference navigable. */ }
+        memberReferences.set(id, value)
+        return value
+      }
+    }
+    if (known) return known
+    return { agentSessionId: id }
+  }
   const matchingSpaces = spaces.filter(item => item.spaceId === spaceId)
   const space = matchingSpaces.length === 1 ? matchingSpaces[0] : undefined
   const matching = (value: string) => value.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
-  const locations = (id: string) => catalog?.locations.filter(location =>
-    catalog.regions.some(region => region.tabId === location.tabId && region.regionId === location.regionId && region.agentSessionId === id)) ?? []
+  const locations = (id: string) => directory.places.get(id) ?? []
   const moteIdentity = (owner: Catalog['spaces'][number]): NonNullable<MobileObjectIdentity['mote']> => {
-    const facts = catalog?.motePresentation?.find(value => value.spaceId === owner.spaceId)
+    const facts = directory.motes.get(owner.spaceId)
     const main = facts?.quickMode.status === 'saved' ? facts.quickMode.defaults.conversation : undefined
     return { spaceId: owner.spaceId, name: owner.name, facts,
-      conversationName: main ? catalog?.agentPresentation?.find(value => value.agentSessionId === main.sessionId)?.name : undefined,
-      appearance: catalog?.appearance?.find(value => value.spaceId === owner.spaceId) }
+      conversationName: main ? directory.rows.get(main.sessionId)?.name : undefined,
+      appearance: directory.appearances.get(owner.spaceId) }
   }
   const spaceIdentity = (owner: Catalog['spaces'][number]): MobileObjectIdentity => ({ name: owner.name, project: owner.name,
     ...(owner.kind === 'mote' ? { mote: moteIdentity(owner) } : {}) })
   const identity = (session: SessionReference, occurrence?: AgentMuxSpaceAddress | null): MobileObjectIdentity => {
     const candidates = locations(session.agentSessionId)
     const context = occurrence === null ? undefined : occurrence ?? (candidates.length === 1 ? candidates[0] : undefined)
-    const owner = context?.spaceId ? spaces.find(owner => owner.spaceId === context.spaceId) : undefined
-    const row = catalog?.agentPresentation?.find(value => value.agentSessionId === session.agentSessionId)
+    const owner = context?.spaceId ? directory.owners.get(context.spaceId) : undefined
+    const row = directory.rows.get(session.agentSessionId)
     return { name: row?.name ?? '名称未确认', project: row?.project ?? owner?.name ?? '项目未确认',
       ...(context ? { context } : {}), ...(owner?.kind === 'mote' ? { mote: moteIdentity(owner) } : {}) }
   }
   const name = (session: SessionReference) => identity(session).name
   const sessionRow = (session: SessionReference, key = session.agentSessionId, context?: AgentMuxSpaceAddress | null, tabName?: string | null, places?: AgentMuxSpaceAddress[]) => {
-    const object = identity(session, context), row = catalog?.agentPresentation?.find(value => value.agentSessionId === session.agentSessionId), status = row?.state ?? 'unknown'
+    const object = identity(session, context), row = directory.rows.get(session.agentSessionId), status = row?.state ?? 'unknown'
     const candidates = places ?? (context === undefined ? locations(session.agentSessionId) : [])
     const providerId = row?.providerId || session.providerId
     return <li key={key} className="mobile-agent-row"><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} onOpen={() => openSession(session.agentSessionId, object)}>
@@ -129,26 +227,23 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
       <span className="mobile-session-copy"><span className="mobile-session-project">{object.project}</span><strong>{object.name !== '名称未确认' ? object.name : tabName || object.name}</strong>{tabName && tabName !== object.name && object.name !== '名称未确认' && <small className="mobile-session-location">{tabName}</small>}{row && <small className="mobile-session-recap" title={row.recap ? `${row.recap.source} · ${row.recap.text}` : row.detail}>{row.recap?.text ?? '暂无已确认摘要'}</small>}{context && <small className="mobile-session-location" title={`${context.displayWorkspaceId} / ${context.groupId}`}>{context.displayWorkspaceId} · {context.groupId}</small>}</span>
       <span className="mobile-session-state" data-state={status}>{row?.stateMark && <FocusStateMark kind={row.stateMark} presenceUnknown={row.presenceUnknown} size={16} />}<span>{row?.stateLabel ?? { working: '执行中', waiting: '等待输入', blocked: '需要处理', done: '已完成', error: '出错', exited: '已结束', starting: '启动中', running: '状态未确认', disconnected: '断开' }[status] ?? '状态未确认'}</span><small>{row?.providerId ?? session.providerId ?? '元信息未确认'}</small></span>
     </MobileAgentRow>{candidates.length > 1 && <details className="mobile-session-locations"><summary>{candidates.length} 个原展示位置</summary>{candidates.map(place => <button type="button" key={JSON.stringify(place)} onClick={() => openSession(session.agentSessionId, identity(session, place))}>
-      {spaces.find(value => value.spaceId === place.spaceId)?.name ?? 'Space 未确认'} · {catalog?.tabs.find(value => value.tabId === place.tabId)?.name ?? 'Tab'} · {place.displayWorkspaceId} / {place.groupId}
+      {(place.spaceId ? directory.owners.get(place.spaceId)?.name : undefined) ?? 'Space 未确认'} · {directory.tabsById.get(place.tabId)?.name ?? 'Tab'} · {place.displayWorkspaceId} / {place.groupId}
     </button>)}</details>}</li>
   }
   const rows = catalog?.agentPresentation ?? []
-  const projectRows = new Map<string, { project: NonNullable<Catalog['agentPresentation']>[number]['projectGroup']; values: SessionReference[] }>()
-  for (const row of rows) {
-    const key = row.projectGroup?.key ?? 'unconfirmed-projects'
-    let entry = projectRows.get(key)
-    if (!entry) { entry = { project: row.projectGroup, values: [] }; projectRows.set(key, entry) }
-    entry.values.push(sessionById.get(row.agentSessionId) ?? { agentSessionId: row.agentSessionId, providerId: row.providerId })
-  }
-  const presentationIssues = catalog?.spaces.filter(owner => home === 'mote' ? owner.kind === 'mote' : home === 'space' ? owner.kind !== 'mote' : true).flatMap(owner => {
-    const moteIssue = catalog.motePresentation?.find(value => value.spaceId === owner.spaceId)?.issue
-    const boundZones = new Set(catalog.bindings.filter(binding => binding.spaceId === owner.spaceId).map(binding => binding.zoneId))
-    const tabIssues = owner.kind === 'mote' ? catalog.tabs.filter(tab => tab.zoneId !== null && boundZones.has(tab.zoneId)).map(tab => tab.issue) : []
-    const messages = [...new Set([owner.issue, moteIssue, ...tabIssues, catalog.appearance?.find(value => value.spaceId === owner.spaceId)?.issue].filter((value): value is string => Boolean(value)))]
-    return messages.map(message => ({ source: owner.name, message }))
-  }) ?? []
-  const zoneIds = new Set(catalog?.bindings.filter(binding => binding.spaceId === spaceId).map(binding => binding.zoneId))
-  const tabs = catalog?.tabs.filter(tab => tab.zoneId !== null && zoneIds.has(tab.zoneId)) ?? []
+  const projectRows = useMemo(() => {
+    const groups = new Map<string, { project: NonNullable<Catalog['agentPresentation']>[number]['projectGroup']; values: SessionReference[] }>()
+    if (home !== 'focus') return groups
+    for (const row of catalog?.agentPresentation ?? []) {
+      const key = row.projectGroup?.key ?? 'unconfirmed-projects'
+      let entry = groups.get(key)
+      if (!entry) { entry = { project: row.projectGroup, values: [] }; groups.set(key, entry) }
+      entry.values.push(sessionById.get(row.agentSessionId) ?? { agentSessionId: row.agentSessionId, providerId: row.providerId })
+    }
+    return groups
+  }, [home, catalog, sessionById])
+  const presentationIssues = directory.issues.filter(owner => home === 'mote' ? owner.kind === 'mote' : home === 'space' ? owner.kind !== 'mote' : true)
+  const tabs = directory.tabsByOwner.get(spaceId ?? '') ?? []
   const openContent = (owner: Catalog['spaces'][number], tab: Catalog['tabs'][number], region: Region) => {
     const key = contentKey(owner.spaceId, tab.zoneId, region), zones = catalog?.zones.filter(zone => zone.zoneId === tab.zoneId) ?? []
     setVisited(values => values.some(value => value.key === key) ? values : [...values, { key, spaceId: owner.spaceId, spaceName: owner.name,
@@ -169,32 +264,32 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     || !tabs.some(tab => tab.tabId === selected.tabId && tab.zoneId === selected.zoneId && tab.regionIds.includes(selected.region.regionId))
     || selected.zone && (!currentZone || currentZone.hostId !== selected.zone.hostId || currentZone.workspaceId !== selected.zone.workspaceId || currentZone.directoryPath !== selected.zone.directoryPath)))
   const mainAction = (owner: Catalog['spaces'][number]) => {
-    const facts = catalog?.motePresentation?.find(value => value.spaceId === owner.spaceId)
+    const facts = directory.motes.get(owner.spaceId)
     const main = facts?.quickMode.status === 'saved' ? facts.quickMode.defaults.conversation : undefined
     const configure = () => openProfile?.(spaceIdentity(owner))
     return <button type="button" className="mobile-mote-quick-open" aria-label={`${main ? '继续主对话' : facts?.quickMode.status === 'unconfirmed' ? '核对主 Agent' : '设置主 Agent'} · ${owner.name}`}
       onClick={() => {
         if (!main) { configure(); return }
-        const places = facts?.conversation ? catalog?.locations.filter(place => place.spaceId === owner.spaceId &&
+        const places = facts?.conversation ? directory.occurrences.get(JSON.stringify([owner.spaceId, main.tabId, main.regionId]))?.filter(place =>
           place.displayWorkspaceId === main.displayWorkspaceId && place.groupId === main.groupId && place.tabId === main.tabId && place.regionId === main.regionId) ?? [] : []
-        const session = sessionById.get(main.sessionId) ?? { agentSessionId: main.sessionId }
+        const session = reference(main.sessionId)
         const object = { ...identity(session, places.length === 1 ? places[0] : null), project: owner.name, mote: moteIdentity(owner) }
         if (openMainAgent) openMainAgent(main.sessionId, object, main.hostId)
         else openSession(main.sessionId, object)
       }}><SemanticIcon name="object.conversation" size={16} /><span>主 Agent</span></button>
   }
   const renderSpaceContents = (owner: Catalog['spaces'][number]) => {
-    const ownerZones = new Set(catalog?.bindings.filter(binding => binding.spaceId === owner.spaceId).map(binding => binding.zoneId))
-    const ownerTabs = catalog?.tabs.filter(tab => tab.zoneId !== null && ownerZones.has(tab.zoneId)) ?? []
+    const ownerZones = directory.zonesByOwner.get(owner.spaceId) ?? new Set<string>()
+    const ownerTabs = directory.tabsByOwner.get(owner.spaceId) ?? []
     if (owner.kind === 'mote') {
-      const facts = catalog?.motePresentation?.find(value => value.spaceId === owner.spaceId)
+      const facts = directory.motes.get(owner.spaceId)
       const members = new Map<string, { session: SessionReference; places: AgentMuxSpaceAddress[] }>()
-      const tabIds = new Set(ownerTabs.map(tab => tab.tabId))
-      const unconfirmedAgent = catalog?.regions.some(region => region.kind === 'agent' && !region.agentSessionId && tabIds.has(region.tabId) && ownerTabs.some(tab => tab.tabId === region.tabId && tab.regionIds.includes(region.regionId)))
-      for (const region of catalog?.regions ?? []) {
-        if (region.kind !== 'agent' || !region.agentSessionId || !tabIds.has(region.tabId) || !ownerTabs.some(tab => tab.tabId === region.tabId && tab.regionIds.includes(region.regionId))) continue
-        const id = region.agentSessionId, member = members.get(id) ?? { session: sessionById.get(id) ?? { agentSessionId: id }, places: [] }
-        member.places.push(...catalog?.locations.filter(place => place.spaceId === owner.spaceId && place.tabId === region.tabId && place.regionId === region.regionId) ?? [])
+      let unconfirmedAgent = false
+      for (const tab of ownerTabs) for (const region of directory.regionsByTab.get(tab.tabId) ?? []) {
+        if (region.kind !== 'agent' || !tab.regionIds.includes(region.regionId)) continue
+        if (!region.agentSessionId) { unconfirmedAgent = true; continue }
+        const id = region.agentSessionId, member = members.get(id) ?? { session: reference(id), places: [] }
+        member.places.push(...directory.occurrences.get(JSON.stringify([owner.spaceId, region.tabId, region.regionId])) ?? [])
         members.set(id, member)
       }
       return <div className="mobile-mote-contents">
@@ -219,7 +314,7 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
           const matches = catalog?.regions.filter(region => region.tabId === tab.tabId && region.regionId === id) ?? []
           return matches.length === 1 ? matches[0] : undefined
         }).filter(region => region !== undefined).map(region => {
-          const session = region.agentSessionId ? sessionById.get(region.agentSessionId) ?? { agentSessionId: region.agentSessionId } : undefined
+          const session = region.agentSessionId ? reference(region.agentSessionId) : undefined
           const occurrences = catalog?.locations.filter(value => value.spaceId === owner.spaceId && value.tabId === tab.tabId && value.regionId === region.regionId) ?? []
           return session ? occurrences.length ? occurrences.map(place => sessionRow(session, JSON.stringify(place), place, tab.regionIds.length === 1 ? tab.name : undefined)) : sessionRow(session, region.regionId, null, tab.regionIds.length === 1 ? tab.name : undefined)
             : <li key={region.regionId}>{region.kind === 'launcher' && onCreateAgent ? <button type="button" aria-label="在此启动位新建 Agent" onClick={() => onCreateAgent({ spaceId: owner.spaceId, zoneId, tabId: tab.tabId, regionId: region.regionId })}>
@@ -236,16 +331,16 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
       <div className="mobile-section-actions">{onCreateAgent && <button className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></button>}<button className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></button></div></div>
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，原工作面与最近目录保留。</MobileNotice>}
-    <MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />
+    <MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
     {home === 'focus' ? <>
       {[...projectRows].map(([key, { project, values }]) => {
         const matchingValues = filteredSessions(values)
         if (!matchingValues.length) return null
-        return <section className="mobile-focus-project" key={key} data-project-key={key} data-project-confirmed={Boolean(project)}><h2 className="mobile-spatial-subheading">{project?.spaceId && <MobileIdentity appearanceRevision={revision} objectSpaceId={project.spaceId} appearance={catalog?.appearance?.find(value => value.spaceId === project.spaceId)} identity={{ name: project.name, project: project.name, ...(spaces.find(owner => owner.spaceId === project.spaceId)?.kind === 'mote' ? { mote: moteIdentity(spaces.find(owner => owner.spaceId === project.spaceId)!) } : {}) }} client={client} connected={connected} visible={visible} size={20} />}<strong>{project?.name ?? '项目未确认'}</strong>{project?.hostId && project.hostId !== 'local' && <small>{project.hostId}</small>}<span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session))}</ul></section>
+        return <section className="mobile-focus-project" key={key} data-project-key={key} data-project-confirmed={Boolean(project)}><h2 className="mobile-spatial-subheading">{project?.spaceId && <MobileIdentity appearanceRevision={revision} objectSpaceId={project.spaceId} appearance={directory.appearances.get(project.spaceId)} identity={{ name: project.name, project: project.name, ...(directory.owners.get(project.spaceId)?.kind === 'mote' ? { mote: moteIdentity(directory.owners.get(project.spaceId)!) } : {}) }} client={client} connected={connected} visible={visible} size={20} />}<strong>{project?.name ?? '项目未确认'}</strong>{project?.hostId && project.hostId !== 'local' && <small>{project.hostId}</small>}<span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session))}</ul></section>
       })}
       {!rows.length && <p className="mobile-spatial-empty">Focus 呈现尚未确认；原会话保留。</p>}
-      {catalog?.agentPresentation === undefined && sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(sessions.filter(session => !rows.some(row => row.agentSessionId === session.agentSessionId))).map(session => sessionRow(session))}</ul></details>}
+      {catalog?.agentPresentation === undefined && metadata.sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(metadata.sessions.filter(session => !directory.rows.has(session.agentSessionId))).map(session => sessionRow(session))}</ul></details>}
     </> : context.regionId ? <>
       <button className="mobile-text-button" type="button" onClick={backToSpace}><SemanticIcon name="navigation.back" size={16} />返回空间内容</button>
       <h2 className="mobile-spatial-subheading">{selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '原文件' : selected?.region.kind === 'browser' ? '原网页' : '原内容'}</h2>
@@ -256,7 +351,7 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
       {spaceId && !space && <MobileNotice identity={[spaceId]} className="mobile-spatial-notice" role="status">原空间绑定尚未重新确认，原引用与工作面保留；可刷新原目录。</MobileNotice>}
       {catalog ? <MobileSpaceDirectory key={home} catalog={catalog} home={home === 'mote' ? 'mote' : 'space'} query={query} selectedSpaceId={spaceId}
         onSelect={owner => { setContext(owner ? { spaceId: owner.spaceId, tabId: null, regionId: null } : EMPTY_CONTEXT); setSelectedKey(null) }}
-        renderIdentity={owner => <MobileIdentity appearanceRevision={revision} objectSpaceId={owner.spaceId} appearance={catalog.appearance?.find(value => value.spaceId === owner.spaceId)} identity={spaceIdentity(owner)} client={client} connected={connected} visible={visible} size={28} />}
+        renderIdentity={owner => <MobileIdentity appearanceRevision={revision} objectSpaceId={owner.spaceId} appearance={directory.appearances.get(owner.spaceId)} identity={spaceIdentity(owner)} client={client} connected={connected} visible={visible} size={28} />}
         {...(home === 'mote' ? { renderPrimary: mainAction } : {})} renderContents={renderSpaceContents} /> : <p className="mobile-spatial-empty">{pending ? '正在读取 Mac 上的空间…' : '空间目录尚未核实，可在 Focus 中继续原会话。'}</p>}
     </>}
     {visited.map(target => <div key={target.key} hidden={home === 'focus' || target.key !== selectedKey || !context.regionId}>
