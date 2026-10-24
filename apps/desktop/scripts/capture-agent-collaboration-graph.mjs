@@ -28,6 +28,19 @@ if (verifying) {
   assert.deepEqual(receipt.changedInputs, []); assert.deepEqual(receipt.changedHarness, [])
   assert.deepEqual(receipt.actual.failures, []); assert.deepEqual(receipt.actual.rendererErrors, [])
   assert.ok(receipt.actual.checks?.length && receipt.actual.checks.every(check => check.passed === true))
+  const cameraWaits = receipt.actual.cameraWaits
+  assert.ok(cameraWaits?.length && cameraWaits.some(wait => wait.kind === 'locate'), 'Original camera completion must be observed for actual locates')
+  for (const wait of cameraWaits) {
+    assert.ok(['locate', 'frame'].includes(wait.kind) && typeof wait.label === 'string' && wait.label)
+    assert.ok(wait.samples?.length && Object.hasOwn(wait, 'before') && wait.final)
+    assert.deepEqual(wait.samples[0], wait.before); assert.deepEqual(wait.samples.at(-1), wait.final)
+    assert.equal(wait.final.ready, true); assert.equal(wait.final.initialized, true); assert.equal(wait.final.applied, true); assert.equal(wait.final.active, false)
+    assert.ok(typeof wait.final.camera === 'string' && wait.final.camera.includes('scale('))
+    if (wait.kind === 'locate') {
+      assert.equal(wait.final.advanced, true, 'An old completed camera intent cannot substitute for this original locate')
+      assert.equal(wait.final.agentId, JSON.stringify(['local', wait.id]))
+    }
+  }
   for (const name of ['initial-gui-entry-keeps-accurate-context-and-full-width', 'source-cli-original-app-admission-and-dom-inspect', 'focus-list-map-and-original-return', ...(scenario === 'perception-scale' ? ['perception-original-large-world-and-consumer-cost', 'terrain-original-nesting-fold-and-exact-reveal', 'terrain-native-continuous-lod-and-selection-cost', 'terrain-held-reader-keyboard-and-motion-choice'] : [])]) assert.ok(receipt.actual.checks.some(check => check.name === name && check.passed === true), 'Missing actual native check: ' + name)
   for (const key of ['inputs', 'harness']) {
     const entries = Object.entries(receipt[key] ?? {}); assert.ok(entries.length, 'Nonempty exact ' + key)
@@ -112,6 +125,13 @@ async function compileRenderer() {
         assert.equal(source.split(anchor).length, 2, 'Observe the one original delivered layout owner')
         const effective = source.replace(anchor, '  ;(globalThis as any).__collaborationCaptureLayout = { ...frame, busy: busy || transitioning, transitioning, issues }\n' + anchor)
         instrumented.push({ file: relative(root, id), originalSHA256: hash(source), effectiveSHA256: hash(effective), boundary: 'Reference-only O(1) observation of the actual presented hook frame and effective busy state, including its finite transition. No canonical Worker geometry is substituted for presentation; no state, input or camera replacement. Uncalibrated reference-publication cost; arrays copy only at explicit evidence boundaries or the declared finite related-neighborhood sampler.' })
+        return effective
+      }
+      if (id === join(desktop, 'src/renderer/src/components/AgentCollaborationGraph.tsx')) {
+        const anchor = '  const motion = useContext(MapMotionContext), preferences = useContext(CollaborationMapPreferences)'
+        assert.equal(source.split(anchor).length, 2, 'Observe the one original viewport camera owner')
+        const effective = source.replace(anchor, anchor + '\n  ;(globalThis as any).__collaborationCaptureCamera = { cameraAnimation, initialized, applied, locate, ready }')
+        instrumented.push({ file: relative(root, id), originalSHA256: hash(source), effectiveSHA256: hash(effective), boundary: 'Reference-only O(1) publication of the original viewport camera owner and its exact request/applied tokens. No completion state, camera, input or scheduling is replaced. Publication and explicit-boundary polling overhead are uncalibrated, not subtracted.' })
         return effective
       }
       const component = id.slice(id.lastIndexOf('/') + 1)

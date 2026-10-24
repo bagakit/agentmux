@@ -1,10 +1,14 @@
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path')
 const { app, BrowserWindow } = require('electron')
+function cameraComplete(observation, id) {
+  return observation?.ready === true && observation.initialized === true && observation.applied === true && observation.active === false &&
+    (id === undefined || observation.advanced === true && observation.agentId === JSON.stringify(['local', id]))
+}
 const [url, privateRoot, evidence, scenario = 'readability'] = process.argv.slice(2)
 for (const name of ['home', 'appData', 'userData', 'sessionData']) app.setPath(name, path.join(privateRoot, name))
 const result = { schema: 'agentmux.collaboration-map-actual.v1', scenario: 'focus-map-' + scenario, passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], checks: [], failures: [], rendererErrors: [], rendererMessages: [], performance: [],
   conditions: { nativeRenderer: true, electron: process.versions.electron, chromium: process.versions.chrome, node: process.versions.node, platform: process.platform, arch: process.arch, privateWindowShown: false, backgroundThrottling: false, focusEmulated: true, viewport: [1440, 900], physicalDisplayRefreshQualified: false,
-    instrumentation: 'Transparent real Worker traffic observer; counter in original context function; LongTask and rAF during finite windows; DOM census at explicit boundaries, plus the declared finite adaptive neighborhood sampler with its own measured overhead. Callback, counter, Worker-observer and census costs are recorded. Clock-call, constructor-listener and O(1) actual presented-frame reference-publication overhead is uncalibrated; these are instrumented results, not an uninstrumented product claim.' },
+    instrumentation: 'Transparent real Worker traffic observer; counter in original context function; LongTask and rAF during finite windows; DOM census at explicit boundaries, plus the declared finite adaptive neighborhood sampler with its own measured overhead. Callback, counter, Worker-observer and census costs are recorded. Clock-call, constructor-listener, O(1) actual presented-frame/camera reference publication and explicit-boundary camera polling overhead are uncalibrated; these are instrumented results, not an uninstrumented product claim.' },
   boundary: 'Original current source App/Space/Focus/Map/Worker/cards/sole Reader/Store. Only typed platform facts and unrelated PTY/Monaco paint are controlled. No Provider, real message, user Run, installed package, durability or aesthetic qualification.' }
 let win, controlHost, controlExit, pendingCli, phase = 'initialize'
 const checkpoint = async () => { result.phase = phase; const next = path.join(evidence, 'actual.next.json'); await fs.writeFile(next, JSON.stringify(result, null, 2) + '\n'); await fs.rename(next, path.join(evidence, 'actual.json')) }
@@ -26,6 +30,17 @@ app.whenReady().then(async () => {
     const pause = ms => new Promise(done => setTimeout(done, ms))
     const until = async (label, predicate) => { const end = Date.now() + 12000; do { if (await predicate()) return; await pause(40) } while (Date.now() < end); throw Error('Scene did not settle: ' + label) }
     const settle = () => read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
+    const cameraObservation = () => read(`(()=>{const owner=globalThis.__collaborationCaptureCamera;if(!owner)return null;const token=owner.locate?.token,viewport=document.querySelector('.collaboration-map .react-flow__viewport');return{ready:owner.ready,initialized:owner.initialized.current,applied:token?owner.applied.current===token:owner.initialized.current,active:Boolean(owner.cameraAnimation.current),advanced:Boolean(token)&&token!==globalThis.__collaborationCapturePreviousLocate,agentId:owner.locate?.agentId??null,camera:viewport?.getAttribute('style')??null}})()`)
+    const waitCamera = async (kind, label, id) => {
+      const before = await cameraObservation(), record = { kind, label, ...(id === undefined ? {} : { id }), before, samples: [before], final: before }
+      ;(result.cameraWaits ??= []).push(record)
+      await until('original camera owner completes ' + kind + ': ' + label, async () => {
+        const current = await cameraObservation()
+        if (JSON.stringify(current) !== JSON.stringify(record.samples.at(-1))) record.samples.push(current)
+        record.final = current
+        return cameraComplete(current, id)
+      })
+    }
     const rect = async selector => {
       const point = await read(`(()=>{const candidates=[...document.querySelectorAll(${JSON.stringify(selector)})],visible=candidates.filter(e=>{const r=e.getBoundingClientRect(),style=getComputedStyle(e);return r.width>0&&r.height>0&&!e.closest('[hidden],[inert]')&&style.visibility==='visible'&&r.right>0&&r.bottom>0&&r.left<innerWidth&&r.top<innerHeight}),e=visible[0];if(!e)return{missing:true,matches:candidates.length,visible:visible.length};const r=e.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return{x:r.x+r.width/2,y:r.y+r.height/2,width:r.width,height:r.height,hit:e.contains(hit),matches:candidates.length,visible:visible.length,hitTag:hit?.tagName,hitClass:hit?.getAttribute('class')}})()`)
       ;(result.pointerTargets ??= []).push({ selector, ...point }); assert.equal(point.missing, undefined, 'Missing actual visible control ' + selector); return point
@@ -35,6 +50,7 @@ app.whenReady().then(async () => {
     const key = async (value, modifiers = 0) => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: value, code: value === 'a' ? 'KeyA' : value, modifiers, ...(value === 'Enter' ? { windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r', unmodifiedText: '\r' } : {}) } : {}), ...(type === 'keyDown' && value === 'a' && modifiers === 4 ? { commands: ['selectAll'] } : type === 'keyDown' && value === 'Backspace' ? { commands: ['deleteBackward'] } : {}) }) }
     const frame = async (name, { motion = false } = {}) => {
       await settle()
+      if (!motion && !name.endsWith('-live') && !name.startsWith('failure-') && await read(`(()=>{const canvas=document.querySelector('.collaboration-map .collaboration-canvas');return Boolean(canvas&&!canvas.closest('[hidden],[inert]')&&canvas.getClientRects().length)})()`)) await waitCamera('frame', name)
       if (!motion && !name.endsWith('-live')) await until('finite entrance settled', () => read(`![...document.getAnimations()].some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().iterations)&&a.effect?.target?.closest?.('.collaboration-map,.agent-information-reader,.collaboration-filter-menu'))`))
       const file = name + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file, label: name, viewport: win.getContentSize() }); await checkpoint()
     }
@@ -120,10 +136,14 @@ app.whenReady().then(async () => {
       ;(result.queryEdits ??= []).push({ before, requested: value, observed: await read(`document.querySelector(${JSON.stringify(selector)}).value`), focused, editingCommand: 'selectAll' })
     }
     const locate = async id => {
+      // Keep the exact old request reference only in the private observation scope.
+      // A still-pending new rAF must not look like an already-completed old camera.
+      await read('globalThis.__collaborationCapturePreviousLocate=globalThis.__collaborationCaptureCamera?.locate?.token; true')
       await fillSearch(id)
       await until('exact original search result', () => read(`document.querySelector('[aria-label="Matching Agents"] [role="option"]')?.textContent.includes(${JSON.stringify(id)})`))
       await key('Enter')
       await until('original combobox committed', () => read(`document.querySelector('[aria-label="Find Agent in map"]').value===''&&!document.querySelector('[aria-label="Matching Agents"]')`))
+      await waitCamera('locate', id, id)
       await until('located original card or mark', () => read(`Boolean(document.querySelector('.collaboration-map [data-session-id=${JSON.stringify(id)}]'))`))
       await until('located Agent is actually actionable after its finite camera transition', async () => (await rect(`.collaboration-map [data-session-id="${id}"]`)).hit)
     }
