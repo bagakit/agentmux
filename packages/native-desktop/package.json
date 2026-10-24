@@ -14,6 +14,7 @@
   "files": ["dist", "macos", "scripts/build-macos.mjs", "THIRD_PARTY_NOTICES.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node scripts/verify-client.mjs",
     "build:macos": "node scripts/build-macos.mjs"

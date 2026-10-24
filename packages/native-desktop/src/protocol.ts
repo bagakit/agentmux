@@ -12,6 +12,9 @@ export const NATIVE_MUTATIONS = new Set<NativeMethod>([
   'captureScreenshot', 'clipboardWrite', 'click', 'performSecondaryAction', 'setValue',
   'typeText', 'pressKey', 'hotkey', 'pasteText', 'scroll', 'drag'
 ])
+export function isNativeMutation(method: NativeMethod, params: JsonObject): boolean {
+  return NATIVE_MUTATIONS.has(method) || (method === 'getAppState' && params.noScreenshot === false)
+}
 export interface NativeErrorData { code: string; message: string }
 export interface NativeResponse {
   id: number
@@ -39,7 +42,7 @@ export type CaptureParams =
   | { mode: 'rect'; rect: { x: number; y: number; width: number; height: number }; displayId?: number }
 export interface CaptureResult {
   state: 'captured' | 'cancelled' | 'failed'
-  screenshot?: { data: string; width: number; height: number; scale: number }
+  screenshot?: { format: 'png'; data: string; width: number; height: number; scale: number }
   engine?: string
   selectionRect?: { x: number; y: number; width: number; height: number }
   error?: NativeErrorData
