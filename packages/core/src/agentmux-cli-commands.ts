@@ -40,6 +40,7 @@ import { parseConversationConsumerQuery } from './conversation-consumer-query.js
 import { parseAgentInputSubmit } from './agent-input-submit.js'
 
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
+import { AGENTMUX_NATIVE_DESKTOP_CLI_COMMANDS } from './native-desktop-cli.js'
 import { AGENTMUX_CAPSULE_CLI_COMMANDS } from './capsule-cli.js'
 import { parseFileHistoryParams, parseFileRestoreParams, parseFileUndoParams, parseFileListParams, parseFileUploadIdentity, parseFileUploadParams } from './public-rpc-files.js'
 import { parseToolkitCommand } from './toolkit-cli.js'
@@ -199,6 +200,7 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   ...AGENTMUX_CAPSULE_CLI_COMMANDS,
   ...Object.values(AGENTMUX_SCHEDULE_CLI_COMMANDS),
+  ...AGENTMUX_NATIVE_DESKTOP_CLI_COMMANDS,
   command('runtime.network.inspect', '--runtime ID --owner ID', 'Read the exact semantic Runtime owner process network interfaces without connecting Native or recovering Sessions. Interface addresses are not connected peers or public egress.',
     { '--runtime': 'data', '--owner': 'data' }, f => ({ fence: { runtimeId: id(f, '--runtime', true), ownerInstanceId: id(f, '--owner', true) } })),
   command('notebook.scan', '--workspace ID --path DIR [--max-files N] [--max-directories N] [--max-bytes N] [--query TEXT [--limit N]]', 'Rebuild a read-only outline/reference/fulltext projection from exact original Markdown files, without an App index. Never writes source, catalog, authors or history; partial scope is explicit.',
