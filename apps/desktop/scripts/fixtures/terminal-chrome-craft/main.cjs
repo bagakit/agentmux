@@ -166,10 +166,13 @@ async function connectorScene(width) {
   Object.assign(scenario,{hovered,opened,closed,passed:true})
 }
 async function neutralFacts() {
-  return { ...await connectorFacts(), ...await evaluate(`(()=>{const s=${surface},group=s.querySelector('.agent-region-header__channels'),menu=document.querySelector('.connector-header-menu');return{channelGroup:{gap:getComputedStyle(group).gap,width:group.getBoundingClientRect().width},popover:menu?{text:menu.innerText,padding:getComputedStyle(menu).padding,actions:[...menu.querySelectorAll('[role="menuitem"]')].map(node=>node.textContent.trim())}:null}})()`) }
+  return { ...await connectorFacts(), ...await evaluate(`(()=>{const s=${surface},group=s.querySelector('.agent-region-header__channels'),menu=document.querySelector('.connector-header-menu');return{theme:{sprite:!!document.querySelector('[data-semantic-icon-sprite]'),forward:!!document.getElementById('agentmux-icon-navigation.forward'),disclosureMask:getComputedStyle(document.documentElement).getPropertyValue('--native-disclosure-mask').trim()},channelGroup:{gap:getComputedStyle(group).gap,width:group.getBoundingClientRect().width},popover:menu?{text:menu.innerText,padding:getComputedStyle(menu).padding,actions:[...menu.querySelectorAll('[role="menuitem"]')].map(node=>node.textContent.trim())}:null}})()`) }
 }
 function neutralPresentation(facts) {
   connectorGeometry(facts)
+  assert.equal(facts.theme.sprite,true,'The original theme installs its semantic sprite')
+  assert.equal(facts.theme.forward,true,'The original group navigation glyph has its actual theme shape')
+  assert.match(facts.theme.disclosureMask,/^url\(/,'The original details disclosure uses its actual theme mask')
   assert.equal(facts.connectors.length,2,'Both real compiled platform contributions remain reachable')
   for(const entry of facts.connectors){assert.equal(entry.imageLoaded,true,'The original platform artwork is loaded');assert.equal(entry.glyphFilter,'grayscale(1)','Platform glyph stays grayscale through original observation and interaction states')}
   assert.equal(facts.channelGroup.gap,'0px','Adjacent channel entries have no redundant group gap')

@@ -10,8 +10,10 @@ import { settingsCatalog } from '../../../src/renderer/src/components/settings/s
 import { invalidateConnectorTarget } from '../../../src/renderer/src/lib/connector-room-intent'
 import { groupTarget, type ConnectionDiagnosis, type RoomBinding } from '@agentmux/core/connections'
 import { readConnectorService } from '../../../src/renderer/src/lib/connector-service-observation'
+import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 
 const connectorGeometry = new URLSearchParams(location.search).has('connector-geometry')
+if (connectorGeometry) mountThemeRuntime(window, useAppStore.getState().config!.appearance)
 const connectorReads: string[] = []
 let hostingUnavailable = false
 let connectorMode: 'unbound' | 'linked' | 'paused' | 'off' = 'unbound'
