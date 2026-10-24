@@ -17,6 +17,17 @@ const variants: Record<string, { file: string; edits: Array<{ before: string; af
     before: 'bytes.current.get(id) !== decision.file || decision.file.revision !== decision.revision', after: 'decision.file.revision !== decision.revision' }] },
   'export-is-not-receipt': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [{
     before: "setCopyDecision(decideCopy(upload, file, 'saved'))", after: "releaseCopy(decideCopy(upload, file, 'saved'))" }] },
+  'export-lost-on-add': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [{
+    before: "await retain({ ...upload, phase: 'inserted' })\n    if (!exportedCopies.current.has(upload.identity.operationId)) bytes.current.delete(upload.identity.operationId)",
+    after: "await retain({ ...upload, phase: 'inserted' })\n    bytes.current.delete(upload.identity.operationId)" }] },
+  'export-lost-on-inspect-insert': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [{
+    before: "await retain({ ...(confirmed as MobileFileUpload), phase: 'inserted' }); if (!exportedCopies.current.has(id)) bytes.current.delete(id); owner.changed()",
+    after: "await retain({ ...(confirmed as MobileFileUpload), phase: 'inserted' }); bytes.current.delete(id); owner.changed()" }] },
+  'export-lost-on-send': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [{
+    before: "await retain({ ...upload, phase: 'inserted' }, true)\n          if (!exportedCopies.current.has(upload.identity.operationId)) bytes.current.delete(upload.identity.operationId)",
+    after: "await retain({ ...upload, phase: 'inserted' }, true)\n          bytes.current.delete(upload.identity.operationId)" }] },
+  'export-lost-on-confirmation': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [{
+    before: 'if (exportedCopies.current.has(upload.identity.operationId) && bytes.current.has(upload.identity.operationId)) return', after: 'void upload' }] },
   'inspect-is-not-upload': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [{
     before: "flight.dispatched = inspectOnly ? 'inspect' : 'upload'", after: "flight.dispatched = 'upload'" }] },
   'sync-failure-unknown': { file: 'apps/mobile/src/conversation/MobileAttachments.tsx', edits: [
