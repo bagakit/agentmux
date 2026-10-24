@@ -96,7 +96,7 @@ import { sessionObservationResult } from '../shared/session-observation-result.j
 import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result.js'
 import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
-import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
+import type { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { inspectDesktopClient, registerLoadedIdentityIpc } from './client-observation.js'
 import { inspectNotifications, clientNotificationsPort } from './notification-observation.js'
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
@@ -1820,7 +1820,7 @@ export async function registerIpc(args: {
     requireTrustedSender('continuousProgress:goals', event)
     return args.progressLoops.listGoals(goalId)
   })
-  handleWithEvent('continuousProgress:prepareGoal', async (event, input: import('./continuous-progress-loop-manager.js').GoalProgressStart, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
+  handleWithEvent('continuousProgress:prepareGoal', async (event, input: import('@agentmux/host/continuous-progress-loop-manager').GoalProgressStart, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
     requireTrustedSender('continuousProgress:prepareGoal', event)
     if (caller && !caller.capability) throw new Error('Original managed caller capability is unavailable.')
     return args.progressLoops.prepareGoal(input, caller?.capability ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : undefined)

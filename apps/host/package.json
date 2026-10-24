@@ -260,6 +260,10 @@
     "./goal-runtime": {
       "types": "./dist/goal-runtime.d.ts",
       "import": "./dist/goal-runtime.js"
+    },
+    "./continuous-progress-loop-manager": {
+      "types": "./dist/continuous-progress-loop-manager.d.ts",
+      "import": "./dist/continuous-progress-loop-manager.js"
     }
   }
 }
