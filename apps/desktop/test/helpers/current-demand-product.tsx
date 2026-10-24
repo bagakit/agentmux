@@ -14,7 +14,7 @@ import { act, Profiler } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './client-ui-render'
 import { afterEach, beforeEach, beforeAll, afterAll, expect, it, vi } from 'vitest'
-import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, AgentMuxClient, AgentMuxMemoryAgentSessionStore, normalizeAgentSession, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, AgentMuxClient, AgentMuxMemoryAgentSessionStore, AgentMuxSpatialStateStore, normalizeAgentSession, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../../src/shared/contracts'
@@ -148,6 +148,7 @@ beforeEach(async () => {
   await mkdir(join(directory, 'home'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'r'))
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'r', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
+  vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(directory, 'r', 'state', 'spatial-state.json'))
   writes = []; requests = []; observations = []; cursor = 0; now = _reshape_fixtureEpoch(0, 0, 0); ended = false
   const store = new AgentMuxMemoryAgentSessionStore(), timestamp = Date.now()
   activityCapability = issueAgentCapability()
@@ -178,11 +179,11 @@ beforeEach(async () => {
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: [] }, workspaces: [{ id: '__scratch__', name: 'Owned topics', hostId: 'local', path: scratchRoot, kind: 'folder' }] }
-  hostGoals = createHostGoals({ configurationPath: join(directory, 'original-config.json'), projects: async () => [],
-    runtime: () => ({ client, ownerIdentity: () => ({ ownerInstanceId: 'original-goal-owner' }) }) as never,
+  hostGoals = createHostGoals({ configurationPath: join(directory, 'original-config.json'), projects: async () => [], spatial: new AgentMuxSpatialStateStore(),
+    runtime: () => ({ client: runtime.rpcClients().find(value => value.hostId === 'local')!.client, ownerIdentity: () => ({ ownerInstanceId: 'original-goal-owner' }) }) as never,
     coreCall: (hostId, method, params, context) => { expect(hostId).toBe('local'); return hostService.call(method, params, context) } })
   demands = hostGoals.demands; manager = hostGoals.schedules
-  hostService = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client }], goalControl: hostGoals.execute, goalChanges: hostGoals.goalChanges,
+  hostService = new AgentMuxRpcService({ spatialState: new AgentMuxSpatialStateStore(), coreClients: () => runtime.rpcClients(), goalControl: hostGoals.execute, goalChanges: hostGoals.goalChanges,
     goalDelegations: hostGoals.goalDelegations, goalParticipation: hostGoals.participation, progress: hostGoals.progress, schedules: hostGoals.schedules, automaticInput: hostGoals.automaticInput })
   const originalCore = runtime.callOriginalCore.bind(runtime)
   vi.spyOn(runtime, 'callOriginalCore').mockImplementation((hostId, method, params, context) => {
@@ -239,4 +240,4 @@ afterEach(async () => {
 
 const request = (operationId = 'original-start') => ({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: operationId, operation: 'demand.start' as const, demandId: 'goal', sessionId: session.agentSessionId, continuation: { intervalMs: 60_000, alignmentRevision: 1 } })
 
-export { bridge, hostGoals, demands, directory, client, runtime, manager, root, container, config, session, writes, requests, snapshot, sourceCli, request }
+export { bridge, hostGoals, hostService, demands, directory, client, runtime, manager, root, container, config, session, writes, requests, snapshot, sourceCli, request }
