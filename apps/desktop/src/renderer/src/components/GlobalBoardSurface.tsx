@@ -20,7 +20,7 @@ import { GoalsCommonActions } from './GoalsCommonActions'
 import { GlobalGoalPatrolControl } from './GlobalGoalPatrolControl'
 import { SelectionField } from './SelectionField'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
-import { resolveGoalsPreferences } from '../../../shared/goals-preferences'
+import { resolveGoalsPreferences } from '@agentmux/host/goals-preferences'
 
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')

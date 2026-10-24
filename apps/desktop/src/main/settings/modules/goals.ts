@@ -1,4 +1,4 @@
-import { DEFAULT_GOALS_COMMON_ACTIONS, GOALS_VIEW_IDS, resolveGoalsCommonActions, resolveGoalsPreferences } from '../../../shared/goals-preferences.js'
+import { DEFAULT_GOALS_COMMON_ACTIONS, GOALS_VIEW_IDS, resolveGoalsCommonActions, resolveGoalsPreferences } from '@agentmux/host/goals-preferences'
 import { booleanSetting, enumSetting, type ScalarSetting } from '../scalar-setting.js'
 
 export const goalsSettings = [

@@ -8,7 +8,7 @@ import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES 
 import { resolveUserProfile, type UserProfile } from './user-profile'
 import { resolveFocusRecentActivityHours, resolveFocusLinkDestination, resolveFocusReplyLines, resolveFocusPreviewTrigger, resolveFocusRecentInputs, resolveFocusMapMotion } from './focus-preferences'
 import { resolveFocusMapPreferences, DEFAULT_FOCUS_MAP_PREFERENCES, type FocusMapPreferences } from './focus-map-preferences'
-import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from './goals-preferences'
+import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
 import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
 import { resolveBrowserStartPage, type BrowserStartPageConfig } from './browser-start-page'
 import { resolveBrowserAgentControl, type BrowserAgentControlPreferences } from './browser-agent-control'

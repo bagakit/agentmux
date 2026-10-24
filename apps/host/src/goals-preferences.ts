@@ -1,4 +1,5 @@
-import type { GoalsCommonActionsConfig } from './contracts'
+export type GoalsCommonActionRef = { kind: 'builtin'; id: 'understand' | 'ideas' | 'next' } | { kind: 'prompt'; id: string }
+export type GoalsCommonActionsConfig = { items: GoalsCommonActionRef[]; collapsed: boolean }
 
 export const GOALS_VIEW_IDS = ['list', 'board'] as const
 export type GoalsView = typeof GOALS_VIEW_IDS[number]
