@@ -19,6 +19,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { applyConfigEdit } from '../src/shared/config-edit'
 import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
+import collaborationCSS from '../src/renderer/src/styles/collaboration.css?inline'
 const captured = vi.hoisted(() => ({ nodes: [] as Node[], store: null as ReturnType<typeof useStoreApi> | null, cardRenders: [] as string[], moveStart: undefined as ReactFlowProps['onMoveStart'] }))
 vi.mock('../src/renderer/src/components/FocusContextCardBody', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/renderer/src/components/FocusContextCardBody')>()
@@ -353,6 +354,35 @@ it('keeps one legible identity ink through paused intermediate zoom without ghos
   }
   expect(captured.nodes).toBe(originalNodes)
   expect(requests).toHaveLength(operations)
+})
+
+it('keeps one continuous body ring when the original avatar button crosses the overview identity boundary', async () => {
+  const stylesheet = document.createElement('style'); stylesheet.textContent = collaborationCSS; document.head.append(stylesheet)
+  try {
+    const scene = scenario(1); scene.relations = []
+    await loaded(scene)
+    const id = collaborationAgentNode('area-0', subject('canvas-0')), box = renderedBox(id), operations = requests.length
+    let body: HTMLElement | null = null, button: HTMLButtonElement | null = null
+    const progress: number[] = []
+    for (const zoom of [.319, .321, .4, .5, .58]) {
+      await viewport(-box.x * zoom + 90, -box.y * zoom + 100, 600, 400, zoom)
+      const agent = nodeElement(id)!.querySelector<HTMLElement>('.collaboration-agent')!
+      const currentBody = agent.querySelector<HTMLElement>('.collaboration-agent__body')!
+      const currentButton = agent.querySelector<HTMLButtonElement>('.collaboration-agent__dot, .collaboration-agent__mark')!
+      if (body) { expect(currentBody).toBe(body); expect(currentButton).toBe(button) }
+      body = currentBody; button = currentButton
+      expect(button.classList.contains('collaboration-agent__dot')).toBe(zoom === .319)
+      // The real class handoff cannot acquire/remove its own second ring.
+      expect(['', 'none']).toContain(getComputedStyle(button).boxShadow)
+      expect(getComputedStyle(button).borderTopWidth).toBe('0px')
+      expect(getComputedStyle(body).boxShadow).toContain('inset')
+      expect(getComputedStyle(agent).getPropertyValue('--collaboration-body-line')).toContain('var(--collaboration-identity, 1)')
+      progress.push(Number(agent.style.getPropertyValue('--collaboration-identity')))
+    }
+    expect(progress[0]).toBe(0); expect(progress[1]).toBeGreaterThan(0); expect(progress[1]).toBeLessThan(.001)
+    expect(progress.at(-1)).toBe(1)
+    expect(requests).toHaveLength(operations)
+  } finally { stylesheet.remove() }
 })
 
 it('passes the effective Motion preference to explicit camera intent and cancels only an active transition', async () => {
@@ -865,6 +895,71 @@ it('opens a real working region at readable scale instead of fitting many empty 
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)) })
   expect(captured.store!.getState().transform).toEqual([-333, -444, 1])
   expect(requests).toHaveLength(operations)
+})
+
+it('reads an exact deep occurrence when its original large parent heading is clicked', async () => {
+  const scene = scenario(24), activeId = subject('canvas-23')
+  scene.relations = []
+  scene.agents = new Map([...scene.agents].map(([id, agent]) => [id, { ...agent, tier: id === activeId ? 'active' as const : 'idle' as const }]))
+  scene.areas = [{ id: 'root', name: 'Original parent terrain', kind: 'project', members: [] },
+    { id: 'middle', name: 'Original middle terrain', kind: 'category', parentId: 'root', members: [] },
+    ...scene.areas.map(area => ({ ...area, parentId: 'middle' }))]
+  const config = useAppStore.getState().config!
+  useAppStore.setState({ config: { ...config, focus: { ...config.focus, mapMotion: 'off' } } })
+  await loaded(scene)
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true, locate: { token: {}, agentId: activeId } }))
+  const targetId = collaborationAgentNode('area-3', activeId), target = renderedBox(targetId)
+  await settleCollaborationCanvas(() => expect(captured.store!.getState().transform[2]).toBe(1))
+  const parent = renderedBox(JSON.stringify(['area', 'root']))
+  expect(Math.min((600 - 96) / parent.width, (400 - 112) / parent.height)).toBeLessThan(.7)
+  await viewport(-parent.x * .25 + 20, -parent.y * .25 + 20, 600, 400, .25)
+  const nodes = captured.nodes, geometry = captured.nodes.map(node => node.data.box), operations = requests.length
+  const heading = dom.container.querySelector<HTMLButtonElement>('[aria-label="Locate Original parent terrain · 24 Agents including subspaces"]')!
+  expect(heading).not.toBeNull()
+  await act(async () => heading.click())
+  await settleCollaborationCanvas(() => {
+    const [x, y, zoom] = captured.store!.getState().transform
+    expect(zoom).toBe(.85)
+    expect((target.x + target.width / 2) * zoom + x).toBeCloseTo(300, 5)
+    expect((target.y + target.height / 2) * zoom + y).toBeCloseTo(200, 5)
+  })
+  expect(nodeElement(targetId)?.querySelector('.focus-context')).not.toBeNull()
+  expect(captured.nodes).toBe(nodes); expect(captured.nodes.map(node => node.data.box)).toEqual(geometry)
+  expect(requests).toHaveLength(operations); expect(open).not.toHaveBeenCalled()
+})
+
+it('reads a real folded descendant summary through its large parent heading without expanding the subtree', async () => {
+  const scene = scenario(8); scene.relations = []
+  const children = scene.areas
+  scene.areas = [{ id: 'root', name: 'Original folded parent', kind: 'project', members: [] },
+    { id: 'middle', name: 'Original middle', kind: 'category', parentId: 'root', members: [] },
+    ...children.map(area => ({ ...area, parentId: 'middle' }))]
+  const config = useAppStore.getState().config!
+  useAppStore.setState({ config: { ...config, focus: { ...config.focus, mapMotion: 'off' } } })
+  await loaded(scene)
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true, locate: { token: {}, agentId: subject('canvas-0') } }))
+  await settleCollaborationCanvas(() => expect(captured.store!.getState().transform[2]).toBe(1))
+  for (const area of children) {
+    const id = JSON.stringify(['area', area.id]), box = renderedBox(id) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+    await viewport(80 - (box.x + box.heading.x) * .85, 100 - (box.y + box.heading.y) * .85, 600, 400, .85)
+    await dom.click(`[aria-label="Collapse ${area.name}"]`)
+    await settleCollaborationCanvas(() => expect(renderedBox(id).folded).toBe(true))
+  }
+  expect(captured.nodes.some(node => node.type === 'agent')).toBe(false)
+  const parent = renderedBox(JSON.stringify(['area', 'root']))
+  expect(Math.min((600 - 96) / parent.width, (400 - 112) / parent.height)).toBeLessThan(.7)
+  const folded = children.map(area => renderedBox(JSON.stringify(['area', area.id])))
+  await viewport(-parent.x * .25 + 20, -parent.y * .25 + 20, 600, 400, .25)
+  const nodes = captured.nodes, operations = requests.length
+  await dom.click('[aria-label="Locate Original folded parent · 8 Agents including subspaces"]')
+  await settleCollaborationCanvas(() => {
+    const [x, y, zoom] = captured.store!.getState().transform
+    expect(zoom).toBe(.85)
+    expect(folded.some(box => Math.abs((box.x + box.width / 2) * zoom + x - 300) < 1e-5 && Math.abs((box.y + box.height / 2) * zoom + y - 200) < 1e-5)).toBe(true)
+  })
+  expect(captured.nodes).toBe(nodes); expect(requests).toHaveLength(operations)
+  expect(captured.nodes.some(node => node.type === 'agent')).toBe(false)
+  for (const box of folded) expect(renderedBox(box.id)).toBe(box)
 })
 
 it('overview keeps exact Agent endpoints without relayout and enters a named region through its control', async () => {
