@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
+import { markdownImageReferences } from '../src/session-history-content.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
@@ -256,6 +257,9 @@ describe('original Markdown image nodes through the resource boundary', () => {
   it('reads direct and reference images, rejects code and changed text without reading another caller path', async () => {
     const h = await fixture()
     const text = `![one](${h.image})\n![two][diagram]\n\n[diagram]: ${h.data}\n\n` + '`![code](' + h.image + ')`' + '\n```md\n![code](' + h.image + ')\n```\n\\![escaped](' + h.image + ')'
+    expect(markdownImageReferences(text)[1]!.definition).toBeDefined()
+    // A definition shared with an ordinary link must remain available to that link.
+    expect(markdownImageReferences(text + '\n[Open original diagram][diagram]')[1]!.definition).toBeUndefined()
     h.entries.push({ turnId: 'markdown-turn', item: { type: 'agentMessage', id: 'markdown-record', text } }); await h.save()
     const request = { ...h.request, recordId: 'markdown-record', turnId: 'markdown-turn', representation: 'image' as const,
       markdownImage: { index: 0, textSha256: createHash('sha256').update(text).digest('hex') } }
