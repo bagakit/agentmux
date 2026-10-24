@@ -61,7 +61,7 @@ const goal: AgentMuxRpcGoal = { id: 'goal-original', title: '把两个想法变�
   alignment: { revision: 1, summary: '给出小步可验证的建议，保留两种方案的依据。', criteria: [{ id: 'criterion-original', text: '形成可开始的实验步骤' }], openQuestions: [], confirmedAt: 1 },
   grounding: { alignmentRevision: 1, submissionId: 'result-original', summary: '建议先做范围更清晰的方案 A；以下是依据和第一步。', acceptedAt: null,
     checks: [{ criterionId: 'criterion-original', outcome: 'met', note: '已整理步骤、比较依据与需要你决定的地方。', evidence: ['原资料/实验建议.md'] }] } }
-let connected = location.hash !== '#fixture-offline', unknownNext = false, appearanceRevision = 0
+let connected = location.hash !== '#fixture-offline', unknownNext = false, promptReadFails = false, appearanceRevision = 0
 let appearanceSubscriber: { onEvent(event: { type: 'snapshot'; data: unknown }): void } | null = null
 const appearanceSnapshot = (appAppearance: 'dark' | 'light') => ({
   sourceId: 'fixture-host', revision: ++appearanceRevision, issues: [],
@@ -79,6 +79,11 @@ const client = {
     items: [{ id: `${id}-user-original`, kind: 'user-message', contentParts: [{ kind: 'text', text: '这两个想法，先从哪一个做成小实验比较好？请保留原来的依据。' }] },
       { id: `${id}-answer-original`, kind: 'assistant-message', contentParts: [{ kind: 'text', text: id === result.agentSessionId ? '我建议先试方案 A。它的范围更清晰，一天就能取得第一批反馈。\n\n1. 保留现有资料和两种方案。\n2. 选三个最关键的问题。\n3. 先观察真实反馈，再决定是否继续。\n\n方案 B 仍有价值，原依据已经保留。' : '可以。我们先确认你想解决的问题，再比较这两种想法。\n\n我会保留原材料、已经确认的进展和还需要你决定的地方；不会把未知回执当作完成。' }] },
       ...(submittedBySession.get(id) ?? []).map(item => ({ id: item.id, kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: item.text }] }))] } },
+  readAgentInputMailbox: async (input: { agentSessionId: string; maxBytes?: number }) => ({
+    agentSessionId: input.agentSessionId, queueId: 'controlled-original-journal',
+    cut: { incarnation: 'controlled-original-journal', throughSequence: 0 }, budgetBytes: input.maxBytes ?? 128 * 1024,
+    items: [], nextCursor: null, coverage: { kind: 'recorded-inputs', unrecorded: 'unconfirmed' }
+  }),
   readAgentSessionHistory: async (input: AgentSessionHistoryReadInput) => {
     record('sdk.readAgentSessionHistory', input)
     if (input.hostId !== 'local' || !sessions.some(session => session.agentSessionId === input.agentSessionId)) throw Error('Wrong exact original history target')
@@ -165,6 +170,12 @@ const client = {
       return { hostId: 'local', sourceHostId: original.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId,
         workspacePath: original.workspacePath, skills: [{ name: 'review-evidence', description: '核对原始资料与实验依据', path: fixturePath('skills/review-evidence/SKILL.md'), source: 'project' }] }
     }
+    if (method === 'settings.prompts.ls' && promptReadFails) throw Error('原自定义 Commands 读取失败；原命令与草稿保留。')
+    if (method === 'settings.prompts.ls') return { operation: 'settings.resource.list', resource: 'prompts', partial: true, items: [
+      { id: 'original-review', value: { keyword: 'compact', label: '核对依据', body: '逐项核对原始依据，保留未知与引用。' } },
+      { id: 'original-codex', value: { keyword: 'review', label: '检查当前修改', body: '检查原修改并给出证据。', providerId: 'codex' } },
+      { id: 'another-provider', value: { keyword: 'private', label: '另一 Provider 专用', body: '不展示给原 Agent', providerId: 'claude' } }
+    ] }
     if (method === 'settings.executors.ls') return { items: [{ id: 'fixture-original', value: { name: 'Codex' } }], partial: true }
     if (method === 'space.inspect' && (params.target as { spaceId?: string }).spaceId === 'space-original') return { catalog: { ...catalog, appearance: [...catalog.appearance!, { spaceId: 'space-original', preset: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.kind, image: { dataUrl: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.icon } }] } }
     if (method === 'space.ls' || method === 'space.inspect') return { catalog }
@@ -198,6 +209,7 @@ const platform = createBrowserPlatform()
 function Scene() {
   const [, refresh] = useState(0)
   Object.assign(window, { mobileProductScene: {
+    setPromptReadFailure: (fail: boolean) => { promptReadFails = fail },
     unknownNext: () => { unknownNext = true },
     setAppearance: (mode: 'dark' | 'light') => { appearanceSubscriber?.onEvent({ type: 'snapshot', data: appearanceSnapshot(mode) }) },
     offline: () => { connected = false; refresh(value => value + 1) },
