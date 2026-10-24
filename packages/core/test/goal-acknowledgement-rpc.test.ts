@@ -20,7 +20,7 @@ function original(request: AgentMuxControlRequest): AgentMuxControlResult {
     const demand = { ...pending, id: request.demandId ?? 'owner-generated', title: request.title, description: request.description ?? '', status: 'backlog' as const }
     return { operation: request.operation, demand, receipt: { demandId: demand.id, createdAt: demand.createdAt } }
   }
-  if (request.operation === 'demand.discuss') return { operation: request.operation, demand: goal, receipt: { demandId: goal.id, requestId: request.requestId, mode: request.mode, tabId: 'original-tab', agentSessionId: null } }
+  if (request.operation === 'demand.discuss') return { operation: request.operation, demand: goal, receipt: { demandId: goal.id, requestId: request.requestId, mode: request.mode, tabId: 'original-tab', regionId: 'original-region', hostId: null, agentSessionId: null } }
   if (request.operation === 'demand.confirm') return { operation: request.operation, demand: goal, receipt: { demandId: goal.id, confirmedRevision: 3, confirmedAt: 5 } }
   if (request.operation === 'demand.accept') return { operation: request.operation, demand: goal, receipt: { demandId: goal.id, alignmentRevision: 3, submissionId: 'exact-report', acceptedAt: 7, acceptedWithGaps: false } }
   throw new Error('Unexpected original request ' + request.operation)
@@ -64,7 +64,7 @@ it('actual Unix CLI discovers and calls the three typed methods with exact busin
   for (const args of cases) { const response = await runCompiledObjectCli(args, env); expect(response.code, response.stderr).toBe(0); results.push(JSON.parse(response.stdout)) }
   expect(execute.mock.calls.map(([request]) => request.operation)).toEqual(['demand.discuss', 'demand.confirm', 'demand.accept'])
   expect(execute.mock.calls.map(([request]) => request.requestId)).toEqual(['open-op', 'confirm-op', 'accept-op'])
-  expect(results[0]).toMatchObject({ result: { receipt: { goalId: goal.id, operationId: 'open-op', mode: 'open', tabId: 'original-tab', agentSessionId: null } } })
+  expect(results[0]).toMatchObject({ result: { receipt: { goalId: goal.id, operationId: 'open-op', mode: 'open', tabId: 'original-tab', regionId: 'original-region', hostId: null, agentSessionId: null } } })
   expect(JSON.stringify(results)).not.toContain('requestId')
   expect(results[1]).toMatchObject({ result: { receipt: { confirmedRevision: 3, confirmedAt: 5 } } })
   expect(results[2]).toMatchObject({ result: { receipt: { submissionId: 'exact-report', acceptedAt: 7, acceptedWithGaps: false } } })
@@ -77,6 +77,8 @@ it('actual Unix CLI discovers and calls the three typed methods with exact busin
 it.each([
   ['goal.discuss', { goalId: goal.id, mode: 'grill', operationId: 'original-op' }, (r: any) => { r.receipt.operationId = 'another-op' }],
   ['goal.discuss', { goalId: goal.id, mode: 'grill' }, (r: any) => { r.receipt.mode = 'open' }],
+  ['goal.discuss', { goalId: goal.id, mode: 'open' }, (r: any) => { delete r.receipt.regionId }],
+  ['goal.discuss', { goalId: goal.id, mode: 'open' }, (r: any) => { r.receipt.hostId = 'unrelated-execution-host' }],
   ['goal.confirm', { goalId: goal.id, expectedRevision: 3 }, (r: any) => { r.receipt.confirmedRevision = 4 }],
   ['goal.confirm', { goalId: goal.id, expectedRevision: 3 }, (r: any) => { r.goal.id = 'another-goal' }],
   ['goal.accept', { goalId: goal.id, expectedAlignmentRevision: 3, expectedSubmissionId: 'exact-report', acceptGaps: false, finish: true }, (r: any) => { r.goal.status = 'in_progress' }],
