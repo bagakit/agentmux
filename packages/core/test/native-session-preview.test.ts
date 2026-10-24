@@ -1,4 +1,5 @@
 import { fixtureIso } from '../../../test/fixture-values.mjs'
+import { createHash } from 'node:crypto'
 import { appendFile, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -112,6 +113,27 @@ it('reads an exact recorded image and never grants a caller-supplied replacement
   await expect(f.client.readNativeAgentHistoryResource(request)).resolves.toMatchObject({ source: page.source, result: { status: 'read', mimeType: 'image/png' } })
   await expect(f.client.readNativeAgentHistoryResource({ ...request, expectedReference: image.replace('AAAAE', 'AAAAC') })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH' })
   for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+})
+
+it.each([false, true])('qualifies original Markdown image authors before native preview reads (deferred=%s)', async deferred => {
+  const f = await fixture('claude'), image = join(f.root, 'diagram.png')
+  const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII=', 'base64')
+  await writeFile(image, bytes)
+  const text = (deferred ? 'Original public text '.repeat(105_000) : 'Original public text') + `\n![Diagram](${image})`
+  const last = f.records.at(-1) as any; last.message.content[0].text = text
+  await writeFile(f.file, f.records.map(record => JSON.stringify(record)).join('\n') + '\n')
+  const page = await f.client.readNativeAgentHistory({ source: f.source, env: f.env, limit: 1 }), item = page.items[0]!, part = item.contentParts[0]!
+  expect(part.kind).toBe(deferred ? 'resource' : 'text')
+  const request = { nativeSource: f.source, source: page.source, recordId: item.id, partIndex: 0,
+    expectedReference: part.kind === 'resource' ? part.reference : image, env: f.env,
+    representation: 'image' as const, markdownImage: { index: 0, textSha256: createHash('sha256').update(text).digest('hex') } }
+  expect((await f.client.readNativeAgentHistoryResource(request)).result).toMatchObject({ status: 'read', dataBase64: bytes.toString('base64') })
+  const read = f.provider.readSessionHistoryRecord!.bind(f.provider)
+  const lookup = vi.spyOn(f.provider, 'readSessionHistoryRecord').mockImplementationOnce(async context => ({ ...await read(context), kind: 'user-message' }))
+  await expect(f.client.readNativeAgentHistoryResource(request)).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH' })
+  expect(lookup).toHaveBeenCalledOnce()
+  for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+  expect(await loadAgentSessions(f.store)).toEqual([])
 })
 
 it.each(['codex', 'claude'] as const)('reads complete %s native text extents and rejects a resource from another source', async providerId => {
