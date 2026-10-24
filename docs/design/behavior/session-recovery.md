@@ -111,7 +111,7 @@ Core `connect()` 的**整组恢复观察**则包括 lifecycle 收口、Session �
 | 接回现存 PTY／Run，读取输出或执行已获授权的 raw 控制 | 原 Runtime、Session／Run 绑定、授权及该控制所需的当前权威事实；ordered bytes、Attachment、Gap 与输入前驱仍由 ctxmux 持有。无需先完成无关目录、历史、Hook 观察或全体终端握手；物理通道可用不证明原生上下文已恢复。 |
 | 以原上下文续接同一 AgentSession | 原 Run 的恢复资格、准确 Provider 原生身份与上下文来源、Provider resume 能力、执行资源、授权／策略及必要持久事务。Provider 上下文未确认须如实保留，启动命令成功、握手或新 PID 均不代签 Level B。 |
 | 创建新的 Agent／Run 或 fork | 本次 Provider／Executor、目标 Host、创建权限、原 operation、必要持久 admission 及本次启动必需的 Hook 等条件；fork 另守准确来源与 witness。无关 Session 恢复不成为共同门禁，首次输入仍单独取得投递回执。 |
-| 读取或核对原创建回执 | 先读原持久 operation；已有回执不因来源后来变化而失去可读性。只有 prepared 操作需要准确 Runtime 核对时才连接它，不把查询变成 Start 或首句重投。 尚未取得 Run ID 时按原 creation operation key 精确观察；已有 Run ID 时只读该 Run，不枚举无关 Run 或逐个 Status。当前未保留映射只表示未知，不能代签原 Start 未应用。 |
+| 读取或核对原创建回执 | 先读原持久 operation；已有回执不因来源后来变化而失去可读性。只有 prepared 操作需要准确 Runtime 核对时才连接它，不把查询变成 Start 或首句重投。 Terminal/Capsule 与 Agent 创建、resume、reopen、restart 的 prepared 核对复用同一原 creation operation key 观察；尚未取得 Run ID 时不扫描无关运行记录；已有 Run ID 时只读该 Run，不枚举无关 Run 或逐个 Status。当前未保留映射只表示未知，不能代签原 Start 未应用。 |
 | 投递结构化语义输入 | 本次输入的准确对象、权限、意图、readiness、字节前驱与必要持久受理事实仍由原 owner 判定；raw 字节可写不代签 Prompt 被接受或业务完成，未知投递不自动重放。 |
 
 累计合法 Session、生命周期预留、退役身份与恢复上下文不得按固定总数量或共享文件字节额度拒绝、误报损坏或静默裁剪。单条字段与协议解析的边界、身份冲突、CAS、内核文件锁、持久刷盘及真实磁盘失败仍各自成立；磁盘失败须区分未提交与已替换但持久确认未知，保全原记录与可用 Run，不以删历史或换存储路径取得恢复。Timeline 的有界展示窗口不是整份持久文件的字节上限，也不代签 Provider 原生全史保留。
