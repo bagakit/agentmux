@@ -33,6 +33,7 @@ import { restoredMoteConnectionSaveIntents, type MoteConnectionSaveIntent } from
 import { restoredMoteChatIntents, type MoteChatIntent } from './lib/mote-chat-intent'
 import { defaultNoteCanvasLayout, mergeNoteCanvasLayout, noteCanvasScopeKey, restoreNoteCanvasLayouts, type NoteCanvasLayout, type NoteCanvasScope } from './lib/note-canvas-state'
 import { projectInputReceipt as retainInputReceipt } from '@agentmux/client-ui/input-receipt-projection'
+import { restoredCapsuleQuestionEditors, type CapsuleQuestionEditor } from './lib/capsule-question-editors'
 import { restoredQuestionReplies, type DesktopQuestionReplies, type DesktopQuestionReplyAttempt, type DesktopQuestionDrafts } from './lib/conversation-question-intent'
 import { fileWorkbenchIdentity } from './lib/file-workbench-state'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -938,6 +939,7 @@ export type AppState = {
   moteChatIntents: Record<string, MoteChatIntent>
   agentComposerDrafts: Record<string, string>
   agentLearningReviewDrafts: Record<string, AgentLearningReviewDraft>
+  capsuleQuestionEditors: Record<string, CapsuleQuestionEditor>
   browserOpinionDrafts: Record<string, BrowserOpinionDraft>
   agentComposerHistory: Record<string, readonly string[]>
   agentComposerHistoryNavigation: Record<string, Omit<HistoryState, 'entries'> & { entries?: readonly string[] }>
@@ -3618,6 +3620,7 @@ type PersistedAppState = {
   moteChatIntents?: Record<string, MoteChatIntent>
   agentComposerDrafts?: Record<string, string>
   agentLearningReviewDrafts?: Record<string, AgentLearningReviewDraft>
+  capsuleQuestionEditors?: Record<string, CapsuleQuestionEditor>
   browserOpinionDrafts?: Record<string, BrowserOpinionDraft>
   agentComposerHistory?: Record<string, readonly string[]>
   launcherNameDrafts?: Record<string, LauncherNames>
@@ -3895,6 +3898,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     moteChatIntents: state.moteChatIntents,
     agentComposerDrafts: state.agentComposerDrafts,
     agentLearningReviewDrafts: state.agentLearningReviewDrafts,
+    capsuleQuestionEditors: state.capsuleQuestionEditors,
     browserOpinionDrafts: state.browserOpinionDrafts,
     agentComposerHistory: state.agentComposerHistory,
     launcherNameDrafts: state.launcherNameDrafts,
@@ -4252,6 +4256,21 @@ export async function retainAgentLearningReviewDraft(draft: AgentLearningReviewD
   useAppStore.setState(state => ({ agentLearningReviewDrafts: { ...state.agentLearningReviewDrafts, [key]: retained } }))
   if (flush) await flushMessageWorkbench(false)
 }
+
+/** Only local editable bytes and exact original operation handles use the existing Workbench writer. */
+export function compareAndSwapCapsuleQuestionEditor(key: string, expected: CapsuleQuestionEditor | undefined, value: CapsuleQuestionEditor | undefined): boolean {
+  let changed = false
+  useAppStore.setState(state => {
+    if (state.capsuleQuestionEditors[key] !== expected) return state
+    changed = true
+    const editors = { ...state.capsuleQuestionEditors }
+    if (value) editors[key] = value
+    else delete editors[key]
+    return { capsuleQuestionEditors: editors }
+  })
+  return changed
+}
+export async function flushCapsuleQuestionEditors(): Promise<void> { await flushMessageWorkbench(false) }
 
 /** Editing an answer draft never replaces its original submitted intent. */
 export function retainConversationQuestionDraft(sessionId: string, key: string, answers: DesktopQuestionReplyAttempt['input']['answers']): void {
@@ -5080,6 +5099,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   browserAnnotationsByBrowserId: {},
   agentComposerDrafts: {},
   agentLearningReviewDrafts: {},
+  capsuleQuestionEditors: {},
   browserOpinionDrafts: {},
   agentComposerHistory: {},
   agentComposerHistoryNavigation: {},
@@ -12579,7 +12599,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
-    return { ...state, agentLearningReviewDrafts: restoredLearningReviewDrafts(state.agentLearningReviewDrafts), manualConnectionIntents: restoredManualConnectionIntents(state.manualConnectionIntents), manualConnectionSelections: restoredManualConnectionSelections(state.manualConnectionSelections), workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, agentLearningReviewDrafts: restoredLearningReviewDrafts(state.agentLearningReviewDrafts), manualConnectionIntents: restoredManualConnectionIntents(state.manualConnectionIntents), manualConnectionSelections: restoredManualConnectionSelections(state.manualConnectionSelections), workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), capsuleQuestionEditors: restoredCapsuleQuestionEditors(state.capsuleQuestionEditors), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyOrganization: restoreSurveyOrganization(state.surveyOrganization), surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
