@@ -10,10 +10,11 @@ import type { PublicationAdapter } from './publication-adapter.js'
 import { publicationEffectContext, publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
 import { isConversationPublicationPart, publicationPartKey } from './publication-content.js'
 import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation, type QuestionPublicationPayload } from './publication-store.js'
+import { readPublicationA2A, publicationNotifications, type PublicationA2A, type PublicationOriginalMessagePort } from './publication-a2a.js'
 import { publicationSpeaker, type PublicationSpeaker, type PublicationSpeakerDetails, type PublicationSpeakerReader } from './publication-speaker.js'
 
 /** Borrow original exact Core reads and the shared Provider observation. No transcript paths or second watcher. */
-export interface PublicationConversationPort {
+export interface PublicationConversationPort extends PublicationOriginalMessagePort {
   checkpoint(reference: ConversationCheckpointInput, signal: AbortSignal): Promise<ConversationCheckpointPage>
   changes(input: ConversationChangesInput, signal: AbortSignal): Promise<ConversationChangesPage>
   inspect(input: ConversationTimelineReadInput, signal: AbortSignal): Promise<AgentConversationReadPage>
@@ -29,7 +30,7 @@ export interface PublicationPermissionsPort {
 }
 export type PublicationObservation = ConnectionDeliveryObservation
 type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | undefined; failure?: { code?: string } }
-type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
+type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; speaker?: PublicationSpeakerReader }
 
 
@@ -273,8 +274,10 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const ordered = [...consumed.snapshot.units].reverse() // The Core wire explicitly declares newest-first.
       const resolvedText = await this.resolve(reference, ordered, signal, binding, adapter)
       const speakers = await this.speakers(reference, ordered, signal)
+      const originals = binding.scope.publication === 'future-shared-conversation'
+        ? new Map(ordered.map(unit => [unit.event.id, publicationNotifications(unit, binding.sourceFrontier).map(target => ({ notificationId: target.notificationId, record: target.record, revision: target.revision, ...(target.startUnconfirmed ? { startUnconfirmed: true as const } : {}), ...(target.part ? { part: target.part } : {}), messages: [], unavailable: true }))])) : new Map()
       const questions = adapter.questionActions ? this.options.permissions?.questions?.(binding, ordered) : undefined
-      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, ...(this.options.queryFeedback && adapter.queryFeedback ? { queryFeedback: true } : {}), fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) } : {}), ...(questions ? { questions } : {}) })
+      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, originals, ...(this.options.queryFeedback && adapter.queryFeedback ? { queryFeedback: true } : {}), fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) } : {}), ...(questions ? { questions } : {}) })
       after = page.checkpoint; lane.view = page.window.view!; lane.viewId = page.window.id; lane.read = { after }
       if (lane.watch?.viewId !== lane.viewId) lane.dirty = true
       if (!page.more) { lane.read = undefined; break }
@@ -292,13 +295,34 @@ export class PublicationHost implements ConnectionDeliveryPort {
     lane.observation = { state: 'unavailable', reason }
     lane.sourceObservation = { state: 'unavailable', reason, code: connectionDiagnosisSourceCode(code), codeRecorded: code !== undefined, checkpointKey }
   }
+  private async originalMessages(binding: RoomBinding, units: readonly ConversationUnit[], signal: AbortSignal): Promise<Map<string, PublicationA2A[]>> {
+    if (binding.scope.publication !== 'future-shared-conversation') return new Map()
+    const reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
+    const originals = await readPublicationA2A(reference, units, {
+      notification: (...input) => this.until(this.options.conversation.notification(...input), signal),
+      message: (...input) => this.until(this.options.conversation.message(...input), signal)
+    }, signal, binding.sourceFrontier)
+    const details = new Map<string, Promise<PublicationSpeakerDetails>>()
+    for (const rows of originals.values()) for (const row of rows) for (const message of row.messages) {
+      const target = message.speaker!.reference!, key = JSON.stringify(target)
+      if (this.options.speaker && !details.has(key)) details.set(key, this.until(this.options.speaker(target, signal), signal).catch(() => { signal.throwIfAborted(); return {} }))
+      if (details.has(key)) {
+        const observed = await details.get(key)!, speaker = message.speaker!
+        if (observed.name !== undefined) speaker.name = observed.name
+        if (observed.nameRevision !== undefined) speaker.nameRevision = observed.nameRevision
+        if (observed.mote !== undefined) speaker.mote = observed.mote
+        if (observed.avatar !== undefined) speaker.avatar = observed.avatar
+      }
+    }
+    return originals
+  }
   private async speakers(reference: ConversationRef, units: readonly ConversationUnit[], signal: AbortSignal): Promise<Map<string, PublicationSpeaker>> {
     const result = new Map<string, PublicationSpeaker>(), details = new Map<string, Promise<PublicationSpeakerDetails>>()
     for (const unit of units) {
       const speaker = publicationSpeaker(unit, reference)
       if (speaker.kind === 'agent' && speaker.reference && this.options.speaker) {
         const target = speaker.reference, key = JSON.stringify(target)
-        if (!details.has(key)) details.set(key, this.options.speaker(target, signal).catch(() => { signal.throwIfAborted(); return {} }))
+        if (!details.has(key)) details.set(key, this.until(this.options.speaker(target, signal), signal).catch(() => { signal.throwIfAborted(); return {} }))
         const observed = await details.get(key)!
         if (observed.name !== undefined) speaker.name = observed.name
         if (observed.nameRevision !== undefined) speaker.nameRevision = observed.nameRevision
@@ -378,36 +402,61 @@ export class PublicationHost implements ConnectionDeliveryPort {
     }
     return result
   }
+  private async gapUnits(lane: Lane, gap: import('@agentmux/core/connections').ConnectionDeliveryGap): Promise<ConversationUnit[]> {
+    const binding = lane.binding, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }, signal = lane.abort.signal
+    let cursor: string | undefined, pending: JsonReadAssembly | undefined
+    const units: ConversationUnit[] = []
+    for (let reads = 0; reads < 1024; reads++) {
+      signal.throwIfAborted()
+      const input = { ...reference, anchor: gap.anchor!, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
+      const page = parseConversationReadPage(await this.until(this.options.conversation.inspect(input, signal), signal), input)
+      for (const entry of page.items) {
+        const value = consumeJsonReadEntry({ entry, scopeKey: JSON.stringify(gap.anchor), ...(pending ? { pending } : {}), maxTotalBytes: CONVERSATION_MAX_UNIT_BYTES })
+        if (value.kind === 'pending') { pending = value.pending; continue }
+        pending = undefined; units.push(parseConversationUnit(value.value, { hostId: page.sourceHostId, agentSessionId: binding.agentSessionId }, page.scope))
+      }
+      if (!page.nextCursor) {
+        if (pending) throw Error('Original part fragments are incomplete')
+        if (!units.length) {
+          const failure = page.coverage.flatMap(c => c.gaps).find(g => g.code === 'AGENT_CONVERSATION_VERSION_UNAVAILABLE')
+          if (failure) this.store.versionUnavailable(binding, gap, failure.code)
+        }
+        return units
+      }
+      if (cursor === page.nextCursor) throw Error('Original part continuation made no progress')
+      cursor = page.nextCursor
+    }
+    return units
+  }
+  /** One cancellable related journal read cannot hold this Binding's ordinary speech lane. */
+  private recoverOriginalMessages(lane: Lane, adapter: PublicationAdapter, gap: import('@agentmux/core/connections').ConnectionDeliveryGap): void {
+    if (lane.originalReading) return
+    const binding = lane.binding, signal = lane.abort.signal
+    let recovered = false
+    lane.originalReading = Promise.resolve().then(async () => {
+      for (const unit of await this.gapUnits(lane, gap)) {
+        const originals = await this.originalMessages(binding, [unit], signal)
+        signal.throwIfAborted()
+        this.store.recoverOriginalMessages(binding, gap, unit, originals.get(unit.event.id) ?? [], () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) : undefined)
+        if ([...originals.values()].flat().some(value => !value.unavailable)) recovered = true
+      }
+    }).catch(() => { /* The exact durable gap retains its original target; ordinary publication stays usable. */ })
+      .finally(() => { lane.originalReading = undefined; if (recovered && !signal.aborted && this.authorized(binding)) this.wake(lane) })
+  }
   private async recoverContent(lane: Lane, adapter: PublicationAdapter): Promise<void> {
     const binding = lane.binding, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }, signal = lane.abort.signal
     const gaps = this.store.recoverableGaps(binding, lane.gapAfter ?? 0)
-    if (!gaps.length) { lane.gapAfter = 0; return }
+    if (!gaps.length) { delete lane.gapAfter; return }
     for (const { ordinal, gap } of gaps) {
+      if (!gap.anchor || signal.aborted || !this.authorized(binding)) continue
+      if (gap.code === 'PUBLICATION_A2A_ORIGINAL_UNAVAILABLE') {
+        if (!lane.originalReading) { lane.gapAfter = ordinal; this.recoverOriginalMessages(lane, adapter, gap) }
+        continue
+      }
       lane.gapAfter = ordinal
-      if (!gap.anchor || !gap.part || signal.aborted || !this.authorized(binding)) continue
+      if (!gap.part) continue
       try {
-        let cursor: string | undefined, pending: JsonReadAssembly | undefined
-        const units: ConversationUnit[] = []
-        for (let reads = 0; reads < 1024; reads++) {
-          const input = { ...reference, anchor: gap.anchor, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
-          const page = parseConversationReadPage(await this.options.conversation.inspect(input, signal), input)
-          for (const entry of page.items) {
-            const value = consumeJsonReadEntry({ entry, scopeKey: JSON.stringify(gap.anchor), ...(pending ? { pending } : {}), maxTotalBytes: CONVERSATION_MAX_UNIT_BYTES })
-            if (value.kind === 'pending') { pending = value.pending; continue }
-            pending = undefined; units.push(parseConversationUnit(value.value, { hostId: page.sourceHostId, agentSessionId: binding.agentSessionId }, page.scope))
-          }
-          if (!page.nextCursor) {
-            if (pending) throw Error('Original part fragments are incomplete')
-            if (!units.length) {
-              const failure = page.coverage.flatMap(c => c.gaps).find(g => g.code === 'AGENT_CONVERSATION_VERSION_UNAVAILABLE')
-              if (failure) this.store.versionUnavailable(binding, gap, failure.code)
-            }
-            break
-          }
-          if (cursor === page.nextCursor) throw Error('Original part continuation made no progress')
-          cursor = page.nextCursor
-        }
-        for (const unit of units) {
+        for (const unit of await this.gapUnits(lane, gap)) {
           const speakers = await this.speakers(reference, [unit], signal)
           this.store.recoverPart(binding, gap, unit, await this.resolve(reference, [unit], signal, binding, adapter), () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) : undefined, speakers.get(unit.event.id))
         }
@@ -467,7 +516,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (signal.aborted || !authorized()) return
       const frozen = JSON.stringify([original.projectionId, original.sourceRevision])
       const relevant = qualified.has(frozen) ? [] : this.store.pendingRecords(original)
-      if (!qualified.has(frozen) && ['speech', 'image', 'file', 'question'].includes(original.payload.kind) && original.effect === 'upsert' && ['native', 'captured'].includes(original.reference.source.kind)) {
+      if (!qualified.has(frozen) && !original.originalMessage && ['speech', 'image', 'file', 'question'].includes(original.payload.kind) && original.effect === 'upsert' && ['native', 'captured'].includes(original.reference.source.kind)) {
         const reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
         try {
           for (const record of relevant) {
