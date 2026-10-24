@@ -12,7 +12,7 @@ import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-servic
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { parseDiagnosticEvidenceResult } from '../../../packages/core/src/diagnostic-evidence-codec'
-import { ClientIncidentArchive, CLIENT_INCIDENT_LIMITS } from '../src/main/client-incident-archive'
+import { ClientIncidentArchive, CLIENT_INCIDENT_LIMITS } from '@agentmux/host/client-incident-archive'
 import { readingClientIncident } from '../src/renderer/src/lib/reading-client-incident'
 
 const paths: string[] = [], services: AgentMuxRpcService[] = []
@@ -90,7 +90,7 @@ describe('reading evidence in the sole client incident archive', () => {
     const owner = await archive(), original = record('held')
     owner.enqueue(readingClientIncident(original, 0), producer()); await owner.flush()
     const before = await owner.read({ domain: 'client.incident', hostId: 'local', logId: original.logId }, bounds())
-    const entry = process.env.AGENTMUX_TEST_READING_ARCHIVE_ENTRY ?? new URL('../src/main/client-incident-archive.ts', import.meta.url).href
+    const entry = process.env.AGENTMUX_TEST_READING_ARCHIVE_ENTRY ?? new URL('@agentmux/host/client-incident-archive', import.meta.url).href
     const script = `import {ClientIncidentArchive} from ${JSON.stringify(entry)};
       const owner=new ClientIncidentArchive(process.argv[1]); await owner.flush();
       const bounds={signal:new AbortController().signal,maxBytes:131072};

@@ -35,7 +35,7 @@ vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ 
 
 import { AgentMuxMemoryAgentSessionStore, connectAgentMuxRpc, LocalExecutionHost } from '@agentmux/core'
 import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
-import { ClientIncidentArchive } from '../src/main/client-incident-archive.js'
+import { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'

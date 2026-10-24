@@ -8,7 +8,7 @@ import { durableWriteFile, AgentMuxControlServer, connectAgentMuxRpc } from '@ag
 import { mintObjectId } from '@agentmux/core/object-id'
 import { clientIncidentPriority, safeClientIncidentCode, type AgentMuxClientIncidentReport, type AgentMuxClientIncidentPage } from '@agentmux/core/client-incident'
 import type { ReadingDiagnosticRecord } from '@agentmux/core/reading-diagnostic'
-import { ClientIncidentArchive, CLIENT_INCIDENT_LIMITS } from '../src/main/client-incident-archive'
+import { ClientIncidentArchive, CLIENT_INCIDENT_LIMITS } from '@agentmux/host/client-incident-archive'
 import { ClientIncidentIpcOwner } from '../src/main/client-incident-ipc'
 import { createClientIncidentDispatcher, CLIENT_INCIDENT_DISPATCH_LIMITS } from '../src/renderer/src/lib/client-incident-dispatcher'
 import { createClientIncidentRecorder } from '../src/renderer/src/lib/client-incident-recorder'

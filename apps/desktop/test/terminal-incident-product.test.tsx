@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ClientIncidentArchive } from '../src/main/client-incident-archive'
+import { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import { ClientIncidentIpcOwner } from '../src/main/client-incident-ipc'
 import { AgentMuxControlServer } from '@agentmux/core'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
