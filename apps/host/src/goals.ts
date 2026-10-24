@@ -7,7 +7,7 @@ import { AgentMuxError, agentPromptCondition, type AgentMuxHeadlessRuntime, type
   type AgentMuxSpatialStateStore, type AgentMuxRpcMethod, type AgentMuxRpcParams, type AgentMuxRpcResult } from '@agentmux/core'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core/control'
 import type { AgentMuxNameContext } from '@agentmux/core/spatial-graph'
-import { openDemandStore, type Demand, type DemandParticipationSource, type DemandStore } from '@agentmux/demand'
+import { isDemandStoreError, openDemandStore, type Demand, type DemandParticipationSource, type DemandStore } from '@agentmux/demand'
 import type { GoalDelegationCorePort, GoalDelegationCoreMethod } from './goal-delegation-owner.js'
 import { GoalDelegationOwner } from './goal-delegation-owner.js'
 import { GoalDelegationAttentionOwner } from './goal-delegation-attention.js'
@@ -260,7 +260,13 @@ export function createHostGoals(options: {
     const prompt = original?.prompt ?? loop?.initialDelivery?.prompt ?? (goal.description.trim() || goal.title)
     await current(context)
     const prepared = await demands.prepareDispatch(goal.id, { operationId, agentSessionId: selected, hostId: resolved.hostId, runId: session.run.runId,
-      execution: loop ? 'continue' : 'finite', prompt, ...(loop ? { loopId: loop.loopId, alignmentRevision: continuation!.alignmentRevision } : {}) }, original ? undefined : expectedUpdatedAt ?? goal.updatedAt)
+      execution: loop ? 'continue' : 'finite', prompt, ...(loop ? { loopId: loop.loopId, alignmentRevision: continuation!.alignmentRevision } : {}) }, original ? undefined : expectedUpdatedAt ?? goal.updatedAt).catch(error => {
+        const cause = isDemandStoreError(error) && record(error.cause) ? error.cause : undefined
+        if (!original && cause?.kind === 'goal-start-version-conflict' && cause.goalId === goal.id && cause.operationId === operationId &&
+            Number.isSafeInteger(cause.currentUpdatedAt) && Number(cause.currentUpdatedAt) >= 0)
+          throw new AgentMuxError(error.message, 'CONTROL_REQUEST_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+        throw error
+      })
     const condition = loop?.initialDelivery?.condition ?? agentPromptCondition(session)
     const control = { kind: 'agent' as const, hostId: resolved.hostId, agentSessionId: selected, run: session.run }
     const note = goalRoleInputNote(undefined, { role: 'executor', goalId: goal.id, agentSessionId: selected, runId: session.run.runId,
