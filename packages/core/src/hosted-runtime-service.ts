@@ -172,7 +172,7 @@ export class AgentMuxHostedRuntimeService {
       evidence: { source: 'agentmux', observedAt: Date.now() } })
   }
   private publish(event: AgentMuxClientEvent): void {
-    const terminal = event.type === 'terminal-output' || event.type === 'terminal-snapshot' || event.type === 'terminal-resized'
+    const terminal = event.type === 'terminal-output' || event.type === 'terminal-snapshot' || event.type === 'terminal-resized' || event.type === 'attachment-state'
     const runId = 'run' in event ? event.run.runId : 'evidence' in event ? event.evidence.run?.runId : undefined
     const matching = runId ? this.runs.get(runId)?.readers : undefined
     if ((!matching || !matching.size) && (terminal || !this.consumers.size)) return
@@ -187,7 +187,7 @@ export class AgentMuxHostedRuntimeService {
       // The initial snapshot takes the current connection cut synchronously with begin().
       // Replaying an earlier retrying/lost afterward could revoke a now-confirmed Native.
       if ('opening' in reader && reader.opening && event.type === 'connection-state') continue
-      reader.enqueue(chunks, event.type === 'agent-session' || event.type === 'run-removed' ? event : undefined)
+      reader.enqueue(chunks, event.type === 'agent-session' || event.type === 'run-removed' || event.type === 'attachment-state' ? event : undefined)
     }
   }
   async bootstrap(): Promise<AgentMuxHostedBootstrap> {
@@ -558,7 +558,10 @@ export class AgentMuxHostedRuntimeService {
     const pending: AgentMuxHostedTransferChunk[][] = []
     let bytes = 0, failed: unknown, output: Reader | undefined, acquired: Awaited<ReturnType<AgentMuxHostedRuntimeService['acquire']>> | undefined
     const destination: Reader = { initialId: '', get closed() { return output?.closed ?? failed !== undefined },
-      enqueue(chunks) {
+      enqueue(chunks, metadata) {
+        // A newly opening reader confirms its own initial cut. Existing readers receive
+        // the recovery fact once; replaying it through both leases duplicates the notice.
+        if (!output && metadata?.type === 'attachment-state' && metadata.state === 'restored') return
         if (output) output.enqueue(chunks)
         else if (failed === undefined) {
           bytes += chunks.reduce((sum, chunk) => sum + chunk.dataBase64.length, 0)
@@ -576,7 +579,9 @@ export class AgentMuxHostedRuntimeService {
       output = reader(emit, acquired.value, () => { void dispose().catch(error => this.releaseUnconfirmed(error)) })
       for (const chunks of pending) output.enqueue(chunks)
       pending.length = 0; original.readers.add(dispose)
-      return { initial: { owner, transferId: output.initialId }, start: () => output!.start(), dispose }
+      const observedOwner = this.owner()
+      this.assertFence(p.fence)
+      return { initial: { owner: observedOwner, transferId: output.initialId }, start: () => output!.start(), dispose }
     } catch (error) { await dispose().catch(failure => this.releaseUnconfirmed(failure)); throw error }
     } finally { original.pending--; this.pruneConsumer(id, original) }
   }

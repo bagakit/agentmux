@@ -532,9 +532,11 @@ export async function connectHostedAgentMux(options: {
     if (!runId && target.kind !== 'agent-session') throw new AgentMuxError('Attachment requires an exact Run or Session.', 'INVALID_CONTROL_REQUEST')
     let key = readerKey ?? runId ?? `session:${target.kind === 'agent-session' ? target.agentSessionId : ''}`
     const previous = attached.get(key), admission = {}, epoch = controlEpoch, expected = fence()
+    const nativeAtAdmission = controlOwner?.ctxmux?.instanceId
     if (!replayOnly) openingReaders.set(key, admission)
     const transfer = new AgentMuxHostedTransferReader()
     let transferId = '', initialSeen = false, cursor = afterByte, failure: unknown, subscription: AgentMuxHostedSubscription | undefined
+    let observedOwner: AgentMuxRuntimeOwnerIdentity | undefined
     let resolve!: (value: AgentMuxRunAttachment | { session: AgentMuxAgentSession; attachment: AgentMuxRunAttachment }) => void, reject!: (error: unknown) => void
     const ready = new Promise<AgentMuxRunAttachment | { session: AgentMuxAgentSession; attachment: AgentMuxRunAttachment }>((yes, no) => { resolve = yes; reject = no })
     void ready.catch(() => {})
@@ -564,6 +566,7 @@ export async function connectHostedAgentMux(options: {
           signal: observationSignal(),
           onInitial: value => {
             if (value.owner.runtimeId !== expected.runtimeId || value.owner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Attachment belongs to another owner.', 'RUNTIME_OWNER_CHANGED')
+            observedOwner = parseHostedRuntimeOwnerIdentity(value.owner)
             transferId = value.transferId
           },
           onEvent: value => {
@@ -607,6 +610,12 @@ export async function connectHostedAgentMux(options: {
       if (failure !== undefined) throw failure
       if (disposed || epoch !== controlEpoch || !replayOnly && openingReaders.get(key) !== admission) throw new AgentMuxError('Attachment was cancelled or superseded; its Run remains retained.', 'CONTROL_CANCELLED')
       if (replayOnly) { await subscription.dispose(); return result }
+      // Consume the same validated initial cut's existing owner receipt. Reconfirming
+      // a dispatch endpoint alone never changes this consumer's current Native fence.
+      if (observedOwner && controlOwner?.ctxmux?.instanceId === nativeAtAdmission) {
+        acceptOwner(observedOwner)
+        if (bootstrap) bootstrap.owner = structuredClone(observedOwner)
+      }
       if (!readerKey && key !== runId) {
         openingReaders.delete(key); key = runId!; openingReaders.set(key, admission)
       }
