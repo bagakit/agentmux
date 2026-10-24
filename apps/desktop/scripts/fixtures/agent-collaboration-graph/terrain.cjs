@@ -14,7 +14,7 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
     for (let attempt = 0; attempt < 24; attempt++) {
       const current = await zoom()
       if (Math.abs(Math.log(target / current)) < .0008) return current
-      const point = await read(`(()=>{const r=document.querySelector('.collaboration-canvas').getBoundingClientRect();return{x:r.x+r.width*.52,y:r.y+r.height*.52}})()`)
+      const point = await read(`(()=>{const canvas=document.querySelector('.collaboration-canvas'),r=canvas.getBoundingClientRect(),anchor=window.__terrainAnchor?.isConnected?window.__terrainAnchor.getBoundingClientRect():null,candidates=[...(anchor?[{x:anchor.x+anchor.width/2,y:anchor.y+anchor.height/2}]:[]),...[ [.52,.52],[.82,.3],[.18,.3],[.82,.72],[.18,.72] ].map(([x,y])=>({x:r.x+r.width*x,y:r.y+r.height*y}))];const point=candidates.find(p=>{const hit=document.elementFromPoint(p.x,p.y);return hit?.closest('.collaboration-canvas')===canvas&&!hit.closest('.collaboration-region-labels,.collaboration-canvas__hud,.agent-information-reader')});if(!point)throw Error('No real Map surface exposed for native wheel input');return point})()`)
       await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: Math.max(-180, Math.min(180, -Math.log2(target / current) / .002)) })
       await pause(120)
     }
@@ -34,6 +34,9 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
     assert.equal(input.areas.find(area => area.id === tools.id).parentId, root.id)
     assert.equal(input.areas.find(area => area.id === deep.id).parentId, tools.id)
     assert.ok(input.edges.some(edge => edge.source === nodeId(original.areas[2].id, 'fixture-terrain-b')), 'The explicitly read original external relationship enters the actual solve')
+    await click('[aria-label^="Locate 协作地形 ·"]')
+    await until('parent terrain enters one of its actual readable descendant occurrences', () => read(`(()=>{const canvas=document.querySelector('.collaboration-canvas').getBoundingClientRect();return ['fixture-terrain-tool','fixture-terrain-a','fixture-terrain-b'].some(id=>{const card=document.querySelector('.collaboration-agent__detail-layer:not([inert]) .focus-context[data-session-id="'+id+'"]');if(!card)return false;const r=card.getBoundingClientRect(),layer=card.closest('[data-map-layer]');return getComputedStyle(layer).opacity==='1'&&r.x>=canvas.x&&r.y>=canvas.y&&r.right<=canvas.right&&r.bottom<=canvas.bottom})})()`))
+    await frame('terrain-parent-readable-destination')
     await locate('fixture-terrain-a'); await closeDetails(); await frame('terrain-nested-dark')
     const camera = await matrix()
     await click('[aria-label="Collapse 协作地形"]'); await settleLayout()
