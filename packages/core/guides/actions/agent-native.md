@@ -16,6 +16,10 @@ hostId, executorId and that exact source; limit and cursor page the original Pro
 Follow nextCursor with the same source. Reading and cancellation operate no Session or Run.
 Use agent native history resource --input FILE|- for a recorded resource, preserving nativeSource,
 source, recordId, turnId, partIndex and expectedReference from that exact page.
+For an image inside original Markdown text, the same resource commands accept markdownImage
+{index, textSha256} with representation: image. Use markdownImageReferences on the complete original
+text to select its node; keep the signed text reference, or compare the original node URL for plain text.
+A changed text revision or a code example does not authorize a resource read.
 For raster bytes use representation: image; for self-contained recorded file bytes use representation: file.
 Keep the same outer signed reference and omit offsetBytes. Files never authorize path or URL reads.
 File results retain recorded MIME and optional label; those metadata do not verify file format or sharing.
