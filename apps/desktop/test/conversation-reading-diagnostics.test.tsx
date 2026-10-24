@@ -16,7 +16,7 @@ import { registerWorkbenchDocument } from '../src/renderer/src/lib/workbench-win
 import { activityReadingProps } from './helpers/activity-reading-props'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
-import { ClientIncidentArchive } from '../src/main/client-incident-archive'
+import { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import { ClientIncidentIpcOwner } from '../src/main/client-incident-ipc'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { parseDiagnosticEvidenceResult } from '../../../packages/core/src/diagnostic-evidence-codec'

@@ -11,7 +11,7 @@ import { AgentMuxControlServer as PublicServer, type AgentMuxControlServerOption
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import type { AppConfig, AgentMuxPreloadApi } from '../src/shared/contracts.js'
-import { ClientIncidentArchive } from '../src/main/client-incident-archive.js'
+import { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import { ClientIncidentRuntimeOwner } from '../src/main/client-incident-runtime.js'
 import { ConfigOwner } from '../src/main/config-owner.js'
 import { refreshSettingsExecutor } from '../src/main/settings-executor-refresh-control.js'

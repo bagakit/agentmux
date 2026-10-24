@@ -17,8 +17,8 @@ vi.mock('node:fs/promises', async original => {
     return actual.link(...args)
   } }
 })
-const { ClientIncidentArchive }: typeof import('../src/main/client-incident-archive') = await import(
-  process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY ?? new URL('../src/main/client-incident-archive.ts', import.meta.url).href)
+const { ClientIncidentArchive }: typeof import('@agentmux/host/client-incident-archive') = await import(
+  process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY ?? new URL('@agentmux/host/client-incident-archive', import.meta.url).href)
 const directories: string[] = []
 afterEach(async () => { identity.mints = 0; identity.raceOriginal = null; await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 const report = (): AgentMuxClientIncidentReport => ({ occurrenceId: randomUUID(), attemptId: 'attempt', relatedOccurrenceId: null,

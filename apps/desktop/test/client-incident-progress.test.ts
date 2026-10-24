@@ -11,7 +11,7 @@ import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-servic
 import { parseDiagnosticEvidenceResult } from '../../../packages/core/src/diagnostic-evidence-codec'
 import { createClientIncidentDispatcher, type ClientIncidentTransport } from '../src/renderer/src/lib/client-incident-dispatcher'
 import { readingClientIncident } from '../src/renderer/src/lib/reading-client-incident'
-import { ClientIncidentArchive } from '../src/main/client-incident-archive'
+import { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import { ClientIncidentIpcOwner } from '../src/main/client-incident-ipc'
 
 const directories: string[] = []

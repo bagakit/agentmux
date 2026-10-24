@@ -35,9 +35,9 @@ vi.mock('@agentmux/core', async original => {
   return { ...actual, durableWriteFile: source.durableWriteFile, DurableWriteError: source.DurableWriteError }
 })
 import { durableWriteFile, DurableWriteError } from '../../../packages/core/src/durable-write'
-const { ClientIncidentArchive }: typeof import('../src/main/client-incident-archive') = process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY
+const { ClientIncidentArchive }: typeof import('@agentmux/host/client-incident-archive') = process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY
   ? await import(process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY)
-  : await import('../src/main/client-incident-archive')
+  : await import('@agentmux/host/client-incident-archive')
 
 const directories: string[] = []
 afterEach(async () => { failure.enabled = false; failure.cleanupFails = true; failure.creates = 0; await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })

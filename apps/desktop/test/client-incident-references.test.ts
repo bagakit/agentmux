@@ -6,7 +6,7 @@ vi.mock('electron', async () => {
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { ClientIncidentArchive } from '../src/main/client-incident-archive.js'
+import { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import { PerformanceToolkitOwner } from '../src/main/toolkit-owner.js'
 import { PerformanceFailureStore } from '../src/main/toolkit-performance-failure-store.js'
 import { ToolkitReceiptStore } from '../src/main/toolkit-receipt-store.js'

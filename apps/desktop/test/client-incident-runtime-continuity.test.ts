@@ -7,7 +7,7 @@ import { AgentMuxSpatialStateStore, type AgentMuxSpatialGraph } from '@agentmux/
 import { createWorkspaceLayout } from '@agentmux/core/spatial-layout'
 import { agentPromptCondition } from '../../../packages/core/src/agent-prompt-condition'
 import { headlessFixture, until } from '../../../packages/core/test/helpers/headless-runtime-fixture'
-import { ClientIncidentArchive } from '../src/main/client-incident-archive'
+import { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import { createClientIncidentRecorder } from '../src/renderer/src/lib/client-incident-recorder'
 
 it('retains original incident, Session, Run, PID and layout across real semantic and archive process restarts', async () => {
