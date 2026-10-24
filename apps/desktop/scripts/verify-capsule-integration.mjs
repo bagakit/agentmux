@@ -34,7 +34,7 @@ if (!values['check-proof']) {
   await writeFile(join(output, 'facts.json'), JSON.stringify({ schema: 'agentmux.capsule.native-proof.v4', scope, result: 'starting' }) + '\n', { mode: 0o600 })
 }
 const build = await realpath(resolve(values['build-root'] ?? join(repository, '.tmp/capsule-native-build/out')))
-for (const name of ['main/index.js', 'main/agentmux-host.js', 'preload/index.cjs', 'preload/browser-popup.cjs', 'preload/capsule.cjs', 'renderer/index.html'])
+for (const name of ['main/index.js', 'main/agentmux-host.js', 'preload/index.cjs', 'preload/capsule.cjs', 'renderer/index.html'])
   assert.ok((await stat(join(build, name))).isFile(), 'Actual compiled product is required: ' + name)
 if (values['check-proof']) {
   await checkProof()

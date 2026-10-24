@@ -114,6 +114,25 @@ describe('original workface native presentation owner', () => {
     expect(page.recordedOperation?.state).toBe('rejected'); expect(f.children).toHaveLength(0)
     expect((await f.owner.call('app.window.ls', { operationId: 'journal-unavailable' }, context)).recordedOperation).toEqual(page.recordedOperation)
   })
+  it.each([
+    { label: 'the same Region', first: { ...target, kind: 'region', regionId: 'region' }, second: { ...target, kind: 'region', regionId: 'region' } },
+    { label: 'a Tab followed by its Region', first: target, second: { ...target, kind: 'region', regionId: 'region' } },
+    { label: 'a Region followed by its Tab', first: { ...target, kind: 'region', regionId: 'region' }, second: target }
+  ] as const)('keeps one native owner when distinct operations concurrently open $label', async ({ first, second }) => {
+    const f = await fixture(), sizes: Array<(value: { width: number; height: number }) => void> = []
+    f.owner.setNativeOwner({ beforeClosing: f.nativeReturns, windowSize: () => new Promise(resolve => sizes.push(resolve)) })
+    const firstOpen = f.owner.call('app.window.open', { operationId: 'first-concurrent-open', target: first }, context)
+    const secondOpen = f.owner.call('app.window.open', { operationId: 'second-concurrent-open', target: second }, context)
+    await vi.waitFor(() => expect(sizes).toHaveLength(2))
+    for (const finish of sizes) finish({ width: 840, height: 620 })
+    const [one, two] = await Promise.all([firstOpen, secondOpen])
+    expect(one.recordedOperation?.state).toBe('confirmed')
+    expect(two.recordedOperation?.windowId).toBe(one.recordedOperation?.windowId)
+    expect(f.children).toHaveLength(1)
+    expect(f.tickets).toHaveLength(1)
+    expect((await f.owner.call('app.window.ls', {}, context)).windows.filter(window => window.target)).toHaveLength(1)
+    expect((await f.store.load()).state.windows).toHaveLength(1)
+  })
   it('retains known native facts when the finished receipt cannot be persisted', async () => {
     const f = await fixture(); f.store.journalFailure = 'finished'
     const identity = await opened(f, 'receipt-unconfirmed')
@@ -133,6 +152,27 @@ describe('original workface native presentation owner', () => {
     const returned = await f.owner.call('app.window.return', { operationId: 'return-confirmed', ...identity }, context)
     expect(returned.recordedOperation?.state).toBe('confirmed'); expect(f.children[0]!.destroyed).toBe(true)
     expect((await f.store.load()).state.windows).toEqual([])
+  })
+  it('returns a whole Tab without letting one contained native child own its Close', async () => {
+    const f = await fixture(); await opened(f)
+    const requestClose = vi.fn(() => true)
+    f.owner.setNativeOwner({ beforeClosing: f.nativeReturns, requestClose })
+    f.children[0]!.close()
+    await vi.waitFor(() => expect(f.children[0]!.destroyed).toBe(true))
+    expect(requestClose).not.toHaveBeenCalled()
+    expect(f.nativeReturns).toHaveBeenCalledOnce()
+  })
+  it('lets the original native child own Close of its exact Region shell', async () => {
+    const f = await fixture()
+    const requestClose = vi.fn(() => true)
+    f.owner.setNativeOwner({ beforeClosing: f.nativeReturns, requestClose })
+    const page = await f.owner.call('app.window.open', { operationId: 'native-child-region',
+      target: { ...target, kind: 'region', regionId: 'native-child' } }, context)
+    expect(page.recordedOperation?.state).toBe('confirmed')
+    f.children[0]!.close()
+    expect(requestClose).toHaveBeenCalledExactlyOnceWith(f.children[0])
+    expect(f.children[0]!.destroyed).toBe(false)
+    expect(f.nativeReturns).not.toHaveBeenCalled()
   })
   it('guards one-use shells, original overlap and exact native Browser scope', async () => {
     const f = await fixture(), identity = await opened(f)

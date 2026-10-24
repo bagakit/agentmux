@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import ts from 'typescript'
 import mainSource from '../src/main/ipc.ts?raw'
 import { SpatialLinkIngress } from '../src/main/spatial-link-ingress'
-import { BROWSER_POPUP_CHANNELS } from '../src/shared/browser-popup-navigation'
 import { focusFacts } from '../../../packages/core/test/fixtures/desktop-focus-facts'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 
@@ -111,8 +110,7 @@ async function fixture(choices: Record<string, 'allow' | 'deny'> = {}, available
   }
   const window = new native.Window()
   const manager = new BrowserViewManager(window as never, { defaultProfileId: () => 'default', resolvePartition: (id: string) => `persist:${id}` },
-    new BrowserRefLedgerStore(join(directory, 'refs.json')), appLinks, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
-    { rendererUrl: () => 'https://desktop.invalid/browser-popup.html', preloadPath: 'browser-popup-preload.cjs' })
+    new BrowserRefLedgerStore(join(directory, 'refs.json')), appLinks)
   cleanup.push(() => owner.unavailable(), () => manager.dispose())
   await manager.create('source-browser', 'https://source.invalid/original')
   const page = window.children[0]!.webContents
@@ -123,15 +121,15 @@ async function fixture(choices: Record<string, 'allow' | 'deny'> = {}, available
     const decision = page.windowOpenHandler!({ url: guest.getURL() })
     expect(decision.action).toBe('allow')
     expect(decision.createWindow({ webContents: guest })).toBe(guest)
-    const shellWindow = native.Window.instances.at(-1)!
     await settled()
-    const event = () => ({ sender: shellWindow.webContents, senderFrame: shellWindow.webContents.mainFrame })
+    const targets = manager.targets().filter(target => target.id !== 'source-browser')
+    expect(targets).toHaveLength(1)
+    const id = targets[0]!.id
+    expect(targets[0]!.openedFrom).toMatchObject({ browserId: 'source-browser' })
     return { page: guest,
-      snapshot: () => shellWindow.webContents.ipc.handlers.get(BROWSER_POPUP_CHANNELS.inspect)!(event()),
-      answer: (allow: boolean, remember = false) => {
-        const state = shellWindow.webContents.ipc.handlers.get(BROWSER_POPUP_CHANNELS.inspect)!(event())
-        return shellWindow.webContents.ipc.handlers.get(BROWSER_POPUP_CHANNELS.command)!(event(), { kind: 'answer-app-link', promptId: state.appLinkPrompt.id, allow, remember })
-      } }
+      snapshot: () => manager.setViewport(id, 'responsive'),
+      answer: (allow: boolean, remember = false) => manager.answerAppLink(id, allow, remember) }
+
   }
   return { manager, page, snapshot, popup, owner, receive, report, requests, shell, choices, execute }
 }

@@ -130,7 +130,7 @@ export async function buildCapsuleProof(output = join(repository, '.tmp/capsule-
   dependencyPaths.push(join(host, 'package.json'), ...await files(join(host, 'dist')))
   receipt.dependencyFiles = await hashes(dependencyPaths)
   assert.deepEqual(await hashes([...new Set(sourcePaths)]), sourceFiles, 'Product source changed while building this candidate')
-  for (const name of ['main/index.js', 'main/agentmux-host.js', 'preload/index.cjs', 'preload/browser-popup.cjs', 'preload/capsule.cjs', 'renderer/index.html'])
+  for (const name of ['main/index.js', 'main/agentmux-host.js', 'preload/index.cjs', 'preload/capsule.cjs', 'renderer/index.html'])
     assert.ok(receipt.compiledFiles[name], `Nonempty production artifact: ${name}`)
   receipt.passed = true
   await publish()
