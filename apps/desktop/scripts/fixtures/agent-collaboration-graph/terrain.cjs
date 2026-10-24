@@ -100,6 +100,13 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
     assert.equal(held.sameReader,true);assert.equal(held.readers,1);assert.equal(held.sameAnchor,true);assert.equal(held.opacity,'1');assert.equal(held.inert,false);assert.ok(held.proxy?.includes('LOD 绘制'))
     await frame('terrain-held-reader-overview')
     await key('Escape'); await until('Reader returns to its exact original anchor', () => read(`!document.querySelector('.agent-information-reader')&&document.activeElement===window.__terrainAnchor`))
+    const focusVisibility = `(()=>{const proxy=window.__terrainAnchor.closest('[data-collaboration-agent]').querySelector('.collaboration-agent__focus-proxy'),r=proxy?.getBoundingClientRect(),canvas=document.querySelector('.collaboration-canvas').getBoundingClientRect();if(!r)return null;const overlapping=[...document.querySelectorAll('.collaboration-area__overview-label')].filter(label=>{const b=label.getBoundingClientRect();return b.left<r.right&&b.right>r.left&&b.top<r.bottom&&b.bottom>r.top}).map(label=>label.dataset.regionId);return{name:proxy.textContent,fontSize:parseFloat(getComputedStyle(proxy).fontSize),bounds:{x:r.x,y:r.y,width:r.width,height:r.height},inside:r.left>=canvas.left&&r.right<=canvas.right&&r.top>=canvas.top&&r.bottom<=canvas.bottom,overlapping}})()`
+    await until('the original held focus name clears every actual region heading', async () => {
+      const visible = await read(focusVisibility)
+      return visible?.inside && visible.fontSize >= 11 && visible.bounds.width > 40 && visible.bounds.height >= 15 && !visible.overlapping.length
+    })
+    const visibleFocus = await read(focusVisibility)
+    assert.ok(visibleFocus.name.includes('LOD 绘制'))
     await frame('terrain-held-focus-overview')
     await click('[aria-label="Find Agent in map"]'); await wheelTo(.72)
     const toggle='[aria-label="Map animations"]'
@@ -110,6 +117,6 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
     assert.equal(await read(`document.querySelectorAll('.collaboration-edge__packet,.collaboration-edge__pulse').length`),0,'Motion Off retains static facts without moving packets')
     await frame('terrain-motion-off-static')
     await click(toggle);await until('original explicit motion on', () => read(`document.querySelector('${toggle}').getAttribute('aria-pressed')==='true'&&document.querySelector('${toggle}').getAttribute('aria-busy')!=='true'`))
-    await intact();result.terrainHeld={held,offCamera:immediate}
+    await intact();result.terrainHeld={held,visibleFocus,offCamera:immediate}
   })
 }
