@@ -7,6 +7,7 @@ import { NoteReader } from '@agentmux/client-ui/components/NoteReader'
 import { readNoteDocument, type NoteBlockTarget } from '@agentmux/client-ui/note/note-document'
 import type { NoteFileDocument, NoteLocation } from '@agentmux/client-ui/note/note-knowledge'
 import { noteDrafts } from './note-drafts'
+import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 
 type Rpc = NonNullable<AgentMuxHostedClient['forwardRpc']>
 export type MobileNoteFileProps = { rpc: Rpc; params: FileReadParams; read: FileReadResult; visible?: boolean; target?: NoteBlockTarget }
@@ -36,6 +37,7 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
   const noteId = parsed?.status === 'valid' ? parsed.note.noteId : 'unconfirmed-note'
   const resourceIdentity = JSON.stringify(originalFileIdentity(params, read.resource))
   const draft = useMemo(() => noteDrafts([resourceIdentity, noteId]), [resourceIdentity, noteId])
+  useMobileWebUpdateSafetyOwner(() => draft.reloadIssue())
   useEffect(() => {
     if (!visible || !read.resource || parsed?.status !== 'valid' || read.result.status !== 'read') return
     let disposed = false

@@ -51,8 +51,8 @@ function parse(raw: string): NoteEditState {
 export function noteDrafts(identity: readonly string[]) {
   const key = prefix + JSON.stringify(identity)
   let observed: string | null = null, inspected: string | null = null
-  let initial: NoteEditState | undefined, issue = '', readable = true
-  const listener = (raw: string, durable = true) => { if (durable) observed = raw; for (const callback of callbacks) callback(parse(raw), durable ? undefined : '本机保存回执未持久保存；已确认的原文件回执与当前草稿仍保留。恢复本机存储后可核对当前原文以重试保全。') }
+  let initial: NoteEditState | undefined, issue = '', readable = true, memoryOnly = false
+  const listener = (raw: string, durable = true) => { if (durable) observed = raw; else memoryOnly = true; for (const callback of callbacks) callback(parse(raw), durable ? undefined : '本机保存回执未持久保存；已确认的原文件回执与当前草稿仍保留。恢复本机存储后可核对当前原文以重试保全。') }
   const callbacks = new Set<(value: NoteEditState, issue?: string) => void>()
   const current = (raw: string): NoteEditState => {
     const value = parse(raw)
@@ -63,16 +63,24 @@ export function noteDrafts(identity: readonly string[]) {
     if (observed !== null) { initial = current(observed); latest.set(key, observed) }
   } catch (error) { readable = false; issue = `${error instanceof Error ? error.message : String(error)}；原存储未覆盖，当前仍可编辑。` }
   function save(value: NoteEditState) {
+    memoryOnly = true
     if (!readable) throw new Error(issue)
     try {
       if (localStorage.getItem(key) !== observed) throw new Error('另一工作面已保存较新的本机草稿；请核对本机笔记草稿，保全两份后明确采用')
       const raw = JSON.stringify(value)
-      localStorage.setItem(key, raw); observed = raw; latest.set(key, raw)
+      localStorage.setItem(key, raw); observed = raw; latest.set(key, raw); memoryOnly = false
       for (const observer of observers.get(key) ?? []) if (observer !== listener) observer(raw)
     } catch (error) { throw new Error(`本机笔记草稿保存失败：${error instanceof Error ? error.message : String(error)}；当前草稿仍保留。`) }
   }
   return {
     initial, issue, save,
+    reloadIssue() {
+      if (pending.get(key)) return '笔记保存仍在进行；请等待原回执，再更新网页。'
+      try {
+        if (readable && !memoryOnly && localStorage.getItem(key) === observed) return null
+      } catch { /* Preserve the current editor when storage cannot be read. */ }
+      return '笔记草稿或原回执尚未确认保存在设备；请先保存或复制保全，再更新网页。'
+    },
     /** Exact owner receipts re-key the original device draft; original records remain backups. */
     restoreRelocated(resource: FileReadResource, noteId: string, changes: readonly NotesResourceChange[], bodyRevision: string) {
       const origins: { resource: NotesResourceChange['from']; conversion?: NotesResourceChange['conversion'] }[] = []
@@ -140,6 +148,7 @@ export function noteDrafts(identity: readonly string[]) {
             : { ...value, attempt: result.status === 'unknown' ? { ...value.attempt, phase: 'unknown' as const, ...(result.noteHistory ? { noteHistory: result.noteHistory } : {}) } : undefined }
           const written = JSON.stringify(next)
           if (durable) { try { localStorage.setItem(key, written); observed = written; latest.set(key, written) } catch { durable = false } }
+          if (!durable) memoryOnly = true
           for (const observer of observers.get(key) ?? []) observer(written, durable)
         }
         return result

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { moteQuickBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult,
@@ -34,6 +35,9 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     values: {}, baseline: null, attempts: [], blockedAttemptId: null })
   const current = useRef(draft), durable = useRef(saved), queue = useRef<Promise<unknown>>(Promise.resolve()), mounted = useRef(true)
   const flight = useRef(false), adopting = useRef(false), changed = useRef(!!saved), conflicted = useRef(false)
+  const reloadDirty = useRef(false), reloadRevision = useRef(0), reloadCopies = useRef(false)
+  useMobileWebUpdateSafetyOwner(() => reloadCopies.current ? '本页保留了 Mote 配置冲突副本；请先复制保全并关闭编辑器，再更新网页。'
+    : reloadDirty.current || flight.current || adopting.current ? 'Mote 配置草稿或保存操作尚未确认；请保存或复制保全后再更新网页。' : null)
   const [busy, setBusy] = useState(false), [adoptionBusy, setAdoptionBusy] = useState(false), [notice, setNotice] = useState('')
   const [storageIssue, setStorageIssue] = useState(''), [memoryOnly, setMemoryOnly] = useState(false)
   const [read, setRead] = useState<MoteQuickPreferencesReadResult | null>(null), [copies, setCopies] = useState<Editable[]>([])
@@ -43,6 +47,8 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; readEpoch.current++ } }, [])
   const display = (next: Editable) => { current.current = next; if (mounted.current) setDraft(next) }
   async function retain(next: Editable) {
+    reloadDirty.current = true
+    const revision = ++reloadRevision.current
     display(next)
     const work = queue.current.catch(() => {}).then(async () => {
       if (!next.scope) { if (mounted.current) setStorageIssue('原 Host 尚未核实；选择仅在本页，可复制。'); return { committed: false, canForward: false } }
@@ -61,6 +67,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
       }
     })
     queue.current = work
+    void work.then(result => { if (revision === reloadRevision.current && result.committed) reloadDirty.current = false })
     return work
   }
   function edit(values: MoteQuickDefaults) { changed.current = true; void retain({ ...current.current, values }) }
@@ -155,6 +162,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     await queue.current.catch(() => {})
     if (flight.current || adopting.current || !mounted.current || owner.recordIdentity() !== recordId) return
     const localCopy = structuredClone(current.current), snapshot = owner.snapshot()
+    reloadCopies.current = true
     setCopies(previous => [...previous, localCopy])
     const canonical = snapshot.issue === null && localCopy.scope
       ? snapshot.record.moteQuickDrafts?.find(d => moteQuickDraftKey(d.scope) === moteQuickDraftKey(localCopy.scope!)) : durable.current

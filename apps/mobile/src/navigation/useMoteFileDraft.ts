@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { parseFileReadResult, parseFileWriteResult, parseFileCreateResult, type FileReadResult, type FileReadResource } from '@agentmux/core/files'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
@@ -49,6 +50,9 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
   const { owner, recordId } = initial.current
   const [draft, setDraft] = useState<Editable>(initial.current.draft), current = useRef(draft), durable = useRef(initial.current.saved)
   const queue = useRef<Promise<unknown>>(Promise.resolve()), flight = useRef(false), adoption = useRef(false), mounted = useRef(true)
+  const reloadDirty = useRef(false), reloadRevision = useRef(0), reloadCopies = useRef(false)
+  useMobileWebUpdateSafetyOwner(() => reloadCopies.current ? '本页保留了 Mote 文件冲突副本；请先复制保全并关闭编辑器，再更新网页。'
+    : reloadDirty.current || flight.current || adoption.current ? 'Mote 文件草稿或保存操作尚未确认；请保存或复制保全后再更新网页。' : null)
   const [saving, setSaving] = useState(false), [adopting, setAdopting] = useState(false), [storageIssue, setStorageIssue] = useState(''), [notice, setNotice] = useState('')
   const [checked, setChecked] = useState<{ read: FileReadResult; scope: MoteFileDraftScope; ownerInstanceId: string } | null>(null)
   const [storageConflict, setStorageConflict] = useState(false), conflicted = useRef(false)
@@ -62,6 +66,8 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
   const connection = (originalClient = context.current.client) => current.current.scope
     ? source(originalClient, owner, target, current.current.scope.resource) : null
   function retain(next: Editable): Promise<{ committed: boolean; canForward: boolean }> {
+    reloadDirty.current = true
+    const revision = ++reloadRevision.current
     display(next)
     const work = queue.current.catch(() => {}).then(async () => {
       if (!next.scope) {
@@ -94,6 +100,7 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
       }
     })
     queue.current = work
+    void work.then(result => { if (revision === reloadRevision.current && result.committed) reloadDirty.current = false })
     return work
   }
   useEffect(() => {
@@ -118,6 +125,7 @@ export function useMoteFileDraft(target: MoteFileEditTarget, client: AgentMuxHos
     // The explicit adoption cannot erase a memory-only later edit or its
     // complete unknown input, even when another Host key is chosen.
     const localCopy = structuredClone(current.current)
+    reloadCopies.current = true
     setLocalCopies(values => [...values, localCopy])
     const snapshot = owner.snapshot()
     const canonical = snapshot.issue === null

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcGoal } from '@agentmux/core'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
@@ -48,12 +49,17 @@ export function useGoalDraft(goalId: string, goal: AgentMuxRpcGoal | null, factS
   const queue = useRef<Promise<unknown>>(Promise.resolve())
   const [storageIssue, setStorageIssue] = useState(''), [messages, setMessages] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false), flight = useRef(false), mounted = useRef(true)
+  const reloadDirty = useRef(false), reloadRevision = useRef(0)
+  useMobileWebUpdateSafetyOwner(() => reloadDirty.current || flight.current
+    ? '目标草稿或保存操作尚未确认；请保存或复制保全后再更新网页。' : null)
   const context = useRef({ client, epoch: 0 }); if (context.current.client !== client) context.current = { client, epoch: context.current.epoch + 1 }
   const latest = useRef({ goal, factScope, connected }); latest.current = { goal, factScope, connected }
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; context.current.epoch += 1 } }, [])
   const display = (next: EditableDraft) => { current.current = next; if (mounted.current) setDraft(next) }
 
   function retain(next: EditableDraft): Promise<{ canForward: boolean; committed: boolean }> {
+    reloadDirty.current = true
+    const revision = ++reloadRevision.current
     display(next)
     const work = queue.current.catch(() => {}).then(async () => {
       if (!next.scope) {
@@ -83,6 +89,7 @@ export function useGoalDraft(goalId: string, goal: AgentMuxRpcGoal | null, factS
       }
     })
     queue.current = work
+    void work.then(result => { if (revision === reloadRevision.current && result.committed) reloadDirty.current = false })
     return work
   }
   useEffect(() => {
