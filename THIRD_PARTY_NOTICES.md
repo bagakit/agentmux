@@ -69,3 +69,7 @@ fs-native-extensions 1.5.1, Copyright 2023 Holepunch Inc., is a runtime dependen
 ## Paseo Relay
 
 The source in `packages/relay` includes code from Paseo, copyright (c) 2025-present Mohamed Boudra, licensed under Apache License 2.0. The pinned upstream revision and adaptations are recorded in `packages/relay/NOTICE`; the full license is retained in `packages/relay/LICENSE`.
+
+## resvg-js
+
+`@resvg/resvg-js` 2.6.2 and its platform native package render the existing Agent and Mote artwork in the independent Host. They are distributed unmodified under MPL-2.0. The full license is retained in the distributed `@resvg/resvg-js/LICENSE`; source is available from the [upstream resvg-js repository](https://github.com/yisibl/resvg-js).
