@@ -9,7 +9,9 @@ const targets = [
   'apps/desktop/src/renderer/src/components/FocusFilters.tsx',
   'apps/desktop/src/renderer/src/lib/focus-filters.ts',
   'apps/desktop/src/renderer/src/lib/focus-lane-origin.ts',
-  'apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx'
+  'apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx',
+  'apps/desktop/src/renderer/src/lib/focus-context.ts',
+  'apps/desktop/src/renderer/src/components/FocusContextCardBody.tsx'
 ]
 const mutations: Record<string, [string, string, string]> = {
   'drop-types': [targets[1]!, 'return selected.length === 0 || selected.some(type => types.includes(type))', 'return true'],
@@ -17,7 +19,11 @@ const mutations: Record<string, [string, string, string]> = {
   'drop-project': [targets[1]!, 'return selected.length === 0 || selected.some(project => project.id === key)', 'return true'],
   'remove-survey': [targets[2]!, "types.push('survey')", "types.push('unknown')"],
   'close-multi-select': [targets[0]!, 'onSelect={event => event.preventDefault()}', 'onSelect={() => {}}'],
-  'forget-unavailable': [targets[0]!, '...value.projects.filter(option => !known.has(option.id)).map(', '...[].map(']
+  'forget-unavailable': [targets[0]!, '...value.projects.filter(option => !known.has(option.id)).map(', '...[].map('],
+  'drop-coordination': [targets[3]!, 'const coordinationResults = filtering ? matched.filter(row => !executionIds.has(row.id)) : []', 'const coordinationResults = []'],
+  'read-coordination-body': [targets[4]!, 'agentContextWithConversation(session, undefined, name, workspace, topicId, focusConversationFacts(undefined))', 'agentContextForSession(session, timeline, name, workspace, topicId)'],
+  'recap-read': [targets[5]!, 'if (!summary || context.recap !== undefined) return', 'if (!summary) return'],
+  'wrong-mote-scope': [targets[3]!, "if (!topicId || focusLaneForSession(topicId, scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)) !== 'pmo') {", 'if (!topicId) {']
 }
 export default defineConfig({
   ...source,
@@ -35,6 +41,6 @@ export default defineConfig({
     if (process.env.AGENTMUX_FOCUS_COMPOSABLE_LOADED) appendFileSync(process.env.AGENTMUX_FOCUS_COMPOSABLE_LOADED, JSON.stringify({path, originalSHA256:createHash('sha256').update(original).digest('hex'), loadedSHA256:createHash('sha256').update(code).digest('hex'), mutant:code!==original?mutant:null})+'\n')
     if (code !== original) return {code,map:null}
   } }],
-  test: { ...source.test, include: ['apps/desktop/test/focus-narrow-filters.test.tsx', 'apps/desktop/test/focus-composable-filters.test.tsx', 'apps/desktop/test/focus-source-filter-membership.test.ts', 'apps/desktop/test/focus-lane-origin.test.tsx', 'apps/desktop/test/focus-history-search.test.tsx'],
+  test: { ...source.test, include: ['apps/desktop/test/focus-narrow-filters.test.tsx', 'apps/desktop/test/focus-composable-filters.test.tsx', 'apps/desktop/test/focus-source-filter-membership.test.ts', 'apps/desktop/test/focus-lane-origin.test.tsx', 'apps/desktop/test/focus-history-search.test.tsx', 'apps/desktop/test/focus-coordination-projection.test.tsx', 'apps/desktop/test/focus-context-cost.test.ts'],
     setupFiles: [], globalSetup: [], maxWorkers: 1, fileParallelism: false, passWithNoTests: false }
 })

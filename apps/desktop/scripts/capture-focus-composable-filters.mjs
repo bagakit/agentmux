@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, relative } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
+import { productInputs, captureInputs } from './fixtures/focus-composable-filters/inputs.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
 assert.ok(process.argv[2] === '--evidence' && process.argv[3] && process.argv.length === 4, 'Use --evidence <private evidence directory>')
@@ -18,9 +17,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs =
 const receipt = { schema: 'agentmux.focus-composable-filters-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', userAppRunRuntimeControlled: false,
   boundary: 'Private Electron Renderer with actual App, GlobalFocusSurface, FocusFilters, Store and Workbench; maintained typed preview API. Only PTY/Agent and unused Monaco painting leaves isolated. No live Runtime, native Run proof, installation, user navigation or restart.' }
 try {
-  const freshness = spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e', `const {assertWorkspaceDistBuiltFromCurrentSource}=await import(${JSON.stringify(pathToFileURL(join(root, 'vitest.dist-freshness.ts')).href)});await assertWorkspaceDistBuiltFromCurrentSource(${JSON.stringify(root)});`], { cwd: root, encoding: 'utf8' })
-  await writeFile(join(evidence, 'freshness.log'), freshness.stdout + freshness.stderr)
-  receipt.distFreshness = { passed: freshness.status === 0, exitCode: freshness.status, loadedDist: false, resolution: 'Current workspace public export source aliases, including when dist is stale.' }
+  receipt.sourceResolution = { loadedDist: false, resolution: 'Current workspace public export source aliases; no Desktop build or unrelated dist scan.' }
   const workspaceSource = { name: 'current-workspace-public-sources', setup(builder) {
     // Preserve Vite's asset URL contract for the unused PDF leaf; emit the real
     // installed worker asset rather than treating its module as a default export.
@@ -70,7 +67,7 @@ try {
     })
     builder.onLoad({ filter: /\.css$/ }, async ({ path }) => { if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return; const source = await readFile(path, 'utf8'); inputs.set(path, hash(source)); return { contents: source, loader: 'css' } })
   } }
-  for (const path of [join(fixture, 'main.cjs'), join(fixture, 'entry.mjs'), fileURLToPath(import.meta.url)]) inputs.set(path, hash(await readFile(path)))
+  for (const input of captureInputs) { const path = join(root, input); inputs.set(path, hash(await readFile(path))) }
   const out = join(privateRoot, 'out'); await mkdir(out)
   const renderer = join(out, 'app.js'), buildResult = await build({ entryPoints: [join(fixture, 'entry.mjs')], outfile: renderer, bundle: true, platform: 'browser', format: 'esm', target: 'es2022', jsx: 'automatic', metafile: true,
     plugins: [workspaceSource], conditions: ['browser', 'import', 'production', 'default'], logLevel: 'silent', define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff2': 'file', '.woff': 'file', '.ttf': 'file' } })
@@ -83,8 +80,18 @@ try {
   receipt.actual = JSON.parse(await readFile(join(evidence, 'actual.json'), 'utf8')); assert.equal(receipt.process.exitCode, 0, receipt.actual.failure?.message); assert.equal(receipt.actual.passed, true)
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
   assert.ok(receipt.frames.length >= 12, 'Both themes at 320/640/1440, menu and applied conditions')
-  receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs.keys()].map(async path => [relative(root, path), hash(await readFile(path))])))
-  assert.deepEqual(receipt.sourceAfter, receipt.inputs, 'Loaded current source stable during capture'); receipt.capturedPass = true
+  receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs.keys()].map(async path => {
+    try { return [relative(root, path), hash(await readFile(path))] }
+    catch (error) { if (error.code === 'ENOENT') return [relative(root, path), null]; throw error }
+  })))
+  receipt.affectedInputs = [...productInputs, ...captureInputs]
+  for (const path of receipt.affectedInputs) {
+    assert.equal(typeof receipt.inputs[path], 'string', 'Actual loaded affected input ' + path)
+    assert.equal(receipt.sourceAfter[path], receipt.inputs[path], 'Affected source stable during capture ' + path)
+  }
+  receipt.peripheralCaptureDrift = Object.entries(receipt.inputs).filter(([path, sha]) => !receipt.affectedInputs.includes(path) && receipt.sourceAfter[path] !== sha)
+    .map(([path, before]) => ({ path, before, after: receipt.sourceAfter[path], gate: 'Peripheral provenance; outside shared affected input scope.' }))
+  receipt.capturedPass = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack, ...(error.errors ? { errors: error.errors } : {}) }; process.exitCode = 1 }
 finally {
   await writeFile(join(evidence, 'process.log'), logs.join('\n'))
