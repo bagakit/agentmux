@@ -10,7 +10,7 @@ import { allStyleRules } from './helpers/styles.js'
 import {
   AGENT_DISPLAY_STATES,
   isNeedsYouState
-} from '../src/renderer/src/lib/attention-vocabulary.js'
+} from '@agentmux/client-ui/attention-vocabulary'
 import {
   attentionAccentFor,
   categoryFor
@@ -773,7 +773,7 @@ describe('each attention call site is wired to the shared vocabulary', () => {
       // 的旧写法会当场红。红了之后最省事的修法是把判据改松——那会把这个文件关掉的每一条旁路重新
       // 打开。所以这里认那个安全拼法，而不是削弱断言。
       expect(source, relative).toMatch(
-        /import \{[^}]*\bisNeedsYouState\b[^}]*\} from '\.\/attention-vocabulary'/
+        /import \{[^}]*\bisNeedsYouState\b[^}]*\} from '@agentmux\/client-ui\/attention-vocabulary'/
       )
     }
 

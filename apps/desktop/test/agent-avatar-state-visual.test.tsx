@@ -32,7 +32,7 @@ vi.mock('../src/renderer/src/store.js', () => ({
 import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar.js'
 import { RosterRowView } from '../src/renderer/src/components/AgentRoster.js'
 import { buildAgentRoster } from '../src/renderer/src/lib/agent-roster.js'
-import { AGENT_DISPLAY_STATES } from '../src/renderer/src/lib/attention-vocabulary.js'
+import { AGENT_DISPLAY_STATES } from '@agentmux/client-ui/attention-vocabulary'
 import { attentionAccentFor } from '../src/renderer/src/lib/attention-event.js'
 import { allStyleRules } from './helpers/styles.js'
 

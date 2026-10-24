@@ -89,7 +89,7 @@ vi.mock('../src/renderer/src/components/SurfaceToolDock', () => ({ SurfaceToolDo
 import { App } from '../src/renderer/src/App'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { AGENT_DISPLAY_STATES } from '../src/renderer/src/lib/attention-vocabulary'
+import { AGENT_DISPLAY_STATES } from '@agentmux/client-ui/attention-vocabulary'
 import { registerIpc } from '../src/main/ipc'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 

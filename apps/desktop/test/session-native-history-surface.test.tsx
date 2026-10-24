@@ -9,7 +9,7 @@ import type { AgentSessionHistoryDescriptor, AgentSessionHistoryPage } from '@ag
 import type { AgentSessionControl, AgentSessionRecoveryCandidate, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
-import * as recapFacts from '../src/renderer/src/lib/launcher-resume'
+import * as recapFacts from '@agentmux/client-ui/conversation-recap'
 import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
 
 const fixture = vi.hoisted(() => ({

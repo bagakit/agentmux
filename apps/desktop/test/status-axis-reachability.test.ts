@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AGENT_DISPLAY_STATES, isNeedsYouState } from '../src/renderer/src/lib/attention-vocabulary'
+import { AGENT_DISPLAY_STATES, isNeedsYouState } from '@agentmux/client-ui/attention-vocabulary'
 // `allStyles` 只给剥注释自检用（证明剥注释真剥掉了东西）；所有判「声明在不在场」的断言走 `allStyleRules`。
 import { allStyleRules, allStyles } from './helpers/styles.js'
 

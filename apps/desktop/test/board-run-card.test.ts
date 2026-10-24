@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
-import { AGENT_DISPLAY_STATES } from '../src/renderer/src/lib/attention-vocabulary'
+import { AGENT_DISPLAY_STATES } from '@agentmux/client-ui/attention-vocabulary'
 import { URGENT_ATTENTION_CATEGORIES, attentionAccentFor } from '../src/renderer/src/lib/attention-event'
 import { boardRunCardAttributes } from '../src/renderer/src/lib/board-run-card'
 import { allStyleRules } from './helpers/styles.js'

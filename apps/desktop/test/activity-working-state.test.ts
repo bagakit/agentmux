@@ -5,7 +5,7 @@ import {
   showEmptyState,
   showWorkingIndicator,
   turnWorking
-} from '../src/renderer/src/lib/activity-working-state.js'
+} from '@agentmux/client-ui/activity-working-state'
 
 // 要修的那一幕：刚发完 prompt，首行还没落地，窗格显示「暂无活动」——看上去是空的、停的。
 

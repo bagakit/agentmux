@@ -63,7 +63,7 @@ import { describe, expect, it } from 'vitest'
 // (`['waiting','blocked'].includes(state)` — the tuple's elements type as their own singletons, so the
 // 2+-member test declines), literals assembled at runtime, and — for tier A — a copy in a file that
 // imports nothing from the SSOT *through a named import* while also naming only one needs-you state. That
-// last one includes a namespace import (`import * as v from './attention-vocabulary'`), which does not
+// last one includes a namespace import (`import * as v from '@agentmux/client-ui/attention-vocabulary'`), which does not
 // enroll the file. It is the price of deriving tier A's scope from the import graph instead of a path
 // list, and it is the better trade: a path list decays silently on every new file, whereas this hole
 // shrinks every time a surface enrolls in the SSOT. Tier B covers the full copy in such a file regardless.
@@ -77,7 +77,7 @@ import { describe, expect, it } from 'vitest'
 
 const DESKTOP_DIR = fileURLToPath(new URL('..', import.meta.url))
 const SRC_DIR = path.join(DESKTOP_DIR, 'src')
-const VOCABULARY_FILE = path.join(SRC_DIR, 'renderer/src/lib/attention-vocabulary.ts')
+const VOCABULARY_FILE = fileURLToPath(new URL('../../../packages/client-ui/src/lib/attention-vocabulary.ts', import.meta.url))
 
 /**
  * Can a needs-you decision live in this file? Declaration files hold types and no function bodies.

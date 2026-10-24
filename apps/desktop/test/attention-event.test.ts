@@ -14,7 +14,7 @@ import { sessionBoardColumn } from '../src/renderer/src/lib/project-board.js'
 import {
   AGENT_DISPLAY_STATES,
   isNeedsYouState
-} from '../src/renderer/src/lib/attention-vocabulary.js'
+} from '@agentmux/client-ui/attention-vocabulary'
 
 function agent(
   id: string,

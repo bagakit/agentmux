@@ -3,7 +3,7 @@ import {
   resolveAgentName,
   resolveTabName,
   type TabAgentMember
-} from '../src/renderer/src/lib/display-name.js'
+} from '@agentmux/client-ui/display-name'
 
 /**
  * 显示名的唯一优先级链：`用户手改 > 启动时指定 > 从成员/首条 prompt 派生 > Provider·Workspace 派生`。

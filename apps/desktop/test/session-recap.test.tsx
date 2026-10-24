@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 import { SessionRecap } from '../src/renderer/src/components/SessionRecap'
 import { api } from '../src/renderer/src/lib/api'
-import * as recapFacts from '../src/renderer/src/lib/launcher-resume'
+import * as recapFacts from '@agentmux/client-ui/conversation-recap'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerSession } from './helpers/composer-dom-fixture'
 
@@ -20,7 +20,7 @@ function page(id = identity.agentSessionId, text = 'Original native reply'): Age
 }
 function timeline(id = identity.agentSessionId, content = 'Original captured reply'): AgentTimelineSnapshot {
   return { agentSessionId: id, revision: 1, items: [{ id: 'reply', agentSessionId: id,
-    kind: 'assistant_message', status: 'complete', source: 'native-hook', title: 'Reply',
+    kind: 'assistant_message', status: 'complete', source: 'native-transcript', title: 'Reply',
     createdAt: 1, updatedAt: 1, content }] }
 }
 async function render(session = identity, visible = true) {
