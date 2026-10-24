@@ -386,19 +386,33 @@ export class DeviceWorkfaceStore {
     this.storage().setItem(DEVICE_WORKFACE_KEY, bytes)
     this.lastRaw = bytes; this.issue = null; this.writeUnavailable = false
   }
-  private exclusive<T>(action: () => T): Promise<T> {
+  private exclusive<T>(action: () => T, signal?: AbortSignal): Promise<T> {
     // setItem is atomic; a read/modify/write is not. All writers share this lock.
-    return withDeviceStorageLock(action)
+    return withDeviceStorageLock(action, signal)
   }
-  retainGoalRequest(item: MobileGoalOperationRecord, expectedRecordId: string | null): Promise<void> {
+  retainGoalRequest(item: MobileGoalOperationRecord, expectedRecordId: string | null, signal?: AbortSignal): Promise<void> {
     const captured = parseMobileGoalOperationRecord(item)
     return this.update(record => {
       const current = record.goalOperationRecords ?? []
       const existing = current.find(value => value.request.operationId === captured.request.operationId)
-      if (existing && !sameValue(existing, captured)) throw new Error('原操作身份已绑定其他请求；原记录未覆盖。')
+      if (existing) {
+        const { confirmation: _confirmation, ...original } = existing
+        if (!sameValue(original, captured)) throw new Error('原操作身份已绑定其他请求；原记录未覆盖。')
+      }
       if (!existing && current.length >= MAX_ENTRIES) throw new Error('设备操作记录已满；原记录与本次请求均保留。')
       return existing ? record : { ...record, goalOperationRecords: [...current, captured] }
-    }, expectedRecordId).finally(() => this.notifyGoalIntents())
+    }, expectedRecordId, undefined, signal).finally(() => this.notifyGoalIntents())
+  }
+  readGoalRequest(item: MobileGoalOperationRecord, expectedRecordId: string | null): 'saved' | 'confirmed' | 'absent' | 'changed' | 'unknown' {
+    try {
+      const raw = this.storage().getItem(DEVICE_WORKFACE_KEY)
+      const value = raw === null ? emptyDeviceWorkface() : parseDeviceWorkface(JSON.parse(raw))
+      if ((value.recordId ?? null) !== expectedRecordId) return 'changed'
+      const existing = value.goalOperationRecords?.find(record => record.request.operationId === item.request.operationId)
+      if (!existing) return 'absent'
+      const { confirmation: _confirmation, ...original } = existing
+      return !sameValue(original, item) ? 'changed' : _confirmation === 'confirmed' ? 'confirmed' : 'saved'
+    } catch { return 'unknown' }
   }
   confirmGoalRequest(item: MobileGoalOperationRecord, expectedRecordId: string | null): Promise<void> {
     const captured = parseMobileGoalOperationRecord(item)
@@ -406,12 +420,28 @@ export class DeviceWorkfaceStore {
       const current = record.goalOperationRecords ?? []
       const existing = current.find(value => value.request.operationId === captured.request.operationId)
       if (!existing) return record
-      if (!sameValue(existing, captured)) throw new Error('原操作记录已改变；原回执未覆盖其他请求。')
+      const { confirmation, ...original } = existing
+      if (!sameValue(original, captured)) throw new Error('原操作记录已改变；原回执未覆盖其他请求。')
+      if (confirmation === 'confirmed') return record
       return { ...record, goalOperationRecords: current.filter(value => value !== existing) }
     }, expectedRecordId).finally(() => this.notifyGoalIntents())
   }
+  markGoalRequestConfirmed(item: MobileGoalOperationRecord, expectedRecordId: string | null, signal?: AbortSignal): Promise<void> {
+    const captured = parseMobileGoalOperationRecord(item)
+    return this.update(record => {
+      const current = record.goalOperationRecords ?? []
+      const existing = current.find(value => value.request.operationId === captured.request.operationId)
+      if (!existing) {
+        if (current.length >= MAX_ENTRIES) throw new Error('设备操作记录已满；原记录与本次请求均保留。')
+        return { ...record, goalOperationRecords: [...current, { ...captured, confirmation: 'confirmed' }] }
+      }
+      const { confirmation: _confirmation, ...original } = existing
+      if (!sameValue(original, captured)) throw new Error('原操作记录已改变；原回执未覆盖其他请求。')
+      return { ...record, goalOperationRecords: current.map(value => value === existing ? { ...existing, confirmation: 'confirmed' } : value) }
+    }, expectedRecordId, undefined, signal).finally(() => this.notifyGoalIntents())
+  }
   private update<T = void>(change: (value: DeviceWorkface) => DeviceWorkface, expectedRecordId?: string | null,
-    acknowledge?: (committed: DeviceWorkface) => T): Promise<T> {
+    acknowledge?: (committed: DeviceWorkface) => T, signal?: AbortSignal): Promise<T> {
     this.writeRevision++
     this.refresh()
     const recordId = expectedRecordId === undefined ? this.value.recordId ?? null : expectedRecordId
@@ -425,7 +455,14 @@ export class DeviceWorkfaceStore {
     this.pending.push(project)
     const releasePending = () => { const index = this.pending.indexOf(project); if (index >= 0) this.pending.splice(index, 1) }
     let domainFailure = false, failedLatest: DeviceWorkface | undefined, failedRaw: string | null | undefined
-    const work = this.tail.then(() => this.exclusive(() => {
+    const previous = this.tail
+    let cancelWait: (() => void) | undefined
+    const cancelled = signal && new Promise<never>((_, reject) => {
+      cancelWait = () => reject(new DOMException('设备记录等待已取消。', 'AbortError'))
+      if (signal.aborted) cancelWait()
+      else signal.addEventListener('abort', cancelWait, { once: true })
+    })
+    const execution = previous.then(() => this.exclusive(() => {
       if (this.issue && !this.writeUnavailable) throw new Error(this.issue)
       const raw = this.storage().getItem(DEVICE_WORKFACE_KEY)
       const latest = raw === null ? emptyDeviceWorkface() : parseDeviceWorkface(JSON.parse(raw))
@@ -439,8 +476,17 @@ export class DeviceWorkfaceStore {
       this.value = this.projectPending(next)
       this.temporary = this.pending.length > 0
       return acknowledged
-    })).catch(error => {
+    }, signal))
+    const work = (cancelled ? Promise.race([execution, cancelled]) : execution).catch(error => {
       releasePending()
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        try {
+          const raw = this.storage().getItem(DEVICE_WORKFACE_KEY)
+          const latest = raw === null ? emptyDeviceWorkface() : parseDeviceWorkface(JSON.parse(raw))
+          this.lastRaw = raw; this.value = this.projectPending(latest); this.temporary = this.pending.length > 0
+        } catch { /* Keep the original issue and temporary workface. */ }
+        throw error
+      }
       if (domainFailure && failedLatest) {
         this.lastRaw = failedRaw
         this.value = this.projectPending(failedLatest)
@@ -451,8 +497,9 @@ export class DeviceWorkfaceStore {
         this.issue = '设备意图尚未持久保存；先前记录仍保留，当前内存与原操作可继续。刷新保障不足，请导出备份，存储恢复后重试保存。'
       }
       throw error
-    })
-    this.tail = work.catch(() => {})
+    }).finally(() => { if (signal && cancelWait) signal.removeEventListener('abort', cancelWait) })
+    // Cancelling this one wait must not let later writes overtake an earlier write.
+    this.tail = previous.then(() => work.catch(() => {}))
     return work
   }
   /** Preserve other tabs and refuse a replacement device record or changed original packet. */
