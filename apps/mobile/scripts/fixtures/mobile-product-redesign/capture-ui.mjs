@@ -79,11 +79,15 @@ try {
   const iconOwner = path.join(compiled, 'project-appearance-owner.mjs')
   await build({ absWorkingDir: root, entryPoints: ['apps/desktop/src/main/project-appearance.ts'], outfile: iconOwner, bundle: true, platform: 'node', format: 'esm', logLevel: 'error' })
   const projectAppearance = await (await import(pathToFileURL(iconOwner).href)).projectAppearance(iconProject)
+  const providerOwner = path.join(compiled, 'provider-catalog-owner.cjs')
+  await build({ absWorkingDir: root, entryPoints: ['packages/core/src/agent-provider.ts'], outfile: providerOwner, bundle: true, platform: 'node', format: 'cjs', logLevel: 'error' })
+  const providerCatalog = new (require(providerOwner)).AgentProviderRegistry().catalog()
+  assert.ok(providerCatalog.find(value => value.id === 'codex')?.composer?.commands?.length, 'Original Provider owner declares the captured Commands')
   assert.ok(projectAppearance.icon?.startsWith('data:image/'), 'The original App filesystem owner returns the real bounded project image')
   receipt.projectAppearance = { owner: 'apps/desktop/src/main/project-appearance.ts', kind: projectAppearance.kind, source: 'apps/desktop/resources/icon-128.png', imageSha256: sha(projectAppearance.icon) }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'product-entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...overrides, clientSources, workers],
-    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: JSON.stringify(projectAppearance), __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
+    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_MOBILE_PROVIDER_CATALOG__: JSON.stringify(providerCatalog), __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: JSON.stringify(projectAppearance), __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('(disabled):') && !file.startsWith('<define:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   if (receipt.sourceOverride) {
     assert.equal(receipt.source[receipt.sourceOverride.file], receipt.sourceOverride.originalSha256, 'Mutation targets an actual nonempty production input')
@@ -95,7 +99,8 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, ...(process.argv.includes('--parity-final') ? ['parity-final'] : process.argv.includes('--baseline') ? ['baseline'] : process.argv.includes('--navigation') ? ['navigation'] : process.argv.includes('--source-recovery') ? ['source-recovery'] : process.argv.includes('--input-history') ? ['input-history'] : [])],
+  const subset = ['commands-entry', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, ...(subset ? [subset] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))

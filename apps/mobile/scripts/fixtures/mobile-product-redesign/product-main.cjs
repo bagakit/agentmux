@@ -41,6 +41,7 @@ app.whenReady().then(async () => {
     await tap('[data-capture-control=' + JSON.stringify(selected) + ']', label)
   }
   const capture = async name => {
+    if (mode === 'commands-entry' && !name.startsWith('commands-')) return
     if (mode === 'parity-final' && !['focus-overview-phone', 'space-directory-430', 'focus-result-conversation-narrow', 'unknown-details-short-viewport', 'offline-retained-short'].includes(name)) return
     if (mode === 'source-recovery' && !['navigation-offline-source-restored-narrow', 'navigation-reconnected-source-narrow'].includes(name)) return
     await pause(120)
@@ -79,6 +80,32 @@ app.whenReady().then(async () => {
   await tap('.mobile-conversation-panel [contenteditable=true]', 'Original shared Composer')
   win.webContents.insertText('先比较两种方案，保留原来的依据。')
   await capture('mote-conversation-phone')
+  if (mode === 'commands-entry') {
+    assert.equal(await read('document.querySelector(".composer-tools").dataset.mode'), 'collapsed')
+    await resize(320, 568)
+    await capture('commands-entry-narrow-short')
+    await button('Choose a command')
+    await until('!!document.querySelector(".mobile-command-menu")')
+    await capture('commands-menu-narrow-short')
+    await read('mobileProductScene.setAppearance("light")')
+    await resize(430, 480)
+    await capture('commands-menu-light-short')
+    await tap('input[aria-label="查找命令"]', 'Search original Provider Commands')
+    win.webContents.insertText('compact')
+    await until('document.querySelectorAll(".mobile-command-menu [role=menuitem]").length>0')
+    const command = await read('document.querySelector(".mobile-command-menu [role=menuitem] strong").textContent')
+    await button(command, '.mobile-command-menu')
+    assert.equal(await visible('.mobile-command-menu'), false)
+    assert.equal(await read('document.querySelector("[contenteditable=true]")===window.originalCaptureEditor'), true)
+    const text = await read('document.querySelector("[contenteditable=true]").textContent')
+    assert.ok(text.includes('先比较两种方案，保留原来的依据。') && text.includes(command))
+    const target = result.operations.find(value => value.target === 'Choose a command' && value.action === 'touch').observed.rect
+    assert.ok(target.width >= 44 && target.height >= 44)
+    assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.submitAgentPrompt").length'), 0)
+    await capture('commands-inserted-light-short')
+    result.passed = true
+    return
+  }
   if (mode === 'input-history') {
     const before = await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.submitAgentPrompt").length')
     await tap('.mobile-conversation-panel .mobile-message-tools__trigger', 'Current Agent input history')
