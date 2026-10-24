@@ -149,12 +149,12 @@ export function useGitHistoryDetails(scope: string, enabled: boolean) {
     <code className="git-history-details__oid">{opened.commit.oid}</code>
     <dl className="git-history-details__metadata">
       <dt>Author</dt><dd>{opened.commit.author || '(Not recorded)'}</dd>
-      <dt>Time</dt><dd>{knownTime ? <time dateTime={knownTime.toISOString()}>{knownTime.toLocaleString()}</time> : 'Time unknown'}</dd>
+      <dt>Author time</dt><dd>{knownTime ? <time dateTime={knownTime.toISOString()} title="Local time">{knownTime.toLocaleString()}</time> : 'Time unknown'}</dd>
     </dl>
     <section aria-label="Commit parents"><h4>Parents · {opened.commit.parents.length}</h4>
       {opened.commit.parents.length ? <ul>{opened.commit.parents.map(parent => <li key={parent}><code>{parent}</code></li>)}</ul> : <p>Root commit · no parents</p>}
     </section>
-    <section aria-label="Commit references"><h4>References · {opened.commit.refs.length}</h4>
+    <section aria-label="Commit references"><h4>Snapshot references · {opened.commit.refs.length}</h4>
       {opened.commit.refs.length ? <ul>{opened.commit.refs.map(ref => <li key={ref.name} className="git-history-details__ref">
         <span>{ref.kind}</span><code>{ref.name}</code><code>{ref.oid}</code>
       </li>)}</ul> : <p>No references at this commit</p>}

@@ -2,6 +2,13 @@
 .git-history-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; color: var(--text-2); background: var(--surface-0); }
 .git-history-controls { flex: 0 0 30px; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-3); }
 .git-history-controls .icon-button { flex: 0 0 24px; width: 24px; height: 24px; }
+.git-history-snapshot { display: flex; flex: none; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 0 var(--sp-3) var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); }
+.git-history-snapshot button { border: 0; padding: var(--sp-1) 0; color: inherit; background: none; font: inherit; cursor: pointer; }
+.git-history-snapshot button:hover:not(:disabled) { color: var(--text); }
+.git-history-notice { display: flex; flex: none; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--text-2); background: var(--surface-1); font-size: var(--fs-micro); }
+.git-history-notice > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.git-history-notice small { display: block; margin-top: var(--sp-1); color: var(--text-3); font-size: inherit; }
+.git-history-notice button { flex: none; border: 0; padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); font: inherit; cursor: pointer; }
 .git-history-error { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .git-history-scroll { flex: 1; min-height: 0; overflow: auto; }
 .git-history-window { position: relative; min-width: 0; padding: 0 var(--sp-2); }
