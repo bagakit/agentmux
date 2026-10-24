@@ -267,6 +267,10 @@ Category／Topic／Chat／Thread 的对象、默认「未分类」、来源知�
 
 用户要求把「在某处打开的 agent 移动到别处」，并确认「不改变执行目录，只改变在agentmux里的空间位置」。`space mv` 绑定源 Region 及其预期 Session，使用同一目标层级；多投影时不得凭 Session 猜来源，目标占用时不得静默替换健康 Agent。落地结果须明确源投影移除、目标位置保留，同一 Session/Run/cwd/原生句柄与其他投影保留；不能复制、合并到第一块同 Session 投影或把关闭源 Region 当成停止 Agent。跨 Zone 目标如实显示原执行目录。源与目标的持久化恢复一致，未知提交不能报告已移动或盲目重移。
 
+普通本机后台创建由原 Host 承担配置与上下文策略，沿 Core 的同一空间锁登记原操作与准确 Tab／Region／Session 关联，再交原 Core 创建 owner；不依赖 Desktop 是否在线。范围由原请求语义及原 Zone 的真实执行 Host 决定，既有远端、原生接续、资源创建或前台聚焦流程继续沿自己的准确 owner，不能按客户端品牌或观察失败切换。桌面和手机消费同一后台能力，不把手机当前支持范围变成桌面已有能力的限制。
+
+创建回执不明时，读取原 `space.inspect` 操作只观察、核对及补齐已确认的空间投影，不启动 Agent 或重投首句。明确「继续原创建」保留同一输入、操作和 Session，交回原 Core 的幂等创建 owner；由原创建记录、在途 claim 与实际 Runtime 回执决定取回原结果或继续原准备。空间已登记但 Core 是否已准备仍未知，不能把 unknown 或错误文案当成尚未执行的证明，也不能另造 Session 绕过恢复。原位置已被明确移动、关闭或替换时保留现有布局，创建恢复不重新占据它。
+
 动作回执分别表达资源/Git checkout、Workspace 登记、工作面放置、Core Session 创建与首句投递的真实事实。启动成功、PTY 接收字节、Core 既有协议投递确认和 Agent 接受/开始/完成任务不能相互代签。后续流程失败保留已创建资源、持久工作面与健康 Session；回执丢失或进程重启后能按精确身份查询已发生、未发生与未知的事实，未知不得触发重复创建或重投。恢复先保留原 durable Tab/Group/Region/布局/焦点及空间绑定，再尝试同 Session reattach/resume；Session 执行目录与展示 Zone 不同不能成为删除投影的理由，移除仍须 Core 的真实终局事实。流程握手、观察或布局失败不能停止健康 Run。
 
 布局已应用、客户端偏好已写入、宿主 flush 已请求与磁盘耐久性已确认分别报告；耐久性只能由 Core 的[持久空间状态 owner](../../architecture/spatial-state.md)完成耐久写入后确认，不能因为 localStorage 写入或 await IPC 就声称已经落盘。未取得确认时如实报告 unconfirmed，保留原工作面、未保存改动与健康 Agent；客户端偏好、草稿或呈现快照不能替代、覆盖 Core 的空间状态。源移除与目标落点沿同一次 Core 空间提交保存；真实私有普通进程重启后读回同一空间绑定、布局与 Session 引用，才证明恢复验收。CLI 回执保持现有 JSON 输出，身份可原样用于后续命令。
