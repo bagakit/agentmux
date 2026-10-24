@@ -116,6 +116,42 @@ it.each([false, true])('a cancelled native selection does not focus Desktop or c
   expect(useAppStore.getState().sessions[0]?.control).toEqual(composerSession().control)
 })
 
+it('explicit focus in a remote Composer supersedes the earlier eligible local draft without capturing or inserting there', async () => {
+  const native = vi.fn(async () => ({ state: 'cancelled' as const }))
+  const { saved, focus } = connect(native)
+  const remote = { ...composerSession('remote-draft'), hostId: 'remote',
+    control: { ...composerSession('remote-draft').control, hostId: 'remote' } }
+  useAppStore.setState({ sessions: [composerSession(), remote],
+    agentComposerDrafts: { 'agent-1': 'Local original draft', 'remote-draft': 'Remote original draft' } })
+  await dom.render(<WorkbenchDocumentContext.Provider value={{ document, window: originalDocument }}>
+    <section data-draft="local"><AgentSessionComposer sessionId="agent-1" visible /></section>
+    <section data-draft="remote"><AgentSessionComposer sessionId="remote-draft" visible /></section>
+  </WorkbenchDocumentContext.Provider>)
+  const localNode = dom.container.querySelector<HTMLElement>('[data-draft="local"] .tiptap')!
+  const remoteNode = dom.container.querySelector<HTMLElement>('[data-draft="remote"] .tiptap')!
+  expect(localNode).toBeTruthy(); expect(remoteNode).toBeTruthy()
+  await act(async () => {
+    localNode.focus()
+    localNode.dispatchEvent(new FocusEvent('focusin', { bubbles: true, relatedTarget: document.body }))
+    // Establish that A was an actual usable target before the later B focus.
+    await runScreenshotShortcut()
+  })
+  expect(native).toHaveBeenCalledExactlyOnceWith({ mode: 'selection' })
+  native.mockClear(); saved.mockClear()
+  await act(async () => {
+    remoteNode.focus()
+    remoteNode.dispatchEvent(new FocusEvent('focusin', { bubbles: true, relatedTarget: localNode }))
+  })
+  expect(document.activeElement).toBe(remoteNode)
+  await act(async () => { await expect(runScreenshotShortcut()).rejects.toThrow(/Message Tool|draft|Composer/i) })
+  expect(native).not.toHaveBeenCalled()
+  expect(saved).not.toHaveBeenCalled()
+  expect(focus).not.toHaveBeenCalled()
+  expect(dom.draft('agent-1')).toBe('Local original draft')
+  expect(dom.draft('remote-draft')).toBe('Remote original draft')
+  expect(useAppStore.getState().sessions.map(session => session.control)).toEqual([composerSession().control, remote.control])
+})
+
 it('a late selection cannot attach or focus after the Launcher execution scope changes', async () => {
   let finish!: (value: typeof captured) => void
   const { saved, focus } = connect(vi.fn(() => new Promise<typeof captured>(resolve => { finish = resolve })))
