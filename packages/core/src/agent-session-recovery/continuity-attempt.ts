@@ -561,7 +561,9 @@ export async function performAgentContinuity(
         reason: 'lifecycle-busy', evidence: { kind: 'agent-session-store' } })
     }
     receipt.error = error instanceof Error ? error.message : String(error)
-    if (receipt.launchInput?.state === 'prepared') receipt.launchInput.state = error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied' ? 'not-applied' : 'unknown'
+    if (receipt.launchInput?.state === 'prepared') receipt.launchInput.state = error instanceof AgentMuxError &&
+      error.creationFailure?.operationId === agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId) &&
+      error.creationFailure.disposition === 'not_applied' ? 'not-applied' : 'unknown'
     return pending('operation-unconfirmed', evidence, policy.recheckMaxAttempts > 0 ? now + policy.recheckIntervalMs : undefined)
   }
 }
