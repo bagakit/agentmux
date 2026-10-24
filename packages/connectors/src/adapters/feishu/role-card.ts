@@ -30,9 +30,9 @@ export function feishuRoleCard(text: string, speaker: Readonly<FeishuRoleSpeaker
   const purpose = options.phase === 'final' ? 'Reply' : options.phase === 'progress' ? 'Progress' : undefined
   const identity = [speaker.name, roles[speaker.kind], purpose].filter(Boolean).join(' · ')
   body.elements.unshift({ tag: 'div', text_size: 'notation',
-    text: { tag: 'plain_text', content: identity },
-    icon: speaker.imageKey ? { tag: 'custom_icon', img_key: speaker.imageKey, size: compact ? '16px 16px' : '24px 24px' }
-      : { tag: 'standard_icon', token: roleIcons[speaker.kind], size: compact ? '16px 16px' : '20px 20px' } })
+    text: { tag: 'plain_text', content: identity, text_size: 'notation', text_color: 'grey' },
+    icon: speaker.imageKey ? { tag: 'custom_icon', img_key: speaker.imageKey, size: '16px 16px' }
+      : { tag: 'standard_icon', token: roleIcons[speaker.kind], size: '16px 16px' } })
   if (options.fragment && options.fragment.count > 1) body.elements.push({ tag: 'div', text_size: 'notation',
     text: { tag: 'plain_text', content: `${options.fragment.ordinal + 1}/${options.fragment.count}` } })
   return card
