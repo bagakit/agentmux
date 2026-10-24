@@ -5,18 +5,21 @@ import { expect, vi } from 'vitest'
 export async function openFocusFilters(container: HTMLElement) {
   const trigger=container.querySelector<HTMLButtonElement>('[aria-label="Focus filters"]')
   expect(trigger).not.toBeNull()
-  await act(async()=>trigger!.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'ArrowDown'})))
-  await vi.waitFor(async()=>{await act(async()=>{});expect(document.querySelector('.focus-filter-menu [role="menuitemradio"]')).not.toBeNull()})
+  if (!document.querySelector('.focus-filter-menu')) await act(async()=>trigger!.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'ArrowDown'})))
+  await vi.waitFor(async()=>{await act(async()=>{});expect(document.querySelector('.focus-filter-menu [role="menuitemcheckbox"]')).not.toBeNull()})
   return document.querySelector<HTMLElement>('.focus-filter-menu')!
 }
 export async function chooseFocusFilter(container: HTMLElement, kind: 'project' | 'state', value: string) {
-  const menu=await openFocusFilters(container),item=[...menu.querySelectorAll<HTMLElement>(`[data-focus-${kind}]`)].find(node => node.getAttribute(`data-focus-${kind}`) === value)
+  const menu=await openFocusFilters(container)
+  await act(async()=>menu.querySelector<HTMLElement>(`[data-focus-${kind}="all"]`)!.click())
+  const item=[...menu.querySelectorAll<HTMLElement>(`[data-focus-${kind}]`)].find(node => node.getAttribute(`data-focus-${kind}`) === value)
   expect(item).not.toBeNull();await act(async()=>item!.click());await act(async()=>{})
+  await act(async()=>menu.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Escape'})));await act(async()=>{})
 }
 export async function focusFilterOptions(container: HTMLElement, kind: 'project' | 'state') {
   const menu=await openFocusFilters(container),items=[...menu.querySelectorAll<HTMLElement>(`[data-focus-${kind}]`)]
   expect(items.length).toBeGreaterThan(0)
-  const options=items.map(item=>({value:item.getAttribute(`data-focus-${kind}`),text:item.textContent}))
+  const options=items.map(item=>({value:item.getAttribute(`data-focus-${kind}`),text:[item.querySelector('.focus-filter-menu__name')?.textContent,item.querySelector('.focus-filter-menu__count')?.textContent].filter(Boolean).join(' · ')}))
   await act(async()=>menu.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Escape'})));await act(async()=>{})
   return options
 }

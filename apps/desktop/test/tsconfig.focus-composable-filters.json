@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "types": ["node", "vite/client", "vitest/globals"] },
+  "include": ["../src/**/*.ts", "../src/**/*.tsx", "../*.ts", "focus-narrow-filters.test.tsx", "focus-composable-filters.test.tsx", "focus-source-filter-membership.test.ts", "focus-history-search.test.tsx"]
+}
