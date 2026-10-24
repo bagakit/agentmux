@@ -21,6 +21,7 @@
 | 持久 Mote、PMO、快捷面和原协调上下文 | [Mote 与 PMO 协调](behavior/motes-and-coordination.md) |
 | 目标对齐、结果核对、Demand、Board 与 Task | [Goals 与 Demand 闭环](behavior/goals-and-demand.md) |
 | 执行焦点、项目泳道、历史与时间音轨 | [Focus 执行上下文](behavior/focus-context.md) |
+| Map 的用途、空间地形、通信邻域与稳定阅读 | [Focus Map](behavior/collaboration-map.md) |
 | Session/Run/View、健康能力、重启和启动事实 | [Session、恢复与启动交付](behavior/session-recovery.md) |
 | 对话视图目标、当前与历史阅读、消息／过程／资源、答复及产品验收 | [对话视图 PRD](behavior/conversation-mode.md) |
 | Composer、Message Tools、草稿、队列、邮箱与持续推进 | [输入与邮箱](behavior/conversation-input.md) |
