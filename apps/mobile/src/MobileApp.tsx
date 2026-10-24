@@ -363,6 +363,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const exposed = sheet === null
   const moteConversation = showSession && objectIdentity?.mote && home === 'mote' && secondary === null
   const conversationVisible = workspaceVisible && showSession && !showGoalWork && workface.panel !== 'terminal'
+  const moteTitle = objectIdentity?.mote?.name ?? 'Mote 名称未确认'
   composeScope.current = { client, sessionId: workface.selectedSessionId, visible: conversationVisible, focusComposer }
   // The visible conversation owns its connection feedback. Storage and projection
   // failures remain separate facts even when the connection is also unavailable.
@@ -370,10 +371,10 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     !conversationVisible ? connection.issue ?? (hasConnected && !connected ? connection.message : null) : null
   ].filter((message): message is string => Boolean(message)))]
   return <MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-connection={connection.state} data-drawer={sheet === 'settings' ? 'open' : 'closed'} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
-    {!primaryHeader && <header className={`mobile-header${workspaceVisible && showSession && !moteConversation ? ' mobile-header--session' : ''}`}>
-      {workspaceVisible && showSession && !moteConversation ? <div className="mobile-session-toolbar">
+    {!primaryHeader && <header className={`mobile-header${workspaceVisible && showSession ? ' mobile-header--session' : ''}`}>
+      {workspaceVisible && showSession ? <div className="mobile-session-toolbar">
         <button type="button" className="mobile-session-origin" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={16} /><span>{pageName}</span></button>
-        {objectIdentity?.mote ? <button className="mobile-mote-heading mobile-session-identity" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={28} visible={exposed} /><span className="mobile-session-title">{sessionTitle ?? objectIdentity.name}</span></button>
+        {objectIdentity?.mote ? <button className="mobile-mote-heading mobile-session-identity" aria-label={`${moteConversation ? moteTitle : objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={28} visible={exposed} /><span className="mobile-session-title">{moteConversation ? moteTitle : sessionTitle ?? objectIdentity.name}</span></button>
           : <><MobileIdentity identity={objectIdentity ?? { name: sessionTitle ?? '原会话', project: pageName }} session={selected} client={client} connected={connected} size={24} visible={exposed} /><span className="mobile-session-title">{sessionTitle ?? selected?.providerId ?? '原会话'}</span></>}
         <div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible} />
         {terminalToggle}
@@ -459,7 +460,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         }
         if (!current.focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。')
       }}>
-        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></Dialog.Close></div>
+        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></Dialog.Close></div>
         {sheet === 'settings' ? <>
           <Dialog.Description id="mobile-sheet-description">工作面与手机设置</Dialog.Description>
 

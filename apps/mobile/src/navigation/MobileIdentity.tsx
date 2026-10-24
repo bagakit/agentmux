@@ -115,6 +115,6 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
       : selected?.glyph ? Glyph ? <Glyph size={size - 8} /> : <MoteMark size={size - 8} /> : <MoteMark size={size - 8} interactive={visible} data-mote-icon-source="automatic" />}</span>
       : <MobileSpaceIcon appearanceRevision={appearanceRevision} spaceId={objectSpaceId ?? identity.context?.spaceId} name={identity.project || identity.name} appearance={appearance} client={client} connected={connected} visible={visible} size={size - 8} />}
     {avatarIssue && <span className="mobile-avatar-issue" aria-label={avatarIssue}><ThemeStatusWarningIcon size={10} /></span>}
-  </span>{identity.mote && <MobileAvatarNotice owner={client} identity={[spaceId, session?.hostId, session?.agentSessionId, session?.run.runId, avatarIssue]} name={identity.name}
+  </span>{identity.mote && <MobileAvatarNotice owner={client} identity={[spaceId, session?.hostId, session?.agentSessionId, session?.run.runId, avatarIssue]} name={identity.mote.name ?? 'Mote 名称未确认'}
     issue={avatarIssue} visible={visible} {...(spaceId && connected && client?.forwardRpc ? { retry: () => setRetryRequest(value => ({ owner: sourceOwner, revision: value?.owner === sourceOwner ? value.revision + 1 : 1 })) } : {})} />}</>
 }
