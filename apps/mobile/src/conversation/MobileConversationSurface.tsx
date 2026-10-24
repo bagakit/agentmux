@@ -381,11 +381,6 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       }}>
         {(reading.page?.nextCursor || reading.capturedHasMore) && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { follow.current.following = false; void reading.older() }}>更早消息</button>}
         {reading.hasNewer && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { void reading.newer() }}>较新消息</button>}
-        {(jump || reading.newerAvailable || reading.olderWindow) && <button className="mobile-reading-action mobile-reading-latest" onClick={() => {
-          follow.current = initFollowState(); presentationIntent.current++; setJump(false)
-          if (reading.olderWindow || reading.newerAvailable) void reading.refresh()
-          else if (feed.current) feed.current.scrollTop = feed.current.scrollHeight
-        }}>{reading.newerAvailable ? '有新回复 · 回到最新' : '回到最新'}</button>}
         {workingObservedAt !== undefined ? <p className="mobile-active-state" role="status" data-activity-current={currentActivity}
           title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</p> : null}
         {agentSessionId ? <>
@@ -415,6 +410,11 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             {...(reading.page ? nativeReadingProps : readingProps)} />
         </> : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
       </div>
+      {(jump || reading.newerAvailable || reading.olderWindow) && <button className="mobile-reading-action mobile-reading-latest" onClick={() => {
+        follow.current = initFollowState(); presentationIntent.current++; setJump(false)
+        if (reading.olderWindow || reading.newerAvailable) void reading.refresh()
+        else if (feed.current) feed.current.scrollTop = feed.current.scrollHeight
+      }}>{reading.newerAvailable ? '有新回复 · 回到最新' : '回到最新'}</button>}
       {request && requestKey ? <div className="mobile-conversation__interaction">
         <AgentInteractionCard key={requestKey} request={request} disabled={responseDisabled}
           {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : responseUnavailableReason ? { responseUnavailableReason } : {})}

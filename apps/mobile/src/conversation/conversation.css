@@ -5,6 +5,14 @@
 .mobile-conversation__interaction > p { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .mobile-conversation__composer .composer { min-width: 0; }
 .mobile-conversation button { touch-action: manipulation; }
+.mobile-conversation .message-disclosure > summary { min-height: 44px; }
+.mobile-conversation .conversation-submission-record:has(> .message-disclosure[open]) { width: calc(100% - var(--sp-4)); }
+.mobile-conversation :is(.log-turn__action, .log-turn__id-copy, .conversation-input-details__toggle) > svg { width: 14px; height: 14px; }
+.mobile-conversation .log-turn__sender-id code { align-self: center; }
+.mobile-conversation .log-turn__identity, .mobile-conversation .log-turn__identity > .log-turn__time { align-self: center; }
+@container conversation-reading (max-width: 440px) {
+.mobile-conversation .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) .log-turn__who { align-self: center; padding-block-start: 0; }
+}
 @media (max-width: 480px) {
 .mobile-conversation .agent-interaction__actions { flex-wrap: wrap; }
 }
@@ -102,7 +110,7 @@
 .mobile-command-menu__list { max-height: min(32dvh, 220px); overflow-y: auto; display: grid; gap: 2px; }
 .mobile-command-menu__empty { margin: 4px 6px; font-size: 11px; color: var(--text-3); }
 .mobile-reading-action { align-self: center; padding: 4px 10px; border: 0; background: var(--surface-1); color: var(--text-muted); font-size: 11px; min-height: 44px; border-radius: 8px; }
-.mobile-reading-latest { position: sticky; top: 0; z-index: 1; }
+.mobile-reading-latest { flex: none; }
 .mobile-send-status { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; min-width: 0; margin: 3px 4px 0; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
 .mobile-send-status--collapsed { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px; border-radius: var(--radius-sm); background: var(--surface-1); }
 .mobile-send-status__collapsed-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-2); }
