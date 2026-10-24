@@ -301,6 +301,9 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       if (!f.values.has('--operation-id')) invalid('--operation-id is required for an exact original restart.')
       return { agentSessionId: id(f, '--session', true), expectedRun: { runId: id(f, '--run', true) }, operationId: value(f, '--operation-id', true)! }
     }, 'Requires an authenticated user or device and complete original Session/Run identities. Keep the same Run and operation ID after an unknown reply. Inspect the original operation; never retry with a new operation ID. Restart interrupts ongoing work, keeps the original native conversation and never replays a prompt. Ordinary Resume does not stop a healthy backend.')),
+  command('skill.ls', '--host ID --session ID', 'Discover Skills from the original Session Provider and execution workspace.',
+    { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) }),
+    'Read-only. Use agent ls to find the exact original Session and route Host; local means the receiving service. No Run is started and no Skill is executed or sent. Provider-declared roots and the original execution cwd determine discovery; callers cannot substitute a directory. An unavailable read is an error, not an empty discovery result.'),
   command('agent.refresh', '--session ID', 'Re-read the canonical original Session using its complete Session ID.',
     { '--session': 'data' }, f => ({ agentSessionId: id(f, '--session', true) }),
     'No Run is started, resumed or stopped and no input is sent. Passive native identity observation may confirm and persist metadata asynchronously; this reply does not promise identity recovery or reopen a retired Session. Use agent inspect for diagnostic inspection.'),
