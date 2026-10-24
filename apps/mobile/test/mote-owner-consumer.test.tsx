@@ -177,7 +177,7 @@ it('actual Service and Desktop Store preserve the canonical missing-observation 
       tabId: 'main-tab', regionId: 'main-region', displayWorkspaceId: 'second-display', groupId: 'saved-group'
     }) }))
     await click(row.querySelector('.mobile-agent-row__more')!)
-    await click(button(view.element, '查看消耗'))
+    expect(view.element.querySelector('[aria-label="Agent 消耗"]')).not.toBeNull()
     await act(async () => await vi.waitFor(() => expect(f.metadataRead).toHaveBeenCalledExactlyOnceWith('session-original')))
     expect(f.calls.filter(call => call.method === 'agent.inspect')).toEqual([{ method: 'agent.inspect', params: {
       target: { kind: 'agent-session', agentSessionId: 'session-original' }

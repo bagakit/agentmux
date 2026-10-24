@@ -70,8 +70,8 @@ describe('mobile persistent Agent identity and explicit continuity actions', () 
   })
   it('does not launch after the original Session selection changes while the authoritative read is pending', async () => {
     const f = setup(); let resolve!: (value: any) => void
-    vi.mocked(f.client.forwardRpc!).mockReturnValueOnce(new Promise(yes => { resolve = yes }) as never)
     const view = await mount(f.node)
+    vi.mocked(f.client.forwardRpc!).mockReturnValueOnce(new Promise(yes => { resolve = yes }) as never)
     await click(button(view.element, '恢复原 Agent'))
     await view.render(<MobileAgentActions client={f.client} agentSessionId="other" connected copyText={f.copy} />)
     await act(async () => resolve({ session: session() }))
@@ -108,21 +108,23 @@ it.each([true, false])('keeps a delayed copy result (%s) on its original Agent p
   const view = await mount(f.node); await click(button(view.element, '复制 Agent 身份链接'))
   await view.render(<MobileAgentActions client={f.client} agentSessionId="other" connected copyText={f.copy} />)
   await act(async () => resolve(copied))
-  expect(view.element.querySelector('[role="status"]')).toBeNull()
+  expect(view.element.textContent).not.toContain('已复制 Agent 身份链接')
+  expect(view.element.textContent).not.toContain('浏览器未确认复制')
   expect(view.element.querySelector('[aria-label="Agent 身份链接"]')).toBeNull()
 })
 it('does not show a late original inspection acknowledgement on a newly selected Agent', async () => {
   const f = setup(), owner = getDeviceWorkface()
   const intent = { runtimeId: 'original-runtime', deviceHostId: null, hostId: 'host-original', input: { agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, operationId: 'original-pending-inspection', trigger: 'manual' as const }, phase: 'unknown' as const }
   await owner.retainAgentResume(intent, owner.recordIdentity())
-  vi.mocked(f.client.forwardRpc!).mockResolvedValueOnce({ session: { ...session(), continuityOperations: { [intent.input.operationId]: { operationId: intent.input.operationId, agentSessionId: 'session-original', previousRun: session().run, kind: 'resumed' } } } } as never)
   const retain = owner.retainAgentResume.bind(owner); let acknowledge!: () => void
   vi.spyOn(owner, 'retainAgentResume').mockImplementationOnce(async (...args) => { await new Promise<void>(yes => { acknowledge = yes }); await retain(...args) })
-  const view = await mount(f.node); await click(button(view.element, '核对原恢复操作'))
+  const view = await mount(f.node)
+  vi.mocked(f.client.forwardRpc!).mockResolvedValueOnce({ session: { ...session(), continuityOperations: { [intent.input.operationId]: { operationId: intent.input.operationId, agentSessionId: 'session-original', previousRun: session().run, kind: 'resumed' } } } } as never)
+  await click(button(view.element, '核对原恢复操作'))
   expect(acknowledge).toBeTypeOf('function')
   await view.render(<MobileAgentActions client={f.client} agentSessionId="other" connected copyText={f.copy} />)
   await act(async () => acknowledge())
-  expect(view.element.querySelector('[role="status"]')).toBeNull()
+  expect(view.element.textContent).not.toContain('原恢复启动已确认')
   expect(owner.snapshot().record.agentResumes?.at(-1)?.phase).toBe('confirmed')
 })
 it('keeps an original flight busy after leaving and returning, while another Agent remains actionable', async () => {
