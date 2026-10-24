@@ -22,7 +22,11 @@ it.each([false, true])('retained active=%s intents preserve identity without clo
   const inner = client as unknown as { registry: { load(hostId: string): Promise<void> }; connected: boolean; kernel: { isConnected(): boolean } }
   await inner.registry.load('local'); inner.connected = true; inner.kernel.isConnected = () => true
   try {
-    await expect(client.saveAgentFuturePromptIntent({ agentSessionId: 'agent', intentId: 'new', operationId: 'new-operation', prompt: 'Next schedule', active: true })).resolves.toBeUndefined()
+    await expect(client.saveAgentFuturePromptIntent({ agentSessionId: 'agent', intentId: 'old-0', operationId: 'original-0',
+      prompt: 'Original schedule 0', active: !active, expectedRun: { runId: 'another-run' } }))
+      .rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+    expect((await new AgentMuxFileAgentSessionStore(path).load())[0]?.futurePromptIntents?.['old-0']?.active).toBe(active)
+    await expect(client.saveAgentFuturePromptIntent({ agentSessionId: 'agent', intentId: 'new', operationId: 'new-operation', prompt: 'Next schedule', active: true, expectedRun: { runId: 'original-run' } })).resolves.toBeUndefined()
     await client.saveAgentFuturePromptIntent({ agentSessionId: 'agent', intentId: 'old-0', operationId: 'original-0', prompt: 'Original schedule 0', active: !active })
     await expect(client.saveAgentFuturePromptIntent({ agentSessionId: 'agent', intentId: 'old-0', operationId: 'replacement', prompt: 'Changed', active: true }))
       .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
