@@ -582,7 +582,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
             <button type="button" onClick={() => showSection('joining')}><JoinIcon size={16} /><span>Join group</span><small>{connection?.capabilities?.roomLink === false ? 'Not supported' : 'Link & code'}</small></button>
           </nav> : null}
           {showingCurrentBinding && binding ? <ConnectorDeliveryDetails key={JSON.stringify([binding.bindingId, binding.revision])} binding={binding} hostingTarget={hostingTarget} onMembers={() => showSection('members')} /> : null}
-          <div data-connection-section="sync" tabIndex={-1}><ConnectorServiceControl active hostingTarget={hostingTarget} /></div>
+          <div className="agent-connector-host-sync" data-connection-section="sync" tabIndex={-1}><ConnectorServiceControl active hostingTarget={hostingTarget} /></div>
 
           {bindingPending || binding && changingGroup ? <p className="agent-connector-note" role="status">{bindingPending ? 'The group change is not confirmed. Check its original status.' : 'Your current group stays connected until you confirm this change.'}</p> : null}
           {creatingGroup && !created && (!creationUnsupported || !!roomIntent) ? <fieldset disabled={busy || !!roomIntent} className="agent-connector-fields" aria-label="New dedicated group">
