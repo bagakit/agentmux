@@ -8,10 +8,10 @@ import type { MobileObjectIdentity } from './MobileIdentity'
 import { MobileAgentRow } from './MobileAgentRow'
 
 /** Topic discussions and original content use the same public Zone and Region identities. */
-export function MobileZoneWorkface({ client, zoneId, name, visible, openSession, tabId, regionId, onCreateAgent }: {
+export function MobileZoneWorkface({ client, zoneId, name, visible, openSession, tabId, regionId, expectedAgent, onCreateAgent }: {
   client: AgentMuxHostedClient | null; zoneId?: string | undefined; name: string; visible: boolean
   openSession(id: string, identity: MobileObjectIdentity): void
-  tabId?: string | undefined; regionId?: string | undefined; onCreateAgent?(target: { spaceId?: string; zoneId?: string }): void
+  tabId?: string | undefined; regionId?: string | undefined; expectedAgent?: { hostId: string; agentSessionId: string } | null; onCreateAgent?(target: { spaceId?: string; zoneId?: string }): void
 }) {
   const [catalog, setCatalog] = useState<AgentMuxSpaceCatalog | null>(null)
   const [issue, setIssue] = useState('')
@@ -31,6 +31,9 @@ export function MobileZoneWorkface({ client, zoneId, name, visible, openSession,
     {catalog?.tabs.filter(tab => !tabId || tab.tabId === tabId).map(tab => <section key={tab.tabId}>
       <h2 className="mobile-spatial-subheading">{tab.name || '讨论'}</h2>
       {catalog.regions.filter(region => region.tabId === tab.tabId && (!regionId || region.regionId === regionId)).map(region => {
+        if (expectedAgent !== undefined && (expectedAgent === null ? region.kind !== 'launcher' || region.agentSessionId !== null
+          : region.kind !== 'agent' || region.agentSessionId !== expectedAgent.agentSessionId || region.execution?.hostId !== expectedAgent.hostId))
+          return <p key={region.regionId} className="mobile-spatial-notice">原讨论 Region 当前未确认保存的执行 Host 与 Session；原关系保留，不替换收件人。</p>
         const agent = catalog.agentPresentation?.find(value => value.agentSessionId === region.agentSessionId)
         const occurrences = catalog.locations.filter(place => place.tabId === tab.tabId && place.regionId === region.regionId)
         const identity = (context?: typeof occurrences[number]): MobileObjectIdentity => ({ name: agent?.name ?? tab.name ?? name, project: agent?.project ?? name, ...(context ? { context } : {}) })

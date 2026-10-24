@@ -139,8 +139,8 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
   }
   const openDiscussion = (receipt: GoalDiscussionReceipt) => {
     if (!navigation.current.visible || selectedRef.current !== receipt.goalId) return
-    setContext(value => ({ ...value, discussion: { goalId: receipt.goalId, tabId: receipt.tabId, agentSessionId: receipt.agentSessionId ?? null } }))
-    if (receipt.agentSessionId && openSession) openSession(receipt.agentSessionId, { name: '目标原 Mote', project: details[receipt.goalId]?.projectName ?? '未分配项目' })
+    setContext(value => ({ ...value, discussion: { goalId: receipt.goalId, tabId: receipt.tabId, regionId: receipt.regionId, hostId: receipt.hostId, agentSessionId: receipt.agentSessionId } }))
+    if (receipt.agentSessionId && receipt.hostId === 'local' && openSession) openSession(receipt.agentSessionId, { name: '目标原 Mote', project: details[receipt.goalId]?.projectName ?? '未分配项目' })
   }
   const visibleGoals = useMemo(() => goals?.filter(goal => (!status || goal.status === status) && `${goal.title} ${goal.description} ${goal.projectName ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [goals, status, query])
   return <MobileNoticeScope owner={client}><section className="mobile-goals" aria-label="Goals" hidden={!visible}>
@@ -195,8 +195,11 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
       <MobileGoalActions client={client} goal={detail} visible={visible && selected === detail.id} updated={updated} deleted={deleted} />
       </details></>}
     </div> })}
-    {discussionTab && <div><MobileZoneWorkface key={discussionTab.tabId} client={client} name="目标原主 Mote" tabId={discussionTab.tabId} visible={visible}
-      openSession={(id, identity) => { if (openSession) openSession(id, identity) }} /></div>}
+    {discussionTab && <div>{discussionTab.regionId && discussionTab.hostId !== undefined
+      ? <MobileZoneWorkface key={discussionTab.tabId} client={client} name="目标原主 Mote" tabId={discussionTab.tabId} regionId={discussionTab.regionId}
+        expectedAgent={discussionTab.agentSessionId && discussionTab.hostId ? { agentSessionId: discussionTab.agentSessionId, hostId: discussionTab.hostId } : null} visible={visible}
+        openSession={(id, identity) => { if (id !== discussionTab.agentSessionId || discussionTab.hostId !== 'local') { setIssue('原讨论位于其他执行 Host，当前手机连接尚不提供该会话；原目标、工作面与身份保留。'); return }; openSession?.(id, identity) }} />
+      : <MobileNotice identity={[discussionTab]} role="status">原讨论的准确 Region 与执行 Host 尚未核实；原 Tab 引用保留，返回目标后重新打开原讨论。</MobileNotice>}</div>}
   </section></MobileNoticeScope>
 }
 
