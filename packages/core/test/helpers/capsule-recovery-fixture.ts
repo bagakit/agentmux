@@ -1,5 +1,6 @@
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { vi } from 'vitest'
 import { startCapsuleRuntime } from '@agentmux/capsule/runtime'
 import type { AgentMuxClient } from '../../src/client.js'
@@ -9,7 +10,7 @@ import type { AgentMuxPreparedTerminal, AgentMuxPreparedTerminalStop } from '../
 
 /** Controlled Native results; real manager, Unix Capsule owner and HTTP. No user Runtime is contacted. */
 export async function capsuleRecoveryFixture() {
-  const directory = await mkdtemp('/tmp/amxrec-'), state = join(directory, 's')
+  const directory = await mkdtemp(join(tmpdir(), 'amxrec-')), state = join(directory, 's')
   await mkdir(state)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', directory)
   const calls: { creates: AgentMuxPreparedTerminal[]; stops: AgentMuxPreparedTerminalStop[] } = { creates: [], stops: [] }
@@ -20,6 +21,7 @@ export async function capsuleRecoveryFixture() {
   let serving = true, nextAck: Promise<void> | undefined, releaseAck: (() => void) | undefined
   const client = {
     connectRuntime: async () => {},
+    terminalCreationRuntimeIdentity: () => ({ runtimeId: 'fixture-lineage', instanceId: 'fixture-owner', buildIdentity: 'fixture-build', protocolVersion: 1 }),
     prepareTerminal: () => {
       const createOperationId = 'native-create-' + ++next
       return { createOperationId, workspacePath: join(state, 'capsules'), launch: JSON.stringify({ createOperationId,
