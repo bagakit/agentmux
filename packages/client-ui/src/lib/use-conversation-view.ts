@@ -494,7 +494,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
   }, [client, key, active])
   useEffect(() => () => {
     const value = retained.current
-    if (value?.client === client && value.key === key) {
+    if (value && value.client === client && value.key === key) {
       retained.current = null
       if (value.snapshot.window.view) void value.client.releaseConversationView({ hostId: value.snapshot.hostId, agentSessionId: value.snapshot.agentSessionId, view: value.snapshot.window.view }).catch(() => {})
     }
