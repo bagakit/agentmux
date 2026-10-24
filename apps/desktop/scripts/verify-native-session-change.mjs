@@ -1,108 +1,160 @@
-import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
+import { fixturePath } from './lib/fixture-values.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { execFile, fork } from 'node:child_process'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
-const root=path.resolve(import.meta.dirname,'../../..'),fixture=path.join(root,'apps/desktop/scripts/fixtures/native-session-change')
-const evidence=path.resolve(process.argv[2]??path.join(root,'.tmp/native-session-change',String(globalThis.crypto.randomUUID())))
-const privateRoot=await fs.mkdtemp(_hygiene_fixturePath("tmp/amux-native-source-")),run=promisify(execFile)
-const desktopRequire=createRequire(path.join(root,'apps/desktop/package.json')),coreRequire=createRequire(path.join(root,'packages/core/package.json'))
-const {build:buildRenderer}=await import(pathToFileURL(desktopRequire.resolve('vite')).href),{build:buildNode}=coreRequire('esbuild')
-const sha=value=>createHash('sha256').update(value).digest('hex')
-const owned=['src/shared/agent-native-source.ts','src/shared/contracts.ts','src/main/runtime-controller.ts','src/main/ipc.ts','src/preload/index.ts','src/renderer/src/lib/session-state.ts','src/renderer/src/lib/session-user-messages.ts','src/renderer/src/lib/api.ts','src/renderer/src/components/AgentNativeSourceControls.tsx','src/renderer/src/components/AgentRegionHeader.tsx','src/renderer/src/components/SessionPane.tsx','src/renderer/src/components/SessionHistoryView.tsx','src/renderer/src/styles/agent-region-header.css','src/renderer/src/styles/session-history.css'].map(p=>'apps/desktop/'+p)
-const cssMutant=process.env.AGENTMUX_NATIVE_UI_CSS_MUTANT==='1'
-const receipt={schema:'agentmux.native-session-change-ui.v1',passed:false,evidence,sourceBefore:{},sourceAfter:{},mutations:[],processes:[],visualReview:'pending-independent-review',isolation:[
- 'Current source App/Store/SessionPane/Header/SessionHistoryView/TerminalView/Core/Main RuntimeController and production Hosted connector are compiled privately. Source aliases and metafiles exclude shared dist.',
- 'One real private semantic owner serves all Electron generations over public hosted RPC; actual ctxmux PTY/Run PID, Hook ingress, file descriptors, input ACK and File/Spatial stores are retained. Three independent Electron processes per Provider use one exact private profile.',
- 'Codex uses actual process-FD discovery and private read-only JSON-RPC protocol. Claude uses actual declared main SessionStart plus real JSONL history; neither authenticates or requests upstream work.',
- 'Only managed native config installation, history watch subscription and unrelated missing file-resource/ConversationView leaves are isolated. The missing leaves throw if invoked; explicit historical reads use real Provider code. The user App/profile/config/Session/Runtime are not accessed.',
- 'The private IPC dispatcher invokes the actual production RuntimeController methods. Product IPC/preload call sites are audited separately; the full unrelated product IPC registrar is not booted.',
- 'One real acknowledged raw input loses its return receipt at the private adapter boundary. Its original permission operation/range must remain unknown through source confirmation and independent process restoration.'
-]}
-await fs.mkdir(evidence,{recursive:true})
-const command=async(label,args,env={})=>{let value;try{const r=await run(path.join(root,'node_modules/.bin/vitest'),args,{cwd:root,env:{...process.env,...env},timeout:60000,maxBuffer:8*1024*1024});value={code:0,output:r.stdout+r.stderr}}catch(e){value={code:e.code,output:(e.stdout??'')+(e.stderr??'')}}await fs.writeFile(path.join(evidence,label+'.log'),value.output);return value}
-const files=async(directory)=>(await Promise.all((await fs.readdir(directory,{withFileTypes:true})).map(e=>e.isDirectory()?files(path.join(directory,e.name)):/\.tsx?$/.test(e.name)?[path.join(directory,e.name)]:[]))).flat()
-let owner,ready
-try {
- receipt.sourceBefore=Object.fromEntries(await Promise.all(owned.map(async p=>[p,sha(await fs.readFile(path.join(root,p)))])))
- const config=path.join(fixture,'vitest.config.mts'),loads=path.join(evidence,'baseline-loaded.jsonl')
- if(process.env.AGENTMUX_NATIVE_UI_REUSE_CONTROL_RECEIPT){const prior=JSON.parse(await fs.readFile(process.env.AGENTMUX_NATIVE_UI_REUSE_CONTROL_RECEIPT,'utf8'));assert.deepEqual(prior.sourceBefore,receipt.sourceBefore);assert.equal(prior.mutations.length,9);assert.ok(prior.mutations.every(m=>m.red>0&&m.green===0));receipt.controlReuse={receipt:process.env.AGENTMUX_NATIVE_UI_REUSE_CONTROL_RECEIPT,exactSourceHashes:true};receipt.mutations=prior.mutations;}else{
- const baseline=await command('baseline',['run','--config',config],{AGENTMUX_NATIVE_UI_LOADED_PATH:loads});assert.equal(baseline.code,0,baseline.output);assert.match(baseline.output,/Tests\s+[1-9]\d* passed/)
- const mutations=[
- ['drop-source-fact','src/shared/agent-native-source.ts','source.observedNativeHandle ?','false ?','mirrors exact'],
- ['keep-old-revision-fence','src/renderer/src/lib/session-state.ts','&& nativeBindingKey(session) === nativeBindingKey(incoming)','&& true','accepts same-Run'],
- ['duplicate-native-observation-banner','src/renderer/src/lib/session-state.ts',"(core.code === 'AGENT_NATIVE_SOURCE_UNCONFIRMED' || core.code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')) return null","(false)) return null",'routes only exact persisted'],
- ['drop-true-refresh','src/main/runtime-controller.ts','options?.refreshNativeSource === undefined','true','Main forwards only'],
- ['disconnect-sdk-confirm','src/main/runtime-controller.ts','return await client.confirmAgentNativeSession(input)','throw new Error("Mutant disconnected Core confirmation")','Main confirms only'],
- ['disconnect-confirm-button','src/renderer/src/components/AgentNativeSourceControls.tsx','event.preventDefault(); void confirm()','event.preventDefault(); void Promise.resolve()','shows a corner label'],
- ['retarget-reviewed-candidate','src/renderer/src/components/AgentNativeSourceControls.tsx','run: review.expectedRun }, review)','run: review.expectedRun }, nativeConfirmationInput(session, review.operationId)!)','keeps a stale reviewed'],
- ['reuse-current-history','src/renderer/src/components/SessionHistoryView.tsx',"...(previous ? { nativeSource: 'previous' } : {})",'...({})','keeps the original reader'],
- ['reuse-same-run-cache','src/renderer/src/lib/session-user-messages.ts','`${makeSessionControlKey(control)}:${bindingKey}`','makeSessionControlKey(control)','isolates shared history cache']
- ].map(([label,file,before,after,test])=>({label,file:'apps/desktop/'+file,before,after,test}))
- for(const m of mutations){const mutationFile=path.join(evidence,'mutation.json'),loaded=path.join(evidence,m.label+'-loaded.jsonl');await fs.writeFile(mutationFile,JSON.stringify(m));const red=await command(m.label,['run','--config',config,'-t',m.test],{AGENTMUX_NATIVE_UI_MUTATION_PATH:mutationFile,AGENTMUX_NATIVE_UI_LOADED_PATH:loaded});assert.ok(Number.isInteger(red.code)&&red.code>0,red.output);assert.match(red.output,/AssertionError/);assert.match(red.output,/Tests\s+[1-9]\d* failed/);const actual=(await fs.readFile(loaded,'utf8')).trim().split('\n').map(JSON.parse).filter(l=>l.path===m.file&&l.mutated);assert.ok(actual.length);assert.equal(actual[0].sourceSHA256,receipt.sourceBefore[m.file]);const green=await command(m.label+'-control',['run','--config',config,'-t',m.test]);assert.equal(green.code,0,green.output);receipt.mutations.push({...m,red:red.code,green:green.code,loaded:actual[0]});console.log('native source mutant killed: '+m.label)}
- }
- await fs.writeFile(path.join(evidence,'source-controls.json'),JSON.stringify({sourceBefore:receipt.sourceBefore,mutations:receipt.mutations}))
- const manifest=JSON.parse(await fs.readFile(path.join(root,'packages/core/package.json'),'utf8'))
- const aliases=Object.entries(manifest.exports).map(([key,v])=>({find:new RegExp('^'+(key==='.'?'@agentmux/core':'@agentmux/core/'+key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$'),replacement:path.join(root,'packages/core',v.import.replace('./dist/','./src/').replace(/\.js$/,'.ts'))}))
- aliases.push({find:/^@agentmux\/layout$/,replacement:path.join(root,'packages/core/src/spatial-layout.ts')},{find:/^@xterm\/xterm$/,replacement:path.join(root,'apps/desktop/scripts/fixtures/terminal-wheel/xterm-instrumented.ts')})
- const consumed=new Map(),guard={name:'bounded-native-unused-leaves',enforce:'pre',resolveId(id){if(/^(\.\.\/)+shared\/zone-file-resource(?:\.js)?$/.test(id))return'\0unused-file';if(/(^|\/)ConversationView(?:\.js)?$/.test(id))return'\0unused-conversation'},load(id){if(id==='\0unused-file')return'export function zoneFileResource(){throw new Error("Unrelated file leaf invoked in native scene")}';if(id==='\0unused-conversation')return'export function ConversationView(){throw new Error("Unrelated ConversationView invoked in native scene")}'},transform(code,id){if(id.startsWith(root+'/apps/desktop/src/')||id.startsWith(root+'/packages/core/src/')||id.startsWith(root+'/packages/client-ui/src/'))consumed.set(path.relative(root,id.split('?')[0]),sha(code))}}
- const renderer=path.join(evidence,'renderer')
- const cssPath=path.join(root,'apps/desktop/src/renderer/src/styles/agent-region-header.css'),cssSource=await fs.readFile(cssPath,'utf8')
- const mutatedDeclarations=new WeakSet()
- const cssMutationPlugin={postcssPlugin:'actual-owning-native-menu-css-mutation',Declaration(declaration){
-  if(!cssMutant||mutatedDeclarations.has(declaration)||declaration.prop!=='max-height'||declaration.parent.selector!=='.agent-region-menu')return
-  assert.equal(path.resolve(declaration.source.input.file),cssPath,'Mutation must consume the owning imported source file')
-  const before='max-height: min(calc(100vh - 2 * var(--sp-4)), var(--radix-dropdown-menu-content-available-height, 100vh));',after='max-height: none;'
-  assert.equal(cssSource.split(before).length,2);assert.equal(declaration.value,before.slice('max-height: '.length,-1));assert.equal(receipt.visualMutation,undefined,'One actual CSS mutation')
-  mutatedDeclarations.add(declaration);declaration.value='none';receipt.visualMutation={path:path.relative(root,cssPath),sourceSHA256:sha(cssSource),transformedSHA256:sha(cssSource.replace(before,after)),before,after,pipelineSource:declaration.source.input.file}
- }}
- await buildRenderer({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true',__TERMINAL_WHEEL_UMD_URL__:'"unused"'},resolve:{alias:aliases},plugins:[guard],css:{postcss:{plugins:[cssMutationPlugin]}},build:{target:'esnext',outDir:renderer,emptyOutDir:true,minify:false}})
- if(cssMutant)assert.ok(receipt.visualMutation,'Nonempty actual owning CSS mutation consumed')
- receipt.compiledRenderer=Object.fromEntries(consumed)
- for(const p of ['src/renderer/src/App.tsx','src/renderer/src/store.ts','src/renderer/src/components/SessionPane.tsx','src/renderer/src/components/AgentRegionHeader.tsx','src/renderer/src/components/AgentNativeSourceControls.tsx','src/renderer/src/components/SessionHistoryView.tsx','src/renderer/src/components/TerminalView.tsx','src/renderer/src/lib/session-user-messages.ts'])assert.ok(consumed.has('apps/desktop/'+p),'Current source compiled: '+p)
- const nodeAliases=Object.fromEntries(aliases.filter(a=>a.find.source.includes('@agentmux')).map(a=>[a.find.source.slice(1,-1).replaceAll('\\/','/').replaceAll('\\.','.'),a.replacement]))
- const sdkPath=path.join(root,'packages/core/node_modules/@ctxmux/sdk'),sdk=JSON.parse(await fs.readFile(path.join(sdkPath,'package.json'),'utf8'));nodeAliases['@ctxmux/sdk']=path.join(sdkPath,sdk.exports['.'].import)
- const nodeSourceHashes=new Map()
- const nodePlugin={name:'private-current-node-source',setup(build){build.onResolve({filter:/zone-file-resource(?:\.js)?$/},()=>({path:'unused-file',namespace:'native-leaf'}));build.onLoad({filter:/.*/,namespace:'native-leaf'},()=>({contents:'export function zoneFileResource(){throw new Error("Unrelated missing file-resource invoked by native Main")}',loader:'js'}));build.onLoad({filter:/\.[cm]?[jt]sx?$/},async a=>{const code=await fs.readFile(a.path,'utf8');if(a.path.startsWith(root+'/packages/core/src/')||a.path.startsWith(root+'/apps/desktop/src/'))nodeSourceHashes.set(path.relative(root,a.path),sha(code));return{contents:code.replaceAll('import.meta.url',JSON.stringify(pathToFileURL(a.path).href)).replaceAll('import.meta.dirname',JSON.stringify(path.dirname(a.path))),loader:a.path.endsWith('.tsx')?'tsx':a.path.endsWith('.ts')?'ts':'js'}})}}
- receipt.nodeBundles={}
- for(const [name,file]of[['owner','owner.ts'],['main','main.ts']]){nodeSourceHashes.clear();const out=path.join(evidence,name+'.mjs'),built=await buildNode({absWorkingDir:root,entryPoints:[path.join(fixture,file)],outfile:out,bundle:true,platform:'node',format:'esm',external:['electron'],conditions:['browser'],alias:nodeAliases,metafile:true,plugins:[nodePlugin],banner:{js:'import {createRequire as _privateRequire} from "node:module"; const require=_privateRequire(import.meta.url);'},logLevel:'error'});receipt.nodeBundles[name]={sha256:sha(await fs.readFile(out)),inputs:Object.keys(built.metafile.inputs),sourceSHA256:Object.fromEntries(nodeSourceHashes)};await fs.writeFile(path.join(evidence,name+'-metafile.json'),JSON.stringify(built.metafile))}
- for(const p of ['apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/desktop-host.ts','packages/core/src/hosted-client.ts'])assert.ok(receipt.nodeBundles.main.inputs.includes(p),'Actual Main/Hosted source '+p)
- for(const p of ['packages/core/src/client.ts','packages/core/src/agent-native-session-confirmation.ts','packages/core/src/providers/codex-native-session.ts','packages/core/src/providers/claude-native-session.ts'])assert.ok(receipt.nodeBundles.owner.inputs.includes(p),'Actual native Core source '+p)
- await fs.copyFile(path.join(fixture,'native-cli.mjs'),path.join(privateRoot,'native-cli.mjs'))
- for(const provider of ['codex','claude'])await fs.mkdir(path.join(privateRoot,'native-'+provider))
- const env=Object.fromEntries(Object.entries(process.env).filter(([name])=>!name.startsWith('AGENTMUX_')&&!name.startsWith('CTXMUX_')&&name!=='ELECTRON_RUN_AS_NODE'))
- Object.assign(env,{AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:path.join(privateRoot,'state'),AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'messages.ndjson')})
- const ownerLogs=[];owner=fork(path.join(evidence,'owner.mjs'),[privateRoot],{cwd:root,env,stdio:['ignore','pipe','pipe','ipc']});owner.stdout.on('data',b=>ownerLogs.push(String(b)));owner.stderr.on('data',b=>ownerLogs.push(String(b)))
- ready=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Private real semantic owner did not start: '+ownerLogs.join(''))),20000);owner.once('message',m=>{clearTimeout(timer);resolve(m)});owner.once('exit',code=>{clearTimeout(timer);reject(new Error('Private semantic owner exited '+code+': '+ownerLogs.join('')))})});assert.equal(ready.ready,true);receipt.owner=ready
- for(const provider of ['codex','claude'])for(const phase of ['seed','adopt','confirmed-restore']){const lines=[],phaseRoot=path.join(privateRoot,provider+'-'+phase);await fs.mkdir(phaseRoot);const exit=await runProbeProcess(desktopRequire('electron'),[path.join(evidence,'main.mjs'),path.join(renderer,'index.html'),privateRoot,provider,phase,path.join(fixture,'preload.cjs'),evidence,process.execPath],{temporaryRoot:phaseRoot,cwd:root,env,timeoutMs:90000,onLine:line=>{lines.push(line);process.stderr.write(provider+'/'+phase+': '+line.slice(0,900)+'\n')}});await fs.writeFile(path.join(evidence,provider+'-'+phase+'-stderr.log'),lines.join('\n'));const fact=JSON.parse(await fs.readFile(path.join(evidence,provider+'-'+phase+'.json'),'utf8'));receipt.processes.push({...exit,...fact});assert.equal(exit.exitCode,0,JSON.stringify(fact.failure));assert.equal(fact.passed,true);console.log('native source Electron '+provider+'/'+phase+' passed PID='+fact.pid)}
- assert.equal(new Set(receipt.processes.map(p=>p.pid)).size,6)
- if(!cssMutant){
-  const negative=path.join(evidence,'menu-clamp-mutant');let exitCode=0
-  try{await run(process.execPath,[import.meta.filename,negative],{cwd:root,env:{...process.env,AGENTMUX_NATIVE_UI_CSS_MUTANT:'1',AGENTMUX_NATIVE_UI_REUSE_CONTROL_RECEIPT:path.join(evidence,'source-controls.json')},timeout:90000,maxBuffer:4*1024*1024})}catch(error){exitCode=error.code;await fs.writeFile(path.join(evidence,'menu-clamp-mutant.log'),(error.stdout??'')+(error.stderr??''))}
-  assert.ok(Number.isInteger(exitCode)&&exitCode>0,'Actual source CSS clamp mutant must fail')
-  const red=JSON.parse(await fs.readFile(path.join(negative,'receipt.json'),'utf8'))
-  assert.equal(red.visualMutation?.sourceSHA256,receipt.sourceBefore['apps/desktop/src/renderer/src/styles/agent-region-header.css'])
-  assert.ok(red.processes.some(p=>p.failure?.message==='Native source menu stays inside the actual viewport'),'CSS mutant fails for actual menu geometry')
-  assert.deepEqual(red.cleanup.errors,[]);assert.deepEqual(red.cleanup.remaining,[])
-  receipt.visualMutationGate={label:'remove-real-menu-height-bound',red:exitCode,receipt:path.join(negative,'receipt.json'),green:0,controlPIDs:receipt.processes.map(p=>p.pid)}
- }
 
- const scanned=await files(path.join(root,'apps/desktop/src')),callers=[]
- for(const[symbol,definition]of[['projectNativeSourceFacts','apps/desktop/src/shared/agent-native-source.ts'],['nativeBindingKey','apps/desktop/src/shared/agent-native-source.ts'],['confirmNativeSession','apps/desktop/src/main/runtime-controller.ts'],['useAgentNativeSourceControls','apps/desktop/src/renderer/src/components/AgentNativeSourceControls.tsx'],['useSessionUserMessages','apps/desktop/src/renderer/src/lib/session-user-messages.ts']]){const found=[];for(const file of scanned.filter(p=>p!==path.join(root,definition)))if(new RegExp('(?:\\b'+symbol+'\\s*\\(|<'+symbol+'\\b)').test(await fs.readFile(file,'utf8')))found.push(path.relative(root,file));assert.ok(found.length,'Nonempty production callers '+symbol);callers.push({symbol,callers:found})}
- assert.ok(scanned.length);receipt.productionConsumers={scanned:scanned.length,callers}
- receipt.sourceAfter=Object.fromEntries(await Promise.all(owned.map(async p=>[p,sha(await fs.readFile(path.join(root,p)))])));assert.deepEqual(receipt.sourceAfter,receipt.sourceBefore);receipt.passed=true
+const root=path.resolve(import.meta.dirname,'../../..')
+const fixture=path.join(root,'apps/desktop/scripts/fixtures/native-session-change')
+const controlsOnly=process.argv.includes('--controls-only')
+const evidence=path.resolve(process.argv.slice(2).find(value=>!value.startsWith('--'))??path.join(root,'.local/native-target-ui',randomUUID()))
+const desktopRequire=createRequire(path.join(root,'apps/desktop/package.json'))
+const coreRequire=createRequire(path.join(root,'packages/core/package.json'))
+const run=promisify(execFile),sha=value=>createHash('sha256').update(value).digest('hex')
+const owned=['src/shared/agent-native-source.ts','src/shared/contracts.ts','src/main/runtime-controller.ts','src/main/ipc.ts','src/preload/index.ts','src/renderer/src/lib/session-state.ts','src/renderer/src/lib/session-user-messages.ts','src/renderer/src/lib/api.ts','src/renderer/src/components/AgentNativeSourceControls.tsx','src/renderer/src/components/AgentRegionHeader.tsx','src/renderer/src/components/SessionPane.tsx','src/renderer/src/styles/agent-region-header.css'].map(file=>'apps/desktop/'+file)
+const testFiles=['apps/desktop/test/native-session-change.test.tsx','apps/desktop/test/native-source-themed-action.test.tsx','apps/desktop/scripts/fixtures/native-session-change/vitest.config.mts']
+const hashes=files=>Promise.all(files.map(async file=>[file,sha(await fs.readFile(path.join(root,file)))])).then(Object.fromEntries)
+await fs.mkdir(evidence,{recursive:true})
+const receipt={schema:'agentmux.native-target-ui.v1',passed:false,sourceBefore:await hashes(owned),sourceAfter:{},processes:[],captureOnly:true,aestheticReview:'not-performed',isolation:[
+ 'Current source App, Store, SessionPane, Region menu, TerminalView, Core and Main RuntimeController are privately compiled; source hashes and bundle inputs are retained.',
+ 'One private semantic owner and actual ctxmux Run serve two independent Electron processes through the production Hosted connector and public RPC. File and Spatial stores, terminal PID and raw-input ACK are real.',
+ 'The native CLI is an explicit protocol fixture with real writable OS descriptors; it is not stock Codex and does not prove upstream TUI selection. Stock-native provenance is qualified separately by the T002 evidence.',
+ 'The private IPC bridge calls real RuntimeController methods. The unrelated production IPC registrar is not booted; mounted forwarding tests cover that API boundary.',
+ 'Only native configuration installation and history-watch subscription are isolated. No user App, profile, native credentials or user Session is used. Captured drafts are never submitted.',
+ 'This bounded scene covers current target menus, exact confirmation and workface restoration. It does not rerun the former full historical-reader or lost-ACK lifecycle matrix.'
+]}
+const controlsPath=path.join(evidence,'controls.json')
+async function controls(){
+ const sources=await hashes([...owned,...testFiles])
+ const prior=await fs.readFile(controlsPath,'utf8').then(JSON.parse).catch(error=>{if(error.code==='ENOENT')return null;throw error})
+ if(prior){assert.deepEqual(prior.sources,sources,'Existing controls bind exact current source');assert.equal(prior.passed,true);return prior}
+ const config=path.join(fixture,'vitest.config.mts')
+ async function execute(name,mutation){
+  const loaded=path.join(evidence,name+'-loaded.jsonl'),report=path.join(evidence,name+'.json')
+  await fs.writeFile(loaded,'')
+  const env={...process.env,AGENTMUX_NATIVE_UI_LOADED_PATH:loaded}
+  delete env.AGENTMUX_NATIVE_UI_MUTATION_PATH
+  if(mutation){const file=path.join(evidence,name+'-mutation.json');await fs.writeFile(file,JSON.stringify(mutation));env.AGENTMUX_NATIVE_UI_MUTATION_PATH=file}
+  const args=['run','--config',config,'--reporter=json','--outputFile='+report,...(mutation?['-t',mutation.test]:[])]
+  let exitCode=0,output=''
+  try{const result=await run(process.execPath,[path.join(root,'node_modules/vitest/vitest.mjs'),...args],{cwd:root,env,timeout:60000,maxBuffer:8*1024*1024});output=result.stdout+result.stderr}
+  catch(error){exitCode=error.code;output=(error.stdout??'')+(error.stderr??'')}
+  await fs.writeFile(path.join(evidence,name+'.log'),output)
+  const data=JSON.parse(await fs.readFile(report,'utf8'))
+  const assertions=data.testResults.flatMap(file=>file.assertionResults),failed=assertions.filter(test=>test.status==='failed')
+  const reads=(await fs.readFile(loaded,'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse)
+  assert.ok(reads.length&&assertions.length,'Actual nonempty tests and implementation loads')
+  assert.equal(data.numRuntimeErrorTestSuites??0,0)
+  if(mutation){
+   assert.ok(Number.isInteger(exitCode)&&exitCode>0)
+   assert.ok(failed.length&&failed.every(test=>test.fullName.includes(mutation.test)&&test.failureMessages.some(value=>value.includes('AssertionError'))),'Only the expected business oracle kills the mutation')
+   const owner=reads.find(value=>value.path===mutation.file&&value.mutated)
+   assert.ok(owner);assert.equal(owner.sourceSHA256,sources[mutation.file]);assert.notEqual(owner.sourceSHA256,owner.loadedSHA256)
+  }else{
+   assert.equal(exitCode,0);assert.equal(data.success,true);assert.equal(failed.length,0);assert.ok(data.numPassedTests>=19)
+   for(const owner of ['apps/desktop/src/renderer/src/components/AgentNativeSourceControls.tsx','apps/desktop/src/shared/agent-native-source.ts'])assert.ok(reads.some(value=>value.path===owner&&value.sourceSHA256===sources[owner]&&!value.mutated),'Current product owner loaded: '+owner)
+  }
+  return{name,exitCode,passed:data.numPassedTests,failed:data.numFailedTests,report:path.basename(report),reportSHA256:sha(await fs.readFile(report)),loaded:path.basename(loaded),loadedSHA256:sha(await fs.readFile(loaded))}
+ }
+ const positive=await execute('positive')
+ const file='apps/desktop/src/renderer/src/components/AgentNativeSourceControls.tsx'
+ const mutations=[]
+ for(const mutation of [
+  {name:'wrong-candidate',file,before:'candidateNativeHandle: structuredClone(candidate)',after:'candidateNativeHandle: structuredClone(old)',test:'keeps the chosen Run member'},
+  {name:'removed-confirm',file,before:'event.preventDefault(); void confirm()',after:'event.preventDefault(); void Promise.resolve()',test:'offers each verified Run member'}
+ ])mutations.push(await execute(mutation.name,mutation))
+ assert.deepEqual(await hashes([...owned,...testFiles]),sources,'Controls source did not change during the run')
+ const result={passed:true,sources,positive,mutations}
+ await fs.writeFile(controlsPath,JSON.stringify(result,null,2)+'\n');return result
+}
+receipt.controls=await controls()
+if(controlsOnly){console.log(JSON.stringify({passed:true,controls:controlsPath}));process.exit(0)}
+
+const privateRoot=await fs.mkdtemp(fixturePath('tmp/amux-native-target-'))
+let owner
+try{
+ const {build:buildRenderer}=await import(pathToFileURL(desktopRequire.resolve('vite')).href)
+ const {build:buildNode}=coreRequire('esbuild')
+ const aliases=[]
+ for(const [name,directory]of[['@agentmux/core','packages/core'],['@agentmux/host','apps/host']]){
+  const manifest=JSON.parse(await fs.readFile(path.join(root,directory,'package.json'),'utf8'))
+  for(const [key,value]of Object.entries(manifest.exports))if(typeof value.import==='string')aliases.push({find:new RegExp('^'+(key==='.'?name:name+'/'+key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$'),replacement:path.join(root,directory,value.import.replace('./dist/','./src/').replace(/\.js$/,'.ts'))})
+ }
+ aliases.push({find:/^@agentmux\/layout$/,replacement:path.join(root,'packages/core/src/spatial-layout.ts')},{find:/^@xterm\/xterm$/,replacement:path.join(root,'apps/desktop/scripts/fixtures/terminal-wheel/xterm-instrumented.ts')})
+ const consumed=new Map()
+ const sourcePlugin={name:'current-native-target-product',enforce:'pre',transform(code,id){
+  const file=id.split('?')[0]
+  if(['apps/desktop/src/','packages/core/src/','packages/client-ui/src/','apps/host/src/'].some(prefix=>file.startsWith(path.join(root,prefix))))consumed.set(path.relative(root,file),sha(code))
+ }}
+ const renderer=path.join(evidence,'renderer')
+ await buildRenderer({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true',__TERMINAL_WHEEL_UMD_URL__:'"unused"'},resolve:{alias:aliases},plugins:[sourcePlugin],build:{target:'esnext',outDir:renderer,emptyOutDir:true,minify:false}})
+ receipt.compiledRenderer=Object.fromEntries(consumed)
+ for(const file of ['App.tsx','store.ts','components/SessionPane.tsx','components/AgentRegionHeader.tsx','components/AgentNativeSourceControls.tsx','components/TerminalView.tsx'])assert.ok(consumed.has('apps/desktop/src/renderer/src/'+file),'Current Renderer consumer compiled: '+file)
+ const nodeAliases=Object.fromEntries(aliases.filter(item=>item.find.source.includes('@agentmux')).map(item=>[item.find.source.slice(1,-1).replaceAll('\\/','/').replaceAll('\\.','.'),item.replacement]))
+ const sdkPath=path.join(root,'packages/core/node_modules/@ctxmux/sdk'),sdk=JSON.parse(await fs.readFile(path.join(sdkPath,'package.json'),'utf8'))
+ nodeAliases['@ctxmux/sdk']=path.join(sdkPath,sdk.exports['.'].import)
+ const sourceHashes=new Map()
+ const nodePlugin={name:'current-native-target-node',setup(build){build.onLoad({filter:/\.[cm]?[jt]sx?$/},async input=>{
+  const code=await fs.readFile(input.path,'utf8')
+  if(['packages/core/src/','apps/desktop/src/','apps/host/src/'].some(prefix=>input.path.startsWith(path.join(root,prefix))))sourceHashes.set(path.relative(root,input.path),sha(code))
+  return{contents:code.replaceAll('import.meta.url',JSON.stringify(pathToFileURL(input.path).href)).replaceAll('import.meta.dirname',JSON.stringify(path.dirname(input.path))),loader:input.path.endsWith('.tsx')?'tsx':input.path.endsWith('.ts')?'ts':'js'}
+ })}}
+ receipt.nodeBundles={}
+ for(const name of ['owner','main']){
+  sourceHashes.clear();const output=path.join(evidence,name+'.mjs')
+  const built=await buildNode({absWorkingDir:root,entryPoints:[path.join(fixture,name+'.ts')],outfile:output,bundle:true,platform:'node',format:'esm',external:['electron'],conditions:['browser'],alias:nodeAliases,metafile:true,plugins:[nodePlugin],banner:{js:'import {createRequire as _privateRequire} from "node:module"; const require=_privateRequire(import.meta.url);'},logLevel:'error'})
+  receipt.nodeBundles[name]={sha256:sha(await fs.readFile(output)),inputs:Object.keys(built.metafile.inputs),sourceSHA256:Object.fromEntries(sourceHashes)}
+  await fs.writeFile(path.join(evidence,name+'-metafile.json'),JSON.stringify(built.metafile))
+ }
+ for(const file of ['apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/desktop-host.ts','packages/core/src/hosted-client.ts'])assert.ok(receipt.nodeBundles.main.inputs.includes(file),'Actual Main/Hosted consumer '+file)
+ for(const file of ['packages/core/src/client.ts','packages/core/src/agent-native-session-confirmation.ts','packages/core/src/providers/app-server-native-session.ts','packages/core/src/providers/codex-native-record-role.ts'])assert.ok(receipt.nodeBundles.owner.inputs.includes(file),'Actual Core/Provider owner '+file)
+ await fs.copyFile(path.join(fixture,'native-cli.mjs'),path.join(privateRoot,'native-cli.mjs'))
+ await fs.mkdir(path.join(privateRoot,'native-codex'))
+ await fs.mkdir(path.join(privateRoot,'home'))
+ const env=Object.fromEntries(['PATH','TMPDIR','LANG','LC_ALL','SHELL','USER'].filter(name=>process.env[name]!==undefined).map(name=>[name,process.env[name]]))
+ Object.assign(env,{HOME:path.join(privateRoot,'home'),AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:path.join(privateRoot,'state'),AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'messages.ndjson')})
+ const ownerLogs=[]
+ owner=fork(path.join(evidence,'owner.mjs'),[privateRoot],{cwd:root,env,stdio:['ignore','pipe','pipe','ipc']})
+ owner.stdout.on('data',value=>ownerLogs.push(String(value)));owner.stderr.on('data',value=>ownerLogs.push(String(value)))
+ receipt.owner=await new Promise((resolve,reject)=>{
+  const timer=setTimeout(()=>reject(new Error('Private semantic owner did not start: '+ownerLogs.join(''))),20000)
+  owner.once('message',value=>{clearTimeout(timer);resolve(value)})
+  owner.once('exit',code=>{clearTimeout(timer);reject(new Error('Private semantic owner exited '+code+': '+ownerLogs.join('')))})
+ })
+ assert.equal(receipt.owner.ready,true)
+ for(const phase of ['select','restore']){
+  const lines=[],phaseRoot=path.join(privateRoot,phase);await fs.mkdir(phaseRoot)
+  const exit=await runProbeProcess(desktopRequire('electron'),[path.join(evidence,'main.mjs'),path.join(renderer,'index.html'),privateRoot,'codex',phase,path.join(fixture,'preload.cjs'),evidence,process.execPath],{temporaryRoot:phaseRoot,cwd:root,env,timeoutMs:90000,onLine:line=>{lines.push(line);process.stderr.write(phase+': '+line.slice(0,900)+'\n')}})
+  await fs.writeFile(path.join(evidence,phase+'-stderr.log'),lines.join('\n'))
+  const fact=JSON.parse(await fs.readFile(path.join(evidence,'codex-'+phase+'.json'),'utf8'))
+  receipt.processes.push({...exit,...fact});assert.equal(exit.exitCode,0,JSON.stringify(fact.failure));assert.equal(fact.passed,true)
+ }
+ assert.equal(new Set(receipt.processes.map(value=>value.pid)).size,2)
+ receipt.sourceAfter=await hashes(owned);assert.deepEqual(receipt.sourceAfter,receipt.sourceBefore)
+ for(const [file,digest] of Object.entries(receipt.compiledRenderer))assert.equal(sha(await fs.readFile(path.join(root,file))),digest,'Renderer source remains the compiled candidate: '+file)
+ for(const bundle of Object.values(receipt.nodeBundles))for(const [file,digest] of Object.entries(bundle.sourceSHA256))assert.equal(sha(await fs.readFile(path.join(root,file))),digest,'Node source remains the compiled candidate: '+file)
+ receipt.passed=true
 }catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack};console.error(error)}
 finally{
- if(Object.keys(receipt.sourceBefore).length)receipt.sourceAfter=Object.fromEntries(await Promise.all(owned.map(async p=>[p,sha(await fs.readFile(path.join(root,p)))])))
+ receipt.sourceAfter=await hashes(owned)
  const errors=[]
- if(owner){try{if(owner.exitCode===null){const stopped=new Promise(resolve=>owner.once('exit',resolve));owner.send({operation:'shutdown'});await Promise.race([stopped,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Owner cleanup timeout')),15000))])} }catch(e){errors.push(e.message);owner.kill('SIGTERM')}}
- try{await stopProbeProcesses(process.pid+1_000_000_000,privateRoot)}catch(e){errors.push(e.message)}
- const remaining=await listProbeProcesses(-1,privateRoot);receipt.cleanup={errors,remaining,privateRootRemoved:false};if(!remaining.length){await fs.rm(privateRoot,{recursive:true,force:true});receipt.cleanup.privateRootRemoved=true}await fs.writeFile(path.join(evidence,'receipt.json'),JSON.stringify(receipt,null,2))
+ if(owner?.exitCode===null){
+  try{const stopped=new Promise(resolve=>owner.once('exit',resolve));owner.send({operation:'shutdown'});await Promise.race([stopped,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Owner cleanup timeout')),15000))])}
+  catch(error){errors.push(error.message);owner.kill('SIGTERM')}
+ }
+ try{await stopProbeProcesses(process.pid+1_000_000_000,privateRoot)}catch(error){errors.push(error.message)}
+ const remaining=await listProbeProcesses(-1,privateRoot)
+ receipt.cleanup={errors,remaining,privateRootRemoved:false}
+ if(!remaining.length){await fs.rm(privateRoot,{recursive:true,force:true});receipt.cleanup.privateRootRemoved=true}
+ await fs.writeFile(path.join(evidence,'receipt.json'),JSON.stringify(receipt,null,2)+'\n')
+ const pictures=receipt.processes.flatMap(value=>value.screenshots.map(shot=>`- [${shot.file}](./${shot.file})`))
+ await fs.writeFile(path.join(evidence,'review.md'),['# Native target menu capture','', 'Capture only. Independent visual review has not been performed.','',...receipt.isolation.map(value=>'- '+value),'',...pictures,''].join('\n'))
 }
-assert.equal(receipt.passed,true,receipt.failure?.message);assert.deepEqual(receipt.cleanup.errors,[]);assert.deepEqual(receipt.cleanup.remaining,[])
-console.log(JSON.stringify({passed:true,receipt:path.join(evidence,'receipt.json'),screenshots:receipt.processes.reduce((n,p)=>n+p.screenshots.length,0)}))
+assert.equal(receipt.passed,true,receipt.failure?.message)
+assert.deepEqual(receipt.cleanup.errors,[]);assert.deepEqual(receipt.cleanup.remaining,[])
+console.log(JSON.stringify({passed:true,receipt:path.join(evidence,'receipt.json'),review:path.join(evidence,'review.md'),screenshots:receipt.processes.reduce((count,value)=>count+value.screenshots.length,0)}))

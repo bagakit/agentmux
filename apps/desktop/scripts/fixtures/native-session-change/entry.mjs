@@ -1,9 +1,6 @@
 import { createElement } from 'react'
 import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { App } from '../../../src/renderer/src/App'
-import { SessionPane } from '../../../src/renderer/src/components/SessionPane'
-import { AttentionRequestPanel } from '../../../src/renderer/src/components/AttentionRequestPanel'
-import { summarizeAgentAttention } from '../../../src/renderer/src/lib/agent-attention'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createRendererSessionEvents } from '../../../src/renderer/src/lib/session-events'
@@ -11,6 +8,7 @@ import { readTerminalViewObservation } from '../../../src/renderer/src/lib/termi
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
+import { updateThemeSelection } from '@agentmux/client-ui/theme'
 import '../../../src/renderer/src/styles/index.css'
 window.terminals = []
 const request = window.nativeBoundary.request
@@ -43,7 +41,7 @@ api.spatial.onChange = () => () => {}
 api.sessions.onEvent = createRendererSessionEvents(listener => window.nativeBoundary.onEvent(listener))
 api.ui.requestStorageFlush = async () => request('flush')
 let identity = setup.ids
-if (setup.phase === 'seed') {
+if (setup.phase === 'select') {
   const { session } = await request('launch')
   identity = { sessionId: session.id, run: session.control.run, tabId: 'native-tab', regionId: 'native-region' }
   await request('save-ids', identity)
@@ -68,12 +66,8 @@ window.nativeState = () => {
 }
 window.nativeLiveReady = () => readTerminalViewObservation({ regionId: identity.regionId, sessionId: identity.sessionId, runId: identity.run.runId })?.liveReady === true
 window.nativeFlush = async () => { prepareRendererUpdate(); await request('flush') }
-window.nativeActivity = () => useAppStore.getState().setViewMode(identity.sessionId, 'activity')
-window.nativeReviewHere = () => {
-  useAppStore.setState(state => ({ mainSurface: 'agents', agentFocus: {
-    ...state.agentFocus, execution: { sessionId: identity.sessionId, history: [] }
-  } }))
-}
+window.nativeTheme = mode => updateThemeSelection({ appAppearance:mode, terminalTheme:'graphite' })
+window.nativeTerminalNode = () => window.terminals.find(one=>one.element?.isConnected)
 createRoot(document.getElementById('root')).render(createElement(App))
 window.nativeReady = true
 window.nativeTerminal = () => { useAppStore.getState().setViewMode(identity.sessionId,'terminal') }
@@ -84,10 +78,10 @@ const presentationFacts = node => {
  return {opacity:getComputedStyle(node).opacity,inert:!!node.closest('[inert]'),editable:node.contentEditable,ancestors}
 }
 const menuGeometry = () => {
- const menu=document.querySelector('.agent-region-menu')
+ const menu=document.querySelector('.agent-region-menu__details')??document.querySelector('.agent-region-menu')
  if(!menu)return null
  const {x,y,width,height,bottom}=menu.getBoundingClientRect(),style=getComputedStyle(menu)
  const items=[...menu.querySelectorAll('[role=menuitem]:not([data-disabled])')],last=items.at(-1),lastBounds=last?.getBoundingClientRect()
  return {x,y,width,height,bottom,viewport:{width:innerWidth,height:innerHeight},scrollTop:menu.scrollTop,scrollHeight:menu.scrollHeight,clientHeight:menu.clientHeight,overflowY:style.overflowY,maxHeight:style.maxHeight,availableHeight:style.getPropertyValue('--radix-dropdown-menu-content-available-height'),lastItem:last?.textContent.trim(),lastBounds:lastBounds?{top:lastBounds.top,bottom:lastBounds.bottom}:null,focused:document.activeElement?.textContent?.trim()}
 }
-window.nativeNativeFacts = () => ({ state:window.nativeState(), menuGeometry:menuGeometry(), marker:document.querySelector('[data-native-source-marker]')?.textContent, menu:document.querySelector('.agent-region-menu')?.textContent, history:document.querySelector('.session-history')?.textContent, historySource:document.querySelector('[data-history-native-session-id]')?.dataset.historyNativeSessionId,presentation:[...document.querySelectorAll('.agent-body,.session-history__viewport')].map(presentationFacts), composer:[...document.querySelectorAll('[contenteditable=true]')].map(input=>presentationFacts(input)),terminal:window.terminals.filter(t=>t.element?.isConnected).map(t=>({rows:t.rows,cols:t.cols})) })
+window.nativeNativeFacts = () => ({ state:window.nativeState(), menuGeometry:menuGeometry(), marker:document.querySelector('[data-native-source-marker]')?.textContent, menu:document.querySelector('.agent-region-menu__details')?.textContent, history:document.querySelector('.session-history')?.textContent, historySource:document.querySelector('[data-history-native-session-id]')?.dataset.historyNativeSessionId,presentation:[...document.querySelectorAll('.agent-body,.session-history__viewport')].map(presentationFacts), composer:[...document.querySelectorAll('[contenteditable=true]')].map(input=>presentationFacts(input)),terminal:window.terminals.filter(t=>t.element?.isConnected).map(t=>({rows:t.rows,cols:t.cols})) })

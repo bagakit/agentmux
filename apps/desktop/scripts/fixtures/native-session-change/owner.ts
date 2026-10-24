@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentMuxControlServer, AgentMuxError, defaultAgentMuxControlSocketPath } from '@agentmux/core'
+import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentMuxControlServer, defaultAgentMuxControlSocketPath } from '@agentmux/core'
 import { AgentMuxHostedRuntimeService } from '../../../../../packages/core/src/hosted-runtime-service'
 const privateRoot=process.argv[2],storePath=path.join(privateRoot,'agent-sessions.json')
 const client=new AgentMuxClient({store:new AgentMuxFileAgentSessionStore(storePath)})
@@ -13,15 +13,6 @@ const identity={runtimeId:'private-native-source-host',ownerInstanceId:randomUUI
 const hosted=new AgentMuxHostedRuntimeService(client,storePath,()=>identity)
 const server=new AgentMuxControlServer({socketPath:defaultAgentMuxControlSocketPath(),coreClients:()=>[{hostId:'local',client}],hostedRuntime:()=>hosted})
 await server.start()
-const kernel=(client as any).kernel,write=kernel.input.bind(kernel)
-kernel.input=async(runId:string,input:any)=>{
- const ack=await write(runId,input),flag=path.join(privateRoot,'lose-next-user-ack')
- if(await fs.stat(flag).catch(()=>null)) {
-  await fs.rm(flag);await fs.writeFile(path.join(privateRoot,'lost-ack.json'),JSON.stringify({runId,input,ack}))
-  throw new AgentMuxError('Private transport lost one already accepted input receipt.','PRIVATE_ACK_LOST','unknown')
- }
- return ack
-}
 process.send?.({ready:true,pid:process.pid,identity,storePath,socket:server.path})
 process.on('message',async(message:any)=>{
  if(message?.operation!=='shutdown')return

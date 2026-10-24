@@ -18,7 +18,7 @@ const idFile=path.join(privateRoot,provider+'-ids.json'),expectedFile=path.join(
 ipcMain.handle('native-proof:request',async(_event,operation,...args)=>{
  calls.push({operation,args})
  switch(operation){
- case'setup':return{phase,config,ids:phase==='seed'?null:JSON.parse(await fs.readFile(idFile,'utf8'))}
+ case'setup':return{phase,config,ids:phase==='select'?null:JSON.parse(await fs.readFile(idFile,'utf8'))}
  case'launch':return runtime.launchAgent({hostId:'local',executorId:'private',workspacePath:nativeRoot},config)
  case'snapshot':return runtime.snapshot(config)
  case'providers':return (runtime.rpcClients()[0].client as any).providers.catalog()
@@ -47,100 +47,151 @@ app.whenReady().then(async()=>{
  try {
   runtime.commit(await runtime.prepare(config))
   win=new BrowserWindow({width:1280,height:820,useContentSize:true,show:false,webPreferences:{preload,contextIsolation:true,sandbox:true,backgroundThrottling:false}})
-  win.webContents.on('console-message',(_event,level,message)=>{if(level>=3){result.errors.push(message);console.error(message)}})
-  runtime.attach(win.webContents);await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
+  win.webContents.on('console-message',(_event,level,message)=>{if(level>=3)result.errors.push(message)})
+  runtime.attach(win.webContents);await win.loadFile(html)
+  win.webContents.debugger.attach('1.3')
+  await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
   const read=(code:string)=>win.webContents.executeJavaScript(code)
-  const until=async(label:string,fn:()=>Promise<any>,budget=20000)=>{const end=Date.now()+budget;do{if(await fn())return;await delay(35)}while(Date.now()<end);throw new Error('Native source scene did not settle: '+label)}
-  await until('actual original workface and live terminal',()=>read('window.nativeReady && window.nativeLiveReady() && window.nativeState().terminalCount===1'))
+  const until=async(label:string,fn:()=>Promise<any>,budget=20000)=>{
+   const end=Date.now()+budget
+   do {if(await fn())return;await delay(35)} while(Date.now()<end)
+   throw new Error('Native target scene did not settle: '+label)
+  }
+  await until('original workface and live terminal',()=>read('window.nativeReady && window.nativeLiveReady() && window.nativeState().terminalCount===1'))
   const ids=JSON.parse(await fs.readFile(idFile,'utf8')),client=runtime.rpcClients()[0].client
-  const core=async()=> (await client.refreshAgentSession(ids.sessionId,ids.run))
+  const core=()=>client.refreshAgentSession(ids.sessionId,ids.run)
   const run=async()=> (await client.statusAgent(ids.sessionId)).run
-  const state=()=>read('window.nativeState()'),facts=()=>read('window.nativeNativeFacts()')
   const persisted=async()=> (await store.load()).find(s=>s.agentSessionId===ids.sessionId)!
-  const menu=async()=>{await read('(()=>{const t=document.querySelector(".agent-region-header__more");t.focus();t.dispatchEvent(new KeyboardEvent("keydown",{key:"ArrowDown",bubbles:true,cancelable:true}))})()');await until('original More menu',()=>read('!!document.querySelector(".agent-region-menu")'))}
-  const select=async(label:string)=>{await read(`(()=>{const b=[...document.querySelectorAll('[role=menuitem],button')].find(b=>b.textContent.trim()===${JSON.stringify(label)});if(!b)throw new Error('Missing actual action '+${JSON.stringify(label)});b.click()})()`);await delay(20)}
-  const dismiss=async()=>{await read('document.querySelector(".agent-region-menu")?.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true}))');await delay(25)}
-  const command=async(mode:string,id:string)=>{await fs.writeFile(path.join(nativeRoot,ids.sessionId+'.control.json'),JSON.stringify({mode,id}));await until('actual native process FD transition',async()=>{try{return JSON.parse(await fs.readFile(path.join(nativeRoot,ids.sessionId+'.controlled.json'),'utf8')).command.id===id}catch{return false}})}
-  const recheck=async()=>{await menu();await select('Check native source');await until('true Core native recheck finished',()=>read('!document.querySelector(".agent-region-menu")?.textContent.includes("Checking source…")'));await dismiss()}
-  const raw=async(label:string)=>{
-   await read('window.nativeTerminal(); window.terminals.find(t=>t.element?.isConnected).focus();true')
-   await until('healthy actual raw terminal',()=>read('window.nativeLiveReady()'))
-   const before=(await run()).acceptedInputBytes
-   await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'char',text:'z'})
-   await until('raw input ACK '+label,async()=> (await run()).acceptedInputBytes>before)
-   const after=(await run()).acceptedInputBytes;result.raw??=[];result.raw.push({label,before,after,pid:(await run()).pid})
+  const state=()=>read('window.nativeState()'),facts=()=>read('window.nativeNativeFacts()')
+  await read('window.originalTerminalForProof=window.nativeTerminalNode();true')
+  const click=async(selector:string,label?:string)=>{
+   const point=await read(`(()=>{const element=[...document.querySelectorAll(${JSON.stringify(selector)})].find(node=>${label===undefined?'true':`node.textContent.trim()===${JSON.stringify(label)}`});if(!element)throw new Error('Missing product action');element.scrollIntoView({block:'nearest'});const r=element.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+   await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point})
+   await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point})
+  }
+  const key=async(value:string)=>{
+   await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyDown',key:value,code:value})
+   await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyUp',key:value,code:value})
+  }
+  const dismiss=async()=>{
+   if(!await read('!!document.querySelector("[data-menu-entry=more]")'))return
+   for(let count=0;count<3&&await read('!!document.querySelector("[data-menu-entry=more]")');count++){await key('Escape');await delay(30)}
+   await until('menu dismissed and original trigger focus restored',()=>read('!document.querySelector("[data-menu-entry=more]") && document.activeElement===document.querySelector(".agent-region-header__more")'))
+  }
+  const menu=async()=>{
+   await dismiss();await click('.agent-region-header__more')
+   await until('original More menu',()=>read('!!document.querySelector("[data-menu-entry=more]")'))
+   await click('[role=menuitem]','Session details')
+   await until('original Session details submenu',()=>read('!!document.querySelector(".agent-region-menu__details .agent-native-source")'))
+  }
+  const select=(label:string)=>click('[role=menuitem],button',label)
+  const recheck=async()=>{
+   await menu();await select('Check native source')
+   await until('source discovery returned',()=>read('!document.querySelector(".agent-region-menu__details")?.textContent.includes("Checking source…")'))
+   await dismiss()
+  }
+  const members=async(values:string[])=>{
+   const id=globalThis.crypto.randomUUID()
+   await fs.writeFile(path.join(nativeRoot,ids.sessionId+'.control.json'),JSON.stringify({id,members:values}))
+   await until('private native actor holds exact members',async()=>{
+    try{return JSON.parse(await fs.readFile(path.join(nativeRoot,ids.sessionId+'.controlled.json'),'utf8')).command.id===id}catch{return false}
+   })
+   await recheck()
   }
   const shot=async(label:string)=>{
-   for(const width of [1280,760]){
-    win.setContentSize(width,820);await read('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+   for(const mode of ['dark','light'])for(const width of [1280,760]){
+    win.setContentSize(width,820)
+    assert.equal(await read(`window.nativeTheme(${JSON.stringify(mode)}).applied`),true)
     await read('Promise.allSettled([document.fonts.ready,...document.getAnimations().filter(a=>a.playState==="running"&&Number.isFinite(a.effect?.getComputedTiming().iterations)).map(a=>a.finished)])')
     await read('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
-    const capture=await facts()
-    if(capture.menuGeometry)assert.ok(capture.menuGeometry.y>=0&&capture.menuGeometry.bottom<=capture.menuGeometry.viewport.height,'Native source menu stays inside the actual viewport')
-    result.screenshots.push({label,width,facts:capture,path:`${provider}-${phase}-${label}-${width}.png`})
-    await fs.writeFile(path.join(evidence,`${provider}-${phase}-${label}-${width}.png`),(await win.capturePage()).toPNG())
-    if(label==='confirm-review'){
-     const menu=capture.menuGeometry
-     assert.ok(menu&&menu.scrollHeight>menu.clientHeight,'Long source review uses real menu scrolling')
-     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',x:menu.x+menu.width/2,y:menu.y+menu.height/2,deltaX:0,deltaY:2000})
-     await until('real pointer wheel scrolls original More menu',()=>read('window.nativeNativeFacts().menuGeometry.scrollTop>0'))
-     await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyDown',key:'End',code:'End',windowsVirtualKeyCode:35})
-     await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyUp',key:'End',code:'End',windowsVirtualKeyCode:35})
-     await until('real End reaches last enabled original menu action',()=>read('(()=>{const m=window.nativeNativeFacts().menuGeometry;return m.focused===m.lastItem&&m.lastBounds.top>=m.y&&m.lastBounds.bottom<=m.bottom})()'))
-     const endFacts=await facts();result.menuReachability??=[];result.menuReachability.push({label,width,geometry:endFacts.menuGeometry})
-     result.screenshots.push({label:'menu-end',width,facts:endFacts,path:`${provider}-${phase}-menu-end-${width}.png`})
-     await fs.writeFile(path.join(evidence,`${provider}-${phase}-menu-end-${width}.png`),(await win.capturePage()).toPNG())
-     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',x:menu.x+menu.width/2,y:menu.y+menu.height/2,deltaX:0,deltaY:-2000})
-     await until('real wheel returns source review to the start',()=>read('window.nativeNativeFacts().menuGeometry.scrollTop===0'))
-    }
+    const observation=await facts(),geometry=observation.menuGeometry
+    if(geometry)assert.ok(geometry.y>=0&&geometry.bottom<=geometry.viewport.height,'Actual Session details stays inside the viewport')
+    assert.equal(observation.state.terminalCount,1)
+    assert.equal(await read('window.nativeTerminalNode()===window.originalTerminalForProof'),true,'Original terminal component remains mounted')
+    const file=`${phase}-${label}-${mode}-${width}.png`,image=await win.capturePage()
+    assert.equal(image.isEmpty(),false)
+    await fs.writeFile(path.join(evidence,file),image.toPNG())
+    result.screenshots.push({label,mode,width,file,facts:observation})
    }
   }
-  result.initial=await state();result.initialRun=await run();assert.ok(result.initialRun.pid)
-  if(phase==='seed'){
-   await fs.writeFile(path.join(nativeRoot,ids.sessionId+'.core-ready'),'Run creation returned; actual Hook fixture may begin')
-   await until('real Core native binding and pending request',async()=>{const s=await core();return s.nativeHandle?.sessionId==='original-'+ids.sessionId&&s.pendingInteraction})
-   await fs.writeFile(path.join(privateRoot,'lose-next-user-ack'),'armed')
-   await read('window.terminals.find(t=>t.element?.isConnected).focus();true')
-   await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27})
-   await until('real accepted old input kept as unknown',async()=> (await persisted())?.pendingInteraction?.nativeInput?.delivery==='unknown')
-   result.lostAck=JSON.parse(await fs.readFile(path.join(privateRoot,'lost-ack.json'),'utf8'))
-   result.originalInteraction=(await persisted()).pendingInteraction
-   await raw('before-source-change')
-   await command('changed','candidate-'+ids.sessionId)
-   await client.sessionHistoryPage(ids.sessionId,{refreshNativeSource:true,limit:1,commandOverride:nodeExecutable,args:[path.join(privateRoot,'native-cli.mjs')],env:config.executors.private.env})
-   await until('changed native label from actual Core',()=>read('window.nativeNativeFacts().marker==="Source changed"'))
-   await shot('changed');await menu();await select('Review source change…');await shot('review');await select('Cancel source change');await dismiss()
-  } else {
+  const raw=async()=>{
+   await dismiss();await read('window.nativeTerminalNode().focus();true')
+   const before=(await run()).acceptedInputBytes
+   await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'char',text:'z'})
+   await until('original healthy raw input ACK',async()=> (await run()).acceptedInputBytes>before)
+   result.raw={before,after:(await run()).acceptedInputBytes}
+  }
+  const workface=async()=>{
+   const value=await state()
+   return{tabs:value.tabs,layouts:value.layouts,drafts:value.drafts,focus:value.focus,activeWorkspaceId:value.activeWorkspaceId}
+  }
+  const targetA='original-'+ids.sessionId,targetB='selected-'+ids.sessionId+'-'+('reader'.repeat(7))
+  result.initialRun=await run();assert.ok(result.initialRun.pid)
+  const originalWorkface=await workface()
+  if(phase==='select'){
+   await fs.writeFile(path.join(nativeRoot,ids.sessionId+'.core-ready'),'Original Run creation returned')
+   await until('original native binding',async()=> (await core()).nativeHandle?.sessionId===targetA)
+   await members([])
+   await until('unknown observation',async()=> (await core()).nativeSourceObservation?.state==='unknown')
+   await menu();await shot('unknown');await dismiss();await raw()
+   await members([targetA,targetB])
+   await until('verified main candidates',async()=> (await core()).nativeSourceObservation?.candidates?.length===2)
+   await menu();await shot('candidates')
+   const count=()=>calls.filter(call=>call.operation==='confirm-native').length
+   const before=count()
+   await select('Choose target: '+targetB)
+   await until('explicit reviewed target',()=>read('document.querySelector("[data-native-source-review]")?.textContent.includes("Confirm conversation target?")'))
+   await shot('review');await select('Cancel source change')
+   assert.equal(count(),before,'Cancelling the review sends no confirmation')
+   assert.equal((await persisted()).nativeHandle?.sessionId,targetA)
+   const choose=async(target:string)=>{
+    await menu();await select('Choose target: '+target);await select('Confirm this native source')
+    await until('exact explicit target persisted',async()=>{
+     const session=await persisted()
+     return session.nativeHandle?.sessionId===target&&session.nativeBinding?.source==='user-selected'
+    })
+    await until('selected marker from actual Core projection',()=>read('window.nativeNativeFacts().marker==="Target selected"'))
+    const invocation=calls.filter(call=>call.operation==='confirm-native').at(-1)
+    assert.equal(invocation.args[1].candidateNativeHandle.sessionId,target)
+    assert.ok(invocation.args[1].operationId)
+    assert.equal((await core()).nativeSourceObservation?.state,'ambiguous','Choosing a semantic target does not invent terminal selection')
+    await dismiss()
+   }
+   await choose(targetB);await menu();await shot('selected-b');await dismiss()
+   await choose(targetA);await menu();await shot('selected-a');await dismiss()
+   await choose(targetB);await raw()
+   assert.equal(calls.filter(call=>call.operation==='launch').length,1)
+   assert.deepEqual(await workface(),originalWorkface,'Target selection retains the original workface and draft')
+   await fs.writeFile(expectedFile,JSON.stringify({workface:await workface(),run:await run(),target:targetB,confirmation:(await persisted()).nativeConfirmation}))
+  }else{
+   assert.equal(phase,'restore')
    const expected=JSON.parse(await fs.readFile(expectedFile,'utf8'))
-   for(const field of ['tabs','layouts','drafts','focus','activeWorkspaceId'])assert.deepEqual(result.initial[field],expected[field],field+' retained after real Electron restart')
-   assert.equal(result.initialRun.runId,expected.session.control.run.runId);assert.equal(result.initialRun.pid,expected.runPID)
-   assert.equal(calls.filter(c=>c.operation==='launch').length,0,'Restart cannot create a new Session')
-   if(phase==='adopt'){
-    assert.equal((await persisted()).nativeSourceObservation?.state,'changed');assert.deepEqual((await persisted()).pendingInteraction,expected.originalInteraction)
-    await raw('candidate-restored')
-    await command('unknown','unknown-'+ids.sessionId);await until('actual Native Hook unknown is published before its diagnostic',()=>read('window.nativeNativeFacts().marker==="Source unknown" && window.nativeState().error===null'));await recheck();await until('unknown is explicit',()=>read('window.nativeNativeFacts().marker==="Source unknown"'));await shot('unknown');await menu();assert.equal(await read('document.querySelector(".agent-region-menu").textContent.includes("Review source change…")'),false);await shot('unknown-info');await dismiss()
-    const next='current-'+ids.sessionId+'-long-native-id-'+('abcdefghij'.repeat(6));await command('changed',next);await recheck()
-    await menu();await select('Review source change…')
-    const reviewed=(await core()).observedNativeHandle!
-    const newest='newest-'+ids.sessionId;await command('changed',newest)
-    await client.sessionHistoryPage(ids.sessionId,{refreshNativeSource:true,limit:1,commandOverride:nodeExecutable,args:[path.join(privateRoot,'native-cli.mjs')],env:config.executors.private.env})
-    await select('Confirm this native source');await until('stale exact review refused',()=>read('document.querySelector(".agent-region-menu")?.textContent.includes("changed")'));assert.equal((await core()).nativeHandle!.sessionId,'original-'+ids.sessionId);result.staleReview={reviewed,retained:(await core()).nativeHandle,notice:await read('document.querySelector(".agent-region-menu").textContent')};await shot('stale');await select('Cancel source change');await dismiss()
-    await menu();await select('Conversation history');await until('actual original history window',()=>read(`window.nativeNativeFacts().historySource===${JSON.stringify('original-'+ids.sessionId)}`))
-    const oldWindow=await read('document.querySelector(".session-history__viewport").textContent');assert.ok(oldWindow.includes('Original history original-'+ids.sessionId),'Original reading window contains actual native records');await menu();await select('Review source change…');await shot('confirm-review');await select('Confirm this native source')
-    await until('Core explicit binding persisted',async()=> (await persisted()).nativeHandle!.sessionId===newest)
-    assert.equal((await core()).run.runId,ids.run.runId);assert.deepEqual((await persisted()).nativeConfirmation?.previousInteraction,expected.originalInteraction)
-    result.confirmation=(await persisted()).nativeConfirmation
-    await dismiss();assert.equal(await read('document.querySelector(".session-history__viewport").textContent'),oldWindow,'Confirmation retains original reading window')
-    await select('Latest');await until('previous exact source re-read',()=>read(`window.nativeNativeFacts().historySource===${JSON.stringify('original-'+ids.sessionId)}`));assert.ok(calls.some(c=>c.operation==='history-page'&&c.args[1]?.nativeSource==='previous'))
-    await shot('previous-history');await select('Current source');await until('independent current history',()=>read(`window.nativeNativeFacts().historySource===${JSON.stringify(newest)}`));await shot('current-history');await select('Terminal');await raw('confirmed-source')
-    assert.equal((await facts()).marker,undefined);assert.equal((await state()).error,null,'Confirmed source leaves no resolved observation error');await shot('confirmed')
-   } else {
-    assert.equal((await facts()).marker,undefined);assert.equal((await state()).error,null,'Restored confirmed source stays quiet');assert.ok((await persisted()).nativeConfirmation);assert.deepEqual((await persisted()).nativeConfirmation?.previousInteraction,expected.originalInteraction);await raw('confirmed-restored');await shot('restored')
-   }
+   assert.deepEqual(await workface(),expected.workface,'Independent Electron process restores original workface')
+   assert.equal((await run()).pid,expected.run.pid)
+   assert.equal((await run()).runId,expected.run.runId)
+   assert.equal(calls.filter(call=>call.operation==='launch').length,0,'Restore cannot create a new Session')
+   assert.equal((await persisted()).nativeHandle?.sessionId,expected.target)
+   assert.equal((await persisted()).nativeBinding?.source,'user-selected')
+   assert.deepEqual((await persisted()).nativeConfirmation,expected.confirmation)
+   await menu();await shot('selected-restored');await raw()
   }
-  result.saved=await state();result.saved.runPID=(await run()).pid;result.saved.originalInteraction=phase==='seed'?result.originalInteraction:JSON.parse(await fs.readFile(expectedFile,'utf8')).originalInteraction
-  assert.equal(result.saved.drafts[ids.sessionId],'Keep this unsent draft');assert.equal(result.saved.session.control.run.runId,ids.run.runId);assert.equal((await run()).pid,result.initialRun.pid);result.persisted=await persisted();result.spatial=await spatial.read();assert.ok(result.spatial?.graph.tabs.length)
-  await fs.writeFile(expectedFile,JSON.stringify(result.saved));await read('window.nativeFlush()');result.calls=calls;result.passed=true
- }catch(error:any){result.failure={name:error.name,message:error.message,stack:error.stack};if(win&&!win.isDestroyed())result.observationAtFailure=await win.webContents.executeJavaScript('window.nativeNativeFacts?.()').catch(()=>null);result.calls=calls;result.diagnostics={owner:await fs.readFile(path.join(privateRoot,'owner-diagnostic.jsonl'),'utf8').catch(()=>''),hooks:await fs.readdir(nativeRoot).then(async files=>Object.fromEntries(await Promise.all(files.filter(f=>f.endsWith('.hooks.jsonl')).map(async f=>[f,await fs.readFile(path.join(nativeRoot,f),'utf8')]))))};console.error(error)}
- finally {await runtime.dispose().catch(error=>{result.cleanupFailure=String(error);result.passed=false});await fs.writeFile(path.join(evidence,provider+'-'+phase+'.json'),JSON.stringify(result,null,2));if(win&&!win.isDestroyed())win.destroy();app.exit(result.passed?0:1)}
+  result.saved=await state();result.persisted=await persisted();result.spatial=await spatial.read()
+  assert.equal(result.saved.drafts[ids.sessionId],'Keep this unsent draft')
+  assert.equal(result.saved.session.control.run.runId,ids.run.runId)
+  assert.equal((await run()).pid,result.initialRun.pid)
+  assert.ok(result.spatial?.graph.tabs.length)
+  await read('window.nativeFlush()');result.calls=calls;result.passed=true
+ }catch(error:any){
+  result.failure={name:error.name,message:error.message,stack:error.stack};result.calls=calls
+  if(win&&!win.isDestroyed()){
+   result.observationAtFailure=await win.webContents.executeJavaScript('window.nativeNativeFacts?.()').catch(()=>null)
+   await fs.writeFile(path.join(evidence,phase+'-failure.png'),(await win.capturePage()).toPNG()).catch(()=>undefined)
+  }
+  console.error(error)
+ }finally{
+  await runtime.dispose().catch(error=>{result.cleanupFailure=String(error);result.passed=false})
+  await fs.writeFile(path.join(evidence,provider+'-'+phase+'.json'),JSON.stringify(result,null,2))
+  if(win&&!win.isDestroyed())win.destroy()
+  app.exit(result.passed?0:1)
+ }
 })
