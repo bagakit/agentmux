@@ -138,7 +138,8 @@ export async function compiledHostFixture(candidate) {
     await writeFile(environment.AGENTMUX_CONFIG_PATH, JSON.stringify({ version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private Host' }],
       executors: { codex: { label: 'Original mobile Agent', providerId: 'codex', command, args: [], env: executorEnv, injectAgentMuxGuide: false } },
       workspaces: [{ id: '__scratch__', name: 'Topics', hostId: 'local', path: scratch, kind: 'folder' },
-        { id: 'original-workspace', name: 'Original mobile workspace', hostId: 'local', path: workspace, kind: 'folder' }], appearance: {}, notifications: { mode: 'off' } }))
+        { id: 'original-workspace', name: 'Original mobile workspace', hostId: 'local', path: workspace, kind: 'folder' }], appearance: { terminalTheme: 'graphite' },
+      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }, notifications: { mode: 'off' } }))
     const native = join(candidate.root, 'packages/core/vendor/ctxmux', process.platform + '-' + process.arch, 'bin/ctxmuxd')
     daemon = spawn(native, ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'],
       { env: environment, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
