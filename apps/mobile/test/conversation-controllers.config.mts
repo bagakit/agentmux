@@ -33,5 +33,5 @@ export default {
     }
   } }],
   test: { ...base.test, include: ['test/manual-input-receipt.test.tsx', 'test/concurrent-drafts.test.tsx',
-    'test/conversation-protocol-consumer.test.tsx', 'test/mobile-input-history.test.tsx'], passWithNoTests: false, maxWorkers: 1 }
+    'test/conversation-protocol-consumer.test.tsx', 'test/mobile-input-history.test.tsx', 'test/mobile-send-capability.test.tsx', 'test/conversation-surface.test.tsx'], passWithNoTests: false, maxWorkers: 1 }
 }
