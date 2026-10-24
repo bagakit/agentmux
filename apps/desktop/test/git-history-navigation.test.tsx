@@ -90,7 +90,8 @@ it('does not start a history reader for a visible review with its tree hidden', 
   await render()
   expect(history).toHaveBeenCalledExactlyOnceWith(workspace.id, { ref: null })
   await render(false); await render()
-  expect(history).toHaveBeenCalledTimes(1)
+  expect(history).toHaveBeenCalledTimes(2)
+  expect(history).toHaveBeenLastCalledWith(workspace.id, { ref: null, limit: 1 })
 })
 
 it('reveals the same Space Git tool through the public repository navigation owner without choosing a commit', async () => {
