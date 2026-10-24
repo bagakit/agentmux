@@ -1,3 +1,4 @@
+import { parseAgentInputJournalCut } from './agent-input-conversation.js'
 import { parseGoalParticipationConfirm } from './goal-participation.js'
 import { isAgentProgressMethod, parseAgentProgressParams, parseAgentProgressResult } from './agent-progress.js'
 import { parseAgentAutomationTarget, parseAgentAutomationInspection } from './agent-automation.js'
@@ -786,9 +787,10 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       }
       case 'message.dispatch.open': case 'message.dispatch.inspect': case 'message.dispatch.report': dispatch(p, input); break
       case 'message.notify': case 'message.notify.inspect': {
-        record(p, ['hostId', 'notification', 'input'])
+        record(p, method === 'message.notify.inspect' ? ['hostId', 'notification', 'input', 'inputOrigin'] : ['hostId', 'notification', 'input'])
+        if (method === 'message.notify.inspect' && p.inputOrigin !== null) parseAgentInputJournalCut(p.inputOrigin)
         if (p.hostId !== input.hostId) fail()
-        if (method === 'message.notify.inspect' && p.notification === null) { if (p.input !== null) fail(); break }
+        if (method === 'message.notify.inspect' && p.notification === null) { if (p.input !== null || p.inputOrigin !== null) fail(); break }
         const raw = record(p.notification, ['notificationId', 'key', 'messageIds', 'wire', 'condition', 'mode', 'idle', 'state', 'reason', 'preparedAt', 'resultRecordedAt'])
         const notice = validateMessageNotification(raw as unknown as import('./agent-message-notification.js').AgentMuxMessageNotification)
         if (notice.notificationId !== input.operationId || method === 'message.notify' && (notice.mode !== 'steer' || !isDeepStrictEqual(notice.messageIds, input.messageIds))) fail()
