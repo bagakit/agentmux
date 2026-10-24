@@ -1,0 +1,22 @@
+{
+  "name": "@agentmux/native-desktop",
+  "version": "0.1.0",
+  "description": "AgentMux native desktop layer and framework-independent page image port",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./image": { "types": "./dist/image.d.ts", "import": "./dist/image.js" }
+  },
+  "files": ["dist", "macos", "scripts/build-macos.mjs", "THIRD_PARTY_NOTICES.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node scripts/verify-client.mjs",
+    "build:macos": "node scripts/build-macos.mjs"
+  },
+  "devDependencies": { "@types/node": "^24.0.0", "typescript": "^5.9.0" }
+}
