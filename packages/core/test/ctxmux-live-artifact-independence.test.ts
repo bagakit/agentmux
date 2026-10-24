@@ -1,5 +1,5 @@
 import { once } from 'node:events'
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises'
 import { createServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -9,11 +9,22 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 
-const boundary = vi.hoisted(() => ({ artifact: 'healthy', spawn: vi.fn() }))
+const boundary = vi.hoisted(() => ({ artifact: 'healthy', directoryFault: '', directoryPath: '', spawn: vi.fn() }))
 vi.mock('node:child_process', async original => ({ ...await original<typeof import('node:child_process')>(), spawn: boundary.spawn }))
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>()
-  return { ...actual, readFile: async (...args: Parameters<typeof actual.readFile>) => {
+  return { ...actual,
+    mkdir: async (...args: Parameters<typeof actual.mkdir>) => {
+      if (boundary.directoryFault === 'mkdir' && String(args[0]) === boundary.directoryPath)
+        throw Object.assign(new Error('Local activation directory cannot be created'), { code: 'EACCES' })
+      return await Reflect.apply(actual.mkdir, actual, args)
+    },
+    chmod: async (...args: Parameters<typeof actual.chmod>) => {
+      if (boundary.directoryFault === 'chmod' && String(args[0]) === boundary.directoryPath)
+        throw Object.assign(new Error('Local activation directory permissions cannot be changed'), { code: 'EPERM' })
+      return await Reflect.apply(actual.chmod, actual, args)
+    },
+    readFile: async (...args: Parameters<typeof actual.readFile>) => {
     if (String(args[0]).includes(join('vendor', 'ctxmux') + '/') && String(args[0]).endsWith('/manifest.json')) {
       if (boundary.artifact === 'missing') throw Object.assign(new Error('Selected artifact unavailable'), { code: 'ENOENT' })
       if (boundary.artifact === 'corrupt') return Buffer.from('{}')
@@ -23,7 +34,7 @@ vi.mock('node:fs/promises', async original => {
 })
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => {
-  boundary.artifact = 'healthy'
+  boundary.artifact = 'healthy'; boundary.directoryFault = ''; boundary.directoryPath = ''
   for (const close of cleanup.splice(0).reverse()) await close()
   vi.restoreAllMocks(); vi.unstubAllEnvs(); boundary.spawn.mockReset()
 })
@@ -54,8 +65,7 @@ async function serving() {
   cleanup.push(async () => { if ((await native.status(run.id)).state.type === 'running') await native.stop(await native.prepareStop(run.id)) })
   return { ...f, daemon, native, identity, run }
 }
-it.each(['missing', 'corrupt'])('keeps the real original Run usable when local activation artifacts are %s', async fault => {
-  const f = await serving(); boundary.artifact = fault
+async function assertOriginalRunUsable(f: Awaited<ReturnType<typeof serving>>) {
   const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
   Object.defineProperty((client as any).hookServer, 'port', { value: 0 }); cleanup.push(() => client.dispose())
   await expect(client.connect()).resolves.toBeUndefined()
@@ -69,6 +79,51 @@ it.each(['missing', 'corrupt'])('keeps the real original Run usable when local a
   expect((await f.native.status(f.run.id)).pid).toBe(f.run.pid)
   expect(f.daemon.exitCode).toBeNull(); expect(f.daemon.signalCode).toBeNull()
   expect(boundary.spawn).not.toHaveBeenCalled()
+}
+it.each(['missing', 'corrupt'])('keeps the real original Run usable when local activation artifacts are %s', async fault => {
+  const f = await serving(); boundary.artifact = fault
+  await assertOriginalRunUsable(f)
+})
+it.each(['mkdir', 'chmod'])('keeps the real original Run usable when local activation directory %s fails', async fault => {
+  const f = await serving(); boundary.directoryFault = fault; boundary.directoryPath = join(f.state, 'ctxmux')
+  await assertOriginalRunUsable(f)
+})
+it('keeps the real original Run usable when the already-private namespace cannot be chmodded', async () => {
+  const f = await serving()
+  await chmod(f.runtime, 0o700)
+  expect((await stat(f.runtime)).uid).toBe(process.getuid!())
+  boundary.directoryFault = 'chmod'; boundary.directoryPath = f.runtime
+  await assertOriginalRunUsable(f)
+  expect((await stat(f.runtime)).mode & 0o777).toBe(0o700)
+})
+it('repairs actual public namespace permissions before using the original Run', async () => {
+  const f = await serving()
+  await chmod(f.runtime, 0o755)
+  expect((await stat(f.runtime)).mode & 0o777).toBe(0o755)
+  await assertOriginalRunUsable(f)
+  expect((await stat(f.runtime)).mode & 0o777).toBe(0o700)
+})
+it('refuses a failed namespace permission repair while preserving the original daemon and Run', async () => {
+  const f = await serving()
+  await chmod(f.runtime, 0o755)
+  boundary.directoryFault = 'chmod'; boundary.directoryPath = f.runtime
+  const adapter = new CtxmuxRunAdapter()
+  await expect(adapter.connect()).rejects.toMatchObject({ code: 'EPERM' })
+  expect(adapter.isConnected()).toBe(false)
+  expect(boundary.spawn).not.toHaveBeenCalled()
+  expect((await stat(f.runtime)).mode & 0o777).toBe(0o755)
+  expect(await f.native.runtimeInfo()).toMatchObject({ daemonInstanceId: f.identity.daemonInstanceId })
+  expect(await f.native.status(f.run.id)).toMatchObject({ pid: f.run.pid, state: { type: 'running' } })
+  expect(f.daemon.exitCode).toBeNull(); expect(f.daemon.signalCode).toBeNull()
+  boundary.directoryFault = ''
+  await assertOriginalRunUsable(f)
+  expect((await stat(f.runtime)).mode & 0o777).toBe(0o700)
+})
+it.each([['mkdir', 'EACCES'], ['chmod', 'EPERM']])('refuses a new activation when directory %s fails', async (fault, code) => {
+  const f = await namespace(); boundary.directoryFault = fault; boundary.directoryPath = join(f.state, 'ctxmux')
+  const adapter = new CtxmuxRunAdapter()
+  await expect(adapter.connect()).rejects.toMatchObject({ code })
+  expect(adapter.isConnected()).toBe(false); expect(boundary.spawn).not.toHaveBeenCalled()
 })
 it.each(['missing', 'corrupt'])('refuses a new activation with %s artifacts before any child is created', async fault => {
   await namespace(); boundary.artifact = fault
