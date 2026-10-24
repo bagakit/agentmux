@@ -499,7 +499,8 @@ const mockApi: AgentMuxDesktopApi = {
     ls: async () => { throw new Error('Device state requires the original desktop Host. This preview cannot read authorization.') },
     revoke: async () => { throw new Error('Revoking a device requires confirmation on the original desktop.') }
   },
-  goals: { execute: async () => { throw new Error('Goal operations require the original background Host.') } },
+  goals: { execute: async () => { throw new Error('Goal operations require the original background Host.') },
+    handoffDiscussion: async () => { throw new Error('Saved Goal discussions require their original Desktop and Core owners.') } },
   demands: {
     delegation: async () => { throw new Error('Original delegation facts and collection require the Desktop Goal and Core owners.') },
     onObservationIssue: () => () => {},

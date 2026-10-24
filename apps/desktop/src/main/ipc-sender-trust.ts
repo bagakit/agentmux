@@ -130,6 +130,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'continuousProgress:list': 'continuous progress',
   'continuousProgress:create': 'continuous progress',
   'continuousProgress:goals': 'Goal progress',
+  'goals:handoffDiscussion': 'original saved Goal discussion handoff',
   'goals:execute': 'original background Goal operation',
   'demands:delegation': 'original Goal report collection',
   'demands:inspectDispatch': 'original Goal Start inspection',

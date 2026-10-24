@@ -788,6 +788,10 @@ export type WorkspaceSelectionResult = {
 }
 
 export type AgentLaunchInput = {
+  /** Exact original Launcher of this trusted native creation, without changing launch options. */
+  launcher?: { tabId: string; regionId: string }
+  /** Original explicit execution choice; independent of the displayed Launcher/Zone. */
+  executionWorkspaceId?: string
   executorId: AgentExecutorId
   executorRevision?: string
   hostId: string
@@ -1139,6 +1143,8 @@ export type AgentSessionRecoveryCandidate = {
 }
 
 export type AgentLaunchResult = {
+  /** A local placement failure never revokes the actual Core creation or input receipt. */
+  placementIssue?: string
   /** One public Core creation receipt; missing display reads never revoke it. */
   created: AgentMuxAgentSession
   creation?: NonNullable<AgentMuxAgentSession['creation']>

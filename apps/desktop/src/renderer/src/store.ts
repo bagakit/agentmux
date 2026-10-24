@@ -4873,7 +4873,14 @@ async function openGoalPmo(demandId: string, mode: 'open' | 'grill' | 'grounding
   return receipt.tabId
 }
 
+const savedGoalDiscussionNoticeKey = JSON.stringify(['saved-source'])
+function settleGoalDiscussionNotice(state: AppState, key: string): Partial<AppState> {
+  const matches = (context: ErrorNoticeContext | null | undefined) => context?.event?.source === 'goal-discussion-binding' && context.event.key === key
+  return { ...settleNotificationRecords(state, state.notificationEvents.filter(notice => matches(notice.context))),
+    ...(matches(state.errorNoticeContext) ? { error: null, lastError: null, errorNoticeContext: null, errorDismissed: false } : {}) }
+}
 export async function handoffOriginalGoalDiscussions(goalId?: string): Promise<void> {
+  try {
   await handoffSavedGoalDiscussions({ getState: () => useAppStore.getState(),
     handoff: input => api.goals.handoffDiscussion(input),
     acknowledged: (id, originalTabId, receipt) => {
@@ -4881,6 +4888,12 @@ export async function handoffOriginalGoalDiscussions(goalId?: string): Promise<v
       useAppStore.setState(current => current.demandPmoTabIds[id] !== originalTabId ? {} : {
         demandPmoTabIds: Object.fromEntries(Object.entries(current.demandPmoTabIds).filter(([goal]) => goal !== id)) })
     } }, goalId)
+  if (!Object.keys(useAppStore.getState().demandPmoTabIds).length) useAppStore.setState(state => settleGoalDiscussionNotice(state, savedGoalDiscussionNoticeKey))
+  } catch (error) {
+    useAppStore.getState().reportError(error, { kind: 'indeterminate', summary: 'Original Goal discussion relationships remain unconfirmed. Their saved sources, workfaces and healthy Agents are retained.',
+      event: { source: 'goal-discussion-binding', key: savedGoalDiscussionNoticeKey, object: { kind: 'application', id: 'desktop' } } })
+    throw error
+  }
 }
 
 // Undelivered display projections retain the exact native creation event, never a URL replay.
@@ -5165,8 +5178,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (get().workbenchSaveWarning !== warning || get().workbenchSaveWarningOwner !== owner) set({ workbenchSaveWarning: warning, workbenchSaveWarningOwner: owner })
   },
   async retryWorkbenchSave() {
-    try { await handoffOriginalGoalDiscussions(); await prepareRendererUpdate() }
-    catch (error) { get().reportWorkbenchSaveFailure(error) }
+    try { await handoffOriginalGoalDiscussions() } catch { /* The original handoff owner keeps its exact notice and saved source. */ }
+    try { await prepareRendererUpdate() } catch (error) { get().reportWorkbenchSaveFailure(error) }
   },
   async initialize() {
     if (!api.control || typeof api.control.onRequest !== 'function') {
@@ -5546,7 +5559,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           set({}) // Rewrite UI preferences after the Core ACK, removing the old entity snapshot.
         } catch(error) {get().reportWorkbenchSaveFailure(error)}
       }
-      void handoffOriginalGoalDiscussions().catch(error => { if (observing) get().reportWorkbenchSaveFailure(error) })
+      void handoffOriginalGoalDiscussions().catch(() => { /* The original handoff owner already reported its retained source. */ })
       // Ordinary startup ensures the original primary identity once. Metadata failure is advisory;
       // it cannot hold up restored workfaces or reconcile a healthy Session into a replacement.
       if (config.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) {
@@ -9658,6 +9671,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       dispatchStarted = true
       const launched = await api.sessions.launchAgent({
+        ...(launcher ? { launcher: { tabId, regionId }, executionWorkspaceId: workspace.id } : {}),
         executorId,
         ...(executor?.executorRevision ? { executorRevision: executor.executorRevision } : {}),
         hostId: workspace.hostId,
@@ -9670,6 +9684,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         createOperationId
       }, pmo?.intent)
       creationObserved = true
+      const placementNoticeKey = JSON.stringify(['native-creation', createOperationId])
+      if (launched.placementIssue) get().reportError(new Error(launched.placementIssue), { kind: 'indeterminate',
+        summary: 'The Agent and its original input remain available. Its discussion placement is unconfirmed; retain the same creation operation.',
+        subject: { kind: 'agent', hostId: launched.created.hostId, agentSessionId: launched.created.agentSessionId, run: launched.created.run },
+        event: { source: 'goal-discussion-binding', key: placementNoticeKey, object: { kind: 'region', id: regionId, hostId: launched.created.hostId, workspaceId: workspace.id } } })
+      else set(current => settleGoalDiscussionNotice(current, placementNoticeKey))
       if (launched.created.agentSessionId !== sessionId) {
         let timelineGapSessionId: string | undefined
         set((current) => {
@@ -9686,8 +9706,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (pmo) await get().refreshDemand(pmo.intent.goalId)
       const canonical = await get().canonicalizeAgentLaunch(launched)
       const result = canonical ?? launched
-      const launchOwner = findWorkbenchRegion(get().tabs, regionId)
-      if (!canonical || !ownsSessionLaunch(launchOwner?.surface, 'agent', sessionId) ||
+      const launchState = get(), launchOwner = findWorkbenchRegion(launchState.tabs, regionId)
+      const observed = launchState.sessions.find(session => session.id === sessionId) ?? result.session
+      const attached = launchOwner?.surface.kind === 'agent' && launchOwner.surface.phase === 'attached' && launchOwner.surface.sessionId === sessionId &&
+        observed?.control.kind === 'agent' && observed.control.hostId === result.created.hostId && observed.control.agentSessionId === sessionId && observed.control.run.runId === result.created.run.runId
+      if (!canonical || !(ownsSessionLaunch(launchOwner?.surface, 'agent', sessionId) || attached) ||
         (launchOwner && !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launchOwner.tab.id))) {
         // Display disappearance is observation loss. Explicit close plans retain their original owner.
         let timelineGapSessionId: string | undefined

@@ -420,7 +420,8 @@ export function reduceAgentSessionLaunchAttached(
   result: AgentLaunchResult
 ): RuntimeEventReduction {
   const owner = findWorkbenchRegion(state.tabs, regionId)
-  if (!owner || !ownsSessionLaunch(owner.surface, 'agent', result.created.agentSessionId)) return { state }
+  // The Core producer can publish this exact attached Session before its IPC reply.
+  if (!owner || owner.surface.kind !== 'agent' || owner.surface.sessionId !== result.created.agentSessionId) return { state }
   const attached = {
     ...state,
     tabs: { ...state.tabs, [owner.tab.id]: updateWorkbenchRegion(owner.tab, regionId, (surface) => (
