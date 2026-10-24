@@ -1,0 +1,17 @@
+.connector-traffic-summary { display: grid; gap: var(--sp-3); min-width: 0; container-type: inline-size; }
+.connector-traffic-summary__directions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
+.connector-traffic-summary__tile { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-1); }
+.connector-traffic-summary__direction { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.connector-traffic-summary__direction svg { flex: none; }
+.connector-traffic-summary__tile strong { font-size: var(--fs-meta); line-height: 1.45; color: var(--text); font-weight: 500; }
+.connector-traffic-summary__tile small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.45; }
+.connector-traffic-summary__tile :is(strong, small) { white-space: normal; overflow-wrap: anywhere; }
+.connector-traffic-summary__tile[data-tone='warning'] strong { color: var(--amber-text); }
+.connector-traffic-summary__problems { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); list-style: none; padding: 0; margin: 0; }
+.connector-traffic-summary__problems li { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.connector-traffic-summary__problems li[data-tone='warning'] { color: var(--amber-text); }
+.connector-traffic-summary__problems svg { flex: none; }
+.connector-traffic-summary__problems span { overflow-wrap: anywhere; }
+.connector-traffic-summary__retained { margin: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.connector-traffic-summary__inspect { justify-self: start; }
+@container (max-width: 260px) { .connector-traffic-summary__directions { grid-template-columns: 1fr; } }
