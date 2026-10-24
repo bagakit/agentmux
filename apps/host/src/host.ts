@@ -1,3 +1,4 @@
+import { createHostContent } from './content-owner.js'
 import { createHostSnapshotObservation } from './snapshot-observation.js'
 import { createHostSpatialPresentation } from './spatial-presentation.js'
 import { createDesktopInputContextCaptureReader } from './input-context-capture-reader.js'
@@ -85,8 +86,10 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const spatialState = connectionOwner?.spatial ?? new AgentMuxSpatialStateStore()
+  const content = configurationPath ? createHostContent({ configurationPath, spatial: spatialState }) : undefined
   const service = {
     spatialState,
+    ...content,
     snapshot: createHostSnapshotObservation(configurationPath, spatialState),
     spatialPresentation: createHostSpatialPresentation({ ...(configurationPath ? { configurationPath } : {}), clients: () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])] }),
     mobileAssets,

@@ -161,6 +161,10 @@
     "./content-types": {
       "types": "./dist/content-types.d.ts",
       "import": "./dist/content-types.js"
+    },
+    "./content-owner": {
+      "types": "./dist/content-owner.d.ts",
+      "import": "./dist/content-owner.js"
     }
   }
 }
