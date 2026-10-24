@@ -1,3 +1,4 @@
+import { parseDemandDiscussionIntent, type DemandDiscussionIntent } from './discussion.js'
 import { assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
 import { parseDemandDispatchIntent, parseDemandDispatches, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
 import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
@@ -171,6 +172,8 @@ function parseDemand(value: unknown, label: string): Demand {
     'supervisorSessionId',
     'participations',
     'creationOrigin',
+    'discussionOperationId',
+    'discussionIntent',
     'contentRefs',
     'dispatches',
     'delegations',
@@ -182,7 +185,7 @@ function parseDemand(value: unknown, label: string): Demand {
     'grounding',
     'createdAt',
     'updatedAt',
-  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'dispatches', 'delegations', 'progressUpdates', 'patrols'])
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'dispatches', 'delegations', 'progressUpdates', 'patrols'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
@@ -199,6 +202,7 @@ function parseDemand(value: unknown, label: string): Demand {
   if (assigneeSessionIds.some(id => !sessionIds.includes(id)) || supervisorSessionId !== null && !assigneeSessionIds.includes(supervisorSessionId)) throw new Error(`${label} has inconsistent collaboration relations`)
   const participations = parseDemandParticipations(record.participations ?? [])
   const creationOrigin = record.creationOrigin === undefined ? undefined : parseDemandCreationOrigin(record.creationOrigin)
+  if (record.discussionIntent !== undefined && record.discussionOperationId === undefined) throw new Error(`${label} has no original discussion operation`)
   if (creationOrigin?.requesterParticipationId && !participations.some(item => item.id === creationOrigin.requesterParticipationId)) throw new Error(`${label} references an absent original requester`)
   return {
     id: nonEmptyString(record.id, `${label}.id`),
@@ -216,6 +220,8 @@ function parseDemand(value: unknown, label: string): Demand {
     phaseIndex,
     sessionIds, assigneeSessionIds, supervisorSessionId, participations,
     ...(creationOrigin === undefined ? {} : { creationOrigin }),
+    ...(record.discussionOperationId === undefined ? {} : { discussionOperationId: nonEmptyString(record.discussionOperationId, `${label}.discussionOperationId`) }),
+    ...(record.discussionIntent === undefined ? {} : { discussionIntent: parseDemandDiscussionIntent(record.discussionIntent) }),
     ...(record.contentRefs === undefined ? {} : { contentRefs: parseDemandContentReferences(record.contentRefs) }),
     dispatches: parseDemandDispatches(record.dispatches ?? []),
     ...(record.delegations === undefined ? {} : { delegations: parseDemandDelegations(record.delegations) }),
@@ -404,6 +410,16 @@ export class DemandStore {
       if (!title) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'title is required')
       const id = input.id ?? mintObjectId()
       inputString(id, 'id')
+      const original = snapshot.demands.find(goal => goal.id === id)
+      if (original && options.discussionOperationId && original.discussionOperationId === options.discussionOperationId && original.creationOrigin?.operationId === operationId) {
+        const expected = { title, description: input.description ?? '', projectId: input.projectId ?? null, priority: input.priority ?? 'normal', status: input.status ?? 'backlog',
+          assigneeSessionIds: [...(input.assigneeSessionIds ?? [])], supervisorSessionId: input.supervisorSessionId ?? null,
+          sessionIds: [...new Set([...(input.sessionIds ?? []), ...(input.assigneeSessionIds ?? [])])], tags: [...(input.tags ?? [])],
+          plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, phaseIndex: input.phaseIndex ?? null, contentRefs: input.contentRefs }
+        if (Object.entries(expected).some(([key, value]) => JSON.stringify(original[key as keyof Demand]) !== JSON.stringify(value)))
+          throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal creation is retained but its current content differs. Inspect that same Goal without creating another.')
+        return { unchanged: original }
+      }
       if (snapshot.demands.some((entry) => entry.id === id)) {
         throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, `Demand ${id} already exists`)
       }
@@ -428,6 +444,7 @@ export class DemandStore {
         participations: [],
         ...(options.creationOrigin ? { creationOrigin: { operationId, requesterAsSupervisor: options.creationOrigin.requesterAsSupervisor,
           requesterParticipationId: null, supervisorDefaultPending: options.creationOrigin.requesterAsSupervisor && !Object.hasOwn(input, 'supervisorSessionId') } } : {}),
+        ...(options.discussionOperationId === undefined ? {} : { discussionOperationId: nonEmptyString(options.discussionOperationId, 'discussionOperationId') }),
         ...(input.contentRefs === undefined ? {} : { contentRefs: [...input.contentRefs] }),
         activities: [],
         decisions: [],
@@ -922,6 +939,22 @@ export class DemandStore {
     }, patch.title === undefined ? undefined : { ...options, targetId: id, requested: typeof patch.title === 'string' ? patch.title : null }, options.operationId)
   }
 
+  /** Freeze this new Goal's first discussion request before any Core creation. */
+  async prepareDiscussion(id: string, operationId: string, input: DemandDiscussionIntent, expectedUpdatedAt: number): Promise<DemandReceipt> {
+    const intent = parseDemandDiscussionIntent(input)
+    return this.mutate('discussion-prepare', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath)
+      if (demand.discussionOperationId !== operationId) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal discussion operation is unconfirmed. Existing workfaces are retained.')
+      if (demand.discussionIntent) {
+        if (JSON.stringify(demand.discussionIntent) !== JSON.stringify(intent)) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal discussion request is frozen. Inspect that same request.')
+        return { unchanged: demand }
+      }
+      if (demand.updatedAt !== expectedUpdatedAt) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Goal changed before preparing its original discussion.')
+      demand.discussionIntent = intent; demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      return demand
+    }, undefined, operationId)
+  }
+
   async recordParticipation(id: string, source: DemandParticipationSource, options: { operationId: string; expectedUpdatedAt?: number }): Promise<DemandReceipt> {
     const parsed = parseDemandParticipationSource(source)
     return this.mutate('participation', snapshot => {
@@ -1345,7 +1378,7 @@ async function enqueue<T>(root: string, fn: () => Promise<T>): Promise<T> {
 function rejectProvenanceInput(value: object): void {
   if (Object.hasOwn(value, 'progressUpdates') || Object.hasOwn(value, 'patrols')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Only the original responsibility owner records progress and inspection facts')
   if (Object.hasOwn(value, 'delegations')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Only the actual delegation owner can prepare, link, report or collect original business work.')
-  if (['participations', 'creationOrigin', 'requesterParticipationId', 'requesterAsSupervisor', 'supervisorDefaultPending', 'assigneeExecutorId'].some(key => Object.hasOwn(value, key)))
+  if (['participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'requesterParticipationId', 'requesterAsSupervisor', 'supervisorDefaultPending', 'assigneeExecutorId'].some(key => Object.hasOwn(value, key)))
     throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Original Goal provenance is authored only by the trusted host; assign accurate Sessions.')
   if (Object.hasOwn(value, 'executorId')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Executor is creation configuration, not a Goal assignee. Assign accurate Sessions.')
 }

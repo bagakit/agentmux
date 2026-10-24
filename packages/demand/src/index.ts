@@ -13,3 +13,5 @@ export * from './delegations.js'
 export * from './responsibility.js'
 export * from './goal-patrol.js'
 export * from './relations.js'
+
+export * from './discussion.js'
