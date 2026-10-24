@@ -27,6 +27,7 @@ import { AgentInformationPreviewHost } from './components/AgentInformationPrevie
 import { QuickSwitcher } from './components/QuickSwitcher'
 import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-shortcuts'
 import { routeWindowShortcut } from './lib/shortcut-registry'
+import { runScreenshotShortcut } from './lib/screenshot-shortcut-target'
 import { SurfaceSwitch, TopRowLeadingChrome, WindowSidebarLayoutContext, useWindowSidebarLayout } from './components/TopRowChrome'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
@@ -574,6 +575,11 @@ function DesktopApp() {
   }, [initialize])
 
   useEffect(() => api.ui.onWindowResize(({ active }) => setWindowResizeActive(active)), [])
+  useEffect(() => api.ui.onScreenshotShortcut(() => {
+    void runScreenshotShortcut().catch(error => {
+      useAppStore.getState().reportError(error)
+    })
+  }), [])
 
   // Background Agents announce themselves: a completion, a request, or a failure the user is not looking
   // at raises a native notification that routes back to that Session.

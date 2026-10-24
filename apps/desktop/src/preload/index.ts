@@ -453,6 +453,12 @@ const api: AgentMuxPreloadApi = {
       return () => ipcRenderer.off('ui:spatialLinkIssue', wrapped)
     },
     captureScreenshot: () => ipcRenderer.invoke('ui:captureScreenshot'),
+    screenshotShortcutStatus: () => ipcRenderer.invoke('ui:screenshotShortcutStatus'),
+    onScreenshotShortcut: listener => {
+      const receive = () => listener()
+      ipcRenderer.on('ui:screenshotShortcut', receive)
+      return () => { ipcRenderer.removeListener('ui:screenshotShortcut', receive) }
+    },
     listAgentSkills: (sessionId: string) => ipcRenderer.invoke('ui:listAgentSkills', sessionId),
     listWorkspaceSkills: (workspaceId: string, providerId: string) => ipcRenderer.invoke('ui:listWorkspaceSkills', workspaceId, providerId),
     readClipboardText: () => ipcRenderer.invoke('ui:readClipboardText'),

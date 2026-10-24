@@ -1,5 +1,6 @@
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { COMPOSER_KEYBOARD_BINDINGS } from '@agentmux/client-ui/composer-keyboard'
+import { SCREENSHOT_SHORTCUT } from '../../../shared/screenshot-shortcut'
 // Desktop's complete shortcut inventory: local bindings plus declarations owned by shared surfaces.
 // Chord, stable id, scope, and the platform bottom line are each expressed exactly once at their owner.
 // Before this, the same "which key is which action" decision was scattered
@@ -18,6 +19,7 @@ export type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 
 
 /**
  * Where a binding is evaluated:
+ * - `system` — Electron Main's OS registration; Renderer only projects its declaration.
  * - `window`  — App's window-level capture listener (quick switcher, workbench actions).
  * - `terminal`— xterm's custom key handler, live while a terminal owns focus.
  * - `editor`  — Monaco's own keybinding table while the editor owns focus.
@@ -47,11 +49,11 @@ export type ShortcutEvent = Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 
  * shadows any future terminal/editor binding on the same chord. A scope keeps it reachable exactly where
  * it means something. `INNER_SCOPES` below is what makes the collision guard see it.
  */
-export const SHORTCUT_SCOPES = ['window', 'terminal', 'editor', 'launcher', 'message-tool'] as const
+export const SHORTCUT_SCOPES = ['system', 'window', 'terminal', 'editor', 'launcher', 'message-tool'] as const
 export type ShortcutScope = (typeof SHORTCUT_SCOPES)[number]
 
 /**
- * The scopes that live *inside* a focused surface, as opposed to `window`.
+ * The scopes that live inside a focused surface. Main owns `system`; it is not an inner listener.
  *
  * Derived by subtraction from {@link SHORTCUT_SCOPES}, deliberately not written out again: this is the list
  * the cross-scope collision guard walks, and it used to be hand-enumerated as `terminal || editor` inside
@@ -62,7 +64,7 @@ export type ShortcutScope = (typeof SHORTCUT_SCOPES)[number]
  * nothing to remember. That is also why the scope union is spelled as an array first: a hand-copied second
  * list is the failure this whole comment is about.
  */
-export const INNER_SCOPES: readonly ShortcutScope[] = SHORTCUT_SCOPES.filter((scope) => scope !== 'window')
+export const INNER_SCOPES: readonly ShortcutScope[] = SHORTCUT_SCOPES.filter((scope) => scope !== 'window' && scope !== 'system')
 
 /**
  * The key's readline classification — this is the *per-binding* form of the platform bottom line, not a
@@ -102,6 +104,7 @@ export interface ShortcutBinding {
   /** Human label for the cheat-sheet / command palette. */
   label: string
   description?: string
+  macOnly?: true
   /** The chord on macOS. */
   mac: Chord
   /** The chord on every other platform. */
@@ -196,6 +199,8 @@ const SELECT_TAB_BINDINGS: ShortcutBinding[] = Array.from({ length: 9 }, (_, ind
  * guard keeps it that way.
  */
 export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
+  { id: SCREENSHOT_SHORTCUT.id, scope: 'system', keyClass: 'digit', label: SCREENSHOT_SHORTCUT.label,
+    description: SCREENSHOT_SHORTCUT.description, macOnly: true, mac: SCREENSHOT_SHORTCUT.chord, other: SCREENSHOT_SHORTCUT.chord },
   // The shared Composer is the dispatch owner; Desktop only projects its declaration for discovery.
   ...COMPOSER_KEYBOARD_BINDINGS.map(({ chord, id, keyClass, label, description }): ShortcutBinding => ({
     id, keyClass, label, description, scope: 'message-tool', mac: chord, other: chord
@@ -619,6 +624,7 @@ export function matchShortcut(
 ): string | null {
   for (const binding of SHORTCUT_BINDINGS) {
     if (binding.scope !== context.scope) continue
+    if (binding.macOnly && !isMac) continue
     if (binding.gate === 'not-in-editable' && context.editableTarget) continue
     if (chordMatches(chordForPlatform(binding, isMac), event, isMac)) return binding.id
   }

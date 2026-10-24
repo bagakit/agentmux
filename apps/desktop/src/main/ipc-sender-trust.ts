@@ -151,6 +151,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'ui:spatialLinksReady': 'spatial link readiness',
   'ui:openObjectLink': 'object link navigation',
   'ui:captureScreenshot': 'screenshot',
+  'ui:screenshotShortcutStatus': 'screenshot shortcut observation',
   'ui:nativeBrowserVisibility': 'native Browser visibility',
   'ui:publishNativeOverlays': 'native floating chrome',
   'ui:listAgentSkills': 'Agent skills',

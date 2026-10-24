@@ -11,6 +11,9 @@ import * as DropdownMenu from './HoverDropdownMenu'
 import { SemanticIcon } from './semantic-icons'
 import { useAppStore } from '../store'
 import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT } from '../../../shared/contracts'
+import { SCREENSHOT_SHORTCUT } from '../../../shared/screenshot-shortcut'
+import { formatChord } from '../lib/shortcut-cheat-sheet'
+import { isMacPlatform } from '../lib/host-platform'
 
 import { ComposerLayoutToggle, type ComposerToolPhase as ToolDockPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
 
@@ -153,7 +156,7 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
     {referenceTools}
     </span>
     {onCapture ? <span className="composer-tool-group" role="group" aria-label="Screen capture"><button type="button" className="composer-tool" disabled={disabled || capturing}
-      aria-label="Capture a screen region" title="Capture a screen region" onClick={() => { void runAction(capture) }}>{capturing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCaptureIcon size={14} />} <span className="composer-tool__label">Capture</span></button></span> : null}
+      aria-label="Capture a screen region" title={isMacPlatform() ? `Capture a screen region (${formatChord(SCREENSHOT_SHORTCUT.chord, true).join('')} · system-wide)` : 'Capture a screen region'} onClick={() => { void runAction(capture) }}>{capturing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCaptureIcon size={14} />} <span className="composer-tool__label">Capture</span></button></span> : null}
     </>}
   </span>
 }
