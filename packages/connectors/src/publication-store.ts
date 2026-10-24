@@ -89,7 +89,7 @@ export function publicDelivery(operation: PublicationOperation): ConnectionDeliv
 export type PublicationPageOptions = {
   queryFeedback?: true
   fragmentBytes?: number
-  fragmentText?: (payload: Extract<PublicationPayload, { kind: 'speech' }>, speaker?: PublicationSpeaker) => readonly PublicationTextFragment[] | undefined
+  fragmentText?: (payload: Extract<PublicationPayload, { kind: 'speech' }>, speaker?: PublicationSpeaker, originalMessage?: PublicationOperation['originalMessage']) => readonly PublicationTextFragment[] | undefined
   units: readonly ConversationUnit[]
   resolvedText: ReadonlyMap<string, ResolvedPublicationPart>
   questions?: ReadonlyMap<string, QuestionPublicationPayload>
@@ -673,7 +673,7 @@ export class PublicationStore {
     const payload = representation(plan.resourceParts ?? [{ text: plan.text }], plan.phase, plan.relay, '\n\n', plan.inputSubmission)
     const represented = question && plan.text && (plan.complete || plan.gaps.every(gap => gap.reason === 'resource-unavailable'))
       ? questionRepresentation(payload, { ...question, ...(plan.phase ? { phase: plan.phase } : {}) }) : payload
-    const revision = digest(represented), parts = representationFragments(represented, fragmentBytes, fragmentText ? payload => fragmentText(payload, speaker) : undefined)
+    const revision = digest(represented), parts = representationFragments(represented, fragmentBytes, fragmentText ? payload => fragmentText(payload, speaker, originalMessage) : undefined)
     if (parts.length && latest.length && latest.every(o => o.sourceRevision === revision && o.state !== 'cancelled')) return
     // A form status update has its own original receipt; unchanged media must not be sent again.
     if (question && payload.kind === 'sequence' && parts.length === latest.length && latest.every((operation, index) => operation.effect === 'upsert' && !['cancelled', 'superseded'].includes(operation.state) && same(operation.payload, parts[index]))) return

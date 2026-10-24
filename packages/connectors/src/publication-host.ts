@@ -279,7 +279,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const originals = binding.scope.publication === 'future-shared-conversation'
         ? new Map(ordered.map(unit => [unit.event.id, publicationMessageTargets(unit, binding.sourceFrontier).map(target => ({ key: target.key, ...(target.notificationId ? { notificationId: target.notificationId } : {}), record: target.record, revision: target.revision, ...(target.startUnconfirmed ? { startUnconfirmed: true as const } : {}), ...(target.part ? { part: target.part } : {}), messages: [], unavailable: true }))])) : new Map()
       const questions = adapter.questionActions ? this.options.permissions?.questions?.(binding, ordered) : undefined
-      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, originals, ...(this.options.queryFeedback && adapter.queryFeedback ? { queryFeedback: true } : {}), fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) } : {}), ...(questions ? { questions } : {}) })
+      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, originals, ...(this.options.queryFeedback && adapter.queryFeedback ? { queryFeedback: true } : {}), fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) } : {}), ...(questions ? { questions } : {}) })
       after = page.checkpoint; lane.view = page.window.view!; lane.viewId = page.window.id; lane.read = { after }
       if (lane.watch?.viewId !== lane.viewId) lane.dirty = true
       if (!page.more) { lane.read = undefined; break }
@@ -439,7 +439,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       for (const unit of await this.gapUnits(lane, gap)) {
         const originals = await this.originalMessages(binding, [unit], signal)
         signal.throwIfAborted()
-        this.store.recoverOriginalMessages(binding, gap, unit, originals.get(unit.event.id) ?? [], () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) : undefined)
+        this.store.recoverOriginalMessages(binding, gap, unit, originals.get(unit.event.id) ?? [], () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) : undefined)
         if ([...originals.values()].flat().some(value => !value.unavailable)) recovered = true
       }
     }).catch(() => { /* The exact durable gap retains its original target; ordinary publication stays usable. */ })
@@ -460,7 +460,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       try {
         for (const unit of await this.gapUnits(lane, gap)) {
           const speakers = await this.speakers(reference, [unit], signal)
-          this.store.recoverPart(binding, gap, unit, await this.resolve(reference, [unit], signal, binding, adapter), () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) : undefined, speakers.get(unit.event.id))
+          this.store.recoverPart(binding, gap, unit, await this.resolve(reference, [unit], signal, binding, adapter), () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) : undefined, speakers.get(unit.event.id))
         }
       } catch { signal.throwIfAborted() /* Original exact gap remains durable and other contents continue. */ }
     }
