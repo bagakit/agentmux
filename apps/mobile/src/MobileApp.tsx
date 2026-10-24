@@ -161,21 +161,21 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const [profileSourcePath, setProfileSourcePath] = useState<string | null>(initial.current.presentation?.profile?.sourcePath ?? null)
   const navigationRevision = useRef(0)
   const originalConnection = useRef({ client, connected }); originalConnection.current = { client, connected }
-  const openSession = (id: string, identity: MobileObjectIdentity) => {
+  const openSession = useCallback((id: string, identity: MobileObjectIdentity) => {
     navigationRevision.current += 1
     if (identity.mote) setRecentMoteSpaceId(identity.mote.spaceId)
     setObjectIdentity(identity); setShowGoalWork(false)
     setWorkface(value => ({ ...value, selectedSessionId: id, panel: 'conversation' }))
     setShowSession(true)
-  }
-  const openMainAgent = (id: string, identity: MobileObjectIdentity, hostId: string) => {
+  }, [])
+  const openMainAgent = useCallback((id: string, identity: MobileObjectIdentity, hostId: string) => {
     openSession(id, identity)
     const revision = navigationRevision.current, source = client
     if (!source || !connected) { setNotice('连接暂不可用；主 Agent 的原身份、历史与草稿保留，可连接后显式恢复。'); return }
     void recoverMobileAgent({ client: source, agentSessionId: id, expectedHostId: hostId, mode: 'open',
       isCurrent: () => originalConnection.current.client === source && originalConnection.current.connected && navigationRevision.current === revision,
       onNotice: setNotice })
-  }
+  }, [client, connected, openSession])
   const openSource = (value: TopicKnowledgeSource) => {
     navigationRevision.current += 1
     if (value.kind === 'url') { openBrowserHttpLink(value.url); return }
@@ -221,13 +221,14 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   }, [rowMenu, client])
   useEffect(() => { if (sheet === 'agent' && !menuTarget) setSheet(null) }, [sheet, menuTarget])
   const [createTarget, setCreateTarget] = useState<MobileAgentCreateTarget>({})
-  const createAgent = (target: MobileAgentCreateTarget) => { setCreateTarget(target); setSheet('create') }
-  const openProfile = (identity: MobileObjectIdentity) => {
+  const createAgent = useCallback((target: MobileAgentCreateTarget) => { setCreateTarget(target); setSheet('create') }, [])
+  const openProfile = useCallback((identity: MobileObjectIdentity) => {
     navigationRevision.current += 1
     if (identity.mote) setRecentMoteSpaceId(identity.mote.spaceId)
     startupProfile.current = null
     setProfileIdentity(identity); setProfileSourcePath(null); setSheet('identity')
-  }
+  }, [])
+  const selectMote = useCallback((id: string) => { navigationRevision.current += 1; setRecentMoteSpaceId(id) }, [])
   const [profileBack, setProfileBack] = useState<(() => void) | null>(null)
   const [spatialBack, setSpatialBack] = useState<(() => void) | null>(null)
   const [topicsBack, setTopicsBack] = useState<(() => void) | null>(null)
@@ -391,7 +392,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       </section>}
       {workspaceVisible && <>
         <div hidden={showSession || secondary !== null}><MobileSpatialNavigation onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} openSession={openSession} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
-          recentMoteSpaceId={recentMoteSpaceId} onSelectMote={id => { navigationRevision.current += 1; setRecentMoteSpaceId(id) }}
+          recentMoteSpaceId={recentMoteSpaceId} onSelectMote={selectMote}
           initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
         <div hidden={showSession || secondary !== 'topics' || Boolean(source && source.kind !== 'topic')}><MobileTopicsSurface rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (!source || source.kind === 'topic')} topicId={topicId}
           client={client} connected={connected} {...(topicsRoute.knowledge ? { initialKnowledge: topicsRoute.knowledge } : {})} onKnowledgeChange={updateKnowledgeReference}
