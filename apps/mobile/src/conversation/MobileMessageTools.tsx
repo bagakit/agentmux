@@ -35,7 +35,6 @@ export function MobileCommandPicker({ commands, disabled, onSelect }: {
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  if (!commands.length) return null
   const normalized = query.trim().toLocaleLowerCase()
   const matching = commands.filter(item => `${item.text} ${item.label ?? ''} ${item.description}`.toLocaleLowerCase().includes(normalized))
   return <span className="mobile-posture-picker mobile-command-picker">
@@ -50,7 +49,7 @@ export function MobileCommandPicker({ commands, disabled, onSelect }: {
           <strong>{item.label ?? item.text}</strong>
           {item.description ? <small>{item.description}</small> : null}
         </button>)}
-        {!matching.length ? <p className="mobile-command-menu__empty" role="status">无匹配命令</p> : null}
+        {!matching.length ? <p className="mobile-command-menu__empty" role="status">{commands.length ? '无匹配命令' : '当前会话尚未列出命令；可继续原输入。'}</p> : null}
       </div>
     </ComposerToolMenu>
   </span>
@@ -69,8 +68,8 @@ export function MobileMessageTools({ refresh, terminal, onInterrupt, commands = 
   const [phase, setPhase] = useState<ComposerToolPhase>('collapsed')
   return <span className="composer-tools" data-mode={phase}><ComposerLayoutToggle phase={phase} onChange={setPhase} />
     {onInterrupt && <button type="button" className="composer-tool" aria-label="Interrupt the current turn" title="Interrupt the current reply" onClick={onInterrupt}><SemanticIcon name="action.stop" size={14} /></button>}
+    {onCommand ? <MobileCommandPicker commands={commands} {...(disabled !== undefined ? { disabled } : {})} onSelect={onCommand} /> : null}
     {phase !== 'collapsed' && <>
-      {commands.length > 0 && onCommand ? <MobileCommandPicker commands={commands} {...(disabled !== undefined ? { disabled } : {})} onSelect={onCommand} /> : null}
       {skills}
       {terminal && <button type="button" className="composer-tool" aria-label="查看终端" onClick={terminal}><SemanticIcon name="object.terminal" size={16} /></button>}
       <button type="button" className="composer-tool" aria-label="刷新原对话" onClick={refresh}><SemanticIcon name="action.refresh" size={16} /></button>
