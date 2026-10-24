@@ -35,7 +35,7 @@ if (args[0] === '--behavior') {
       assert.equal(input.original, hash(await readFile(resolve(root, input.path))), 'Actual consumed source: ' + input.path)
       if (sources[input.path]) assert.equal(sources[input.path], input.original, 'One candidate through behavior proof')
       sources[input.path] = input.original
-      if (input.compiled !== input.original) changed.add(input.path)
+      if (input.compiled !== input.input) changed.add(input.path)
     }
     if (edit) {
       assert.equal(exitCode, 1); assert.ok(result.numFailedTests > 0)
