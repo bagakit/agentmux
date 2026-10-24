@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
-import { basename, dirname, relative, resolve, sep } from 'node:path'
+import { basename, dirname, relative, resolve, sep, posix } from 'node:path'
 import type { FileDocumentReadResult, FileWriteReceipt, FileNameListing } from '@agentmux/core/files'
 import type { NoteFileWitness } from '@agentmux/core/note-history'
-import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromDirectoryName } from './mote-topic-model.js'
-import { resolveScratchTopicDirectory } from './mote-directories.js'
+import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromDirectoryName, scratchTopicDirectoryName } from './mote-topic-model.js'
+import { resolveScratchTopicDirectory, scratchStorageTopicIds } from './mote-directories.js'
+import type { WorkspaceDirectoryEntry, WorkspaceFileDeleteExactResult } from './content-types.js'
+export type { WorkspaceDirectoryEntry, WorkspaceFileDeleteExactResult } from './content-types.js'
 import type { FileWorkspace } from './file-resource.js'
 import { WORKSPACE_FILE_MAX_BYTES, WORKSPACE_FILE_MAX_READ_BYTES, type WorkspaceFileReadBudget,
   type WorkspaceFileByteRead, type WorkspaceFileByteReadOptions } from './workspace-file-bytes.js'
@@ -18,6 +20,9 @@ type LocalMutablePath = { root: string; parent: string; name: string }
 export type OrdinaryFileWriteInput = { path: string; content: string; expectedRevision: string | null; baseContent?: string; operationId?: string }
 export type OrdinaryFileWriteResult = FileWriteReceipt & { fileWitness?: NoteFileWitness }
 export type OrdinaryWorkspaceFilesOptions = {
+  beforeLocalDeleteClaim?: () => Promise<void>
+  afterLocalDeleteClaim?: () => Promise<void>
+  localDeleteFault?: string
   helperPath?: string
   hostFor?: (id: string) => { kind: string }
   beforeWrite?: (input: OrdinaryFileWriteInput) => Promise<void>
@@ -212,6 +217,62 @@ export class OrdinaryWorkspaceFiles {
       }
       return resultError(error)
     }
+  }
+
+  async deleteExact(workspace: FileWorkspace, input: {
+    path: string; expectedRevision: string; witness: NoteFileWitness; operationId: string
+  }): Promise<WorkspaceFileDeleteExactResult> {
+    if (!/^sha256:[a-f0-9]{64}$/.test(input.expectedRevision) || !input.operationId ||
+        /[\0\r\n]/u.test(input.operationId) || !input.witness ||
+        !['device', 'inode', 'size', 'ctimeNs', 'mtimeNs'].every(key => {
+          const value = input.witness[key as keyof NoteFileWitness]
+          return typeof value === 'string' && /^\d{1,20}$/.test(value) && BigInt(value) <= 18446744073709551615n
+        })) return { status: 'error', code: 'WORKSPACE_FILE_INVALID_REQUEST', message: 'Exact deletion requires the original revision, creation generation and operation.' }
+    const requestKey = `${workspace.hostId}\0${workspace.path}\0${input.path}`
+    return await this.scope.serialize(this.scope.requests, requestKey, async () => {
+      try {
+        if (this.options.hostFor && this.options.hostFor(workspace.hostId).kind !== 'local') return {
+          status: 'error', code: 'REMOTE_WORKSPACE_FILE_DELETE_EXACT_UNSUPPORTED', message: 'Exact regular-file collection is unavailable on this remote Host.'
+        }
+        const resolved = await localMutablePathWithin(workspace, input.path)
+        const key = `${resolved.root}\0${resolved.parent}\0${resolved.name}`
+        return await this.scope.serialize(this.scope.paths, key, async () => {
+          const token = createHash('sha256').update(JSON.stringify([requestKey, input.operationId])).digest('hex')
+          const claim = `.agentmux-reclaim-${token}.note.md`
+          const before = this.options.beforeLocalDeleteClaim, after = this.options.afterLocalDeleteClaim
+          try {
+            const result = JSON.parse((await runWorkspaceFileWorker(resolved.parent, resolved.root, {
+              action: 'delete-exact', name: resolved.name, expectedRevision: input.expectedRevision, witness: input.witness, claim,
+              fault: [before ? 'before-claim' : '', after ? 'after-claim' : '', this.options.localDeleteFault ?? ''].join(',')
+            }, { helperPath: this.options.helperPath ?? helperPath, workerSource: FILE_NAME_WORKER_SOURCE }, undefined, undefined, before || after ? { ...(before ? { before } : {}), ...(after ? { after } : {}) } : undefined)).toString('utf8')) as WorkspaceFileDeleteExactResult
+            return result
+          } catch (error) {
+            const detail = resultError(error), extra = error as { writeOutcomeUnknown?: boolean; retainedPath?: string }
+            return { ...detail, ...(extra.writeOutcomeUnknown ? { status: 'unknown' as const } : {}),
+              ...(extra.retainedPath ? { retainedPath: extra.retainedPath } : extra.writeOutcomeUnknown ? {
+                // A recovery candidate, never evidence that the claim exists or that deletion applied.
+                retainedPath: posix.join(posix.dirname(input.path), claim)
+              } : {}) }
+          }
+        })
+      } catch (error) { return resultError(error) }
+    })
+  }
+
+  async readDirectory(workspace: FileWorkspace, requestedPath: string): Promise<WorkspaceDirectoryEntry[]> {
+    const directory = await localReadablePath(workspace, requestedPath || '.')
+    const entries = JSON.parse((await this.run(directory.target, directory.root, { action: 'list' })).toString('utf8')) as WorkspaceDirectoryEntry[]
+    let mapped = entries.map(entry => ({ ...entry, path: posix.join(requestedPath || '.', entry.name) }))
+    if (workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === 'local' && (!requestedPath || requestedPath === '.')) {
+      const ids = await scratchStorageTopicIds(workspace.path)
+      const topics = await Promise.all(ids.map(async id => {
+        await resolveScratchTopicDirectory(workspace.path, id)
+        const name = scratchTopicDirectoryName(id)
+        return { name, path: name, isDirectory: true, isSymlink: false }
+      }))
+      mapped = [...mapped.filter(entry => !scratchTopicIdFromDirectoryName(entry.name)), ...topics]
+    }
+    return mapped.sort((a, b) => a.isDirectory !== b.isDirectory ? a.isDirectory ? -1 : 1 : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
   }
 
   async listFiles(workspace: FileWorkspace, requestedPath = '.', limit = 20000, options?: { signal?: AbortSignal }): Promise<FileNameListing> {

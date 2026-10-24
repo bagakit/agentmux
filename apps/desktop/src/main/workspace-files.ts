@@ -4,12 +4,11 @@ import { OrdinaryWorkspaceFiles, WorkspaceFileWriteScope, localPathWithin, local
 import { gitIgnoredNames } from './workspace-git-ignore.js'
 import { LOCAL_FILE_LIST_SOURCE } from './workspace-file-list.js'
 import type { FileNameListing } from '@agentmux/core'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName, scratchTopicStorageRoots } from '../shared/scratch-topics.js'
-import { resolveScratchTopicDirectory, scratchStorageTopicIds, scratchConfirmedDirectoryPaths } from './scratch-topic-directories.js'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../shared/scratch-topics.js'
+import { resolveScratchTopicDirectory, scratchConfirmedDirectoryPaths } from './scratch-topic-directories.js'
 import { BOOKMARK_FILE_MAX_BYTES, isBinaryContent } from '../shared/bookmark-file.js'
 import { workspaceFilePreviewFormat, type WorkspaceFilePreviewReadOptions, type WorkspaceFilePreviewResult } from '../shared/workspace-file-preview.js'
 import { spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import { basename, dirname, relative, resolve, sep } from 'node:path'
 import { posix } from 'node:path'
@@ -40,9 +39,8 @@ const WORKSPACE_MOVE_HELPER = resolve(
   '../../resources/bin/agentmux-workspace-move'
 )
 
-export type WorkspaceFileDeleteExactResult =
-  | { status: 'deleted' }
-  | { status: 'conflict' | 'unknown' | 'error'; code: string; message: string; retainedPath?: string }
+import type { WorkspaceFileDeleteExactResult } from '@agentmux/host/ordinary-files'
+export type { WorkspaceFileDeleteExactResult } from '@agentmux/host/ordinary-files'
 
 type LocalExistingPath = {
   root: string
@@ -681,9 +679,6 @@ export class WorkspaceFiles {
     return disposal
   }
 
-  private serializeWrite<T>(tails: Map<string, Promise<void>>, key: string, operation: () => Promise<T>): Promise<T> {
-    return this.writeScope.serialize(tails, key, operation)
-  }
 
   async observe(
     workspace: WorkspaceRecord,
@@ -846,36 +841,7 @@ export class WorkspaceFiles {
   ): Promise<WorkspaceDirectoryEntry[]> {
     this.options.onReadDirectoryStart?.(workspace, requestedPath)
     const host = this.hostFor(workspace.hostId)
-    if (host.kind === 'local') {
-      if (workspace.id === SCRATCH_WORKSPACE_ID && (!requestedPath || requestedPath === '.')) {
-        const ids = await scratchStorageTopicIds(workspace.path)
-        const entities = await Promise.all(ids.map(async id => {
-          const name = scratchTopicDirectoryName(id)
-          await resolveScratchTopicDirectory(workspace.path, id)
-          return { name, path: name, isDirectory: true, isSymlink: false }
-        }))
-        const directory = await localReadablePath(workspace.path, '.')
-        const oldEntries = JSON.parse((await runLocalWorker(directory.target, directory.root, { action: 'list' })).toString('utf8')) as WorkspaceDirectoryEntry[]
-        const rootEntries = oldEntries
-          .filter(entry => !scratchTopicIdFromDirectoryName(entry.name))
-          .map(entry => ({ ...entry, path: entry.name }))
-        return sortDirectoryEntries([...rootEntries, ...entities])
-      }
-      const directory = await localReadablePath(workspace, requestedPath || '.')
-      const entries = JSON.parse((await runLocalWorker(
-        directory.target,
-        directory.root,
-        { action: 'list' }
-      )).toString('utf8')) as WorkspaceDirectoryEntry[]
-      return sortDirectoryEntries(
-        entries.flatMap((entry) => {
-          return [{
-            ...entry,
-            path: relativeEntryPath(requestedPath, entry.name)
-          }]
-        })
-      )
-    }
+    if (host.kind === 'local') return this.ordinary.readDirectory(workspace, requestedPath)
 
     // Key the original execution object as well as the complete resource. A replaced Host cannot
     // borrow an old observation, and settled work is never a directory cache or a retry policy.
@@ -1249,44 +1215,8 @@ export class WorkspaceFiles {
   }
 
   /** Main-only, exact original regular-file collection; never recursive or a missing-file replay. */
-  async deleteExact(workspace: WorkspaceRecord, input: {
-    path: string; expectedRevision: string; witness: NoteFileWitness; operationId: string
-  }): Promise<WorkspaceFileDeleteExactResult> {
-    if (!/^sha256:[a-f0-9]{64}$/.test(input.expectedRevision) || !input.operationId ||
-        /[\0\r\n]/u.test(input.operationId) || !input.witness ||
-        !['device', 'inode', 'size', 'ctimeNs', 'mtimeNs'].every(key => {
-          const value = input.witness[key as keyof NoteFileWitness]
-          return typeof value === 'string' && /^\d{1,20}$/.test(value) && BigInt(value) <= 18446744073709551615n
-        })) return { status: 'error', code: 'WORKSPACE_FILE_INVALID_REQUEST', message: 'Exact deletion requires the original revision, creation generation and operation.' }
-    const requestKey = `${workspace.hostId}\0${workspace.path}\0${input.path}`
-    return await this.serializeWrite(this.writeScope.requests, requestKey, async () => {
-      try {
-        if (this.hostFor(workspace.hostId).kind !== 'local') return {
-          status: 'error', code: 'REMOTE_WORKSPACE_FILE_DELETE_EXACT_UNSUPPORTED', message: 'Exact regular-file collection is unavailable on this remote Host.'
-        }
-        const resolved = await localMutablePathWithin(workspace, input.path)
-        const key = `${resolved.root}\0${resolved.parent}\0${resolved.name}`
-        return await this.serializeWrite(this.writeScope.paths, key, async () => {
-          const token = createHash('sha256').update(JSON.stringify([requestKey, input.operationId])).digest('hex')
-          const claim = `.agentmux-reclaim-${token}.note.md`
-          const before = this.options.beforeLocalDeleteClaim, after = this.options.afterLocalDeleteClaim
-          try {
-            const result = JSON.parse((await runLocalWorker(resolved.parent, resolved.root, {
-              action: 'delete-exact', name: resolved.name, expectedRevision: input.expectedRevision, witness: input.witness, claim,
-              fault: [before ? 'before-claim' : '', after ? 'after-claim' : '', this.options.localDeleteFault ?? ''].join(',')
-            }, undefined, undefined, before || after ? { ...(before ? { before } : {}), ...(after ? { after } : {}) } : undefined)).toString('utf8')) as WorkspaceFileDeleteExactResult
-            return result
-          } catch (error) {
-            const detail = resultError(error), extra = error as { writeOutcomeUnknown?: boolean; retainedPath?: string }
-            return { ...detail, ...(extra.writeOutcomeUnknown ? { status: 'unknown' as const } : {}),
-              ...(extra.retainedPath ? { retainedPath: extra.retainedPath } : extra.writeOutcomeUnknown ? {
-                // A recovery candidate, never evidence that the claim exists or that deletion applied.
-                retainedPath: posix.join(posix.dirname(input.path), claim)
-              } : {}) }
-          }
-        })
-      } catch (error) { return resultError(error) }
-    })
+  async deleteExact(workspace: WorkspaceRecord, input: { path: string; expectedRevision: string; witness: NoteFileWitness; operationId: string }): Promise<WorkspaceFileDeleteExactResult> {
+    return this.ordinary.deleteExact(workspace, input)
   }
 
   async delete(workspace: WorkspaceRecord, requestedPath: string): Promise<void> {
