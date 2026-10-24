@@ -99,7 +99,13 @@ describe('T-007 original Survey selected content frame', () => {
   })
   it('keeps the exact mounted Note editor and unknown save across Region back and a different Browser, without retrying or selecting the first file', async () => {
     const view = await fixture()
-    await view.click('原研究目录'); await view.click('original.note.md'); await view.click('编辑原笔记')
+    await view.click('原研究目录'); await view.click('original.note.md')
+    const noteReadIndex = view.rpc.mock.calls.findIndex(([method, params]) => method === 'file.read' && params.path === 'original.note.md')
+    expect(noteReadIndex).toBeGreaterThanOrEqual(0)
+    // This selected Note becomes editable only after its original Files receipt renders.
+    await act(async () => { await view.rpc.mock.results[noteReadIndex]!.value })
+    expect(view.changed).toHaveBeenLastCalledWith({ zoneId: view.zone.zoneId, tabId: view.tabId, regionId: 'note-region' })
+    await view.click('编辑原笔记')
     await view.edit('本机未确认保存的原补充')
     const originalEditor = view.editor(), registrations = view.back.mock.calls.length
     await view.edit('后来编辑不重注册Back'); expect(view.back.mock.calls).toHaveLength(registrations)
