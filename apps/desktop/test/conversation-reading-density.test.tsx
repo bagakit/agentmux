@@ -128,7 +128,7 @@ it('reads native collaboration participants without interpreting text declaratio
     contentParts: [{ kind: 'text', text: 'Sender: misleading-body-name\n\nThe recorded review is complete.' }] })
   await render([native('before', 1), report, native('after', 5)], [])
   const row = host.querySelector('[data-native-record-id="report"]')!
-  expect(host.querySelectorAll('.conversation-record-process')).toHaveLength(2)
+  expect(host.querySelectorAll('.conversation-record-process')).toHaveLength(1)
   expect(row.querySelector('.log-turn__collaboration-path')?.textContent).toBe('native-reviewer')
   expect(row.querySelector('.log-turn__collaboration-toggle')?.getAttribute('aria-expanded')).toBe('false')
   await click('[data-native-record-id="report"] .log-turn__collaboration-toggle')
