@@ -1,11 +1,11 @@
+import { createHash } from 'node:crypto'
 import { AgentMuxError, agentDiscoveryActivity, type AgentMuxAgentCreationInspection, type AgentMuxAgentSession, type AgentMuxClient } from '@agentmux/core'
-import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { MoteChatTarget } from '@agentmux/core/mote-chat'
 import type { MoteChatAgentPort, MoteChatCreatedAgent, MoteChatPreparedLaunch } from '@agentmux/connectors'
 import type { MoteChatResourcePort } from './mote-resources.js'
 import type { AgentMuxAgentCreateInput, AgentMuxHostExecutorInventory, AgentMuxHostAgentCreateInput } from '@agentmux/core'
 type AgentMuxAgentCreationResult = Awaited<ReturnType<AgentMuxClient['createAgentWithDelivery']>>
-type Core = Pick<AgentMuxClient, 'inspectAgentCreation' | 'readAgentSession'> & { listHostExecutors(input?: { refresh?: boolean }): Promise<AgentMuxHostExecutorInventory>; createHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput): Promise<AgentMuxAgentCreationResult> }
+type Core = Pick<AgentMuxClient, 'inspectAgentCreation' | 'readAgentSession' | 'runtimeSubject' | 'ensureAgentContinuity'> & { listHostExecutors(input?: { refresh?: boolean }): Promise<AgentMuxHostExecutorInventory>; createHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput): Promise<AgentMuxAgentCreationResult> }
 export type MoteChatExecutorPort = {
   resolve(hostId: string, executorId: string, workspacePath: string): Promise<
     { providerId: string; revision: string; launch?: never } |
@@ -40,6 +40,7 @@ export type HostMoteChatAgents = MoteChatAgentPort & {
   assertReady(target: MoteChatTarget): Promise<void>
 }
 const failure = (code: string, message: string): never => { throw new AgentMuxError(message, code) }
+const recoveryId = (sessionId: string, runId: string) => `mote-chat-recovery-${createHash('sha256').update(JSON.stringify([sessionId, runId])).digest('hex')}`
 
 /** Exact Mote files and existing Core creation, independently of Renderer, focus or Region placement. */
 export function createMoteChatAgents(options: MoteChatAgentOptions): HostMoteChatAgents {
@@ -75,6 +76,48 @@ export function createMoteChatAgents(options: MoteChatAgentOptions): HostMoteCha
     const session = exact(prepared, value)
     return { executionHostId: prepared.executionHostId, agentSessionId: session.agentSessionId }
   }
+  async function prepareInput(prepared: MoteChatPreparedLaunch): Promise<void> {
+    const client = core(prepared.executionHostId)
+    const session = exact(prepared, await client.inspectAgentCreation(prepared.input.agentSessionId!))
+    const current = session.continuity
+    // A prepared replacement Run is not the completed recovery receipt. Rejoin our
+    // original operation before ingress can freeze that Run into a new input.
+    const pending = current && ['pending', 'starting'].includes(current.kind) &&
+      current.operationId === recoveryId(session.agentSessionId, current.previousRun.runId) &&
+      [current.previousRun.runId, current.newRun?.runId].includes(session.run.runId) ? current : undefined
+    if (!pending) {
+      let subject: Awaited<ReturnType<Core['runtimeSubject']>> | undefined
+      try { subject = await client.runtimeSubject({ kind: 'terminal-run', runId: session.run.runId }) }
+      catch (error) {
+        if (error instanceof AgentMuxError && ['AGENT_SESSION_RUN_MISMATCH', 'RUNTIME_OWNER_MISMATCH', 'CONTROL_PERMISSION_DENIED'].includes(error.code)) throw error
+        // Observation failure is not evidence that a healthy Agent needs recovery.
+        // The original Core input path still owns its exact Run and admission.
+        if (!(error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found')) return
+      }
+      const run = subject?.run
+      // A terminal-run observation intentionally carries no Agent identity; the
+      // canonical creation above owns that binding, while Runtime owns this Run.
+      if (run && (run.runId !== session.run.runId || run.workspacePath !== session.workspacePath)) {
+        return failure('MOTE_CHAT_TARGET_UNCONFIRMED', 'The Runtime observation belongs to another Mote chat target. The original conversation and incoming message are retained.')
+      }
+      if (run?.state === 'running') return
+    }
+    const expectedRun = pending?.previousRun ?? session.run
+    const operationId = pending?.operationId ?? recoveryId(session.agentSessionId, expectedRun.runId)
+    const prior = session.continuityOperations?.[operationId]
+    // Default Host creation owns saved AppConfig options; Core freezes those logical
+    // options on the first recovery. Rechecks use that original frozen executor.
+    const { commandOverride, args, env } = prepared.executorRevision === undefined ? prepared.input : {}
+    const result = await client.ensureAgentContinuity({ agentSessionId: session.agentSessionId, expectedRun, operationId, trigger: 'input',
+      ...(!prior && !prepared.executorRevision ? {
+        ...(commandOverride === undefined ? {} : { commandOverride }),
+        ...(args === undefined ? {} : { args }), ...(env === undefined ? {} : { env })
+      } : {}) })
+    if (result.kind === 'resumed' || result.kind === 'reattachable') { exact(prepared, result.session); return }
+    if (result.kind === 'retired') return failure('MOTE_CHAT_AGENT_RETIRED', 'The original Mote chat Agent was retired. Its conversation and incoming message are retained.')
+    return failure(result.kind === 'unavailable' ? 'MOTE_CHAT_RECOVERY_UNAVAILABLE' : 'MOTE_CHAT_RECOVERY_PENDING',
+      'The original Mote chat is not ready after recovery. Its original recovery and incoming message are retained; no input was dispatched.')
+  }
   return {
     assertTarget: async input => { await options.resources.read(input) },
     assertReady: async input => { await ready(input) },
@@ -107,6 +150,7 @@ export function createMoteChatAgents(options: MoteChatAgentOptions): HostMoteCha
       }
       return await created(prepared, session)
     },
+    prepareInput,
     activity: async reference => {
       const session = await core(reference.executionHostId).readAgentSession(reference.agentSessionId)
       if (!session) return { lastActivityAt: null }

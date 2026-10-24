@@ -21,6 +21,8 @@ export interface MoteChatAgentPort {
   create(prepared: MoteChatPreparedLaunch): Promise<MoteChatCreatedAgent>
   /** Read/reconcile the exact saved create; null means that original creation has not started. */
   inspect(prepared: MoteChatPreparedLaunch): Promise<MoteChatCreatedAgent | null>
+  /** Restore the original conversation before a new external input freezes its Run. */
+  prepareInput(prepared: MoteChatPreparedLaunch): Promise<void>
   /** Typed original activity only. Null means unknown, never metadata update/poll time. */
   activity(reference: { executionHostId: string; agentSessionId: string }): Promise<{ lastActivityAt: number | null }>
 }
@@ -225,7 +227,10 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
   private async ready(id: string): Promise<RoomBinding> {
     const pending = this.pending.get(id)
     if (pending) return await pending
-    const work = this.createGeneration(id).finally(() => this.pending.delete(id)); this.pending.set(id, work); return await work
+    const work = this.createGeneration(id).then(async binding => {
+      await this.options.agents.prepareInput(structuredClone(this.store.generation(id)!.prepared!))
+      return binding
+    }).finally(() => this.pending.delete(id)); this.pending.set(id, work); return await work
   }
   private async createGeneration(id: string): Promise<RoomBinding> {
     let row = this.store.generation(id)!
