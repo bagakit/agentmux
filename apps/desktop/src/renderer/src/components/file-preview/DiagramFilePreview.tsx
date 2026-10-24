@@ -2,6 +2,8 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useMemo, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
+import { DiagramImage } from '@agentmux/client-ui/components/DiagramImage'
+import { diagramSvgImage } from '@agentmux/client-ui/diagram-svg-image'
 import type { FileDiagramKind } from '../../../../shared/file-diagram'
 import { api } from '../../lib/api'
 import { APP_APPEARANCE_DATASET_KEY } from '../../lib/theme-contract'
@@ -30,7 +32,7 @@ export function DiagramFilePreview({ content, kind, path, visible = true, page, 
       if (!current || value.id !== id) return
       if (value.error) setResult({ owner, source: content, kind, page, attempt, error: value.error })
       else {
-        url = URL.createObjectURL(new Blob([value.svg], { type: 'image/svg+xml' }))
+        url = URL.createObjectURL(diagramSvgImage(value.svg))
         setResult({ owner, source: content, kind, page, attempt, url })
         if (value.pageCount !== undefined) onPageCount?.(value.pageCount)
       }
@@ -39,7 +41,9 @@ export function DiagramFilePreview({ content, kind, path, visible = true, page, 
   }, [content, kind, page, theme, inView, attempt])
   const ready = inView && result?.owner === owner && result.source === content && result.kind === kind && result.page === page && result.attempt === attempt ? result : null
   return <div ref={ref} className="file-diagram-preview" data-diagram-kind={kind} style={{ minHeight: 80, overflow: 'auto' }}>
-    {ready?.url ? <img src={ready.url} alt={`${path ?? kind} diagram`} style={{ display: 'block', maxWidth: '100%', margin: 'auto' }} /> : <>
+    {ready?.url ? <DiagramImage key={ready.url} src={ready.url} alt={`${path ?? kind} diagram`} onError={() => {
+      setResult(current => current === ready ? { owner, source: content, kind, page, attempt, error: 'Diagram image could not be decoded. Retry preview or return to Source.' } : current)
+    }} /> : <>
       {ready?.error ? <div className="file-preview-state" role="alert"><strong>Diagram could not render</strong><span>{ready.error}</span>
         <button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry preview</button></div> : <div role="status">{inView ? 'Rendering diagram…' : 'Diagram preview'}</div>}
       <pre className="md-block-code"><code>{content}</code></pre>

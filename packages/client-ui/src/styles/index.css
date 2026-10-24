@@ -22,6 +22,7 @@
 @import './note-rich-content.css';
 @import './note-image.css';
 @import './conversation-image.css';
+@import './diagram-image.css';
 @import './conversation-input-details.css';
 @import './conversation-tool-trace.css';
 @import './conversation-tool-payload.css';
