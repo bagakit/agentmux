@@ -9,8 +9,8 @@ export function globalGoalPatrolPrompt(totalCount?: number, inventoryIssue?: str
     GLOBAL_GOAL_PATROL_GUIDANCE,
     'Original-owner scope reference (all statuses, no UI filters; identities are not copied into this prompt):',
     JSON.stringify({ schema: 'agentmux.goal-global-patrol-scope.v1', ...(inventoryIssue ? { state: 'unavailable', reason: inventoryIssue }
-      : { state: totalCount === undefined ? 'read-original-owner' : 'observed', ...(totalCount === undefined ? {} : { totalCount }), inventory: 'not-inlined; discover every original Goal with goal ls, without filters or a limiting sample' }) }),
-    'Use goal ls without filters or a limiting sample, then goal inspect / delegations / activity for every original Goal. Begin the actual inspection now and return the overview, actionable confirmation proposals and structured questions here.'
+      : { state: totalCount === undefined ? 'read-original-owner' : 'observed', ...(totalCount === undefined ? {} : { totalCount }), inventory: 'not-inlined; discover every original Goal with goal ls --all, without filters or a limiting sample' }) }),
+    'Use goal ls --all without filters or a limiting sample, then goal inspect / delegations / activity for every original Goal. Begin the actual inspection now and return the overview, actionable confirmation proposals and structured questions here.'
   ].join('\n\n')
 }
 export type GoalPatrolObservation = { operationId: string; state: 'prepared' | 'delivered' | 'unknown' | 'missing' | 'stale' | 'reported'; reason: string }
