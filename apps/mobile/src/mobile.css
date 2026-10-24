@@ -107,7 +107,8 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-session-list button > span:nth-child(2) { display: grid; gap: 5px; min-width: 0; }
 .mobile-session-list strong { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
 .mobile-session-list small { font-size: 11px; color: var(--text-3); }
-.mobile-session-list button > svg { margin-left: auto; flex: 0 0 auto; color: var(--text-3); }
+.mobile-session-list button > svg { flex: 0 0 auto; color: var(--text-3); }
+.mobile-session-list button > svg:last-child { margin-left: auto; }
 .mobile-session-icon { display: grid; place-items: center; width: 40px; height: 40px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: var(--radius-lg); color: var(--text-2); background: var(--surface-1); }
 .mobile-text-button { min-height: 44px; display: flex; align-items: center; gap: 5px; padding: 0; color: var(--green); background: transparent; font-size: 12px; }
 .mobile-sheet-backdrop { position: fixed; inset: 0; background: var(--scrim-3); }

@@ -198,7 +198,12 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
       {moteFact?.issue && <MobileNotice identity={[moteFact?.spaceId,moteFact?.issue]} className="mobile-spatial-notice" role="status">{moteFact.issue}</MobileNotice>}
       {[...ownerZones].map(zoneId => <section className="mobile-spatial-zone" key={zoneId} data-zone-id={zoneId}>
         {catalog?.zones.find(zone => zone.zoneId === zoneId)?.kind === 'worktree' && <h3 className="mobile-spatial-zone-name">{catalog.zones.find(zone => zone.zoneId === zoneId)?.branch ?? 'Worktree'}</h3>}
-        {ownerTabs.filter(tab => tab.zoneId === zoneId).map(tab => <section className="mobile-spatial-tab" key={tab.tabId}>{(tab.regionIds.length !== 1 || !catalog?.regions.some(region => region.tabId === tab.tabId && region.agentSessionId)) && <h3>{tab.name || '未命名 Tab'}</h3>}
+        {ownerTabs.filter(tab => tab.zoneId === zoneId).map(tab => {
+          const singleMatches = tab.regionIds.length === 1 ? catalog?.regions.filter(region => region.tabId === tab.tabId && region.regionId === tab.regionIds[0]) ?? [] : []
+          const sole = singleMatches.length === 1 ? singleMatches[0] : undefined
+          const repeatedName = sole?.agentSessionId || sole?.kind === 'file' && tab.name === sole.file?.path.split('/').at(-1)
+          const heading = sole ? !repeatedName && tab.name || null : tab.name || (tab.regionIds.length > 1 ? '多个工作面' : '内容待确认')
+          return <section className="mobile-spatial-tab" key={tab.tabId}>{heading && <h3>{heading}</h3>}
         <ul className="mobile-session-list">{tab.regionIds.map(id => {
           const matches = catalog?.regions.filter(region => region.tabId === tab.tabId && region.regionId === id) ?? []
           return matches.length === 1 ? matches[0] : undefined
@@ -208,7 +213,7 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
           return session ? occurrences.length ? occurrences.map(place => sessionRow(session, JSON.stringify(place), place, tab.regionIds.length === 1 ? tab.name : undefined)) : sessionRow(session, region.regionId, null, tab.regionIds.length === 1 ? tab.name : undefined)
             : <li key={region.regionId}>{['file', 'browser'].includes(region.kind) ? <button type="button" onClick={() => openContent(owner, tab, region)}><SemanticIcon name={region.kind === 'file' ? 'object.file' : 'object.browser'} size={18} /><span><strong>{region.kind === 'file' ? region.file?.path.split('/').at(-1) ?? '文件名称未确认' : '查看原网页'}</strong><small>{region.kind === 'file' ? region.file?.path.endsWith(NOTE_FILE_EXTENSION) ? '笔记' : '文件' : '网页'}</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
               : <div className="mobile-spatial-resource"><SemanticIcon name={region.kind === 'launcher' ? 'object.launcher' : 'object.region'} size={18} /><span>{region.kind === 'launcher' ? 'Launcher' : region.kind}<small>{region.agentSessionId ? '会话状态尚未核实' : '此内容在 Mac 上查看'}</small></span></div>}</li>
-        })}</ul></section>)}</section>)}
+        })}</ul></section>})}</section>)}
       {!ownerTabs.length && <p className="mobile-spatial-empty">此空间暂无已绑定 Tab。原空间和资料仍保留。</p>}
       {owner.kind === 'mote' && openProfile && <button type="button" className="mobile-tree-profile" aria-label="查看 Mote 资料" onClick={() => openProfile(spaceIdentity(owner))}>查看 Mote 资料</button>}
     </>
