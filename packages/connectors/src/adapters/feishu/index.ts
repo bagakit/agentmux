@@ -1,7 +1,8 @@
 import { createFeishuSetup } from './setup.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { Readable } from 'node:stream'
 import { Client, WSClient, EventDispatcher, AppType, LoggerLevel, defaultHttpInstance, DefaultCache, type HttpInstance, type HttpRequestOptions, type Logger } from '@larksuiteoapi/node-sdk'
-import { parseConnectionConfig, type ConnectionConfig, type ConnectionObservation } from '@agentmux/core/connections'
+import { CONNECTION_API_LIMITS, parseConnectionConfig, type ConnectionConfig, type ConnectionObservation } from '@agentmux/core/connections'
 import type { ConnectionAdapter } from '../../connection-host.js'
 import type { ConnectionIngressTransport, ConnectionIngressReceiver } from '../../connection-receivers.js'
 import type { IngressAuthenticator, VerifiedIngressEvent } from '../../durable-ingress.js'
@@ -15,10 +16,13 @@ import { createFeishuRooms } from './rooms.js'
 import { createFeishuRoomDiscovery } from './room-discovery.js'
 import { createFeishuHistory } from './history.js'
 import { createFeishuChannelProfiles } from './channel-profile.js'
+import { createFeishuApi, type FeishuApiScope, type FeishuApiHttpResponse } from './api.js'
 
 export type FeishuAdapterOptions = { http?: HttpInstance }
 /** Only original application identity is needed by the SDK; Host authorization stays outside the leaf. */
 export type FeishuClientScope = Pick<ConnectionConfig, 'connectionId' | 'application'>
+type NativeApiHttpOptions<D> = HttpRequestOptions<D> & { signal?: AbortSignal; maxRedirects?: number; maxContentLength?: number; validateStatus?: (status: number) => boolean;
+  transformResponse?: (data: unknown, headers: Record<string, unknown>, status?: number) => FeishuApiHttpResponse }
 type ReceiverState = { config: ConnectionConfig; signal: AbortSignal; closed: boolean; botOpenId: string; ws: WSClient | null; observed: boolean }
 type Witness = { receiver: ReceiverState; raw: string }
 const owners = new Map<string, ReceiverState>()
@@ -30,6 +34,12 @@ const safeLogger: Logger = { error: muted, warn: muted, info: muted, debug: mute
 
 export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly adapterId = 'feishu'
+  readonly api = createFeishuApi((config, credential, scope, request) => {
+    this.configuration(config)
+    return this.apiRequests.run(scope, () => this.withClient(config, credential, client => client.request<FeishuApiHttpResponse>({
+      url: request.path, method: request.method, ...(request.query ? { params: request.query } : {})
+    })))
+  })
   readonly channelProfiles = createFeishuChannelProfiles((config, credential, call, signal) => this.withClient(config, credential, call, signal))
   readonly profile = createFeishuProfile((config, credential, call, signal) => this.withClient(config, credential, call, signal))
   readonly setup = createFeishuSetup()
@@ -43,6 +53,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   private readonly witnesses = new WeakSet<object>()
   private readonly callback = new AsyncLocalStorage<Witness>()
   private readonly requests = new AsyncLocalStorage<AbortSignal | undefined>()
+  private readonly apiRequests = new AsyncLocalStorage<FeishuApiScope>()
   private readonly clients = new Map<string, { application: string; credential: string; client: Client }>()
   private closed = false
   private clientRetention = (_connectionId: string) => true
@@ -66,7 +77,31 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
       try {
         const signal = receiverSignal ?? this.requests.getStore()
         if (signal?.aborted || input.signal?.aborted) feishuFailure('FEISHU_SDK_REQUEST_CANCELLED')
-        const result = await transport.request<T, R, D>({ ...input, ...(signal ? { signal } : {}) })
+        const api = this.apiRequests.getStore()
+        let request: NativeApiHttpOptions<D> = { ...input, ...(signal ? { signal } : {}) }
+        if (api) {
+          if (!input.url || new URL(input.url).origin !== new URL(api.url).origin) feishuFailure('CONNECTION_API_ENDPOINT_UNAVAILABLE')
+          for (const [name, value] of Object.entries(input.headers ?? {})) if (name.toLowerCase() === 'authorization' && typeof value === 'string') {
+            api.protect(value)
+            const token = /^Bearer\s+(.+)$/iu.exec(value)?.[1]
+            if (token) api.protect(token)
+          }
+          request = { ...request, maxRedirects: 0, maxContentLength: CONNECTION_API_LIMITS.responseBytes }
+          if (input.url === api.url) {
+            if (!Object.entries(input.headers ?? {}).some(([name, value]) => name.toLowerCase() === 'authorization' && typeof value === 'string' && /^Bearer\s+\S/iu.test(value)))
+              feishuFailure('CONNECTION_API_AUTHENTICATION_UNCONFIRMED')
+            // Client.formatPayload object-merges data. Restore this one original API payload only.
+            // The bounded reader owns streamed bytes and their exact unavailable reason. Token JSON remains Axios-bounded.
+            request = { ...request, data: api.data as D, responseType: 'stream', maxContentLength: -1, validateStatus: () => true,
+              headers: { ...input.headers, ...(typeof api.data === 'string' ? { 'Content-Type': 'application/json' } : {}) },
+              transformResponse(data, headers, status) {
+                if (!(data instanceof Readable)) return feishuFailure('CONNECTION_API_REQUEST_UNCONFIRMED')
+                return { status, body: data, contentType: typeof headers['content-type'] === 'string' ? headers['content-type'] : null,
+                  contentLength: typeof headers['content-length'] === 'string' ? headers['content-length'] : null }
+              } }
+          }
+        }
+        const result = await transport.request<T, R, D>(request)
         if (input.url?.endsWith('/callback/ws/endpoint')) {
           const response = result as { code?: unknown; data?: { URL?: unknown } }
           if (response.code === 0) {
