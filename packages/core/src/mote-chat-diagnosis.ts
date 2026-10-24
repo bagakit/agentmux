@@ -79,6 +79,8 @@ export const moteChatDiagnosisIssues = ['configuration-unavailable', 'target-cha
 /** One generation's publication window, never a causal reply to an individual intake. */
 export type MoteChatDiagnosisPublication = {
   generationKey: string
+  /** Provider frozen by the original prepared launch; never the current Mote default. */
+  preparedProviderId: string | null
   intakeKeys: string[]
   reading: 'not-started' | 'unavailable' | 'observed'
   observation: ConnectionDeliveryObservation | null
@@ -204,7 +206,11 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
   if (new Set(issues).size !== issues.length) fail()
   const eligible = new Set(incoming?.rows.filter(row => row.preparation !== 'other-route').map(row => row.key)), associated = new Set<string>()
   const publications = array(p.publications, value => {
-    const v = fields(value, ['generationKey', 'intakeKeys', 'reading', 'observation', 'sourceObservation', 'effectObservation', 'coverage', 'effects', 'more'])
+    const v = fields(value, ['generationKey', 'preparedProviderId', 'intakeKeys', 'reading', 'observation', 'sourceObservation', 'effectObservation', 'coverage', 'effects', 'more'])
+    const preparedProviderId = nullable(v.preparedProviderId, value => {
+      if (typeof value !== 'string' || !value || /[\0\r\n]/u.test(value) || new TextEncoder().encode(value).byteLength > 4096) fail()
+      return value as string
+    })
     const intakeKeys = array(v.intakeKeys, key, moteChatDiagnosisWindowLimit)
     if (!intakeKeys.length || intakeKeys.some(k => !eligible.has(k) || associated.has(k))) fail()
     for (const k of intakeKeys) { if (associated.has(k)) fail(); associated.add(k) }
@@ -233,7 +239,7 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
     let observation, sourceObservation, effectObservation
     try { observation = nullable(v.observation, parseConnectionDeliveryObservation); sourceObservation = nullable(v.sourceObservation, parseConnectionDeliverySourceObservation); effectObservation = nullable(v.effectObservation, parseConnectionDeliveryObservation) } catch { return fail() }
     if (reading !== 'observed' && (observation || sourceObservation || effectObservation || coverage || effects || more) || reading === 'observed' && effects === null) fail()
-    return { generationKey: key(v.generationKey), intakeKeys, reading, observation, sourceObservation, effectObservation, coverage, effects, more }
+    return { generationKey: key(v.generationKey), preparedProviderId, intakeKeys, reading, observation, sourceObservation, effectObservation, coverage, effects, more }
   }, moteChatDiagnosisWindowLimit)
   if (new Set(publications.map(row => row.generationKey)).size !== publications.length) fail()
   return { targetKey, limit: moteChatDiagnosisWindowLimit, configuration, readiness,
