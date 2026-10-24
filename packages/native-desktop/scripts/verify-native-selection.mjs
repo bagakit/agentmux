@@ -257,7 +257,7 @@ try {
       { name: 'nudge', path: state, before: 'self.rectangle = translated(rectangle, dx: dx, dy: dy)', after: 'self.rectangle = rectangle' },
       { name: 'resize', path: state, before: 'right = min(bounds.maxX, max(location.x, left + minimumWidth))', after: 'right = original.maxX' },
       { name: 'panel-bounds', path: state, before: 'x: min(max(preferredOrigin.x, available.minX), available.maxX - width)', after: 'x: preferredOrigin.x' },
-      { name: 'capture-lease', path: core[3], before: '        guard lock.try() else { throw Failure.busy }\n        defer { lock.unlock() }', after: '        // Test mutant: operation runs without the capture lease.' },
+      { name: 'capture-lease', path: core[3], before: '        guard !occupied else { lock.unlock(); throw Failure.busy }', after: '        // Test mutant: concurrent ownership is admitted.' },
       { name: 'consumer-lease', path: operationsSource, before: 'return try NativeSelectionCaptureLease.shared.withCapture {', after: 'return try unleasedCapture {' },
       { name: 'release', path: view, before: 'selection.pointerUp(convert(event.locationInWindow, from: nil)); refresh()', after: 'selection.pointerUp(convert(event.locationInWindow, from: nil)); refresh(); confirm()' },
       { name: 'escape', path: view, before: 'case 53: cancel()', after: 'case 53: confirm()' },
