@@ -94,3 +94,26 @@ it('an authored message needs both its original recipient role and exact native 
   f.setMessage({ envelope })
   expect((await f.owner.confirm(input, caller)).goal.participations).toHaveLength(1)
 })
+
+it('a handed-off discussion records only its real new authored input without inventing creation provenance', async () => {
+  const f = await fixture(), sender = { agentSessionId: 'actual-message-author', run: { runId: 'actual-author-run' } }
+  await f.demands.create({ id: 'original-saved-goal', title: 'An existing Goal' })
+  const input = { goalId: 'original-saved-goal', hostId: f.input.hostId, agentSessionId: f.input.agentSessionId,
+    expectedRun: f.input.expectedRun, evidence: 'message-input' as const, operationId: 'actual-new-message' }
+  const caller = { caller: { agentSessionId: sender.agentSessionId, capability: 'actual-author-capability' } }
+  f.client.authorizeAgentCaller = async () => sender
+  const envelope = { messageId: 'actual-native-message', operationId: input.operationId,
+    sender: { kind: 'agent-session', agentSessionId: sender.agentSessionId }, senderSessionId: sender.agentSessionId, senderRunId: sender.run.runId,
+    recipient: { kind: 'agent-session', agentSessionId: input.agentSessionId }, recipientSessionId: input.agentSessionId, recipientRunId: input.expectedRun.runId }
+  f.setMessage({ envelope })
+  await expect(f.owner.confirm(input, caller)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+  expect((await f.demands.get(input.goalId))!.participations).toEqual([])
+  f.setReceipt({ agentSessionId: input.agentSessionId, run: input.expectedRun, admission: { submissionId: envelope.messageId, acknowledged: true,
+    inputKey: { kind: 'message', agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, messageId: envelope.messageId },
+    intent: { run: input.expectedRun, message: { authorAgentSessionId: sender.agentSessionId } } } })
+  const confirmed = await f.owner.confirm(input, caller)
+  expect(confirmed.goal.participations).toHaveLength(1)
+  expect(confirmed.goal).not.toHaveProperty('discussionOperationId')
+  expect(confirmed.goal).not.toHaveProperty('creationOrigin')
+  expect(confirmed.goal.supervisorSessionId).toBeNull()
+})
