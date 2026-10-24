@@ -6,7 +6,7 @@ vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/core/src/control-host.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { executeSettingsControl } from '../src/main/settings-control.js'
-import { themeObservation } from '../src/main/theme-observation.js'
+import { themeObservation } from '@agentmux/host/theme-observation'
 import { terminalPaletteForAppearance } from '../src/main/terminal-theme.js'
 import { TERMINAL_THEME_CATALOG, terminalTheme } from '../src/renderer/src/lib/terminal-theme.js'
 import { ConfigStore } from '../src/main/config-store.js'

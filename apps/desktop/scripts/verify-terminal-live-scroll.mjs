@@ -33,7 +33,7 @@ const critical = [
   path.join(root, 'packages/client-ui/src/lib/activity-step-summary.ts'), path.join(desktop, 'src/renderer/src/styles/index.css'),
   path.join(desktop, 'src/renderer/src/lib/api.ts'), path.join(desktop, 'src/renderer/src/lib/session-events.ts'),
   path.join(desktop, 'src/renderer/src/lib/idle-agent-restore-policy.ts'), path.join(desktop, 'src/renderer/src/lib/terminal-theme.ts'),
-  path.join(desktop, 'src/shared/terminal-palettes.ts'), path.join(desktop, 'src/renderer/src/styles/activity.css'),
+  path.join(root, 'packages/client-ui/src/theme/terminal-palettes.ts'), path.join(desktop, 'src/renderer/src/styles/activity.css'),
   path.join(desktop, 'src/preload/index.ts'), path.join(desktop, 'src/shared/contracts.ts'), productPreload,
   core, ...['providers/codex.js', 'providers/codex-native-history.js', 'providers/codex-native-read.js', 'session-history.js', 'errors.js']
     .map(name => path.join(root, 'packages/core/dist', name)),

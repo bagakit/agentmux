@@ -5,7 +5,7 @@ import { createDaemonChannel, generateKeyPair, exportPublicKey, type Transport }
 import { HostedRelayRpcPort } from '../../../packages/core/src/relay-hosted.js'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service.js'
 import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client.js'
-import { themeObservation } from '../src/main/theme-observation.js'
+import { themeObservation } from '@agentmux/host/theme-observation'
 import { configOwnerFixture } from './helpers/config-owner-fixture.js'
 import type { AgentMuxAppearanceObservation } from '@agentmux/core'
 const cleanup: Array<() => void | Promise<void>> = []

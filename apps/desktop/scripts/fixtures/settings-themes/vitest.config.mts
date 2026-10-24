@@ -7,7 +7,9 @@ export default defineConfig({
   ...overviewConfig,
   resolve: { ...overviewConfig.resolve, alias: [
     ...(overviewConfig.resolve!.alias as []),
-    { find: /^@agentmux\/client-ui\/theme$/, replacement: resolve(import.meta.dirname, '../../../../../packages/client-ui/src/theme/index.ts') }
+    { find: /^@agentmux\/client-ui\/theme$/, replacement: resolve(import.meta.dirname, '../../../../../packages/client-ui/src/theme/index.ts') },
+    { find: /^@agentmux\/host\/settings-resource-read$/, replacement: resolve(import.meta.dirname, '../../../../../apps/host/src/settings-resource-read.ts') },
+    { find: /^@agentmux\/host\/theme-observation$/, replacement: resolve(import.meta.dirname, '../../../../../apps/host/src/theme-observation.ts') }
   ] },
   test: { ...overviewConfig.test, include: [
     'apps/desktop/test/settings-themes-control.test.ts',
