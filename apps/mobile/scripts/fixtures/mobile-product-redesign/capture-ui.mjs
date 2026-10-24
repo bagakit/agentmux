@@ -19,7 +19,7 @@ try {
     'duplicate-connection': { file: 'apps/mobile/src/MobileApp.tsx', before: '!conversationVisible ? connection.issue', after: 'true ? connection.issue' },
     'hide-unknown': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: "{attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}", after: "{attempt && attempt.phase === 'sending' ? renderPromptAttempt([draftKey, attempt]) : null}" },
     'persistent-confirmed-diagnostic': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: "{attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}", after: "{attempt && (attempt.phase !== 'confirmed' || attempt.manualInput) ? renderPromptAttempt([draftKey, attempt]) : null}" },
-    'missing-palette': { file: 'apps/mobile/src/mobile.css', before: "@import '@agentmux/client-ui/styles/palette.css';", after: '' }
+    'evidence-touch-target': { file: 'apps/mobile/src/mobile.css', before: '.mobile-goal-evidence button { min-width: 44px; min-height: 44px; padding: 6px 10px;', after: '.mobile-goal-evidence button { min-width: 12px; min-height: 12px; height: 12px; padding: 0;' }
   }
   const variant = mutationId ? variants[mutationId] : null
   if (mutationId) assert.ok(variant, 'Known bounded Mobile presentation mutation is required')
