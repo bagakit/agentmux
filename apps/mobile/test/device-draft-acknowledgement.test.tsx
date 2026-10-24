@@ -123,6 +123,6 @@ it('does not send from the mounted Mobile surface when import replaces the secon
     const exported = JSON.parse(copy.mock.calls.at(-1)![0]).workface.conversation
     expect(exported.drafts).toEqual([[key, 'original reader body']])
     expect(exported.attempts).toEqual([[key, expect.objectContaining({ draft: 'original reader body',
-      inputRequested: true, request: expect.objectContaining({ condition: { expectedRun: { runId: 'run-original' }, afterSubmissionId: null } }) })]])
+      inputRequested: true, manualInput: { agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, runtimeId: 'original-runtime' } })]])
   } finally { internal.exclusive = exclusive }
 })

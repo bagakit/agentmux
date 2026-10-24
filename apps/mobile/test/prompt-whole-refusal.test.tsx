@@ -4,7 +4,7 @@ import { MobileConversationSurface } from '../src/conversation/MobileConversatio
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { ClientDeliveryDiagnostics } from '@agentmux/client-ui/delivery-diagnostics'
-import { button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { button, click, deferred, editor, fixture, mount, mounted, paste, plainEnter } from './conversation-fixture'
 
 const sid = 'session-original', key = JSON.stringify(['draft', sid]), body = 'Original explicitly refused input'
 const connection = { state: 'connected' as const, message: 'Connected to original Host' }
@@ -32,7 +32,7 @@ async function firstRefusal(f: ReturnType<typeof consumer>) {
     throw Object.assign(new Error('Native confirmed original whole input was not applied'), { code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', detail: 'not_applied' })
   })
   const view = await mount(f.surface)
-  await paste(view.element, body); await click(button(view.element, 'Send'))
+  await paste(view.element, body); await plainEnter(view.element)
   await vi.waitFor(() => expect(currentAttempt().phase).toBe('rejected'))
   return { view, original: structuredClone(currentAttempt()) }
 }
@@ -42,25 +42,27 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
-it('uses a new operation only on an explicit Send after exact whole refusal, preserving the original request and diagnostic', async () => {
+it('uses a new manual operation only on an explicit Send after an exact conditioned-input whole refusal, preserving the original request and diagnostic', async () => {
   const f = consumer(), { view, original } = await firstRefusal(f)
   expect(f.submit).toHaveBeenCalledOnce()
   await click(button(view.element, 'Send'))
   await vi.waitFor(() => expect(currentAttempt().phase).toBe('confirmed'))
   const next = f.submit.mock.calls[1]![0]
   expect(next.operationId).not.toBe(original.operationId)
-  expect(next).toMatchObject({ prompt: body, expectedRun: original.request!.condition.expectedRun, afterSubmissionId: original.operationId })
+  expect(next).toMatchObject({ prompt: body, expectedRun: original.request!.condition.expectedRun, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' })
+  expect(next).not.toHaveProperty('afterSubmissionId')
   expect(record().attempts.some(([entry, value]) => entry !== key && value.operationId === original.operationId
     && value.draft === body && value.logId === original.logId && JSON.stringify(value.request) === JSON.stringify(original.request))).toBe(true)
 })
 
-it('explicitly resends the original refused body as a new intent while preserving a different edited draft', async () => {
+it('explicitly resends the original refused conditioned body as a new intent while preserving a different edited draft', async () => {
   const f = consumer(), { view, original } = await firstRefusal(f)
   await paste(view.element, ' Different new draft')
   const edited = editor(view.element).textContent
   await click(button(view.element, '重新发送原正文'))
   await vi.waitFor(() => expect(currentAttempt().phase).toBe('confirmed'))
-  expect(f.submit.mock.calls[1]![0]).toMatchObject({ prompt: body, afterSubmissionId: original.operationId })
+  expect(f.submit.mock.calls[1]![0]).toMatchObject({ prompt: body, execution: 'default', expectedRun: original.request!.condition.expectedRun, afterSubmissionId: original.operationId })
+  expect(f.submit.mock.calls[1]![0]).not.toHaveProperty('admissionIntent')
   expect(f.submit.mock.calls[1]![0].operationId).not.toBe(original.operationId)
   expect(editor(view.element).textContent).toBe(edited)
   expect(record().drafts).toContainEqual([key, edited])
@@ -79,7 +81,7 @@ it('does not interpret a partially accepted payload refusal as whole input or re
     f.sessions.set(sid, partial); f.emit({ type: 'agent-session', session: partial })
     throw new Error('Lost acknowledgement after payload acceptance')
   })
-  const view = await mount(f.surface); await paste(view.element, body); await click(button(view.element, 'Send'))
+  const view = await mount(f.surface); await paste(view.element, body); await plainEnter(view.element)
   await vi.waitFor(() => expect(currentAttempt().logId).toBeDefined())
   expect(currentAttempt().phase).toBe('unknown')
   const original = f.submit.mock.calls[0]![0]
@@ -90,7 +92,7 @@ it('does not interpret a partially accepted payload refusal as whole input or re
 
 it.each(['runtime', 'host', 'run', 'operation'] as const)('does not settle a negative fact belonging to another %s', async target => {
   const f = consumer(); f.submit.mockRejectedValueOnce(new Error('Original acknowledgement unavailable'))
-  const view = await mount(f.surface); await paste(view.element, body); await click(button(view.element, 'Send'))
+  const view = await mount(f.surface); await paste(view.element, body); await plainEnter(view.element)
   await vi.waitFor(() => expect(currentAttempt().phase).toBe('unknown'))
   const original = structuredClone(currentAttempt())
   await act(async () => {
@@ -114,7 +116,7 @@ it('keeps the original archived request and diagnostic when an old retry failure
     if (++calls === 2) { entered.resolve(); await held.promise }
     return result
   })
-  const view = await mount(f.surface); await paste(view.element, body); await click(button(view.element, 'Send'))
+  const view = await mount(f.surface); await paste(view.element, body); await plainEnter(view.element)
   await vi.waitFor(() => expect(currentAttempt().phase).toBe('unknown'))
   const original = structuredClone(currentAttempt())
   await click(button(view.element, '重试原请求')); await entered.promise

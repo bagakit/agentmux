@@ -60,11 +60,16 @@ describe('Mobile consumes the original Desktop owners', () => {
     expect(rows[0]).toMatchObject({ agentSessionId: 'original', name: '修复手机通信', project: 'Actual Project', group: 'idle', state: 'running', avatar, recap: { text: '已定位读取缺口' } })
   })
   it('carries exact per-Session tool expressions without borrowing a neighbouring Host or calling multiple discussions restoring', async () => {
-    const original = { kind: 'agent', id: 'tool-session', hostId: 'local', workspacePath: topic.physicalDirectoryPath, status: { state: 'working' }, semanticStatus: { state: 'working', stateEnteredAt: _tailFixtureEpoch(0, 0, 100) }, control: { run: { runId: 'run' } } }
-    const input = { ...state, sessions: [original, { ...original, id: 'waiting-session', status: { state: 'waiting' } }, { ...original, id: 'foreign', hostId: 'another-host' }], timelines: { 'tool-session': { liveTool: { itemId: 'step', hostId: 'local', runId: 'run', epoch: 100, observedAt: _tailFixtureEpoch(0, 0, 101), startedAt: _tailFixtureEpoch(0, 0, 101) } } } }
+    const now = Date.now()
+    const original = { kind: 'agent', id: 'tool-session', hostId: 'local', workspacePath: topic.physicalDirectoryPath, processState: 'running', capabilities: { timeline: true },
+      status: { state: 'working', source: 'native-hook', observedAt: now }, semanticStatus: { state: 'working', source: 'native-hook', observedAt: now, stateEnteredAt: now },
+      currentActivity: { state: 'active', nativeSessionId: 'native-original', nativeTurnId: 'turn-original', sourceId: 'original-channel', sequence: 1, source: 'native-hook', run: { runId: 'run' }, hookReceiptId: 'original-hook', observedAt: now },
+      control: { kind: 'agent', hostId: 'local', agentSessionId: 'tool-session', run: { runId: 'run' } } }
+    const input = { ...state, sessions: [original, { ...original, id: 'waiting-session', control: { ...original.control, agentSessionId: 'waiting-session' }, currentActivity: undefined, semanticStatus: undefined, status: { state: 'waiting', source: 'native-hook', observedAt: now } }, { ...original, id: 'foreign', hostId: 'another-host' }], timelines: { 'tool-session': { liveTool: { itemId: 'step', hostId: 'local', runId: 'run', epoch: now, observedAt: now, startedAt: now } } } }
     const [result] = await readSpatialAppearance(input as any, catalog, key, [topic], vi.fn())
     expect(result?.expression).toBe('identity')
-    expect(result?.activities).toEqual([{ agentSessionId: 'tool-session', runId: 'run', expression: 'tool' }, { agentSessionId: 'waiting-session', runId: 'run', expression: 'waiting' }])
+    expect(result?.activities).toEqual([{ agentSessionId: 'tool-session', hostId: 'local', runId: 'run', expression: 'tool', activeForMs: expect.any(Number) }, { agentSessionId: 'waiting-session', hostId: 'local', runId: 'run', expression: 'waiting', activeForMs: 0 }])
+    expect(result!.activities![0]!.activeForMs).toBeGreaterThan(0)
   })
 
 })
