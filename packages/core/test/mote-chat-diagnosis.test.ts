@@ -95,13 +95,18 @@ it('keeps generation publication windows bounded, redacted and separate from ter
   }
   const generationKey = moteChatDiagnosisGenerationKey(input.target, 'private-generation')
   expect(generationKey).not.toBe(moteChatDiagnosisKey(input.target, 'private-generation'))
-  const publication = { generationKey, intakeKeys: [row.key], reading: 'observed' as const,
+  const publication = { generationKey, preparedProviderId: 'claude', intakeKeys: [row.key], reading: 'observed' as const,
     observation: { state: 'ready' as const }, sourceObservation: { state: 'ready' as const, code: null, codeRecorded: false, checkpointKey: 'a'.repeat(64) },
     effectObservation: { state: 'unknown' as const, reason: 'effect-unconfirmed' as const }, coverage: { state: 'complete' as const, gaps: [], more: false, originCount: 0 },
     effects: [{ kind: 'conversation' as const, effect: 'upsert' as const, state: 'unknown' as const, receipt: { state: 'unknown' as const, reason: 'platform-unavailable' as const }, resourceUpload: null }], more: false }
   report.publications = [publication]
   expect(parseMoteChatResult(method, report, input)).toEqual(report)
+  for (const preparedProviderId of [null, 'custom-provider', 'x'.repeat(300), '😀'.repeat(1024)]) {
+    expect(parseMoteChatResult(method, { ...report, publications: [{ ...publication, preparedProviderId }] }, input)
+      .publications[0]!.preparedProviderId).toBe(preparedProviderId)
+  }
   for (const fields of [
+    ...[undefined, '', 'x'.repeat(4097), '😀'.repeat(1025), 'private\nvalue', 1, {}].map(preparedProviderId => ({ preparedProviderId })),
     { generationKey: 'private-generation' }, { intakeKeys: ['f'.repeat(64)] }, { intakeKeys: [row.key, row.key] },
     { reading: 'unavailable' }, { bindingId: 'private-binding' }, { sourceObservation: { ...publication.sourceObservation, nativeSessionId: 'private-native' } },
     { sourceObservation: { ...publication.sourceObservation, code: 'RAW_EXCEPTION' } },
