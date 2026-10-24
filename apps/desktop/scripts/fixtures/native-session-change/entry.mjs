@@ -8,6 +8,7 @@ import { readTerminalViewObservation } from '../../../src/renderer/src/lib/termi
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
+import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { updateThemeSelection } from '@agentmux/client-ui/theme'
 import '../../../src/renderer/src/styles/index.css'
 window.terminals = []
@@ -15,7 +16,7 @@ const request = window.nativeBoundary.request
 const setup = await request('setup')
 const workspace = setup.config.workspaces[0]
 api.config.get = async () => setup.config
-api.providers.list = async () => request('providers')
+api.providers.list = options => request('providers',options)
 api.demands.list = async () => []
 api.files.readDirectory = async () => []
 api.files.observe = async () => {}
@@ -30,7 +31,8 @@ api.sessions.paste = async (control, text, data) => request('paste', control, te
 api.sessions.respondInteraction = async (control, response) => request('respond', control, response)
 api.sessions.resolve = async control => request('resolve', control)
 api.sessions.refresh = async control => request('refresh', control)
-api.sessions.historySources = () => request('history-sources')
+api.sessions.recover = (control, workspacePath, operationId, options) => request('recover', control, workspacePath, operationId, options)
+api.sessions.historySources = options => request('history-sources',options)
 api.sessions.historyPage = (control, options) => request('history-page',control,options)
 api.sessions.confirmNativeSession = (control,input) => request('confirm-native',control,input)
 api.sessions.observeHistory = async () => { throw Object.assign(new Error('Private source observation stream isolated; explicit history reads remain real'), {code:'AGENT_SESSION_HISTORY_OBSERVATION_UNSUPPORTED'}) }
@@ -47,9 +49,10 @@ if (setup.phase === 'select') {
   await request('save-ids', identity)
   const tab = createWorkbenchTab(identity.tabId, { regionId: identity.regionId, kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: session.id })
   const layout = createWorkspaceLayout('native-group', [tab.id])
+  await api.spatial.commit({ expectedRevision:0, graph:desktopSpatialGraph({ config:setup.config, sessions:[session],
+    tabs:{[tab.id]:tab}, layouts:{[workspace.id]:layout}, spaceZoneBindings:{}, spatialRequests:{} },[]) })
   const { name, version } = useAppStore.persist.getOptions()
   localStorage.setItem(name, JSON.stringify({ version, state: {
-    restoredWorkbench: projectPersistedWorkbench({ tabs: { [tab.id]: tab }, layouts: { [workspace.id]: layout } }),
     activeWorkspaceId: workspace.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false,
     agentComposerDrafts: { [session.id]: 'Keep this unsent draft' }
   } }))
@@ -60,7 +63,7 @@ window.nativeState = () => {
   const workbench = projectPersistedWorkbench(state)
   const session = state.sessions.find(one => one.id === identity.sessionId)
   return { tabs: workbench.tabs, layouts: workbench.layouts, drafts: state.agentComposerDrafts, focus: state.agentFocus,
-    activeWorkspaceId: state.activeWorkspaceId, session, error: state.error,
+    activeWorkspaceId: state.activeWorkspaceId, session, error: state.error, notifications: state.notificationEvents,
     card: document.querySelector('.agent-interaction')?.textContent ?? null,
     terminalCount: window.terminals.filter(one => one.element?.isConnected).length }
 }
