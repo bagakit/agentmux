@@ -681,7 +681,7 @@ export type AgentHookSubject = {
 }
 
 export type AgentNativeBinding = {
-  source: 'native-hook' | 'process-witness' | 'semantic-resume-target' | 'user-confirmed'
+  source: 'native-hook' | 'process-witness' | 'semantic-resume-target' | 'user-confirmed' | 'user-selected'
   run: AgentMuxRunRef
   observedAt: number
 }
@@ -692,6 +692,8 @@ export type AgentNativeSourceObservation = {
   run: AgentMuxRunRef
   observedAt: number
   reason: string
+  /** Verified main members of this Run, not a claim about the frontend's selection. */
+  candidates?: readonly Extract<AgentNativeSessionHandle, { kind: 'provider' }>[]
 }
 
 export type AgentMuxNativeSessionConfirmationInput = {
@@ -711,6 +713,8 @@ export type AgentNativeSessionConfirmationReceipt = {
   nativeHandle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
   observedAt: number
   candidateObservedAt: number
+  /** Older receipts retain their original facts without inventing an observation basis. */
+  basis?: 'current-main' | 'run-main-candidate'
   previousInteraction?: AgentMuxPendingInteraction
   /** Original prompt operation remains reconcilable, but cannot replay into this source. */
   previousPromptSubmissionId?: string
@@ -968,12 +972,28 @@ export type AgentProviderNativeSessionDiscoveryContext = {
   signal: AbortSignal
 }
 
-export type AgentProviderNativeSessionDiscovery = {
+export type AgentProviderNativeSessionWitness = {
   /** Provider-confirmed descendants of the same process-native main Session. */
   childSessionIds?: readonly string[]
   handle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
   /** Recheck the observed native record before accepting a late result. */
   assertCurrent(): Promise<void>
+  /** Exact Run membership only; does not claim the frontend is displaying this conversation. */
+  assertPresent?(): Promise<void>
+  candidates?: never
+}
+
+export type AgentProviderNativeSessionCandidateWitness = Pick<AgentProviderNativeSessionWitness, 'handle' | 'childSessionIds'> & {
+  /** Recheck this original member and file object, independently of the other main members. */
+  assertPresent(): Promise<void>
+}
+
+export type AgentProviderNativeSessionDiscovery = AgentProviderNativeSessionWitness | {
+  candidates: readonly AgentProviderNativeSessionCandidateWitness[]
+  handle?: never
+  childSessionIds?: never
+  assertCurrent?: never
+  assertPresent?: never
 }
 
 export type AgentNativeResumeSource = {
@@ -2187,7 +2207,12 @@ export type AgentCurrentActivity = AgentNativeActivityEvent & {
 } & ({ state: 'active' | 'idle'; nativeTurnId: string } | { state: 'unknown'; nativeTurnId?: string })
 
 /** A Provider observation failure is diagnostic only; it does not alter Agent authority. */
-export type AgentHookObservationFailure = { code: string; message: string }
+export type AgentHookObservationFailure = {
+  code: string
+  message: string
+  /** Original ordered observer identity, when the Provider can still report it. */
+  source?: Pick<AgentNativeActivityEvent, 'sourceId' | 'sequence'>
+}
 
 /** Optional Provider protocol evidence; neither form grants input or task-completion authority. */
 export type AgentHookContinuityObservation =

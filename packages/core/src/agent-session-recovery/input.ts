@@ -1,3 +1,4 @@
+import { hasSelectedNativeTarget } from '../agent-native-source.js'
 import { mintObjectId } from '../object-id.js'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -266,8 +267,8 @@ export class AgentSessionContinuityInputs {
       !isDeepStrictEqual(operation.recoveryDelivery?.key, delivery.key) || operation.recoveryDelivery?.phase === 'superseded' || session.run.runId !== delivery.key.expectedRun.runId ||
       !matchesProviderNativeSessionTarget(operation.nativeTarget, session.nativeHandle)) throw new AgentMuxError('The original recovery input target changed. Its text and key are kept.', 'CONTINUITY_INPUT_SUPERSEDED')
     const observed = session.observedNativeHandle, source = session.nativeSourceObservation
-    if (source?.run.runId === session.run.runId && source.state === 'changed' || observed &&
-      (observed.kind !== 'provider' || observed.providerId !== operation.nativeTarget.providerId || observed.sessionId !== operation.nativeTarget.sessionId)) {
+    if (!hasSelectedNativeTarget(session) && (source?.run.runId === session.run.runId && source.state === 'changed' || observed &&
+      (observed.kind !== 'provider' || observed.providerId !== operation.nativeTarget.providerId || observed.sessionId !== operation.nativeTarget.sessionId))) {
       throw new AgentMuxError('The confirmed current native conversation differs from the original recovery target. The original text and key are retained.', 'CONTINUITY_INPUT_SUPERSEDED')
     }
     const phase = operation.recoveryDelivery?.phase
@@ -315,7 +316,7 @@ export class AgentSessionContinuityInputs {
       await this.deps.submit({ agentSessionId: id, expectedRun: delivery.key.expectedRun, afterSubmissionId: null,
         operationId: delivery.key.submissionId, prompt: delivery.continuation.text, signal: this.controller.signal,
         ...(recoverySystemContext(delivery) === undefined ? {} : { agentMuxNote: recoverySystemContext(delivery)! }) }, {
-        requestSignal: this.controller.signal, assertCurrent: () => this.qualify(id, operationId, delivery, true)
+        requestSignal: this.controller.signal, nativeIdleOnly: true, assertCurrent: () => this.qualify(id, operationId, delivery, true)
       })
       if (!await this.receipt(id, operationId, delivery)) await this.phase(id, operationId, 'unknown', 'original-input-receipt-unconfirmed')
     } catch (error) {

@@ -94,6 +94,8 @@ export type AgentProviderHookNormalizationContext = Readonly<{
   /** This Run was started for an exact semantic resume target; Hook observations cannot redirect it. */
   protectedNativeTarget?: boolean
   processNativeHandle?: Readonly<AgentNativeSessionHandle>
+  /** A verified member does not attribute Run-bound events without an exact native subject. */
+  nativeTargetMembershipOnly?: true
   processNativeChildSessionIds?: readonly string[]
   /** Core witness fact; a diagnostic reason does not authorize semantic attribution. */
   nativeTargetMismatch?: true

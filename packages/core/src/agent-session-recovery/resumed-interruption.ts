@@ -1,3 +1,4 @@
+import { nativeTargetSourceUnconfirmed } from '../agent-native-source.js'
 import { isDeepStrictEqual } from 'node:util'
 import { matchesProviderNativeSessionTarget } from '../agent-native-locator.js'
 import { createContinuityInputDelivery } from './input.js'
@@ -20,7 +21,7 @@ export async function observeResumedTurnInterruption(session: AgentMuxStoredAgen
   if (!active || !root || root.action === 'restart' || root.trigger === 'input' || active.recoveryDelivery || active.resumedInterruption ||
       root.supervision?.phase === 'cancelled' || !old || !['unknown', 'interrupted'].includes(old.state) ||
       !active.resumedInputBoundary || active.resumedInputBoundary.superseded || session.promptCompletionAdmission ||
-      !matchesProviderNativeSessionTarget(root.nativeTarget, session.nativeHandle) || session.nativeSourceObservation ||
+      !matchesProviderNativeSessionTarget(root.nativeTarget, session.nativeHandle) || nativeTargetSourceUnconfirmed(session) ||
       old.nativeTurnId && session.semanticStatus?.nativeTurnId && session.semanticStatus.nativeTurnId !== old.nativeTurnId) return session
   const needsRead = old.state === 'unknown'
   if (needsRead && (!session.nativeActor || !deps.provider.readResumedTurnInterruption || old.support !== 'provider' ||
@@ -47,7 +48,7 @@ export async function observeResumedTurnInterruption(session: AgentMuxStoredAgen
     const operation = current.continuityOperations?.[active.operationId], originalRoot = current.continuityOperations?.[root.operationId]
     if (current.run.runId !== after.runId || !operation || operation.resumedInterruption || operation.recoveryDelivery ||
         !isDeepStrictEqual(originalRoot?.interruption, old) || originalRoot?.supervision?.phase === 'cancelled' ||
-        !matchesProviderNativeSessionTarget(root.nativeTarget, current.nativeHandle) || !isDeepStrictEqual(current.nativeActor, session.nativeActor) || current.nativeSourceObservation ||
+        !matchesProviderNativeSessionTarget(root.nativeTarget, current.nativeHandle) || !isDeepStrictEqual(current.nativeActor, session.nativeActor) || nativeTargetSourceUnconfirmed(current) ||
         current.promptCompletionAdmission || operation.resumedInputBoundary?.superseded ||
         old.nativeTurnId && current.semanticStatus?.nativeTurnId && current.semanticStatus.nativeTurnId !== old.nativeTurnId ||
         Object.values(current.continuityOperations ?? {}).some(blocks)) return current

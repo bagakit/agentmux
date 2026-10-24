@@ -128,8 +128,13 @@ export const prepareCodexNativeInput: NonNullable<AgentProvider['prepareNativeIn
   const listener = listeners[0]!, listenerBirth = await nativeProcessBirth(listener.processId, signal)
   const { request: call, dispose } = await connectCodexNativeActor(listener.endpoint, nativeActor.token, signal, 'agentmux_native_input')
   try {
-    const value = await call('thread/read', { threadId: target.nativeSessionId, includeTurns: false })
-    if (value?.thread?.id !== target.nativeSessionId || value.thread.canAcceptDirectInput !== true) throw unavailable()
+    const assertPresent = async (): Promise<void> => {
+      const value = await call('thread/read', { threadId: target.nativeSessionId, includeTurns: false })
+      // read also serves unloaded history. Only the actor's live status proves membership.
+      if (value?.thread?.id !== target.nativeSessionId || value.thread.canAcceptDirectInput !== true ||
+          !['idle', 'active', 'systemError'].includes(value.thread.status?.type)) throw unavailable()
+    }
+    await assertPresent()
     const plan = { kind: 'native-rpc' as const, protocolId: PROTOCOL_ID, sourceId: nativeInputSourceId(target),
       actorId: nativeActor.actorId, threadId: target.nativeSessionId,
       ...(target.idleOnly ? { operation: 'queue-idle' as const } : target.expectedTurnId === undefined ? { operation: 'start-or-steer' as const } : { operation: 'steer' as const, expectedTurnId: target.expectedTurnId }) }
@@ -137,6 +142,7 @@ export const prepareCodexNativeInput: NonNullable<AgentProvider['prepareNativeIn
       signal.throwIfAborted()
       if (await nativeProcessBirth(processId, signal) !== birth || await nativeProcessBirth(listener.processId, signal) !== listenerBirth ||
           !(await nativeProcessTcpListeners(processId, signal)).some(x => x.processId === listener.processId && x.endpoint === listener.endpoint)) throw unavailable()
+      await assertPresent()
     }
     return { plan, assertCurrent, dispose,
       async send(prompt, frozen) {

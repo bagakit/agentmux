@@ -1347,17 +1347,20 @@ function terminalOutputChannel(
 /** Public and durable Session facts share the same validation owner. */
 function nativeConfirmation(value: unknown): AgentNativeSessionConfirmationReceipt {
   const p = record(value, 'nativeConfirmation')
-  if (Object.keys(p).some(key => !['operationId', 'run', 'previousNativeHandle', 'nativeHandle', 'observedAt', 'candidateObservedAt', 'previousInteraction', 'previousPromptSubmissionId'].includes(key))) {
+  if (Object.keys(p).some(key => !['operationId', 'run', 'previousNativeHandle', 'nativeHandle', 'observedAt', 'candidateObservedAt', 'basis', 'previousInteraction', 'previousPromptSubmissionId'].includes(key))) {
     throw new AgentMuxError('Invalid native confirmation receipt.', 'INVALID_AGENT_SESSION_STORE')
   }
   const previousNativeHandle = nativeHandle(p.previousNativeHandle), handle = nativeHandle(p.nativeHandle)
   if (previousNativeHandle.kind !== 'provider' || handle.kind !== 'provider' ||
-    previousNativeHandle.providerId !== handle.providerId || previousNativeHandle.sessionId === handle.sessionId) {
+    previousNativeHandle.providerId !== handle.providerId ||
+    p.basis !== undefined && p.basis !== 'current-main' && p.basis !== 'run-main-candidate' ||
+    previousNativeHandle.sessionId === handle.sessionId && (p.basis !== 'run-main-candidate' || previousNativeHandle.transcriptPath !== handle.transcriptPath)) {
     throw new AgentMuxError('Native confirmation requires two exact Provider conversations.', 'INVALID_AGENT_SESSION_STORE')
   }
   return { operationId: string(p.operationId, 'nativeConfirmation.operationId'), run: runRef(p.run),
     previousNativeHandle, nativeHandle: handle, observedAt: timestamp(p.observedAt, 'nativeConfirmation.observedAt'),
     candidateObservedAt: timestamp(p.candidateObservedAt, 'nativeConfirmation.candidateObservedAt'),
+    ...(p.basis === undefined ? {} : { basis: p.basis as 'current-main' | 'run-main-candidate' }),
     ...(p.previousInteraction === undefined ? {} : { previousInteraction: pendingInteraction(p.previousInteraction) }),
     ...(p.previousPromptSubmissionId === undefined ? {} : { previousPromptSubmissionId: string(p.previousPromptSubmissionId, 'nativeConfirmation.previousPromptSubmissionId') }) }
 }
@@ -1543,9 +1546,21 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     ...(source.observedNativeHandle === undefined ? {} : { observedNativeHandle: nativeHandle(source.observedNativeHandle) }),
     ...(source.nativeSourceObservation === undefined ? {} : { nativeSourceObservation: (() => {
       const p = record(source.nativeSourceObservation, 'nativeSourceObservation')
-      if (Object.keys(p).some(key => !['state', 'run', 'observedAt', 'reason'].includes(key)) ||
+      if (Object.keys(p).some(key => !['state', 'run', 'observedAt', 'reason', 'candidates'].includes(key)) ||
         !['changed', 'unknown', 'ambiguous'].includes(String(p.state))) throw new AgentMuxError('Invalid native source observation.', 'INVALID_AGENT_SESSION_STORE')
+      const candidates = p.candidates === undefined ? undefined : (() => {
+        if (p.state !== 'ambiguous' || !Array.isArray(p.candidates) || p.candidates.length === 0) {
+          throw new AgentMuxError('Native candidates require an ambiguous Run observation.', 'INVALID_AGENT_SESSION_STORE')
+        }
+        const handles = p.candidates.map(nativeHandle)
+        if (handles.some(handle => handle.kind !== 'provider' || handle.providerId !== source.providerId) ||
+          new Set(handles.map(handle => handle.sessionId)).size !== handles.length) {
+          throw new AgentMuxError('Native candidates must be distinct main conversations of this Provider.', 'INVALID_AGENT_SESSION_STORE')
+        }
+        return handles as Extract<AgentNativeSessionHandle, { kind: 'provider' }>[]
+      })()
       return { state: p.state as 'changed' | 'unknown' | 'ambiguous', run: runRef(p.run),
+        ...(candidates ? { candidates } : {}),
         observedAt: timestamp(p.observedAt, 'nativeSourceObservation.observedAt'), reason: string(p.reason, 'nativeSourceObservation.reason') }
     })() }),
     ...(source.nativeConfirmation === undefined ? {} : { nativeConfirmation: nativeConfirmation(source.nativeConfirmation) }),
@@ -1555,8 +1570,8 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     })() }),
     ...(source.nativeBinding === undefined ? {} : { nativeBinding: (() => {
       const binding = record(source.nativeBinding, 'nativeBinding')
-      if (!['native-hook', 'process-witness', 'semantic-resume-target', 'user-confirmed'].includes(String(binding.source))) throw new AgentMuxError('Invalid native binding source.', 'INVALID_AGENT_SESSION_STORE')
-      return { source: binding.source as 'native-hook' | 'process-witness' | 'semantic-resume-target' | 'user-confirmed', run: runRef(binding.run), observedAt: timestamp(binding.observedAt, 'nativeBinding.observedAt') }
+      if (!['native-hook', 'process-witness', 'semantic-resume-target', 'user-confirmed', 'user-selected'].includes(String(binding.source))) throw new AgentMuxError('Invalid native binding source.', 'INVALID_AGENT_SESSION_STORE')
+      return { source: binding.source as 'native-hook' | 'process-witness' | 'semantic-resume-target' | 'user-confirmed' | 'user-selected', run: runRef(binding.run), observedAt: timestamp(binding.observedAt, 'nativeBinding.observedAt') }
     })() }),
     ...(source.nativePromptPredecessor === undefined ? {} : { nativePromptPredecessor: (() => {
       const fact = record(source.nativePromptPredecessor, 'nativePromptPredecessor')
@@ -2086,7 +2101,8 @@ function assertNativeCreationOwner(seed: AgentMuxPreparedCreation, sessions: rea
   const same = (handle: AgentNativeSessionHandle | undefined): boolean => handle?.kind === 'provider' &&
     handle.providerId === source.providerId && handle.sessionId === source.sessionId
   if (sessions.some(session => session.hostId === seed.hostId && (same(session.nativeHandle) ||
-      session.nativeSourceObservation?.state === 'changed' && same(session.observedNativeHandle))) ||
+      session.nativeSourceObservation?.state === 'changed' && same(session.observedNativeHandle) ||
+      session.nativeSourceObservation?.candidates?.some(same))) ||
       retired.some(session => session.hostId === seed.hostId && same(session.history?.nativeHandle)) ||
       reservations.some(reservation => reservation.agentSessionId !== seed.agentSessionId &&
         (reservation.kind === 'create' && reservation.preparedCreation?.hostId === seed.hostId && same(reservation.preparedCreation.nativeHandle) ||

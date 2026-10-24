@@ -119,7 +119,8 @@ export const prepareCodexDurableQueueInput: NonNullable<AgentProvider['prepareNa
   if (target.providerId !== 'codex' || target.idleOnly !== true || target.expectedTurnId !== undefined) throw unavailable()
   const { signal, processId } = context
   const rootBirth = await nativeProcessBirth(processId, signal)
-  const original = await locateAppServerNativeSession(context, codexMainNativeRecord)
+  const original = await locateAppServerNativeSession(context, codexMainNativeRecord, 'run-group', { id: target.nativeSessionId,
+    ...(context.nativeHandle?.kind === 'provider' && context.nativeHandle.transcriptPath ? { path: context.nativeHandle.transcriptPath } : {}) })
   if (!original || original.id !== target.nativeSessionId || context.nativeHandle &&
       (context.nativeHandle.kind !== 'provider' || context.nativeHandle.providerId !== target.providerId ||
        context.nativeHandle.sessionId !== original.id || context.nativeHandle.transcriptPath !== undefined && context.nativeHandle.transcriptPath !== original.file.path)) throw unavailable()
@@ -137,7 +138,7 @@ export const prepareCodexDurableQueueInput: NonNullable<AgentProvider['prepareNa
       signal.throwIfAborted()
       if (await nativeProcessBirth(processId, signal) !== rootBirth || await nativeProcessBirth(owner, signal) !== ownerBirth ||
           await nativeProcessBirth(helper.processId, signal) !== helperBirth) throw unavailable()
-      const current = await locateAppServerNativeSession(context, codexMainNativeRecord)
+      const current = await locateAppServerNativeSession(context, codexMainNativeRecord, 'run-group', { id: original.id, path: original.file.path })
       if (!current || current.id !== original.id || current.file.processId !== owner || !sameFile(current.file, original.file) || current.file.path !== original.file.path) throw unavailable()
       const sourceStores = stores(await nativeProcessFiles(owner, signal, 'process'))
       const helperStores = stores(await nativeProcessFiles(helper.processId, signal, 'process'))

@@ -663,11 +663,14 @@ export function normalizeNativeHook(
   // Authentication binds the Core Session/Run. A different native identity still needs an
   // explicit Provider membership/transition rule; absence of a witness never grants one.
   const protectedTargetMismatch = context.protectedNativeTarget === true && knownLocatorChanged && !childSubject
-  const nativeSessionMatches = !protectedTargetMismatch && (declaredSubject
+  const missingMemberSubject = context.nativeTargetMembershipOnly === true && !declaredSubject && !incomingId
+  const nativeSessionMatches = !protectedTargetMismatch && !missingMemberSubject && (declaredSubject
     ? declaredSubject.kind === 'main' || declaredSubject.kind === 'child'
     : specification.matchesNativeSession?.(eventName, rawPayload, context) ?? !knownLocatorChanged)
   const mainSubject = nativeSessionMatches && !childSubject
-  const subject: AgentHookSubject = protectedTargetMismatch ? {
+  const subject: AgentHookSubject = missingMemberSubject ? {
+    kind: 'unknown', basis: 'process-native-record', reason: 'native-subject-unconfirmed'
+  } : protectedTargetMismatch ? {
     kind: 'unknown', basis: 'provider-protocol', reason: 'resume-target-mismatch',
     ...(incomingId ? { nativeSessionId: incomingId } : {})
   } : declaredSubject ?? {
