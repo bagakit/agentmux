@@ -4,6 +4,7 @@ import { ConversationRulerControls } from './ConversationRulerControls'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { conversationRulerWindow, type RulerRecord, type RulerWindow } from '../lib/conversation-ruler'
 import { rulerBand } from '../lib/activity-ruler'
+import { useConversationKeyframes } from '../lib/use-conversation-keyframes'
 import type { projectAgentActivityHistory } from '@agentmux/core/timeline'
 import type { ConversationProcessMember } from '@agentmux/client-ui/components/ConversationRecordSequence'
 
@@ -29,6 +30,7 @@ export function ConversationReadingRuler({ feedEl, sessionId, readingEnabled, ru
   tools: ReactNode
 }) {
   const [visible, setVisible] = useState<Set<string>>(new Set())
+  const keyframes = useConversationKeyframes(feedEl, sessionId, readingEnabled, rulerRecords)
   const ruler = useMemo(() => conversationRulerWindow(rulerRecords, rulerWindow, visible), [rulerRecords, rulerWindow, visible])
   const rulerSelectedIndex = ruler.items.findIndex(record => record.id === selectedRecordId)
   const scale = ruler.scale
@@ -135,6 +137,7 @@ export function ConversationReadingRuler({ feedEl, sessionId, readingEnabled, ru
         axes={({ width, onPeek, onPeekEnd }) =>
           describeSpeaker ? (
             <ConversationAxis items={ruler.items} belongs={() => true} width={width}
+              keyframes={keyframes}
               label="Participants" size={16} describe={describeSpeaker}
               conversationSessionId={sessionId} recentFraction={ruler.recentFraction}
               selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}

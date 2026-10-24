@@ -3,6 +3,7 @@ import { projectConversationRecords, type ConversationRecord } from '@agentmux/c
 import { speakerOfUserMessage, type ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import { speakerOf } from './conversation-speaker'
 import { createRulerScale } from './activity-ruler'
+import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import type { ConversationAxisItem, RulerAxisItem } from './conversation-axis'
 
 export type RulerRecord = {
@@ -10,6 +11,10 @@ export type RulerRecord = {
   kind: 'ruler-record'
   recordedAt?: number
   speaker: ConversationSpeaker | null
+  /** Exact rendered message source. Only used to associate disposable visual observations. */
+  sourceKey?: string | undefined
+  /** Existing Core source revisions survive IPC object reallocation. */
+  revision?: string
   target: { kind: 'native'; source: string; recordId: string } | { kind: 'observed'; index: number }
   record: AgentSessionHistoryItem | Exclude<ConversationAxisItem, RulerRecord>
 }
@@ -26,6 +31,8 @@ export function conversationRulerRecords(sessionId: string | undefined, page: Ag
     timeline: { agentSessionId: sessionId ?? '', revision: 0, items: [...captured] } })
   const indices = new Map(observed.map((item, index) => [item.id, index]))
   const records: RulerRecord[] = projected.map(record => ({ id: record.id, kind: 'ruler-record', record: record.original.item,
+    sourceKey: conversationMessageSourceKey(sessionId, record.source),
+    ...(record.records?.length ? { revision: JSON.stringify(record.records.map(source => [source.id, source.revision])) } : {}),
     ...(record.recordedAt === undefined ? {} : { recordedAt: record.recordedAt }),
     speaker: record.role === 'message' || record.role === 'notice' ? record.speaker ?? null : null,
     target: record.source.kind === 'native' ? { kind: 'native', source: JSON.stringify([record.source.providerId, record.source.nativeSessionId]), recordId: record.rawId }
@@ -33,6 +40,7 @@ export function conversationRulerRecords(sessionId: string | undefined, page: Ag
   observed.forEach((record, index) => {
     if (!('author' in record)) return
     records.push({ id: JSON.stringify(['observed', sessionId, record.id]), kind: 'ruler-record', record,
+      sourceKey: conversationMessageSourceKey(sessionId, { kind: 'captured', recordId: record.id }),
       ...(record.recordedAt === undefined ? {} : { recordedAt: record.recordedAt }), speaker: speakerOf(record), target: { kind: 'observed', index } })
   })
   return records
