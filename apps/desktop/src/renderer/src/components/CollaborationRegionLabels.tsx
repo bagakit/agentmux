@@ -18,7 +18,7 @@ export const COLLABORATION_AREA_KINDS = {
   project: { icon: 'object.project', label: 'Project' }, topic: { icon: 'object.topic', label: 'Topic' }, category: { icon: 'object.topic', label: 'Category' },
   mote: { icon: 'object.mote', label: 'Mote' }, unplaced: { icon: 'object.topology', label: 'Unplaced' }
 } as const
-type Region = { box: Extract<CollaborationLayoutBox, { kind: 'area' }>; area: CollaborationArea; folded: boolean; totalMembers: number; depth: number
+type Region = { box: Extract<CollaborationLayoutBox, { kind: 'area' }>; area: CollaborationArea; folded: boolean; totalMembers: number; childCount: number; depth: number
   activity?: { pulse: { kind: 'communication' | 'supervision' } } | undefined
   internal: readonly unknown[]; onInspect(): void; onLocate(): void; onToggle(anchor?: { x: number; y: number }): void }
 const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((value, index) => value === b[index])
@@ -59,7 +59,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
       if (!visible(box)) return []
       const left = (box.x + box.heading.x) * zoom + panX, top = (box.y + box.heading.y) * zoom + panY
       const headingVisible = left >= 8 && left + box.heading.width * zoom <= width - 8 && top >= 8 && top + box.heading.height * zoom <= height - 8
-      if (!overview && !headingVisible && !visibleAreas.has(box.id)) return []
+      if (!overview && !headingVisible && !visibleAreas.has(box.id) && !data.folded) return []
       const current = currentAreas.has(area.id)
       // A responsive text column, never a character-count approximation. The
       // browser wraps the complete name and supplies its actual block height.
@@ -67,7 +67,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
       const measured = sizes.get(area.id), labelWidth = measured?.budget === budget ? measured.width : Math.min(180, budget)
       const labelHeight = measured?.budget === budget ? measured.height : 44
       return [{ data, budget, width: labelWidth, height: labelHeight, x: clamp(left, 12, width - labelWidth - 12),
-        y: clamp(top + box.heading.height * zoom - labelHeight, headingVisible ? 8 : 52, height - labelHeight - 8), current, context: !headingVisible }]
+        y: clamp(top + box.heading.height * zoom - labelHeight, 8, height - labelHeight - 8), current, context: !headingVisible }]
     }).sort((a, b) => Number(b.current) - Number(a.current) || Number(!a.data.totalMembers) - Number(!b.data.totalMembers) || b.data.totalMembers - a.data.totalMembers || a.data.depth - b.data.depth || a.y - b.y || a.x - b.x || a.data.area.id.localeCompare(b.data.area.id))
     const placed: typeof candidates = [], clearance = 6
     const blockingAgents = (label: CollaborationBounds) => {
@@ -84,7 +84,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
       let resolved = false
       for (let attempts = 0; pending.length && attempts < 64;) {
         pending.sort((a, b) => (a.x - candidate.x) ** 2 + (a.y - candidate.y) ** 2 - (b.x - candidate.x) ** 2 - (b.y - candidate.y) ** 2)
-        const next = pending.shift()!, x = clamp(next.x, 12, width - candidate.width - 12), y = clamp(next.y, candidate.context ? 52 : 8, height - candidate.height - 8)
+        const next = pending.shift()!, x = clamp(next.x, 12, width - candidate.width - 12), y = clamp(next.y, 8, height - candidate.height - 8)
         // Repeated obstacle moves can differ only by floating point roundoff.
         // Deduplicate their screen cells instead of exhausting the finite search.
         const key = `${Math.round(x * 2)},${Math.round(y * 2)}`
@@ -155,8 +155,8 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
     const frame = window.requestAnimationFrame(() => { update(); observer.observe(element.parentElement!); observer.observe(element); for (const child of element.children) observer.observe(child); if (contextControl?.current) observer.observe(contextControl.current) })
     return () => { window.cancelAnimationFrame(frame); observer.disconnect() }
   }, [active, hud, contextControl])
-  return <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-depth={data.depth} data-empty={!data.totalMembers || undefined} data-context={context || undefined} data-current={current || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget }}>
-    <RegionIdentity data={data} hasChildren={Boolean(hierarchy.children.get(data.area.id)?.length)} onToggle={() => data.onToggle(context ? { x, y: y + height } : undefined)} />
+  return <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-depth={data.depth} data-empty={!data.totalMembers && !data.childCount || undefined} data-context={context || undefined} data-current={current || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget }}>
+    <RegionIdentity data={data} hasChildren={data.childCount > 0} onToggle={() => data.onToggle({ x, y: y + height })} />
   </div>)}</div>
 })
 
