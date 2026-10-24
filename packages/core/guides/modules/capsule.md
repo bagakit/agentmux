@@ -81,6 +81,12 @@ To embed a saved page in an AgentMux Desktop conversation reply, write
 ![Page title](amux://capsule/ORIGINAL_ID) in its own Markdown paragraph. Use the actual
 returned capsuleId. Several such references may share a paragraph; ordinary bare links
 and [labels](amux://capsule/ORIGINAL_ID) remain compact object links. Code stays literal.
+For new pages intended for conversation replies, prefer explicit mode "injected" and
+theme "follow" in capsule create. Use the granted App theme variables and respond to
+theme changes so typography, colors and light/dark appearance fit the conversation.
+Choose "isolated" when independent styling or isolation is needed. This recommendation
+does not change creation defaults, convert existing pages or grant communication/input
+capabilities; keep the page's actual authorization and the person's explicit confirmation.
 The Desktop reconnects an existing native page while its card is visible, retaining that
 document even if later service observation fails. A first display reads the original Capsule
 and displays an already-serving page in its original isolated/injected native container. Reading a reply never Starts a
