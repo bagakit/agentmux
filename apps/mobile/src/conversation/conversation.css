@@ -160,3 +160,11 @@
 .mobile-message-tools .input-history__search input { min-height: 44px; font-size: 16px; }
 .mobile-message-tools .input-history__actions { gap: 8px; }
 .mobile-message-tools .input-history :is(button, input, summary):focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+
+/* Retain the shared identities and full provenance in details; give the reading itself the room. */
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'][data-speaker-role='agent'] { background: transparent; padding-block: 4px; }
+.mobile-app .mobile-conversation .log-turn__content p:first-child { margin-top: 2px; }
+.mobile-app .mobile-conversation .conversation-coverage { padding-inline: 12px; font-size: 11px; color: var(--text-3); }
+.mobile-app .mobile-conversation .conversation-coverage > summary { min-height: 44px; display: flex; align-items: center; gap: 5px; }
+.mobile-app .mobile-conversation .conversation-coverage > summary::before { content: '›'; font-size: 14px; }
+.mobile-app .mobile-conversation .conversation-coverage[open] > summary::before { transform: rotate(90deg); }
