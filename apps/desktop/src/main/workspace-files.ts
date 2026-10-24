@@ -4,7 +4,7 @@ import { OrdinaryWorkspaceFiles, WorkspaceFileWriteScope, localPathWithin, local
 import { gitIgnoredNames } from './workspace-git-ignore.js'
 import { LOCAL_FILE_LIST_SOURCE } from './workspace-file-list.js'
 import type { FileNameListing } from '@agentmux/core'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../shared/scratch-topics.js'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicStorageRoots } from '../shared/scratch-topics.js'
 import { resolveScratchTopicDirectory, scratchConfirmedDirectoryPaths } from './scratch-topic-directories.js'
 import { BOOKMARK_FILE_MAX_BYTES, isBinaryContent } from '../shared/bookmark-file.js'
 import { workspaceFilePreviewFormat, type WorkspaceFilePreviewReadOptions, type WorkspaceFilePreviewResult } from '../shared/workspace-file-preview.js'
