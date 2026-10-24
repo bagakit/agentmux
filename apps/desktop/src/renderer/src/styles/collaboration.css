@@ -129,7 +129,7 @@
 .collaboration-navigation { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px; margin-bottom: 14px; }
 .collaboration-navigation button { margin: 3px; }
 
-.collaboration-area__internal { pointer-events: auto; display: flex; align-items: center; gap: 8px; margin: 0 32px 6px 8px; padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font-size: var(--fs-micro); cursor: pointer; }
+.collaboration-area__internal { pointer-events: auto; display: flex; align-items: center; gap: 8px; contain: inline-size; overflow-wrap: anywhere; margin: 0 32px 6px 8px; padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font-size: var(--fs-micro); cursor: pointer; }
 .collaboration-area__internal:hover { color: var(--green); }
 .collaboration-area-issues { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
 
@@ -199,6 +199,8 @@
 .collaboration-area[data-depth="0"] .collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 3%, var(--surface-1)); }
 .collaboration-area__overview-label:not([data-depth="0"])::before { width: 2px; opacity: .65; }
 .collaboration-area__overview-label { position: absolute; width: max-content; min-width: 148px; pointer-events: none; border-radius: 9px; background: color-mix(in srgb, var(--surface-1) 96%, var(--area-color)); border: 1px solid color-mix(in srgb, var(--area-color) 32%, var(--line)); box-shadow: 0 3px 12px color-mix(in srgb, var(--surface-1) 70%, transparent); }
+.collaboration-area__overview-label[data-internal-above=true] { display: flex; flex-direction: column; }
+.collaboration-area__overview-label[data-internal-above=true] .collaboration-area__internal { order: -1; margin-top: 6px; margin-bottom: 0; }
 .collaboration-area__overview-label::before { content: ''; position: absolute; inset: 9px auto 9px -1px; width: 3px; border-radius: 3px; background: var(--area-color); pointer-events: none; }
 .collaboration-area__overview-label[data-current=true] { border-color: var(--area-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--area-color) 13%, transparent), 0 4px 16px color-mix(in srgb, var(--surface-1) 80%, transparent); }
 .collaboration-area__summary { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 6px 26px 6px 11px; border: 0; border-radius: inherit; background: transparent; color: var(--text); text-align: left; cursor: pointer; pointer-events: auto; }
@@ -213,9 +215,9 @@
 .collaboration-area__meta em { font-style: normal; color: var(--area-color); }
 .collaboration-area__meta small { font-size: inherit; font-variant-numeric: tabular-nums; }
 .collaboration-area__meta .host-identity { font-size: inherit; line-height: inherit; }
-.collaboration-area__fold { position: absolute; right: 4px; bottom: 6px; display: grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 4px; color: var(--text-2); background: transparent; cursor: pointer; pointer-events: auto; }
+.collaboration-area__fold { position: absolute; right: 4px; top: calc(var(--collaboration-summary-bottom, 44px) - 28px); display: grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 4px; color: var(--text-2); background: transparent; cursor: pointer; pointer-events: auto; }
 .collaboration-area__fold:hover, .collaboration-area__fold:focus-visible { color: var(--text); background: var(--surface-3); }
-.collaboration-area__overview-label .collaboration-area__activity { position: absolute; right: 12px; top: 10px; }
+.collaboration-area__overview-label .collaboration-area__activity { position: absolute; right: 12px; top: calc(var(--collaboration-summary-top, 0px) + 10px); }
 .collaboration-area__overview-label[data-empty=true] { border-color: var(--line); box-shadow: none; background: var(--surface-1); }
 .collaboration-area__overview-label[data-empty=true]::before { opacity: .4; }
 .collaboration-area__overview-label[data-empty=true] .collaboration-area__summary { min-height: 42px; padding-block: 6px; }

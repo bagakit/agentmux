@@ -1,4 +1,4 @@
-import { type RefObject, useContext, memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type RefObject, useContext, memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@xyflow/react'
 import { useShallow } from 'zustand/react/shallow'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
@@ -35,7 +35,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
   const preferences = useContext(CollaborationMapPreferences)
   const camera = useStore(state => [...state.transform, state.width, state.height], same)
   const root = useRef<HTMLDivElement>(null)
-  const [sizes, setSizes] = useState<ReadonlyMap<string, { budget: number; width: number; height: number }>>(new Map())
+  const [sizes, setSizes] = useState<ReadonlyMap<string, { budget: number; width: number; height: number; summaryHeight: number; inset: number }>>(new Map())
   const [occlusion, setOcclusion] = useState<readonly CollaborationBounds[]>([])
   const topology = useRef<readonly CollaborationArea[]>([]), original = areas.map(({ data }) => data.area)
   if (!same(topology.current, original)) topology.current = original
@@ -69,8 +69,12 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
       const budget = Math.min(width - 24, current || area.kind === 'project' && data.totalMembers ? 320 : 260)
       const measured = sizes.get(area.id), labelWidth = measured?.budget === budget ? measured.width : Math.min(180, budget)
       const labelHeight = measured?.budget === budget ? measured.height : 44
+      const summaryHeight = measured?.budget === budget ? measured.summaryHeight : 44, inset = measured?.budget === budget ? measured.inset : 0
+      const rowY = clamp(top + box.heading.height * zoom - summaryHeight - inset, 8, height - summaryHeight - inset - 8)
+      const internalAbove = data.folded && data.internal.length > 0 && rowY + labelHeight > height - 8
+      const summaryBottom = internalAbove ? labelHeight - inset : summaryHeight + inset
       return [{ data, budget, width: labelWidth, height: labelHeight, x: clamp(left, 12, width - labelWidth - 12),
-        y: clamp(top + box.heading.height * zoom - labelHeight, 8, height - labelHeight - 8), current, context: !headingVisible }]
+        y: clamp(top + box.heading.height * zoom - summaryBottom, 8, height - labelHeight - 8), summaryBottom, summaryTop: summaryBottom - summaryHeight, internalAbove, current, context: !headingVisible }]
     }).sort((a, b) => Number(b.current) - Number(a.current) || Number(!a.data.totalMembers) - Number(!b.data.totalMembers) || b.data.totalMembers - a.data.totalMembers || a.data.depth - b.data.depth || a.y - b.y || a.x - b.x || a.data.area.id.localeCompare(b.data.area.id))
     const placed: typeof candidates = [], clearance = 6
     const blockingAgents = (label: CollaborationBounds) => {
@@ -128,11 +132,17 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
       const next = new Map(previous)
       let changed = false
       for (const entry of entries) {
-        const id = (entry.target as HTMLElement).dataset.regionId!, size = entry.borderBoxSize[0]
+        const element = entry.target as HTMLElement, id = element.dataset.regionId!, size = entry.borderBoxSize[0]
         if (!size || !size.inlineSize || !size.blockSize) continue
-        const budget = Number.parseFloat((entry.target as HTMLElement).style.maxWidth)
+        const budget = Number.parseFloat(element.style.maxWidth)
         const width = Math.ceil(size.inlineSize), height = Math.ceil(size.blockSize), old = previous.get(id)
-        if (old?.budget !== budget || old.width !== width || old.height !== height) { next.set(id, { budget, width, height }); changed = true }
+        const summary = element.querySelector<HTMLElement>('.collaboration-area__summary')?.getBoundingClientRect()
+        // Only the stable identity/action row anchors a fold. The complete
+        // label still reserves room for its separately disclosed internal links.
+        const summaryHeight = summary?.height ? Math.ceil(summary.height) : height
+        const label = summary?.height ? element.getBoundingClientRect() : null
+        const inset = label && summary ? Math.max(0, Math.round(element.dataset.internalAbove === 'true' ? label.bottom - summary.bottom : summary.top - label.top)) : 0
+        if (old?.budget !== budget || old.width !== width || old.height !== height || old.summaryHeight !== summaryHeight || old.inset !== inset) { next.set(id, { budget, width, height, summaryHeight, inset }); changed = true }
       }
       return changed ? next : previous
     }))
@@ -163,8 +173,8 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
     const frame = window.requestAnimationFrame(() => { update(); observer.observe(element.parentElement!); observer.observe(element); for (const child of element.children) observer.observe(child); if (contextControl?.current) observer.observe(contextControl.current); for (const proxy of readingProxies) observer.observe(proxy) })
     return () => { window.cancelAnimationFrame(frame); observer.disconnect() }
   }, [active, hud, contextControl, readingProxies, readingCamera])
-  return <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-depth={data.depth} data-empty={!data.totalMembers && !data.childCount || undefined} data-context={context || undefined} data-current={current || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget }}>
-    <RegionIdentity data={data} hasChildren={data.childCount > 0} onToggle={() => data.onToggle({ x, y: y + height })} />
+  return <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, summaryBottom, summaryTop, internalAbove, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-depth={data.depth} data-empty={!data.totalMembers && !data.childCount || undefined} data-context={context || undefined} data-current={current || undefined} data-internal-above={internalAbove || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget, '--collaboration-summary-bottom': `${summaryBottom}px`, '--collaboration-summary-top': `${summaryTop}px` } as CSSProperties}>
+    <RegionIdentity data={data} hasChildren={data.childCount > 0} onToggle={() => data.onToggle({ x, y: y + summaryBottom })} />
   </div>)}</div>
 })
 
