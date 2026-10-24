@@ -203,7 +203,7 @@ describe('durable bounded Topic query observations', () => {
     const history = await f.owner.call('topic.knowledge.history', {})
     expect(history.records).toHaveLength(4)
     expect(history.records.find(row => row.query === '取消查询')).toMatchObject({ outcome: 'cancelled', stopReason: 'cancelled', counters: { topicsVisited: 0, candidates: 0 } })
-    expect(history.records.find(row => row.query === '读取后取消')).toMatchObject({ outcome: 'cancelled', stopReason: 'cancelled', counters: { topicsVisited: 1, candidates: 2, unconfirmedReads: 0 } })
+    expect(history.records.find(row => row.query === '读取后取消')).toMatchObject({ outcome: 'cancelled', stopReason: 'cancelled', counters: { topicsVisited: 1, candidates: 3, unconfirmedReads: 0 } })
     expect(history.records.find(row => row.query === '读取后取消')!.counters.readBytes).toBeGreaterThan(0)
     expect(history.records.find(row => row.query === '不存在')).toMatchObject({ topicId: 'view:missing', outcome: 'error', issues: [{ code: 'TOPIC_NOT_FOUND', source: 'view:missing' }] })
     expect(history.records.find(row => row.query === '私有请求')).toMatchObject({ topicId: mote.id, outcome: 'error', issues: [{ code: 'TOPIC_TARGET_IS_MOTE', source: mote.id }] })

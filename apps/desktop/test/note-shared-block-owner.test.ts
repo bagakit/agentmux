@@ -29,7 +29,11 @@ async function fixture() {
   dispose.push(() => rm(root, { recursive: true, force: true }))
   const workspace: WorkspaceRecord = { id: 'notes', hostId: 'local', name: 'Notes', kind: 'folder', path: directory }
   const files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local' }) as never); dispose.push(() => files.dispose())
-  const metadata = new AgentMuxNotebookStore(join(root, 'state', 'notebooks.sqlite')), writer = new NoteFileWriter(files, undefined, metadata)
+  // Metadata is outside the configured File roots: these cases exercise content aliases,
+  // not intentional retention while a managed directory's own sidecar files change.
+  const metadataRoot = await realpath(await mkdtemp(join(tmpdir(), 'note-shared-metadata-')))
+  dispose.push(() => rm(metadataRoot, { recursive: true, force: true }))
+  const metadata = new AgentMuxNotebookStore(join(metadataRoot, 'notebooks.sqlite')), writer = new NoteFileWriter(files, undefined, metadata)
   const sourceNote = newNoteDocument('One original knowledge source', 'source-note', 'source-block')
   sourceNote.content.content!.push({ type: 'paragraph', attrs: { blockId: 'untouched' }, content: [{ type: 'text', text: 'Keep this outside' }] })
   const destinationNote = newNoteDocument('Destination before paste', 'destination-note', 'destination-body')
@@ -456,6 +460,21 @@ it('keeps the original source include when a visible dependency is added after d
  expect(await owner.apply(params,{actor:person})).toMatchObject({status:'committed',collections:[{source:null,retainedReason:{code:'scope-changed'}}]});expect(await readFile(join(f.directory,'source.note.md'),'utf8')).toContain('::note-include');expect(await readFile(join(f.directory,'block-shared.note.md'),'utf8')).toContain('One original knowledge source')
 })
 
+it('retains original shared knowledge when a new managed root appears during undo', async () => {
+  const f = await fixture(); await f.port.share(f.params, { actor: person }); const params = await removal(f)
+  const owner = f.makeUndo(async stage => {
+    if (stage !== 'destination') return
+    const path = join(f.root, 'additional-notes'); await mkdir(path)
+    const note = newNoteDocument('A new original scope', 'additional-note', 'additional-block')
+    note.content.content!.push(f.include('additional-reference', 'additional-include'))
+    await writeFile(join(path, 'additional.note.md'), serializeNoteDocument(note))
+    f.workspaces.push({ ...f.workspace, id: 'additional-workspace', path })
+  })
+  expect(await owner.apply(params, { actor: person })).toMatchObject({ status: 'committed', collections: [{ source: null, retainedReason: { code: 'scope-changed' } }] })
+  expect(await readFile(join(f.directory, 'source.note.md'), 'utf8')).toContain('::note-include')
+  expect(await readFile(join(f.directory, 'block-shared.note.md'), 'utf8')).toContain('One original knowledge source')
+})
+
 it.each(['source','delete'] as const)('retains shared knowledge when another intent preoccupies the derived %s stage ID',async stage=>{
  const f=await fixture();await f.port.share(f.params,{actor:person});const params=await removal(f),created=await f.metadata.readHistoryOperation('promote-original:create');if(!created||created.operation!=='edit')throw Error('fixture')
  const {provenance:_provenance,...record}=created;const identity=stage==='source'?JSON.stringify(['local',f.workspace.id,f.workspace.path,'source.note.md']):'shared-note',id=fileShareUndoStageOperation(params.destination.operationId!,stage,identity)
@@ -481,7 +500,7 @@ it.each(['preparation-conflict','history-unavailable'] as const)('preserves real
 
 it('collects the original physical shared file when an earlier configured parent root aliases its trusted child Workspace resource',async()=>{
  const f=await fixture();f.workspaces.unshift({...f.workspace,id:'parent-alias',path:f.root});expect(await f.port.share(f.params,{actor:person})).toMatchObject({status:'committed'})
- const result=await f.port.undoShare(await removal(f),{actor:person});expect(result).toMatchObject({status:'committed',collections:[{resource:{workspaceId:'notes',path:'block-shared.note.md'},source:{resource:{workspaceId:'notes',path:'source.note.md'},result:{noteHistory:{status:'committed'}}},deletion:{result:{status:'deleted'}}}]});expect(await readFile(join(f.directory,'source.note.md'),'utf8')).toContain('One original knowledge source');await expect(readFile(join(f.directory,'block-shared.note.md'),'utf8')).rejects.toMatchObject({code:'ENOENT'})
+ const result=await f.port.undoShare(await removal(f),{actor:person});expect(result, JSON.stringify(result)).toMatchObject({status:'committed',collections:[{resource:{workspaceId:'notes',path:'block-shared.note.md'},source:{resource:{workspaceId:'notes',path:'source.note.md'},result:{noteHistory:{status:'committed'}}},deletion:{result:{status:'deleted'}}}]});expect(await readFile(join(f.directory,'source.note.md'),'utf8')).toContain('One original knowledge source');await expect(readFile(join(f.directory,'block-shared.note.md'),'utf8')).rejects.toMatchObject({code:'ENOENT'})
 })
 
 it('uses one final physical destination save when its original source is addressed through a different managed Workspace alias',async()=>{
