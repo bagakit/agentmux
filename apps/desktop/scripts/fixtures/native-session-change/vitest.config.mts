@@ -4,10 +4,12 @@ import { resolve, relative, isAbsolute } from 'node:path'
 import assert from 'node:assert/strict'
 import { defineConfig } from 'vitest/config'
 import { candidateAlias, candidateModule } from '../../candidate-package-resolve.mjs'
+import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { noteParsingAliases } from '../../../../../packages/client-ui/scripts/note-parsing-aliases.ts'
 const root = resolve(import.meta.dirname, '../../../../..')
-const aliases = [candidateAlias(root, { browser: true, source: true })]
+const aliases = [...Object.entries({ ...radixOverlayAliases, ...noteParsingAliases }).map(([find, replacement]) => ({ find, replacement })), candidateAlias(root, { browser: true, source: true })]
 const digest = (text: string) => createHash('sha256').update(text).digest('hex')
-export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases, conditions: ['browser'] },
+export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases, conditions: ['browser'], dedupe: ['react', 'react-dom'] },
   plugins: [{ name: 'native-session-owning-source', enforce: 'pre',
     transform(source, id) {
       const file = id.split('?')[0]!

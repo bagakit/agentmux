@@ -9,6 +9,8 @@ import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { candidateAlias, candidateModule, candidateResolve } from './candidate-package-resolve.mjs'
+import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { noteParsingAliases } from '../../../packages/client-ui/scripts/note-parsing-aliases.ts'
 
 const root=path.resolve(import.meta.dirname,'../../..')
 const fixture=path.join(root,'apps/desktop/scripts/fixtures/native-session-change')
@@ -19,7 +21,7 @@ const coreRequire=createRequire(path.join(root,'packages/core/package.json'))
 const run=promisify(execFile),sha=value=>createHash('sha256').update(value).digest('hex')
 const owned=['src/shared/agent-native-source.ts','src/shared/contracts.ts','src/main/runtime-controller.ts','src/main/ipc.ts','src/preload/index.ts','src/renderer/src/lib/session-state.ts','src/renderer/src/lib/session-user-messages.ts','src/renderer/src/lib/api.ts','src/renderer/src/components/AgentNativeSourceControls.tsx','src/renderer/src/components/AgentRegionHeader.tsx','src/renderer/src/components/SessionPane.tsx','src/renderer/src/styles/agent-region-header.css'].map(file=>'apps/desktop/'+file)
 const testFiles=['apps/desktop/test/native-session-change.test.tsx','apps/desktop/test/native-source-themed-action.test.tsx','apps/desktop/scripts/fixtures/native-session-change/vitest.config.mts']
-const probeFiles=['apps/desktop/scripts/verify-native-session-change.mjs','apps/desktop/scripts/candidate-package-resolve.mjs',...['main.ts','owner.ts','entry.mjs','native-cli.mjs','preload.cjs','index.html'].map(file=>'apps/desktop/scripts/fixtures/native-session-change/'+file)]
+const probeFiles=['apps/desktop/scripts/verify-native-session-change.mjs','apps/desktop/scripts/candidate-package-resolve.mjs','apps/desktop/scripts/radix-overlay-aliases.ts','packages/client-ui/scripts/note-parsing-aliases.ts',...['main.ts','owner.ts','entry.mjs','native-cli.mjs','preload.cjs','index.html'].map(file=>'apps/desktop/scripts/fixtures/native-session-change/'+file)]
 const hashes=files=>Promise.all(files.map(async file=>[file,sha(await fs.readFile(path.join(root,file)))])).then(Object.fromEntries)
 await fs.mkdir(evidence,{recursive:true})
 const receipt={schema:'agentmux.native-target-ui.v1',passed:false,sourceBefore:await hashes(owned),sourceAfter:{},probeSources:await hashes(probeFiles),processes:[],captureOnly:true,aestheticReview:'not-performed',isolation:[
@@ -83,7 +85,7 @@ try{
  const {build:buildRenderer}=await import(pathToFileURL(desktopRequire.resolve('vite')).href)
  const {build:buildNode}=coreRequire('esbuild')
  const manifests=new Map(),onManifest=(file,bytes)=>manifests.set(path.relative(root,file),sha(bytes))
- const aliases=[candidateAlias(root,{browser:true,source:true,onManifest}),{find:/^@xterm\/xterm$/,replacement:path.join(root,'apps/desktop/scripts/fixtures/terminal-wheel/xterm-instrumented.ts')}]
+ const aliases=[...Object.entries({...radixOverlayAliases,...noteParsingAliases}).map(([find,replacement])=>({find,replacement})),candidateAlias(root,{browser:true,source:true,onManifest}),{find:/^@xterm\/xterm$/,replacement:path.join(root,'apps/desktop/scripts/fixtures/terminal-wheel/xterm-instrumented.ts')}]
  const consumed=new Map()
  const sourcePlugin={name:'current-native-target-product',enforce:'pre',async transform(_code,id){
   const file=id.split('?')[0]
@@ -92,7 +94,7 @@ try{
   if(/^(?:apps|packages)\//.test(relative)&&!relative.includes('/node_modules/'))consumed.set(relative,sha(await fs.readFile(actual)))
  }}
  const renderer=path.join(evidence,'renderer')
- await buildRenderer({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true',__TERMINAL_WHEEL_UMD_URL__:'"unused"'},esbuild:{jsx:'automatic'},resolve:{alias:aliases},plugins:[sourcePlugin],worker:{format:'es',plugins:()=>[sourcePlugin]},build:{target:'esnext',outDir:renderer,emptyOutDir:true,minify:false}})
+ await buildRenderer({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true',__TERMINAL_WHEEL_UMD_URL__:'"unused"'},esbuild:{jsx:'automatic'},resolve:{alias:aliases,dedupe:['react','react-dom']},plugins:[sourcePlugin],worker:{format:'es',plugins:()=>[sourcePlugin]},build:{target:'esnext',outDir:renderer,emptyOutDir:true,minify:false}})
  receipt.compiledRenderer=Object.fromEntries(consumed)
  for(const file of ['App.tsx','store.ts','components/SessionPane.tsx','components/AgentRegionHeader.tsx','components/AgentNativeSourceControls.tsx','components/TerminalView.tsx'])assert.ok(consumed.has('apps/desktop/src/renderer/src/'+file),'Current Renderer consumer compiled: '+file)
  for(const file of ['theme/icons.tsx','theme/runtime.ts','components/ConversationView.tsx'])assert.ok(consumed.has('packages/client-ui/src/'+file),'Current shared UI consumer compiled: '+file)
