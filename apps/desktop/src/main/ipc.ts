@@ -1495,6 +1495,10 @@ export async function registerIpc(args: {
     if(!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('spatial:changed',state)
   })
   handleWithEvent('spatial:read',async event=>{requireTrustedSender('spatial:read',event);return spatialState.readForLayout()})
+  handleWithEvent('spatial:openAgent', async (event, input: import('@agentmux/core').AgentMuxRpcParams<'agent.open'>) => {
+    requireTrustedSender('spatial:openAgent', event)
+    return await callUserRpc('agent.open', input)
+  })
   handleWithEvent('spatial:commit',async (event,input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit)=>{requireTrustedSender('spatial:commit',event);return spatialState.commit(input)})
   handleWithEvent('spatial:renameLabel', async (event, input: import('@agentmux/core/spatial-graph').AgentMuxDisplayLabelMutation) => {
     requireTrustedSender('spatial:renameLabel', event)

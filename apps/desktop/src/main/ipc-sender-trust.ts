@@ -99,6 +99,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'notebook:cancelObservation': 'Note observation cancellation',
   'notebook:apply': 'notebook changes',
   'spatial:read': 'spatial state',
+  'spatial:openAgent': 'original Host Agent creation',
   'spatial:commit': 'spatial state',
   'spatial:renameLabel': 'spatial name state',
   'spatial:retainLabels': 'spatial name state',

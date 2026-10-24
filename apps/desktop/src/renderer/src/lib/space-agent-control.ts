@@ -1,3 +1,4 @@
+import { spatialAgentFact as agentFact } from '@agentmux/core/spatial-graph'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxSpatialTargetError as SpatialFailure, exactSpatialDisplayLayout, selectSpatialCatalog, spatialDestination, type AgentMuxSpatialDestination as Destination } from '@agentmux/core/spatial-graph'
 import { zoneFileResource } from './zone-file-resource'
@@ -300,20 +301,6 @@ export function applySpatialPlacement(state: SpatialWorkbench, topics: readonly 
 }
 
 
-function agentFact(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run' | 'providerId' | 'executorId' | 'workspacePath' | 'creation' | 'forkedFrom'>, hostId: string): AgentMuxSpaceAgentFact {
-  return { agentSessionId: session.agentSessionId, runId: session.run.runId, providerId: session.providerId,
-    executorId: session.executorId, hostId, cwd: session.workspacePath,
-    createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
-    ...(session.creation?.executorRevision ? { executorRevision: session.creation.executorRevision } : {}),
-    ...(session.creation?.initialMessageOrigin ? { initialMessageOrigin: session.creation.initialMessageOrigin } : {}),
-    ...(session.creation?.createdBy ? { createdBy: session.creation.createdBy } : {}),
-    ...(session.creation?.createdRun ? { createdRun: session.creation.createdRun } : {}),
-    ...(session.creation?.initialMessageId ? { initialMessageId: session.creation.initialMessageId } : {}),
-    ...(session.creation?.agentMuxContext ? { agentMuxContext: session.creation.agentMuxContext } : {}),
-    ...(session.creation?.persistence ? { creationPersistence: session.creation.persistence } : {}),
-    ...(session.creation?.failure ? { creationFailure: session.creation.failure } : {}),
-    ...(session.forkedFrom ? { forkedFrom: session.forkedFrom } : {}) }
-}
 function snapshotFact(session: Extract<SessionSnapshot, { kind: 'agent' }>): AgentMuxSpaceAgentFact {
   return { agentSessionId: session.control.agentSessionId, runId: session.control.run.runId, providerId: session.providerId,
     executorId: session.executorId, hostId: session.control.hostId, cwd: session.workspacePath,

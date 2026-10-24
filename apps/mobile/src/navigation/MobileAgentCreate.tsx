@@ -13,7 +13,7 @@ import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 export type MobileAgentCreateTarget =
   | { spaceId?: string; zoneId?: string; tabId?: never; regionId?: never }
   | { spaceId: string; zoneId: string; tabId: string; regionId: string }
-/** One explicit form calls the original spatial creator. Unknown operations are inspected, never replayed. */
+/** Unknown operations retain their original identity for inspection or explicit Core continuation. */
 export function MobileAgentCreate({ client, connected, visible, target, platform, onClose, openSession }: {
   client: AgentMuxHostedClient | null; connected: boolean; visible: boolean; target: MobileAgentCreateTarget
   platform: ClientUiPlatform; onClose(): void; openSession(id: string): void
@@ -55,7 +55,7 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
   }, [client, connected, visible, target.spaceId, target.zoneId, target.tabId, target.regionId])
   const boundZones = catalog?.zones.filter(zone => catalog.bindings.some(binding => binding.spaceId === spaceId && binding.zoneId === zone.zoneId)) ?? []
   const targetTab = catalog?.tabs.find(tab => tab.tabId === target.tabId)
-  async function run(inspect: MobileAgentCreateIntent | null) {
+  async function run(inspect: MobileAgentCreateIntent | null, action: 'inspect' | 'continue' = 'inspect') {
     if (!client?.forwardRpc || !connected || !visible || flights.current.has(form)) return
     flights.current.add(form); redraw(value => value + 1)
     const source = client, recordId = owner.recordIdentity(), scope = { runtimeId, deviceHostId }
@@ -74,7 +74,7 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
         unretained.current = null
         if (!current()) return
       }
-      const report = inspect ? (await source.forwardRpc!('space.inspect', { target: { operationId: intent.input.operationId } })).request?.report
+      const report = inspect && action === 'inspect' ? (await source.forwardRpc!('space.inspect', { target: { operationId: intent.input.operationId } })).request?.report
         : await source.forwardRpc!('agent.open', intent.input)
       if (!report || report.operationId !== intent.input.operationId) throw new Error('原创建回执尚未确认，保留原操作供核对。')
       if (report.agent && (report.agent.executorId !== intent.input.content.executorId || report.agent.createOperationId !== intent.input.operationId)) throw new Error('回执绑定了另一创建操作；未采用该 Agent。')
@@ -82,7 +82,7 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
       await owner.retainAgentCreate({ ...intent, phase: confirmed ? 'confirmed' : 'unknown', ...(report.agent ? { agentSessionId: report.agent.agentSessionId } : {}) }, recordId)
       if (current()) setIssue(confirmed ? 'Agent 已创建。可打开原对话；初始输入与任务进展以原回执为准。' : `原创建：${report.outcome}。${report.save.diskDurability !== 'confirmed' ? '工作面持久化尚未确认。' : ''}${report.issues.map(issue => `${issue.message} ${issue.recovery}`).join('\n')} 保留原操作，可核对。`)
     } catch (error) {
-      if (intent && !inspect && !unretained.current) { try { await owner.retainAgentCreate({ ...intent, phase: 'unknown' }, recordId) } catch { /* The original durable sending intent remains available for inspection. */ } }
+      if (intent && (!inspect || action === 'continue') && !unretained.current) { try { await owner.retainAgentCreate({ ...intent, phase: 'unknown' }, recordId) } catch { /* The original durable sending intent remains available for inspection. */ } }
       if (current()) setIssue(unretained.current ? '原创建记录未保全，请求没有发起；可保留表单，放弃本次未发起的创建后重试。' : error instanceof Error ? error.message : String(error))
     } finally { flights.current.delete(form); redraw(value => value + 1) }
   }
@@ -103,6 +103,7 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
         <small>{intent.input.content.executorId} · {intent.input.destination.newTab ? '新 Tab' : catalog?.tabs.find(tab => tab.tabId === intent.input.destination.tabId)?.name || '原启动位'} · {intent.phase === 'confirmed' ? '创建已确认' : '原操作待核对'}</small>
         <details><summary>原创建位置</summary><dl><dt>Space</dt><dd>{intent.input.destination.spaceId}</dd><dt>Zone</dt><dd>{intent.input.destination.zoneId}</dd>{!intent.input.destination.newTab && <><dt>Tab</dt><dd>{intent.input.destination.tabId}</dd><dt>Region</dt><dd>{intent.input.destination.regionId}</dd></>}<dt>Operation</dt><dd>{intent.input.operationId}</dd></dl></details>
         {intent.phase !== 'confirmed' && <button className="mobile-text-button" disabled={busy || !connected} onClick={() => void run(intent)}>核对原创建操作</button>}
+        {intent.phase !== 'confirmed' && <button className="mobile-text-button" disabled={busy || !connected} onClick={() => void run(intent, 'continue')}>继续原创建</button>}
         {intent.agentSessionId && <button className="mobile-text-button" onClick={() => { openSession(intent.agentSessionId!); onClose() }}>打开原 Agent 对话</button>}
       </div>)}
       {issue && <MobileNotice kind="feedback" owner={client} identity={[target.spaceId,target.zoneId,target.tabId,target.regionId,pending?.input.operationId,issue]} className="mobile-spatial-notice" role="status">{issue}</MobileNotice>}

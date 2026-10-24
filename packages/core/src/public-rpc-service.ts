@@ -1,3 +1,4 @@
+import { isBackgroundLocalAgentOpen } from './spatial-agent-open-contract.js'
 import { isConnectionApplicationAccessMethod, parseConnectionApplicationAccessParams } from './connection-application-access-codec.js'
 import { isConnectionCredentialMethod } from './connection-credential-codec.js'
 import { homedir } from 'node:os'
@@ -179,6 +180,8 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   schedules?: AgentMuxRpcSchedulesOwner
   nativeDesktop?: AgentMuxRpcNativeDesktopOwner
   spatialState?: AgentMuxSpatialStateStore
+  /** Original Host policy over Core-owned spatial creation associations, without a screen. */
+  spatialAgentControl?(request: AgentMuxControlRequest, context: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined>
   /** Read only original host metadata; topology and execution remain with their Core owners. */
   spatialPresentation?(input: { graph: import('./spatial-graph.js').AgentMuxSpatialGraph;
     catalog: import('./space-control.js').AgentMuxSpaceCatalog; target: import('./space-control.js').AgentMuxSpaceSelector; imageSpaceId?: string },
@@ -561,7 +564,8 @@ export class AgentMuxRpcService {
         restored.continuity?.errorCode ?? 'AGENT_CONTINUITY_PENDING', JSON.stringify(restored))
       return { operation: 'resume', agentSessionId: original.agentSessionId, runId: restored.session.run.runId }
     }
-    if (!this.ports.execute && ['space.ls','space.inspect','space.bind','space.unbind'].includes(request.operation)) {
+    if (!this.ports.execute && ['space.ls','space.inspect','space.bind','space.unbind'].includes(request.operation) &&
+        !(this.ports.spatialAgentControl && request.operation === 'space.inspect' && 'requestId' in request.target)) {
       const state = await this.spatial.readForLayout()
       if (!state) throw new AgentMuxError('No durable spatial graph has been registered.', 'SPATIAL_STATE_ABSENT')
       if (request.operation === 'space.ls' || request.operation === 'space.inspect') {
@@ -577,6 +581,7 @@ export class AgentMuxRpcService {
     }
     let result: AgentMuxControlResult | undefined = request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get'
       ? await this.ports.settingsResources?.(request) : undefined
+    if (!result && executionContext && (request.operation === 'agent.open' || request.operation === 'space.inspect')) result = await this.ports.spatialAgentControl?.(request, executionContext)
     if (!result) {
       if (!this.ports.execute) throw new AgentMuxError('The original business owner is unavailable. Original objects, input and healthy Agents remain available.', 'CONTROL_UNAVAILABLE')
       result = await this.ports.execute(request, context)
@@ -1461,6 +1466,12 @@ export class AgentMuxRpcService {
     }
     if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
       const originalControlOperation = AGENTMUX_RPC_CONTROL_METHODS[method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS]
+      const originalSpatialRequest = method === 'agent.open' || method === 'space.inspect' ? rpcControlRequest(method, params) : null
+      let independentSpatial = originalSpatialRequest && (isBackgroundLocalAgentOpen(originalSpatialRequest) ||
+        originalSpatialRequest.operation === 'space.inspect' && 'requestId' in originalSpatialRequest.target)
+      if (independentSpatial && originalSpatialRequest?.operation === 'agent.open') independentSpatial =
+        isBackgroundLocalAgentOpen(originalSpatialRequest, (await this.spatial.readForLayout())?.graph)
+      if (independentSpatial && this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', method, params, context)
       if (originalControlOperation === 'settings.resource.list' || originalControlOperation === 'settings.resource.get') {
         const request = rpcControlRequest(method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS, params)
         if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', method, params, context)
@@ -1486,7 +1497,7 @@ export class AgentMuxRpcService {
           return rpcControlResult(method, { operation: method, catalog }) as AgentMuxRpcResult<M>
         }
       }
-      if (this.ports.forwardControl) return await this.ports.forwardControl(method, params, context)
+      if (this.ports.forwardControl && !(this.ports.spatialAgentControl && independentSpatial)) return await this.ports.forwardControl(method, params, context)
       let body = p
       if (method === 'space.inspect') {
         const target = rpcRecord(p.target)

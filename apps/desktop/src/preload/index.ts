@@ -168,6 +168,7 @@ const api: AgentMuxPreloadApi = {
     }
   },
   spatial: {
+    openAgent: input => ipcRenderer.invoke('spatial:openAgent', input),
     read:()=>ipcRenderer.invoke('spatial:read'),
     commit:input=>ipcRenderer.invoke('spatial:commit',input),
     renameLabel:input=>ipcRenderer.invoke('spatial:renameLabel',input),

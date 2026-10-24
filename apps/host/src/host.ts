@@ -1,3 +1,4 @@
+import { createHostSpatialAgentControl } from './spatial-agent-control.js'
 import { createHostMobileIncidents } from './mobile-incidents.js'
 import { createHostSettingsResourceRead } from './settings-resource-read.js'
 import { createHostAppearanceObservation } from './host-appearance.js'
@@ -94,8 +95,13 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   }
   const spatialState = connectionOwner?.spatial ?? new AgentMuxSpatialStateStore()
   const content = configurationPath ? createHostContent({ configurationPath, spatial: spatialState }) : undefined
+  const originalRuntime = () => {
+    if (!runtime) throw new AgentMuxError('The original Host is not yet available. Original operations and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
+    return runtime
+  }
   const service = {
     spatialState,
+    ...(configurationPath ? { spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial: spatialState, runtime: originalRuntime }) } : {}),
     ...(mobileIncidents ? { clientIncidents: mobileIncidents.clientIncidents, mobileWebReports: mobileIncidents.mobileWebReports } : {}),
     ...content,
     ...(configurationPath ? { settingsResources: createHostSettingsResourceRead(configurationPath), appearance: createHostAppearanceObservation(configurationPath) } : {}),

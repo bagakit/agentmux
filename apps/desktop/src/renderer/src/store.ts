@@ -1,3 +1,4 @@
+import { isBackgroundLocalAgentOpen } from '@agentmux/core/spatial-graph'
 import { restoredManualConnectionIntents, restoredManualConnectionSelections, manualConnectionScope, type ManualConnectionIntent } from "./lib/manual-connection-intent"
 import { emptyApplicationAccess, restoredApplicationAccess, type ApplicationAccessContinuation } from './lib/application-member-intent'
 import { restoreToolkitPresentations, updateToolkitPresentation, type ToolkitPresentations, type ToolkitPresentationPatch } from './lib/toolkit-presentation'
@@ -6120,6 +6121,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         : request.operation === 'file.build.inspect' ? { operation: request.operation, ...result } : { operation: request.operation, ...result }
     }
     if (request.operation === 'space.ls' || request.operation === 'space.inspect' || request.operation === 'agent.open' || request.operation === 'space.mv' || request.operation === 'space.bind' || request.operation === 'space.unbind') {
+      if (isBackgroundLocalAgentOpen(request, coreSpatialPersistence?.current?.graph) && !request.caller && !options) {
+        await coreSpatialPersistence?.flush()
+        const { schemaVersion: _schema, requestId, operation: _operation, caller: _caller, ...input } = request
+        const { operationId, ...report } = await api.spatial.openAgent({ ...input, operationId: requestId })
+        return { operation: 'agent.open', requestId: operationId, ...report }
+      }
       return await executeSpatialControl({
         get: () => ({ ...get(), originalSpatialGraph: coreSpatialPersistence?.current?.graph ?? null }),
         agentPresentation: () => readAgentPresentation(get()),
