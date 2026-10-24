@@ -43,9 +43,10 @@ function selectedTargetAvailable(session: Agent): boolean {
   return hasSelectedNativeTarget({ ...session, run: session.control.run }) && !nativeSourceUnconfirmed(session)
 }
 
-function focusCheckAction(event: Event) {
+function focusSourceMenu(event: Event) {
   const item = event.target as HTMLElement
-  item.closest('[role="menu"]')?.querySelector<HTMLElement>('[data-native-source-check]')?.focus()
+  // Candidate rows are replaced during review; keep focus in this details menu.
+  item.closest<HTMLElement>('[role="menu"]')?.focus()
 }
 
 export function nativeSourceLabel(session: Agent): string | undefined {
@@ -55,7 +56,9 @@ export function nativeSourceLabel(session: Agent): string | undefined {
 }
 
 /** Information and an explicit two-step action in the existing Region menu. Raw input is independent. */
-export function useAgentNativeSourceControls({ session, readOnly }: { session: Agent | null; readOnly: boolean }): ReactNode {
+export function useAgentNativeSourceControls({ session, readOnly }: { session: Agent | null; readOnly: boolean }): {
+  details: ReactNode; checkAction: ReactNode
+} {
   const [review, setReview] = useState<AgentMuxNativeSessionConfirmationInput | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -96,8 +99,8 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
       if (owner.current === exactOwner) setBusy(false)
     }
   }
-  if (!session) return null
-  return <WorkbenchMenuScope.Consumer>{DropdownMenu => <>
+  if (!session) return { details: null, checkAction: null }
+  return { details: <WorkbenchMenuScope.Consumer>{DropdownMenu => <>
     <DropdownMenu.Label className="agent-region-menu__context agent-native-source" data-native-source-state={observation?.state ?? (session.nativeHandle ? 'confirmed' : 'unknown')}>
       <span>Conversation target: {session.nativeHandle?.sessionId ?? 'Unknown'}</span>
       {targetSelected ? <span>Explicitly selected for AgentMux conversation input and recovery.</span> : null}
@@ -115,23 +118,25 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
       </div> : null}
       {notice ? <span role="status">{notice}</span> : null}
     </DropdownMenu.Label>
-    <DropdownMenu.Item data-native-source-check="" className="tab-context-menu__item" disabled={busy} onSelect={event => {
-      event.preventDefault(); void recheck()
-    }}><ThemeActionRefreshIcon size={14} /><span>{busy ? 'Checking source…' : 'Check native source'}</span></DropdownMenu.Item>
     {review ? <>
       <DropdownMenu.Item className="tab-context-menu__item" disabled={busy || readOnly} onSelect={event => {
-        focusCheckAction(event)
+        focusSourceMenu(event)
         event.preventDefault(); void confirm()
       }}><ThemeActionConfirmIcon size={14} /><span>Confirm this native source</span></DropdownMenu.Item>
       <DropdownMenu.Item className="tab-context-menu__item" disabled={busy} onSelect={event => {
-        focusCheckAction(event)
+        focusSourceMenu(event)
         event.preventDefault(); setReview(null)
       }}><ThemeActionCancelIcon size={14} /><span>Cancel source change</span></DropdownMenu.Item>
     </> : candidates.map(candidate => <DropdownMenu.Item key={candidate.sessionId}
       className="tab-context-menu__item agent-native-source__candidate" disabled={busy} onSelect={event => {
         // Keep keyboard navigation in the menu when these action rows are replaced.
-        focusCheckAction(event)
+        focusSourceMenu(event)
         event.preventDefault(); setNotice(null); setReview(nativeConfirmationInput(session, mintObjectId(), candidate))
       }}><ThemeActionReviewSourceIcon size={14} /><span>{observation?.state === 'changed' ? 'Review source change…' : `Choose target: ${candidate.sessionId}`}</span></DropdownMenu.Item>)}
-  </>}</WorkbenchMenuScope.Consumer>
+  </>}</WorkbenchMenuScope.Consumer>, checkAction: <WorkbenchMenuScope.Consumer>{DropdownMenu => <>
+    <DropdownMenu.Item data-native-source-check="" className="tab-context-menu__item" disabled={busy} onSelect={event => {
+      event.preventDefault(); void recheck()
+    }}><ThemeActionRefreshIcon size={14} /><span>{busy ? 'Checking source…' : 'Check native source'}</span></DropdownMenu.Item>
+    {notice ? <DropdownMenu.Label className="agent-region-menu__context" role="status">{notice}</DropdownMenu.Label> : null}
+  </>}</WorkbenchMenuScope.Consumer> }
 }
