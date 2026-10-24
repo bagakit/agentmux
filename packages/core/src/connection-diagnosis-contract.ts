@@ -45,6 +45,7 @@ export type ConnectionDiagnosisIntake = {
 }
 export type ConnectionGroupDiagnosis = {
   target: ConnectionDiagnosisTarget; window: ConnectionDiagnosisWindow; limit: number
+  adapterService: ConnectionDiagnosisReading<{ adapterId: string; enabled: boolean; revision: number }>
   connection: ConnectionDiagnosisReading<{ revision: number; enabled: boolean } & ConnectionObservation>
   binding: ConnectionDiagnosisReading<{ state: 'active' | 'paused' | 'detached'; currentRevision: number | null; scope: RoomBindingScope; activeInputGrants: number; activeAnswerGrants: number; activePermissionGrants: number }>
   outgoing: ConnectionDiagnosisReading<{

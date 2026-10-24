@@ -10,8 +10,8 @@ function identity(value: unknown): string { if (typeof value !== 'string' || !/^
 function revision(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 0) fail(); return value as number }
 function enabled(value: unknown): boolean { if (typeof value !== 'boolean') fail(); return value as boolean }
 export function parseConnectionServiceState(value: unknown): ConnectionServiceState {
-  const p = object(value, ['enabled', 'revision'])
-  const state = { enabled: enabled(p.enabled), revision: revision(p.revision) }
+  const p = object(value, ['enabled', 'revision', 'adapterId'])
+  const state = { enabled: enabled(p.enabled), revision: revision(p.revision), ...(p.adapterId === undefined ? {} : { adapterId: identity(p.adapterId) }) }
   if (state.revision === 0 && !state.enabled) fail()
   return state
 }
@@ -21,17 +21,21 @@ export function parseConnectionServiceOperation(value: unknown): ConnectionServi
   return { operationId: identity(p.operationId), expectedRevision, status: 'configured', service }
 }
 export function parseConnectionServiceParams<M extends ConnectionServiceMethod>(method: M, value: unknown): ConnectionServiceParamsMap[M] {
-  if (method === 'connection.service.get') { object(value, []); return {} as ConnectionServiceParamsMap[M] }
+  if (method === 'connection.service.get') { const p = object(value, ['adapterId']); return (p.adapterId === undefined ? {} : { adapterId: identity(p.adapterId) }) as ConnectionServiceParamsMap[M] }
   if (method === 'connection.service.inspect') { const p = object(value, ['operationId']); return { operationId: identity(p.operationId) } as ConnectionServiceParamsMap[M] }
-  const p = object(value, ['operationId', 'expectedRevision', 'service']), service = object(p.service, ['enabled']), expectedRevision = revision(p.expectedRevision)
+  const p = object(value, ['operationId', 'expectedRevision', 'service', 'adapterId']), service = object(p.service, ['enabled']), expectedRevision = revision(p.expectedRevision)
   if (expectedRevision === Number.MAX_SAFE_INTEGER) fail()
-  return { operationId: identity(p.operationId), expectedRevision, service: { enabled: enabled(service.enabled) } } as ConnectionServiceParamsMap[M]
+  return { operationId: identity(p.operationId), expectedRevision, service: { enabled: enabled(service.enabled) }, ...(p.adapterId === undefined ? {} : { adapterId: identity(p.adapterId) }) } as ConnectionServiceParamsMap[M]
 }
 export function parseConnectionServiceResult<M extends ConnectionServiceMethod>(method: M, value: unknown, input: ConnectionServiceParamsMap[M]): ConnectionServiceResultMap[M] {
-  if (method === 'connection.service.get') return parseConnectionServiceState(value) as ConnectionServiceResultMap[M]
+  if (method === 'connection.service.get') {
+    const state = parseConnectionServiceState(value)
+    if (state.adapterId !== (input as ConnectionServiceParamsMap['connection.service.get']).adapterId) fail()
+    return state as ConnectionServiceResultMap[M]
+  }
   if (method === 'connection.service.configure') {
     const operation = parseConnectionServiceOperation(value), expected = input as ConnectionServiceParamsMap['connection.service.configure']
-    if (operation.operationId !== expected.operationId || operation.expectedRevision !== expected.expectedRevision || operation.service.enabled !== expected.service.enabled) fail()
+    if (operation.operationId !== expected.operationId || operation.expectedRevision !== expected.expectedRevision || operation.service.enabled !== expected.service.enabled || operation.service.adapterId !== expected.adapterId) fail()
     return operation as ConnectionServiceResultMap[M]
   }
   const p = object(value, ['operation']), operation = p.operation === null ? null : parseConnectionServiceOperation(p.operation)
