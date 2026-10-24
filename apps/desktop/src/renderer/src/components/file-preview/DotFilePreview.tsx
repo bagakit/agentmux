@@ -1,6 +1,8 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useMemo, useState } from 'react'
 import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
+import { DiagramImage } from '@agentmux/client-ui/components/DiagramImage'
+import { diagramSvgImage } from '@agentmux/client-ui/diagram-svg-image'
 
 /** A Worker owns each Graphviz computation, so leaving a preview really stops layout. */
 export function DotFilePreview({ content, path, visible = true }: { content: string; path?: string | undefined; visible?: boolean }) {
@@ -21,7 +23,7 @@ export function DotFilePreview({ content, path, visible = true }: { content: str
       if (event.data.error) setResult({ owner, content, attempt, error: event.data.error })
       else {
         try {
-          url = URL.createObjectURL(new Blob([event.data.svg], { type: 'image/svg+xml' }))
+          url = URL.createObjectURL(diagramSvgImage(event.data.svg))
           setResult({ owner, content, attempt, url })
         } catch { setResult({ owner, content, attempt, error: 'The DOT image could not load. Retry preview or return to Source.' }) }
       }
@@ -32,7 +34,9 @@ export function DotFilePreview({ content, path, visible = true }: { content: str
   }, [content, inView, attempt])
   const ready = inView && result?.owner === owner && result.content === content && result.attempt === attempt ? result : null
   return <div ref={ref} className="file-diagram-preview" data-diagram-kind="dot" style={{ minHeight: 80, overflow: 'auto' }}>
-    {ready?.url ? <img src={ready.url} alt={`${path ?? 'DOT'} diagram`} style={{ display: 'block', maxWidth: '100%', margin: 'auto' }} /> : <>
+    {ready?.url ? <DiagramImage key={ready.url} src={ready.url} alt={`${path ?? 'DOT'} diagram`} onError={() => {
+      setResult(current => current === ready ? { owner, content, attempt, error: 'DOT image could not be decoded. Retry preview or return to Source.' } : current)
+    }} /> : <>
       {ready?.error ? <div className="file-preview-state" role="alert"><strong>DOT could not render</strong><span>{ready.error}</span>
         <button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry preview</button></div> : <div role="status">{inView ? 'Rendering DOT…' : 'DOT preview'}</div>}
       <pre className="md-block-code"><code>{content}</code></pre>

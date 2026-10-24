@@ -1,0 +1,22 @@
+/* Diagram previews keep the entire vector image in the document's reading rhythm. */
+.md-diagram-image {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  max-width: 100%;
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: zoom-in;
+}
+.md-diagram-image:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; }
+.md-diagram-image__thumb {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(300px, 50dvh);
+  object-fit: contain;
+}
