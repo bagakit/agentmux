@@ -63,6 +63,7 @@ final class NativeScreenSelection: NSView {
 
     private func buildControls() {
         toolbar.identifier = NSUserInterfaceItemIdentifier("native-selection-toolbar")
+        dimensions.identifier = NSUserInterfaceItemIdentifier("native-selection-dimensions")
         confirmButton.identifier = NSUserInterfaceItemIdentifier("native-selection-confirm")
         cancelButton.identifier = NSUserInterfaceItemIdentifier("native-selection-cancel")
         confirmButton.setAccessibilityIdentifier("native-selection-confirm")
@@ -147,9 +148,7 @@ final class NativeScreenSelection: NSView {
             sizeLabel.stringValue = "\(dimension(rect.width)) × \(dimension(rect.height)) pt"
             sizeLabel.sizeToFit()
             let size = NSSize(width: sizeLabel.frame.width + 20, height: 28)
-            var point = NSPoint(x: rect.minX, y: rect.maxY + 8)
-            if point.y + size.height > screen.maxY - 8 { point.y = rect.maxY - size.height - 8 }
-            dimensions.frame = NativeSelectionState.panelFrame(size: size, preferredOrigin: point, screen: screen, padding: 8)
+            dimensions.frame = NativeSelectionState.dimensionPanelFrame(size: size, selection: rect, toolbar: toolbar.frame, screen: screen)
             sizeLabel.frame.origin = NSPoint(x: 10, y: 7)
             sizeLabel.frame.size.width = max(0, dimensions.bounds.width - 20)
         }
