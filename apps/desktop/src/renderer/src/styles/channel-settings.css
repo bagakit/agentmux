@@ -72,3 +72,10 @@
 @media (prefers-reduced-motion: reduce) { .channel-settings .connector-record__open { transition: none; } }
 
 @container channel-settings (width < 380px) { .channel-hosting__selection { display: grid; } .channel-hosting__selection select { width: 100%; } }
+
+.channel-header-control { display: grid; gap: var(--sp-2); }
+.channel-header-control > label { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+.channel-header-control > label > span { display: grid; gap: var(--sp-1); }
+.channel-header-control strong { font-size: var(--fs-meta); font-weight: 550; }
+.channel-header-control small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.channel-header-control .settings-pane-actions { padding: var(--sp-2) 0 0; border: 0; }

@@ -7,7 +7,7 @@ import { useConnectorRoomName } from '../lib/use-connector-room-name'
 import { SettingsNavigation } from './SettingsNavigation'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
-import { readConnectorService, selectConnectorServiceObservation } from '../lib/connector-service-observation'
+import { readConnectorService } from '../lib/connector-service-observation'
 import type { ChannelEntry } from './settings/settings-catalog'
 import { connectorDiagnosisKey, useConnectorGroupDiagnosis, type CheckedGroupDiagnosis } from '../lib/use-connector-group-diagnosis'
 import { ConnectorProblemIcon, ConnectorTrafficSummary } from './ConnectorTrafficSummary'
@@ -24,7 +24,7 @@ type Props = {
 /** Compiled channel entries share one bounded reading of the original Session's relationships. */
 export function ConnectorHeaderLinks(props: Props) {
   const navigation = useContext(SettingsNavigation), channels = navigation?.channelEntries ?? []
-  const observations = useAppStore(state => state.connectorServiceObservation)
+  const headerVisibility = useAppStore(state => state.config?.appearance.channelHeaderVisibility)
   const policyScope = JSON.stringify([props.hostingTarget, channels.map(channel => channel.adapterId)]), source = api.connections.call
   useEffect(() => {
     if (!props.visible || !props.hostingTarget) return
@@ -32,10 +32,7 @@ export function ConnectorHeaderLinks(props: Props) {
     for (const channel of channels) void readConnectorService(() => live, props.hostingTarget, channel.adapterId).catch(() => {})
     return () => { live = false }
   }, [policyScope, props.visible, props.nameVersion, source])
-  const visibleChannels = channels.filter(channel => {
-    const policy = selectConnectorServiceObservation(observations, props.hostingTarget, channel.adapterId)
-    return !policy || !!policy.issue || policy.state?.enabled !== false
-  })
+  const visibleChannels = channels.filter(channel => headerVisibility?.[channel.adapterId] !== false)
   const diagnosis = useConnectorGroupDiagnosis(props.bindings, props.nameVersion, props.visible, props.syncEnabled, props.hostingTarget)
   const matches = (channel: ChannelEntry, binding: RoomBinding) => channel.domains.includes(binding.application.domain)
   const unknown = props.bindings.filter(binding => !channels.some(channel => matches(channel, binding)))
