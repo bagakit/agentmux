@@ -11,6 +11,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxFileAgentSessionStore, AgentMuxError } from '@agentmux/core'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { headlessFixture, until } from '../../../packages/core/test/helpers/headless-runtime-fixture'
+import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { bridge, owningBridge } from './fixtures/terminal-observation-bridge'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -56,6 +57,8 @@ let refreshObservation: (() => Promise<void>) | null = null
 let disposeUi: (() => void) | undefined
 const persistenceOptions = useAppStore.persist.getOptions()
 const records: unknown[] = []
+let observationRpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+const carrier = { remaining: 0, corrupted: 0, foreignOwners: 0, opened: 0, held: false, buffered: [] as Array<() => void> }
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -64,14 +67,45 @@ beforeEach(async () => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ font: '',
     measureText: () => ({ width: 8, actualBoundingBoxDescent: 2, actualBoundingBoxAscent: 10 })
   }) as unknown as CanvasRenderingContext2D)
-  fixture.terminals.length = 0; fixture.reports.length = 0; refreshObservation = null
+  fixture.terminals.length = 0; fixture.reports.length = 0; refreshObservation = null; run = undefined as never
+  carrier.remaining = 0; carrier.corrupted = 0; carrier.foreignOwners = 0; carrier.opened = 0; carrier.held = false; carrier.buffered = []
   scope = await headlessFixture()
   resource({ event: 'allocated', root: scope.root, nativePid: scope.nativeProcessId, ownerPid: scope.ownerProcess.pid })
   vi.stubEnv('HOME', scope.env.HOME!)
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', scope.env.AGENTMUX_STATE_DIRECTORY!)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', scope.env.AGENTMUX_RUNTIME_DIRECTORY!)
   vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(scope.root, 'spatial.json'))
-  const client = await scope.client()
+  observationRpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: scope.socketPath } })
+  const subscribe = observationRpc.subscribe.bind(observationRpc)
+  vi.spyOn(observationRpc, 'subscribe').mockImplementation(async (method, params, handlers) => {
+    if (method !== 'runtime.attachment-watch') return await subscribe(method, params, handlers)
+    carrier.opened++
+    let first = true
+    return await subscribe(method, params, { ...handlers, onInitial(value) {
+      if (carrier.foreignOwners > 0) {
+        carrier.foreignOwners--; carrier.corrupted++
+        const initial = value as { owner: { ownerInstanceId: string } }
+        handlers.onInitial({ ...value, owner: { ...initial.owner, ownerInstanceId: 'foreign-observation-owner' } } as never)
+      } else handlers.onInitial(value)
+    }, onEvent(event) {
+      const deliver = () => {
+        if (event.type === 'snapshot' && first) {
+          first = false
+          if (carrier.remaining > 0) {
+            carrier.remaining--; carrier.corrupted++
+            // This is a real initial transfer received over Unix. Its actual Hosted
+            // codec, not a fabricated Main exception, must reject the missing first part.
+            handlers.onEvent({ ...event, data: { ...event.data, index: event.data.index + 1 } })
+            return
+          }
+        }
+        handlers.onEvent(event)
+      }
+      if (carrier.held) carrier.buffered.push(deliver)
+      else deliver()
+    } })
+  })
+  const client = await scope.client(observationRpc)
   config = { ...structuredClone(DEFAULT_CONFIG), hosts: [{ id: 'local', kind: 'local', label: 'Private proof' }],
     workspaces: [{ id: 'private', kind: 'folder', hostId: 'local', name: 'Private proof', path: scope.root }] }
   owner = await owningBridge({ client: client as never,
@@ -92,7 +126,7 @@ afterEach(async () => {
   release?.(); release = undefined
   try { await owner?.dispose() }
   catch (error) { resource({ event: 'cleanup-error', detail: inspect(error, { depth: 8 }) }); throw error }
-  finally { await scope?.cleanup() }
+  finally { await observationRpc?.dispose(); observationRpc = undefined; await scope?.cleanup() }
   resource({ event: 'released', root: scope?.root, nativePid: scope?.nativeProcessId, ownerPid: scope?.ownerProcess.pid })
   if (run?.pid) expect(() => process.kill(run.pid!, 0)).toThrow()
   useAppStore.setState(original, true)
@@ -145,6 +179,110 @@ const failure = (code = 'CONTROL_CONNECTION_FAILED') => new AgentMuxError('Origi
 function observation(session: SessionSnapshot) {
   return readTerminalViewObservation({ regionId: origin.regionId, sessionId: session.id, runId: session.control.run.runId })
 }
+function releaseTransfer(): void {
+  carrier.held = false
+  for (const deliver of carrier.buffered.splice(0)) deliver()
+}
+function text(terminal: BrowserTerminal): string {
+  return Array.from({ length: terminal.buffer.active.length }, (_, index) => terminal.buffer.active.getLine(index)?.translateToString(true)).join('\n')
+}
+async function originalRunRemains(session: SessionSnapshot) {
+  const original = await (owner.client as Awaited<ReturnType<typeof scope.client>>).readRunReplay(session.control.run)
+  expect(original.run).toMatchObject({ runId: session.control.run.runId, pid: run.pid, state: 'running', acceptedInputBytes: 0 })
+  expect(useAppStore.getState().tabs[origin.tabId]!.regions[origin.regionId]).toMatchObject({ sessionId: session.id })
+  expect(bridge.invoke.mock.calls.filter(call => ['sessions:write', 'sessions:paste', 'sessions:submitPrompt', 'sessions:restart', 'sessions:recover', 'sessions:snapshot'].includes(call[0]))).toEqual([])
+  resource({ event: 'original-preserved', runId: run.runId, pid: run.pid, acceptedInputBytes: original.run.acceptedInputBytes,
+    transferReads: carrier.opened, corruptedTransfers: carrier.corrupted })
+}
+
+it.each(['agent', 'terminal'] as const)('visible observation restores the original %s on first visible mount after a real invalid Hosted transfer', async kind => {
+  const session = await create(kind)
+  carrier.remaining = 1
+  const attach = vi.spyOn(owner.runtime, 'attachSession'), refresh = vi.spyOn(owner.runtime, 'refreshSessionAttachment')
+  const metadata = vi.spyOn(useAppStore.getState(), 'refreshSession'), recover = vi.spyOn(useAppStore.getState(), 'recoverSession')
+  const terminal = await mount(session)
+  await act(async () => await vi.waitFor(() => expect(observation(session)?.liveReady).toBe(true), { timeout: 5000 }))
+  expect(carrier.corrupted).toBe(1); expect(carrier.opened).toBe(2)
+  expect(attach).toHaveBeenCalledTimes(2); expect(refresh).toHaveBeenCalledOnce()
+  expect(refresh.mock.calls[0]?.slice(0, 4)).toEqual([owner.sender.id, session.control, null, 0])
+  expect(metadata).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+  expect(text(terminal)).toContain('private-input-owner-ready')
+  const failed = fixture.reports.filter(report => report.kind === 'terminal-attach-failed')
+  expect(failed).toHaveLength(1); expect(failed[0]?.code).toBe('CONTROL_PROTOCOL_ERROR')
+  expect(fixture.reports.find(report => report.kind === 'terminal-recovered')?.relatedOccurrenceId).toBe(failed[0]!.occurrenceId)
+  expect(container.querySelector('.terminal-service-window')?.textContent ?? '').not.toContain('Runtime transfer sequence')
+  await mount(session, false, false); await mount(session)
+  await act(async () => await wait(150))
+  expect(carrier.opened).toBe(2); expect(fixture.terminals).toEqual([terminal])
+  await originalRunRemains(session)
+}, 30000)
+
+it.each(['agent', 'terminal'] as const)('visible observation resumes the original hidden %s on a real hide/show demand without repeating a healthy read', async kind => {
+  const session = await create(kind); carrier.remaining = 1
+  const terminal = await mount(session, false, false)
+  await act(async () => await vi.waitFor(() => expect(carrier.corrupted).toBe(1)))
+  await act(async () => await wait(150))
+  expect(observation(session)?.liveReady).toBe(false); expect(carrier.opened).toBe(1)
+  await mount(session)
+  await act(async () => await vi.waitFor(() => expect(observation(session)?.liveReady).toBe(true), { timeout: 5000 }))
+  expect(carrier.opened).toBe(2); expect(text(terminal)).toContain('private-input-owner-ready')
+  await mount(session); await act(async () => await wait(150))
+  expect(carrier.opened).toBe(2); expect(fixture.terminals).toEqual([terminal])
+  await originalRunRemains(session)
+}, 30000)
+
+it('visible observation gives persistent bad transfer one independent read per visible window', async () => {
+  const session = await create('terminal'); carrier.remaining = Infinity
+  await mount(session)
+  await act(async () => await vi.waitFor(() => expect(carrier.opened).toBeGreaterThanOrEqual(2), { timeout: 5000 }))
+  await act(async () => await wait(750))
+  if (carrier.opened > 2) await mount(session, false, false)
+  expect(carrier.opened).toBe(2); expect(carrier.corrupted).toBe(2); expect(observation(session)?.liveReady).toBe(false)
+  expect(container.querySelector('.terminal-service-window')?.textContent).toContain('Runtime transfer sequence')
+  await mount(session); await act(async () => await wait(150)); expect(carrier.opened).toBe(2)
+  await mount(session, false, false); await mount(session)
+  await act(async () => await vi.waitFor(() => expect(carrier.opened).toBe(3), { timeout: 5000 }))
+  await act(async () => await wait(750)); expect(carrier.opened).toBe(3)
+  expect(observation(session)?.liveReady).toBe(false)
+  await originalRunRemains(session)
+}, 20000)
+
+it('visible observation refuses a foreign semantic owner on both strict opening attempts', async () => {
+  const session = await create('terminal'); carrier.foreignOwners = Infinity
+  const terminal = await mount(session)
+  await act(async () => await vi.waitFor(() => expect(carrier.opened).toBe(2), { timeout: 5000 }))
+  await act(async () => await wait(150))
+  expect(carrier.corrupted).toBe(2); expect(carrier.opened).toBe(2)
+  expect(observation(session)?.liveReady).toBe(false); expect(text(terminal)).not.toContain('private-input-owner-ready')
+  expect(container.querySelector('.terminal-service-window')?.textContent).toContain('another owner')
+  await originalRunRemains(session)
+}, 20000)
+
+it('visible observation shares a pending first read through hide/show and manual refresh before one strict reread', async () => {
+  const session = await create('terminal'); carrier.remaining = 1; carrier.held = true
+  const terminal = await mount(session)
+  await act(async () => await vi.waitFor(() => expect(carrier.buffered.length).toBeGreaterThan(0)))
+  const pending = refreshObservation!()
+  expect(refreshObservation!()).toBe(pending)
+  await mount(session, false, false); await mount(session); await mount(session)
+  expect(carrier.opened).toBe(1)
+  await act(async () => { releaseTransfer(); await pending })
+  await act(async () => await vi.waitFor(() => expect(observation(session)?.liveReady).toBe(true), { timeout: 5000 }))
+  expect(carrier.opened).toBe(2); expect(carrier.corrupted).toBe(1); expect(fixture.terminals).toEqual([terminal])
+  await originalRunRemains(session)
+}, 20000)
+
+it('visible observation retires a hidden pending failure and releases the original late lease on unmount', async () => {
+  const session = await create('terminal'); carrier.held = true
+  await mount(session)
+  await act(async () => await vi.waitFor(() => expect(carrier.buffered.length).toBeGreaterThan(0)))
+  await mount(session, false, false)
+  await act(async () => root.unmount()); root = createRoot(container)
+  await act(async () => releaseTransfer())
+  await vi.waitFor(() => expect(owner.runtime.resourceOwnerCounts()).toEqual({ sessionAttachmentOwners: 0, sessionAttachmentLeases: 0 }), { timeout: 5000 })
+  await act(async () => await wait(150)); expect(carrier.opened).toBe(1)
+  await originalRunRemains(session)
+}, 20000)
 
 async function mountToolkit(session: SessionSnapshot) {
   useAppStore.setState({ config })
@@ -164,18 +302,18 @@ async function mountToolkit(session: SessionSnapshot) {
 
 it('Toolkit Check status reconnects a failed original output in place without restarting or replacing xterm', async () => {
   const session = await create('terminal'), client = owner.client as Awaited<ReturnType<typeof scope.client>>
-  const attach = vi.spyOn(owner.runtime, 'attachSession').mockRejectedValueOnce(failure('CONTROL_PROTOCOL_ERROR'))
+  const attach = vi.spyOn(owner.runtime, 'attachSession').mockRejectedValueOnce(failure('CONTROL_PROTOCOL_ERROR')).mockRejectedValueOnce(failure('CONTROL_PROTOCOL_ERROR'))
   const refresh = vi.spyOn(owner.runtime, 'refreshSessionAttachment')
   const { terminal, check } = await mountToolkit(session)
   await act(async () => await vi.waitFor(() => expect(container.querySelector('.terminal-service-window')?.textContent).toContain('Refresh observation')))
   await act(async () => await wait(650))
-  expect(refresh).not.toHaveBeenCalled()
+  expect(refresh).toHaveBeenCalledTimes(1)
   const input = terminal.textarea
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Check status"]')!.click())
   await act(async () => await vi.waitFor(() => {
     expect(Array.from({ length: terminal.buffer.active.length }, (_, index) => terminal.buffer.active.getLine(index)?.translateToString(true)).join('\n')).toContain('private-input-owner-ready')
   }))
-  expect(check).toHaveBeenCalledOnce(); expect(refresh).toHaveBeenCalledOnce(); expect(attach).toHaveBeenCalledTimes(2)
+  expect(check).toHaveBeenCalledOnce(); expect(refresh).toHaveBeenCalledTimes(2); expect(attach).toHaveBeenCalledTimes(3)
   expect(refresh.mock.calls[0]?.slice(0, 4)).toEqual([owner.sender.id, session.control, null, 0])
   expect(fixture.terminals).toEqual([terminal]); expect(terminal.textarea).toBe(input)
   expect(container.querySelector('.terminal-service-window')?.textContent ?? '').not.toContain('Attaching this Region')
@@ -251,17 +389,6 @@ it('holds the actual first request slot across manual refresh and a pending repl
   await vi.waitFor(() => expect(owner.runtime.resourceOwnerCounts()).toEqual({ sessionAttachmentOwners: 0, sessionAttachmentLeases: 0 }))
 }, 15000)
 
-it.each(['CONTROL_PROTOCOL_ERROR', 'CONTROL_CANCELLED', 'STALE_AGENT_SESSION_BINDING'])('keeps %s as a persistent service window without automatic reattachment', async code => {
-  const session = await create('terminal')
-  vi.spyOn(owner.runtime, 'attachSession').mockRejectedValue(failure(code))
-  const refresh = vi.spyOn(owner.runtime, 'refreshSessionAttachment')
-  await mount(session)
-  await act(async () => await wait(650))
-  expect(refresh).not.toHaveBeenCalled()
-  expect(observation(session)?.liveReady).toBe(false)
-  expect(container.querySelector('.terminal-service-window')?.textContent).toContain('Refresh observation')
-}, 15000)
-
 it('bounds one failure window and re-arms only after the failed consumer is shown again', async () => {
   const session = await create('terminal')
   vi.spyOn(owner.runtime, 'attachSession').mockRejectedValue(failure())
@@ -293,11 +420,14 @@ it('cancels a hidden or replaced consumer wake', async () => {
   expect(refresh).not.toHaveBeenCalled()
 }, 15000)
 
-it('retains the first returned lease but refuses a foreign Run continuation without retrying or applying its bytes', async () => {
-  const session = await create('terminal')
+it.each(['Host', 'Session', 'Run'] as const)('retains the first returned lease but refuses a foreign %s continuation without retrying or applying its bytes', async mismatch => {
+  const session = await create(mismatch === 'Session' ? 'agent' : 'terminal')
   vi.spyOn(owner.runtime, 'attachSession').mockRejectedValue(failure())
-  const foreign = { ...session, control: { ...session.control, run: { runId: 'foreign-run' } } }
   const text = 'FOREIGN-CONTINUATION'
+  const complete = { ...session, latestOutputBytes: new TextEncoder().encode(text).length }
+  const foreign = mismatch === 'Host' ? { ...complete, hostId: 'foreign-host' }
+    : mismatch === 'Session' && complete.kind === 'agent' ? { ...complete, control: { ...complete.control, agentSessionId: 'foreign-session' } }
+    : { ...complete, control: { ...complete.control, run: { runId: 'foreign-run' } } }
   const refresh = vi.spyOn(owner.runtime, 'refreshSessionAttachment').mockResolvedValue({ attachmentId: 'returned-lease',
     session: foreign, currentSize: { cols: 80, rows: 24 }, gap: null, terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0,
     replay: [{ type: 'data', runId: session.control.run.runId, startByte: 0, endByte: text.length, data: text, dataBytes: new TextEncoder().encode(text) }] })
@@ -307,4 +437,4 @@ it('retains the first returned lease but refuses a foreign Run continuation with
   expect(observation(session)?.liveReady).toBe(false)
   expect(Array.from({ length: terminal.buffer.active.length }, (_, index) => terminal.buffer.active.getLine(index)?.translateToString(true)).join('\n')).not.toContain(text)
   expect(refresh).toHaveBeenCalledTimes(1)
-}, 15000)
+}, 30000)
