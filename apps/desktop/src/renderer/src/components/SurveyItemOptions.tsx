@@ -6,6 +6,7 @@ import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
+import type { SurveyItemGrouping } from '../hooks/useSurveyListOrganization'
 
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeActionCreateNoteIcon = semanticIconComponent('action.create-note')
@@ -41,18 +42,20 @@ export type SurveyItemOptionsProps = {
   onNewNote?: () => void
   onNewAgent?: () => void
   onClose?: () => void
+  grouping?: SurveyItemGrouping | undefined
 }
 
 export function SurveyItemOptions(props: SurveyItemOptionsProps) {
   const { visible, zone, compact, rowAction } = props
   const [open, setOpen] = useState(false)
+  const [grouping, setGrouping] = useState(props.grouping)
   useEffect(() => { if (!visible) setOpen(false) }, [visible])
   useEffect(() => setOpen(false), [zone?.zoneId])
-  return <Menu.Root modal={false} open={visible && open} onOpenChange={setOpen}>
+  return <Menu.Root modal={false} open={visible && open} onOpenChange={value => { if (value) setGrouping(props.grouping); setOpen(value) }}>
     <Menu.Trigger asChild><button type="button" className={`survey-item-options ${rowAction ? '' : zone ? 'survey-tab-view' : 'survey-icon-button'}`} data-row-action={rowAction || undefined} data-compact={compact || undefined} aria-label={rowAction ? `Options for ${props.title}` : 'Exploration options'} title="Exploration options">{rowAction ? <ThemeActionAdjustIcon size={14} aria-hidden="true" /> : <ThemeActionMoreIcon size={16} aria-hidden="true" />}{zone && !compact && !rowAction ? <span>Organize</span> : null}</button></Menu.Trigger>
     <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu survey-topic-menu survey-item-menu" align="start" sideOffset={4} collisionPadding={8}
       onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
-      <SurveyItemMenuItems {...props} primitives={Menu} />
+      <SurveyItemMenuItems {...props} grouping={grouping} primitives={Menu} />
     </Menu.Content></DocumentOverlayPortal>
   </Menu.Root>
 }
@@ -87,7 +90,7 @@ export function SurveyItemContextMenu({ children, returnFocus, ...props }: Surve
   </ContextMenu.Root>
 }
 
-function SurveyItemMenuItems({ primitives: M, run = action => action(), title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, onDeleteNotebook, onNewNote, onNewAgent, onClose }: SurveyItemOptionsProps & { primitives: typeof Menu | typeof ContextMenu; run?: (action: () => void) => void }) {
+function SurveyItemMenuItems({ primitives: M, run = action => action(), title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, onDeleteNotebook, onNewNote, onNewAgent, onClose, grouping }: SurveyItemOptionsProps & { primitives: typeof Menu | typeof ContextMenu; run?: (action: () => void) => void }) {
   const displayPath = usePathDisplay()
   return <>
       <M.Label className="survey-topic-menu__label">{title}</M.Label>
@@ -96,6 +99,14 @@ function SurveyItemMenuItems({ primitives: M, run = action => action(), title, z
       {onNewNote || onNewAgent ? <M.Separator className="tab-context-menu__separator" /> : null}
       {zone && onRename ? <M.Item className="tab-context-menu__item" onSelect={() => run(onRename)}><ThemeActionEditIcon size={14} /><span>Rename exploration</span></M.Item> : null}
       {zone && onClose ? <M.Item className="tab-context-menu__item" onSelect={() => run(onClose)}><ThemeActionCloseIcon size={14} /><span>Close in Survey</span></M.Item> : null}
+      {grouping ? <M.Sub><M.SubTrigger className="tab-context-menu__item"><span className="survey-topic-menu__indicator" /><span>Move to group</span><ThemeNavigationDisclosureIcon size={12} /></M.SubTrigger>
+        <DocumentOverlayPortal component={M.Portal}><M.SubContent className="tab-context-menu survey-item-menu" sideOffset={4} collisionPadding={8}>
+          <M.Item className="tab-context-menu__item" onSelect={() => run(() => grouping.onMove(null))}><span className="survey-topic-menu__indicator">{grouping.currentGroupId === null ? <ThemeStatusSelectedIcon size={13} /> : null}</span><span>Ungrouped</span></M.Item>
+          {grouping.groups.map(group => <M.Item key={group.groupId} className="tab-context-menu__item" onSelect={() => run(() => grouping.onMove(group.groupId))}><span className="survey-topic-menu__indicator">{grouping.currentGroupId === group.groupId ? <ThemeStatusSelectedIcon size={13} /> : null}</span><span>{group.name || 'Unnamed group'}</span></M.Item>)}
+          <M.Separator className="tab-context-menu__separator" />
+          <M.Item className="tab-context-menu__item" onSelect={() => run(grouping.onNewGroup)}><ThemeActionCreateNoteIcon size={14} /><span>New group…</span></M.Item>
+        </M.SubContent></DocumentOverlayPortal>
+      </M.Sub> : null}
       {zone && collected ? <M.CheckboxItem className="tab-context-menu__item" checked={collected} disabled={!collected && zone.kind === 'unknown'}
         onSelect={event => event.preventDefault()} onCheckedChange={value => { if (value === false) onCollectedChange(false) }}>
         <span className="survey-topic-menu__indicator"><M.ItemIndicator><ThemeStatusSelectedIcon size={13} aria-hidden="true" /></M.ItemIndicator></span><span>Keep in Survey</span>
