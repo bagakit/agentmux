@@ -9,6 +9,7 @@ import type * as Source from '../src/index.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import type { AgentMuxAgentRestartIdentity } from '../src/agent-session-recovery/restart-contract.js'
+import { createWorkspaceLayout } from '../src/spatial-layout.js'
 
 const core: typeof Source & Record<string, any> = process.env.AGENTMUX_TEST_RESTART_ENTRY
   ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_RESTART_ENTRY)
@@ -116,6 +117,105 @@ it('recovers an applied Stop with lost reply after the original Core owner is di
   expect(await second.store.readMetadata(f.original.agentSessionId)).not.toBeNull()
   await f.restart(second); await f.invariants(second)
 })
+it('startup and restored generic observers preserve the original restart receipt and frozen executor', async () => {
+  const f = await fixture()
+  f.stop.mockImplementationOnce(async (operation: any) => { await f.nativeStop(operation); throw new Error('Original Stop reply lost') })
+  await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESTART_UNCONFIRMED' })
+  const original = (await f.store.readMetadata(f.original.agentSessionId))!.continuity!
+  for (const operationId of ['new-startup-observer', f.request.operationId]) {
+    await expect(f.client.ensureAgentContinuity({ ...f.request, operationId, trigger: 'startup' })).resolves.toMatchObject({
+      kind: 'pending', reason: 'operation-unconfirmed', continuity: original })
+    expect((await f.store.readMetadata(f.original.agentSessionId))!.continuity).toEqual(original)
+  }
+  // Reproduce a receipt polluted by an older observer. Reconnection must not
+  // run its legacy timer through the generic executor reconstruction again.
+  const current = (await f.store.readMetadata(f.original.agentSessionId))!
+  const polluted = { ...original, kind: 'pending' as const, reason: 'provider-unverified',
+    nextActionAt: Date.now() + 60, errorCode: 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED' }
+  await f.store.compareAndSwap(current, { ...current, continuity: polluted,
+    continuityOperations: { ...current.continuityOperations, [original.operationId]: polluted } })
+  await f.client.dispose()
+  const second = await f.reader()
+  await new Promise(resolve => setTimeout(resolve, 120))
+  expect((await second.store.readMetadata(f.original.agentSessionId))!.continuityOperations![original.operationId]).toEqual(polluted)
+  await expect(f.restart(second)).resolves.toMatchObject({
+    continuity: { action: 'restart', operationId: original.operationId, kind: 'resumed' } })
+  await f.invariants(second)
+})
+it.each([false, true])('explicit close supersedes an unprepared restart without starting a replacement (Stop applied=%s)', async applied => {
+  const f = await fixture()
+  f.stop.mockImplementationOnce(async (operation: any) => { if (applied) await f.nativeStop(operation); throw new Error('Original Stop reply lost') })
+  await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESTART_UNCONFIRMED' })
+  const old = await f.store.readLifecycleReservation(f.original.agentSessionId)
+  expect(old).toMatchObject({ kind: 'resume', restart: expect.any(Object) }); expect(old.preparedSession).toBeUndefined()
+  await f.client.dispose(); const second = await f.reader()
+  await expect(second.client.stopAgent(f.original.agentSessionId, f.original.run)).resolves.toBeUndefined()
+  expect(second.start).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled()
+  expect(await second.store.readMetadata(f.original.agentSessionId)).toBeNull()
+  expect(await second.store.readRetiredAgentSession(f.original.agentSessionId)).toMatchObject({
+    agentSessionId: f.original.agentSessionId, history: { nativeHandle: f.original.nativeHandle } })
+  await expect(second.inner.registry.prepareResume(old, f.original)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+  expect((await second.inner.kernel.status(f.unrelated.runId)).state.type).toBe('running')
+  expect(second.input).not.toHaveBeenCalled()
+})
+it('explicit close cannot discard a prepared unknown replacement Start', async () => {
+  const f = await fixture()
+  f.start.mockRejectedValueOnce(new core.AgentMuxError('Original Start result unknown', 'CONTROL_UNAVAILABLE'))
+  await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
+  await f.client.dispose(); const second = await f.reader()
+  const before = await second.store.readLifecycleReservation(f.original.agentSessionId)
+  expect(before.preparedSession).toBeDefined()
+  await expect(second.client.stopAgent(f.original.agentSessionId, f.original.run)).rejects.toMatchObject({ code: 'AGENT_SESSION_BUSY' })
+  expect(await second.store.readLifecycleReservation(f.original.agentSessionId)).toEqual(before)
+  expect(second.start).not.toHaveBeenCalled(); expect(second.stop).not.toHaveBeenCalled()
+  expect((await second.inner.kernel.status(f.unrelated.runId)).state.type).toBe('running')
+})
+it('close wins atomically against a late original restart reader before Start preparation', async () => {
+  const f = await fixture(); let release!: () => void
+  const waiting = new Promise<void>(resolve => { release = resolve })
+  f.stop.mockImplementationOnce(async (operation: any) => { await f.nativeStop(operation); await waiting })
+  const restarting = f.restart().catch(error => error)
+  await vi.waitFor(() => expect(f.stop).toHaveBeenCalledTimes(1))
+  await vi.waitFor(async () => expect((await f.inner.kernel.status(f.original.run.runId)).state.type).not.toBe('running'))
+  try { await f.client.stopAgent(f.original.agentSessionId, f.original.run) }
+  finally { release() }
+  expect(await restarting).toBeInstanceOf(Error)
+  expect(f.start).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
+  expect(await f.store.readRetiredAgentSession(f.original.agentSessionId)).toMatchObject({ agentSessionId: f.original.agentSessionId })
+  expect((await f.inner.kernel.status(f.unrelated.runId)).state.type).toBe('running')
+})
+it('a live foreign restart owner cannot be stolen by close', async () => {
+  const f = await fixture()
+  f.stop.mockRejectedValueOnce(new Error('Original Stop reply unknown'))
+  await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESTART_UNCONFIRMED' })
+  const second = await f.reader()
+  await expect(second.client.stopAgent(f.original.agentSessionId, f.original.run)).rejects.toMatchObject({ code: 'AGENT_SESSION_BUSY' })
+  expect(second.start).not.toHaveBeenCalled(); expect(second.stop).not.toHaveBeenCalled()
+  expect((await f.inner.kernel.status(f.original.run.runId)).state.type).toBe('running')
+})
+it('the original prepareResume cannot overwrite an admitted Stop before its retirement commits', async () => {
+  const f = await fixture()
+  f.stop.mockImplementationOnce(async (operation: any) => { await f.nativeStop(operation); throw new Error('Original Stop reply lost') })
+  await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESTART_UNCONFIRMED' })
+  const restart = await f.store.readLifecycleReservation(f.original.agentSessionId)
+  let release!: () => void, admitted!: () => void
+  const waiting = new Promise<void>(resolve => { release = resolve }), admission = new Promise<void>(resolve => { admitted = resolve })
+  const commit = f.store.commitLifecycle.bind(f.store)
+  vi.spyOn(f.store, 'commitLifecycle').mockImplementation(async (reservation: any, session: any) => {
+    if (reservation.kind === 'stop') { admitted(); await waiting }
+    return await commit(reservation, session)
+  })
+  const closing = f.client.stopAgent(f.original.agentSessionId, f.original.run).catch(error => error)
+  try {
+    await admission
+    const stop = await f.store.readLifecycleReservation(f.original.agentSessionId)
+    expect(stop.kind).toBe('stop')
+    await expect(f.store.prepareResume(restart, f.original)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+    expect(await f.store.readLifecycleReservation(f.original.agentSessionId)).toEqual(stop)
+  } finally { release(); await closing }
+  expect(await closing).toBeUndefined()
+  expect(f.start).not.toHaveBeenCalled()
+})
 it('reconciles an applied Start with lost reply without another Start or successor Stop', async () => {
   const f = await fixture(); let actual: any
   f.start.mockImplementationOnce(async (input: any) => { actual = await f.nativeStart(input); throw new core.AgentMuxError('Private original Start ACK lost', 'CONTROL_UNAVAILABLE') })
@@ -128,9 +228,15 @@ it('reconciles an applied Start with lost reply without another Start or success
 })
 it('keeps completed original restart discovery after another explicit restart replaces its successor', async () => {
   const f = await fixture(), first = await f.restart()
+  const original = (await f.store.readMetadata(f.original.agentSessionId))!.continuityOperations![f.request.operationId]
+  await expect(f.client.ensureAgentContinuity(f.request)).resolves.toMatchObject({ kind: 'resumed', run: first.run, continuity: original })
+  await expect(f.client.ensureAgentContinuity({ ...f.request, expectedRun: { runId: f.unrelated.runId } })).rejects.toMatchObject({ code: 'CONTINUITY_OPERATION_MISMATCH' })
+  await expect(f.client.ensureAgentContinuity({ ...f.request, trigger: 'input', input: { submissionId: 'another-input', prompt: 'not part of restart' } })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
   const second = await f.client.restartAgent({ ...f.request, expectedRun: first.run, operationId: 'second-restart' })
   expect(second.run).not.toEqual(first.run)
   expect(await f.client.inspectAgentRestart(f.request)).toMatchObject({ phase: 'restarted', newRun: first.run })
+  await expect(f.client.ensureAgentContinuity(f.request)).resolves.toMatchObject({ kind: 'conflict', reason: 'session-run-changed', currentRun: second.run, continuity: original })
+  expect((await f.store.readMetadata(f.original.agentSessionId))!.continuityOperations![f.request.operationId]).toEqual(original)
   await expect(f.restart()).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' }); await f.invariants(f, 2, 2)
 })
 it('the real Hosted, public service and compiled CLI consume the same original restart operation', async () => {
@@ -199,9 +305,23 @@ it.each(['Stop', 'Start'] as const)('a distinct process recovers the original in
   if (stage === 'Stop') f.stop.mockImplementationOnce(async (operation: any) => { await f.nativeStop(operation); throw new Error('Original private Stop reply lost') })
   else f.start.mockImplementationOnce(async (input: any) => { originalSuccessor = await f.nativeStart(input); throw new core.AgentMuxError('Original private Start reply lost', 'CONTROL_UNAVAILABLE') })
   await expect(f.restart()).rejects.toMatchObject({ code: stage === 'Stop' ? 'AGENT_RESTART_UNCONFIRMED' : 'AGENT_RESUME_UNCONFIRMED' })
+  const spatialPath = join(f.root, 'workface.json')
+  const workface = await new core.AgentMuxSpatialStateStore(spatialPath).commit({ expectedRevision: 0, graph: {
+    spaces: [{ spaceId: 'original-space', kind: 'folder', name: 'Original work', hostId: 'local', directoryPath: f.root, projectId: 'original-project' }],
+    zones: [{ zoneId: 'original-zone', workspaceId: 'original-workspace', kind: 'directory', hostId: 'local', directoryPath: f.root, branch: null }],
+    tabs: [{ tabId: 'original-tab', zoneId: 'original-zone', workspaceId: 'original-workspace', name: null, regionIds: ['original-region', 'neighbor-region'] }],
+    regions: [{ regionId: 'original-region', tabId: 'original-tab', kind: 'agent', agentSessionId: f.original.agentSessionId,
+      runId: f.original.run.runId, execution: { hostId: 'local', cwd: f.root } },
+      { regionId: 'neighbor-region', tabId: 'original-tab', kind: 'browser', agentSessionId: null, runId: null, execution: null }],
+    bindings: [{ zoneId: 'original-zone', spaceId: 'original-space' }],
+    layouts: { 'original-workspace': createWorkspaceLayout('original-group', ['original-tab']) },
+    tabLayouts: { 'original-tab': { root: { type: 'split', direction: 'horizontal', ratio: 0.4,
+      first: { type: 'leaf', regionId: 'original-region' }, second: { type: 'leaf', regionId: 'neighbor-region' } }, activeRegionId: 'original-region' } },
+    resources: { 'original-tab': { draft: 'Original unsent draft', browserId: 'original-browser' } }
+  } })
   await f.client.dispose()
   const entry = process.env.AGENTMUX_TEST_RESTART_CHILD_ENTRY ?? process.env.AGENTMUX_TEST_RESTART_ENTRY ?? new URL('../dist/index.js', import.meta.url).href
-  const code = `import * as core from ${JSON.stringify(entry)};const program=${JSON.stringify(program)};const provider=${provider.toString()};const store=new core.AgentMuxFileAgentSessionStore(${JSON.stringify(f.storePath)});const client=new core.AgentMuxClient({store,providers:[provider()]});Object.defineProperty(client.hookServer,'port',{value:0});await client.connect();client.kernel.list=async()=>{throw Error('Original operation must not read unrelated inventory')};try{const session=await client.restartAgent(${JSON.stringify(f.request)});console.log(JSON.stringify({pid:process.pid,session,inspection:await client.inspectAgentRestart(${JSON.stringify(f.request)})}))}finally{await client.dispose()}`
+  const code = `import * as core from ${JSON.stringify(entry)};const program=${JSON.stringify(program)};const provider=${provider.toString()};const store=new core.AgentMuxFileAgentSessionStore(${JSON.stringify(f.storePath)});const spatial=new core.AgentMuxSpatialStateStore(${JSON.stringify(spatialPath)});const before=await spatial.read();const client=new core.AgentMuxClient({store,providers:[provider()]});Object.defineProperty(client.hookServer,'port',{value:0});await client.connect();client.kernel.list=async()=>{throw Error('Original operation must not read unrelated inventory')};try{const session=await client.restartAgent(${JSON.stringify(f.request)});console.log(JSON.stringify({pid:process.pid,session,inspection:await client.inspectAgentRestart(${JSON.stringify(f.request)}),workfaceBefore:before,workfaceAfter:await spatial.read()}))}finally{await client.dispose()}`
   const child = spawn(process.execPath, ['--input-type=module', '-e', code], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
   let stdout = '', stderr = ''; child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value })
   cleanups.push(async () => { if (child.exitCode === null && child.signalCode === null) { const ended = once(child, 'exit'); child.kill('SIGTERM'); await ended } })
@@ -209,6 +329,7 @@ it.each(['Stop', 'Start'] as const)('a distinct process recovers the original in
   expect(exit, stderr).toBe(0)
   const result = JSON.parse(stdout.trim())
   expect(result.pid).not.toBe(process.pid)
+  expect(result.workfaceBefore).toEqual(workface); expect(result.workfaceAfter).toEqual(workface)
   expect(result.session.agentSessionId).toBe(f.original.agentSessionId); expect(result.session.nativeHandle).toEqual(f.original.nativeHandle)
   expect(result.inspection).toMatchObject({ phase: 'restarted', newRun: result.session.run })
   if (originalSuccessor) { expect(result.session.run.runId).toBe(originalSuccessor.runId) }
@@ -297,6 +418,7 @@ it.each(['foreign-operation', 'input-receipt'] as const)('keeps restart Start un
 it('reports a genuinely exited replacement as a known failed restart and retains original native recovery', async () => {
   const f = await fixture(false, true, true, true)
   await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_TERMINAL_HANDSHAKE_FAILED' })
+  await expect(f.client.ensureAgentContinuity(f.request)).rejects.toMatchObject({ code: 'AGENT_TERMINAL_HANDSHAKE_FAILED' })
   const failed = await f.client.inspectAgentRestart(f.request)
   expect(failed).toMatchObject({ phase: 'failed', canRetry: false, newRun: expect.any(Object), detail: expect.any(String), failure: { code: 'AGENT_TERMINAL_HANDSHAKE_FAILED' } })
   expect(failed.session?.agentSessionId).toBe(f.original.agentSessionId)
