@@ -5,6 +5,7 @@ import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import { selectManualConnectionOwner, useAppStore } from '../../store'
 import { api } from '../../lib/api'
+import { selectConnectorServiceObservation } from '../../lib/connector-service-observation'
 import { connectionSettingsPort } from '../../lib/connection-settings-port'
 import { botTaskSelectionKey, readBotTaskLocator, restoredManagementTask } from '../../lib/bot-task-selection'
 import { ConnectorServiceControl } from './ConnectorServiceControl'
@@ -14,7 +15,7 @@ import '../../styles/channel-settings.css'
 const HostIcon = semanticIconComponent('object.host')
 
 /** An explicit route on the existing configured Hosts, separate from Agent execution. */
-export function ConnectionHostingSettings(props: { active: boolean; channel?: 'lark' | 'discord'; onClose?: (() => void) | undefined; navigationRequest?: SettingsNavigationRequest | undefined }) {
+export function ConnectionHostingSettings(props: { active: boolean; platform: { adapterId: string; title: string }; channel?: 'lark' | 'discord'; onClose?: (() => void) | undefined; navigationRequest?: SettingsNavigationRequest | undefined }) {
   const channel = props.channel ?? 'lark', hosts = useAppStore(state => state.config?.hosts)
   const intents = useAppStore(state => state.manualConnectionIntents)
   const origin = props.navigationRequest?.channelOrigin ?? props.navigationRequest?.moteLarkOrigin
@@ -23,6 +24,8 @@ export function ConnectionHostingSettings(props: { active: boolean; channel?: 'l
     const state = useAppStore.getState(), retained = channel === 'lark' ? restoredManagementTask(state.botTaskSelections) ?? readBotTaskLocator(state.botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })]) : null
     return retained ? retained.hostingTarget : Object.hasOwn(state.manualConnectionSelections, channel) ? state.manualConnectionSelections[channel] : undefined
   })
+  const globalService = useAppStore(state => selectConnectorServiceObservation(state.connectorServiceObservation, target))
+  const globalSummary = !globalService?.state || globalService.issue ? 'sync unconfirmed' : globalService.state.enabled ? 'sync on' : 'sync off'
   const navigation = useRef(props.navigationRequest)
   useEffect(() => {
     if (navigation.current === props.navigationRequest) return
@@ -65,7 +68,12 @@ export function ConnectionHostingSettings(props: { active: boolean; channel?: 'l
       {reading ? <p role="status" aria-busy="true">Reading the original Host identity…</p> : issue ? <p role="status" className="connector-issue">{issue}</p> : null}
       {target === undefined && !reading ? <button type="button" className="small-button" onClick={() => setRequest('local')}>Read background Host</button> : null}
     </section>
-    {target !== undefined ? <ConnectorServiceControl active={props.active} hostingTarget={target} /> : null}
+    {target !== undefined ? <div className="channel-environment__policy">
+      <ConnectorServiceControl active={props.active} hostingTarget={target} platform={props.platform} />
+      <details className="channel-environment__global"><summary>All channels on this Host · {globalSummary}</summary>
+        <ConnectorServiceControl active={props.active} hostingTarget={target} />
+      </details>
+    </div> : null}
     </div>
     {target !== undefined ? <ExternalConnectionsSettings key={key} {...props} connections={connections} hostingTarget={target} onOpenOriginalHost={original => { setRequest(null); selectManualConnectionOwner(channel, original); setTarget(original); setIssue('') }} /> : null}
   </div>

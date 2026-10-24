@@ -10,7 +10,11 @@
 .channel-hosting .connector-diagnostics { padding: 0; margin: 0; border: 0; font-size: var(--fs-meta); }
 .channel-hosting .connector-diagnostics > summary { font-size: var(--fs-micro); min-height: 0; padding-block: var(--sp-1); color: var(--text-3); }
 .channel-hosting .connector-diagnostics code { font-size: var(--fs-micro); overflow-wrap: anywhere; }
-.channel-environment .connector-service-control { align-content: start; min-width: 0; padding: 0 0 0 var(--sp-6); margin: 0; border: 0; border-left: 1px solid var(--line-soft); gap: var(--sp-2); }
+.channel-environment__policy { min-width: 0; padding-left: var(--sp-5); border-left: 1px solid var(--line-soft); }
+.channel-environment__global { margin-top: var(--sp-2); font-size: var(--fs-meta); }
+.channel-environment__global > summary { color: var(--text-3); cursor: pointer; padding-block: var(--sp-1); }
+.channel-environment__global[open] > summary { margin-bottom: var(--sp-3); }
+.channel-environment .connector-service-control { align-content: start; min-width: 0; padding: 0; margin: 0; border: 0; gap: var(--sp-2); }
 .channel-environment .connector-service-control__heading { align-items: start; gap: var(--sp-3); }
 .channel-environment .connector-service-control__heading > div:first-child { flex-basis: 160px; }
 .channel-environment .connector-service-control__heading h3 { font-size: var(--fs-meta); }
@@ -60,7 +64,7 @@
 .connector-mote-directory { display: grid; gap: var(--sp-5); }
 @container channel-settings (width < 620px) {
   .channel-environment { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); padding: var(--sp-4); }
-  .channel-environment .connector-service-control { border-left: 0; border-top: 1px solid var(--line-soft); padding: var(--sp-4) 0 0; }
+  .channel-environment__policy { border-left: 0; border-top: 1px solid var(--line-soft); padding: var(--sp-4) 0 0; }
   .connector-mote-entry { flex-wrap: wrap; }
   .connector-mote-entry > span:nth-child(2) { flex-basis: calc(100% - 64px); }
   .connector-mote-entry__action { margin-left: calc(36px + var(--sp-4)); }
