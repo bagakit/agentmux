@@ -71,6 +71,9 @@
 .mobile-chat-start p { margin: 0; font-size: 13px; line-height: 1.6; }
 .mobile-chat-start > div { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 12px; }
 .mobile-chat-start button { min-height: 44px; }
+.mobile-update-recovery__actions > button { border: 1px solid var(--line); border-radius: var(--radius); padding: 0 14px; color: var(--text); background: var(--surface-2); font: inherit; font-size: 13px; }
+.mobile-update-recovery__actions > button:first-child { color: var(--green); }
+.mobile-update-recovery__actions > button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .mobile-mote-agents-heading { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
 .mobile-mote-agents-heading h3 { margin: 0; color: var(--text-3); font-size: 11px; font-weight: 550; }
 
