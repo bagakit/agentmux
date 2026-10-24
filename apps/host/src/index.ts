@@ -41,7 +41,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
 })
 startup = startAgentMuxHost({ store: agentMuxHostStore(storePath), mobileBuildDirectory, shutdown,
   ...(configurationPath === undefined ? {} : { configurationPath }),
-  ...(connectionDirectory === undefined && moteConfigurationPath === undefined ? {} : { connections: { directory: connectionDirectory, clients: () => configured.clients(),
+  ...(connectionDirectory === undefined && moteConfigurationPath === undefined ? {} : { connections: { directory: connectionDirectory, clients: () => configured.clients(), subscribeClients: listener => configured.subscribeClients(listener),
     ...(moteConfigurationPath === undefined ? {} : { moteConfigurationPath }) } }) }).catch(async error => {
       try { await configured.close() } catch (cleanup) { throw new AggregateError([error, cleanup], 'Host startup and configured consumer cleanup failed.') }
       throw error

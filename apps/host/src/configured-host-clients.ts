@@ -9,6 +9,10 @@ type Lease = { config: SshHostConfig; client: AgentMuxSshHostedClient }
 /** Read the original application configuration; own only these SSH consumer leases. */
 export function configuredHostClients(path: string | undefined) {
   const leases = new Map<string, Lease>()
+  const listeners = new Set<() => void>()
+  const changed = () => { for (const listener of listeners) { try { listener() } catch (error) {
+    process.emitWarning('Observing original Host leases is unconfirmed: ' + (error instanceof Error ? error.message : String(error)), { code: 'HOST_LEASE_OBSERVATION_UNCONFIRMED' })
+  } } }
   const configurationRead = new AbortController()
   const routes = new Map<string, { config: SshHostConfig; controller: AbortController }>()
   const work = new Set<Promise<void>>()
@@ -36,7 +40,7 @@ export function configuredHostClients(path: string | undefined) {
       routes.delete(id); route.controller.abort()
     }
     for (const [id, lease] of leases) if (!desired.has(id)) {
-      leases.delete(id)
+      leases.delete(id); changed()
       track(lease.client.dispose().catch(() => issue(`Host ${id} consumer cleanup is unconfirmed.`)))
     }
     for (const config of configured) {
@@ -66,7 +70,7 @@ export function configuredHostClients(path: string | undefined) {
         } else {
           const client = await connectSshAgentMux({ expectedRuntimeId: runtimeId, waitForReady: false, target: { ...config, hostId: config.id } })
           if (!accepted()) { await client.dispose(); return }
-          leases.set(config.id, { config, client })
+          leases.set(config.id, { config, client }); changed()
         }
       } catch { issue(`Host ${config.id} could not confirm its original Runtime on the configured route.`) }
       finally { if (routes.get(config.id) === candidate) routes.delete(config.id) } })())
@@ -98,13 +102,14 @@ export function configuredHostClients(path: string | undefined) {
   }
   return {
     start() { if (!started && !closed) { started = true; void refresh() } },
+    subscribeClients(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
     clients: () => [...leases].map(([hostId, lease]) => ({ hostId, client: lease.client })),
     async close() {
       closed = true; configurationRead.abort(); if (retry) clearTimeout(retry); watcher?.close(); watcher = undefined
       for (const route of routes.values()) route.controller.abort()
       await pending
       const results = await Promise.allSettled([...work, ...[...leases.values()].map(lease => lease.client.dispose())])
-      leases.clear()
+      leases.clear(); changed(); listeners.clear()
       const errors = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
       if (errors.length) throw new AggregateError(errors, 'Configured Host consumer cleanup is unconfirmed. Original Runs were retained.')
     }
