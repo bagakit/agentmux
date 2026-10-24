@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it, vi } from 'vitest'
 import { parseDesktopClientObservation, parseDesktopClientObservationForInstall, type DesktopClientObservation } from '../src/shared/client-observation'
@@ -13,7 +14,7 @@ const io = vi.hoisted(() => ({
   before: null as DesktopClientObservation | null,
   after: null as DesktopClientObservation | null,
   failAfterRead: false, failEveryRead: false,
-  tick: 0
+  tick: 0, nativePlan: null as any, nativeConfirmation: null as any
 }))
 const roots: string[] = []
 vi.mock('node:child_process', async original => {
@@ -46,7 +47,7 @@ vi.mock('../scripts/package-semantic-host.mjs', async original => ({
 }))
 vi.mock('../scripts/package-runtime-upgrade.mjs', async original => ({
   ...await original<typeof import('../scripts/package-runtime-upgrade.mjs')>(),
-  prepareUiRuntime: async () => null, closeRuntimeUpgrade: async () => {},
+  prepareUiRuntime: async () => io.nativePlan, confirmUiRuntime: async () => io.nativeConfirmation, closeRuntimeUpgrade: async () => {},
   observeUiClient: async (app: string) => {
     expect(app).toBe(io.app)
     if (io.pid === 201) return parseDesktopClientObservationForInstall(structuredClone(io.before))
@@ -58,13 +59,14 @@ vi.mock('../scripts/package-runtime-upgrade.mjs', async original => ({
 
 afterEach(async () => {
   vi.restoreAllMocks()
+  vi.unstubAllEnvs()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-install-continuity-')); roots.push(root)
   const home = join(root, 'home'), app = join(home, 'Applications/AgentMux.app'), candidate = join(root, 'candidate.app')
-  Object.assign(io, { app, candidate, pid: 201, reads: 0, cutovers: 0, failEveryRead: false, failAfterRead: false, tick: 0 })
+  Object.assign(io, { app, candidate, pid: 201, reads: 0, cutovers: 0, failEveryRead: false, failAfterRead: false, tick: 0, nativePlan: null, nativeConfirmation: null })
   const identity = { schema: 'agentmux.package-identity.v1' as const, sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40),
     appVersion: '0.1.0', platform: process.platform, arch: process.arch }
   for (const [directory, sourceCommit] of [[app, 'a'.repeat(40)], [candidate, 'c'.repeat(40)]]) {
@@ -78,7 +80,7 @@ async function fixture() {
     }
   }
   const session = (kind: 'agent' | 'terminal', regionId: string) => ({ kind, regionId, workspaceId: 'workspace',
-    sessionId: `${regionId}-session`, phase: 'attached' as const, processState: 'running' as const,
+    sessionId: `${regionId}-${kind === 'terminal' ? 'run' : 'session'}`, phase: 'attached' as const, processState: 'running' as const,
     control: kind === 'agent'
       ? { kind, hostId: 'local', agentSessionId: `${regionId}-session`, run: { runId: `${regionId}-run` } }
       : { kind, hostId: 'local', runId: `${regionId}-run`, run: { runId: `${regionId}-run` } } })
@@ -382,3 +384,70 @@ it('outgoing qualification failure preserves the observed snapshot without reque
   expect(error.transaction.ui.continuity).toEqual({ before: null, after: io.before })
   expect(io.pid).toBe(201); expect(io.cutovers).toBe(0)
 })
+
+const rawTerminal = (observation = io.after!) => observation.workbench.tabs[0]!.regions[1]! as Extract<DesktopClientObservation['workbench']['tabs'][number]['regions'][number], { kind: 'terminal' }>
+async function terminalRebindingFixture() {
+  const f = await fixture(), root = dirname(f.candidate)
+  const runtime = { runtimeId: 'private-runtime', daemonInstanceId: 'private-instance', buildId: 'private-build', protocolGeneration: 22 }
+  const local = { hostId: 'local', identity: { hostId: 'local', buildIdentity: runtime.buildId, protocolVersion: 22, processId: null, instanceId: runtime.daemonInstanceId } }
+  io.before!.main.runtimes = [structuredClone(local)]; io.after!.main.runtimes = [structuredClone(local)]
+  rawTerminal(io.before!).processState = 'interrupted'
+  Object.assign(rawTerminal(), { sessionId: 'replacement-run', control: { kind: 'terminal', hostId: 'local', runId: 'replacement-run', run: { runId: 'replacement-run' } } })
+  const states = { 'terminal-run': { id: 'terminal-run', state: { type: 'interrupted', reason: 'daemon_restart' }, spec: { cwd: '/private/original-cwd' } },
+    'replacement-run': { id: 'replacement-run', state: { type: 'running' }, spec: { cwd: '/private/original-cwd' } } }
+  const config = join(root, 'native.json'), sdk = join(root, 'sdk.mjs'), reads = join(root, 'native-reads.ndjson')
+  await writeFile(reads, '')
+  await writeFile(sdk, `import {readFileSync,appendFileSync} from 'node:fs';export class CtxmuxClient {
+    constructor(options){ const config=JSON.parse(readFileSync(${JSON.stringify(config)},'utf8'));if(JSON.stringify(options.expectedRuntimeIdentity)!==JSON.stringify(config.runtime))throw Error('PRIVATE_NATIVE_IDENTITY_CHANGED') }
+    async status(id){appendFileSync(${JSON.stringify(reads)},JSON.stringify({id})+'\\n');const config=JSON.parse(readFileSync(${JSON.stringify(config)},'utf8'));if(config.error)throw Error(config.error);return config.states[id]}
+    async listPage(){throw Error('UNRELATED_INVENTORY_FORBIDDEN')} }
+  `)
+  io.nativePlan = { newSdk: sdk, old: { socketPath: join(root, 'private.sock') } }
+  io.nativeConfirmation = { runtime: structuredClone(runtime), originalRuns: [] }
+  const sourceLoader = pathToFileURL(join(import.meta.dirname, '../scripts/fixtures/install-terminal-continuity/source-loader.mjs')).href
+  vi.stubEnv('NODE_OPTIONS', (process.env.NODE_OPTIONS ?? '') + ' --experimental-transform-types --import=' + sourceLoader)
+  const state = { runtime, states, error: '' }
+  const save = async () => writeFile(config, JSON.stringify(state))
+  await save()
+  return { ...f, state, save, reads }
+}
+it('[terminal-install] admits only proven interrupted raw replacement and records exact Native bindings', async () => {
+  const f = await terminalRebindingFixture(), original = structuredClone(io.before), expected = structuredClone(io.after)
+  const outcome = await install(f).then(result => ({ result, error: null }), error => ({ result: null, error: error.message }))
+  expect(outcome.error, 'Proven raw Run replacement must qualify through the real installer').toBeNull()
+  const result = outcome.result!
+  expect(result.ui.status, 'Typed raw Run replacement must not masquerade as durable Session loss').toBe('committed')
+  expect(result.ui.terminalRebindings).toEqual([{ tabId: 'tab-a', regionId: 'terminal', hostId: 'local',
+    previousRunId: 'terminal-run', currentRunId: 'replacement-run', runtimeId: f.state.runtime.runtimeId, daemonInstanceId: f.state.runtime.daemonInstanceId,
+    previous: { id: 'terminal-run', state: f.state.states['terminal-run'].state, workspacePath: '/private/original-cwd' },
+    current: { id: 'replacement-run', state: f.state.states['replacement-run'].state, workspacePath: '/private/original-cwd' } }])
+  expect((await readFile(f.reads, 'utf8')).trim().split('\n').map(row => JSON.parse(row).id)).toEqual(['terminal-run', 'replacement-run'])
+  expect(io.before).toEqual(original); expect(io.after).toEqual(expected); expect(io.pid).toBe(202); expect(io.cutovers).toBe(1)
+})
+it.each(['old-running', 'old-exited', 'reason', 'new-ended', 'cwd', 'missing-cwd', 'wrong-run', 'unknown', 'Native-owner', 'UI-owner', 'Host', 'control', 'healthy-Terminal', 'Agent-SID', 'focus', 'layout', 'missing-plan'] as const)(
+  '[terminal-install] refuses unproven replacement %s and retains the activated GUI and original evidence', async field => {
+    const f = await terminalRebindingFixture(), previous = f.state.states['terminal-run'], current = f.state.states['replacement-run']
+    if (field === 'old-running') Object.assign(previous, { state: { type: 'running' } })
+    if (field === 'old-exited') Object.assign(previous, { state: { type: 'exited', code: 0 } })
+    if (field === 'reason') previous.state.reason = 'other-interruption'
+    if (field === 'new-ended') Object.assign(current, { state: { type: 'exited', code: 0 } })
+    if (field === 'cwd') current.spec.cwd = '/private/other-cwd'
+    if (field === 'missing-cwd') Object.assign(previous, { spec: undefined })
+    if (field === 'wrong-run') current.id = 'foreign-run'
+    if (field === 'unknown') f.state.error = 'PRIVATE_NATIVE_UNKNOWN'
+    if (field === 'Native-owner') f.state.runtime.daemonInstanceId = 'changed-owner'
+    if (field === 'UI-owner') io.after!.main.runtimes[0]!.identity.instanceId = 'changed-owner'
+    if (field === 'Host') rawTerminal().control!.hostId = 'different-host'
+    if (field === 'control') rawTerminal().control!.run.runId = 'different-run'
+    if (field === 'healthy-Terminal') rawTerminal(io.before!).processState = 'running'
+    if (field === 'Agent-SID') agent().sessionId = 'different-Agent-SID'
+    if (field === 'focus') after().focus.executionSessionId = 'different-focus'
+    if (field === 'layout') after().layouts.workspace!.groups[0]!.tabOrder.reverse()
+    if (field === 'missing-plan') io.nativePlan = null
+    await f.save()
+    const before = structuredClone(io.before), expected = structuredClone(io.after), error = await install(f).catch(error => error)
+    expect(error.transaction?.ui.status, 'No generic Terminal-ID exemption may certify unproved continuity').toBe('unknown')
+    expect(error.transaction.ui.continuity).toEqual({ before, after: expected })
+    expect(io.before).toEqual(before); expect(io.after).toEqual(expected); expect(io.pid).toBe(202); expect(io.cutovers).toBe(1)
+  }
+)
