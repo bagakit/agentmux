@@ -4,13 +4,18 @@ import { expect, it } from 'vitest'
 import { AGENTMUX_CLI_COMMANDS } from '../src/agentmux-cli-commands.js'
 import { parseConnectionIngressRecord } from '../src/ingress-codec.js'
 import { isMoteChatMethod, moteChatDiagnosisCode, moteChatDiagnosisKey, parseMoteChatParams, parseMoteChatResult,
-  type MoteChatDiagnosis, type MoteChatDiagnosisInput } from '../src/mote-chat.js'
+  moteChatPreparationReason, type MoteChatDiagnosis, type MoteChatDiagnosisInput, type MoteChatDiagnosisIntake } from '../src/mote-chat.js'
+import { parseConnectionDiagnosisWaiting } from '../src/connection-diagnosis-codec.js'
+import type { AgentInputSubmissionReceipt, AgentInputWaitReason } from '../src/agent-input-wait.js'
 import { fixturePath } from './helpers/fixture-values.js'
 
 const method = 'space.mote.chat.diagnose' as const
 const input: MoteChatDiagnosisInput = { target: { spaceId: 'private-mote', zoneId: 'private-home',
   expectedResource: { hostId: 'original-host', workspaceId: 'private-workspace', workspacePath: fixturePath('private-mote-home') } } }
 const stage = { state: 'ready' as const }
+const inputObservation = (overrides: Partial<MoteChatDiagnosisIntake['input']> = {}): MoteChatDiagnosisIntake['input'] => ({
+  status: null, observation: 'not-started', controlState: null, receiptObservation: null, waiting: null, preparationReason: null, ...overrides
+})
 const diagnosis = (): MoteChatDiagnosis => ({
   targetKey: moteChatDiagnosisKey(input.target), limit: 5,
   configuration: { revision: 2, enabled: true, connection: { connectionId: 'public-connection', application: { domain: 'platform.example', appId: 'public-app' } } },
@@ -19,7 +24,7 @@ const diagnosis = (): MoteChatDiagnosis => ({
   connection: { enabled: true, revision: 3, authentication: stage, transport: stage, intake: stage, delivery: stage },
   incoming: { rows: [{ key: moteChatDiagnosisKey(input.target, 'private-ingress'), state: 'received',
     code: 'MOTE_CHAT_SOURCE_UNCONFIRMED', codeRecorded: true, preparation: 'creation-dispatched',
-    input: { status: null, observation: 'not-started' } }], more: true }, issues: []
+    input: inputObservation() }], more: true }, issues: []
 })
 
 it('accepts only the complete exact target and hashes its canonical identity without exposing it', () => {
@@ -42,11 +47,11 @@ it('keeps readiness, original preparation and Core receipt observations separate
   const encoded = JSON.stringify(parseMoteChatResult(method, value, input))
   for (const privateValue of ['private-mote', 'private-home', 'private-workspace', 'private-ingress', input.target.expectedResource.workspacePath])
     expect(encoded).not.toContain(privateValue)
-  value.incoming!.rows[0]!.input = { status: 'terminal-confirmed', observation: 'observed' }
+  value.incoming!.rows[0]!.input = inputObservation({ status: 'terminal-confirmed', observation: 'observed', controlState: 'dispatch-authorized', receiptObservation: 'closed' })
   expect(parseMoteChatResult(method, value, input).incoming!.rows[0]!.input.status).toBe('terminal-confirmed')
   value.incoming!.rows[0]!.preparation = 'other-route'
-  value.incoming!.rows[0]!.input = { status: null, observation: 'unavailable' }
-  expect(parseMoteChatResult(method, value, input).incoming!.rows[0]!.input).toEqual({ status: null, observation: 'unavailable' })
+  value.incoming!.rows[0]!.input = inputObservation({ observation: 'unavailable' })
+  expect(parseMoteChatResult(method, value, input).incoming!.rows[0]!.input).toEqual(inputObservation({ observation: 'unavailable' }))
   value.incoming = { rows: [], more: false }
   expect(parseMoteChatResult(method, value, input).incoming).toEqual({ rows: [], more: false })
   value.incoming = null; value.issues = ['intake-unavailable']
@@ -66,8 +71,8 @@ it('rejects private fields, foreign targets, arbitrary causes and inconsistent o
     ...[
       [{ ...row, agentSessionId: 'private-session' }], [{ ...row, input: { ...row.input, body: 'private-message' } }],
       [{ ...row, code: 'PRIVATE_EXCEPTION_CODE' }], [{ ...row, codeRecorded: false }],
-      [{ ...row, input: { status: 'admitted', observation: 'not-started' } }],
-      [{ ...row, preparation: 'other-route', input: { status: 'admitted', observation: 'observed' } }],
+      [{ ...row, input: inputObservation({ status: 'admitted' }) }],
+      [{ ...row, preparation: 'other-route', input: inputObservation({ status: 'admitted', observation: 'observed' }) }],
       Array(6).fill(row), [row, structuredClone(row)], Array(1)
     ].map(rows => ({ ...v, incoming: { rows, more: false } })), { ...v, incoming: { rows: [] } }
   ]
@@ -78,6 +83,70 @@ it('rejects private fields, foreign targets, arbitrary causes and inconsistent o
   expect(moteChatDiagnosisCode('INGRESS_PREPARATION_UNAVAILABLE')).toBe('INGRESS_PREPARATION_UNAVAILABLE')
   expect(moteChatDiagnosisCode('PRIVATE_EXCEPTION_CODE')).toBeNull()
   expect(moteChatDiagnosisCode({ code: 'MOTE_CHAT_EXECUTOR_UNAVAILABLE', message: 'private error' })).toBeNull()
+})
+
+it('reuses exact safe waiting combinations while separating receipt ownership from inspection availability', () => {
+  const report = diagnosis(), row = report.incoming!.rows[0]!
+  row.input = inputObservation({ status: 'waiting', observation: 'observed', controlState: 'enabled', receiptObservation: 'rejoin-needed' })
+  expect(parseMoteChatResult(method, report, input).incoming!.rows[0]!.input.waiting).toBeNull()
+  const tuples: Array<NonNullable<MoteChatDiagnosisIntake['input']['waiting']>> = [
+    { phase: 'runtime', reason: 'runtime-unavailable', wake: 'runtime-restored' },
+    { phase: 'authorization', reason: 'author-authorization-needed', wake: 'explicit-rejoin' },
+    { phase: 'observer', reason: 'observer-stopped', wake: 'explicit-rejoin' },
+    { phase: 'native-environment', reason: 'original-environment-unconfirmed', wake: 'explicit-rejoin' },
+    { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin' },
+    { phase: 'input-environment', reason: 'original-target-changed', wake: 'explicit-rejoin' },
+    { phase: 'service', reason: 'observation-failed', wake: 'explicit-rejoin' }
+  ]
+  for (const waiting of tuples) {
+    row.input.waiting = waiting
+    expect(parseConnectionDiagnosisWaiting(waiting)).toEqual(waiting)
+    expect(parseMoteChatResult(method, report, input).incoming!.rows[0]!.input.waiting).toEqual(waiting)
+  }
+  const original = structuredClone(row.input), malformed: unknown[] = [
+    { ...original, waiting: { phase: 'runtime', reason: 'original-input-unconfirmed', wake: 'runtime-restored' } },
+    { ...original, waiting: { phase: 'runtime', reason: 'runtime-unavailable', wake: 'explicit-rejoin' } },
+    { ...original, waiting: { ...original.waiting, failure: { message: 'private body' } } },
+    { ...original, waiting: { ...original.waiting, ref: { key: 'private input' } } },
+    { ...original, controlState: 'working' }, { ...original, receiptObservation: 'observed' },
+    { ...original, controlState: 'dispatch-authorized', receiptObservation: 'owned' },
+    { ...original, receiptObservation: 'closed' },
+    { ...original, status: 'stopped', controlState: 'enabled', receiptObservation: 'closed' },
+    { ...original, status: 'admitted', controlState: 'stopped-before-dispatch', receiptObservation: 'closed' },
+    { ...original, status: 'unknown', receiptObservation: 'owned' },
+    { ...original, controlState: null }, { ...original, status: null },
+    { ...original, waiting: null, preparationReason: 'native-busy' },
+    { ...original, preparationReason: 'private-code' }, { ...original, gateId: 'private gate' }
+  ]
+  for (const value of malformed) {
+    const bad = { ...report, incoming: { rows: [{ ...row, input: value }], more: false } }
+    expect(() => parseMoteChatResult(method, bad, input)).toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  }
+})
+
+it('exports only an existing preparation reason after matching the original input key, never its private fence or retry permission', () => {
+  for (const kind of ['prompt', 'message'] as const) {
+    const key = { kind, agentSessionId: 'private-session', expectedRun: { runId: 'private-run' },
+      ...(kind === 'prompt' ? { submissionId: 'private-operation' } : { messageId: 'private-operation' }) } as AgentInputSubmissionReceipt['key']
+    const wait = { reason: 'context-compaction', retrySafe: true, agentSessionId: key.agentSessionId, runId: key.expectedRun.runId,
+      operationId: 'private-operation', nativeSourceId: 'private-native-source', inputByte: 12 }
+    const receipt: AgentInputSubmissionReceipt = { key, ref: { key, waitGeneration: 1 }, persistence: 'confirmed',
+      control: { ref: { key, waitGeneration: 1 }, state: 'enabled', at: 1 }, admission: null, status: 'waiting', observation: 'rejoin-needed' }
+    const waiting = (value: unknown): AgentInputWaitReason => ({ phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin',
+      failure: { name: 'AgentMuxError', message: 'private body', code: 'AGENT_PROMPT_PREPARATION_FAILED', detail: JSON.stringify({ detail: JSON.stringify({ preparationWait: value }) }) } })
+    for (const reason of ['context-compaction', 'native-busy'] as const) {
+      receipt.control.waiting = waiting({ ...wait, reason })
+      expect(moteChatPreparationReason(receipt)).toBe(reason)
+    }
+    for (const field of ['agentSessionId', 'runId', 'operationId']) {
+      receipt.control.waiting = waiting({ ...wait, [field]: 'foreign-original' })
+      expect(moteChatPreparationReason(receipt)).toBeNull()
+    }
+    receipt.control.waiting = waiting({ ...wait, reason: 'guessed-from-text' })
+    expect(moteChatPreparationReason(receipt)).toBeNull()
+    delete receipt.control.waiting
+    expect(moteChatPreparationReason(receipt)).toBeNull()
+  }
 })
 
 it('exposes the same exact-target parser through original CLI discovery without a write or retry option', async () => {
