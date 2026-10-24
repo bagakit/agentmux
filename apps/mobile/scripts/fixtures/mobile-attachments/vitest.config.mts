@@ -14,11 +14,11 @@ export default defineConfig({
   plugins: [react(), { name: 'mobile-attachments-source-proof', enforce: 'pre', transform(code, id) {
     const path = id.split('?')[0]!, file = relative(repository, path), proof = process.env.AGENTMUX_MOBILE_ATTACHMENTS_PROOF
     const baseline = process.env.AGENTMUX_MOBILE_ATTACHMENTS_BASELINE
-    if (baseline && /\.[cm]?[jt]sx?$/u.test(file) && !id.includes('?') && /^(packages\/|apps\/(mobile|desktop)\/)/.test(file)) {
+    if (baseline && /\.[cm]?[jt]sx?$/u.test(file) && !id.includes('?') && /^(packages\/|apps\/(mobile|desktop|host)\/)/.test(file)) {
       try { return execFileSync('git', ['show', baseline + ':' + file], { cwd: repository, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) }
       catch { /* New candidate-only files have no baseline representation. */ }
     }
-    if (proof && /^(packages\/|apps\/(mobile\/src|desktop\/src\/main)\/)/.test(file)) appendFileSync(proof, JSON.stringify({ file, sha256: createHash('sha256').update(readFileSync(path)).digest('hex'), consumer: 'actual-vite-module' }) + '\n')
+    if (proof && /^(packages\/|apps\/(mobile\/src|desktop\/src\/main|host\/src)\/)/.test(file)) appendFileSync(proof, JSON.stringify({ file, sha256: createHash('sha256').update(readFileSync(path)).digest('hex'), consumer: 'actual-vite-module' }) + '\n')
     if (mutant && mutant.file === file) {
       if (code.split(mutant.before).length !== 2) throw new Error('One exact loaded mutant anchor is required')
       const changed = code.replace(mutant.before, mutant.after)
