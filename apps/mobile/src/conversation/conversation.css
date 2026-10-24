@@ -95,7 +95,7 @@
 .mobile-app .mobile-conversation .composer-send { min-width: 44px; padding: 0 8px; }
 .mobile-app .mobile-conversation .composer-session-controls { box-shadow: none; background: transparent; }
 .mobile-app .mobile-conversation .composer__editor .tiptap { font-size: 16px; line-height: 1.4; }
-.mobile-posture-picker { position: relative; display: inline-flex; align-items: center; }
+.mobile-posture-picker, .mobile-command-picker { position: relative; display: inline-flex; align-items: center; }
 .mobile-posture-menu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 20; min-width: 180px; max-width: min(86vw, 280px); display: grid; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-2); }
 .mobile-posture-menu__item { display: grid; gap: 2px; width: 100%; min-height: 44px; padding: 6px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font-size: 12px; }
 .mobile-posture-menu__item strong { font-weight: 550; }
