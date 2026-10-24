@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CollaborationLayoutInput, CollaborationLayoutBox, CollaborationLayoutRequest, CollaborationLayoutResponse, CollaborationLayoutStructure } from './collaboration-layout-engine'
 import { collaborationLayoutStructureKey, translateCollaborationPath, type CollaborationPath } from './collaboration-layout-engine'
 import { COLLABORATION_LAYOUT_TRANSITION_MS, interpolateCollaborationGeometry, type CollaborationGeometryFrame } from './collaboration-map-transition'
@@ -10,8 +10,8 @@ export function createCollaborationLayoutWorker() { return new Worker(new URL('.
 
 /** Disposable map geometry. Structural placement and new-path demand have separate invalidation. */
 export function useCollaborationLayout(input: CollaborationLayoutInput, active: boolean, readingAnchor: { current: string | null }, motion: boolean) {
-  const structure = collaborationLayoutStructureKey(input)
-  const topology = JSON.stringify(input.connections.map(edge => [edge.id, edge.source, edge.target, edge.kind]))
+  const structure = useMemo(() => collaborationLayoutStructureKey(input), [input.areas, input.nodes])
+  const topology = useMemo(() => JSON.stringify(input.connections.map(edge => [edge.id, edge.source, edge.target, edge.kind])), [input.connections])
   const [retry, setRetry] = useState(0), [arrange, setArrange] = useState(0)
   const [frame, setFrame] = useState<CollaborationGeometryFrame>(() => ({ boxes: new Map(), paths: new Map() }))
   const [transitioning, setTransitioning] = useState(false)
