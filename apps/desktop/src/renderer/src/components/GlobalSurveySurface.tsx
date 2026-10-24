@@ -20,13 +20,14 @@ import { useAppStore } from '../store'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import { SurveyZoneItem } from './SurveyZoneItem'
+import { SurveyTabColumn } from './SurveyTabColumn'
 import { BrowserStartPage } from './BrowserStartPage'
 import { resolveBrowserStartPage } from '../../../shared/browser-start-page'
 import { SurveyPanelChoices } from './SurveyPanelChoices'
 import { groupIds, regionIds } from '@agentmux/layout'
 import { resolveWorkbenchZone } from '../lib/workbench-projection'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
-import { SurveyItemOptions, SurveyItemContextMenu } from './SurveyItemOptions'
+import { SurveyItemOptions, SurveyItemContextMenu, type SurveyItemOptionsProps } from './SurveyItemOptions'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
 import { SurveyRecallCapture } from './SurveyRecallCapture'
 import type { SurveyRecallCapture as RecallCaptureTarget } from '../lib/survey-recall-capture'
@@ -107,13 +108,6 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     }
     return result
   }, [catalog])
-  const related = useMemo(() => {
-    if (!currentZone || !catalog) return { spaces: null, unconfirmed: false }
-    const spaces = new Map(catalog.spaces.map(space => [space.spaceId, space]))
-    const bindings = catalog.bindings.filter(binding => binding.zoneId === currentZone.zoneId)
-    return { spaces: bindings.flatMap(binding => spaces.has(binding.spaceId) ? [spaces.get(binding.spaceId)!] : []),
-      unconfirmed: bindings.some(binding => !spaces.has(binding.spaceId) || spaces.get(binding.spaceId)?.issue) }
-  }, [catalog, currentZone])
   const currentPanel = selection?.active && currentZone && catalog?.tabs.some(tab => tab.tabId === selection.active!.tabId && tab.zoneId === currentZone.zoneId)
     && catalog.regions.some(region => region.regionId === selection.active!.regionId && region.tabId === selection.active!.tabId) ? selection.active : null
   const currentBrowser = surveySelectedBrowser(tabs, selection)
@@ -123,7 +117,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const [creationNotice, setCreationNotice] = useState<string | null>(null)
   const [capture, setCapture] = useState<{ title: string; sources: TopicKnowledgeSource[]; noteIds: string[] } | null>(null)
   const [recallCapture, setRecallCapture] = useState<RecallCaptureTarget | null>(null)
-  const [locationChoice, setLocationChoice] = useState<{ kind: 'note' | 'agent'; zoneId: string; choices: WorkbenchProjectionSelection[] } | null>(null)
+  const [locationChoice, setLocationChoice] = useState<{ kind: 'note' | 'agent' | 'browser' | 'tab'; zoneId: string; choices: WorkbenchProjectionSelection[] } | null>(null)
   const [toolsVisited, setToolsVisited] = useState(toolsOpen)
   const surfaceRef = useRef<HTMLElement>(null)
   const managementRef = useRef<HTMLElement>(null)
@@ -157,6 +151,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const selectionKey = selection ? JSON.stringify([selection.zoneId, selection.active]) : null
   const intent = useRef(0)
   const failedCreation = useRef<SurveyBrowserPreparation | null>(null)
+  const [itemBrowserRecoveries, setItemBrowserRecoveries] = useState<Record<string, { preparation: SurveyBrowserPreparation; message: string; pending: boolean }>>({})
   useLayoutEffect(() => { intent.current += 1 }, [visible, selectionKey, activeWorkspaceId])
   useEffect(() => { if (toolsOpen) setToolsVisited(true) }, [toolsOpen])
   useEffect(() => {
@@ -254,7 +249,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const startedIntent = intent.current
     setOpening(true); setError(null)
     try {
-      const preparation = await before.createSurveyBrowser({ workspaceId: newItem ? SCRATCH_WORKSPACE_ID : workspace?.id ?? SCRATCH_WORKSPACE_ID, url: input,
+      const preparation = await before.createSurveyBrowser({ workspaceId: newItem ? SCRATCH_WORKSPACE_ID : failedCreation.current?.zone.workspaceId ?? workspace?.id ?? SCRATCH_WORKSPACE_ID, url: input,
         ...(mode === undefined ? {} : { mode }), preparation: newItem ? null : failedCreation.current, onPrepared(value) { failedCreation.current = value } })
       const reference = preparation.reference, current = useAppStore.getState()
       failedCreation.current = null
@@ -265,25 +260,20 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   }
 
   async function newBrowserTab(displayWorkspaceId: string, groupId: string): Promise<void> {
-    if (opening || !currentZone || !selection) return
+    if (!currentZone || !selection) return
     const before = useAppStore.getState(), held = before.surveyZoneSelection, startedIntent = intent.current
-    // Direct entity display does not pretend to be an original durable placement.
+    // A direct entity Group is presentation, not an original durable placement.
     if (!before.layouts[displayWorkspaceId]?.groups.some(group => group.id === groupId)) {
       displayWorkspaceId = currentZone.workspaceId
       groupId = before.layouts[displayWorkspaceId]?.activeGroupId ?? ''
     }
-    setOpening(true); setError(null)
-    try {
-      const tabId = before.openLauncher({ workspaceId: currentZone.workspaceId, displayWorkspaceId, tabGroupId: groupId, zoneId: currentZone.zoneId, reveal: false })
-      const tab = tabId ? useAppStore.getState().tabs[tabId] : undefined
-      if (!tab) throw new Error('This exact display Group is still restoring. Existing pages are kept.')
-      const reference = { displayWorkspaceId, groupId, tabId: tab.id, regionId: tab.layout.activeRegionId }
-      failedCreation.current = { zone: currentZone, reference, surface: tab.regions[reference.regionId]! }
-      await before.createSurveyBrowser({ workspaceId: currentZone.workspaceId, url: 'about:blank', preparation: failedCreation.current, onPrepared(value) { failedCreation.current = value } })
-      failedCreation.current = null
-      if (held && intent.current === startedIntent && useAppStore.getState().surveyZoneSelection === held) setSelection(surveySelectReference(held, reference))
-    } catch (cause) { setError(`Browser could not open: ${presentError(cause)}. Recover this same page; existing content is kept.`) }
-    finally { setOpening(false) }
+    const preparation = prepareItemTab(currentZone, { displayWorkspaceId, groupId })
+    if (!preparation) return
+    setError(null)
+    const created = await createItemBrowser(preparation)
+    if (created && held && intent.current === startedIntent && useAppStore.getState().surveyZoneSelection === held) {
+      setSelection(surveySelectReference(held, preparation.reference))
+    }
   }
 
   function itemProjection(zoneId: string) {
@@ -296,11 +286,25 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const original = itemProjection(zoneId), state = useAppStore.getState()
     const members = new Set(catalog?.tabs.filter(tab => tab.zoneId === zoneId).map(tab => tab.tabId))
     const layout = original?.composition
-    const groups = new Set(layout ? groupIds(layout.root) : [])
-    return layout?.groups.filter(group => groups.has(group.id)).flatMap(group => group.tabOrder.filter(id => members.has(id)).flatMap(tabId => {
+    return (layout ? groupIds(layout.root).flatMap(id => layout.groups.filter(group => group.id === id)) : []).flatMap(group => group.tabOrder.filter(id => members.has(id)).flatMap(tabId => {
       const tab = state.tabs[tabId]
       return tab ? regionIds(tab.layout.root).filter(regionId => !!tab.regions[regionId]).map(regionId => ({ displayWorkspaceId: original!.displayWorkspaceId, groupId: group.id, tabId, regionId })) : []
-    })) ?? []
+    }))
+  }
+
+  function chooseTab(zoneId: string, tabId: string) {
+    const state = useAppStore.getState(), tab = state.tabs[tabId]
+    const reference = itemReferences(zoneId).find(reference => reference.tabId === tabId && reference.regionId === tab?.layout.activeRegionId)
+    if (!reference || !catalog) { setError('This original Tab is still restoring. Its content and reference are kept.'); return }
+    intent.current += 1
+    setError(null)
+    const held = state.surveyZoneSelection?.zoneId === zoneId ? state.surveyZoneSelection : surveyInitialZoneSelection(catalog, zoneId, state.layouts, state.tabs, activeWorkspaceId)
+    setSelection(surveySelectReference(held, reference))
+  }
+
+  function closeItem(zoneId: string) {
+    setCollected(zoneId, false)
+    if (useAppStore.getState().surveyZoneSelection?.zoneId === zoneId) setSelection(null)
   }
 
   function newItemNote(zoneId: string, chosen?: WorkbenchProjectionSelection) {
@@ -323,7 +327,32 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         position: { zoneId, tabId: reference.tabId, regionId: reference.regionId } } })
   }
 
-  function newItemAgent(zoneId: string, chosen?: WorkbenchProjectionSelection) {
+  async function createItemBrowser(preparation: SurveyBrowserPreparation) {
+    // Each independent creation retains its own recovery; another success cannot clear it.
+    const key = JSON.stringify([preparation.zone.zoneId, preparation.reference?.tabId, preparation.reference?.regionId])
+    let original = preparation
+    setItemBrowserRecoveries(previous => previous[key] ? { ...previous, [key]: { ...previous[key]!, pending: true } } : previous)
+    try {
+      await useAppStore.getState().createSurveyBrowser({ workspaceId: preparation.zone.workspaceId, url: 'about:blank', preparation,
+        onPrepared(value) { original = value } })
+      setItemBrowserRecoveries(previous => { const { [key]: _recovered, ...remaining } = previous; return remaining })
+      return true
+    } catch (cause) {
+      setItemBrowserRecoveries(previous => ({ ...previous, [key]: { preparation: original, pending: false,
+        message: `Browser could not open: ${presentError(cause)}. The original page and existing content are kept.` } }))
+      return false
+    }
+  }
+
+  function prepareItemTab(zone: AgentMuxZoneFact, target: Pick<WorkbenchProjectionSelection, 'displayWorkspaceId' | 'groupId'>) {
+    const id = useAppStore.getState().openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: target.displayWorkspaceId,
+      tabGroupId: target.groupId, zoneId: zone.zoneId, reveal: false })
+    const tab = id ? useAppStore.getState().tabs[id] : null
+    if (!tab) { setError('The original display location is still restoring. Existing content is kept.'); return null }
+    return { zone, reference: { ...target, tabId: tab.id, regionId: tab.layout.activeRegionId }, surface: tab.regions[tab.layout.activeRegionId]! }
+  }
+
+  async function newItemTab(zoneId: string, kind: 'agent' | 'browser' | 'tab', chosen?: WorkbenchProjectionSelection) {
     const before = useAppStore.getState(), zone = catalog?.zones.find(zone => zone.zoneId === zoneId)
     const candidates = itemReferences(zoneId).filter(reference => before.layouts[reference.displayWorkspaceId]?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(reference.tabId)))
     const groups = new Set(candidates.map(reference => JSON.stringify([reference.displayWorkspaceId, reference.groupId])))
@@ -331,19 +360,23 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const exact = chosen ?? active
     const confirmed = exact ? candidates.find(reference => reference.displayWorkspaceId === exact.displayWorkspaceId && reference.groupId === exact.groupId && reference.tabId === exact.tabId && reference.regionId === exact.regionId) : undefined
     const reference = confirmed ?? (!chosen && groups.size === 1 ? candidates[0] : undefined)
-    if (!reference && !chosen && candidates.length) { setLocationChoice({ kind: 'agent', zoneId, choices: candidates }); return }
-    if (!zone || !reference) { setError('This item’s original display location is not confirmed. Its content is kept; restore that item and retry.'); return }
-    const id = before.openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: reference.displayWorkspaceId,
-      tabGroupId: reference.groupId, zoneId, reveal: false })
-    const tab = id ? useAppStore.getState().tabs[id] : null
-    if (!tab) { setError('The original Agent location is still restoring. Existing content is kept.'); return }
+    if (!reference && !chosen && candidates.length) { setLocationChoice({ kind, zoneId, choices: candidates }); return }
+    const layout = zone ? before.layouts[zone.workspaceId] : undefined
+    const emptyTarget = !chosen && !candidates.length && zone && layout?.groups.some(group => group.id === layout.activeGroupId && groupIds(layout.root).includes(group.id))
+      ? { displayWorkspaceId: zone.workspaceId, groupId: layout.activeGroupId } : undefined
+    const target = reference ?? emptyTarget
+    if (!zone || !target) { setError('This item’s original display location is not confirmed. Its content is kept; restore that item and retry.'); return }
+    const preparation = prepareItemTab(zone, target)
+    if (!preparation) return
     setLocationChoice(null)
-    useLauncherState.getState().setSection(zone.workspaceId, 'agents', 'expanded')
+    if (kind === 'agent') useLauncherState.getState().setSection(zone.workspaceId, 'agents', 'expanded')
     intent.current += 1
     setError(null)
-    setSelection(surveySelectReference(surveyInitialZoneSelection(catalog!, zoneId, before.layouts, before.tabs, reference.displayWorkspaceId),
-      { tabId: tab.id, regionId: tab.layout.activeRegionId }))
+    setSelection(surveySelectReference(surveyInitialZoneSelection(catalog!, zoneId, before.layouts, before.tabs, target.displayWorkspaceId), preparation.reference))
+    if (kind === 'browser') await createItemBrowser(preparation)
   }
+
+  const newItemAgent = (zoneId: string, chosen?: WorkbenchProjectionSelection) => { void newItemTab(zoneId, 'agent', chosen) }
 
   function saveToTopic(zone: AgentMuxZoneFact | undefined, scope: 'research' | 'panel'): void {
     const targetPanel = selection?.zoneId === zone?.zoneId ? currentPanel : null
@@ -366,13 +399,27 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         position: { zoneId: currentZone.zoneId, tabId: currentPanel.tabId, regionId: currentPanel.regionId } } })
   }
 
-  const options = <SurveyItemOptions key={String(sidebarCollapsed)} visible={visible && !controlsCoverPage} title={currentZone ? itemTitle(currentZone) : selection ? 'Retained exploration' : 'New exploration'}
-    zone={currentZone ?? null} workspace={workspace ?? null} collected={!!selection && collected[selection.zoneId] === true} relatedSpaces={related.spaces} relatedSpacesUnconfirmed={related.unconfirmed}
-    activityDetails={currentZone ? activity(currentZone).details : null}
-    onSaveToTopic={scope => saveToTopic(currentZone, scope)} currentPanelAvailable={Boolean(currentPanel)}
-    {...(currentZone ? { onRename: () => { setSidebarCollapsed(false); setRenamingZoneId(currentZone.zoneId) } } : {})}
-    onCollectedChange={value => { if (selection && !setCollected(selection.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}
-    onManageBrowsers={() => setToolsOpen(!toolsOpen)} onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }} />
+  function itemOptionsFor(zone: AgentMuxZoneFact | undefined, activityDetails = zone ? activity(zone).details : null): SurveyItemOptionsProps {
+    const bindings = catalog?.bindings.filter(binding => binding.zoneId === zone?.zoneId) ?? []
+    return {
+      visible: visible && !controlsCoverPage, title: zone ? itemTitle(zone) : selection ? 'Retained exploration' : 'New exploration',
+      zone: zone ?? null, workspace: zone ? resourceWorkspaces.get(zone.workspaceId) ?? null : null,
+      collected: !!zone && collected[zone.zoneId] === true,
+      relatedSpaces: zone && catalog ? bindings.flatMap(binding => catalog.spaces.filter(space => space.spaceId === binding.spaceId)) : null,
+      relatedSpacesUnconfirmed: bindings.some(binding => !catalog?.spaces.some(space => space.spaceId === binding.spaceId && !space.issue)),
+      activityDetails,
+      currentPanelAvailable: zone?.zoneId === selection?.zoneId && Boolean(currentPanel),
+      onSaveToTopic: scope => saveToTopic(zone, scope),
+      onCollectedChange: value => { if (zone && !setCollected(zone.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') },
+      onOpenWorkspace: workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) },
+      ...(zone ? {
+        onRename: () => { setSidebarCollapsed(false); setRenamingZoneId(zone.zoneId) },
+        onClose: () => closeItem(zone.zoneId),
+        onNewNote: () => newItemNote(zone.zoneId), onNewAgent: () => newItemAgent(zone.zoneId)
+      } : {})
+    }
+  }
+  const options = <SurveyItemOptions key={String(sidebarCollapsed)} {...itemOptionsFor(currentZone)} onManageBrowsers={() => setToolsOpen(!toolsOpen)} />
   const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
   return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform()}
@@ -382,17 +429,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <ThemeLayoutOpenLeftIcon size={16} /> : <ThemeLayoutCloseLeftIcon size={16} />}</button>
       </div>
       <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
-        <SurveyItemContextMenu returnFocus={() => contextOrigin.current} visible={visible && !controlsCoverPage} title={contextZone ? itemTitle(contextZone) : 'Exploration'}
-          zone={contextZone ?? null} workspace={contextZone ? resourceWorkspaces.get(contextZone.workspaceId) ?? null : null}
-          collected={!!contextZone && collected[contextZone.zoneId] === true}
-          relatedSpaces={contextZone && catalog ? catalog.bindings.filter(binding => binding.zoneId === contextZone.zoneId).flatMap(binding => catalog.spaces.filter(space => space.spaceId === binding.spaceId)) : null}
-          relatedSpacesUnconfirmed={!!contextZone && !!catalog?.bindings.some(binding => binding.zoneId === contextZone.zoneId && !catalog.spaces.some(space => space.spaceId === binding.spaceId && !space.issue))}
-          activityDetails={contextZone ? activity(contextZone).details : null}
-          onRename={() => { if (contextZone) { setSidebarCollapsed(false); setRenamingZoneId(contextZone.zoneId) } }}
-          onCollectedChange={value => { if (contextZone && !setCollected(contextZone.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}
-          onSaveToTopic={scope => saveToTopic(contextZone, scope)} currentPanelAvailable={contextZone?.zoneId === selection?.zoneId && Boolean(currentPanel)}
-          onNewNote={() => { if (contextZone) newItemNote(contextZone.zoneId) }} onNewAgent={() => { if (contextZone) newItemAgent(contextZone.zoneId) }}
-          onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }}>
+        <SurveyItemContextMenu returnFocus={() => contextOrigin.current} {...itemOptionsFor(contextZone)}>
         <div className="survey-page-list">
           {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
             <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><ThemeStatusUnknownIcon size={14} /><strong>Retained exploration</strong></button>
@@ -401,7 +438,13 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           {items.filter(zone => !((notebooks.some(book => book.workface?.zoneId === zone.zoneId) || pages.some(page => page.workface?.zoneId === zone.zoneId)) &&
             (tabsByZone.get(zone.zoneId) ?? []).length > 0 && (tabsByZone.get(zone.zoneId) ?? []).every(tabId => !!tabs[tabId] && workbenchSurfaces(tabs[tabId]!).every(surface => surface.kind === 'file' && pages.some(member => member.resource.workspaceId === surface.workspaceId && member.resource.path === surface.path))))).map(zone => {
             const status = activity(zone)
+            const itemTabs = [...new Set(itemReferences(zone.zoneId).map(reference => reference.tabId))]
+            const itemOptions = itemOptionsFor(zone, status.details)
             return <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
+              visible={visible && !controlsCoverPage}
+              tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn key={tabId} tab={tabs[tabId]!} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} />)}</div> : null}
+              options={<SurveyItemOptions {...itemOptions} rowAction compact />}
+              onNewBrowser={zoneId => { void newItemTab(zoneId, 'browser') }} onNewTab={zoneId => { void newItemTab(zoneId, 'tab') }}
               onContextMenu={button => { contextOrigin.current = button; setContextZoneId(zone.zoneId) }} onNewNote={newItemNote} onNewAgent={newItemAgent} activity={status.summary} editing={renamingZoneId === zone.zoneId} onEdit={editing => setRenamingZoneId(editing ? zone.zoneId : null)}
               onRename={async (name, revision) => { const applied = await useAppStore.getState().setSurveyExplorationName(zone.zoneId, name, revision); if (!applied) setError('The exploration source or name revision is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
           })}
@@ -409,7 +452,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         </SurveyItemContextMenu>
       </aside>
       {locationChoice ? <SurveyPanelChoices mode="button" open visible={visible && !controlsCoverPage} choices={locationChoice.choices} facts={useAppStore.getState()}
-        onOpenChange={open => { if (!open) setLocationChoice(null) }} onSelect={reference => locationChoice.kind === 'note' ? newItemNote(locationChoice.zoneId, reference) : newItemAgent(locationChoice.zoneId, reference)} /> : null}
+        onOpenChange={open => { if (!open) setLocationChoice(null) }} onSelect={reference => locationChoice.kind === 'note' ? newItemNote(locationChoice.zoneId, reference) : void newItemTab(locationChoice.zoneId, locationChoice.kind, reference)} /> : null}
       <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><ThemeActionCreateBrowserIcon size={16} /><span>New browser</span></button>
         <Menu.Root modal={false} open={visible && !controlsCoverPage && createMenuOpen} onOpenChange={setCreateMenuOpen}>
           <Menu.Trigger asChild><button type="button" className="survey-icon-button" aria-label="New browser options" title="New browser options" disabled={opening}><ThemeNavigationDisclosureIcon size={12} /></button></Menu.Trigger>
@@ -436,6 +479,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     <div className="survey-content">
       <div className="survey-page-content" inert={controlsCoverPage} aria-hidden={controlsCoverPage}>
         {error ? <p className="survey-error" role="alert">{error}{failedCreation.current ? <button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>Retry original item</button> : null}</p> : null}
+        {Object.entries(itemBrowserRecoveries).map(([key, recovery]) => <p key={key} className="survey-error" role="alert" data-survey-browser-recovery={recovery.preparation.reference?.regionId}>
+          {recovery.message}<button type="button" disabled={recovery.pending} onClick={() => void createItemBrowser(recovery.preparation)}>{recovery.pending ? 'Retrying original page…' : 'Retry original page'}</button>
+        </p>)}
         {!selection ? <BrowserStartPage config={resolveBrowserStartPage(config?.browser.startPage)} visible={visible && !controlsCoverPage} historyRevision={historyRevision}
           historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null}
           onChooseHistory={value => { setQuery(value); browserInput.current?.submit(value) }}>
