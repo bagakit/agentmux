@@ -1775,7 +1775,8 @@ export class AgentMuxClient {
    *
    * 谁**不会**：用户点 Resume。这条降级只在进程还在跑时产生，而 Resume 走 `ensureAgentContinuity`，
    * 对 running 的 Run 判出 `reattachable` 就直接返回投影，不碰 attach；观察刷新沿公开
-   * refreshRunAttachment 重建原 live owner，真实 attach 成功后才撤销输出通道事实。
+   * refreshRunAttachment 取得准确 continuation；原 live owner 已不可用时才恢复它，
+   * 真实 attach 成功后才撤销对应输出通道事实。
    */
   private async clearOutputChannel(session: AgentMuxStoredAgentSession, observationOrigin?: AgentMuxObservationOrigin): Promise<void> {
     if (!session.terminalOutputChannel) return
@@ -4099,7 +4100,7 @@ export class AgentMuxClient {
     })
   }
 
-  /** Replace this client's live observation of an exact Run, keeping its process and Input untouched. */
+  /** Read a fresh exact continuation, restoring an unavailable live owner without disturbing existing readers or Input. */
   async refreshRunAttachment(ref: AgentMuxRunRef, afterByte = 0,
     view: AgentMuxRunAttachmentView = 'raw', operationId: string = mintObjectId()): Promise<AgentMuxRunAttachment> {
     this.requireConnected()

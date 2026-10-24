@@ -1404,6 +1404,19 @@ export class CtxmuxRunAdapter {
       if (this.client !== client || this.attachmentOpenings.get(runId) !== opening) {
         throw new AgentMuxError('The original Attachment observation changed during publication; its Run was retained.', 'CONTROL_CANCELLED')
       }
+      if (replace && previous?.attachment && !previous.unavailable) {
+        // This snapshot belongs to its new reader. The original pump still owns
+        // ordered output, resize events and decoder carry for existing readers.
+        // Replacing it at this snapshot's later cut would skip their queued bytes.
+        if (attachment.snapshot.run.state.type !== 'running') attachment.close()
+        else await attachment.detach()
+        if (this.client !== client || this.attachmentOpenings.get(runId) !== opening ||
+          this.attachments.get(runId) !== previous) throw new AgentMuxError(
+          'The original Attachment observation changed while releasing its snapshot reader; its Run was retained.', 'CONTROL_CANCELLED')
+        if (!previous.attachment || previous.unavailable) throw previous.unavailable ?? new AgentMuxError(
+          'The original output observation ended while its snapshot reader was closing. Its Run is retained.', 'CTXMUX_ATTACHMENT_UNCONFIRMED')
+        return snapshot
+      }
       if (replace) {
         this.attachments.set(runId, next)
         void this.pump(runId, token, attachment, decoder)
