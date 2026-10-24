@@ -91,6 +91,29 @@ async function fixture(providerId: 'codex' | 'claude' | 'droid' = 'codex') {
       contentOperations(activeServices.publication!.store, bound.binding, 100).some(operation => operation.prepared?.request.body === call.body)) }
 }
 
+it('current native coverage failure leaves an independently confirmed App user message publishable', async () => {
+  const f = await fixture('claude'), text = 'A confirmed App message while native history is temporarily unreadable'
+  const provider = (f.client as unknown as { providers: core.AgentProviderRegistry }).providers.get('claude')
+  const nativeChanges = provider.readConversationChanges!.bind(provider)
+  const read = vi.spyOn(provider, 'readConversationChanges').mockImplementation(input => input.after !== undefined
+    ? Promise.reject(new core.AgentMuxError('PRIVATE native details', 'AGENT_SESSION_HISTORY_TIMEOUT')) : nativeChanges(input))
+  await f.client.submitAgentPrompt({ ...agentPromptCondition(f.client.agentSession(f.ref.agentSessionId)), agentSessionId: f.ref.agentSessionId,
+    operationId: 'independent-public-input-during-native-gap', prompt: text, authorHuman: true, allowUncertainTurn: true })
+  f.services.publication!.refresh()
+  await vi.waitFor(async () => {
+    expect(JSON.stringify(f.posts())).toContain(text)
+    const page = await f.services.publication!.list({ connectionId: f.binding.connectionId, bindingId: f.binding.bindingId, bindingRevision: f.binding.revision })
+    expect(page.sourceObservation).toMatchObject({ state: 'unavailable', code: 'AGENT_SESSION_HISTORY_TIMEOUT' })
+    expect(contentOperations(f.services.publication!.store, f.binding)).toMatchObject([{ state: 'confirmed' }])
+  }, { timeout: 8_000 })
+  expect(read).toHaveBeenCalled()
+  const report = await f.rpc.call('connection.diagnose', { executionHostId: f.ref.hostId, agentSessionId: f.ref.agentSessionId })
+  expect(report.groups.value!.items[0]!.outgoing.value!.sourceObservation).toMatchObject({ state: 'unavailable', code: 'AGENT_SESSION_HISTORY_TIMEOUT' })
+  expect(JSON.stringify(report)).not.toContain('PRIVATE native details')
+  expect(f.client.agentSession(f.ref.agentSessionId).run).toEqual({ runId: 'run-original-agent' })
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
 it('original saved context and native input copies stay locally complete while the default Host publishes only independent allowed content', async () => {
   const f = await fixture(), privateContext = 'Private generated context sentinel', publicInput = '  Exact public input 中文🙂\nAll original spacing remains.  '
   const mixed = privateContext + '\n\n' + publicInput
