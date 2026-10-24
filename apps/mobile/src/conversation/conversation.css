@@ -77,7 +77,10 @@
 .mobile-app .mobile-conversation .log-turn[data-message-bubble='true'] { border: 0; box-shadow: none; font-size: 13px; border-radius: 10px; padding: 8px 10px; margin-block: 4px; }
 .mobile-app .mobile-conversation .log-turn__content { font-size: 13px; line-height: 1.5; }
 .mobile-app .mobile-conversation .log-turn__content p { margin-block: 6px; }
-.mobile-app .mobile-conversation .log-turn__head { font-size: 11px; }
+.mobile-app .mobile-conversation .log-turn__head { display: flex; align-items: center; gap: 6px; font-size: 11px; min-height: 28px; }
+.mobile-app .mobile-conversation .log-turn__head .log-turn__sender-id { display: none; }
+.mobile-app .mobile-conversation .log-turn__actions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.mobile-app .mobile-conversation .agent-interaction__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .mobile-app .mobile-conversation .composer { border: 0; background: var(--surface-2); background-image: none; margin: 0; padding: 4px 6px 2px; box-shadow: none; border-radius: 12px; }
 .mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: max-content minmax(0,1fr) max-content; min-height: 44px; }
 .mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer-completion-editor { grid-column: 1 / -1; grid-row: 1; }
