@@ -24,10 +24,15 @@ function mapping(value: unknown): ConnectionDeliveryMapping {
   return { messageId: text(p.messageId), ...(p.threadId === undefined ? {} : { threadId: text(p.threadId) }), ...(p.reactionId === undefined ? {} : { reactionId: text(p.reactionId) }) }
 }
 function reference(value: unknown): import('./connection-delivery-contract.js').ConnectionDeliveryReference {
-  const p = object(value, ['hostId', 'agentSessionId', 'source']), source = object(p.source, ['kind', 'providerId', 'nativeSessionId', 'recordId', 'runId', 'requestId', 'requestDigest', 'operationId', 'event'])
+  const p = object(value, ['hostId', 'agentSessionId', 'source']), source = object(p.source, ['kind', 'providerId', 'nativeSessionId', 'recordId', 'runId', 'requestId', 'requestDigest', 'operationId', 'event', 'ingressId'])
   const ref = { hostId: text(p.hostId), agentSessionId: text(p.agentSessionId) }
+  if (source.kind === 'ingress') {
+    object(source, ['kind', 'ingressId'])
+    return { ...ref, source: { kind: 'ingress', ingressId: text(source.ingressId) } }
+  }
+  if (source.ingressId !== undefined) fail()
   if (source.kind === 'binding-operation') {
-    object(source, ['kind', 'operationId', 'event'])
+    object(source, ['kind', 'operationId', 'event', 'ingressId'])
     if (!['connected', 'disconnected', 'paused', 'resumed', 'updated'].includes(String(source.event))) fail()
     return { ...ref, source: { kind: 'binding-operation', operationId: text(source.operationId), event: source.event as import('./room-binding-contract.js').RoomBindingNoticeEvent } }
   }
@@ -120,11 +125,12 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
   let queryFeedback: ConnectionDelivery['queryFeedback']
   if (p.queryFeedback !== undefined) {
     const q = object(p.queryFeedback, ['stage', 'ingressId', 'messageId'])
-    if (!['received', 'started', 'completed'].includes(String(q.stage)) || original.source.kind !== 'captured' ||
+    if (!['received', 'started', 'completed'].includes(String(q.stage)) || original.source.kind !== 'ingress' ||
       p.effect !== 'upsert' || ordinal !== 0 || count !== 1 || p.relay !== undefined || p.resourceUpload !== undefined || predecessorOperationId !== undefined) fail()
     queryFeedback = { stage: q.stage as NonNullable<ConnectionDelivery['queryFeedback']>['stage'], ingressId: text(q.ingressId), messageId: text(q.messageId) }
+    if (original.source.kind !== 'ingress' || original.source.ingressId !== queryFeedback.ingressId) fail()
     if (mapped && (mapped.messageId !== queryFeedback.messageId || !mapped.reactionId || mapped.threadId !== undefined)) fail()
-  } else if (mapped?.reactionId !== undefined) fail()
+  } else if (mapped?.reactionId !== undefined || original.source.kind === 'ingress') fail()
   let resourceUpload: ConnectionDelivery['resourceUpload']
   if (p.resourceUpload !== undefined) {
     const upload = object(p.resourceUpload, ['kind', 'part', 'attempt', 'state']), selected = part(upload.part), attempt = integer(upload.attempt, 0)
