@@ -154,6 +154,7 @@ import {
   AgentMuxSessionDurabilityError,
   loadAgentSessionMetadata,
   agentLifecycleOperationIdentity,
+  parseAgentCreationSpatialIntent,
   loadSessionHistorySources,
   type AgentMuxAgentSessionStore,
   type AgentMuxLifecycleReservation,
@@ -218,6 +219,8 @@ const AGENTMUX_CLI_PATH = resolveCoreBinPath('amux')
 export type AgentMuxAgentCreateInput = {
   agentSessionId?: string
   createOperationId?: string
+  /** Original requested position only; it grants no placement, role or caller authority. */
+  spatialIntent?: import('./types.js').AgentMuxAgentCreationSpatialIntent
   /** Native context copy into this new Session; the source retains its original Run. */
   forkSource?: AgentMuxAgentForkSource
   /** Continue an exact persisted Provider conversation that has no existing Core owner. */
@@ -256,7 +259,7 @@ export type AgentMuxAgentCreateInput = {
 /** Target-owned configuration, with a frozen revision; no source machine argv or environment. */
 export type AgentMuxHostAgentCreateInput = Pick<AgentMuxAgentCreateInput,
   'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'agentMuxNote' | 'agentMuxTask' | 'optionalContext' |
-  'launchOptions' | 'cols' | 'rows' | 'nativeResumeSource'> & {
+  'launchOptions' | 'cols' | 'rows' | 'nativeResumeSource' | 'spatialIntent'> & {
   executorRevision: string
   /** Existing signed creation intent admission; an initial body is optional. */
   initialMessageAdmission?: AgentMuxCreationAdmission
@@ -638,8 +641,9 @@ export class AgentMuxClient {
 
   async createHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
+    if (input?.spatialIntent !== undefined) input = { ...input, spatialIntent: parseAgentCreationSpatialIntent(input.spatialIntent) }
     const allowed = ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt',
-      'agentMuxNote', 'agentMuxTask', 'optionalContext', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId', 'nativeResumeSource']
+      'agentMuxNote', 'agentMuxTask', 'optionalContext', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId', 'nativeResumeSource', 'spatialIntent']
     if (!input || Object.keys(input).some(key => !allowed.includes(key)) || !input.agentSessionId || !input.createOperationId || !input.executorRevision ||
       input.agentMuxTask !== undefined && typeof input.agentMuxTask !== 'string') {
       throw new AgentMuxError('Target creation requires exact Session, operation and Executor revision, without command overrides.', 'INVALID_CONTROL_REQUEST')
@@ -670,6 +674,7 @@ export class AgentMuxClient {
     if (descriptor.configRevision !== input.executorRevision) throw new AgentMuxError('Target Executor configuration changed. Refresh its inventory before a new operation.', 'EXECUTOR_REVISION_CONFLICT')
     return await this.createAgentWithDeliveryAuthorized({
       agentSessionId: input.agentSessionId, createOperationId: input.createOperationId,
+      ...(input.spatialIntent === undefined ? {} : { spatialIntent: input.spatialIntent }),
       providerId: config.providerId, executorId: input.executorId, workspacePath: input.workspacePath,
       injectAgentMuxGuide: config.injectAgentMuxGuide, args: config.args, env: config.env, commandOverride: config.command,
       ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
@@ -4561,6 +4566,7 @@ export class AgentMuxClient {
     admitted?: Parameters<AgentMuxClient['createAgentWithDeliveryAttempt']>[1]): ReturnType<AgentMuxClient['createAgentWithDelivery']> {
     this.requireConnected()
     const frozen = structuredClone(input)
+    if (frozen.spatialIntent !== undefined) frozen.spatialIntent = parseAgentCreationSpatialIntent(frozen.spatialIntent)
     frozen.createOperationId ??= mintObjectId()
     frozen.agentSessionId ??= await this.resolveAgentCreationSessionId(frozen.createOperationId)
     const authority = structuredClone(admitted)
@@ -4789,7 +4795,7 @@ export class AgentMuxClient {
           ...(managedLaunch?.nativeActor ? { nativeActor: managedLaunch.nativeActor } : {}),
           ...(initialInput ? { initialInput } : {}),
           capabilityHash: hashAgentCapability(invocationCapability), createdAt: preparedAt, updatedAt: preparedAt,
-          creation: { createOperationId, intentDigest, ...(createdBy ? { createdBy } : {}),
+          creation: { createOperationId, intentDigest, ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(createdBy ? { createdBy } : {}),
             ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}),
             initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}), ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
           ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
@@ -4856,7 +4862,7 @@ export class AgentMuxClient {
         createdAt: preparedCreation?.createdAt ?? now,
         updatedAt: preparedCreation?.updatedAt ?? now,
         creation: { createOperationId, ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}), initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested',
-          intentDigest, ...(createdBy ? { createdBy } : {}), createdRun: runRef(run.runId),
+          intentDigest, ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(createdBy ? { createdBy } : {}), createdRun: runRef(run.runId),
           ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}), ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}),
           ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
         ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
@@ -4999,6 +5005,7 @@ export class AgentMuxClient {
         createOperationId,
         ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}),
         intentDigest,
+        ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}),
         ...(createdBy ? { createdBy } : {}), createdRun: runRef(run.runId),
         ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}),
         ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}),

@@ -1309,8 +1309,13 @@ export type AgentPromptSubmissionRecord = {
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
 }
 
+/** Original requested position, never a placement ACK or a role/permission grant. */
+export type AgentMuxAgentCreationSpatialIntent = { tabId: string; regionId: string; executionWorkspaceId: string }
+
 export type AgentMuxAgentCreationFact = {
   createOperationId: string
+  /** Frozen only when supplied by this creation; old Sessions remain without a position claim. */
+  spatialIntent?: AgentMuxAgentCreationSpatialIntent
   /** Safe reference to the original input owner; private launch text is never projected here. */
   initialInputKey?: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey, { kind: 'prompt' }>
   /** Original authenticated creation source, distinct from initial-message author and fork ancestry. */

@@ -1445,6 +1445,14 @@ function nativeConfirmation(value: unknown): AgentNativeSessionConfirmationRecei
     ...(p.previousPromptSubmissionId === undefined ? {} : { previousPromptSubmissionId: string(p.previousPromptSubmissionId, 'nativeConfirmation.previousPromptSubmissionId') }) }
 }
 
+export function parseAgentCreationSpatialIntent(value: unknown): import('./types.js').AgentMuxAgentCreationSpatialIntent {
+  const intent = record(value, 'creation.spatialIntent')
+  if (Object.keys(intent).some(key => !['tabId', 'regionId', 'executionWorkspaceId'].includes(key)))
+    throw new AgentMuxError('Creation spatial intent requires only its exact original position and execution Workspace.', 'INVALID_AGENT_SESSION_STORE')
+  return { tabId: string(intent.tabId, 'creation.spatialIntent.tabId'), regionId: string(intent.regionId, 'creation.spatialIntent.regionId'),
+    executionWorkspaceId: string(intent.executionWorkspaceId, 'creation.spatialIntent.executionWorkspaceId') }
+}
+
 export function parseAgentCreationFact(value: unknown): NonNullable<AgentMuxAgentSession['creation']> {
   const creation = record(value, 'creation'), initialPrompt = creation.initialPrompt
   if (!['not-requested', 'confirmed', 'unconfirmed', 'unknown'].includes(String(initialPrompt)) ||
@@ -1459,6 +1467,7 @@ export function parseAgentCreationFact(value: unknown): NonNullable<AgentMuxAgen
     failure = { step: p.step as NonNullable<typeof failure>['step'], code: string(p.code, 'creation.failure.code'), message: text(p.message, 'creation.failure.message') }
   }
   return { createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt: initialPrompt as NonNullable<AgentMuxAgentSession['creation']>['initialPrompt'],
+    ...(creation.spatialIntent === undefined ? {} : { spatialIntent: parseAgentCreationSpatialIntent(creation.spatialIntent) }),
     ...(creation.initialInputKey === undefined ? {} : { initialInputKey: (() => {
       const key = validateAgentPromptInputKey(creation.initialInputKey)
       if (key.kind !== 'prompt') throw new AgentMuxError('Creation requires its original prompt key.', 'INVALID_AGENT_SESSION_STORE')
