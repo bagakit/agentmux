@@ -19,6 +19,7 @@ export type HostConnectionOptions = Pick<Parameters<typeof createConnectionServi
   moteConfigurationPath?: string
   /** Original remote execution clients, owned by this Host rather than a GUI window. */
   clients?(): readonly { hostId: string; client: ExecutionClient }[]
+  subscribeClients?(listener: () => void): () => void
 }
 
 /** The service is registered before Core starts; its original owner is opened only after Core's lease. */

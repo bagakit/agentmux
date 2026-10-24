@@ -256,6 +256,10 @@
     "./continuous-progress-delivery": {
       "types": "./dist/continuous-progress-delivery.d.ts",
       "import": "./dist/continuous-progress-delivery.js"
+    },
+    "./goal-runtime": {
+      "types": "./dist/goal-runtime.d.ts",
+      "import": "./dist/goal-runtime.js"
     }
   }
 }

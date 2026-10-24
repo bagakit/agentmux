@@ -14,7 +14,8 @@ export type ContinuousProgressObservation = {
   lastCompletionId?: string
   /** Candidate only; the final nullable Native fence authorizes new admission. */
   inputByte: number | null
-  inputOccupied: boolean
+  /** Optional client-owned veto. Absence does not claim that a client has no draft. */
+  inputOccupied?: boolean
 }
 
 export type ContinuousProgressDecision =
