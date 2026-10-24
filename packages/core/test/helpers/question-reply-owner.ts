@@ -50,7 +50,7 @@ server.on('listening',()=>process.stdout.write('ready\\n'));
 server.on('connection',(ws,req)=>{if(req.headers.authorization!=='Bearer '+token){ws.close();return}
 ws.on('message',bytes=>{const request=JSON.parse(String(bytes));appendFileSync(log,JSON.stringify(request)+'\\n');
 if(!Object.hasOwn(request,'id'))return;
-let result={};if(request.method==='thread/read')result={thread:{id:source.nativeSessionId,canAcceptDirectInput:true}};
+let result={};if(request.method==='thread/read')result={thread:{id:source.nativeSessionId,canAcceptDirectInput:true,status:{type:'idle'}}};
 if(request.method==='turn/start')result={turn:{id:'reply-native-turn'}};
 ws.send(JSON.stringify({jsonrpc:'2.0',id:request.id,result}));});});`)
     const child = spawn(process.execPath, [script, createRequire(import.meta.url).resolve('ws'), JSON.stringify(source), join(f.root, 'requests.ndjson'), actor.token], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] })

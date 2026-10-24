@@ -17,9 +17,9 @@ it.each([
   { name: 'unknown role with CLI origin', payloads: [{ source: 'cli', thread_source: 'future' }], main: false },
   { name: 'unknown origin', payloads: [{ source: 'future', thread_source: 'user' }], main: false },
   { name: 'child conflicts with user role', payloads: [{ source: { subagent: { thread_spawn: { parent_thread_id: 'parent' } } }, thread_source: 'user' }], main: false },
-  { name: 'multiple user roots', payloads: [{ source: 'vscode', thread_source: 'user' }, { source: 'vscode', thread_source: 'user' }], main: false },
+  { name: 'multiple user roots', payloads: [{ source: 'vscode', thread_source: 'user' }, { source: 'vscode', thread_source: 'user' }], main: false, candidates: true },
   { name: 'read-only borrowed record', payloads: [{ source: 'vscode', thread_source: 'user' }], main: false, readOnly: true },
-])('Codex machine role discovers $name only on the original live writer', async ({ payloads, main, readOnly }) => {
+])('Codex machine role discovers $name only on the original live writer', async ({ payloads, main, readOnly, candidates }) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'am-role-')))
   const files = await Promise.all(payloads.map(async (payload, index) => {
     const path = join(root, `rollout-owned-${index}.jsonl`)
@@ -30,13 +30,18 @@ it.each([
     { detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
   try {
     await once(child.stdout!, 'data')
-    const context = { processId: child.pid!, command: process.execPath, args: [], workspacePath: root, signal: AbortSignal.timeout(4000) }
+    const context = { processId: child.pid!, command: process.execPath, args: [], env: {}, workspacePath: root, signal: AbortSignal.timeout(4000) }
     const discovered = await new AgentProviderRegistry().get('codex').discoverNativeSession!(context).catch(() => null)
     if (main) {
       expect(discovered?.handle).toEqual({ kind: 'provider', providerId: 'codex', sessionId: 'thread-0', transcriptPath: files[0] })
-      await discovered!.assertCurrent()
+      if (!discovered?.assertCurrent) throw new Error('Expected a unique native witness')
+      await discovered.assertCurrent()
       await writeFile(files[0]!, JSON.stringify({ type: 'session_meta', payload: { id: 'thread-0', source: 'vscode', thread_source: 'future' } }) + '\n')
-      await expect(discovered!.assertCurrent()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE' })
+      await expect(discovered.assertCurrent()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE' })
+    } else if (candidates) {
+      expect(discovered?.candidates?.map(value => value.handle.sessionId).sort()).toEqual(['thread-0', 'thread-1'])
+      for (const candidate of discovered!.candidates!) await candidate.assertPresent()
+      expect(discovered?.assertCurrent).toBeUndefined()
     } else expect(discovered).toBeNull()
     // The different app-server Provider has no declared ThreadSource::User contract.
     if (payloads[0]?.source === 'vscode') expect(await new AgentProviderRegistry().get('traex').discoverNativeSession!(context).catch(() => null)).toBeNull()
@@ -83,8 +88,10 @@ it('OS producer counts many writable descriptors as one exact actor/file, withou
     const signal = AbortSignal.timeout(4000)
     const files = await nativeProcessFiles(child.pid!, signal, 'process')
     expect(files.filter(file => file.path === path && (file.access === 'w' || file.access === 'u'))).toHaveLength(17)
-    const found = await new AgentProviderRegistry().get('codex').discoverNativeSession!({ processId: child.pid!, command: process.execPath, args: [], workspacePath: root, signal })
-    expect(found?.handle).toMatchObject({ sessionId: 'dual-main', transcriptPath: path }); await found!.assertCurrent()
+    const found = await new AgentProviderRegistry().get('codex').discoverNativeSession!({ processId: child.pid!, command: process.execPath, args: [], env: {}, workspacePath: root, signal })
+    expect(found?.handle).toMatchObject({ sessionId: 'dual-main', transcriptPath: path })
+    if (!found?.assertCurrent) throw new Error('Expected one native writer witness')
+    await found.assertCurrent()
     expect(child.exitCode).toBeNull()
   } finally { const exit = once(child, 'exit'); child.kill('SIGTERM'); await exit; await rm(root, { recursive: true, force: true }) }
 }, 10_000)
