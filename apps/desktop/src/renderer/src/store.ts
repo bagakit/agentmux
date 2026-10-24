@@ -341,6 +341,7 @@ import {
   reduceSessionLaunchFailed,
   reduceTimelineSnapshot,
   type PendingAgentLaunch,
+  type RuntimeOperationNotice,
   type SessionViewMode
 } from './lib/session-state'
 import {
@@ -504,6 +505,7 @@ export type ErrorNoticeContext = {
   /** Explicit presentation from the diagnostic producer; the complete error remains authoritative. */
   summary?: string
   subject?: SessionControl
+  runtimeOperation?: RuntimeOperationNotice
   /** Same key means the same original occurrence. New operations/recurrences supply a new key. */
   event?: { source: string; key: string; object?: NotificationEventObject }
   /** An exact absent-main diagnostic may settle from this Session's later confirmed binding. */
@@ -528,9 +530,18 @@ export type NotificationEvent = {
   firstObservedAt?: number
   lastObservedAt?: number
   occurrences?: number
+  /** Changed failures of the same original operation remain separately readable. */
+  previousObservations?: Array<{ message: string; observedAt: number }>
+}
+
+function runtimeOperationOwner(operation: RuntimeOperationNotice): string {
+  const source = operation.lifecycle
+  return JSON.stringify(['core-lifecycle', operation.hostId, operation.agentSessionId,
+    source.kind, source.lifecycleOperationId, source.operationId, source.phase, source.expectedRun?.runId])
 }
 
 export function notificationSourceOwner(context: ErrorNoticeContext | null | undefined): string | undefined {
+  if (context?.runtimeOperation && context.runtimeOperation.resolvedAt === undefined) return runtimeOperationOwner(context.runtimeOperation)
   const failure = context?.lifecycle
   if (failure) return lifecycleFeedbackOwnerKey(failure.step === 'launch' ? { regionId: failure.regionId } : { subject: failure.subject })
   const subject = context?.subject
@@ -539,6 +550,7 @@ export function notificationSourceOwner(context: ErrorNoticeContext | null | und
 }
 
 export function notificationEventIdentity(message: string, context: ErrorNoticeContext | null | undefined): string {
+  if (context?.runtimeOperation) return compactNotificationIdentity(runtimeOperationOwner(context.runtimeOperation))
   const owner = notificationSourceOwner(context)
   if (owner) return ownedNotificationIdentity(owner, context?.kind ?? 'indeterminate', errorIdentity(message))
   const subject = context?.subject
@@ -551,6 +563,36 @@ export function notificationEventIdentity(message: string, context: ErrorNoticeC
     subject?.hostId, subject?.kind, subject?.kind === 'agent' ? subject.agentSessionId : undefined,
     subject?.run.runId, context?.lifecycle, context?.startupSessionSnapshot?.sessionIds,
     context?.startupProviderCatalog ? 'provider-catalog' : undefined, errorIdentity(message)]))
+}
+
+function observeRuntimeOperation(state: Pick<AppState, 'notificationEvents'>, event: RuntimeEvent): Partial<AppState> {
+  if (event.event.type !== 'agent-lifecycle-observed') return {}
+  const core = event.event, resolved = runtimeOperationOwner({ hostId: event.hostId, agentSessionId: core.agentSessionId,
+    lifecycle: core.lifecycle, observedAt: core.evidence.observedAt })
+  let changed = false
+  const notificationEvents = state.notificationEvents.map(record => {
+    const original = record.context?.runtimeOperation
+    if (!original || original.resolvedAt !== undefined || runtimeOperationOwner(original) !== resolved) return record
+    changed = true
+    return { ...record, context: { ...record.context!, runtimeOperation: { ...original, resolvedAt: core.evidence.observedAt } } }
+  })
+  return changed ? { notificationEvents } : {}
+}
+
+// Membership reconciliation replays the same envelope for projection. That is
+// not a second observation of its original lifecycle failure.
+const reportedRuntimeOperations = new WeakSet<RuntimeEvent>()
+function reportRuntimeDiagnostic(event: RuntimeEvent): void {
+  const diagnostic = runtimeDiagnosticNotice(useAppStore.getState(), event)
+  if (!diagnostic) return
+  if (diagnostic.runtimeOperation) {
+    if (reportedRuntimeOperations.has(event)) return
+    reportedRuntimeOperations.add(event)
+  }
+  useAppStore.getState().reportError(diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
+    ...(diagnostic.subject ? { subject: diagnostic.subject } : {}),
+    ...(diagnostic.runtimeOperation ? { runtimeOperation: diagnostic.runtimeOperation } : {}),
+    ...(diagnostic.cause ? { cause: diagnostic.cause } : {}) })
 }
 
 type NotificationProjection = { current: NotificationEvent[]; history: NotificationEvent[]; owners: Map<string, NotificationEvent> }
@@ -3494,9 +3536,7 @@ function startSessionMembershipResync(
         for (const pending of events) {
           if (pending.event.event.type === 'run-service') runServiceProjection.apply(pending.event)
           if (pending.nativeIdentityNotice && nativeIdentityNoticeResolved(useAppStore.getState().sessions, pending.nativeIdentityNotice)) continue
-          const diagnostic = runtimeDiagnosticNotice(useAppStore.getState(), pending.event)
-          if (diagnostic) useAppStore.getState().reportError(diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
-            ...(diagnostic.subject ? { subject: diagnostic.subject } : {}), ...(diagnostic.cause ? { cause: diagnostic.cause } : {}) })
+          reportRuntimeDiagnostic(pending.event)
         }
         for (const { candidate, sessionId } of startupCandidates) {
           if (restoredDuringRead.has(candidate.hostId)) continue
@@ -11940,6 +11980,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const observationSource = rendererSessionEventSource(event.hostId, event.event)
     try {
     const core = event.event
+    if (core.type === 'agent-lifecycle-observed') {
+      set(state => observeRuntimeOperation(state, event))
+      return
+    }
     if (core.type === 'agent-input') {
       const sid = core.receipt.key.agentSessionId, pending = get().agentSteerQueues[sid]?.find(entry => entry.directInputControl?.hostId === event.hostId &&
         entry.directInputControl.agentSessionId === sid && entry.directInputControl.run.runId === core.receipt.key.expectedRun.runId &&
@@ -11985,9 +12029,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       core.observationOrigin.run.runId === projectedRun?.runId
     // Diagnostics use the existing notice owner, even while membership is reconciling.
     // They never replace semantic state or its clock.
-    const diagnostic = runtimeDiagnosticNotice(get(), event)
-    if (diagnostic) get().reportError(diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
-      ...(diagnostic.subject ? { subject: diagnostic.subject } : {}), ...(diagnostic.cause ? { cause: diagnostic.cause } : {}) })
+    reportRuntimeDiagnostic(event)
     if (core.type === 'run-service') {
       if (!runServiceProjection.apply(event) && core.agentSessionId) {
         if (get().pendingAgentLaunches[core.agentSessionId]) {
@@ -12101,20 +12143,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const message = presentError(error)
     // Without an original producer or exact subject, identical prose is not proof of one failure.
     // Mint once at intake and keep that receipt on both the latest error and its history record.
-    if (!context?.event && !context?.subject && !context?.lifecycle && !context?.startupSessionSnapshot && !context?.startupProviderCatalog) {
+    if (!context?.event && !context?.subject && !context?.runtimeOperation && !context?.lifecycle && !context?.startupSessionSnapshot && !context?.startupProviderCatalog) {
       context = { kind: 'indeterminate', ...context, event: { source: 'operation', key: mintObjectId() } }
     }
     const observedAt = Date.now()
     const observedRecord = (id: string, prior?: NotificationEvent): NotificationEvent => {
       const firstObservedAt = prior?.id === id ? prior.firstObservedAt : observedAt
+      const previousObservations = context?.runtimeOperation && prior ? prior.message === message ? prior.previousObservations
+        : [...(prior.previousObservations ?? []), { message: prior.message, observedAt: prior.lastObservedAt ?? prior.firstObservedAt ?? observedAt }] : undefined
       return { id, message, context: context ?? null,
         ...(firstObservedAt === undefined ? {} : { firstObservedAt }), lastObservedAt: observedAt,
+        ...(previousObservations ? { previousObservations } : {}),
         occurrences: prior?.id === id ? (prior.occurrences ?? 1) + 1 : 1 }
     }
     const owner = notificationSourceOwner(context)
     if (owner) {
-      const current = get(), prior = projectNotifications(current.notificationEvents).owners.get(owner)
-      const record = observedRecord(notificationEventIdentity(message, context), prior)
+      const current = get(), id = notificationEventIdentity(message, context)
+      const prior = projectNotifications(current.notificationEvents).owners.get(owner) ??
+        (context?.runtimeOperation ? current.notificationEvents.find(record => record.id === id) : undefined)
+      // Confirmation of this immutable original operation is not revoked by a
+      // delayed observation. Another operation/phase has a different owner.
+      if (context?.runtimeOperation && prior?.context?.runtimeOperation?.resolvedAt !== undefined) return
+      const record = observedRecord(id, prior)
       // The failed operation owns this current record. Unrelated errors cannot replace it,
       // and a later record cannot be settled by an older operation's successful receipt.
       set({ notificationEvents: [...(prior ? current.notificationEvents.filter(item => item !== prior) : current.notificationEvents), record] })

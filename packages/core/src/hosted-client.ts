@@ -3,6 +3,7 @@ import { parseStartupDiagnosticRead, type AgentStartupDiagnosticExactTarget, typ
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-recovery/control-contract.js'
 import { parseTerminalRecoveryInput, parseTerminalRecoveryResult } from './terminal-recovery.js'
+import { parseLifecycleDiagnosticEvent } from './lifecycle-diagnostic.js'
 import { parseConversationViewReleaseResult, parseConversationCheckpointPage, parseConversationReadPage, parseConversationChangesPage, parseConversationWatchOpening, parseConversationObservation, type ConversationRef } from './conversation.js'
 import { parseNativeConversationCheckpoint, parseNativeConversationChangesPage } from './session-history-changes.js'
 import { sanitizeInputObservationArguments } from './performance-diagnostics.js'
@@ -430,6 +431,13 @@ export async function connectHostedAgentMux(options: {
                 resolveInitial()
               } else if (received.kind === 'event') {
                 if (!initialSeen) throw new AgentMuxError('Runtime mutation preceded its initial observation.', 'CONTROL_PROTOCOL_ERROR')
+                try { parseLifecycleDiagnosticEvent(received.event) }
+                catch (error) {
+                  // An auxiliary diagnostic cannot revoke this confirmed Host or its healthy readers.
+                  emit({ type: 'agent-error', code: 'CONTROL_PROTOCOL_ERROR', message: error instanceof Error ? error.message : String(error),
+                    evidence: { source: 'agentmux', observedAt: Date.now() } })
+                  return
+                }
                 if (received.event.type === 'connection-state') {
                   try { parseHostedNativeConnection(received.event) }
                   catch (error) {

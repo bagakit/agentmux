@@ -11,7 +11,7 @@ import type {
 import { runInterruptionFact } from '../../../shared/contracts'
 import { nativeBindingKey, projectNativeSourceFacts } from '../../../shared/agent-native-source'
 import { configValuesEqual } from '../../../shared/config-edit'
-import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef, AgentMuxAttachmentGapObservation, AgentMuxOutputGapCauses } from '@agentmux/core'
+import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef, AgentMuxAttachmentGapObservation, AgentMuxOutputGapCauses, AgentMuxLifecycleDiagnosticSource } from '@agentmux/core'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
 import { agentPromptNotApplied, agentPromptPredecessor } from '@agentmux/core/prompt-condition'
 import { applyAgentTimelineEvent } from '@agentmux/core/timeline'
@@ -154,7 +154,7 @@ function gapObservationDetail(o: AgentMuxAttachmentGapObservation): string {
 export function runtimeDiagnosticNotice(
   state: Pick<SessionProjectionState, 'sessions'> & Partial<Pick<SessionProjectionState, 'pendingAgentLaunches'>>,
   event: RuntimeEvent
-): { message: string; summary: string; subject?: SessionControl; cause?: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' } | null {
+): { message: string; summary: string; subject?: SessionControl; cause?: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED'; runtimeOperation?: RuntimeOperationNotice } | null {
   const core = event.event
   if (core.type !== 'agent-error') return null
   // The exact pending Region displays this ongoing Core wait and settles it on creation.
@@ -171,7 +171,7 @@ export function runtimeDiagnosticNotice(
         // A complete failure of an original operation remains readable after
         // that Run changes. It is not a state or subject of the replacement.
         // Existing identity/source notices still settle with their original Run.
-        if (core.code !== 'AGENT_CREATION_WAITING_FOR_STORAGE' && (!core.failure || core.code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' ||
+        if (!core.lifecycle && core.code !== 'AGENT_CREATION_WAITING_FOR_STORAGE' && (!core.failure || core.code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' ||
           core.code === 'AGENT_NATIVE_SOURCE_UNCONFIRMED')) return null
       } else session = current[0]
     }
@@ -213,6 +213,8 @@ export function runtimeDiagnosticNotice(
     message: `${summary}\n\nDiagnostic:\nSource: ${core.evidence.source}. ${mode}${observation}\n${recovery}` +
       (core.failure ? `\n\nOriginal failure:\n${JSON.stringify(core.failure, null, 2)}` : ''),
     summary,
+    ...(core.lifecycle && core.agentSessionId ? { runtimeOperation: { hostId: event.hostId, agentSessionId: core.agentSessionId,
+      lifecycle: core.lifecycle, observedAt: core.evidence.observedAt } } : {}),
     ...(confirmed ? { subject: confirmed.control } : {}),
     // Only an absent main identity has this success condition. Source conflicts and failed
     // persistence retain their own cause; matching text or a generic error code cannot settle them.
@@ -220,6 +222,16 @@ export function runtimeDiagnosticNotice(
       !confirmed.nativeSourceObservation && core.evidence.source === 'agentmux' &&
       core.code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' ? { cause: core.code } : {})
   }
+}
+
+/** Notification provenance only. Run absence is retained; this is never a Session control. */
+export type RuntimeOperationNotice = {
+  hostId: string
+  agentSessionId: string
+  lifecycle: AgentMuxLifecycleDiagnosticSource
+  observedAt: number
+  /** Reading history after the original Core owner confirmed this operation. */
+  resolvedAt?: number
 }
 
 export function ownsSessionLaunch(

@@ -10,7 +10,7 @@ export const RENDERER_SESSION_EVENT_TYPES = {
   'agent-input': true, 'agent-input-recorded': true, 'control-endpoint-state': true,
   'attachment-state': true, 'run-service': true, 'terminal-snapshot': true, 'terminal-resized': true,
   'terminal-output': true, 'process-state': true, 'agent-status': true, 'agent-timeline': true,
-  interaction: true, 'agent-session': true, 'run-removed': true, 'agent-error': true,
+  interaction: true, 'agent-session': true, 'agent-lifecycle-observed': true, 'run-removed': true, 'agent-error': true,
   'connection-state': true, unknown: true
 } as const satisfies Record<AgentMuxClientEvent['type'] | 'unknown', true>
 export type RendererSessionEventType = keyof typeof RENDERER_SESSION_EVENT_TYPES
