@@ -108,7 +108,7 @@ function rows() {
   const needle=query.trim().toLowerCase();
   return data.roles.filter(r=>{
     const e=effective(r);
-    return (category==='all'||r.category===category)&&(!modifiedOnly||changed(r.id))&&(!needle||[r.id,r.glyph,r.label,e.glyph,e.feature,e.meaning,e.note,...r.sources.map(s=>s.file)].join(' ').toLowerCase().includes(needle));
+    return (category==='all'||r.category===category)&&(!modifiedOnly||changed(r.id))&&(!needle||[r.id,r.glyph,r.label,e.glyph,drawingLabel(r),e.feature,e.meaning,e.note,...r.sources.map(s=>s.file)].join(' ').toLowerCase().includes(needle));
   });
 }
 function orderedGroups(items) {
@@ -244,7 +244,7 @@ function renderInspector() {
   const e=effective(r),siblings=data.roles.filter(x=>x.glyph===r.glyph), diff=e.glyph!==r.glyph;
   $('#inspector-content').innerHTML=`
     <div class="inspector-top"><div class="inspector-heading"><h2>图标与用途</h2><span class="source-tag">${data.customGlyphs.includes(r.glyph)?'项目自绘':'共享目录'}</span><button class="icon-button close-inspector" aria-label="关闭用途编辑" data-close="inspector">×</button></div>
-    <div class="icon-comparison"><div class="comparison-item"><div class="preview">${icon(r.glyph,39)}</div><small>目录默认</small></div><span class="comparison-arrow" aria-hidden="true">→</span><div class="comparison-item proposed"><div class="preview" id="proposed-preview">${semantic(r.id,39)}</div><small>当前主题与草稿</small></div></div>
+    <div class="icon-comparison"><div class="comparison-item"><div class="preview">${icon(r.glyph,39)}</div><small>目录默认</small><div class="inspector-sizes" aria-label="目录默认实际尺寸">${[12,16,24].map(size=>`<span>${icon(r.glyph,size)}<small>${size}px</small></span>`).join('')}</div></div><span class="comparison-arrow" aria-hidden="true">→</span><div class="comparison-item proposed"><div class="preview" id="proposed-preview">${semantic(r.id,39)}</div><small>当前主题与草稿</small><div class="inspector-sizes" aria-label="当前主题实际尺寸">${[12,16,24].map(size=>`<span>${semantic(r.id,size)}<small>${size}px</small></span>`).join('')}</div></div></div>
     <div class="active-glyph-name">${escape(r.glyph)}</div><p class="reuse-label">${siblings.length} 个用途复用此图形 · 选择要调整的一项</p><div class="reuse-list">${siblings.map(x=>`<button class="reuse-button" data-reuse="${x.id}" aria-pressed="${x.id===r.id}">${x.id===r.id?'✓ ':''}${escape(x.id)}</button>`).join('')}</div></div>
     <form class="inspector-form" id="role-form"><p class="semantic-id">${escape(r.id)}</p><p class="editing-label">修改只针对这一语义项。<span id="editing-state">${changed(r.id)?'已有人工修改。':'当前显示原始定义。'}</span></p>
     <label class="field"><span class="field-label">使用的图标 <em id="glyph-changed">${diff?'已修改':''}</em></span><button type="button" id="choose-glyph" class="glyph-control">${semantic(r.id,19)}<span>${escape(drawingLabel(r))}</span><span>更换 ↗</span></button></label>
@@ -380,7 +380,7 @@ function attachEvents() {
     const card=event.target.closest('[data-glyph]'),row=event.target.closest('[data-role]'),design=event.target.closest('[data-motion-glyph]');
     if(design)openMotion(design.dataset.motionGlyph,design);
     if(card){const candidates=rows().filter(r=>r.glyph===card.dataset.glyph);selectRole(candidates.find(r=>r.id===activeId)?.id??candidates[0].id,card);}
-    if(row){if(!['gallery','matrix'].includes(mode)){mode='matrix';category='all';query=row.dataset.role;$('#search').value=query;renderCategories();}selectRole(row.dataset.role,row.querySelector('button')??row);}
+    if(row){if(!['gallery','matrix'].includes(mode)){mode='matrix';category='all';query=row.dataset.role;modifiedOnly=false;$('#modified-only').checked=false;$('#search').value=query;renderCategories();}selectRole(row.dataset.role,row.querySelector('button')??row);}
   });
   $('#inventory-content').addEventListener('change',event=>{
     if(event.target.id==='mote-interactive'){

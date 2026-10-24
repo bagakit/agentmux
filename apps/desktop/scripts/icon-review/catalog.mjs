@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { resolve, relative, join, extname, basename } from 'node:path'
 
 export const root = resolve(import.meta.dirname, '../../../..')
-export const sourceRoots = ['packages/client-ui/src', 'apps/desktop/src/renderer/src', 'apps/mobile/src']
+export const sourceRoots = ['packages/client-ui/src', 'apps/desktop/src/renderer/src', 'apps/desktop/src/shared', 'apps/mobile/src']
 const source = import.meta.dirname
 const sha = value => createHash('sha256').update(value).digest('hex')
 
@@ -40,7 +40,7 @@ export async function createReviewCatalog({ getSemanticIconCatalog, ICON_GLYPHS,
       }
     }
   }
-  for (const directory of ['packages/client-ui/src', 'apps/desktop/src/renderer/src', 'apps/mobile/src']) await scan(join(root, directory))
+  for (const directory of sourceRoots) await scan(join(root, directory))
   // Native CSS consumers have masks instead of literal semantic IDs. These are source references only.
   const nativeSource=await fs.readFile(join(root,'packages/client-ui/src/theme/icon-sprite.ts'),'utf8')
   for(const match of nativeSource.matchAll(/'(--native-[^']+)': '([^']+)'/g)) {
@@ -72,7 +72,7 @@ export async function createReviewCatalog({ getSemanticIconCatalog, ICON_GLYPHS,
     generatedAt: new Date().toISOString(), head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     categories: [{ id: 'all', label: categoryLabels.all }, ...metadata.groups.map(group => ({ id: group.id, label: categoryLabels[group.id] ?? group.label }))],
     roles, customGlyphs, sourceFiles, glyphCount: Object.keys(ICON_GLYPHS).length,
-    scanScope:{roots:['packages/client-ui/src','apps/desktop/src/renderer/src','apps/mobile/src'],extensions:['.ts','.tsx','.css'],excluded:['theme directory in ordinary scan','index.ts'],nativeSource:'packages/client-ui/src/theme/icon-sprite.ts',dynamic:'Prefix candidates only; exact targets are not resolved and do not prove actual consumer coverage.'} }
+    scanScope:{roots:sourceRoots,extensions:['.ts','.tsx','.css'],excluded:['theme directory in ordinary scan','index.ts'],nativeSource:'packages/client-ui/src/theme/icon-sprite.ts',dynamic:'Prefix candidates only; exact targets are not resolved and do not prove actual consumer coverage.'} }
   
   return catalog
 }
