@@ -42,7 +42,7 @@ export function prepareDiscordPublication(operation: Readonly<PublicationOperati
   if (statusText) text += '\n\n' + statusText
   if (includeAgent) text += '\n' + localAgent
   const authors = p.kind === 'speech' && p.relay ? p.relay.sources.map(source => source.author.kind) : undefined
-  const kinds = new Set(authors), human = !!authors?.length && authors.every(kind => kind === 'human')
+  const kinds = new Set(authors), human = operation.speaker ? operation.speaker.kind === 'human' : !!authors?.length && authors.every(kind => kind === 'human')
   const input = human && p.kind === 'speech' ? p.inputSubmission : undefined
   const inputStatus = input ? ({ waiting: 'Saved · waiting for Agent', stopped: 'Saved · delivery stopped',
     'terminal-confirmed': 'Sent to Agent · acceptance not confirmed', admitted: 'Accepted by Agent',
@@ -50,7 +50,11 @@ export function prepareDiscordPublication(operation: Readonly<PublicationOperati
     + (input.observation === 'rejoin-needed' ? '\nReconnect this input in AgentMux' : '')) : undefined
   const relayTitle = authors ? (human ? 'User' : kinds.size > 1 ? 'Mixed authors' : kinds.has('external') ? 'External message'
     : kinds.has('agent') ? 'Agent input' : 'Unknown author') + ' · via amux' : undefined
-  const heading = relayTitle ?? (p.kind === 'speech' && p.phase === 'final' ? 'Agent reply'
+  const speaker = p.kind === 'speech' ? operation.speaker : undefined
+  const name = speaker?.name?.replace(/([\\`*_~|<>])/gu, '\\$1').replace(/\r\n|\r|\n/gu, ' ')
+  const heading = speaker ? [name, { agent: 'Agent', human: 'User · via amux', external: 'External message', mixed: 'Mixed authors', unknown: 'Unknown author' }[speaker.kind],
+    p.kind === 'speech' && p.phase === 'final' ? 'Reply' : p.kind === 'speech' && p.phase === 'progress' ? 'Progress' : undefined].filter(Boolean).join(' · ')
+    : relayTitle ?? (p.kind === 'speech' && p.phase === 'final' ? 'Agent reply'
     : 'phase' in p && p.phase === 'progress' ? p.kind === 'speech' ? 'Agent progress' : 'Progress' : undefined)
   const content = (heading ? `**${heading}**\n` : '') + text
   if (content.length > 4000 && (p.kind === 'question' || p.kind === 'permission' && p.disclosure === 'shared')) {

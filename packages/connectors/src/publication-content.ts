@@ -18,6 +18,8 @@ export type PublicationContentOptions = {
   resolved: ReadonlyMap<string, ResolvedPublicationPart>
   origin(recordId: string): ConnectionOriginRepresentation['origin'] | undefined
   selected?: ConversationContentRef
+  /** A new operation carries original typed attribution separately from authored text. */
+  attributed?: boolean
 }
 export const publicationPartKey = (part: Pick<ConversationContentRef, 'record' | 'selector'>) => {
   const selector = part.selector.kind === 'native-part' ? { kind: 'native-part', partIndex: part.selector.partIndex } : { kind: 'captured-field', field: part.selector.field }
@@ -129,7 +131,7 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
       const author = original.kind === 'captured' && original.item.kind === 'user_message' && slot.selector.kind === 'captured-field' && slot.selector.field === 'content'
         ? conversationRecordAuthor(record, unit.event.reference!.agentSessionId) : undefined
       const source = original.kind === 'native' ? 'Original conversation' : original.item.source
-      const label = author ? `${({ human: 'Human user', unknown: 'Unknown author', agent: 'Agent input', external: 'External user', system: 'System' } as const)[author.kind]} · via amux\n`
+      const label = options.attributed ? '' : author ? `${({ human: 'Human user', unknown: 'Unknown author', agent: 'Agent input', external: 'External user', system: 'System' } as const)[author.kind]} · via amux\n`
         : narrow || unit.event.role === 'message' && unit.event.author.kind === 'agent' && slot.placement === 'body' ? ''
         : `[${unit.event.role} · ${source} · ${unit.event.author.kind}${original.kind === 'captured' ? ` · ${original.item.status}` : ''}${unit.event.role === 'message' ? ' · via amux' : ' · read-only'}]\n`
       const text = value ? label + value : ''
