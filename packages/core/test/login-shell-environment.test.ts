@@ -7,6 +7,7 @@ import { promisify } from 'node:util'
 import { describe, expect, it, vi } from 'vitest'
 import {
   hydrateProcessEnvironmentFromLoginShell,
+  prepareProcessEnvironmentFromLoginShell,
   loginShellEnvironmentWarning,
   parseLoginShellEnvironment
 } from '../src/login-shell-environment.js'
@@ -150,7 +151,7 @@ describe('login shell exported environment', () => {
    * 都要在预算内 settle。它是唯一能把 `withDeadline` 整个删掉这个变异打红的用例——把 runner 换成
    * SIGKILL 版本救不了它，因为这里的 runner 根本不起进程。
    *
-   * 之所以要守到函数这一层：`startPrimaryInstance` 里 `buildWindow` 会 `await environmentReady`，
+   * 之所以要守到函数这一层：新执行准备会等待完整导出环境，
    * 于是「不 settle」的症状不是环境不全，而是**窗口根本建不出来**——Dock 图标弹一下，没有任何界面。
    */
   it('gives up on a runner that never settles instead of leaving the caller pending forever', async () => {
@@ -311,4 +312,22 @@ describe('login shell exported environment', () => {
       expect(alive(hungPid), '探针 shell 在超时后还活着——TERM 被 trap 掉了，没有人送 SIGKILL').toBe(false)
     } finally { await rm(directory, { recursive: true, force: true }) }
   }, 60_000)
+})
+
+it('prepares complete exports without publishing shell-owned namespace values at any point', async () => {
+  const env: NodeJS.ProcessEnv = { HOME: '/original/home', TMPDIR: '/original/tmp', SHELL: '/bin/zsh',
+    AGENTMUX_STATE_DIRECTORY: '/original/state', CTXMUX_SOCKET: '/original/socket', PATH: '/inherited' }
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const pending = prepareProcessEnvironmentFromLoginShell({ env, runner: async (_shell, args) => {
+    await held
+    return framed(args, { HOME: '/shell/home', TMPDIR: '/shell/tmp', AGENTMUX_STATE_DIRECTORY: '/shell/state',
+      AGENTMUX_AGENT_CAPABILITY: 'shell-authority', CTXMUX_SOCKET: '/shell/socket', PATH: '/interactive', EXPORTED_VALUE: 'complete' })
+  } })
+  expect(env.PATH).toBe('/inherited')
+  expect(env.AGENTMUX_AGENT_CAPABILITY).toBeUndefined()
+  release()
+  expect(await pending).toMatchObject({ ok: true, mode: 'interactive-login' })
+  expect(env).toEqual({ HOME: '/original/home', TMPDIR: '/original/tmp', SHELL: '/bin/zsh',
+    AGENTMUX_STATE_DIRECTORY: '/original/state', CTXMUX_SOCKET: '/original/socket', PATH: '/interactive', EXPORTED_VALUE: 'complete' })
 })

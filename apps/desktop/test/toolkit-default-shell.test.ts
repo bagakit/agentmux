@@ -176,7 +176,7 @@ describe('Core terminal preparation', () => {
       workspacePath: fields.workspacePath,
       args: ['-i'],
     }
-    const original = client.prepareTerminal(input)
+    const original = await client.prepareTerminal(input)
     const request = JSON.parse(original.launch).request
     expect(original.createOperationId).toBe(input.createOperationId)
     expect(original.workspacePath).toBe(input.workspacePath)
@@ -215,11 +215,11 @@ describe('Core terminal preparation', () => {
     })
     vi.stubEnv('SHELL', undefined)
     expect(
-      JSON.parse(client.prepareTerminal(input).launch).request.args.slice(-2),
+      JSON.parse((await client.prepareTerminal(input)).launch).request.args.slice(-2),
     ).toEqual(['/bin/sh', '-i'])
     expect(
       JSON.parse(
-        client.prepareTerminal({ ...input, command: '/bin/false' }).launch,
+        (await client.prepareTerminal({ ...input, command: '/bin/false' })).launch,
       ).request.args.slice(-2),
     ).toEqual(['/bin/false', '-i'])
     vi.restoreAllMocks()
@@ -272,7 +272,7 @@ describe('Core terminal preparation', () => {
       store: new AgentMuxMemoryAgentSessionStore(),
       providers: [],
     })
-    const valid = client.prepareTerminal({
+    const valid = await client.prepareTerminal({
       workspacePath: fields.workspacePath,
     })
     const request = JSON.parse(valid.launch).request

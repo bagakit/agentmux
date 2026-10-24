@@ -84,7 +84,7 @@ it('recovers through actual private Native, Core manager, Unix RPC and source co
   expect((await replacement.runtime.call('capsule.runtime.inspect', { operationId: 'native-explicit-recovery' })).run?.runId).toBe(serviceRun)
   expect((await replacement.runtime.call('capsule.runtime.inspect', {})).phase).toBe('running')
   // Real Adapter/SDK retained validation cannot authorize a foreign complete launch.
-  const prepared = client.prepareTerminal({ command: '/bin/sh', args: ['-c', 'sleep 30'], workspacePath: directory, createOperationId: 'retained-original' })
+  const prepared = await client.prepareTerminal({ command: '/bin/sh', args: ['-c', 'sleep 30'], workspacePath: directory, createOperationId: 'retained-original' })
   const retainedRun = await create(prepared)
   closes.push(async () => await client.stopPreparedTerminal(await client.prepareTerminalStop({ runId: retainedRun.runId })))
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); closes.push(() => rpc.dispose())
