@@ -1,13 +1,16 @@
 import { appendFileSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { resolve, relative, isAbsolute } from 'node:path'
+import { resolve, relative, isAbsolute, dirname } from 'node:path'
+import { createRequire } from 'node:module'
 import assert from 'node:assert/strict'
 import { defineConfig } from 'vitest/config'
 import { candidateAlias, candidateModule } from '../../candidate-package-resolve.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 import { noteParsingAliases } from '../../../../../packages/client-ui/scripts/note-parsing-aliases.ts'
 const root = resolve(import.meta.dirname, '../../../../..')
-const aliases = [...Object.entries({ ...radixOverlayAliases, ...noteParsingAliases }).map(([find, replacement]) => ({ find, replacement })), candidateAlias(root, { browser: true, source: true })]
+const desktop = createRequire(resolve(root, 'apps/desktop/package.json'))
+const aliases = [...['react', 'react-dom'].map(find => ({ find, replacement: dirname(desktop.resolve(find + '/package.json')) })),
+  ...Object.entries({ ...radixOverlayAliases, ...noteParsingAliases }).map(([find, replacement]) => ({ find, replacement })), candidateAlias(root, { browser: true, source: true })]
 const digest = (text: string) => createHash('sha256').update(text).digest('hex')
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases, conditions: ['browser'], dedupe: ['react', 'react-dom'] },
   plugins: [{ name: 'native-session-owning-source', enforce: 'pre',
