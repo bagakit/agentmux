@@ -1,3 +1,4 @@
+import { SHORTCUT_GROUP_LABEL } from '@agentmux/client-ui/composer-command-candidates'
 import type { ComposerShortcut } from './contracts'
 import type { AgentDisplayState } from '@agentmux/core'
 
@@ -31,34 +32,6 @@ export function resolveComposerShortcuts(
 ): readonly ComposerShortcut[] {
   return config?.composerShortcuts ?? NO_PROMPTS
 }
-
-/**
- * 某个 Provider 的 Composer 该看到哪些 prompt。
- *
- * `providerId` 缺席即通用（对所有 Agent 可见），绑定了就只在那个 Provider 出现。判据必须是
- * 「缺席 **或** 相等」两支：只写相等会让所有不绑定的 prompt 一条都不出现（那是最常见的情形），
- * 只写缺席则绑定这件事根本没有效果。
- *
- * `providerId` 参数自身缺席（还不知道是哪个 Agent，比如新标签页尚未选 Provider）时只给通用那些：
- * 此时无从判断绑定条是否适用，而把绑定条端出来是在一个它明确不属于的地方展示它。
- */
-export function composerShortcutsForProvider(
-  prompts: readonly ComposerShortcut[],
-  providerId: string | undefined
-): ComposerShortcut[] {
-  return prompts.filter((prompt) => prompt.providerId === undefined || prompt.providerId === providerId)
-}
-
-/**
- * 一条 prompt 在候选列表里的样子：`/keyword` 作补全词，来源写进描述。
- *
- * 来源必须显示：候选里同时有 Provider 原生命令与用户自己的 Shortcut，而「打这个词会发生什么」在两者
- * 之间是不同的——一个交给 Provider 执行，一个只是把正文填进草稿。同名时用户看不出区别就会误发。
- *
- * 来源经 `group` 这个**字段**表达（浮层按它分段加标题），而不是塞进 description 让渲染层再解析回来。
- */
-export const SHORTCUT_GROUP_LABEL = 'Shortcuts'
-export const AGENT_COMMAND_GROUP_LABEL = 'Agent commands'
 
 export function composerShortcutSuggestion(
   shortcut: ComposerShortcut
