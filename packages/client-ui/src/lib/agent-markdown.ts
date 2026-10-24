@@ -223,6 +223,7 @@ export function markdownHeadingText(heading: MarkdownHeading): string {
 /** Conversation prose retains literal text unless it contains Markdown signals; files always parse. */
 export function looksLikeMarkdown(source: string): boolean {
   return (
+    /(?:^|\n)[\t ]*(?:https?:\/\/[^\s<>]+|<https?:\/\/[^\s<>]+>)[\t ]*(?=\r?\n|$)/iu.test(source) ||
     source.includes('$') || /^(#{1,6}\s|\s*[-*+]\s|\s*\d+[.)]\s|```|~~~|>\s|\||---|\*\*\*|\s*\[[^\]]+\]:)/mu.test(source) ||
     /`|\*\*|__|~~|\[[^\]]*\]\(|\[[^\]]*\]\[[^\]]*\]|\[\^[^\]]+\]|(?:^|\s)[*_][^\s*_][^\n]*?[*_](?=\s|[.,!?;:]|$)|\n\s*=+\s*(?:\n|$)| {2,}\n/u.test(source)
   )
