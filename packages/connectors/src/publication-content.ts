@@ -1,3 +1,4 @@
+import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { conversationRecordAuthor, conversationRecordId, type ConversationSourceRecord, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
 import type { PublicationImage, PublicationFile, PublicationMarkdown, ResolvedPublicationPart } from './publication-resource.js'
 import type { ConnectionDeliveryGap, ConnectionDeliveryRelay, ConnectionOriginRepresentation, RoomBinding } from '@agentmux/core/connections'
@@ -55,9 +56,17 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
   const event = { id: unit.event.id, revision: unit.event.revision }, sections: string[] = [], pieces: PublicationContentPlan['pieces'] = [], questions = new Set<string>()
   const narrow = binding.scope.publication === 'future-native-user-facing'
   let phase: 'progress' | 'final' | undefined
+  // Reading headers retain their exact frontier, but do not prove absent original content.
+  for (const record of unit.records) if (!isCompleteConversationRecord(record) &&
+    (!options.selected || conversationRecordId(options.selected.record) === record.id)) {
+    gaps.push({ gapId: 'deferred-' + record.id, event, reason: 'public-content-unconfirmed',
+      code: 'PUBLICATION_PROCESS_DETAILS_DEFERRED', record: record.reference!,
+      anchor: { record: record.reference!, revision: record.revision, frontier } })
+  }
   for (const slot of unit.event.content) {
     const record = records.get(slot.recordId)!
     const part: ConversationContentRef = { record: record.reference!, recordRevision: record.revision, selector: slot.selector }
+    if (!isCompleteConversationRecord(record)) continue // The exact missing-body gap was recorded above.
     const original = record.original, key = publicationPartKey(part)
     if (options.selected && publicationPartKey(options.selected) !== key) continue
     if (narrow && (original.kind !== 'native' || !['message', 'interaction'].includes(unit.event.role) || unit.event.author.kind !== 'agent')) { excluded.push(part); continue }

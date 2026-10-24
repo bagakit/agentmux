@@ -230,3 +230,5 @@ export function completedNativeReply(item: AgentSessionHistoryItem): boolean {
   return item.kind === 'assistant-message' && item.messagePhase !== 'progress'
     && (item.messagePhase === 'final' || item.completedAt !== undefined)
 }
+
+export { isCompleteConversationRecord } from './conversation-process-detail.js'

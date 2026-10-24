@@ -1,3 +1,4 @@
+import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { ConnectionIngressMessage } from '@agentmux/core/connections'
@@ -29,7 +30,7 @@ export function queueQueryFeedback(store: PublicationStore, boundary: Publicatio
 
 /** Consumes the original Core window and qualified adoption relation, never rendered reply text. */
 export function projectQueryFeedback(store: PublicationStore, boundary: PublicationBoundary, units: readonly ConversationUnit[]): void {
-  const records = units.flatMap(unit => unit.records)
+  const records = units.flatMap(unit => unit.records).filter(isCompleteConversationRecord)
   const context = { witnesses: units.flatMap(unit => unit.event.inputAdoption?.witnesses ?? []),
     ...(units.some(unit => unit.event.inputAdoption?.unconfirmed) ? { unconfirmed: true as const } : {}) }
   const edges = conversationInputAdoptionEdges(records, context)
