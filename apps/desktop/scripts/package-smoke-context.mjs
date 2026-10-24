@@ -30,7 +30,7 @@ export async function preservePackageSmokeFailure(temporaryRoot, failureRoot, er
   const directory = await mkdtemp(join(failureRoot, 'smoke-'))
   const files = []
   for (const [prefix, root] of [['app', temporaryRoot], ['dmg', join(temporaryRoot, 'verification')]]) {
-    for (const name of ['desktop-stdout.log', 'desktop-stderr.log', 'user-data/agentmux-host.log', 'runtime-cleanup.json']) {
+    for (const name of ['desktop-stdout.log', 'desktop-stderr.log', 'user-data/agentmux-host.log', 'semantic-host-cleanup.json', 'runtime-cleanup.json']) {
       const relative = `${prefix}-${name.replaceAll('/', '-')}`
       let handle
       try {
@@ -59,6 +59,7 @@ export async function preservePackageSmokeFailure(temporaryRoot, failureRoot, er
   }
   const failures = error instanceof AggregateError ? error.errors : [error]
   const receipt = { schema: 'agentmux.private-package-failure.v1', directory, logTailBytes: LOG_TAIL_BYTES,
+    ...(error.privateSmokeCleanup ? { cleanup: error.privateSmokeCleanup } : {}),
     failures: failures.map(failure => {
       const message = String(failure?.message ?? failure)
       return { name: String(failure?.name ?? typeof failure), message: message.slice(0, 8192),
