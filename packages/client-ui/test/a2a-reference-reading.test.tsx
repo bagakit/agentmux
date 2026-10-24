@@ -16,6 +16,7 @@ import { ConversationResourceText } from '../src/components/ConversationResource
 import { ConversationView } from '../src/components/ConversationView.js'
 import { conversationAgentReference } from '../src/lib/conversation-speaker.js'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+import { conversationMessageSourceKey } from '../src/lib/conversation-message-location.js'
 
 const { markdownInputs } = vi.hoisted(() => ({ markdownInputs: [] as string[] }))
 vi.mock('../src/components/AgentMarkdown.js', async importOriginal => {
@@ -83,15 +84,13 @@ it.each([
   expect(copy).toHaveBeenCalledExactlyOnceWith(wire, expect.any(Function))
 })
 
-it('reads the exact typed captured notice as platform wire and retains its original Copy', async () => {
+it('retains typed notification evidence without an extra system message card', async () => {
   await render(captured())
   expect(host.querySelector('[data-a2a-notification-id]')?.getAttribute('data-a2a-notification-id')).toBe('independent-notice-input')
-  expect(host.querySelector('.log-turn__system-summary')?.textContent).toBe('2 A2A Inbox references')
-  await click('.log-turn__system-toggle')
-  expect(host.querySelectorAll('.log-turn__references li')).toHaveLength(2)
-  expect(host.querySelector('[data-avatar-id]')?.getAttribute('data-avatar-id')).toBe('agentmux')
-  expect(host.querySelector('[data-declared-source]')?.getAttribute('data-declared-source')).toBe('')
-  await click('[aria-label="Copy message"]')
+  expect(host.querySelector('.log-turn__system-toggle')).toBeNull()
+  await click('.conversation-a2a-notice__details > summary')
+  expect(host.querySelector('.conversation-a2a-notice__details')?.textContent).toContain(batch)
+  await click('[aria-label="Copy notification protocol"]')
   expect(copy).toHaveBeenCalledExactlyOnceWith(batch, expect.any(Function))
   expect(describe).not.toHaveBeenCalled()
 })
@@ -110,10 +109,10 @@ it.each([false, true])('reads qualified native platform input through the produc
   expect(projection.records[0]!.role).toBe('notice')
   await render(<ConversationView page={page} timeline={timeline} sessionId="recipient" records={projection.records} originalRecords={projection.originalRecords} describeSpeaker={describe} />)
   expect(host.querySelector('[data-a2a-notification-id]')?.getAttribute('data-a2a-notification-id')).toBe('independent-notice-input')
-  expect(host.querySelector('.log-turn__system-summary')?.textContent).toBe('2 A2A Inbox references')
-  await click('.log-turn__system-toggle')
-  expect(host.querySelectorAll('.log-turn__references li')).toHaveLength(2)
-  await click('[aria-label="Copy message"]')
+  expect(host.querySelector('.log-turn__system-toggle')).toBeNull()
+  await click('.conversation-a2a-notice__details > summary')
+  expect(host.querySelector('.conversation-a2a-notice__details')?.textContent).toContain(batch)
+  await click('[aria-label="Copy notification protocol"]')
   expect(copy).toHaveBeenCalledExactlyOnceWith(batch, expect.any(Function))
   expect(describe).not.toHaveBeenCalled()
 })
@@ -127,6 +126,28 @@ it('does not turn ordinary native adoption into a platform notification from its
   await render(<ConversationView page={page} sessionId="recipient" records={projection.records} originalRecords={projection.originalRecords} />)
   expect(host.querySelector('[data-a2a-notification-id]')).toBeNull()
   expect(host.querySelector('.log-turn__system-toggle')).toBeNull()
+})
+
+it('locates the captured contributor of a native resource notice without opening Info or prefetching its resource', async () => {
+  const resource = textResource(), source = resource.record.source
+  const page: AgentSessionHistoryPage = { agentSessionId: 'recipient', sourceHostId: 'original-host', source, nextCursor: null,
+    items: [{ id: 'native-notification', kind: 'user-message', turnId: 'original-turn', contentParts: [resource.part],
+      conversation: { nativeInput: { source, semanticItemId: 'native-notification', turnId: 'original-turn', clientCorrelation: createNativeInputCorrelation(notice.inputRef!) },
+        adoptedInput: { key: notice.inputRef!, purpose: 'a2a-notification' } } }] }
+  const timeline = { agentSessionId: 'recipient', sourceHostId: 'original-host', revision: 1, items: [notice] }
+  const projection = projectConversationReading({ agentSessionId: 'recipient', historyPage: page, timeline })
+  expect(projection.records).toHaveLength(1); expect(projection.records[0]!.original.kind).toBe('native')
+  expect(projection.records[0]!.records).toHaveLength(2)
+  const locatedMessageKey = conversationMessageSourceKey('recipient', { kind: 'captured', recordId: notice.id })!
+  await render(<ConversationView page={page} timeline={timeline} sessionId="recipient" records={projection.records} originalRecords={projection.originalRecords}
+    locatedMessageKey={locatedMessageKey} readHistoryResource={resource.read} />)
+  const evidence = host.querySelector<HTMLDetailsElement>('.conversation-a2a-notice__details')!
+  expect(evidence).not.toBeNull(); expect(evidence.open).toBe(true)
+  const original = [...evidence.querySelectorAll<HTMLDetailsElement>('[data-original-contribution]')].find(node => node.getAttribute('data-message-source-key') === locatedMessageKey)!
+  expect(original).toBeDefined(); expect(original.open).toBe(true)
+  expect(original.querySelector('pre')?.textContent).toContain(notice.id)
+  expect(host.querySelector('[aria-label="Message details"]')?.getAttribute('aria-expanded')).not.toBe('true')
+  expect(resource.read).not.toHaveBeenCalled()
 })
 
 it.each([
