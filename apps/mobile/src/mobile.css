@@ -324,6 +324,11 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-drawer-settings { margin-top: 12px; padding-top: 0; }
 .mobile-home-select { display: flex; align-items: center; justify-content: space-between; min-height: 44px; gap: 12px; font-size: 13px; }
 .mobile-home-select select { max-width: 130px; border: 0; border-radius: var(--radius-lg); padding: 8px 10px; background: var(--surface-2); color: var(--text); font-size: 16px; }
+.mobile-goal-recovery h3 { margin: 12px 0 4px; color: var(--text); font-size: 13px; font-weight: 600; }
+.mobile-goal-recovery p { color: var(--text-2); font-size: 12px; line-height: 1.5; }
+.mobile-goal-recovery details { color: var(--text-2); font-size: 12px; }
+.mobile-goal-recovery summary { overflow-wrap: anywhere; }
+.mobile-goal-recovery pre { font-size: 12px; line-height: 1.45; }
 .mobile-drawer .mobile-sheet-title h2 { margin: 8px 0; font-size: 17px; }
 .mobile-navigation-bar { grid-row: 5; display: flex; align-items: center; gap: 6px; background: var(--surface-0); border-top: 1px solid var(--line-soft); padding: 3px max(6px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left)); }
 .mobile-navigation-bar > .mobile-settings-button { flex: none; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 2px 0; }
