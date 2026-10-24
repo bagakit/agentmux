@@ -42,11 +42,11 @@ function replaceOnce(text, before, after) {
 }
 const mutants = [
   { id: 'registration', file: owners.registration,
-    expectedFailure: { file: 'apps/desktop/test/settings-modules.test.tsx', fullName: 'a contributed ninth module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell' },
+    expectedFailure: { file: 'apps/desktop/test/settings-modules.test.tsx', fullName: 'a contributed module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell' },
     source: replaceOnce(source.registration, '  generalSettingsModule,\n', ''),
     proves: 'Removing a real contribution breaks the actual product navigation/catalog.' },
   { id: 'pane', file: owners.pane,
-    expectedFailure: { file: 'apps/desktop/test/settings-modules.test.tsx', fullName: 'a contributed ninth module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell' },
+    expectedFailure: { file: 'apps/desktop/test/settings-modules.test.tsx', fullName: 'a contributed module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell' },
     source: replaceOnce(source.pane, 'const Pane = settingsModules.find((module) => module.id === pane)!.Pane', 'const Pane = () => null'),
     proves: 'A generic editor wired to an empty component cannot deliver real controls.' },
   { id: 'summary', file: owners.summary,
@@ -73,6 +73,8 @@ for (const relative of [
   renderer + 'settings/SettingsSaveBar.tsx', renderer + 'SettingsNavigation.tsx',
   'apps/desktop/src/renderer/src/App.tsx', main + 'settings/scalar-setting.ts', main + 'settings-control.ts',
   main + 'config-owner.ts', main + 'config-store.ts', 'apps/desktop/src/shared/config-edit.ts',
+  'apps/desktop/src/shared/focus-map-preferences.ts', 'apps/desktop/src/shared/focus-preferences.ts',
+  'apps/desktop/test/helpers/settings-schema-keys.ts',
   'apps/desktop/src/shared/contracts.ts', 'packages/core/src/settings-cli.ts',
   'apps/desktop/scripts/fixtures/settings-modules/vitest.config.mts',
   'apps/desktop/scripts/fixtures/settings-overview/vitest.config.mts',
@@ -100,7 +102,7 @@ assert.ok(paneHits.length > 0, 'Nonempty actual generic editor caller')
 callers.push({ symbol: 'Pane', excludedDefinitions: 'settings/modules/*', found: paneHits })
 const scalarAliasCalls = execFileSync('rg', ['-n', 'settings\\.(filter|find)\\(', main + 'settings-control.ts'], { cwd: root, encoding: 'utf8' }).trim().split('\n')
 assert.ok(scalarAliasCalls.length >= 2, 'The imported scalar alias is actually consumed by get/set')
-callers.push({ symbol: 'settings (scalarSettings alias)', excludedDefinitions: owners.main, found: scalarAliasCalls })
+callers.push({ symbol: 'settings (current scalarSettings snapshot)', excludedDefinitions: owners.main, found: scalarAliasCalls })
 await fs.writeFile(path.join(directory, 'callers.json'), JSON.stringify(callers, null, 2) + '\n')
 
 const monitored = [...inputs.keys()].filter(file => file.startsWith('apps/desktop/src/'))

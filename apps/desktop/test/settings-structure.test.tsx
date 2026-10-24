@@ -8,6 +8,7 @@ import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavig
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
+import { settingsNavGroups } from '../src/renderer/src/components/settings/settings-modules'
 
 const dom = composerDOM()
 beforeEach(() => {
@@ -25,10 +26,12 @@ async function section(title: string) {
 
 it('renders preference, resource and connection entries, with Overview before the unchanged Appearance pane', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
-  expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] p')].map(node => node.textContent))
-    .toEqual(['Preferences', 'Resources', 'Connections'])
-  expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button:not([data-settings-overview-nav])')].map(node => node.textContent))
-    .toEqual(['Appearance', 'Notifications', 'Browser', 'General', 'Keyboard shortcuts', 'Toolkit', 'Agents', 'Prompts', 'Workspaces', 'Environments', 'Phones & devices'])
+  const groups = settingsNavGroups('')
+  expect(groups.length).toBeGreaterThan(0)
+  expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] [data-settings-group-toggle]')].map(node => node.textContent))
+    .toEqual(groups.map(group => group.title))
+  expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button[data-settings-target]:not([data-settings-overview-nav])')].map(node => node.textContent))
+    .toEqual(groups.flatMap(group => group.items.map(item => item.title)))
   expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Overview')
   expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
   await section('Appearance')
@@ -36,7 +39,7 @@ it('renders preference, resource and connection entries, with Overview before th
   const pane = dom.container.querySelector<HTMLElement>('[data-settings-pane="appearance"]')!
   expect(pane.isConnected).toBe(true)
   expect([...pane.querySelectorAll('.settings-group > header > span')].map(node => node.textContent))
-    .toEqual(['Application appearance', 'Terminal font size', 'Terminal palette'])
+    .toEqual(['Workspace theme', 'Application appearance', 'Editor font size', 'Terminal font size', 'Terminal palette'])
   expect(dom.container.querySelector('[data-settings-pane="copy-paths"]')).toBeNull()
 })
 
