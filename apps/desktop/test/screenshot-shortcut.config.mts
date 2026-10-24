@@ -40,6 +40,7 @@ export default defineConfig({
     return id.includes('?raw') ? 'export default ' + JSON.stringify(changed) : changed
   } }],
   test: { include: ['apps/desktop/test/screenshot-shortcut*.test.{ts,tsx}',
+    'apps/desktop/test/{screen-capture,native-desktop-consumers,native-composer-consumers,composer-local-feedback}.test.{ts,tsx}',
     'apps/desktop/test/{shortcut-registry,shortcut-cheat-sheet,settings-keyboard-shortcuts}.test.{ts,tsx}'], environment: 'node',
     passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 10000 }
 })

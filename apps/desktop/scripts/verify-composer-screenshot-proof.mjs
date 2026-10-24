@@ -10,11 +10,11 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const read = file => readFile(path.resolve(root, file))
 const json = async file => JSON.parse(await read(file))
 const sourceFiles = [
-  'apps/desktop/src/main/composer-screenshot.ts',
+  'apps/desktop/src/main/screen-capture.ts',
   'apps/desktop/src/renderer/src/components/NewTabSurface.tsx',
   'apps/desktop/src/renderer/src/components/ComposerFeedback.tsx'
 ]
-const testFiles = ['composer-screenshot.test.ts', 'composer-local-feedback.test.tsx', 'composer-paste-selection.test.tsx']
+const testFiles = ['screen-capture.test.ts', 'composer-local-feedback.test.tsx', 'composer-paste-selection.test.tsx']
 
 async function verifyInputs(inputs) {
   for (const file of sourceFiles) assert.ok(inputs[file], `Missing owning input: ${file}`)
@@ -61,7 +61,7 @@ async function source() {
   assert.equal(hash(green), receipt.artifacts[receipt.green.log], 'Changed restored GREEN original')
   assert.match(green.toString(), /Tests\s+[1-9]\d* passed/, 'Missing restored GREEN tests')
   const productCallers = [
-    ...callers('captureComposerScreenshot', sourceFiles[0], ['apps/desktop/src/main/ipc.ts']),
+    ...callers('new ScreenCapture', sourceFiles[0], ['apps/desktop/src/main/ipc.ts']),
     ...callers('captureScreenshot()', 'apps/desktop/src/shared/contracts.ts', [
       'apps/desktop/src/renderer/src/components/NewTabSurface.tsx',
       'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx'

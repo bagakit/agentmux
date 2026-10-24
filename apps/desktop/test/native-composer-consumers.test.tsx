@@ -15,6 +15,7 @@ import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { registerNativeDesktopIpc } from '../src/main/native-desktop-ipc'
+import { ScreenCapture } from '../src/main/screen-capture'
 import { readPastedImage } from '../src/main/pasted-image-read'
 
 const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6V8AAAAASUVORK5CYII=', 'base64')
@@ -28,7 +29,9 @@ beforeEach(async () => {
 afterEach(async () => { await rm(home, { recursive: true, force: true }) })
 function connect(captureScreenshot: ReturnType<typeof vi.fn>) {
   const handlers = new Map<string, (...args: any[]) => any>()
-  registerNativeDesktopIpc({ home, native: () => ({ captureScreenshot, readClipboardText: vi.fn(), writeClipboardText: vi.fn(), writeClipboardImage: vi.fn() }),
+  const native = { captureScreenshot, readClipboardText: vi.fn(), writeClipboardText: vi.fn(), writeClipboardImage: vi.fn() }
+  const capture = new ScreenCapture({ home, native: () => native, edit: vi.fn(), reportIssue: vi.fn() })
+  registerNativeDesktopIpc({ capture: () => capture.capture(true), native: () => native,
     handle: (channel, handler) => { handlers.set(channel, handler) }, trust: () => {} })
   vi.spyOn(api.ui, 'captureScreenshot').mockImplementation(() => handlers.get('ui:captureScreenshot')!({}))
   vi.spyOn(api.ui, 'readPastedImage').mockImplementation(path => readPastedImage(home, path))
@@ -55,7 +58,7 @@ it.each([false, true])('native selection flows through the real %s Composer butt
   const { editor, id } = await mount(launcher)
   await act(async () => editor.commands.setTextSelection(7))
   await dom.click('[aria-label="Capture a screen region"]')
-  expect(captureScreenshot).toHaveBeenCalledExactlyOnceWith({ mode: 'selection' })
+  expect(captureScreenshot).toHaveBeenCalledExactlyOnceWith({ mode: 'selection', allowEditing: true })
   await act(async () => { editor.commands.insertContentAt(1, 'new '); editor.commands.setTextSelection(editor.state.doc.content.size - 1) })
   let path: string | null = null
   await act(async () => { done(result); path = await vi.mocked(api.ui.captureScreenshot).mock.results[0]!.value })
@@ -79,7 +82,7 @@ it.each([false, true])('a typed native cancel leaves the original %s Composer bo
   connect(captureScreenshot)
   const { id } = await mount(launcher)
   await dom.click('[aria-label="Capture a screen region"]')
-  expect(captureScreenshot).toHaveBeenCalledExactlyOnceWith({ mode: 'selection' })
+  expect(captureScreenshot).toHaveBeenCalledExactlyOnceWith({ mode: 'selection', allowEditing: true })
   expect(dom.draft(id)).toBe('alpha omega')
   expect(useAppStore.getState().error).toBeNull()
 })
