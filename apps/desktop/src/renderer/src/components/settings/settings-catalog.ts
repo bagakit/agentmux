@@ -1,5 +1,4 @@
 import type { ComponentType } from 'react'
-import type { SemanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import type { SettingsPageId } from './settings-modules'
@@ -46,7 +45,7 @@ export type SettingsModule = {
   description: string
   keywords: string
   searchTargets?: readonly SettingsSearchTarget[]
-  icon: SemanticIconComponent
+  icon: ComponentType<{ size?: number | undefined }>
   /** Presentation of this leaf's applications. Never implementation support or native authorization. */
   channel?: { adapterId: string; domains: readonly { domain: string; title: string }[]; icon: ComponentType<{ size?: number | undefined }> }
   /** Optional ordered shortcut on Overview; the original editor remains the destination. */

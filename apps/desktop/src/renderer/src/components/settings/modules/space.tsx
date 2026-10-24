@@ -4,7 +4,7 @@ import { useAppStore } from '../../../store'
 import { SpaceSettingsPane, projectRailDensityLabel, type SpacePreferences } from '../SpaceSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
-const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
+const SpaceIcon = semanticIconComponent('navigation.space')
 
 
 async function savePreferences(value: SpacePreferences, expected: SpacePreferences): Promise<void> {
@@ -15,7 +15,7 @@ async function savePreferences(value: SpacePreferences, expected: SpacePreferenc
 }
 
 export const spaceSettingsModule = {
-  id: 'space', group: 'work', title: 'Space', icon: ThemeObjectLauncherIcon,
+  id: 'space', group: 'work', title: 'Space', icon: SpaceIcon,
   description: 'Project rail density, Git History, topics and projects.',
   keywords: 'work topic topics project projects density rail compact dense git history commit time date',
   searchTargets: [

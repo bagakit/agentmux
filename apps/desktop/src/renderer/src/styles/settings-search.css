@@ -1,10 +1,10 @@
 .settings-search-results { padding-bottom: var(--sp-6); }
 .settings-search-results__section { margin-bottom: var(--sp-5); }
 .settings-search-results__section-link { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); width: 100%; min-height: 44px; padding: var(--sp-3) 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
-.settings-search-results__section-link > span { display: grid; gap: var(--sp-1); min-width: 0; }
+.settings-search-results__section-link > span { flex: 1; display: grid; gap: var(--sp-1); min-width: 0; }
 .settings-search-results__section-link small { color: var(--text-3); font-size: var(--fs-micro); }
 .settings-search-results__section-link strong { font-size: var(--fs-body); font-weight: 600; overflow-wrap: anywhere; }
-.settings-search-results__section-link > svg { flex: 0 0 auto; color: var(--text-3); }
+.settings-search-results__section-link > :is(svg, img) { flex: 0 0 auto; color: var(--text-3); }
 .settings-search-results__targets { border-top: 1px solid var(--line-soft); }
 .settings-search-results__target { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); width: 100%; min-height: 40px; padding: var(--sp-3); border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .settings-search-results__target > span { display: grid; min-width: 0; gap: var(--sp-1); }

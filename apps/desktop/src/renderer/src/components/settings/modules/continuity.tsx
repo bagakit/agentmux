@@ -4,9 +4,9 @@ import { saveContinuitySettings } from '../save-continuity-settings'
 import { ContinuitySettingsPane } from '../ContinuitySettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
-const ContinuityIcon = semanticIconComponent('action.refresh')
+const SessionRecoveryIcon = semanticIconComponent('object.session-recovery')
 export const continuitySettingsModule = {
-  id: 'continuity', group: 'agents', title: 'Session recovery', icon: ContinuityIcon,
+  id: 'continuity', group: 'agents', title: 'Session recovery', icon: SessionRecoveryIcon,
   description: 'Reconnect sessions and restore conversations with native recovery.',
   keywords: 'execution session continuity recovery resume restart idle wait recheck 会话 执行 连续性 恢复 重启 retry backoff budget 重试 退避',
   searchTargets: [

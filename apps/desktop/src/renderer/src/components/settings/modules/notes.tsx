@@ -6,7 +6,7 @@ import { resolveNotesPreferences, type NotesPreferences } from '../../../../../s
 import { NotesSettingsPane } from '../NotesSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
-const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
+const RecallIcon = semanticIconComponent('navigation.recall')
 
 
 async function saveNotes(value: Required<NotesPreferences>, expected: Required<NotesPreferences>): Promise<void> {
@@ -16,7 +16,7 @@ async function saveNotes(value: Required<NotesPreferences>, expected: Required<N
 }
 
 export const notesSettingsModule = {
-  id: 'notes', group: 'work', title: 'Recall', icon: ThemeActionEditNoteIcon,
+  id: 'notes', group: 'work', title: 'Recall', icon: RecallIcon,
   description: 'A comfortable reading space for your notebooks and pages.',
   keywords: 'recall directory folder storage path work notes note notebook notebooks pages quick notes 随手记 knowledge reading font size width wide',
   searchTargets: [

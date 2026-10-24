@@ -15,7 +15,7 @@ async function saveAgentControl(value: BrowserAgentControlPreferences, expected:
 export const browserAgentControlSettingsModule = {
   id: 'browser-agent-control', group: 'browser-use', title: 'Agent takeover',
   description: 'Cursor, discussion and page-edge feedback, with a live simulation.',
-  icon: semanticIconComponent('object.browser'),
+  icon: semanticIconComponent('object.agent-controlled-browser'),
   keywords: 'browser agent takeover control cursor mouse avatar title discussion tween click ripple glow color blend animation width preview simulation 鼠标 接管 内发光 讨论框',
   searchTargets: [
     { id: 'showCursor', title: 'Agent cursor', keywords: 'mouse show hide 鼠标' },

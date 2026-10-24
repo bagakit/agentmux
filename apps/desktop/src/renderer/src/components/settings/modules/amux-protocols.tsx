@@ -60,7 +60,7 @@ export const amuxProtocolsSettingsModule = {
   group: 'message-tool',
   title: 'amux Protocols',
   description: 'Readable formats, original wire examples, and shared message cards.',
-  icon: semanticIconComponent('object.document'),
+  icon: semanticIconComponent('object.amux-protocols'),
   keywords: 'amux protocol protocols reference wire declaration envelope marker sharing links format card 协议 格式 声明 卡片 参考',
   searchTargets: AGENTMUX_PROTOCOL_CATALOG.map(entry => ({ id: entry.id, title: entry.title, description: entry.description,
     keywords: `${entry.id} ${entry.form} ${entry.examples.map(example => example.wire).join(' ')}`, kind: 'info' as const })),

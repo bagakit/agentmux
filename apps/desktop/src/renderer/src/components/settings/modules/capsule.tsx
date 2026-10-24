@@ -2,7 +2,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { CapsuleSettingsPane } from '../CapsuleSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
-const CapsuleIcon = semanticIconComponent('object.browser')
+const CapsuleIcon = semanticIconComponent('object.capsule')
 
 export const capsuleSettingsModule = {
   id: 'capsule', group: 'browser-use', title: 'Capsule', icon: CapsuleIcon,

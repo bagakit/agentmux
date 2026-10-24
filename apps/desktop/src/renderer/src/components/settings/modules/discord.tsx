@@ -1,4 +1,3 @@
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ConnectionHostingSettings } from '../ConnectionHostingSettings'
 import type { SettingsModule } from '../settings-catalog'
 import '../../../styles/settings-lark.css'
@@ -13,7 +12,7 @@ export const discordSettingsModule = {
   id: 'discord', group: 'conversation-channels', title: 'Discord',
   description: 'Chat with your Agents in Discord channels.',
   channel: { adapterId: platform.adapterId, domains: [{ domain: 'discord.com', title: 'Discord' }], icon: ChannelIcon },
-  icon: semanticIconComponent('object.conversations'), keywords: 'channel agent conversation discord chat connector application bot token gateway intents 对话 频道 机器人',
+  icon: ChannelIcon, keywords: 'channel agent conversation discord chat connector application bot token gateway intents 对话 频道 机器人',
   savedSummary: () => 'Bot credentials, connection checks and channel setup',
   Pane({ active, onClose, navigationRequest }) { return <div className="settings-pane-stack lark-settings discord-settings"><ConnectionHostingSettings platform={platform} active={active} channel="discord" onClose={onClose} navigationRequest={navigationRequest} /></div> }
 } as const satisfies SettingsModule
