@@ -57,8 +57,9 @@
   min-height: var(--conversation-message-action-size, 24px);
 }
 .log-turn__identity { grid-column: 1; grid-row: 1; display: grid; grid-template-columns: minmax(0, max-content) auto; align-items: start; gap: var(--sp-2); min-width: 0; }
-.log-turn__title { grid-column: 1; grid-row: 1; display: flex; flex-wrap: wrap; align-items: baseline; align-content: start; gap: var(--sp-1) var(--sp-2); min-width: 0; min-height: var(--conversation-message-action-size, 24px); padding-block-start: calc((var(--conversation-message-action-size, 24px) - 20px) / 2); line-height: 20px; }
-.log-turn__identity > .log-turn__time { grid-column: 2; grid-row: 1; justify-self: start; line-height: var(--conversation-message-action-size, 24px); }
+/* Text keeps its reading metrics when a host enlarges the independent action targets. */
+.log-turn__title { grid-column: 1; grid-row: 1; display: flex; flex-wrap: wrap; align-items: baseline; align-content: start; gap: var(--sp-1) var(--sp-2); min-width: 0; min-height: 24px; padding-block-start: var(--sp-1); line-height: 20px; }
+.log-turn__identity > .log-turn__time { grid-column: 2; grid-row: 1; justify-self: start; line-height: 24px; }
 .log-turn__head > .log-turn__actions { grid-column: 2; grid-row: 1; margin-left: 0; }
 .log-turn__head > .conversation-input-details > .conversation-input-details__toggle { grid-column: 3; grid-row: 1; width: var(--conversation-message-action-size, 24px); height: var(--conversation-message-action-size, 24px); }
 .log-turn__head > .conversation-input-details > .conversation-input-details__body { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
