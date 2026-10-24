@@ -26,7 +26,8 @@ authority read or revoked grant; ordinary local input remains available. Continu
 journal source, without substituting a current same-name Host. An old remote binding without a
 confirmed Runtime requires an explicit original relink, not an inferred target or automatic move.
 For a human-selected exact Session, use connection diagnose --host ID --session ID [--binding ID].
-This bounded local read is available with the original managed caller. It exposes service,
+This bounded local read is available with the original managed caller. It exposes global service,
+the exact Connection's adapterService policy (adapterId, enabled and revision),
 transport, binding scope/grant counts and newest application/group intake with original Core
 outcome/waiting reasons, including receiver aliases. It returns no bodies, member identities,
 credentials or private setup data. Partial sections stay explicit; an empty page is not an
@@ -89,9 +90,12 @@ An unsupported new operation does not revoke saved bindings, grants or healthy l
 Begin with connection ls/inspect; configuration, a successful test, an enabled
 binding, ingress and actual outgoing delivery are distinct facts. Keep the exact connection,
 binding and source identities rather than matching human labels or assuming transport trust.
-connection service get reads the complete Connector policy on the current endpoint. Service
-configure disables or enables new automatic traffic without rewriting application enabled values.
-Retain the exact operationId, expectedRevision and service input after an unknown configure reply;
+connection service get reads the global Connector policy on the current endpoint; --adapter ID
+reads one adapter's independent policy and revision. Service configure accepts optional adapterId
+beside operationId, expectedRevision and service:{enabled:boolean}; omission keeps the global scope.
+New automatic traffic must satisfy global, exact adapter and application enabled policy plus the
+original binding and grant. Pausing one adapter preserves the others and already accepted Core input.
+Retain the exact operationId, scope, expectedRevision and service input after an unknown configure reply;
 service inspect reads that receipt, while get reports current policy and cannot acknowledge it.
 Management, original receipts and healthy local Agent input remain available while service is off.
 For an exact saved bot, connection setup begin requests one original management QR challenge unless
