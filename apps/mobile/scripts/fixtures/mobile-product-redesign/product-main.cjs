@@ -130,10 +130,14 @@ app.whenReady().then(async () => {
   }
   if (mode === 'commands-entry') {
     assert.equal(await read('document.querySelector(".composer-tools").dataset.mode'), 'collapsed')
+    await capture('commands-entry-phone')
     await resize(320, 568)
     await capture('commands-entry-narrow-short')
     await button('Choose a command')
     await until('!!document.querySelector(".mobile-command-menu")')
+    await until('document.querySelector(".mobile-command-menu").innerText.includes("核对依据")')
+    assert.ok(await read('document.querySelector(".mobile-command-menu").textContent.includes("Shortcuts")&&document.querySelector(".mobile-command-menu").textContent.includes("Agent commands")'))
+    assert.equal(await read('document.querySelector(".mobile-command-menu").innerText.includes("另一 Provider 专用")'), false)
     await capture('commands-menu-narrow-short')
     await read('mobileProductScene.setAppearance("light")')
     await resize(430, 480)
@@ -150,12 +154,28 @@ app.whenReady().then(async () => {
     const target = result.operations.find(value => value.target === 'Choose a command' && value.action === 'touch').observed.rect
     assert.ok(target.width >= 44 && target.height >= 44)
     assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.submitAgentPrompt").length'), 0)
+    assert.equal(await read('document.querySelector("[contenteditable=true] [data-tool-reference]").title'), 'Expand prompt: 逐项核对原始依据，保留未知与引用。')
     await capture('commands-inserted-light-short')
+    await resize(390, 844)
+    await read('mobileProductScene.setAppearance("dark")')
+    await capture('commands-custom-phone')
+    await read('mobileProductScene.setPromptReadFailure(true)')
+    await button('Choose a command')
+    await until('document.querySelector(".mobile-command-menu").innerText.includes("重试读取 Commands")')
+    await capture('commands-error-phone')
+    await read('mobileProductScene.setPromptReadFailure(false)')
+    await button('重试读取 Commands', '.mobile-command-menu')
+    const retryTarget = result.operations.find(value => value.target === '重试读取 Commands' && value.action === 'touch').observed.rect
+    assert.ok(retryTarget.width >= 44 && retryTarget.height >= 44, 'The actual retry action keeps its mobile touch target')
+    await until('!document.querySelector(".mobile-command-menu").innerText.includes("重试读取 Commands")')
+    await button('Choose a command')
     result.passed = true
     return
   }
   if (mode === 'input-history') {
     const before = await read('mobileProductScene.facts().calls.filter(call=>call.method==="sdk.submitAgentPrompt").length')
+    assert.ok(await read('document.querySelector(".mobile-message-tools__trigger").innerText.includes("历史")'))
+    await capture('input-history-entry-phone')
     await tap('.mobile-conversation-panel .mobile-message-tools__trigger', 'Current Agent input history')
     await until('document.querySelector(".input-history__records")?.textContent.includes("Message Tool")')
     assert.ok(await read('document.querySelector("[role=dialog]").innerText.includes("入口未记录")'))
@@ -175,12 +195,12 @@ app.whenReady().then(async () => {
     const originalGeometry = await read(`(()=>{const sheet=document.querySelector('[role=dialog]'),record=document.querySelector('.input-history__records [data-message-id]');return {sheet:{width:sheet.clientWidth,scrollWidth:sheet.scrollWidth},record:{width:record.clientWidth,scrollWidth:record.scrollWidth},buttons:[...sheet.querySelectorAll('.input-history button')].map(n=>({label:n.getAttribute('aria-label')||n.textContent,rect:n.getBoundingClientRect().toJSON()}))}})()`)
     assert.ok(originalGeometry.sheet.scrollWidth <= originalGeometry.sheet.width, 'Original-record sheet remains readable at 320px')
     assert.ok(originalGeometry.record.scrollWidth <= originalGeometry.record.width, 'Original record does not create horizontal scrolling')
-    assert.ok(originalGeometry.buttons.length >= 5, 'Original history actions were actually inspected')
+    for (const label of ['查询当前 Agent 输入历史', '填入草稿', '复制正文']) assert.ok(originalGeometry.buttons.some(target => target.label.trim() === label), `Original history action ${label} was actually inspected`)
     for (const target of originalGeometry.buttons) assert.ok(target.rect.width >= 44 && target.rect.height >= 44, `${target.label} keeps a 44px touch target`)
     result.operations.push({action:'original-record-geometry',...originalGeometry})
     await tap('.input-history__records > li details > summary', 'Close the original record reading')
     await button('填入草稿', '[role=dialog]')
-    await until('document.querySelector(".input-history__notice")?.textContent.includes("尚未发送")')
+    await until('document.querySelector("[role=dialog]")?.textContent.includes("尚未发送")')
     await button('关闭通信记录', '[role=dialog]')
     assert.equal(await read('document.querySelector("[contenteditable=true]").textContent'), '更早的实验依据：先比较三份样本，再决定是否继续。')
     await tap('.mobile-conversation-panel [contenteditable=true]', 'Undo original draft fill')
