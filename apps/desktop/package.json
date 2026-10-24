@@ -20,6 +20,7 @@
     "report:package": "node scripts/report-desktop-package.mjs",
     "audit:features": "node scripts/audit-feature-history.mjs",
     "verify:settings-actions": "node scripts/verify-settings-actions.mjs",
+    "verify:settings-module-icons": "node scripts/verify-settings-module-icons.mjs",
     "capture:visual": "node scripts/verify-agent-region-identity-menu.mjs --visual-only",
     "typecheck": "tsc --noEmit -p tsconfig.json && node scripts/typecheck-activity-tests.mjs",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
