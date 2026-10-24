@@ -17,6 +17,8 @@ import { RuntimeController } from '../src/main/runtime-controller'
 import { MobileMailbox } from '../../mobile/src/conversation/MobileMailbox'
 import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
+import { OriginalInputWaitingControl } from '../src/renderer/src/components/OriginalInputWaitingControl'
+import type { AgentInputSubmissionReceipt, AgentInputWaitStopReceipt } from '@agentmux/core'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { api } from '../src/renderer/src/lib/api'
@@ -312,5 +314,164 @@ it.each(['desktop','mobile'] as const)('interleaves the original journal and sou
     .filter(node=>node.dataset.inputMailboxKey || !node.closest('[data-input-mailbox-key]'))
     .map(node=>node.dataset.inputMailboxKey?'journal':node.dataset.inputHistoryId??node.dataset.recordKey?.replace('native:',''))
   expect(rows).toEqual(['native-new','journal','journal','native-old','native-unknown'])
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+async function waitingController() {
+  const f = await inputs()
+  vi.spyOn(f.client, 'connect').mockRejectedValue(new Error('Declared unavailable Runtime transport'))
+  const controller = new RuntimeController(f.store, async () => f.client); closes.push(() => controller.dispose())
+  controller.commit(await controller.prepare(composerConfig))
+  vi.spyOn(api.sessions, 'inputMailbox').mockImplementation((target, options) => controller.inputMailbox(target, options))
+  const inspect = vi.spyOn(api.sessions, 'inspectInput').mockImplementation((target, key) => controller.inspectInput(target, key))
+  const stop = vi.spyOn(api.sessions, 'stopInputWaiting').mockImplementation((target, ref, id) => controller.stopInputWaiting(target, ref, id))
+  const page = await f.client.readAgentInputMailbox({ agentSessionId: f.session.agentSessionId })
+  const external = page.items.find(entry => entry.kind === 'item' && entry.item.kind === 'controlled' && entry.item.intent.key.kind === 'message')!
+  if (external.kind !== 'item' || external.item.kind !== 'controlled' || !external.item.receipt) throw Error('Missing original external input')
+  return { ...f, controller, inspect, stop, receipt: external.item.receipt }
+}
+
+it('stops the original external wait from actual SessionMailbox through Runtime and Core without inspect, replay or current Run substitution', async () => {
+  const f = await waitingController(), session = composerSession(f.session.agentSessionId, 'claude')
+  session.control.run = { runId: 'a-new-current-run-that-does-not-own-the-original-input' }
+  useAppStore.setState({ sessions: [session], agentComposerDrafts: { [session.id]: 'Unsent draft remains' } })
+  const submit = vi.spyOn(f.client, 'submitAgentPrompt'), rejoin = vi.spyOn(f.client, 'rejoinAgentInputWaiting')
+  await dom.render(<SessionMailbox control={session.control} system={system} queued={[]} />); await open()
+  await flushUntil(() => expect(dom.container.querySelectorAll('[data-input-mailbox-key]')).toHaveLength(2))
+  expect(f.stop).not.toHaveBeenCalled(); expect(f.inspect).not.toHaveBeenCalled()
+  const row = [...dom.container.querySelectorAll('[data-input-mailbox-key]')].find(row => row.textContent?.includes(f.actor.userId))!
+  await act(async () => row.querySelector<HTMLButtonElement>('.composer-mailbox__row')!.click())
+  await dom.click('[data-input-wait-action="stop"]')
+  await flushUntil(() => expect(dom.container.querySelector('[data-input-stop-outcome]')?.getAttribute('data-input-stop-outcome')).toBe('stopped-before-dispatch'))
+  expect(f.stop).toHaveBeenCalledTimes(1); expect(f.inspect).not.toHaveBeenCalled()
+  expect(f.stop.mock.calls[0]!.slice(0, 2)).toEqual([{ kind: 'agent', hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.receipt.key.expectedRun }, f.receipt.ref])
+  expect(await f.client.inspectAgentInput({ key: f.receipt.key })).toMatchObject({ status: 'stopped', ref: f.receipt.ref })
+  expect(submit).not.toHaveBeenCalled(); expect(rejoin).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  expect(dom.draft(session.id)).toBe('Unsent draft remains')
+})
+
+it('recovers a lost Core stop ACK only after another explicit click using the same ID after remount, and retains it when later reads fail', async () => {
+  const f = await waitingController(), originalStop = f.controller.stopInputWaiting.bind(f.controller)
+  f.stop.mockImplementationOnce(async (...args) => { await originalStop(...args); throw Error('Reply lost after Core saved the original stop') })
+  await dom.render(<OriginalInputWaitingControl hostId="local" receipt={f.receipt} />)
+  await dom.click('[data-input-wait-action="stop"]')
+  await flushUntil(() => expect(dom.container.querySelector('[data-input-wait-error]')?.textContent).toContain('停止结果未确认'))
+  expect(dom.container.querySelector('[data-input-stop-outcome]')).toBeNull()
+  const firstId = f.stop.mock.calls[0]![2]
+  await dom.render(null); await dom.render(<OriginalInputWaitingControl hostId="local" receipt={f.receipt} />)
+  expect(f.stop).toHaveBeenCalledTimes(1); expect(f.inspect).not.toHaveBeenCalled()
+  await dom.click('[data-input-wait-action="check"]')
+  await flushUntil(() => expect(dom.container.querySelector('[data-input-wait-observation]')?.textContent).toBe('原输入已停止等待。'))
+  expect(f.stop).toHaveBeenCalledTimes(1)
+  // Reopen the retained original record: only another explicit stop retrieves that original operation's ACK.
+  await dom.render(null)
+  const refresh = vi.fn(async () => { throw Error('Mailbox read unavailable') })
+  await dom.render(<OriginalInputWaitingControl hostId="local" receipt={f.receipt} onRefresh={refresh} />)
+  await dom.click('[data-input-wait-action="stop"]')
+  await flushUntil(() => expect(dom.container.querySelector('[data-input-stop-outcome]')?.textContent).toContain('原消息保留'))
+  expect(f.stop.mock.calls[1]![2]).toBe(firstId)
+  expect(dom.container.querySelector('[data-input-wait-error]')?.textContent).toContain('已收到的操作回执保留')
+  f.inspect.mockRejectedValueOnce(Error('Original observation unavailable'))
+  await dom.click('[data-input-wait-action="check"]')
+  await flushUntil(() => expect(dom.container.querySelector('[data-input-wait-error]')?.textContent).toContain('本次检查未确认'))
+  expect(dom.container.querySelector('[data-input-stop-outcome]')?.getAttribute('data-input-stop-outcome')).toBe('stopped-before-dispatch')
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+function waitingReceipt(): AgentInputSubmissionReceipt {
+  const key = { kind: 'message' as const, agentSessionId: 'original-session', expectedRun: { runId: 'original-run' }, messageId: 'original-message' }
+  const ref = { key, waitGeneration: 1 }
+  return { key, ref, persistence: 'confirmed', control: { ref, state: 'enabled', at: 1 }, admission: null, status: 'waiting', observation: 'rejoin-needed' }
+}
+
+it.each([
+  ['stopped-before-dispatch', '原消息保留'], ['observation-stopped', '原输入可能已派发，未撤回'],
+  ['already-settled', '请检查原输入结果'], ['stale-generation', '未停止新的等待']
+] as const)('renders the exact %s stop ACK without claiming a reply or stopping a newer generation', async (outcome, message) => {
+  const receipt = waitingReceipt(), stop = vi.spyOn(api.sessions, 'stopInputWaiting').mockImplementation(async (_target, ref, cancelOperationId) => ({ ref, cancelOperationId, outcome, at: 2 }))
+  const inspect = vi.spyOn(api.sessions, 'inspectInput')
+  await dom.render(<OriginalInputWaitingControl hostId="original-host" receipt={receipt} />)
+  expect(stop).not.toHaveBeenCalled(); expect(inspect).not.toHaveBeenCalled()
+  await dom.click('[data-input-wait-action="stop"]')
+  expect(dom.container.querySelector('[data-input-stop-outcome]')?.textContent).toContain(message)
+  if (outcome === 'already-settled') {
+    expect(dom.container.querySelector('[data-input-stop-outcome]')?.textContent).toContain('上方等待状态是此前观测')
+    expect(dom.container.textContent).not.toContain('已被 Agent 接收')
+  }
+  expect(dom.container.querySelector('[data-input-wait-action="stop"]')).toBeNull()
+  expect(stop.mock.calls[0]![1]).toEqual(receipt.ref)
+})
+
+it('isolates late Host, Session and generation results and distinguishes every full original identity in the stop ID', async () => {
+  const receipt = waitingReceipt(), delayed: Array<(value: AgentInputWaitStopReceipt) => void> = []
+  const stop = vi.spyOn(api.sessions, 'stopInputWaiting').mockImplementation(() => new Promise(resolve => delayed.push(resolve)))
+  const variants = [
+    { hostId: 'host-a', receipt }, { hostId: 'host-b', receipt },
+    ...['session', 'run', 'id', 'kind', 'generation'].map(change => {
+      const next = structuredClone(receipt)
+      const key = change === 'kind' ? { kind: 'prompt' as const, agentSessionId: receipt.key.agentSessionId, expectedRun: receipt.key.expectedRun, submissionId: 'original-message' } : {
+        ...receipt.key, ...(change === 'session' ? { agentSessionId: 'another-session' } : {}), ...(change === 'run' ? { expectedRun: { runId: 'another-run' } } : {}), ...(change === 'id' ? { messageId: 'another-message' } : {}) }
+      next.key = key; next.ref = { key, waitGeneration: change === 'generation' ? 2 : 1 }; next.control.ref = next.ref
+      return { hostId: 'host-a', receipt: next }
+    })
+  ]
+  for (const props of variants) {
+    await dom.render(<OriginalInputWaitingControl {...props} />)
+    expect(dom.container.querySelector('[data-input-stop-outcome]')).toBeNull()
+    await dom.click('[data-input-wait-action="stop"]')
+  }
+  expect(new Set(stop.mock.calls.map(call => call[2])).size).toBe(variants.length)
+  await act(async () => delayed[0]!({ ref: receipt.ref, cancelOperationId: stop.mock.calls[0]![2], outcome: 'stopped-before-dispatch', at: 2 }))
+  expect(dom.container.querySelector('[data-input-stop-outcome]')).toBeNull()
+  const last = stop.mock.calls.at(-1)!
+  await act(async () => delayed.at(-1)!({ ref: last[1], cancelOperationId: last[2], outcome: 'stale-generation', at: 2 }))
+  expect(dom.container.querySelector('[data-input-stop-outcome]')?.getAttribute('data-input-stop-outcome')).toBe('stale-generation')
+})
+
+it('checks the original key without rejoin or stop, retains unknown, and does not grant Stop for another generation or settled receipts', async () => {
+  const receipt = waitingReceipt(), stop = vi.spyOn(api.sessions, 'stopInputWaiting'), rejoin = vi.spyOn(api.sessions, 'rejoinInputWaiting')
+  const inspect = vi.spyOn(api.sessions, 'inspectInput').mockResolvedValueOnce(null)
+  await dom.render(<OriginalInputWaitingControl hostId="original-host" receipt={receipt} />)
+  await dom.click('[data-input-wait-action="check"]')
+  expect(inspect).toHaveBeenCalledWith({ kind: 'agent', hostId: 'original-host', agentSessionId: receipt.key.agentSessionId, run: receipt.key.expectedRun }, receipt.key)
+  expect(dom.container.querySelector('[data-input-wait-observation]')?.textContent).toContain('结果仍未确认')
+  expect(dom.container.querySelector('[data-input-wait-action="stop"]')).not.toBeNull()
+  const newer = structuredClone(receipt); newer.ref.waitGeneration = 2
+  inspect.mockResolvedValueOnce(newer)
+  await dom.click('[data-input-wait-action="check"]')
+  expect(dom.container.querySelector('[data-input-wait-generation]')?.textContent).toContain('当前操作仍绑定原批次')
+  expect(dom.container.querySelector('[data-input-wait-action="stop"]')).toBeNull()
+  await dom.render(null)
+  for (const status of ['admitted', 'terminal-confirmed', 'not-applied', 'stopped', 'unknown'] as const) {
+    await dom.render(<OriginalInputWaitingControl hostId="original-host" receipt={{ ...receipt, status }} />)
+    expect(dom.container.querySelector('[data-input-wait-action="stop"]')).toBeNull()
+  }
+  expect(stop).not.toHaveBeenCalled(); expect(rejoin).not.toHaveBeenCalled()
+})
+
+it('keeps an in-flight original stop result when the parent reads a newer waiting generation without silently targeting it', async () => {
+  const f = await waitingController()
+  const receipt = (await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: f.session.agentSessionId, expectedRun: f.session.run, submissionId: 'local-original' } }))!
+  let release!: () => void
+  const barrier = new Promise<void>(done => { release = done })
+  f.stop.mockImplementation(async (...args) => { await barrier; return f.controller.stopInputWaiting(...args) })
+  const refresh = vi.fn(async () => { throw Error('Refresh failed after original ACK') })
+  await dom.render(<OriginalInputWaitingControl hostId="local" receipt={receipt} onRefresh={refresh} />)
+  await dom.click('[data-input-wait-action="stop"]')
+  const call = f.stop.mock.calls[0]!
+  // A separate explicit owner action wins the race. The UI must not inherit its new generation.
+  await f.client.stopAgentInputWaiting({ ref: receipt.ref, cancelOperationId: 'competing-original-stop' })
+  const newer = await f.client.rejoinAgentInputWaiting({ ref: receipt.ref })
+  expect(newer.ref.waitGeneration).toBe(receipt.ref.waitGeneration + 1)
+  await dom.render(<OriginalInputWaitingControl hostId="local" receipt={newer} onRefresh={refresh} />)
+  expect(dom.container.querySelector('[data-input-wait-generation]')?.textContent).toContain('当前操作仍绑定原批次')
+  await act(async () => release())
+  await flushUntil(() => expect(dom.container.querySelector('[data-input-stop-outcome]')?.getAttribute('data-input-stop-outcome')).toBe('stale-generation'))
+  expect(dom.container.querySelector('[data-input-wait-generation]')).toBeNull()
+  expect(dom.container.textContent!.split('等待批次已变化')).toHaveLength(2)
+  expect(dom.container.querySelector('[data-input-wait-error]')?.textContent).toContain('已收到的操作回执保留')
+  expect(dom.container.querySelector('[data-input-wait-action="stop"]')).toBeNull()
+  expect(f.stop).toHaveBeenCalledTimes(1); expect(call[1].waitGeneration).toBe(1)
+  expect(await f.client.inspectAgentInput({ key: receipt.key })).toMatchObject({ ref: newer.ref, control: { state: 'enabled' } })
   expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
