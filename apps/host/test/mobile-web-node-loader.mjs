@@ -1,3 +1,4 @@
+import { instrumentDiscoverySource } from './mobile-discovery-mutations.mjs'
 import { registerHooks } from 'node:module'
 import { existsSync, readFileSync, appendFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
@@ -27,7 +28,7 @@ registerHooks({
     else if (specifier.startsWith('@agentmux/client-ui/')) {
       const entries = JSON.parse(readFileSync(resolve(root, 'packages/client-ui/package.json'), 'utf8')).exports
       const key = './' + specifier.slice('@agentmux/client-ui/'.length)
-      const entry = entries[key]?.types ?? entries['./*']?.types.replace('*', key.slice(2))
+      const entry = entries[key]?.types ?? (key.startsWith('./note/') ? entries['./note/*']?.types.replace('*', key.slice(7)) : entries['./*']?.types.replace('*', key.slice(2)))
       if (entry?.startsWith('./src/')) file = resolve(root, 'packages/client-ui', entry)
     }
     else if (specifier.startsWith('@agentmux/core/')) {
@@ -44,8 +45,9 @@ registerHooks({
     const result = next(url, context)
     if (!url.startsWith('file:')) return result
     const path = relative(root, fileURLToPath(url))
-    if (!observed.test(path)) return result
-    const original = String(result.source); let source = original
+    const discoverySource = instrumentDiscoverySource(String(result.source), path)
+    if (!observed.test(path)) return discoverySource === String(result.source) ? result : { ...result, source: discoverySource }
+    const original = String(result.source); let source = discoverySource
     if (mutant && mutants[mutant][0] === path) {
       const [, anchor, replacement] = mutants[mutant]
       if (source.split(anchor).length !== 2) throw Error('Mobile Web mutant must match exactly one loaded owner: ' + mutant)

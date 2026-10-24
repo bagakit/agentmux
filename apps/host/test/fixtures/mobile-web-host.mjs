@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, access as fileAccess } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { AgentMuxFileAgentSessionStore, defaultAgentMuxControlSocketPath } from '../../../../packages/core/src/index.ts'
@@ -14,8 +14,10 @@ const body = { schema: 'agentmux.mobile-web-release.v1', buildId: 'private-initi
   { path: 'assets/app.js', bytes: Buffer.byteLength(source), digest: digest(source) },
   { path: 'index.html', bytes: Buffer.byteLength(html), digest: digest(html) }] }
 await writeFile(join(directory, 'mobile-release.json'), JSON.stringify({ ...body, digest: digest(JSON.stringify(body)) }))
+const configurationPath = join(root, 'original-configuration.json')
+try { await fileAccess(configurationPath) } catch { await writeFile(configurationPath, JSON.stringify({ workspaces: [{ id: 'original-workspace', hostId: 'local', name: 'Original Workspace', kind: 'folder', path: dirname(root) }], executors: { codex: { providerId: 'codex', label: 'Original Codex' } }, appearance: {} })) }
 const host = await startAgentMuxHost({ store: new AgentMuxFileAgentSessionStore(process.env.AGENTMUX_AGENT_SESSION_STORE),
-  socketPath: path, desktopSocketPath: path + '.desktop', mobileBuildDirectory: directory, mobilePort: 0 })
+  configurationPath, socketPath: path, desktopSocketPath: path + '.desktop', mobileBuildDirectory: directory, mobilePort: 0 })
 const { owner } = await host.hosted.call('runtime.owner.identity', {})
 // These are this test's freshly generated public offer facts; no user device is consulted.
 const publicKey = JSON.parse(await readFile(join(root, 'agentmux-relay-keypair.json'), 'utf8')).publicKeyB64
