@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
+import { grokChunk, grokDone, grokUpdate } from './fixtures/grok-updates.js'
 import { nativeHistoryFixture, jsonl } from './fixtures/native-history-session.js'
 import { readSessionHistoryTextResource } from '../src/session-history-content.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
@@ -99,15 +100,15 @@ it.each(['claude', 'pi', 'grok', 'kimi'] as const)('%s preserves large speech, n
     { type: 'message', id: 'tool', parentId: 'speech', message: { role: 'assistant', content: [{ type: 'toolCall', name: 'inspect', id: 'call', arguments: { payload: text } }] } },
     { type: 'custom_message', id: 'unknown', parentId: 'tool', content: { data: text } }
   ]) : provider === 'grok' ? jsonl([
-    { type: 'assistant', content: text },
-    { type: 'assistant', tool_calls: [{ name: 'inspect', id: 'call', arguments: { payload: text } }] },
-    { type: 'new_activity', data: text }
+    grokChunk(id, text), grokDone(id),
+    grokUpdate(id, { sessionUpdate: 'tool_call', title: 'inspect', toolCallId: 'call', rawInput: { payload: text } }),
+    grokUpdate(id, { sessionUpdate: 'new_activity', data: text })
   ]) : jsonl([
     { type: 'context.append_message', uuid: 'speech', message: { role: 'assistant', content: [{ type: 'text', text }] } },
     { type: 'context.append_loop_event', event: { type: 'step.begin', uuid: 'tool' } },
     { type: 'context.append_loop_event', event: { type: 'tool.call', name: 'inspect', toolCallId: 'call', args: { payload: text } } },
     { type: 'context.append_loop_event', event: { type: 'step.end', uuid: 'tool' } }
-  ]), { nativeSessionId: id, relativePath: provider === 'grok' ? 'chat_history.jsonl'
+  ]), { nativeSessionId: id, relativePath: provider === 'grok' ? 'updates.jsonl'
     : provider === 'kimi' ? 'kimi/sessions/native/agents/main/wire.jsonl' : 'native.jsonl' })
   fixtures.push(f)
   let env: Record<string, string> | undefined
@@ -119,7 +120,7 @@ it.each(['claude', 'pi', 'grok', 'kimi'] as const)('%s preserves large speech, n
   const options: AgentSessionHistoryPageOptions = { limit: 3, ...(env ? { env } : {}) }
   const page = await f.client.sessionHistoryPage(f.session.agentSessionId, options)
   expect(page.items[0]!.kind).toBe('assistant-message')
-  expectExactParts(await complete(f, page.items[0]!, page.source, env), [{ kind: 'text', text }])
+  expectExactParts(await complete(f, page.items[0]!, page.source, env), [{ kind: 'text', text, ...(provider === 'grok' ? { contentEligibility: 'public' as const } : {}) }])
   const parts = await complete(f, page.items[1]!, page.source, env)
   expect(parts).toHaveLength(1)
   const call = parts[0]!
@@ -131,7 +132,7 @@ it.each(['claude', 'pi', 'grok', 'kimi'] as const)('%s preserves large speech, n
     expect(page.items[2]!.kind).toBe('activity')
     const unknown = (await complete(f, page.items[2]!, page.source))[0]!
     if (unknown.kind !== 'text') throw new Error('Expected neutral unknown activity')
-    expect(JSON.parse(unknown.text).data).toBe(text)
+    expect(provider === 'grok' ? JSON.parse(unknown.text).params.update.data : JSON.parse(unknown.text).data).toBe(text)
   }
   await untouched(f)
 }, 30_000)

@@ -13,16 +13,25 @@ import { createMoteChatAgents as createHostMoteChatAgents } from '@agentmux/host
 import { directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { AppConfig, WorkspaceRecord } from '../../../../apps/desktop/src/shared/contracts.js'
+import { encodeCwdDirname } from '../../../core/src/providers/grok-native-history.js'
+import { grokChunk, grokDone, grokUpdate } from '../../../core/test/fixtures/grok-updates.js'
+import { feishuConfig } from './feishu.js'
+import { feishuPublicationHttp } from './feishu-publication.js'
+import { FeishuAdapter } from '../../src/adapters/feishu/index.js'
 import { signedRoomAdapter, type SignedRoomMessage } from './signed-room-adapter.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
 type DirectMessage = SignedRoomMessage & { nativeKind: 'direct' | 'group' }
 
-export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false) {
+export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false, nativeProvider: 'claude' | 'grok' = 'claude') {
   const publicationRefresh = vi.spyOn(PublicationHost.prototype, 'refresh')
   const original = await rpcOwnerFixture([], core)
   const client = original.client as core.AgentMuxClient
+  const grokHome = join(original.root, 'grok')
+  if (nativeProvider === 'grok') vi.stubEnv('GROK_HOME', grokHome)
+  const feishu = nativeProvider === 'grok' ? await feishuPublicationHttp() : undefined
+  if (feishu) cleanup.push(feishu.close)
   cleanup.push(async () => {
     try { await original.close() } catch (error) {
       // Aborted original read observers can finish their owned receipt write after dispose.
@@ -43,7 +52,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   const spatial = new core.AgentMuxSpatialStateStore(join(original.root, 'spatial.json'))
   await spatial.commit({ expectedRevision: 0, graph })
   const config = { hosts: [{ id: 'local', kind: 'local', label: 'Original host' }], workspaces: [workspace],
-    executors: { 'saved-chat': { label: 'Saved Executor', providerId: 'claude', command: 'claude', injectAgentMuxGuide: false } },
+    executors: { 'saved-chat': { label: 'Saved Executor', providerId: nativeProvider, command: nativeProvider, injectAgentMuxGuide: false } },
     profile: { displayName: 'Original owner', about: '', avatar: '', shareWithAgents: true } } as unknown as AppConfig
 
   // Native process creation, Hook handshake and signed transport are controlled leaves.
@@ -57,9 +66,15 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     const number = runs.size + 1, runId = `native-run-${number}`, pid = 400_000 + number
     const resumeIndex = input.args.indexOf('--resume'), resumed = resumeIndex < 0 ? undefined : [...sources.values()].find(source => source.id === input.args[resumeIndex + 1])
     if (resumeIndex >= 0 && !resumed) throw new Error('Resume must retain an existing original native conversation')
-    const id = resumed?.id ?? `native-chat-${number}`, path = resumed?.path ?? join(original.root, `${id}.jsonl`)
-    if (!resumed && !nativeAfterInput) await writeFile(path, JSON.stringify({ sessionId: id, uuid: 'original-context', type: 'system', message: { role: 'system', content: 'Native system context' } }) + '\n')
-    const run = { ...original.run(runId), lifecycleOperationId: input.operationKey ?? null, program: 'claude', pid, workspacePath: topic.physicalDirectoryPath! }
+    const id = resumed?.id ?? `native-chat-${number}`
+    const path = resumed?.path ?? (nativeProvider === 'grok'
+      ? join(grokHome, 'sessions', encodeCwdDirname(topic.physicalDirectoryPath!), id, 'updates.jsonl') : join(original.root, `${id}.jsonl`))
+    if (nativeProvider === 'grok' && !resumed) {
+      await mkdir(join(path, '..'), { recursive: true })
+      await writeFile(join(path, '..', 'summary.json'), JSON.stringify({ info: { id, cwd: topic.physicalDirectoryPath! } }))
+    }
+    if (!resumed && !nativeAfterInput) await writeFile(path, JSON.stringify(nativeProvider === 'grok' ? grokUpdate(id, { sessionUpdate: 'current_mode_update', currentModeId: 'chat' }) : { sessionId: id, uuid: 'original-context', type: 'system', message: { role: 'system', content: 'Native system context' } }) + '\n')
+    const run = { ...original.run(runId), lifecycleOperationId: input.operationKey ?? null, program: nativeProvider, pid, workspacePath: topic.physicalDirectoryPath! }
     runs.set(runId, run); sources.set(pid, { id, path }); return run
   })
   inner.kernel.start = start
@@ -70,12 +85,26 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   inner.ensureManagedHooks = async () => {}
   inner.ensureTerminalHandshakeOrDegrade = async (session: core.AgentMuxAgentSession) => session
   vi.spyOn(client, 'probeAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true, capabilities: new core.AgentProviderRegistry().get(id).catalog.capabilities }))
-  const provider = inner.providers.get('claude') as core.AgentProvider & Required<Pick<core.AgentProvider, 'discoverNativeSession'>>
-  expect(typeof provider.discoverNativeSession).toBe('function')
-  vi.spyOn(provider, 'discoverNativeSession').mockImplementation(async ({ processId }) => {
-    const source = sources.get(processId)
-    return source && (!nativeAfterInput || inputCreatedSources.has(processId)) ? { handle: { kind: 'provider' as const, providerId: 'claude', sessionId: source.id, transcriptPath: source.path }, assertCurrent: async () => {} } : null
-  })
+  const provider = inner.providers.get(nativeProvider) as core.AgentProvider & Required<Pick<core.AgentProvider, 'discoverNativeSession'>>
+  if (nativeProvider === 'claude') {
+    expect(typeof provider.discoverNativeSession).toBe('function')
+    vi.spyOn(provider, 'discoverNativeSession').mockImplementation(async ({ processId }) => {
+      const source = sources.get(processId)
+      return source && (!nativeAfterInput || inputCreatedSources.has(processId)) ? { handle: { kind: 'provider' as const, providerId: 'claude', sessionId: source.id, transcriptPath: source.path }, assertCurrent: async () => {} } : null
+    })
+  } else {
+    // Exact Hook/Run identity leaf; the real Grok normalizer supplies the native
+    // handle. No Claude discovery or fake Grok changes method is substituted.
+    inner.ensureTerminalHandshakeOrDegrade = async (session: core.AgentMuxAgentSession) => {
+      const run = runs.get(session.run.runId)!, source = sources.get(run.pid!)!
+      const normalized = provider.normalizeHook({ receiptId: 'synthetic-grok-hook', agentSessionId: session.agentSessionId,
+        runId: run.runId, providerId: 'grok', payload: { hookEventName: 'user_prompt_submit', sessionId: source.id } }, {})
+      expect(normalized.nativeHandle).toEqual({ kind: 'provider', providerId: 'grok', sessionId: source.id })
+      const registry = Reflect.get(client, 'registry') as { update(id: string, run: core.AgentMuxAgentSession['run'], change: (current: core.AgentMuxStoredAgentSession) => core.AgentMuxStoredAgentSession): Promise<unknown> }
+      await registry.update(session.agentSessionId, session.run, current => ({ ...current, nativeHandle: normalized.nativeHandle! }))
+      return { ...session, nativeHandle: normalized.nativeHandle! }
+    }
+  }
   const inputCreatedSources = new Set<number>()
   if (nativeAfterInput) {
     const inputLeaf = vi.mocked(inner.kernel.input as (id: string, input: { operationId: string; expectedByte: number; data: string }) => Promise<unknown>)
@@ -98,15 +127,15 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     const runtimeId = 'original-mote-host'
     const hostExecutorOwner = new core.AgentMuxHostExecutorOwner({ path: join(original.root, 'host-executors.json'), runtimeId, catalog: () => client.catalog() })
     Object.assign(client, { hostExecutorOwner, creationAuthority: new core.AgentMuxCreationAuthority({ stateDirectory: join(original.root, 'creation'), runtimeId }) })
-    await client.configureHostExecutor({ executorId: 'saved-chat', config: { label: 'Original saved chat', providerId: 'claude', command: process.execPath, args: ['--chosen'], env: { MOTE_VALUE: 'host-owned' }, injectAgentMuxGuide: false } })
+    await client.configureHostExecutor({ executorId: 'saved-chat', config: { label: 'Original saved chat', providerId: nativeProvider, command: process.execPath, args: ['--chosen'], env: { MOTE_VALUE: 'host-owned', ...(nativeProvider === 'grok' ? { GROK_HOME: grokHome } : {}) }, injectAgentMuxGuide: false } })
   }
   const desktopAgents = mode === 'headless'
     ? createHostMoteChatAgents({ resources: createMoteChatResources({ topics, catalog: async () => spatialCatalog(graph), configuration: target => readMoteResourceConfiguration(configurationPath, target) }), clients })
     : (await import('../../../../apps/desktop/src/main/mote-chat-agents.js')).createMoteChatAgents({ config: () => config, catalog: async () => spatialCatalog(graph), topics, clients })
-  const wire = signedRoomAdapter(), application = { domain: 'signed.example', appId: 'original-mote-app' }
+  const wire = signedRoomAdapter(nativeProvider === 'grok' ? 'feishu' : 'signed-room'), application = { domain: nativeProvider === 'grok' ? 'open.feishu.cn' : 'signed.example', appId: nativeProvider === 'grok' ? feishuConfig.application.appId : 'original-mote-app' }
   const creator = { application, idType: 'email', userId: 'creator@example.test' }, guest = { ...creator, userId: 'guest@example.test' }
   const verify = wire.adapter.ingress!.verify
-  const adapter: ConnectionAdapter = { ...wire.adapter,
+  const adapter: ConnectionAdapter = { ...wire.adapter, ...(feishu ? { publication: new FeishuAdapter({ http: feishu.http }).publication } : {}),
     ingress: { ...wire.adapter.ingress!, verify: async (...args) => {
       const verified = await verify(...args), native = JSON.parse(args[1]) as DirectMessage
       if (!['direct', 'group'].includes(native.nativeKind) || verified.kind === 'action') throw new Error('Missing signed native conversation kind')
@@ -159,10 +188,12 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   }
   async function reply(agentSessionId: string, id: string, text: string) {
     const session = await original.client.readAgentSession(agentSessionId), source = session!.nativeHandle!
-    if (source.kind !== 'provider' || !source.transcriptPath) throw new Error('Original native source is missing')
-    await appendFile(source.transcriptPath, JSON.stringify({ sessionId: source.sessionId, uuid: id, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n')
+    if (source.kind !== 'provider') throw new Error('Original native source is missing')
+    if (!source.transcriptPath && nativeProvider === 'grok') source.transcriptPath = join(grokHome, 'sessions', encodeCwdDirname(session!.workspacePath), source.sessionId, 'updates.jsonl')
+    if (!source.transcriptPath) throw new Error('Original native path is missing')
+    await appendFile(source.transcriptPath, nativeProvider === 'grok' ? [grokChunk(source.sessionId, text, id), grokDone(source.sessionId, id)].map(row => JSON.stringify(row)).join('\n') + '\n' : JSON.stringify({ sessionId: source.sessionId, uuid: id, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n')
   }
-  return { ...original, agents, config, configurationPath, graph, workspace, get services() { return services }, get sdk() { return sdk }, topic, target, creator, guest, wire, message, records, claimed, reply, start, prepare, submission,
+  return { ...original, feishu, agents, config, configurationPath, graph, workspace, get services() { return services }, get sdk() { return sdk }, topic, target, creator, guest, wire, message, records, claimed, reply, start, prepare, submission,
     cli, publicationRefresh, credentials(index: number) { const env = start.mock.calls[index]![0].env!; return { agentSessionId: env.AGENTMUX_AGENT_SESSION_ID!, capability: env.AGENTMUX_AGENT_CAPABILITY! } },
     submissionErrors, async restart() { await close(); await open(); await vi.waitFor(() => expect(wire.endpoint).toBeDefined()) } }
 }
