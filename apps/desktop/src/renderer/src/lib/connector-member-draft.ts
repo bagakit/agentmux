@@ -14,7 +14,8 @@ export type ConnectorMemberDraft = {
 export type ConnectorMemberDrafts = Record<string, ConnectorMemberDraft>
 const capabilities = ['input', 'answer', 'permission'] as const
 export const sameMemberCapabilities = (a: Capabilities, b: Capabilities) => capabilities.every(value => a.includes(value) === b.includes(value))
-export const savedMemberCapabilities = (grant: ConnectionGrant | null | undefined): Capabilities => grant?.state === 'active' ? grant.capabilities : []
+export const savedMemberCapabilities = (grant: Pick<ConnectionGrant, 'state' | 'capabilities'> | null | undefined): Capabilities => grant?.state === 'active' ? grant.capabilities : []
+export const isMemberCapabilities = (value: unknown): value is Capabilities => Array.isArray(value) && value.length <= capabilities.length && new Set(value).size === value.length && value.every(item => capabilities.includes(item))
 export const connectorMemberKey = (binding: Pick<RoomBinding, 'bindingId' | 'revision'>, actor: ConnectionActor) => JSON.stringify([binding.bindingId, binding.revision, actor.application.domain, actor.application.appId, actor.idType, actor.userId])
 
 export function editConnectorMemberDraft(drafts: ConnectorMemberDrafts, binding: RoomBinding, actor: ConnectionActor, current: ConnectionGrant | null | undefined, desired: Capabilities): ConnectorMemberDrafts {
