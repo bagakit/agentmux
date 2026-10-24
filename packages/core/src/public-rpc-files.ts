@@ -89,7 +89,7 @@ export function parseFileUploadIdentity(value: unknown, code = 'INVALID_CONTROL_
   if (typeof run.runId !== 'string' || !run.runId.length || run.runId.length > 256 || /[\0\r\n]/u.test(run.runId)) invalid('The original upload Run is required.', code)
   if (typeof p.name !== 'string' || !p.name.length || p.name.length > 256 || /[\0\r\n/\\]/u.test(p.name)) invalid('A local file name, without a destination path, is required.', code)
   if (typeof p.mimeType !== 'string' || p.mimeType.length > 128 || !/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u.test(p.mimeType) || /^(?:audio|video)\//u.test(p.mimeType)) invalid('Choose an image or ordinary file; audio and video transfer are unavailable.', code)
-  if (p.mimeType.startsWith('image/') && !['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(p.mimeType)) invalid('Choose a PNG, JPEG, GIF or WebP image.', code)
+  if (p.mimeType.startsWith('image/') && !['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/heic', 'image/heif'].includes(p.mimeType)) invalid('Choose a PNG, JPEG, GIF, WebP or HEIC/HEIF image.', code)
   if (!Number.isSafeInteger(p.byteLength) || Number(p.byteLength) < 1 || Number(p.byteLength) > FILE_UPLOAD_MAX_BYTES) invalid('Choose one nonempty file up to 4 MiB.', code)
   revision(p.revision, code)
   return p as FileUploadIdentity

@@ -16,7 +16,7 @@ function identityOf(input: FileUploadIdentity): FileUploadIdentity {
     mimeType: input.mimeType, byteLength: input.byteLength, revision: input.revision })
 }
 function extension(input: FileUploadIdentity): string {
-  const image = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp' }[input.mimeType]
+  const image = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp', 'image/heic': '.heic', 'image/heif': '.heif' }[input.mimeType]
   if (image) return image
   const suffix = extname(input.name).toLowerCase()
   return /^\.[a-z0-9]{1,12}$/u.test(suffix) ? suffix : '.bin'
