@@ -10,6 +10,7 @@ import * as conversation from '../../core/dist/conversation.js'
 import type { ConnectionDeliveryGap } from '../../core/dist/connections.js'
 import { publicationContent } from '../dist/publication-content.js'
 import { PublicationHost } from '../dist/publication-host.js'
+import { ConnectionSecrets } from '../dist/connection-secrets.js'
 import type { ResolvedPublicationPart } from '../dist/publication-resource.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { agentPromptCondition } from '../../core/src/agent-prompt-condition.js'
@@ -62,6 +63,10 @@ async function fixture(providerId: 'codex' | 'claude' | 'droid' = 'codex') {
   const port = createPublicationConversationPort(original.coreClients)
   const adapters = createBuiltinConnectionAdapters(), adapter = adapters.find(adapter => adapter.adapterId === 'feishu')!
   let credentialReadable = true
+  const originalCredential = ConnectionSecrets.prototype.resolve
+  vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(function (reference) {
+    return credentialReadable ? originalCredential.call(this, reference) : Promise.resolve(null)
+  })
   let activeServices: Awaited<ReturnType<typeof createConnectionServices>>
   const openServices = async () => activeServices = await createConnectionServices({ directory: join(original.root, 'host'), adapters,
     bindings: { spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, publication: port })
@@ -277,7 +282,7 @@ it('the actual Droid Reader preserves deferred tool purpose before common public
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 20_000)
 
-it('captured Hook replies remain shared while diagnostic and tool fields stay in the original conversation', async () => {
+it('unattributed Hook snapshots remain local while canonical speech and confirmed human content are shared', async () => {
   const f = await fixture('claude'), providers = new core.AgentProviderRegistry()
   const hidden = 'Unconfirmed Hook failure canary', privateBody = 'Private captured body canary'
   const normal = 'Independent normal Stop reply', other = 'Independent other Provider reply'
@@ -307,7 +312,8 @@ it('captured Hook replies remain shared while diagnostic and tool fields stay in
   f.services.publication!.refresh()
   await vi.waitFor(() => {
     const wire = JSON.stringify(f.remote.messageCalls())
-    for (const text of [normal, other, user, 'Independent native public reply beside captured failure']) expect(wire).toContain(text)
+    for (const text of [user, 'Independent native public reply beside captured failure']) expect(wire).toContain(text)
+    for (const text of [normal, other]) expect(wire).not.toContain(text)
     expect(contentOperations(f.services.publication!.store, f.binding).every(operation => operation.state === 'confirmed')).toBe(true)
   }, { timeout: 10_000 })
   const wire = JSON.stringify(f.remote.messageCalls())
@@ -320,9 +326,9 @@ it('captured Hook replies remain shared while diagnostic and tool fields stay in
   const original = read.snapshot.units.flatMap(unit => unit.records).find(record => record.original.kind === 'captured' && record.original.item.id === captured.item.id)
   expect(original?.original).toMatchObject({ kind: 'captured', item: saved })
   const delivery = await f.cli(['connection', 'delivery', 'ls', '--connection', f.binding.connectionId, '--binding', f.binding.bindingId, '--binding-revision', String(f.binding.revision)])
-  expect(delivery.coverage.gaps.some((gap: ConnectionDeliveryGap) => gap.reason === 'public-content-unconfirmed' &&
+  expect(delivery.coverage.gaps.some((gap: ConnectionDeliveryGap) =>
     gap.part?.record.source.kind === 'captured' && gap.part.record.source.recordId === captured.item.id &&
-    gap.part.selector.kind === 'captured-field' && gap.part.selector.field === 'content')).toBe(true)
+    gap.part.selector.kind === 'captured-field' && gap.part.selector.field === 'content')).toBe(false)
   expect(delivery.coverage.gaps.some((gap: ConnectionDeliveryGap) => gap.part?.record.source.kind === 'captured' && gap.part.record.source.recordId === 'private-body-with-tool')).toBe(false)
   expect(f.client.agentSession(f.ref.agentSessionId).run).toEqual({ runId: 'run-original-agent' })
   expect(f.inner.kernel.input).toHaveBeenCalledTimes(2); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
@@ -439,7 +445,12 @@ it('an old mixed frozen representation recovers ordinary conversation after excl
   await appendFile(f.transcript, jsonl([{ sessionId: source.nativeSessionId, uuid: 'old-mixed', type: 'assistant', message: { role: 'assistant', content: [
     { type: 'text', text: allowed }, { type: 'tool_result', tool_use_id: 'old-tool', content: hidden }
   ] } }]))
-  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.ref.agentSessionId, item: { id: 'same-event-captured-public', agentSessionId: f.ref.agentSessionId, kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Original captured output', content: 'Allowed original captured contribution survives cancellation', createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1), conversation: { sameEvent: { ...f.ref, source: { kind: 'native', providerId: 'claude', nativeSessionId: source.nativeSessionId, recordId: 'old-mixed' } } } } })
+  const captured = core.agentTimelineMutationFromAcpEvent(f.ref.agentSessionId, { type: 'activity', operation: 'append', activityId: 'same-event-captured-public',
+    kind: 'assistant_message', status: 'complete', title: 'Original captured output', content: 'Allowed original captured contribution survives cancellation' },
+  { source: 'acp', acpAdapterId: 'original-acp-adapter', acpSessionId: 'original-acp-session', run: { runId: 'run-original-agent' }, observedAt: _historyFixtureEpoch(0, 0, 1) })
+  if (!captured || captured.type === 'update') throw Error('Original ACP assistant contribution required')
+  await f.store.applyTimelineMutation({ ...captured, item: { ...captured.item, conversation: { sameEvent: {
+    ...f.ref, source: { kind: 'native', providerId: 'claude', nativeSessionId: source.nativeSessionId, recordId: 'old-mixed' } } } } })
   active.publication!.refresh()
   await vi.waitFor(() => {
     const pending = contentOperations(active.publication!.store, f.binding).filter(value => value.state === 'pending')
@@ -461,7 +472,7 @@ it('an old mixed frozen representation recovers ordinary conversation after excl
   db.prepare('UPDATE connector_publication_decision SET record_id=?,decision_json=? WHERE rowid=?').run(privateId, JSON.stringify(unqualifiedPiece), Number(originalRow.rowid))
   db.prepare('INSERT INTO connector_publication_decision(binding_id,binding_revision,source_key,record_id,source_revision,reason,decision_json) VALUES(?,?,?,?,?,?,?)')
     .run(f.binding.bindingId, f.binding.revision, 'unified', String(originalRow.record_id), 'current', 'content-accounted', JSON.stringify(allowedPiece))
-  expect(unit.records.some(value => value.original.kind === 'captured' && value.original.item.id === 'same-event-captured-public')).toBe(true)
+  expect(unit.records.some(value => value.original.kind === 'captured' && value.original.item.id === captured.item.id)).toBe(true)
   const restoredRows = db.prepare("SELECT decision_json FROM connector_publication_decision WHERE json_extract(decision_json,'$.kind')='representation' AND json_extract(decision_json,'$.projectionId')=? ORDER BY rowid").all(old.projectionId)
   const payload = { kind: 'speech', text: restoredRows.map(row => JSON.parse(String(row.decision_json)).text).join('\n\n') }
   const encoded = JSON.stringify(payload, (_key, value) => value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value)

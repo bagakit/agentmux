@@ -23,10 +23,15 @@ export default defineConfig({ ...native, cacheDir: '.cache/a2a-publication', plu
       if (code.split(before).length !== 2) throw Error('Original direct consumer mutation did not load exactly once')
       code = code.replace(before, 'notice ? notice.messageIds : []')
     }
+    if (process.env.A2A_PUBLICATION_MUTANT === 'hook-snapshot-speech' && path === 'packages/connectors/src/publication-content.ts') {
+      const before = "conversationRecordRole(record) === 'message' &&"
+      if (code.split(before).length !== 2) throw Error('Original Hook observation qualification mutation did not load exactly once')
+      code = code.replace(before, 'true &&')
+    }
     if (process.env.A2A_PUBLICATION_LOADED) {
       const hash = (value: string) => createHash('sha256').update(value).digest('hex')
       appendFileSync(process.env.A2A_PUBLICATION_LOADED, JSON.stringify({ path, originalSHA256: hash(original), loadedSHA256: hash(code), ...(code !== original ? { mutation: process.env.A2A_PUBLICATION_MUTANT } : {}) }) + '\n')
     }
     if (code !== original) return code
   }
-}], test: { ...native.test, include: ['packages/connectors/test/direct-a2a-gap.test.ts', 'packages/core/test/message-read-origin.test.ts', 'packages/connectors/test/connection-services-owner.test.ts', 'packages/connectors/test/a2a-publication-consumer.test.ts', 'packages/connectors/test/ordinary-conversation-publication.test.ts', 'packages/connectors/test/publication-a2a-boundary.test.ts'], testTimeout: 30_000 } })
+}], test: { ...native.test, include: ['packages/connectors/test/direct-a2a-gap.test.ts', 'packages/core/test/message-read-origin.test.ts', 'packages/connectors/test/connection-services-owner.test.ts', 'packages/connectors/test/a2a-publication-consumer.test.ts', 'packages/connectors/test/ordinary-conversation-publication.test.ts', 'packages/connectors/test/publication-a2a-boundary.test.ts', 'packages/connectors/test/native-content-eligibility-consumer.test.ts'], testTimeout: 30_000 } })
