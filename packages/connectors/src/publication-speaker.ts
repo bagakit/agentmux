@@ -1,3 +1,4 @@
+import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { conversationRecordAuthor, type ConversationRef, type ConversationUnit } from '@agentmux/core/conversation'
 import type { MoteChatTarget } from '@agentmux/core/mote-chat'
 import type { MoteAvatarTarget } from '@agentmux/core/mote-avatar-write'
@@ -26,7 +27,7 @@ export function publicationSpeaker(unit: ConversationUnit, reference: Conversati
   const author = unit.event.author
   if (author.kind === 'agent') return { kind: 'agent', reference: { ...reference, agentSessionId: author.agentSessionId } }
   if (author.kind === 'human' || author.kind === 'external') return { kind: author.kind }
-  const originals = new Set(unit.records.map(record => conversationRecordAuthor(record, reference.agentSessionId))
+  const originals = new Set(unit.records.filter(isCompleteConversationRecord).map(record => conversationRecordAuthor(record, reference.agentSessionId))
     .filter(value => value.kind !== 'unknown' && value.kind !== 'system').map(value => JSON.stringify(value)))
   return { kind: originals.size > 1 ? 'mixed' : 'unknown' }
 }

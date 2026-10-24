@@ -1,3 +1,4 @@
+import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { projectQueryFeedback, queueQueryFeedback } from './publication-query-feedback.js'
 import { externalConversationAuthor, externalConversationRecordId } from '@agentmux/core'
 import { createHash } from 'node:crypto'
@@ -400,7 +401,7 @@ export class PublicationStore {
       if (original !== projectionId) for (const row of this.representationRows(boundary, original))
         this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...row.value, projectionId }), row.ordinal)
     }
-    const covered = new Set(unit.records.map(record => record.id)), blocked = new Set(plan.gaps.flatMap(gap => gap.part ? [conversationRecordId(gap.part.record)] : []))
+    const covered = new Set(unit.records.filter(isCompleteConversationRecord).map(record => record.id)), blocked = new Set(plan.gaps.flatMap(gap => gap.part ? [conversationRecordId(gap.part.record)] : []))
     const pieces = new Map(plan.pieces.map(piece => [publicationPartKey(piece.part), piece])), preserveLegacy = new Set<string>(), preserveResources = new Set<string>()
     for (const row of this.representationRows(boundary, projectionId)) {
       const value = row.value, recordId = conversationRecordId(value.kind === 'representation' ? value.part.record : value.record)
@@ -623,7 +624,8 @@ export class PublicationStore {
       let identity = prior?.operationId ?? null
       const queue = (effect: 'upsert' | 'withdraw', payload: PublicationPayload, parent: PublicationOperation | null): PublicationOperation => {
         const operationId = 'publication-' + digest([projectionId, ordinal, identity, revision, effect])
-        const original = unit.records.find(record => record.id === unit.event.anchorId)?.original
+        const readingOriginal = unit.records.find(record => record.id === unit.event.anchorId)?.original
+        const original = readingOriginal?.kind === 'deferred' ? readingOriginal.item : readingOriginal
         const sourceTime = original?.kind === 'native' ? original.item.startedAt : original?.item.createdAt
         const presentationTime = sourceTime !== undefined && Number.isFinite(sourceTime) && Math.abs(sourceTime) <= 8.64e15
           ? sourceTime : prior?.presentationTime ?? Date.now()
