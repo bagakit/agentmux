@@ -337,9 +337,11 @@ Toolkit 的设备列表只列原 Host 已确认连接中的设备，不铺离线
 
 手机 Mote 的日常入口围绕同一个原对象组织：进入原主对话、阅读进展、继续输入、回应事项与查看结果。主对话及合作资料消费原保存配置与业务 owner；主对话未确认时保留原对话候选和手动继续能力。同一 Session 在多处呈现时，入口保留此次 Space／Zone／Tab／Region 与 occurrence，不从 SID 的首个位置推导 Mote 身份。头像揭示该对象的 Profile、当前工作和就近动作。
 
-Mote 目录根行点击就地展开该对象的原二级 Tabs，不自动跳入主会话；Tab 行包含原 Agent 呈现 owner 的 recap。选择单 Agent 的 Tab 可进入其准确 Region 的已有 Session；包含多个 Region 的 Tab 保留各原工作面供明确选择，不任取一个 Session。展开目录与阅读 recap 不启动 Agent、不发送输入，也不增加操作授权。
+手机 Mote 目录以 Profile 与 Agents 组织原对象，不枚举全部文件 Tab。Profile 沿[原搭档主页](motes-and-coordination.md#mote-快捷入口与当前协调上下文)提供已保存资料与按需文件编辑，Agents 只呈现原空间关系明确关联的 Agent 及其 recap；文件 Tab 和 Launcher 不冒充 Agent。选择已有 Agent 保留其准确 Session 与原展示位置，多 Region 或多处展示仍明确选择，不任取一个 Session。完整文件与其他工作面继续沿原 Space／资料入口可达，目录重排不删除或迁移内容。
 
-Mote／Space 目录中的 Launcher 提供可发现的创建 Agent 入口，沿[原工作起点](workface-launcher.md)进入既有创建流程，保留该入口的准确 Space／Zone／Tab／Region 来源，不按名称、当前焦点或首个位置改投。打开目录或创建表单不启动 Agent；用户明确确认后才沿原创建 owner 执行，并保留原操作及真实回执。原位置或绑定未确认时保留原工作面与输入，提供核对原目标的路径，不能只以“在 Mac 上查看”封住工作起点，也不能用未知回执自动重建。
+每个 Mote 的主 Agent 入口与根行就近常驻，不依赖展开目录、已有运行 Session 或已保存默认主会话。目录呈现、展开、资料读取、刷新和重连不额外启动或恢复 Agent；用户明确点击主入口后才进入该原 Mote 的主对话流程。已保存主会话沿[原默认会话与主对话恢复合同](motes-and-coordination.md#主对话的自动接回)核对原 Host、Session 与准确展示位置，健康会话直接继续，需恢复时通过原 Core 接回同一身份；配置确实未保存主会话时可进入该 Mote 的原创建表单，明确创建后沿原配置 owner 保存准确主会话绑定。组合由原公共／共享 Mote 机制承担，不另建手机主会话或生命周期 owner。配置、身份或原操作未知时保入口、原引用、草稿与核对路径，不从第一个 SID、Launcher、名称或当前焦点猜主 Agent，不自动新建替代会话；既有独立的启动恢复时机仍由原恢复合同持有。
+
+Space 等完整工作面目录中的 Launcher 提供可发现的创建 Agent 入口，沿[原工作起点](workface-launcher.md)进入既有创建流程，保留该入口的准确 Space／Zone／Tab／Region 来源，不按名称、当前焦点或首个位置改投。打开目录或创建表单不启动 Agent；用户明确确认后才沿原创建 owner 执行，并保留原操作及真实回执。原位置或绑定未确认时保留原工作面与输入，提供核对原目标的路径，不能只以“在 Mac 上查看”封住工作起点，也不能用未知回执自动重建。
 
 手机 Topics 在同一目录中展开或收起 Category 下的原 Topic 子项，分类和成员由准确身份及原绑定确定；选择 Topic 仍进入原 Topic／Zone／Tab 工作面，讨论、知识及管理保持可达。对象和来源沿[《Topics 知识库的层级与沉淀》](spaces-and-layout.md#topics-知识库的层级与沉淀)，同屏展开只改变手机呈现，不另造分类或改写 Desktop 的导航范围。
 
