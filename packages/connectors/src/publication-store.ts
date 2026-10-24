@@ -6,7 +6,7 @@ import { parsePreparedPublication, publicationSpeechText, type PreparedPublicati
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
 import { parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
-import { parseConversationChangesPage, parseConversationUnit, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
+import { parseConversationChangesPage, parseConversationUnit, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
 export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'sourceFrontier' | 'scope'>
@@ -88,6 +88,11 @@ const same = (a: unknown, b: unknown) => encode(a) === encode(b)
 type RepresentationIntent = { kind: 'representation'; projectionId: string } & PublicationContentPlan['pieces'][number]
 type LegacyRepresentationIntent = { kind: 'legacy-representation'; projectionId: string; record: ConversationItemRef; operations: string[]; text: string }
 type RepresentationRow = { ordinal: number; id: string; value: RepresentationIntent | LegacyRepresentationIntent }
+type QuestionReadWitness = { recordRevision: string; targets: ConversationQuestionIdentity[]; read: string[] }
+const questionReadsComplete = (witnesses: QuestionReadWitness[]) => witnesses.length > 0 && witnesses.every(witness => witness.targets.length > 0 && witness.targets.every(target => witness.read.includes(encode(target))))
+function acceptQuestionReads(witnesses: QuestionReadWitness[], questions: ReadonlySet<string>): QuestionReadWitness[] {
+  return witnesses.map(witness => ({ ...witness, read: [...new Set([...witness.read, ...witness.targets.map(encode).filter(target => questions.has(target))])] }))
+}
 /** Exact UTF-8 text fragments. The adapter declares its supported payload budget before admission. */
 function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byteLimit: number, fragmentText?: PublicationPageOptions['fragmentText']): PublicationPayload[] {
   if (!Number.isSafeInteger(byteLimit) || byteLimit < 4 || byteLimit > 128 * 1024)
@@ -408,6 +413,15 @@ export class PublicationStore {
     const page = parseConversationChangesPage(value, { ...ref(boundary), checkpoint: after, limit: 100, maxBytes: value.budgetBytes })
     const units = options.units.map(unit => parseConversationUnit(unit, { hostId: page.sourceHostId, agentSessionId: boundary.agentSessionId }, page.scope))
     const decisions = units.map(unit => ({ unit, plan: publicationContent(unit, boundary as RoomBinding, page.checkpoint, { resolved: options.resolvedText, origin: id => this.origin(boundary, unit, id) }) }))
+    const questionsRead = new Set(units.flatMap(unit => unit.records.flatMap(record => {
+      const reference = record.reference
+      if (record.original.kind !== 'native' || reference?.source.kind !== 'native') return []
+      const source = { providerId: reference.source.providerId, nativeSessionId: reference.source.nativeSessionId }
+      return (record.original.item.questionRequest?.questions ?? []).flatMap(question => {
+        const identity = conversationQuestionIdentity({ ...reference, source }, question.id)
+        return identity ? [encode(identity)] : []
+      })
+    })))
     this.transaction(() => {
       if (!authorized()) throw new AgentMuxError('This exact Binding no longer authorizes publication.', 'PUBLICATION_NOT_AUTHORIZED')
       const row = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), 'unified')
@@ -423,11 +437,33 @@ export class PublicationStore {
           // does not prove that an earlier recorded relation has been closed.
           const targetRead = gap.record && ['CONVERSATION_ANCHOR_UNREAD', 'CONVERSATION_OBSERVED_TARGET_UNREAD'].includes(gap.code ?? '') && units.some(unit => unit.records.some(record => record.id === conversationRecordId(gap.record!)))
           const sourceRecovered = !gap.record && !gap.code?.startsWith('CONVERSATION_') && coverage.current === 'complete-through-cut' && !coverage.gaps.length
-          if (targetRead || sourceRecovered) this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...d, state: 'resolved' }), Number(row.rowid))
+          // An original answer's typed targets, not its current text/version,
+          // survive separate read pages and reopen in this same decision.
+          const questionReads = d.questionReads as QuestionReadWitness[] | undefined
+          const accepted = questionReads && acceptQuestionReads(questionReads, questionsRead)
+          if (targetRead || sourceRecovered || accepted && !same(accepted, questionReads)) this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...d,
+            ...(accepted ? { questionReads: accepted } : {}), state: targetRead || sourceRecovered || accepted && questionReadsComplete(accepted) ? 'resolved' : 'unresolved' }), Number(row.rowid))
         }
         for (const original of coverage.gaps) {
           const gap: ConnectionDeliveryGap = { gapId: 'gap-' + digest([...scopeKey(boundary), key, original.code, original.record]), reason: 'source-gap', source: coverage.source, code: original.code, ...(original.record ? { record: original.record } : {}) }
-          this.saveDecision(boundary, gap.gapId, digest(original), { kind: 'gap', state: 'unresolved', sourceKey: key, gap })
+          const revision = digest(original)
+          if (original.code === 'CONVERSATION_QUESTION_TARGET_UNREAD' && original.record) {
+            const prior = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision=?").get(...scopeKey(boundary), gap.gapId, revision)
+            const previous = prior ? JSON.parse(String(prior.decision_json)) : undefined
+            // Historical decisions without frozen targets cannot acquire proof
+            // from a later answer version. Preserve their original unknown.
+            if (previous && !previous.questionReads) continue
+            const record = units.flatMap(unit => unit.records).find(record => record.id === conversationRecordId(original.record!))
+            const targets = units.flatMap(unit => unit.event.relations.flatMap(relation => relation.kind === 'answers' && same(relation.from, original.record) ? [relation.question] : []))
+            let witnesses: QuestionReadWitness[] = previous?.questionReads ?? []
+            if (record && targets.length && !witnesses.some(witness => witness.recordRevision === record.revision)) witnesses = [...witnesses, { recordRevision: record.revision, targets: [...new Map(targets.map(target => [encode(target), target])).values()], read: [] }]
+            if (witnesses.length) {
+              witnesses = acceptQuestionReads(witnesses, questionsRead)
+              this.saveDecision(boundary, gap.gapId, revision, { kind: 'gap', state: questionReadsComplete(witnesses) ? 'resolved' : 'unresolved', sourceKey: key, gap, questionReads: witnesses })
+              continue
+            }
+          }
+          this.saveDecision(boundary, gap.gapId, revision, { kind: 'gap', state: 'unresolved', sourceKey: key, gap })
         }
       }
       for (const decision of decisions) {
