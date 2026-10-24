@@ -30,6 +30,37 @@ async function input(selector: string, value: string) {
 }
 function noteEditor() { return dom.container.querySelector<HTMLElement & { editor: Editor }>('.launcher-note-composer .tiptap')!.editor }
 
+it('[icon-role] Launcher Note identity follows object.note without changing the original draft', async () => {
+  const { GRAPHITE_THEME, mountThemeRuntime, previewTheme } = await import('@agentmux/client-ui/theme')
+  const { semanticIconHref } = await import('@agentmux/client-ui/icons')
+  const release = mountThemeRuntime(window)
+  try {
+    await mount(); await dom.click('[aria-label="Expand Note"]')
+    await act(async () => noteEditor().commands.insertContent('Original Note draft remains here'))
+    const header = dom.container.querySelector('[data-section="note"] .launcher-utility__head')!
+    const icon = header.querySelector('svg')!, href = semanticIconHref('object.note')
+    expect(header, 'actual Launcher Note header').not.toBeNull(); expect(icon).not.toBeNull()
+    expect(icon.querySelector('use')?.getAttribute('href')).toBe(href)
+    expect(icon.closest('[data-icon-animation]')).toBeNull()
+    const symbol = () => document.getElementById(href.slice(1))!, original = symbol().innerHTML
+    const editor = noteEditor(), draft = useLauncherState.getState().drafts['region:region']
+    const custom = structuredClone(GRAPHITE_THEME); custom.id = 'custom.launcher-note-role'; custom.name = 'Launcher Note identity'
+    custom.icons = { 'action.edit-note': { kind: 'glyph', glyph: 'gem' } }
+    await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+    expect(symbol().innerHTML).toBe(original)
+    custom.icons = { 'object.note': { kind: 'glyph', glyph: 'gem' } }
+    await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+    expect(symbol().innerHTML).not.toBe(original)
+    custom.icons = { 'object.note': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] } }
+    await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+    expect(symbol().querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
+    expect(noteEditor()).toBe(editor); expect(editor.getText()).toBe('Original Note draft remains here')
+    expect(useLauncherState.getState().drafts['region:region']).toBe(draft)
+    await act(async () => { expect(previewTheme(GRAPHITE_THEME).applied).toBe(true) })
+    expect(symbol().innerHTML).toBe(original); expect(icon.querySelector('use')?.getAttribute('href')).toBe(href)
+  } finally { release() }
+})
+
 describe('actual Launcher utility surfaces', () => {
   it('Browser submits the exact address or search to the existing create action and keeps its draft after failure/close', async () => {
     await mount(); await dom.click('[aria-label="Expand Browser"]'); const browser = vi.fn().mockRejectedValue(new Error('Navigation unavailable')); await act(async () => useAppStore.setState({ createBrowser: browser }))

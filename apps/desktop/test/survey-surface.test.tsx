@@ -151,6 +151,46 @@ afterEach(async () => {
   if (savedStorage === null) localStorage.removeItem('agentmux-workbench-v1'); else localStorage.setItem('agentmux-workbench-v1', savedStorage)
 })
 async function renderApp() { await dom.render(<DesktopClientUiProvider><App /></DesktopClientUiProvider>) }
+
+it('[icon-role] Survey Note identity follows object.note while ordinary files and the original selection stay independent', async () => {
+  const { GRAPHITE_THEME, previewTheme } = await import('@agentmux/client-ui/theme')
+  const { semanticIconHref } = await import('@agentmux/client-ui/icons')
+  const { NOTE_FILE_EXTENSION } = await import('../src/shared/note-format')
+  const textWorkspace = { ...otherWorkspace, id: 'text-role-workspace', path: _hygiene_fixturePath('text-role-project') }
+  const noteTab = createWorkbenchTab('note-role-tab', { kind: 'file', regionId: 'note-role-region', workspaceId: otherWorkspace.id, path: `original${NOTE_FILE_EXTENSION}` })
+  const textTab = createWorkbenchTab('text-role-tab', { kind: 'file', regionId: 'text-role-region', workspaceId: textWorkspace.id, path: 'original.md' })
+  useNotebookLibrary.setState({ state: emptyNotebookState(), issue: null })
+  useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, otherWorkspace, textWorkspace] },
+    tabs: { ...state.tabs, [noteTab.id]: noteTab, [textTab.id]: textTab },
+    layouts: { ...state.layouts, [otherWorkspace.id]: createWorkspaceLayout('note-role-group', [noteTab.id]), [textWorkspace.id]: createWorkspaceLayout('text-role-group', [textTab.id]) } }))
+  const noteZone = catalog().tabs.find(tab => tab.tabId === noteTab.id)!.zoneId!, textZone = catalog().tabs.find(tab => tab.tabId === textTab.id)!.zoneId!
+  expect(noteZone).not.toBe(textZone)
+  useAppStore.setState({ surveyCollectedZones: { [noteZone]: true, [textZone]: true } })
+  await renderApp(); await enterSurvey(); await choose()
+  const row = (zoneId: string) => [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(item => item.dataset.surveyZoneId === zoneId)
+  const note = row(noteZone)?.querySelector('.survey-item-glyph')!, text = row(textZone)?.querySelector('.survey-item-glyph')!
+  expect(note, 'actual pure Note Survey row').not.toBeNull(); expect(text, 'actual ordinary file Survey row').not.toBeNull()
+  const href = semanticIconHref('object.note'), symbol = () => document.getElementById(href.slice(1))!
+  expect(note.querySelector('use')?.getAttribute('href')).toBe(href)
+  expect(text.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('file.text'))
+  expect(note.querySelector('[data-icon-animation]')).toBeNull()
+  const original = symbol().innerHTML, ordinary = document.getElementById(semanticIconHref('file.text').slice(1))!.innerHTML
+  const before = useAppStore.getState(), custom = structuredClone(GRAPHITE_THEME); custom.id = 'custom.survey-note-identity'; custom.name = 'Survey Note identity'
+  custom.icons = { 'action.edit-note': { kind: 'glyph', glyph: 'gem' } }
+  await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+  expect(symbol().innerHTML).toBe(original)
+  custom.icons = { 'object.note': { kind: 'glyph', glyph: 'gem' } }
+  await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+  expect(symbol().innerHTML).not.toBe(original)
+  custom.icons = { 'object.note': { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] } }
+  await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
+  expect(symbol().querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
+  expect(document.getElementById(semanticIconHref('file.text').slice(1))!.innerHTML).toBe(ordinary)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  await act(async () => { expect(previewTheme(GRAPHITE_THEME).applied).toBe(true) })
+  expect(symbol().innerHTML).toBe(original); expect(note.querySelector('use')?.getAttribute('href')).toBe(href)
+})
 /** Name writes require the production durable owner, not the Browser preview transport. */
 async function realNameOwner(retainedDirectory?: string) {
   const directory = retainedDirectory ?? await mkdtemp(join(tmpdir(), 'amux-survey-name-'))
