@@ -355,3 +355,27 @@ it.each([
     expect(h.inner.kernel.input).not.toHaveBeenCalled()
   } finally { await second.dispose(); await h.close() }
 })
+
+it.each([true, false])('attributes selected-target transcript activity only to an observed Run member (present=%s)', async present => {
+  const h = await nativeTurnEndFixture()
+  try {
+    await h.change(session => {
+      const observedAt = session.updatedAt + 1
+      if (session.nativeHandle?.kind !== 'provider') throw new Error('Expected the original Provider source')
+      return { ...session, updatedAt: observedAt,
+        nativeBinding: { source: 'user-selected', run: session.run, observedAt },
+        nativeSourceObservation: { state: 'ambiguous', run: session.run, observedAt, reason: 'frontend-selection-unconfirmed',
+          candidates: present ? [session.nativeHandle] : [{ ...session.nativeHandle, sessionId: 'another-main' }] } }
+    })
+    const before = h.client.agentSession('recipient')
+    await h.observe({ state: 'working', recordId: 'selected-working', nativeTurnId: 'selected-turn' })
+    expect(h.client.agentSession('recipient').semanticStatus).toEqual(present
+      ? expect.objectContaining({ state: 'working', nativeTurnId: 'selected-turn', source: 'native-transcript' }) : before.semanticStatus)
+    await h.observe({ state: 'done', recordId: 'selected-end', nativeTurnId: 'selected-turn' })
+    expect(h.client.agentSession('recipient').semanticStatus).toEqual(present
+      ? expect.objectContaining({ state: 'done', nativeTurnId: 'selected-turn', source: 'native-transcript' }) : before.semanticStatus)
+    expect(h.client.agentSession('recipient').nativeSourceObservation).toEqual(before.nativeSourceObservation)
+    expect(h.client.agentSession('recipient').nativeHandle).toEqual(before.nativeHandle)
+    expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  } finally { await h.close() }
+})
