@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Graph, Subgraph } from '@viz-js/viz'
 import { writeFileSync } from 'node:fs'
-import { arrangeCollaboration, reconcileCollaborationLayout, routeCollaborationLayout, handleCollaborationLayoutRequest, type CollaborationLayoutBox, type CollaborationLayoutInput, type CollaborationLayoutConnection, type CollaborationLayoutResponse } from '../src/renderer/src/lib/collaboration-layout-engine'
+import { arrangeCollaboration, reconcileCollaborationLayout, routeCollaborationLayout, handleCollaborationLayoutRequest, collaborationLayoutStructureKey, type CollaborationLayoutBox, type CollaborationLayoutInput, type CollaborationLayoutConnection, type CollaborationLayoutResponse } from '../src/renderer/src/lib/collaboration-layout-engine'
 
 const measurements = vi.hoisted(() => [] as { engine: string; nodes: string[]; edges: { source: string; target: string }[]; ms: number }[])
 const captures = vi.hoisted(() => [] as unknown[])
@@ -40,7 +40,200 @@ function contains(a: CollaborationLayoutBox, b: CollaborationLayoutBox) {
 function intersects(a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }
+const distance = (a: CollaborationLayoutBox, b: CollaborationLayoutBox) => Math.hypot(a.x + a.width / 2 - b.x - b.width / 2, a.y + a.height / 2 - b.y - b.height / 2)
+const heading = (id: string, x = 0, y = -120, areaId = id): CollaborationLayoutBox => ({ id, areaId, kind: 'area', folded: false,
+  x: x - 24, y: y - 24, width: 1600, height: 300, heading: { x: 24, y: 24, width: 184, height: 40 } })
+function adaptiveAddition() {
+  const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Work', members: ['reading', 'peer'], folded: false }, { id: 'elsewhere', name: 'Other occurrence', members: ['same-session-elsewhere'], folded: false }],
+    nodes: [{ id: 'reading', areaId: 'work', width: 154, height: 38 }, { id: 'peer', areaId: 'work', width: 154, height: 38 }, { id: 'same-session-elsewhere', areaId: 'elsewhere', width: 154, height: 38 }],
+    connections: [{ ...edge('original', 'reading', 'peer'), strength: 8 }] }
+  const boxes = [heading('work'), box('reading', 0, 0, 154, 38, 'work'), box('peer', 900, 0, 154, 38, 'work'), heading('elsewhere', 5000), box('same-session-elsewhere', 5000, 0, 154, 38, 'elsewhere')]
+  const next: CollaborationLayoutInput = { ...input, areas: input.areas.map(area => area.id === 'work' ? { ...area, members: [...area.members, 'new'] } : area),
+    nodes: [...input.nodes, { id: 'new', areaId: 'work', width: 154, height: 38 }],
+    connections: [...input.connections, { ...edge('new-reading', 'new', 'reading'), strength: 8 }, { ...edge('new-peer', 'new', 'peer'), strength: 8 }] }
+  return { input, boxes, next }
+}
 describe('finite collaboration Worker engine', () => {
+  it('adapts a real force-arranged neighborhood to a new strong member and an internal deletion', async () => {
+    const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Original work', members: Array.from({ length: 12 }, (_, index) => 'member-' + index), folded: false },
+      { id: 'control', name: 'Unrelated control', members: ['control-member'], folded: false }],
+      nodes: [...Array.from({ length: 12 }, (_, index) => ({ id: 'member-' + index, areaId: 'work', width: 154, height: 38 })), { id: 'control-member', areaId: 'control', width: 154, height: 38 }],
+      connections: Array.from({ length: 11 }, (_, index) => edge('chain-' + index, 'member-' + index, 'member-' + (index + 1))) }
+    const original = await arrangeCollaboration(input), before = new Map(original.map(box => [box.id, box])), reading = before.get('member-0')!
+    const farthest = original.filter(box => box.kind === 'agent' && box.areaId === 'work' && box.id !== reading.id).sort((a, b) => distance(b, reading) - distance(a, reading) || a.id.localeCompare(b.id))[0]!
+    const added: CollaborationLayoutInput = { ...input, areas: input.areas.map(area => area.id === 'work' ? { ...area, members: [...area.members, 'new-member'] } : area),
+      nodes: [...input.nodes, { id: 'new-member', areaId: 'work', width: 154, height: 38 }], connections: [...input.connections,
+        { ...edge('new-reader', 'new-member', reading.id), strength: 32 }, { ...edge('new-far', 'new-member', farthest.id), strength: 32 }] }
+    const after = new Map(reconcileCollaborationLayout(added, original, reading.id, input).map(box => [box.id, box]))
+    expect(distance(after.get(farthest.id)!, farthest)).toBeGreaterThan(1)
+    const newLength = distance(after.get('new-member')!, after.get(reading.id)!) + distance(after.get('new-member')!, after.get(farthest.id)!)
+    expect(newLength).toBeLessThan(distance(reading, farthest) * .95)
+    for (const id of [reading.id, 'control', 'control-member']) expect(after.get(id)).toEqual(before.get(id))
+    const internal = input.nodes.filter(node => node.areaId === 'work' && node.id !== reading.id && node.id !== farthest.id)
+      .map(node => after.get(node.id)!).sort((a, b) => distance(a, after.get('new-member')!) - distance(b, after.get('new-member')!))[0]!
+    const removed = { ...added, areas: added.areas.map(area => ({ ...area, members: area.members.filter(id => id !== internal.id) })),
+      nodes: added.nodes.filter(node => node.id !== internal.id), connections: added.connections.filter(edge => edge.source !== internal.id && edge.target !== internal.id) }
+    const survivors = new Map(reconcileCollaborationLayout(removed, [...after.values()], reading.id, added).map(box => [box.id, box]))
+    // Freeze the two surrounding survivors before the deletion; their summed
+    // radius measures the local hole without requiring an identity swap into its exact old slot.
+    const surrounding = removed.nodes.filter(node => node.areaId === 'work' && node.id !== reading.id).map(node => after.get(node.id)!)
+      .sort((a, b) => distance(a, internal) - distance(b, internal) || a.id.localeCompare(b.id)).slice(0, 2).map(box => box.id)
+    const hole = (values: ReadonlyMap<string, CollaborationLayoutBox>) => surrounding.reduce((sum, id) => sum + distance(values.get(id)!, internal), 0)
+    const moved = removed.nodes.filter(node => node.areaId === 'work' && node.id !== reading.id).map(node => distance(survivors.get(node.id)!, after.get(node.id)!))
+    expect(Math.max(...moved)).toBeGreaterThan(1)
+    expect(hole(survivors)).toBeLessThan(hole(after) * .95)
+    expect(survivors.get(reading.id)).toEqual(reading)
+    for (const id of ['control', 'control-member']) expect(survivors.get(id)).toEqual(before.get(id))
+    await successfulRoutes([...survivors.values()], removed.connections)
+    console.info(JSON.stringify({ candidate: 'real-force-adaptive', farthest: farthest.id, initialDistance: distance(reading, farthest), addedLength: newLength,
+      deleted: internal.id, holeBefore: hole(after), holeAfter: hole(survivors), survivorMaxMovement: Math.max(...moved) }))
+  })
+
+  it('moves an old noncolliding neighbor on related addition and improves the independently bounded weighted distance', async () => {
+    const { input, boxes, next } = adaptiveAddition(), before = new Map(boxes.map(box => [box.id, box]))
+    const initialNew = box('new', 450, 47, 154, 38, 'work')
+    for (const member of boxes.filter(box => box.kind === 'agent')) expect(intersects(initialNew, member)).toBe(false)
+    const responses: CollaborationLayoutResponse[] = []
+    await handleCollaborationLayoutRequest({ id: 'adaptive-add', type: 'reconcile', input: next, previousStructure: input, boxes, paths: [], anchor: 'reading' }, response => responses.push(response))
+    const result = responses.find(response => response.type === 'boxes')!; if (result.type !== 'boxes') throw Error('Original Worker boxes required')
+    const after = new Map(result.boxes.map(box => [box.id, box])), peer = after.get('peer')!
+    expect(distance(peer, before.get('peer')!)).toBeGreaterThan(16)
+    expect(distance(peer, before.get('peer')!)).toBeLessThanOrEqual(396 + 1e-6)
+    // With the two old endpoints fixed 900px apart, these three equal springs
+    // have a 7*(900+900) lower bound for every possible placement of the new node.
+    const weighted = next.connections.reduce((sum, edge) => sum + 7 * distance(after.get(edge.source)!, after.get(edge.target)!), 0)
+    expect(weighted).toBeLessThan(7 * 1800 * .85)
+    expect(after.get('reading')).toEqual(before.get('reading'))
+    for (const id of ['elsewhere', 'same-session-elsewhere']) expect(after.get(id)).toEqual(before.get(id))
+    const bodies = result.boxes.map(box => box.kind === 'area' ? { ...box, x: box.x + box.heading.x, y: box.y + box.heading.y, width: box.heading.width, height: box.heading.height } : box)
+    for (const [index, first] of bodies.entries()) for (const second of bodies.slice(index + 1))
+      expect(intersects({ x: first.x - 28 + 1e-6, y: first.y - 28 + 1e-6, width: first.width + 56 - 2e-6, height: first.height + 56 - 2e-6 }, second), first.id + '/' + second.id).toBe(false)
+    expect(result.work!.nodes).toBe(2); expect(result.work!.passes).toBeLessThanOrEqual(4)
+    expect(result.work!.candidates).toBeGreaterThan(0); expect(result.work!.candidates).toBeLessThanOrEqual(2 * 4 * 48)
+    expect(responses.filter(response => response.type === 'error')).toEqual([])
+    expect(responses.filter(response => response.type === 'paths').flatMap(response => Object.keys(response.paths)).sort()).toEqual(next.connections.map(edge => edge.id).sort())
+    const reordered = { ...next, areas: [...next.areas].reverse(), nodes: [...next.nodes].reverse(), connections: [...next.connections].reverse() }
+    expect(reconcileCollaborationLayout(reordered, boxes, 'reading', input)).toEqual(result.boxes)
+    console.info(JSON.stringify({ candidate: 'adaptive-addition', oldNeighborMovement: distance(peer, before.get('peer')!), weighted, fixedEndpointLowerBound: 12600, work: result.work }))
+  })
+
+  it.each(['remove', 'shrink'] as const)('reclaims an internal %s gap by moving a surviving neighbor rather than only shrinking its outline', async change => {
+    const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Work', members: ['reading', 'middle', 'peer'], folded: false }],
+      nodes: [{ id: 'reading', areaId: 'work', width: 154, height: 38 }, { id: 'middle', areaId: 'work', width: 500, height: 94 }, { id: 'peer', areaId: 'work', width: 154, height: 38 }], connections: [edge('survivors', 'reading', 'peer')] }
+    const boxes = [heading('work'), box('reading', 0, 0, 154, 38, 'work'), box('middle', 500, 0, 500, 94, 'work'), box('peer', 1200, 0, 154, 38, 'work')]
+    const next: CollaborationLayoutInput = { ...input, areas: input.areas.map(area => change === 'remove' ? { ...area, members: area.members.filter(id => id !== 'middle') } : area),
+      nodes: change === 'remove' ? input.nodes.filter(node => node.id !== 'middle') : input.nodes.map(node => node.id === 'middle' ? { ...node, width: 154, height: 38 } : node) }
+    const after = new Map(reconcileCollaborationLayout(next, boxes, 'reading', input).map(box => [box.id, box]))
+    expect(distance(after.get('peer')!, boxes[3]!)).toBeGreaterThan(40)
+    expect(distance(after.get('reading')!, after.get('peer')!)).toBeLessThan(1200 * .9)
+    expect(distance(after.get('peer')!, boxes[3]!)).toBeLessThanOrEqual(396 + 1e-6)
+    expect(after.get('reading')).toEqual(boxes[1])
+    expect([...after.keys()].sort()).toEqual(['work', ...next.nodes.map(node => node.id)].sort())
+    for (const node of next.nodes) expect(contains(after.get('work')!, after.get(node.id)!)).toBe(true)
+    await successfulRoutes([...after.values()], next.connections)
+    console.info(JSON.stringify({ candidate: 'adaptive-' + change, survivingMovement: distance(after.get('peer')!, boxes[3]!), originalSpan: 1200, finalSpan: distance(after.get('reading')!, after.get('peer')!) }))
+  })
+
+  it('settles real reparent and membership changes through three levels without moving the exact reading occurrence or an unrelated region', async () => {
+    const input: CollaborationLayoutInput = { areas: [{ id: 'root', name: 'Original ancestor', members: [], folded: false },
+      { id: 'middle', name: 'Original middle', parentId: 'root', members: [], folded: false }, { id: 'leaf', name: 'Original leaf', parentId: 'middle', members: ['reading', 'moved'], folded: false },
+      { id: 'target', name: 'Target parent', members: ['peer'], folded: false }, { id: 'control', name: 'Unrelated', members: ['other-occurrence'], folded: false }],
+      nodes: [['reading', 'leaf'], ['moved', 'leaf'], ['peer', 'target'], ['other-occurrence', 'control']].map(([id, areaId]) => ({ id: id!, areaId: areaId!, width: 154, height: 38 })),
+      connections: [edge('local', 'reading', 'moved'), edge('target-neighbor', 'moved', 'peer')] }
+    const boxes = await arrangeCollaboration(input), before = new Map(boxes.map(box => [box.id, box]))
+    const next: CollaborationLayoutInput = { ...input, areas: input.areas.map(area => area.id === 'middle' ? { ...area, parentId: 'target' } : area.id === 'leaf' ? { ...area, members: ['reading'] } : area.id === 'target' ? { ...area, members: ['peer', 'moved'] } : area),
+      nodes: input.nodes.map(node => node.id === 'moved' ? { ...node, areaId: 'target' } : node) }
+    const after = new Map(reconcileCollaborationLayout(next, boxes, 'reading', input).map(box => [box.id, box]))
+    expect(after.size).toBe(next.areas.length + next.nodes.length)
+    expect(after.get('reading')).toEqual(before.get('reading'))
+    for (const id of ['control', 'other-occurrence']) expect(after.get(id)).toEqual(before.get(id))
+    for (const area of next.areas) if (area.parentId) expect(contains(after.get(area.parentId)!, after.get(area.id)!)).toBe(true)
+    for (const node of next.nodes) expect(contains(after.get(node.areaId)!, after.get(node.id)!)).toBe(true)
+    expect(after.get('moved')!.areaId).toBe('target')
+    expect(contains(after.get('root')!, after.get('middle')!)).toBe(false)
+    await successfulRoutes([...after.values()], next.connections)
+    const readerMoved = { ...next, areas: next.areas.map(area => area.id === 'leaf' ? { ...area, members: [] } : area.id === 'target' ? { ...area, members: [...area.members, 'reading'] } : area),
+      nodes: next.nodes.map(node => node.id === 'reading' ? { ...node, areaId: 'target' } : node) }
+    const movedReader = new Map(reconcileCollaborationLayout(readerMoved, [...after.values()], 'reading', next).map(box => [box.id, box]))
+    expect(movedReader.get('reading')).toEqual({ ...before.get('reading'), areaId: 'target' })
+    for (const id of ['control', 'other-occurrence']) expect(movedReader.get(id)).toEqual(before.get(id))
+    for (const node of readerMoved.nodes) expect(contains(movedReader.get(node.areaId)!, movedReader.get(node.id)!)).toBe(true)
+  })
+
+  it('keeps repeated structural inputs and evidence-only changes exactly settled without spending a placement budget', async () => {
+    const { input, boxes, next } = adaptiveAddition(), settled = reconcileCollaborationLayout(next, boxes, 'reading', input)
+    const metadata = { ...next, areas: next.areas.map(area => ({ ...area, name: area.name + ' renamed' })), connections: [...next.connections.map(edge => ({ ...edge, strength: 128 })), edge('new-evidence', 'peer', 'reading')] }
+    expect(collaborationLayoutStructureKey(metadata)).toBe(collaborationLayoutStructureKey(next))
+    for (let index = 0; index < 5; index++) {
+      const work = { areas: 0, nodes: 0, passes: 0, candidates: 0 }
+      expect(reconcileCollaborationLayout(metadata, settled, index % 2 ? 'peer' : 'reading', next, undefined, work)).toEqual(settled)
+      expect(work).toEqual({ areas: 0, nodes: 0, passes: 0, candidates: 0 })
+    }
+  })
+
+  it('treats a true child contour as a whole obstacle while a direct parent member adapts', () => {
+    const input: CollaborationLayoutInput = { areas: [{ id: 'root', name: 'Parent', members: ['parent-member'], folded: false },
+      { id: 'child', name: 'Child', parentId: 'root', members: ['reading', 'child-peer'], folded: false }],
+      nodes: [{ id: 'parent-member', areaId: 'root', width: 154, height: 38 }, { id: 'reading', areaId: 'child', width: 154, height: 38 }, { id: 'child-peer', areaId: 'child', width: 154, height: 38 }],
+      connections: [{ ...edge('across-parent', 'parent-member', 'reading'), strength: 32 }] }
+    const child = { ...heading('child', 500), width: 1000, height: 450 }, boxes = [{ ...heading('root'), width: 2300, height: 700 }, child,
+      box('parent-member', 0, 0, 154, 38, 'root'), box('reading', 700, 0, 154, 38, 'child'), box('child-peer', 1300, 200, 154, 38, 'child')]
+    const next = { ...input, nodes: input.nodes.map(node => node.id === 'parent-member' ? { ...node, width: 160 } : node) }
+    const after = new Map(reconcileCollaborationLayout(next, boxes, 'reading', input).map(box => [box.id, box]))
+    expect(after.get('parent-member')!.x).toBeGreaterThan(1)
+    expect(intersects(after.get('parent-member')!, after.get('child')!)).toBe(false)
+    for (const id of ['child', 'reading', 'child-peer']) expect(after.get(id)).toEqual(boxes.find(box => box.id === id))
+    expect(contains(after.get('root')!, after.get('child')!)).toBe(true)
+  })
+
+  it('cancels a structural neighborhood before publishing geometry or submitting any routing work', async () => {
+    const { input, boxes, next } = adaptiveAddition(), controller = new AbortController(), responses: CollaborationLayoutResponse[] = []
+    controller.abort(); measurements.length = 0
+    await handleCollaborationLayoutRequest({ id: 'canceled-adaptive', type: 'reconcile', input: next, previousStructure: input, boxes, paths: [], anchor: 'reading' }, response => responses.push(response), controller.signal)
+    expect(responses).toEqual([]); expect(measurements).toEqual([])
+  })
+
+  it('includes a genuine neighboring collision dependency while keeping a distant original region fixed', () => {
+    const input: CollaborationLayoutInput = { areas: [{ id: 'reading-area', name: 'Reading', members: ['reading'], folded: false },
+      { id: 'neighbor-area', name: 'Adjacent', members: ['neighbor'], folded: false }, { id: 'control', name: 'Distant', members: ['control-member'], folded: false }],
+      nodes: [{ id: 'reading', areaId: 'reading-area', width: 154, height: 38 }, { id: 'neighbor', areaId: 'neighbor-area', width: 24, height: 24 }, { id: 'control-member', areaId: 'control', width: 154, height: 38 }], connections: [] }
+    const boxes: CollaborationLayoutBox[] = [{ ...heading('reading-area'), width: 232, height: 206 },
+      { id: 'neighbor-area', areaId: 'neighbor-area', kind: 'area', folded: false, x: 226, y: -144, width: 382, height: 192, heading: { x: 174, y: 24, width: 184, height: 40 } },
+      box('reading', 0, 0, 154, 38, 'reading-area'), box('neighbor', 250, 0, 24, 24, 'neighbor-area'), heading('control', 5000), box('control-member', 5000, 0, 154, 38, 'control')]
+    const next = { ...input, nodes: input.nodes.map(node => node.id === 'reading' ? { ...node, width: 500, height: 94 } : node) }, work = { areas: 0, nodes: 0, passes: 0, candidates: 0 }
+    const after = new Map(reconcileCollaborationLayout(next, boxes, 'reading', input, undefined, work).map(box => [box.id, box]))
+    expect([after.get('reading')!.x + 250, after.get('reading')!.y + 47]).toEqual([77, 19])
+    expect(intersects(after.get('reading')!, after.get('neighbor')!)).toBe(false)
+    expect(after.get('neighbor')).not.toEqual(boxes.find(box => box.id === 'neighbor'))
+    expect(work.areas).toBe(2); expect(work.nodes).toBe(1)
+    for (const id of ['control', 'control-member']) expect(after.get(id)).toEqual(boxes.find(box => box.id === id))
+  })
+
+  it('keeps local placement and reroute submission budgets unchanged when 240 unrelated original regions are added', async () => {
+    const { input, boxes, next } = adaptiveAddition(), results: { work: unknown; submitted: string[] }[] = []
+    for (const count of [0, 240]) {
+      const extra = Array.from({ length: count }, (_, index) => {
+        const id = 'unrelated-' + index, x = 15000 + index * 2000
+        return { area: { id, name: id, members: [id + '-a', id + '-b'], folded: false },
+          nodes: ['a', 'b'].map(suffix => ({ id: id + '-' + suffix, areaId: id, width: 154, height: 38 })),
+          boxes: [heading(id, x), box(id + '-a', x, 0, 154, 38, id), box(id + '-b', x + 500, 0, 154, 38, id)], connection: edge(id + '-edge', id + '-a', id + '-b') }
+      })
+      const before = { ...input, areas: [...input.areas, ...extra.map(value => value.area)], nodes: [...input.nodes, ...extra.flatMap(value => value.nodes)], connections: [...input.connections, ...extra.map(value => value.connection)] }
+      const after = { ...next, areas: [...next.areas, ...extra.map(value => value.area)], nodes: [...next.nodes, ...extra.flatMap(value => value.nodes)], connections: [...next.connections, ...extra.map(value => value.connection)] }
+      const allBoxes = [...boxes, ...extra.flatMap(value => value.boxes)], paths = await successfulRoutes(allBoxes, before.connections), responses: CollaborationLayoutResponse[] = []
+      measurements.length = 0
+      await handleCollaborationLayoutRequest({ id: 'cost-' + count, type: 'reconcile', input: after, previousStructure: before, boxes: allBoxes, paths, anchor: 'reading' }, response => responses.push(response))
+      const placement = responses.find(response => response.type === 'boxes')!; if (placement.type !== 'boxes') throw Error('Worker placement receipt required')
+      for (const original of extra.flatMap(value => value.boxes)) expect(placement.boxes.find(box => box.id === original.id)).toEqual(original)
+      const submitted = responses.filter(response => response.type === 'paths').flatMap(response => Object.keys(response.paths)).sort()
+      expect(responses.filter(response => response.type === 'error')).toEqual([])
+      expect(submitted).toEqual(next.connections.map(edge => edge.id).sort())
+      expect(measurements.every(value => value.engine !== 'fdp')).toBe(true)
+      results.push({ work: placement.work, submitted })
+    }
+    expect(results[1]).toEqual(results[0])
+  })
+
   it('reserves physical port clearance in nested force packing so unchanged reconciliation keeps every member fixed', async () => {
     const nodes = Array.from({ length: 24 }, (_, index) => ({ id: 'member-' + String(index).padStart(2, '0'),
       areaId: index < 2 ? 'leaf' : 'root', width: 250, height: 94 }))
@@ -56,7 +249,7 @@ describe('finite collaboration Worker engine', () => {
       expect(intersects({ x: a.x - 14, y: a.y - 14, width: a.width + 28, height: a.height + 28 }, b),
         'Real cards need room for their 8px stems and the unchanged reconciliation clearance').toBe(false)
     }
-    const settled = new Map(reconcileCollaborationLayout(input, boxes, null).map(box => [box.id, box]))
+    const settled = new Map(reconcileCollaborationLayout(input, boxes, null, input).map(box => [box.id, box]))
     for (const member of members) expect(settled.get(member.id)).toEqual(member)
     const paths = await successfulRoutes(boxes, connections)
     expect(paths.map(path => path.id).sort()).toEqual(connections.map(edge => edge.id).sort())
@@ -76,7 +269,10 @@ describe('finite collaboration Worker engine', () => {
     const input: CollaborationLayoutInput = { nodes: [{ id: 'original-member', areaId: 'occupied', width: 250, height: 94 }], connections: [],
       areas: [{ id: 'occupied', name: 'Original occupied area', members: ['original-member'], folded: false },
         ...Array.from({ length: 24 }, (_, index) => ({ id: 'empty-' + String(index).padStart(2, '0'), name: 'Original empty place', members: [], folded: false }))] }
-    const boxes = await arrangeCollaboration(input), settled = new Map(reconcileCollaborationLayout(input, boxes, null).map(box => [box.id, box]))
+    const boxes = await arrangeCollaboration(input), settled = new Map(reconcileCollaborationLayout(input, boxes, null, input).map(box => [box.id, box]))
+    const headings = boxes.filter(box => box.kind === 'area').map(box => ({ ...box, x: box.x + box.heading.x, y: box.y + box.heading.y, width: box.heading.width, height: box.heading.height }))
+    for (const [index, first] of headings.entries()) for (const second of headings.slice(index + 1))
+      expect(intersects({ x: first.x - 14, y: first.y - 14, width: first.width + 28, height: first.height + 28 }, second)).toBe(false)
     for (const box of boxes) {
       const after = settled.get(box.id)!
       if (box.kind === 'agent') expect(after).toEqual(box)
@@ -93,7 +289,8 @@ describe('finite collaboration Worker engine', () => {
     const cached = [area('folded', 400, true), area('visible', 0, false), box('a', 0, 0, 24, 24, 'folded'), box('b', 0, 0, 24, 24, 'visible')]
     const input: CollaborationLayoutInput = { areas: [{ id: 'folded', name: 'Unfolded now', folded: false, members: ['a'] }, { id: 'visible', name: 'Still visible', folded: false, members: ['b'] }],
       nodes: [{ id: 'a', areaId: 'folded', width: 24, height: 24 }, { id: 'b', areaId: 'visible', width: 24, height: 24 }], connections: [] }
-    const result = reconcileCollaborationLayout(input, cached, null)
+    const previousStructure = { ...input, areas: input.areas.map(area => area.id === 'folded' ? { ...area, folded: true } : area) }
+    const result = reconcileCollaborationLayout(input, cached, null, previousStructure)
     expect(result.find(box => box.id === 'b')).toEqual(cached[3]); expect(intersects(result.find(box => box.id === 'a')!, cached[3]!)).toBe(false)
   })
 
@@ -104,22 +301,23 @@ describe('finite collaboration Worker engine', () => {
     ]
     const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Work', members: ['a', 'b'], folded: false }, { id: 'new-area', name: 'New empty area', members: [], folded: false }],
       nodes: ['a', 'b'].map(id => ({ id, areaId: 'work', width: 24, height: 24 })), connections: [] }
-    const result = reconcileCollaborationLayout(input, previous, 'b')
+    const result = reconcileCollaborationLayout(input, previous, 'b', { ...input, areas: input.areas.filter(area => area.id !== 'new-area') })
     expect(result.find(box => box.id === 'a')).toEqual(previous[1]); expect(result.find(box => box.id === 'b')).toEqual(previous[2])
     expect(intersects(result.find(box => box.id === 'new-area')!, previous[1]!)).toBe(false)
   })
 
-  it('pins a growing actual reading occurrence and moves only the members its new body collides with', () => {
+  it('pins a growing actual reading occurrence while its related neighborhood can adjust', () => {
     const previous: CollaborationLayoutBox[] = [
       { id: 'work', areaId: 'work', kind: 'area', folded: false, x: -24, y: -144, width: 900, height: 240, heading: { x: 24, y: 24, width: 184, height: 40 } },
       box('reading', 0, 0, 154, 38, 'work'), box('neighbor', 190, 0, 24, 24, 'work'), box('unrelated', 600, 0, 24, 24, 'work')
     ]
     const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Work', members: ['reading', 'neighbor', 'unrelated'], folded: false }],
       nodes: [{ id: 'reading', areaId: 'work', width: 250, height: 94 }, ...['neighbor', 'unrelated'].map(id => ({ id, areaId: 'work', width: 24, height: 24 }))], connections: [] }
-    const result = reconcileCollaborationLayout(input, previous, 'reading'), reading = result.find(box => box.id === 'reading')!, neighbor = result.find(box => box.id === 'neighbor')!
+    const previousStructure = { ...input, nodes: input.nodes.map(node => node.id === 'reading' ? { ...node, width: 154, height: 38 } : node) }
+    const result = reconcileCollaborationLayout(input, previous, 'reading', previousStructure), reading = result.find(box => box.id === 'reading')!, neighbor = result.find(box => box.id === 'neighbor')!
     expect([reading.x + reading.width / 2, reading.y + reading.height / 2]).toEqual([77, 19])
     expect(intersects(reading, neighbor)).toBe(false); expect(neighbor).not.toEqual(previous[2])
-    expect(result.find(box => box.id === 'unrelated')).toEqual(previous[3])
+    for (const member of result.filter(box => box.kind === 'agent' && box.id !== 'reading')) expect(intersects(reading, member)).toBe(false)
   })
 
 
@@ -134,7 +332,7 @@ describe('finite collaboration Worker engine', () => {
     const next = { ...input, areas: input.areas.map(area => area.id === 'work' ? { ...area, members: [...area.members, 'new'] } : area),
       nodes: [...input.nodes.map(node => node.id === 'a' ? { ...node, width: 250, height: 94 } : node), { id: 'new', areaId: 'work', width: 154, height: 38 }],
       connections: [...input.connections, edge('a-new', 'a', 'new')] }
-    const boxes = reconcileCollaborationLayout(next, original, 'a'), after = new Map(boxes.map(box => [box.id, box]))
+    const boxes = reconcileCollaborationLayout(next, original, 'a', input), after = new Map(boxes.map(box => [box.id, box]))
     expect(measurements).toEqual([])
     expect(after.get('c')).toEqual(before.get('c'))
     const a = after.get('a')!, held = before.get('a')!
@@ -147,25 +345,29 @@ describe('finite collaboration Worker engine', () => {
     const obstacles = boxes.map(box => box.kind === 'area' ? { ...box, x: box.x + box.heading.x, y: box.y + box.heading.y, width: box.heading.width, height: box.heading.height } : box)
     for (const [index, first] of obstacles.entries()) for (const second of obstacles.slice(index + 1)) expect(intersects(first, second), first.id + '/' + second.id).toBe(false)
     const foldedInput = { ...next, areas: next.areas.map(area => area.id === 'work' ? { ...area, folded: true } : area) }
-    const folded = reconcileCollaborationLayout(foldedInput, boxes, 'work')
+    const folded = reconcileCollaborationLayout(foldedInput, boxes, 'work', next)
     const retained = new Map([...boxes, ...folded].map(box => [box.id, box]))
-    const unfolded = reconcileCollaborationLayout(next, [...retained.values()], 'work')
-    for (const id of ['a', 'b', 'c', 'new']) expect(unfolded.find(box => box.id === id)).toEqual(after.get(id))
+    const unfolded = reconcileCollaborationLayout(next, [...retained.values()], 'work', foldedInput)
+    expect(unfolded.find(box => box.id === 'c')).toEqual(after.get('c'))
+    for (const id of ['a', 'b', 'new']) expect(contains(unfolded.find(box => box.id === 'work')!, unfolded.find(box => box.id === id)!)).toBe(true)
   })
 
   it('reroutes an old nonincident path blocked by a resized member and retains an unaffected original path', async () => {
     const boxes: CollaborationLayoutBox[] = [
       { id: 'area', areaId: 'area', kind: 'area', folded: false, x: -24, y: -120, width: 950, height: 900, heading: { x: 24, y: 24, width: 184, height: 40 } },
-      box('a', 0, 0), box('b', 650, 0), box('obstacle', 400, 70, 50, 10), box('d', 0, 600), box('e', 650, 600)
+      { id: 'obstacles', areaId: 'obstacles', kind: 'area', folded: false, x: 376, y: 46, width: 232, height: 318, heading: { x: 24, y: 254, width: 184, height: 40 } },
+      box('a', 0, 0), box('b', 650, 0), box('obstacle', 400, 70, 50, 10, 'obstacles'), box('d', 0, 600), box('e', 650, 600)
     ]
     const connections = [edge('a-b', 'a', 'b'), edge('d-e', 'd', 'e')], paths = await successfulRoutes(boxes, connections)
-    const input: CollaborationLayoutInput = { areas: [{ id: 'area', name: 'Work', members: ['a', 'b', 'obstacle', 'd', 'e'], folded: false }],
+    const input: CollaborationLayoutInput = { areas: [{ id: 'area', name: 'Work', members: ['a', 'b', 'd', 'e'], folded: false }, { id: 'obstacles', name: 'Original child', parentId: 'area', members: ['obstacle'], folded: false }],
       nodes: boxes.filter(box => box.kind === 'agent').map(box => ({ id: box.id, areaId: box.areaId, width: box.width, height: box.id === 'obstacle' ? 180 : box.height })), connections }
     const responses: CollaborationLayoutResponse[] = []
     measurements.length = 0
-    await handleCollaborationLayoutRequest({ id: 'local-update', type: 'reconcile', input, boxes, paths, anchor: 'a' }, response => responses.push(response))
+    const previousStructure = { ...input, nodes: input.nodes.map(node => node.id === 'obstacle' ? { ...node, height: 10 } : node) }
+    await handleCollaborationLayoutRequest({ id: 'local-update', type: 'reconcile', input, previousStructure, boxes, paths, anchor: 'a' }, response => responses.push(response))
     const placement = responses.find(response => response.type === 'boxes')!
     expect(placement.type).toBe('boxes'); if (placement.type !== 'boxes') throw Error('Updated original geometry required')
+    for (const id of ['a', 'b', 'd', 'e']) expect(placement.boxes.find(box => box.id === id)).toEqual(boxes.find(box => box.id === id))
     expect(placement.retainedPaths).toEqual(['d-e'])
     expect(responses.filter(response => response.type === 'error')).toEqual([])
     expect(responses.filter(response => response.type === 'paths').flatMap(response => Object.keys(response.paths))).toEqual(['a-b'])
@@ -480,9 +682,9 @@ describe('finite collaboration Worker engine', () => {
         { id: 'root', name: 'Root', members: [], folded: false },
         { id: 'middle', name: 'Middle', members: ['m'], parentId: 'root', folded: false },
         { id: 'leaf', name: 'Leaf', members: ['a', 'b', 'isolated'], parentId: 'middle', folded: false },
-        { id: 'peer', name: 'Peer', members: ['p'], folded: false }
+        { id: 'peer', name: 'Peer', members: ['p', 'q'], folded: false }
       ],
-      nodes: [['m', 'middle'], ['a', 'leaf'], ['b', 'leaf'], ['isolated', 'leaf'], ['p', 'peer']].map(([id, areaId]) => ({ id: id!, areaId: areaId!, width: 154, height: 38 })),
+      nodes: [['m', 'middle'], ['a', 'leaf'], ['b', 'leaf'], ['isolated', 'leaf'], ['p', 'peer'], ['q', 'peer']].map(([id, areaId]) => ({ id: id!, areaId: areaId!, width: 154, height: 38 })),
       connections: [edge('local', 'a', 'b'), edge('inside-parent', 'm', 'a'), edge('external', 'a', 'p')]
     }
     const previousProbe = process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE
@@ -505,14 +707,14 @@ describe('finite collaboration Worker engine', () => {
     expect(await arrangeCollaboration({ ...input, areas: [...input.areas].reverse(), nodes: [...input.nodes].reverse(), connections: [...input.connections].reverse() })).toEqual(result!)
     const folded = { ...input, areas: input.areas.map(area => area.id === 'middle' ? { ...area, folded: true } : area) }
     const fold = await arrangeCollaboration(folded), ids = fold.map(box => box.id)
-    expect(ids.toSorted()).toEqual(['root', 'middle', 'peer', 'p'].toSorted())
+    expect(ids.toSorted()).toEqual(['root', 'middle', 'peer', 'p', 'q'].toSorted())
     expect(contains(fold.find(box => box.id === 'root')!, fold.find(box => box.id === 'middle')!)).toBe(true)
-    const restore = reconcileCollaborationLayout(input, [...result!, ...reconcileCollaborationLayout(folded, result!, 'middle')], 'a')
+    const restore = reconcileCollaborationLayout(input, [...result!, ...reconcileCollaborationLayout(folded, result!, 'middle', input)], 'a', folded)
     const restored = new Map(restore.map(box => [box.id, box]))
     expect(restored.get('a')).toEqual(byId.get('a'))
     expect(contains(restored.get('root')!, restored.get('middle')!)).toBe(true)
     expect(contains(restored.get('middle')!, restored.get('leaf')!)).toBe(true)
-    expect(restored.get('p')).toEqual(byId.get('p'))
+    expect(restored.get('q')).toEqual(byId.get('q'))
   })
 
   it('reduces the final distance of a strong communication pair without counting its dispatch overlay twice', async () => {
@@ -542,7 +744,7 @@ describe('finite collaboration Worker engine', () => {
     const original = await arrangeCollaboration(input), before = new Map(original.map(box => [box.id, box]))
     const changed: CollaborationLayoutInput = { ...input, areas: input.areas.map(area => area.id === 'child' ? { ...area, members: [...area.members, 'new'] } : area),
       nodes: [...input.nodes.map(node => node.id === 'a' ? { ...node, width: 250, height: 94 } : node), { id: 'new', areaId: 'child', width: 154, height: 38 }] }
-    const after = new Map(reconcileCollaborationLayout(changed, original, 'a').map(box => [box.id, box]))
+    const after = new Map(reconcileCollaborationLayout(changed, original, 'a', input).map(box => [box.id, box]))
     const a = after.get('a')!, old = before.get('a')!
     expect([a.x + a.width / 2, a.y + a.height / 2]).toEqual([old.x + old.width / 2, old.y + old.height / 2])
     expect(after.get('p')).toEqual(before.get('p'))
