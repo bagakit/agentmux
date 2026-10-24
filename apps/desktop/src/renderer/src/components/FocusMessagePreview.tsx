@@ -14,7 +14,7 @@ import type { FocusDescribeSpeaker } from '../lib/conversation-sender-details'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 import { api } from '../lib/api'
 import { createFocusTimeFormatters, type FocusTimeFormatters } from '../lib/focus-timeline-ruler'
-import { conversationItemRef } from '@agentmux/core/conversation'
+import { conversationA2ANotificationId, conversationItemRef } from '@agentmux/core/conversation'
 import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
 
 const ThemeConversationOutgoingIcon = semanticIconComponent('conversation.outgoing')
@@ -197,7 +197,7 @@ export function FocusMessagePreview({ active = true, autoFocus = true, message, 
       <p className="recent-focus__sender-run">Sender Run not recorded · Execution relationship unknown</p></details> : null}
     {message.coverage ? <ConversationCoverage coverage={message.coverage} record={message} {...(onReveal ? { onLocate: onReveal } : {})} /> : null}
     <div className="recent-focus__message-body" data-input-preview-id={message.input?.id} data-input-source={message.input?.source.kind} data-record-preview-id={message.id} data-record-source={message.source.kind} data-conversation-role={message.role}><ConversationMessage sources={message.sources} active={active} {...(message.event ? { conversationEvent: message.event } : {})} messageId={message.input?.id ?? message.id}
-      speaker={speaker!} recordedIdentity
+      speaker={speaker!} recordedIdentity a2aNotificationId={conversationA2ANotificationId(message)} notificationRecords={message.records}
       describeSpeaker={describeSpeaker} {...(message.input ? { inputSource: message.input.source } : {})} conversationSessionId={message.agentSessionId}
       {...(conversationItemRef(message) ? { itemRef: conversationItemRef(message)! } : {})}
       {...(message.original.kind === 'native' && message.source.kind === 'native' ? {
@@ -214,7 +214,7 @@ export function FocusMessagePreview({ active = true, autoFocus = true, message, 
       {...(message.original.kind === 'native' && message.original.item.questionDiagnostic ? { questionDiagnostic: message.original.item.questionDiagnostic } : {})}
       timeFormatter={time.clock}
       {...(message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? {} : { createdAt: message.recordedAt })}
-      workspaceRoot={recipient?.workspacePath ?? workspaceRoot ?? ''} readPastedImage={readPastedImage} />{message.records && message.records.length > 1 ? <details><summary>Contributing source records</summary>{message.records.map(record => <pre key={record.id} data-original-contribution={record.id}>{JSON.stringify(record.original.item, null, 2)}</pre>)}</details> : null}</div>
+      workspaceRoot={recipient?.workspacePath ?? workspaceRoot ?? ''} readPastedImage={readPastedImage} />{!conversationA2ANotificationId(message) && message.records && message.records.length > 1 ? <details><summary>Contributing source records</summary>{message.records.map(record => <pre key={record.id} data-original-contribution={record.id}>{JSON.stringify(record.original.item, null, 2)}</pre>)}</details> : null}</div>
     <footer className="recent-focus__navigation">
     {agent ? <button type="button" className="recent-focus__sender-link" disabled={!sender} onClick={() => navigate(sender)}>View sender<ThemeActionOpenExternalIcon size={12} aria-hidden="true" /></button> : null}
     <button type="button" disabled={!recipient && !onReveal} onClick={() => { void reveal() }}>Return to Context</button>

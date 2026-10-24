@@ -51,6 +51,14 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
 export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, visible = true, displayName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
+  const conversationPlatform = useMemo(() => ({ ...platform,
+    readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string) => {
+      // The selected hosted client owns the local namespace; it cannot route another Host or participant.
+      if (!client) throw new Error('The selected Host is unavailable. The original message reference is retained.')
+      if (reference.hostId !== 'local' || reference.agentSessionId !== agentSessionId) throw new Error('The original message belongs to another Host or Session. Its reference is retained.')
+      return client.readMessage({ messageId })
+    }
+  }), [platform, client, agentSessionId])
   const feed = useRef<HTMLDivElement>(null), follow = useRef(initFollowState())
   const presentation = useRef<ConversationPresentationController | null>(null)
   const presentationIntent = useRef(0)
@@ -337,7 +345,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           </details> : null}</>}
         </aside>
   }
-  return <ClientUiProvider platform={platform}><MobileNoticeScope owner={client} identity={[ agentSessionId, session?.run.runId]}>
+  return <ClientUiProvider platform={conversationPlatform}><MobileNoticeScope owner={client} identity={[ agentSessionId, session?.run.runId]}>
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
       {!available || connection.issue ? <MobileNotice identity={[connection.state,connection.issue,available]} className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前发送暂不可用。' : ''}</MobileNotice> : null}
       {reading.notice ? <details className="mobile-conversation__notice"><summary>对话读取暂未确认 · 原 Agent 与输入保留</summary><p>{reading.notice}</p><button onClick={() => { void reading.refresh() }}>刷新原记录</button></details> : null}
