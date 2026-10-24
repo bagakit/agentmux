@@ -20,7 +20,11 @@ afterEach(async () => {
 const wait = (assert: () => void) => vi.waitFor(async () => { await act(async () => {}); assert() }, { timeout: 8000 })
 const row = (id: string) => [...document.querySelectorAll<HTMLElement>('[data-member-row]')].find(node => node.dataset.memberRow === JSON.stringify(['open_id', id]))!
 const checkbox = (id: string, permission: 'Send requests' | 'Answer questions') => [...row(id).querySelectorAll<HTMLLabelElement>('label')].find(node => node.textContent === permission)!.querySelector<HTMLInputElement>('input')!
-async function toggle(id: string, permission: 'Send requests' | 'Answer questions') { await act(async () => checkbox(id, permission).click()) }
+async function toggle(id: string, permission: 'Send requests' | 'Answer questions') {
+  const source = row(id).querySelector<HTMLSelectElement>('select')
+  if (source && source.value !== 'room') await act(async () => { source.value = 'room'; source.dispatchEvent(new Event('change', { bubbles: true })) })
+  await act(async () => checkbox(id, permission).click())
+}
 async function click(id: string, selector: string) { await act(async () => row(id).querySelector<HTMLButtonElement>(selector)!.click()) }
 async function bind() {
   const result = await f.forward('connection.bind', { ...f.original.input, operationId: 'member-binding', bindingId: 'member-group', connectionId: f.config.connectionId, expectedConnectionRevision: 1, externalConversationId: 'oc_members' }, f.hostingTarget)
@@ -65,9 +69,11 @@ it('keeps a dirty member choice through a delayed original grant read and a late
   let releaseRead!: () => void, releaseAck!: () => void, readHeld = true, ackHeld = false
   const readBarrier = new Promise<void>(resolve => { releaseRead = resolve }), ackBarrier = new Promise<void>(resolve => { releaseAck = resolve }), forward = f.forward
   vi.spyOn(api.connections, 'call').mockImplementation(async (method, input, target) => {
+    const holdRead = method === 'connection.binding.inspect' && 'bindingId' in input && readHeld
+    const holdAck = method === 'connection.grant' && ackHeld
     const result = await forward(method, input, target)
-    if (method === 'connection.binding.inspect' && 'bindingId' in input && readHeld) await readBarrier
-    if (method === 'connection.grant' && ackHeld) await ackBarrier
+    if (holdRead) await readBarrier
+    if (holdAck) await ackBarrier
     return result
   })
   try {
@@ -88,7 +94,8 @@ it('keeps a dirty member choice through a delayed original grant read and a late
     facts.late = { currentConfirmed: current.grants[0], laterDesired: ['input', 'answer'], displayedRequests: checkbox('ou_ada', 'Send requests').checked, displayedAnswers: checkbox('ou_ada', 'Answer questions').checked, draftStatus: row('ou_ada').dataset.memberState }
     expect(checkbox('ou_ada', 'Send requests').checked, 'The earlier ACK cannot replace a later dirty choice').toBe(true)
     expect(checkbox('ou_ada', 'Answer questions').checked, 'The earlier ACK cannot discard the later Answer choice').toBe(true)
-    expect(row('ou_ada').textContent).toContain('Unsaved changes')
+    expect(row('ou_ada').textContent).toContain('Unsaved · review current access')
+    expect(row('ou_ada').dataset.memberState).toBe('dirty')
     expect(current.grants[0]?.capabilities).toEqual(['input'])
   } finally { readHeld = false; ackHeld = false; releaseRead(); releaseAck() }
 })
