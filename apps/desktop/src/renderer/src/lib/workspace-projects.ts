@@ -1,19 +1,9 @@
-import { isFolderWorkspace, isScratchWorkspaceId, type WorkspaceRecord } from '../../../shared/contracts'
+import { isScratchWorkspaceId, type WorkspaceRecord } from '../../../shared/contracts'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
-import { directoryIdentity } from '../../../shared/space-addresses'
+import { projectWorkspaces, workspaceProjectId, type WorkspaceProject as HostWorkspaceProject } from '@agentmux/host/workspace-projects'
+export { projectWorkspaces, workspaceProjectId } from '@agentmux/host/workspace-projects'
 
-export type WorkspaceProject = {
-  id: string
-  name: string
-  hostId: string
-  repoPath: string
-  workspaces: WorkspaceRecord[]
-  preferredWorkspaceId: string
-}
-
-export function workspaceProjectId(workspace: WorkspaceRecord): string {
-  return directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path)
-}
+export type WorkspaceProject = HostWorkspaceProject<WorkspaceRecord>
 
 /** Remove every registered Workspace that makes up one Project Rail view. */
 export function removeProjectWorkspaces(
@@ -22,38 +12,6 @@ export function removeProjectWorkspaces(
 ): WorkspaceRecord[] {
   const removedIds = new Set(project.workspaces.map((workspace) => workspace.id))
   return workspaces.filter((workspace) => !removedIds.has(workspace.id))
-}
-
-function basename(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
-}
-
-export function projectWorkspaces(workspaces: readonly WorkspaceRecord[]): WorkspaceProject[] {
-  const projects = new Map<string, WorkspaceProject>()
-  for (const workspace of workspaces) {
-    if (workspace.closeout) continue
-    if (workspace.id === NOTES_WORKSPACE_ID) continue
-    const id = workspaceProjectId(workspace)
-    const existing = projects.get(id)
-    if (existing) {
-      existing.workspaces.push(workspace)
-      if (isFolderWorkspace(workspace) && workspace.path === existing.repoPath) {
-        existing.preferredWorkspaceId = workspace.id
-        existing.name = workspace.name
-      }
-      continue
-    }
-    const repoPath = workspace.repoPath ?? workspace.path
-    projects.set(id, {
-      id,
-      name: isFolderWorkspace(workspace) ? workspace.name : basename(repoPath),
-      hostId: workspace.hostId,
-      repoPath,
-      workspaces: [workspace],
-      preferredWorkspaceId: workspace.id
-    })
-  }
-  return [...projects.values()]
 }
 
 export function projectRailNavigation(workspaces: readonly WorkspaceRecord[]): {

@@ -181,6 +181,10 @@
     "./mobile-web-report-owner": {
       "types": "./dist/mobile-web-report-owner.d.ts",
       "import": "./dist/mobile-web-report-owner.js"
+    },
+    "./workspace-projects": {
+      "types": "./dist/workspace-projects.d.ts",
+      "import": "./dist/workspace-projects.js"
     }
   }
 }
