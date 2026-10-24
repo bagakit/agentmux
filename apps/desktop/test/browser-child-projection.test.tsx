@@ -15,7 +15,7 @@ import { hydratePersistedTab, reducePersistedTab } from '../src/renderer/src/lib
 import { placeWorkbenchWindow, registerWorkbenchDocument, registerWorkbenchHost } from '../src/renderer/src/lib/workbench-window-registry'
 import { createClientUiRoot } from './helpers/client-ui-render'
 
-const windows = vi.hoisted(() => ({ open: vi.fn(async (_target: AppWindowTarget) => {}), focus: vi.fn(async (_document: WorkbenchWindowDocument) => true),
+const windows = vi.hoisted(() => ({ open: vi.fn(async (_target: AppWindowTarget, _options?: { focus?: boolean }) => {}), focus: vi.fn(async (_document: WorkbenchWindowDocument) => true),
   retire: vi.fn(async (_regions: readonly { tabId: string; regionId: string }[]) => {}) }))
 vi.mock('../src/renderer/src/lib/workbench-windows', () => ({ openWorkbenchWindow: windows.open, focusWorkbenchWindow: windows.focus,
   returnClosedWorkbenchWindows: windows.retire }))
@@ -177,7 +177,7 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
     useAppStore.getState().applyBrowserEvent(ambiguous); await flush()
     expect(childSurface()).toMatchObject({ id: snapshot.id, browserId: snapshot.id, source: ambiguous.browser.source })
     expect(childSurface()!.source).not.toHaveProperty('location')
-    expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region', displayWorkspaceId: 'second-display', groupId: 'second-group', regionId: snapshot.id }))
+    expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region', displayWorkspaceId: 'second-display', groupId: 'second-group', regionId: snapshot.id }), { focus: false })
     expect(resolveBrowserSource(useAppStore.getState(), ambiguous.browser.source)).toMatchObject({ status: 'ambiguous' })
     expect(useAppStore.getState().activeWorkspaceId).toBe(before.activeWorkspaceId)
     expect(useAppStore.getState().error).toBeNull(); expect(create).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled()
@@ -193,7 +193,8 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
       [sourceLocation.displayWorkspaceId]: createWorkspaceLayout(sourceLocation.groupId, []) } })
     useAppStore.getState().applyBrowserEvent(event); await flush()
     expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region',
-      displayWorkspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, regionId: snapshot.id }))
+      displayWorkspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, regionId: snapshot.id }), { focus: false })
+    expect(windows.open.mock.calls[0]?.[1]).toEqual({ focus: false })
     expect(childSurface()!.source).toEqual(source)
     expect(resolveBrowserSource(useAppStore.getState(), source)).toMatchObject({ status: 'ambiguous' })
   })
@@ -204,7 +205,7 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
     expect(childSurface()).toMatchObject({ id: snapshot.id, browserId: snapshot.id, workspaceId: event.workspaceId })
     expect(childSurface()).not.toHaveProperty('source')
     expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region',
-      displayWorkspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, regionId: snapshot.id }))
+      displayWorkspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, regionId: snapshot.id }), { focus: false })
     expect(useAppStore.getState().activeWorkspaceId).toBe('human-workspace')
   })
 
@@ -214,7 +215,7 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
       'unrelated-tab', 'right-group', 'right-group', 'left', 'left-group')
     useAppStore.setState({ layouts: { 'container-display': layout }, activeWorkspaceId: 'some-other-current-display' })
     useAppStore.getState().applyBrowserEvent({ ...event, browser, workspaceId: null }); await flush()
-    expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region', displayWorkspaceId: 'container-display', groupId: 'left-group', regionId: snapshot.id }))
+    expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region', displayWorkspaceId: 'container-display', groupId: 'left-group', regionId: snapshot.id }), { focus: false })
     expect(childSurface()).toMatchObject({ id: snapshot.id, browserId: snapshot.id, workspaceId: before.tabs['unrelated-tab']!.workspaceId })
     expect(useAppStore.getState().layouts['container-display']!.activeGroupId).toBe(layout.activeGroupId)
     expect(useAppStore.getState().layouts['container-display']!.groups.find(group => group.id === 'left-group')!.activeTabId).toBe('unrelated-tab')

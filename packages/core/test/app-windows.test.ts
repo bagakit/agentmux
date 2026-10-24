@@ -49,6 +49,15 @@ describe('original client window public capabilities', () => {
     expect(() => parseAppWindowParams('app.window.return', { operationId: 'return-original', windowId: original.windowId, documentGeneration: 1 })).toThrow()
     expect(parseAppWindowParams('app.window.focus', { operationId: 'focus-original', windowId: original.windowId, documentGeneration: 'original-document' })).toMatchObject({ documentGeneration: 'original-document' })
   })
+  it('retains explicit background presentation intent and rejects a changed focus receipt', () => {
+    const background = { ...input, focus: false }
+    expect(parseAppWindowParams('app.window.open', background)).toEqual(background)
+    for (const focus of ['false', 0, null]) expect(() => parseAppWindowParams('app.window.open', { ...input, focus })).toThrow()
+    const result = page(); result.recordedOperation = { ...operation, input: background }
+    expect(parseAppWindowPage('app.window.open', result, background)).toEqual(result)
+    result.recordedOperation = { ...operation, input: { ...input, focus: true } }
+    expect(() => parseAppWindowPage('app.window.open', result, background)).toThrow('intent')
+  })
   it('rejects changed original intent, duplicate ownership and mismatched native document results', () => {
     expect(parseRpcNativeResult('app.window.open', page(), input)).toEqual(page())
     const changed = page(); changed.windows = []; changed.recordedOperation = { ...operation, input: { ...input, target: { ...target, tabId: 'another-tab' } } }
@@ -131,11 +140,11 @@ describe('original client window public capabilities', () => {
           input: { operationId: action + '-original', windowId: original.windowId, documentGeneration: 'original-document' } })
       }
       const openedCli = await run(['app', 'window', 'open', '--kind', 'region', '--display-workspace', target.displayWorkspaceId, '--group', target.groupId,
-        '--tab', target.tabId, '--region', 'original-region', '--operation-id', 'open-cli'], endpoint)
+        '--tab', target.tabId, '--region', 'original-region', '--background', '--operation-id', 'open-cli'], endpoint)
       expect(openedCli.code, openedCli.stderr + openedCli.stdout).toBe(0)
       expect(calls.map(call => call.method)).toEqual(['app.window.open', 'app.window.ls', 'app.window.focus', 'app.window.return', 'app.window.open'])
       expect(calls.every(call => (call.actor as typeof actor).kind === 'user' && !!(call.actor as typeof actor).id)).toBe(true)
-      expect(calls.at(-1)?.input).toEqual({ operationId: 'open-cli', target })
+      expect(calls.at(-1)?.input).toEqual({ operationId: 'open-cli', target, focus: false })
       const count = calls.length, invalid = await run(['app', 'window', 'return', '--window', original.windowId, '--document-generation', 'self'], endpoint)
       expect(invalid.code).not.toBe(0); expect(calls).toHaveLength(count)
     } finally { await client.dispose() }
