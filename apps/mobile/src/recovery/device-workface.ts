@@ -6,6 +6,7 @@ import type { MobileQuestionReplyAttempt } from '../conversation/question-replie
 import type { AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { withDeviceStorageLock, DEVICE_WORKFACE_KEY } from './device-storage-lock'
+import { parseMobileGoalOperationRecord, type MobileGoalOperationRecord } from './goal-operation-record'
 import { validateDeliveryLogId } from '@agentmux/core/delivery-attempt'
 import { validateAgentPromptCondition, validateAgentPromptInputBinding, validateAgentPromptInputKey } from '@agentmux/core/prompt-condition'
 import { isLocalNetworkHost } from '@agentmux/relay/offer'
@@ -64,7 +65,7 @@ function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): bool
 }
 export type DeviceWorkface = Navigation & { version: 1;
   agentCreates?: MobileAgentCreateIntent[]; agentResumes?: MobileAgentResumeIntent[]; recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[]; goalDrafts?: MobileGoalDraft[]; goalDraftConflicts?: MobileGoalDraft[]; knowledgeDrafts?: MobileKnowledgeDraft[]; knowledgeDraftConflicts?: MobileKnowledgeDraft[];
-  moteFileDrafts?: MoteFileDraft[]; moteFileDraftConflicts?: MoteFileDraft[]; moteQuickDrafts?: MoteQuickDraft[]; moteQuickDraftConflicts?: MoteQuickDraft[] }
+  moteFileDrafts?: MoteFileDraft[]; moteFileDraftConflicts?: MoteFileDraft[]; moteQuickDrafts?: MoteQuickDraft[]; moteQuickDraftConflicts?: MoteQuickDraft[]; goalOperationRecords?: MobileGoalOperationRecord[] }
 type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
 const defaultStorage: StorageGetter = () => localStorage
@@ -200,6 +201,7 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   const keys = ['version', 'selectedSessionId', 'hostUrl', 'panel', 'host', 'conversation']
   if (value && typeof value === 'object' && Object.hasOwn(value, 'goalWork')) keys.push('goalWork')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'goalIntents')) keys.push('goalIntents')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'goalOperationRecords')) keys.push('goalOperationRecords')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'fileUploads')) keys.push('fileUploads')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'presentation')) keys.push('presentation')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'recordId')) keys.push('recordId')
@@ -259,6 +261,15 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
       parseGoalIntent(intent)
       if (found.has(intent.operationId)) throw invalid()
       found.add(intent.operationId)
+    }
+  }
+  if (v.goalOperationRecords !== undefined) {
+    if (!Array.isArray(v.goalOperationRecords) || v.goalOperationRecords.length > MAX_ENTRIES) throw invalid()
+    const found = new Set<string>()
+    for (const item of v.goalOperationRecords) {
+      const parsed = parseMobileGoalOperationRecord(item)
+      if (found.has(parsed.request.operationId)) throw invalid()
+      found.add(parsed.request.operationId)
     }
   }
   return structuredClone(value) as DeviceWorkface
@@ -378,6 +389,26 @@ export class DeviceWorkfaceStore {
   private exclusive<T>(action: () => T): Promise<T> {
     // setItem is atomic; a read/modify/write is not. All writers share this lock.
     return withDeviceStorageLock(action)
+  }
+  retainGoalRequest(item: MobileGoalOperationRecord, expectedRecordId: string | null): Promise<void> {
+    const captured = parseMobileGoalOperationRecord(item)
+    return this.update(record => {
+      const current = record.goalOperationRecords ?? []
+      const existing = current.find(value => value.request.operationId === captured.request.operationId)
+      if (existing && !sameValue(existing, captured)) throw new Error('原操作身份已绑定其他请求；原记录未覆盖。')
+      if (!existing && current.length >= MAX_ENTRIES) throw new Error('设备操作记录已满；原记录与本次请求均保留。')
+      return existing ? record : { ...record, goalOperationRecords: [...current, captured] }
+    }, expectedRecordId).finally(() => this.notifyGoalIntents())
+  }
+  confirmGoalRequest(item: MobileGoalOperationRecord, expectedRecordId: string | null): Promise<void> {
+    const captured = parseMobileGoalOperationRecord(item)
+    return this.update(record => {
+      const current = record.goalOperationRecords ?? []
+      const existing = current.find(value => value.request.operationId === captured.request.operationId)
+      if (!existing) return record
+      if (!sameValue(existing, captured)) throw new Error('原操作记录已改变；原回执未覆盖其他请求。')
+      return { ...record, goalOperationRecords: current.filter(value => value !== existing) }
+    }, expectedRecordId).finally(() => this.notifyGoalIntents())
   }
   private update<T = void>(change: (value: DeviceWorkface) => DeviceWorkface, expectedRecordId?: string | null,
     acknowledge?: (committed: DeviceWorkface) => T): Promise<T> {
