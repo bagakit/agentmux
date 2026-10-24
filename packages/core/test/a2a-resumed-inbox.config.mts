@@ -6,6 +6,8 @@ import { transformResumedInboxSource } from './fixtures/a2a-resumed-inbox/mutati
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_RESUMED_INBOX_MUTATION
 export default defineConfig({ root, plugins: [{ name: 'a2a-resumed-inbox-source', enforce: 'pre', resolveId(id) {
+  // This export is generated runtime text, not a TypeScript source module.
+  if (id === '@agentmux/identity/runtime-source') return resolve(root, 'packages/identity/dist/runtime-source.js')
   const match = id.match(/^@agentmux\/([^/]+)(.*)$/u)
   if (!match) return
   const directory = resolve(root, 'packages', match[1]!), manifestPath = resolve(directory, 'package.json')
