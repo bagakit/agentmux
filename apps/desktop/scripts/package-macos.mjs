@@ -30,6 +30,8 @@ import process from 'node:process'
 import { observeApplicationProcesses, assertApplicationActivationOwnership, applicationQuitOwnershipDiagnostic } from './package-process-scope.mjs'
 import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient, requireOutgoingWorkbenchStorage, createPrivateRuntimeScope } from './package-runtime-upgrade.mjs'
 import { prepareSemanticHostReload, inspectSemanticHostForInstall, stopSemanticHostForInstall, confirmSemanticHostReload } from './package-semantic-host.mjs'
+import { defaultAgentMuxControlSocketPath, probeSocketLiveness } from '@agentmux/core'
+import { macosHostService, macosHostServiceRegistration, inspectMacosHostService, stopMacosHostService } from '../../host/dist/macos-service.js'
 import {
   assertPackageIdentity,
   canonicalInstallPath,
@@ -576,6 +578,19 @@ async function cleanupProcessScope(scope, findProcessIds) {
   return errors
 }
 
+async function cleanupSmokeHost(service) {
+  const registration = await macosHostServiceRegistration(service)
+  let owner
+  if (registration) {
+    owner = await inspectMacosHostService(service)
+    await stopMacosHostService(service, owner)
+  }
+  assert(await macosHostServiceRegistration(service) === null, 'Launch smoke private Host service remains registered.')
+  assert(await probeSocketLiveness(service.socketPath) === 'dead', 'Launch smoke private Host endpoint exit is unconfirmed.')
+  return { schema: 'agentmux.private-package-host-cleanup.v1', label: service.label, target: service.target,
+    socketPath: service.socketPath, storePath: service.storePath, owner: owner ?? null, status: 'unregistered' }
+}
+
 async function verifyLaunchServices(appPath, verificationRoot) {
   const canonicalAppPath = await realpath(appPath)
   const readyFile = join(verificationRoot, 'desktop-ready.json')
@@ -593,38 +608,15 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   const ownedApplicationPids = async () => (
     (await processIdsForApplication(canonicalAppPath)).filter((pid) => !before.has(pid))
   )
-  const semanticHostCommand = `${executable} ${join(canonicalAppPath, 'Contents', 'Resources', 'app', 'out', 'main', 'agentmux-host.js')} --store ${join(userData, 'agent-sessions.json')}`
-  const semanticHostOwners = new Map()
-  const ownedSemanticHostPids = async () => {
-    const observed = await run('ps', ['-axo', 'uid=,pid=,ppid=,lstart=,command='],
-      { capture: true, env: { ...process.env, LC_ALL: 'C' } })
-    const scope = await scopedProcesses(canonicalAppPath)
-    return observed.stdout.split('\n').flatMap((line) => {
-      const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+)$/u.exec(line)
-      if (!match || match[5] !== semanticHostCommand) return []
-      const uid = Number(match[1]), pid = Number(match[2]), birth = match[4].replace(/\s+/g, ' ')
-      // The selected Host may exit or be reparented during the bound mode read.
-      // Only the later OS snapshot can settle absence; a missing mode cannot.
-      const current = scope.ownershipObservation.identities.get(pid)
-      if (!current) return []
-      assert(current.uid === uid && current.birth === birth,
-        'Private launch smoke Host PID was reused or changed owner.')
-      const mode = scope.nodeModes.find(row => row.pid === pid)
-      assert(uid === process.getuid() && mode?.mode === 'node' && mode.executable === executable &&
-        mode.uid === current.uid && mode.ppid === current.ppid && mode.birth === current.birth,
-        'Private launch smoke Host process identity is unconfirmed.')
-      if (semanticHostOwners.has(pid)) assert(semanticHostOwners.get(pid) === birth,
-        'Private launch smoke Host PID was reused.')
-      else semanticHostOwners.set(pid, birth)
-      return [pid]
-    })
-  }
-  assert((await ownedSemanticHostPids()).length === 0, 'Private launch smoke Host already exists.')
+  const guiEnvironment = privatePackageSmokeEnvironment(process.env, { userData, runtimeRoot, readyFile })
+  const service = macosHostService({ executable, entrypoint: join(canonicalAppPath, 'Contents/Resources/app/out/main/agentmux-host.js'),
+    storePath: guiEnvironment.AGENTMUX_AGENT_SESSION_STORE, socketPath: defaultAgentMuxControlSocketPath(guiEnvironment),
+    mobileBuildDirectory: join(canonicalAppPath, 'Contents/Resources/app/out/mobile'), environment: guiEnvironment })
+  assert(await macosHostServiceRegistration(service) === null, 'Private launch smoke Host service already exists.')
   let verificationError
   let verificationStage = 'launch-request'
   const verificationDeadline = Date.now() + 60_000
   try {
-    const guiEnvironment = privatePackageSmokeEnvironment(process.env, { userData, runtimeRoot, readyFile })
     for (const name of ['HOME', 'TMPDIR', 'CODEX_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME']) {
       await mkdir(guiEnvironment[name], { recursive: true, mode: 0o700 })
     }
@@ -661,15 +653,20 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     verificationError = new Error(`Packaged Desktop ${verificationStage} failed: ${error.message}`,
       { cause: error })
   }
-  const cleanupErrors = [
-    ...await cleanupProcessScope('application', ownedApplicationPids),
-    ...await cleanupProcessScope('semantic-host', ownedSemanticHostPids)
-  ]
+  const cleanupErrors = await cleanupProcessScope('application', ownedApplicationPids)
+  let hostStopped = false
   try {
-    const receipt = await privateRuntime.cleanup()
-    await writeFile(join(verificationRoot, 'runtime-cleanup.json'), JSON.stringify(receipt, null, 2) + '\n')
-    if (receipt.signals.includes('SIGKILL')) cleanupErrors.push(new Error('Launch smoke Runtime required forced termination.'))
+    const receipt = await cleanupSmokeHost(service)
+    hostStopped = true
+    await writeFile(join(verificationRoot, 'semantic-host-cleanup.json'), JSON.stringify(receipt, null, 2) + '\n')
   } catch (error) { cleanupErrors.push(error) }
+  if (hostStopped) {
+    try {
+      const receipt = await privateRuntime.cleanup()
+      await writeFile(join(verificationRoot, 'runtime-cleanup.json'), JSON.stringify(receipt, null, 2) + '\n')
+      if (receipt.signals.includes('SIGKILL')) cleanupErrors.push(new Error('Launch smoke Runtime required forced termination.'))
+    } catch (error) { cleanupErrors.push(error) }
+  }
   if (cleanupErrors.length === 0) {
     try {
       await rm(runtimeRoot, { recursive: true, force: true })
@@ -677,8 +674,12 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     } catch (error) { cleanupErrors.push(error) }
   }
   const failures = [verificationError, ...cleanupErrors].filter(Boolean)
-  if (failures.length > 0) throw new AggregateError(failures,
-    `Packaged Desktop verification failed; Runtime diagnostics retained if cleanup failed: ${runtimeRoot}`)
+  if (failures.length > 0) {
+    const failure = new AggregateError(failures,
+      `Packaged Desktop verification failed; Runtime diagnostics retained if cleanup failed: ${runtimeRoot}`)
+    if (cleanupErrors.length > 0) failure.privateSmokeCleanup = { status: 'unconfirmed', runtimeRoot, hostStopped }
+    throw failure
+  }
   process.stdout.write('packaged_desktop_launch=passed\n')
 }
 
@@ -1125,6 +1126,7 @@ async function main() {
   await run('pnpm', ['build'], { cwd: desktopRoot })
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'agentmux-macos-package-'))
   let retainedDiagnostics = false
+  let packagingError
   try {
     const candidateRoot = join(temporaryRoot, 'candidate')
     const stagedApp = join(candidateRoot, `${PRODUCT_NAME}.app`)
@@ -1191,9 +1193,12 @@ async function main() {
       'notarized=false'
     ].join('\n') + '\n')
   } catch (error) {
+    packagingError = error
+    retainedDiagnostics = error.privateSmokeCleanup?.status === 'unconfirmed'
     try {
       const receipt = await preservePackageSmokeFailure(temporaryRoot, join(repositoryRoot, '.local', 'state', 'package-failures'), error)
       process.stderr.write(`package_failure_diagnostics=${receipt.directory}\n`)
+      if (retainedDiagnostics) process.stderr.write(`package_failure_staging=${temporaryRoot}\n`)
     } catch (diagnosticError) {
       retainedDiagnostics = true
       const preservedError = new AggregateError([error, diagnosticError], `Package diagnostics could not be preserved; original staging retained: ${temporaryRoot}`, { cause: error })
@@ -1202,7 +1207,15 @@ async function main() {
     }
     throw error
   } finally {
-    if (!retainedDiagnostics) await rm(temporaryRoot, { recursive: true, force: true })
+    if (!retainedDiagnostics) {
+      try { await rm(temporaryRoot, { recursive: true, force: true }) }
+      catch (cleanupError) {
+        if (!packagingError) throw cleanupError
+        const failure = new AggregateError([packagingError, cleanupError], 'Package staging cleanup failed; the original failure is retained.', { cause: packagingError })
+        if (packagingError.transaction) failure.transaction = packagingError.transaction
+        throw failure
+      }
+    }
   }
 }
 
