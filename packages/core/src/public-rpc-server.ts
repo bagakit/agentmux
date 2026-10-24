@@ -84,6 +84,11 @@ export class AgentMuxControlServer {
     return address && typeof address === 'object' ? { host: address.address, port: address.port } : null
   }
   controlEndpointState(): AgentMuxControlEndpointState { return this.publication.state() }
+  /** Borrow this server's original dispatcher from a trusted in-process Host composition. */
+  async callRpc<M extends import('./public-rpc.js').AgentMuxRpcMethod>(method: M,
+    params: import('./public-rpc.js').AgentMuxRpcParams<M>, context: import('./public-rpc-service.js').AgentMuxRpcCallContext): Promise<import('./public-rpc.js').AgentMuxRpcResult<M>> {
+    return await this.service.call(method, params, context)
+  }
   get httpUnavailable(): AgentMuxError | null { return this.httpFailure }
   async start(): Promise<void> {
     if (this.started) return

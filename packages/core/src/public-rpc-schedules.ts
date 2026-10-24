@@ -112,10 +112,16 @@ export function parseScheduleRecord(value: unknown): ContinuousProgressLoop {
     }
   }
   if (p.taskSource !== undefined) {
-    const source = rpcRecord(p.taskSource, ['root','ownerId','readerPath'], code)
-    for (const key of ['root','ownerId','readerPath']) string(source[key], code)
+    parseProgressTaskSource(p.taskSource, code)
   }
   return structuredClone(p) as ContinuousProgressLoop
+}
+/** Original Feature source shape, shared by public progress arguments and records. */
+export function parseProgressTaskSource(value: unknown, code: 'INVALID_CONTROL_REQUEST' | 'CONTROL_PROTOCOL_ERROR' = 'INVALID_CONTROL_REQUEST'): Exclude<import('./continuous-progress-scheduler.js').ContinuousProgressTaskSource, { kind: 'goal' }> {
+  const source = rpcRecord(value, ['kind','root','ownerId','readerPath'], code)
+  if (source.kind !== undefined && source.kind !== 'feature') invalid('The task source kind is invalid.', code)
+  for (const key of ['root','ownerId','readerPath']) string(source[key], code)
+  return source as Exclude<import('./continuous-progress-scheduler.js').ContinuousProgressTaskSource, { kind: 'goal' }>
 }
 export function validateScheduleRpcResult<M extends ScheduleMethod>(method: M, value: unknown, params?: ScheduleParamsMap[M]): ScheduleResultMap[M] {
   const code = 'CONTROL_PROTOCOL_ERROR'

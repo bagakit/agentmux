@@ -177,3 +177,14 @@ export * from './agent-session-recovery.js'
 
 export * from './capsule-input.js'
 export * from './agent-learning.js'
+
+export type { AgentAutomationTarget, AgentAutomationPause, AgentAutomationPauseReceipt, AgentAutomationPauseInspection, AgentAutomationOwner } from './agent-automation.js'
+export { parseAgentAutomationTarget, parseAgentAutomationInspection } from './agent-automation.js'
+
+export { callPublicGoalControl, rpcControlResult } from './rpc-business-codec.js'
+
+export * from './agent-progress.js'
+
+export * from './goal-changes.js'
+
+export * from './goal-participation.js'
