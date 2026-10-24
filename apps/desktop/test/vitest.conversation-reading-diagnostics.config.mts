@@ -23,7 +23,7 @@ const owners = [hook, 'packages/client-ui/src/lib/conversation-reading-diagnosti
   'packages/core/src/reading-diagnostic.ts', 'apps/desktop/src/renderer/src/lib/session-conversation-window.ts',
   activity, 'apps/desktop/src/renderer/src/lib/reading-diagnostic-publication.ts',
   'apps/desktop/src/renderer/src/lib/reading-client-incident.ts', 'apps/desktop/src/renderer/src/lib/client-incident-recorder.ts',
-  'apps/desktop/src/renderer/src/lib/client-incident-dispatcher.ts', 'apps/desktop/src/main/client-incident-archive.ts',
+  'apps/desktop/src/renderer/src/lib/client-incident-dispatcher.ts', 'apps/host/src/client-incident-archive.ts',
   'apps/desktop/src/main/client-incident-ipc.ts', 'packages/core/src/client-incident.ts',
   'packages/core/src/diagnostic-evidence-service.ts', 'packages/core/src/diagnostic-evidence-codec.ts', 'packages/core/src/public-rpc-service.ts']
 export default defineConfig({ ...base, cacheDir: '.cache/conversation-reading-diagnostics', plugins: [...base.plugins ?? [], {

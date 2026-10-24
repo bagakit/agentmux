@@ -76,7 +76,7 @@ async function capturePublications(f: Awaited<ReturnType<typeof nativeHistoryFix
     return receipt
   })
   vi.stubGlobal('agentmux', { clientIncidents: { open: async () => ipc.open(event), report: publication } })
-  const service = new AgentMuxRpcService({ clientIncidents: archive, coreClients: () => [] })
+  const service = new AgentMuxRpcService({ clientIncidents: () => archive, coreClients: () => [] })
   closes.push(() => service.dispose())
   return { publication, async readRetained() {
     await archive.flush()

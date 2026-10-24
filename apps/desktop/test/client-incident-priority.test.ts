@@ -108,7 +108,7 @@ it('publishes finite loss reasons through authenticated IPC and original public 
     expect((await page(archive)).coverage.pendingWrites).toBe(CLIENT_INCIDENT_LIMITS.readingProducerQueue + 2)
     expect(active).toBe(1); expect(peak).toBe(1)
     release(); await archive.flush()
-    const server = new AgentMuxControlServer({ socketPath: join(path, 'public.sock'), clientIncidents: archive, coreClients: () => [] })
+    const server = new AgentMuxControlServer({ socketPath: join(path, 'public.sock'), clientIncidents: () => archive, coreClients: () => [] })
     await server.start()
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
     try {

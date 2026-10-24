@@ -1,5 +1,6 @@
-import { instrumentWorkspaceSource } from './mobile-workspace-mutations.mjs'
+import { instrumentDiagnosticsSource } from './mobile-diagnostics-mutations.mjs'
 import { instrumentContentSource } from './mobile-content-mutations.mjs'
+import { instrumentWorkspaceSource } from './mobile-workspace-mutations.mjs'
 import { instrumentDiscoverySource } from './mobile-discovery-mutations.mjs'
 import { registerHooks } from 'node:module'
 import { existsSync, readFileSync, appendFileSync } from 'node:fs'
@@ -8,12 +9,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 const root = resolve(import.meta.dirname, '../../..')
 const manifest = JSON.parse(readFileSync(resolve(root, 'packages/core/package.json'), 'utf8')).exports
-const observed = /^(?:packages\/core\/src\/(?:mobile-web(?:-codec)?|client-incident|public-rpc-service|public-rpc-server|rpc-native-codec|spatial-state|space-control-parser)\.ts|apps\/host\/src\/(?:host|mobile-assets(?:-owner)?)\.ts|apps\/desktop\/src\/main\/(?:desktop-host|runtime-controller|client-incident-archive|mobile-web-report-owner)\.ts|apps\/desktop\/src\/shared\/space-addresses\.ts)$/u
+const observed = /^(?:packages\/core\/src\/(?:mobile-web(?:-codec)?|client-incident|public-rpc-service|public-rpc-server|rpc-native-codec|spatial-state|space-control-parser)\.ts|apps\/host\/src\/(?:host|mobile-assets(?:-owner)?|client-incident-archive|mobile-web-report-owner)\.ts|apps\/desktop\/src\/main\/(?:desktop-host|runtime-controller)\.ts|apps\/desktop\/src\/shared\/space-addresses\.ts)$/u
 const mutants = {
   'main-route': ['packages/core/src/public-rpc-service.ts', "if (this.ports.callOriginalCore) return parseMobileAssetsResult(method, await this.ports.callOriginalCore(target.hostId, 'app.mobile.assets.activate'", "if (false) return parseMobileAssetsResult(method, await this.ports.callOriginalCore(target.hostId, 'app.mobile.assets.activate'"],
   'manifest-hash': ['apps/host/src/mobile-assets.ts', "mobileDigest(bytes) !== file.digest", 'false'],
-  'report-forward': ['packages/core/src/public-rpc-service.ts', "await this.ports.forwardControl('app.mobile.report', input, context)", 'undefined'],
-  'report-producer': ['apps/desktop/src/main/mobile-web-report-owner.ts', 'devicePrincipalId, documentId: input.documentId, buildId:', "devicePrincipalId: 'wrong-original-device', documentId: input.documentId, buildId:"]
+  'report-owner': ['packages/core/src/public-rpc-service.ts', 'const result = this.ports.mobileWebReports?.report(input, context.principal.id)', 'const result = undefined'],
+  'report-producer': ['apps/host/src/mobile-web-report-owner.ts', 'devicePrincipalId, documentId: input.documentId, buildId:', "devicePrincipalId: 'wrong-original-device', documentId: input.documentId, buildId:"]
 }
 const mutant = process.env.MOBILE_WEB_TEST_MUTANT
 if (mutant && !Object.hasOwn(mutants, mutant)) throw Error('Unknown mobile Web mutation')
@@ -47,7 +48,7 @@ registerHooks({
     const result = next(url, context)
     if (!url.startsWith('file:')) return result
     const path = relative(root, fileURLToPath(url))
-    const discoverySource = instrumentWorkspaceSource(instrumentDiscoverySource(instrumentContentSource(String(result.source), path), path), path)
+    const discoverySource = instrumentDiagnosticsSource(instrumentWorkspaceSource(instrumentDiscoverySource(instrumentContentSource(String(result.source), path), path), path), path)
     if (!observed.test(path)) return discoverySource === String(result.source) ? result : { ...result, source: discoverySource }
     const original = String(result.source); let source = discoverySource
     if (mutant && mutants[mutant][0] === path) {

@@ -77,8 +77,10 @@ describe('client incident public contract', () => {
     expect(() => parseClientIncidentRecord({ ...record(), producer: { ...record().producer, cwd: 'private-directory' } })).toThrow()
     const recent = { domain: 'client.incident', hostId: 'local', recent: {} }
     expect(parseDiagnosticEvidenceParams({ target: recent })).toEqual({ target: recent })
+    const scoped = { ...recent, authority: { kind: authority.kind, id: authority.id } }
+    expect(parseDiagnosticEvidenceParams({ target: scoped })).toEqual({ target: scoped })
     for (const target of [
-      { ...recent, logId: mintObjectId() }, { ...recent, authority: { kind: 'client-journal', id: 'another' } },
+      { ...recent, logId: mintObjectId() }, { ...recent, authority: { kind: 'client-incident-archive', id: null } },
       { ...recent, recent: { limit: 33 } }, { ...recent, recent: { since: 4, until: 3 } },
       { ...recent, recent: { cursor: 'private/path' } }, { ...recent, recent: { prompt: 'private' } },
     ]) expect(() => parseDiagnosticEvidenceParams({ target })).toThrow()
@@ -88,7 +90,7 @@ describe('client incident public contract', () => {
     const root = await mkdtemp(join(tmpdir(), 'amx-incident-rpc-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
     const original = record(), recovered = record('connection-recovered'), archive = port([original, recovered])
     const desktopPath = join(root, 'desktop.sock'), hostPath = join(root, 'host.sock')
-    const desktop = new AgentMuxControlServer({ socketPath: desktopPath, coreClients: () => [], clientIncidents: archive })
+    const desktop = new AgentMuxControlServer({ socketPath: desktopPath, coreClients: () => [], clientIncidents: () => archive })
     await desktop.start(); cleanup.push(() => desktop.stop())
     const owner = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: desktopPath } }); cleanup.push(() => owner.dispose())
     const forwarded: string[] = []
@@ -117,6 +119,14 @@ describe('client incident public contract', () => {
     if (duplicate.reads[0]?.data?.kind === 'client-incident-page') duplicate.reads[0].data.items.push(duplicate.reads[0].data.items[0]!)
     for (let i = 0; i < 4; i++) duplicate.budget.usedBytes = Buffer.byteLength(JSON.stringify(duplicate))
     expect(() => parseDiagnosticEvidenceResult(duplicate, params)).toThrow()
+    const emptyParams = { target: { ...params.target, authority: { kind: authority.kind, id: authority.id }, recent: { kind: 'mobile-web-observation' as const } } }
+    const empty = await rpc.call('system.diagnostics.inspect', emptyParams)
+    expect(empty.reads[0]!.data).toMatchObject({ kind: 'client-incident-page', items: [] })
+    expect(() => parseDiagnosticEvidenceResult(empty, emptyParams)).not.toThrow()
+    const wrongEmptyAuthority = structuredClone(empty)
+    wrongEmptyAuthority.reads[0]!.readAuthority = { ...authority, id: 'another-empty-archive' }
+    for (let i = 0; i < 4; i++) wrongEmptyAuthority.budget.usedBytes = Buffer.byteLength(JSON.stringify(wrongEmptyAuthority))
+    expect(() => parseDiagnosticEvidenceResult(wrongEmptyAuthority, emptyParams)).toThrow()
     const target = { domain: 'client.incident' as const, hostId: 'local', logId: original.logId, authority: { kind: authority.kind, id: authority.id } }
     const exact = await rpc.call('system.diagnostics.inspect', { target, includeRaw: true })
     expect(exact.reads[0]).toMatchObject({ recordRef: { logId: original.logId, routeHostId: 'local' }, raw: { returned: 'withheld' }, data: original })
@@ -127,6 +137,9 @@ describe('client incident public contract', () => {
     const cli = await runCompiledObjectCli([...prefix, '--domain', 'client.incident', '--host-id', 'local', '--recent', '--limit', '1', '--kind', 'connection-recovered'], env)
     expect(cli.code, cli.stderr).toBe(0)
     expect(JSON.parse(cli.stdout)).toMatchObject({ ok: true, result: { reads: [{ data: { kind: 'client-incident-page', items: [{ kind: 'connection-recovered' }] } }] } })
+    const scopedCli = await runCompiledObjectCli([...prefix, '--domain', 'client.incident', '--host-id', 'local', '--recent', '--authority', authority.id, '--limit', '1'], env)
+    expect(scopedCli.code, scopedCli.stderr).toBe(0)
+    expect(JSON.parse(scopedCli.stdout).result.reads[0].readAuthority).toEqual(authority)
     const read = await runCompiledObjectCli([...prefix, '--domain', 'client.incident', '--host-id', 'local', '--logid', original.logId, '--authority', authority.id], env)
     expect(read.code, read.stderr).toBe(0); expect(JSON.parse(read.stdout).result.reads[0].data).toEqual(original)
     const calls = archive.read.mock.calls.length
@@ -137,7 +150,7 @@ describe('client incident public contract', () => {
 
   it('refuses another archive Host without reading or controlling a healthy Agent', async () => {
     const h = await rpcOwnerFixture(); cleanup.push(h.close)
-    const archive = port([record()]), service = new AgentMuxRpcService({ coreClients: h.coreClients, clientIncidents: archive })
+    const archive = port([record()]), service = new AgentMuxRpcService({ coreClients: h.coreClients, clientIncidents: () => archive })
     cleanup.push(() => service.dispose())
     const result = await service.call('system.diagnostics.inspect', { target: { domain: 'client.incident', hostId: 'other', recent: {} } }, { caller: h.credentials })
     expect(result.reads[0]).toMatchObject({ availability: 'forbidden', data: null })

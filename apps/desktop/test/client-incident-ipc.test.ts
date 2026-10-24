@@ -6,7 +6,7 @@ import type { IpcMainInvokeEvent, WebContents } from 'electron'
 import { afterEach, expect, it } from 'vitest'
 import type { AgentMuxClientIncidentPage, AgentMuxClientIncidentRecord, AgentMuxClientIncidentReport } from '@agentmux/core'
 const { ClientIncidentArchive }: typeof import('@agentmux/host/client-incident-archive') = await import(
-  process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY ?? new URL('@agentmux/host/client-incident-archive', import.meta.url).href)
+  process.env.AGENTMUX_TEST_INCIDENT_ARCHIVE_ENTRY ?? new URL('../../host/src/client-incident-archive.ts', import.meta.url).href)
 const { ClientIncidentIpcOwner }: typeof import('../src/main/client-incident-ipc') = await import(
   process.env.AGENTMUX_TEST_INCIDENT_IPC_ENTRY ?? new URL('../src/main/client-incident-ipc.ts', import.meta.url).href)
 
