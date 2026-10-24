@@ -13,7 +13,8 @@ AgentMux 的优先目标是可独立消费的本地 Agent Core；Desktop 是它�
 | ctxmux | 通用 Run、PTY、进程生命周期、ordered bytes、Replay、Gap 与 Attachment | [随包 artifact manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)、[Core 的唯一适配器](../../packages/core/src/ctxmux-run-adapter.ts) |
 | AgentMux Core | AgentSession semantics and frontend-independent durable spatial identities, topology and bindings | [Client](../../packages/core/src/client.ts), [Session Store](../../packages/core/src/agent-session-store.ts), [Spatial owner](../../packages/core/src/spatial-state.ts) |
 | Provider | 解释原生 Agent 协议，贡献启动／恢复计划、输入协议、Hook 归一化与原生历史能力 | [`AgentProvider` / `defineAgentProvider`](../../packages/core/src/agent-provider.ts)、[内置 Provider](../../packages/core/src/providers/) |
-| Desktop Main | 宿主配置、文件／Git／Topic、Browser 与 Toolkit 等能力；通过 Core 管理 Agent 与 Run | [RuntimeController](../../apps/desktop/src/main/runtime-controller.ts)、[IPC 接线](../../apps/desktop/src/main/ipc.ts)、[ConfigOwner](../../apps/desktop/src/main/config-owner.ts) |
+| 独立 Host | 组合唯一 Core 语义 owner，提供 Relay／设备、原文件／Note／Topic、资源配置读取与观察；不持有真实屏幕焦点 | [Host](../../apps/host/src/host.ts)、[内容 owner](../../apps/host/src/content-owner.ts)、[平台服务](../../apps/host/src/macos-service.ts) |
+| Desktop Main | 宿主配置写入、原生文件适配／Git、Browser 与 Toolkit；连接原 Host 并通过 Core 公共 API 管理 Agent | [RuntimeController](../../apps/desktop/src/main/runtime-controller.ts)、[IPC 接线](../../apps/desktop/src/main/ipc.ts)、[ConfigOwner](../../apps/desktop/src/main/config-owner.ts) |
 | Desktop Renderer | Spatial projection, screen layout, focus, input and client resource metadata; legacy persistence is replaced in the tracked consumer cutover | [Store](../../apps/desktop/src/renderer/src/store.ts), [Spatial ownership](spatial-state.md) |
 | `@agentmux/client-ui` | 消息、原生历史、Trace、结构化请求卡片与 Composer 的共享 React 呈现和编辑；宿主能力经平台适配器与 typed props 注入 | [包说明](../../packages/client-ui/README.md)、[导出入口](../../packages/client-ui/src/index.ts)、[`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) |
 | `@agentmux/layout` | 分屏树结构、比例、几何寻址与布局 reducer 的纯代数；不持有展示记录或 Session 生命周期 | [包说明](../../packages/layout/README.md)、[导出入口](../../packages/layout/src/index.ts) |
@@ -31,7 +32,7 @@ Desktop 二级内容由 [`WorkspaceFilesTool`](../../apps/desktop/src/renderer/s
 
 ## 文件格式的扩展位置
 
-文件能力留在 Desktop，沿原 FileRegion 和 FileDocument 派发；Core 只公开准确目标、动作和结果类型。行为要求见[格式能力与按需扩展](../design/behavior/files-and-git.md#格式能力与按需扩展)，当前模块按以下职责增长。
+格式编辑、呈现与原生工具留在 Desktop，沿原 FileRegion 和 FileDocument 派发；可移植文件与知识领域 owner 由 Host 提供，Core 只公开准确目标、动作和结果类型。行为要求见[格式能力与按需扩展](../design/behavior/files-and-git.md#格式能力与按需扩展)，当前模块按以下职责增长。
 
 | 职责 | 当前来源与扩展方式 |
 | --- | --- |
@@ -64,18 +65,19 @@ Desktop 二级内容由 [`WorkspaceFilesTool`](../../apps/desktop/src/renderer/s
 flowchart LR
   Package["包消费者"] --> Core["AgentMuxClient"]
   CLI["amux CLI"] --> Service["共享 JSON-RPC 业务服务"]
-  Service --> Main["Desktop Main handlers"]
-  Service --> Core
+  Service --> Host["独立 Host 领域 owners"]
+  Service --> Main["Desktop 原生 handlers"]
+  Host --> Core
   Renderer["Desktop Renderer"] --> Main
   Renderer --> SharedUI["client-ui 呈现 / 编辑"]
-  Main --> Core
+  Main --> Service
   Core --> Adapter["CtxmuxRunAdapter"]
   Adapter --> Runtime["ctxmux Run Runtime"]
 ```
 
-[`agentmux.ts`](../../packages/core/src/agentmux.ts) 解析 CLI 后通过 `connectAgentMuxRpc` 调用共享 [`AgentMuxRpcService`](../../packages/core/src/public-rpc-service.ts)。[`AgentMuxControlServer`](../../packages/core/src/public-rpc-server.ts) 在 Main 的 [IPC 入口](../../apps/desktop/src/main/ipc.ts) 接入原宿主 handlers、Core clients 和事实观察入口；业务服务向这些 owner 委托操作，不复制它们的事实。工作面操作经 [DesktopControlIpcBridge](../../apps/desktop/src/main/control-ipc-bridge.ts) 和 Renderer 的 [Control 接收入口](../../apps/desktop/src/renderer/src/lib/control-api.ts) 进入 [Store 的 `executeControl`](../../apps/desktop/src/renderer/src/store.ts)，空间判定复用 [Control helpers](../../apps/desktop/src/renderer/src/lib/control.ts)。
+[`agentmux.ts`](../../packages/core/src/agentmux.ts) 解析 CLI 后通过 `connectAgentMuxRpc` 调用共享 [`AgentMuxRpcService`](../../packages/core/src/public-rpc-service.ts)。[`AgentMuxControlServer`](../../packages/core/src/public-rpc-server.ts) 由独立 [Host](../../apps/host/src/host.ts) 接入 Core clients、可移植领域 owner 和事实观察入口；Main 的 [IPC 入口](../../apps/desktop/src/main/ipc.ts) 提供原生宿主能力，并借同一 Host 读取领域事实；业务服务向准确 owner 委托操作，不复制其事实。工作面操作经 [DesktopControlIpcBridge](../../apps/desktop/src/main/control-ipc-bridge.ts) 和 Renderer 的 [Control 接收入口](../../apps/desktop/src/renderer/src/lib/control-api.ts) 进入 [Store 的 `executeControl`](../../apps/desktop/src/renderer/src/store.ts)，空间判定复用 [Control helpers](../../apps/desktop/src/renderer/src/lib/control.ts)。
 
-Agent 生命周期由 Main 的 `RuntimeController` 调用 Core 公共 API。Browser 操作事实和订阅由 Main 的 [operation journal](../../apps/desktop/src/main/browser-operation-journal.ts) 提供，Toolkit 能力由 [ToolkitOwner](../../apps/desktop/src/main/toolkit-owner.ts) 提供。Session lookup、角色绑定和消息编排归共享业务服务；CLI 不直接读写这些本地业务事实。独立服务可连接本地 Core，但未注入的空间、文件或配置 owner 明确返回不可用，服务存在不证明完整宿主能力已经就绪。
+Agent 生命周期由 Host 的 Core owner 持有；Main 的 `RuntimeController` 沿原 Hosted client 调用公共 API。Browser 操作事实和订阅由 Main 的 [operation journal](../../apps/desktop/src/main/browser-operation-journal.ts) 提供，Toolkit 能力由 [ToolkitOwner](../../apps/desktop/src/main/toolkit-owner.ts) 提供。Session lookup、角色绑定和消息编排归共享业务服务；CLI 不直接读写这些本地业务事实。独立 Host 不依赖 Main 提供内容与配置读取；真实焦点、窗口、Browser 等原生 owner 离线时明确局部不可用，服务存在不证明这些宿主能力已经就绪。
 
 ## 持久事实与观察投影
 
@@ -89,7 +91,7 @@ Agent 生命周期由 Main 的 `RuntimeController` 调用 Core 公共 API。Brow
 | Note 正文与稳定块／引用 | 原 Files owner 的 `.note.md`；共享 [Markdown codec](../../packages/client-ui/src/note/note-markdown.ts) 供 Desktop／Mobile 编辑和读取，Core [轻量格式入口](../../packages/core/src/note-format.ts) 只解释身份头 |
 | Notebook 目录、关注、操作轨迹、块归因与历史 | 原 [NotebookStore](../../packages/core/src/notebook-store.ts)／[本地文件后端](../../packages/core/src/notebook-files.ts)；[NotesStorage](../../packages/core/src/notes-storage.ts) 持有目录搬迁与显式转换 journal；[Host owner](../../apps/desktop/src/main/notes-storage-owner.ts) 组织原资源确认。文件组织见 [Note Markdown](../specs/note-markdown.md#元数据与公共消费) |
 
-Note 的内存编辑树不另行存为正文。Main 的原 NoteFileWriter 在 Files CAS 成功后将可信 actor 的块归因绑定到同一正文 revision；
+Note 的内存编辑树不另行存为正文。共享的原 NoteFileWriter 在 Files CAS 成功后将可信 actor 的块归因绑定到同一正文 revision；
 元数据失败保留已写结果，正文读取失败和归因未确认分别表达。Graph 与搜索从正文派生，普通图观察不加载块作者历史。
 具体格式、转换与草稿保全见 [Note Markdown 与元数据](../specs/note-markdown.md)。
 
@@ -105,7 +107,7 @@ Session 元数据与每条未来消息正文分行持久化。Registry 只保留
 
 Runtime 语义服务由 Core 的 [Headless owner](../../packages/core/src/headless-runtime.ts) 组合唯一 `AgentMuxClient`、durable Session Store 与 [Hosted Runtime service](../../packages/core/src/hosted-runtime-service.ts)。宿主服务组合该 owner 及自己的私网、设备和 Desktop ports；不会再建立另一套 Agent 语义 Runtime。
 
-[`connectHostedAgentMux`](../../packages/core/src/hosted-client.ts) 是公共 RPC 的唯一类型化 Runtime client；[`connectSshAgentMux`](../../packages/core/src/runtime-client.ts) 只负责组合系统 SSH 传输与同一 Hosted client。Desktop 的 [Host connector](../../apps/desktop/src/main/desktop-host.ts) 连接语义 owner，工作面与文件／Git 能力继续归 Desktop。客户端的最后观察、durable Runtime 身份、当前 owner 进程代次与 ctxmux 身份分别保留；缓存不成为授权或当前运行事实。
+[`connectHostedAgentMux`](../../packages/core/src/hosted-client.ts) 是公共 RPC 的唯一类型化 Runtime client；[`connectSshAgentMux`](../../packages/core/src/runtime-client.ts) 只负责组合系统 SSH 传输与同一 Hosted client。Desktop 的 [Host connector](../../apps/desktop/src/main/desktop-host.ts) 连接语义 owner；原生工作面、文件格式工具与 Git 继续归 Desktop，可移植内容消费同一 Host owner。客户端的最后观察、durable Runtime 身份、当前 owner 进程代次与 ctxmux 身份分别保留；缓存不成为授权或当前运行事实。
 
 SSH 公共服务连接与远端 shell／文件能力是不同能力。[`SshExecutionHost`](../../packages/core/src/execution-host.ts) 不持有 Agent 生命周期；Core 远程管理连接的是远端 AgentMux owner，由它消费当地 ctxmux。此实现不声称 ctxmux 具有独立 Remote Runtime 协议。源码、编译、安装包和当前连接能力仍分别核对；来源不可用保持未知，恢复行为唯一见[联邦 Runtime 与远端恢复边界](../design/behavior/session-recovery.md#联邦-runtime-与远端恢复边界)。
 

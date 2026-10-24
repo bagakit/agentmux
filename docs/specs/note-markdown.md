@@ -224,7 +224,7 @@ block inline PM UTF16 offset，不是 Markdown 字节位置。它不是跨文件
 
 ## 持久正文历史
 
-[原 Note writer](../../apps/desktop/src/main/note-file-writer.ts) 沿既有 NotesStorage 锁和 Files revision CAS 保存正文，
+[原 Note writer](../../apps/host/src/note-file-writer.ts) 沿既有 NotesStorage 锁和 Files revision CAS 保存正文，
 在同一原元数据 owner 中准备历史事件并分别确认正文与历史结果。当前 Markdown 是唯一当前正文；历史保存不可变的前后内容快照，
 不是可独立写入的另一份当前文档，也不是从当前 Markdown 可重建的缓存。
 
