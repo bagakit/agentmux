@@ -279,6 +279,8 @@ it.runIf(process.platform === 'darwin')('keeps the original backend working afte
   const running = await runNativeLifecycle(f)
   const context = { processId: running.child.pid!, nativeActor: { protocolId: 'codex-app-server-v2-0.163', actorId: 'original-actor',
     lifecycleOperationId: 'original-lifecycle', token: 'a'.repeat(64), launch: { command: f.plan.command, args: ['resume', f.plan.resume!.threadId] } },
+    nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: f.plan.resume!.threadId },
+    assertCurrent: async () => { expect(running.child.exitCode).toBeNull(); expect(running.child.signalCode).toBeNull() },
     workspacePath: f.root, signal: new AbortController().signal }
   let latest: import('../src/agent-terminal-frontend.js').AgentTerminalFrontendObservation | undefined
   await expect.poll(() => readFile(f.marker, 'utf8').then(() => true, () => false), { timeout: 10_000 }).toBe(true)
@@ -289,7 +291,7 @@ it.runIf(process.platform === 'darwin')('keeps the original backend working afte
   await expect.poll(() => readFile(f.marker + '.heartbeat', 'utf8')).not.toBe(heartbeat)
   expect(running.child.exitCode).toBeNull()
   await expect(reconnectCodexTerminalFrontend(context, { operationId: 'wrong-target', expectedFrontendId: original.frontendId,
-    target: { kind: 'native-session', nativeSessionId: 'foreign-native-thread' } })).rejects.toThrow('original initialized native target')
+    target: { kind: 'native-session', nativeSessionId: 'foreign-native-thread' } })).rejects.toMatchObject({ code: 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED' })
   expect((await readFile(f.marker + '.events', 'utf8')).trim().split('\n')).toHaveLength(1)
   const request = { operationId: 'same-original-reconnect', expectedFrontendId: original.frontendId, target: { kind: 'native-session' as const, nativeSessionId: f.plan.resume!.threadId } }
   // Abandon only the response; the wrapper retains this same original operation.
@@ -307,6 +309,10 @@ it.runIf(process.platform === 'darwin')('keeps the original backend working afte
   expect(events).toHaveLength(2)
   expect(events[1].args.slice(4)).toEqual(['resume', request.target.nativeSessionId])
   expect(JSON.stringify(events[1])).not.toContain('Original continuation prompt')
+  const prejoins = (await readFile(f.log, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    .filter(row => row.method === 'thread/resume' && row.params.excludeTurns === false)
+  expect(prejoins.length).toBeGreaterThan(0)
+  for (const row of prejoins) expect(row.params).toEqual({ threadId: request.target.nativeSessionId, excludeTurns: false })
   await expect.poll(() => latest?.frontendId === resumed.frontendId && latest.state === 'detached', { timeout: 10_000 }).toBe(true)
   await expect(reconnectCodexTerminalFrontend(context, { ...request, operationId: 'stale-reconnect' })).rejects.toThrow('generation changed')
   running.stop()
