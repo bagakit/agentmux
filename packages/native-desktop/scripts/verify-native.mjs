@@ -22,7 +22,8 @@ if (args.includes('--help')) {
 --source-only parses Swift syntax only; no SDK typecheck, test, build or UI.
 --source runs real Swift tests/build, two nonempty test-killed mutants and the production Node client against native OS dispatch.
 It launches an isolated AppKit window, sends real input to that exact process/window and captures only its pixels.
-No application assembly, signing, installation, permission prompting or user clipboard writes. A failed/unavailable operation fails the requested scope.
+No application assembly, signing, installation, permission changes or user clipboard writes.
+Actual capture may show macOS consent; the runner never approves it. Missing authorization fails the requested scope.
 `)
   process.exit(0)
 }
