@@ -36,7 +36,21 @@ export async function privateMobileBrowser(directory) {
         const path = join(directory, String(++serial).padStart(2, '0') + '-' + label + '.js')
         const source = 'async page => { const input = ' + JSON.stringify(input) + '; return await (' + String(program) + ')(input.page === "second" ? page.__independentSecond : page, input); }\n'
         await writeFile(path, source)
-        const result = await run(['run-code', '--filename=' + path])
+        let result
+        try { result = await run(['run-code', '--filename=' + path]) }
+        catch (error) {
+          Object.assign(commands.at(-1), { sourceDigest: digest(await readFile(path)), label })
+          const failure = { label, input, observation: { status: 'unavailable' } }
+          const observationPath = join(directory, String(serial).padStart(2, '0') + '-' + label + '-observation.js')
+          try {
+            await writeFile(observationPath, 'async page => { const current = ' + (input.page === 'second' ? 'page.__independentSecond' : 'page') + '; return await current.evaluate(() => ({url:location.href,body:document.body.innerText,panels:Array.from(document.querySelectorAll(".mobile-spatial-panel,.mobile-conversation,.mobile-goals")).map(panel=>({visible:Boolean(panel.getClientRects().length),html:panel.outerHTML})),record:JSON.parse(localStorage.getItem("agentmux-mobile-workface-v1"))})); }\n')
+            failure.observation = { status: 'observed', value: await run(['run-code', '--filename=' + observationPath]) }
+          } catch (observation) { failure.observation = { status: 'unavailable', message: observation.message } }
+          try { await writeFile(join(directory, label + '-failure.json'), JSON.stringify(failure, null, 2) + '\n', { mode: 0o600 }) }
+          catch (observation) { failure.artifactFailure = observation.message }
+          error.privateBrowserFailure = failure
+          throw error
+        }
         commands.at(-1).sourceDigest = digest(await readFile(path)); commands.at(-1).label = label
         await writeFile(join(directory, label + '-result.json'), JSON.stringify(result, null, 2) + '\n', { mode: 0o600 })
         return result
@@ -125,14 +139,7 @@ export async function readOriginalContent(page, input) {
   if (await row.count() !== 1) throw Error('One original workspace is required')
   if (await row.locator('button.mobile-space-row').getAttribute('aria-expanded') !== 'true') await row.locator('button.mobile-space-row').click()
   await row.getByRole('button', { name: input.fileName, exact: false }).click()
-  try { await page.getByText(input.body, { exact: true }).waitFor() }
-  catch (error) {
-    const observed = await page.evaluate(() => ({
-      panels: Array.from(document.querySelectorAll('.mobile-spatial-panel')).map(panel => ({ visible: Boolean(panel.getClientRects().length), text: panel.innerText, html: panel.outerHTML })),
-      record: JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1'))
-    })).catch(observation => ({ unavailable: observation.message }))
-    throw new Error(error.message + '; original Mobile content observation=' + JSON.stringify(observed))
-  }
+  await page.getByText(input.body, { exact: true }).waitFor()
   return { body: await page.locator('.mobile-spatial-panel').innerText(),
     presentation: await page.evaluate(() => JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1')).presentation) }
 }

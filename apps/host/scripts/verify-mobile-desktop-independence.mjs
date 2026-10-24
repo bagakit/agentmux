@@ -351,6 +351,27 @@ try {
   receipt.passed = true
 } catch (error) {
   failed = error; receipt.error = { name: error.name, message: error.message, stack: error.stack }
+  if (error.privateBrowserFailure) {
+    receipt.browserFailure = error.privateBrowserFailure
+    if (fixture) {
+      const observed = error.privateBrowserFailure.observation.value, marker = error.privateBrowserFailure.input.marker
+      const attempts = observed?.record?.conversation?.attempts?.map(([, attempt]) => attempt).filter(attempt =>
+        attempt.manualInput?.agentSessionId === fixture.original.agentSessionId && (!marker || attempt.draft === marker)) ?? []
+      const reads = [
+        ['status', () => fixture.sdk.statusAgent(fixture.original.agentSessionId)],
+        ['replay', () => fixture.sdk.readRunReplay(fixture.original.run, 0, 'raw')],
+        ['nativeTranscript', () => readFile(fixture.original.nativeHandle.transcriptPath, 'utf8')],
+        ...attempts.map(attempt => ['input:' + attempt.operationId, () => fixture.sdk.inspectAgentInput({ key: {
+          kind: 'prompt', agentSessionId: attempt.manualInput.agentSessionId,
+          expectedRun: attempt.manualInput.expectedRun, submissionId: attempt.operationId } })])
+      ]
+      receipt.browserFailure.inputObservation = attempts.length ? 'exact-original-record' : 'unknown-no-original-record'
+      receipt.browserFailure.owner = Object.fromEntries(await Promise.all(reads.map(async ([name, read]) => {
+        try { return [name, { status: 'observed', value: await read() }] }
+        catch (observation) { return [name, { status: 'unavailable', code: observation.code, message: observation.message }] }
+      })))
+    }
+  }
   if (fixture) receipt.failureContext = {
     agentSessionId: fixture.original.agentSessionId, run: fixture.original.run,
     nativeHandle: fixture.original.nativeHandle, workspacePath: fixture.original.workspacePath,
