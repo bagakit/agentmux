@@ -82,12 +82,34 @@ async function fixture(options: { owner?: boolean; configuration?: boolean; heal
   }
   const original = await reader()
   cleanups.push(async () => {
-    const final = await reader()
-    for (const run of await final.nativeList()) if (run.state.type === 'running') {
-      try { await final.inner.kernel.stop(await final.inner.kernel.prepareStop(run.runId)) }
-      catch (error) { if ((await final.inner.kernel.status(run.runId)).state.type === 'running') throw error }
+    const errors: unknown[] = []
+    // Dispose business observers before Stop so an automatic recovery intent cannot
+    // treat fixture teardown as another recoverable Native failure.
+    for (const value of readers.slice().reverse()) {
+      try { await value.client.dispose() } catch (error) { errors.push(error) }
     }
-    for (const value of readers.slice().reverse()) await value.client.dispose()
+    const final = await reader()
+    let stopped: unknown, terminal: unknown[] = []
+    try {
+      const session = await final.client.readAgentSession('original-session')
+      if (session) { await final.client.stopAgent(session.agentSessionId, session.run); stopped = { agentSessionId: session.agentSessionId, run: session.run } }
+    } catch (error) { errors.push(error) }
+    try {
+      // Finish only this exact private Runtime namespace. A Core Stop failure
+      // above remains an error; Runtime cleanup does not prove Session retirement.
+      for (const run of await final.nativeList()) {
+        if (run.state.type === 'running') await final.inner.kernel.stop(await final.inner.kernel.prepareStop(run.runId))
+        await vi.waitFor(async () => expect((await final.inner.kernel.status(run.runId)).state.type).not.toBe('running'))
+        terminal.push({ runId: run.runId, state: (await final.inner.kernel.status(run.runId)).state })
+      }
+    } catch (error) { errors.push(error) }
+    try { await final.client.dispose() } catch (error) { errors.push(error) }
+    // All observers are now closed. This exact-recipient read joins the original
+    // same-path queue tail, including connect's already-enqueued restoration read.
+    try { await final.inner.messageQueue.hasPendingNotification('original-session') } catch (error) { errors.push(error) }
+    if (process.env.SESSION_EXECUTOR_FACTS) appendFileSync(process.env.SESSION_EXECUTOR_FACTS, JSON.stringify({ phase: 'private-owner-closed',
+      readers: readers.length, stopped, terminal, queueTail: errors.length ? 'unknown' : 'settled' }) + '\n')
+    if (errors.length) throw new AggregateError(errors, 'Private Core fixture owners did not close completely')
   })
   const seed = await original.nativeStart({ operationKey: 'original-seed', program: process.execPath, args: ['-e', 'process.exit(0)'], cwd: root, env: {} })
   await vi.waitFor(async () => expect((await original.inner.kernel.status(seed.runId)).state.type).toBe('exited'))
