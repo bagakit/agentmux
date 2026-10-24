@@ -48,12 +48,14 @@ function protection(root: HTMLElement | null, previous: ReadonlyMap<string, Plac
   const document = root?.ownerDocument, selection = document?.defaultView?.getSelection()
   const range = selection && !selection.isCollapsed && selection.rangeCount ? selection.getRangeAt(0) : null
   const focused = document?.activeElement
-  for (const node of root?.querySelectorAll<HTMLElement>('[data-conversation-layout-key]') ?? []) {
-    const key = node.dataset.conversationLayoutKey!, prior = previous.get(key), next = incoming.get(key)
-    if (prior && next && prior.version === next.version && prior.parent === next.parent) continue
-    const protectedNode = readingNode(node) ?? node
-    try { if (range?.intersectsNode(protectedNode)) return 'selection' } catch { return 'selection' }
-    if (focused && focused !== document?.body && protectedNode.contains(focused)) return 'focus'
+  if (range || focused && focused !== document?.body && root?.contains(focused)) {
+    for (const node of root?.querySelectorAll<HTMLElement>('[data-conversation-layout-key]') ?? []) {
+      const key = node.dataset.conversationLayoutKey!, prior = previous.get(key), next = incoming.get(key)
+      if (prior && next && prior.version === next.version && prior.parent === next.parent) continue
+      const protectedNode = readingNode(node) ?? node
+      try { if (range?.intersectsNode(protectedNode)) return 'selection' } catch { return 'selection' }
+      if (focused && focused !== document?.body && protectedNode.contains(focused)) return 'focus'
+    }
   }
   const anchor = preserveAnchor ? currentAnchor(root) : null
   if (anchor && !incoming.has(anchor.key)) return 'anchor'
