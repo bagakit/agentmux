@@ -374,7 +374,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           reading={readingProps}
           {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
           onChange={setDraft} {...(attempt?.phase !== 'sending' ? { onSubmit: () => void submit(), onQueue: () => void submit(false) } : {})}
-          onAttach={onAttach ?? (() => { void attachmentControls.current?.choose() })} {...(readPastedImage ? { readPastedImage } : {})}
+          onAttach={onAttach ?? (() => { void attachmentControls.current?.choose() })}
+          onPasteImage={file => { void attachmentControls.current?.stageFile?.(file) }}
+          onDropFiles={files => { if (files[0]) void attachmentControls.current?.stageFile?.(files[0]) }}
+          {...(readPastedImage ? { readPastedImage } : {})}
           />
         {attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}
         {retainedAttempts.length ? <details className="mobile-retained-prompts"><summary>保留的原消息 ({retainedAttempts.length})</summary>

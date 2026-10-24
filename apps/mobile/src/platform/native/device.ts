@@ -60,18 +60,44 @@ function base64(bytes: Uint8Array): string {
   for (let offset = 0; offset < bytes.length; offset += 32768) value += String.fromCharCode(...bytes.subarray(offset, offset + 32768))
   return btoa(value)
 }
+function normalizeAttachmentMimeType(name: string, rawMimeType?: string | null): string {
+  const lower = (rawMimeType ?? '').trim().toLowerCase()
+  if (lower === 'image/jpg') return 'image/jpeg'
+  if (lower) return lower
+  const ext = name.includes('.') ? name.split('.').at(-1)?.toLowerCase() : undefined
+  return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif' } as const)[ext ?? ''] ?? 'application/octet-stream'
+}
+
+export async function localAttachmentFromBlob(file: { name: string; type?: string; mimeType?: string; size: number; stream(): ReadableStream<Uint8Array> }): Promise<LocalAttachment> {
+  const name = file.name || `image-${randomClientRequestId()}.png`
+  if (!Number.isSafeInteger(file.size) || file.size < 1) {
+    throw new Error('系统尚未确认附件的名称、类型或大小；这次附件尚未采用。')
+  }
+  const mimeType = normalizeAttachmentMimeType(name, file.mimeType ?? file.type)
+  parseFileUploadIdentity({ hostId: 'local', agentSessionId: 'local-selection', expectedRun: { runId: 'local-selection' },
+    operationId: 'local-selection', name, mimeType, byteLength: file.size, revision: 'sha256:' + '0'.repeat(64) })
+  const bytes = await boundedBytes(file.stream(), file.size)
+  return { id: randomClientRequestId(), name, mimeType, size: bytes.byteLength,
+    revision: fileUploadRevision(bytes), dataBase64: base64(bytes) }
+}
 
 /** The system chooser owns access; native paths stay on this device. Byte reads are bounded before upload. */
 export async function pickLocalAttachment(ports: Pick<NativeDevicePorts, 'filePicker'> = nativeDevicePorts,
   readNative: (path: string) => Promise<Response> = path => fetch(Capacitor.convertFileSrc(path))): Promise<LocalAttachment | null> {
-  const result = await ports.filePicker.pickFiles({ limit: 1, readData: false })
+  let result: Awaited<ReturnType<NativeDevicePorts['filePicker']['pickFiles']>>
+  try {
+    result = await ports.filePicker.pickFiles({ limit: 1, readData: false })
+  } catch (error) {
+    if (/cancel(?:ed|led)?/iu.test(error instanceof Error ? error.message : String(error))) return null
+    throw error
+  }
   if (result.files.length === 0) return null
   if (result.files.length !== 1) throw new Error('系统文件选择返回了多个文件；这次附件尚未采用。')
   const file = result.files[0]!
   if (!file.name || !Number.isSafeInteger(file.size)) {
     throw new Error('系统尚未确认附件的名称、类型或大小；这次附件尚未采用。')
   }
-  const mimeType = file.mimeType || 'application/octet-stream'
+  const mimeType = normalizeAttachmentMimeType(file.name, file.mimeType)
   // Reuse the public byte/format budget before reading a Blob or an OS-granted URI.
   parseFileUploadIdentity({ hostId: 'local', agentSessionId: 'local-selection', expectedRun: { runId: 'local-selection' },
     operationId: 'local-selection', name: file.name, mimeType, byteLength: file.size, revision: 'sha256:' + '0'.repeat(64) })

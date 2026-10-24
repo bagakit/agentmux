@@ -30,6 +30,7 @@ export type AgentMuxHostOptions = {
   configurationPath?: string
   mobileBuildDirectory?: string
   mobilePort?: number
+  fileUploads?: import('@agentmux/core/files').AgentMuxRpcFileUploadsOwner
   inputContextCaptureReader?: import('@agentmux/core').AgentInputContextCaptureReader
   externalInputAuthority?: import('@agentmux/core').AgentExternalInputAuthorityPort
 }
@@ -76,6 +77,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const service = {
+    ...(options.fileUploads ? { fileUploads: options.fileUploads } : {}),
     ...(agentLearning ? { agentLearning } : {}),
     ...(connectionOwner ? { connections: connectionOwner.connections, spatialState: connectionOwner.spatial,
       ...(connectionOwner.moteChat ? { moteChat: connectionOwner.moteChat } : {}),

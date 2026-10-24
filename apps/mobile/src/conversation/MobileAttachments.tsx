@@ -3,12 +3,15 @@ import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession } from '@agentmux/core'
 import { FILE_UPLOAD_MAX_BYTES, parseFileUploadParams, type FileUploadIdentity } from '@agentmux/core/files'
-import { pickLocalAttachment, type LocalAttachment } from '../platform/native/device'
+import { localAttachmentFromBlob, pickLocalAttachment, type LocalAttachment } from '../platform/native/device'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import { fileUploadScopeMatches, uploadFromReceipt, type MobileFileUpload } from './attachments'
 import { errorMessage } from './delivery'
 
-export type MobileAttachmentControls = { choose(): Promise<void> }
+export type MobileAttachmentControls = {
+  choose(): Promise<void>
+  stageFile?(file: { name: string; type?: string; mimeType?: string; size: number; stream(): ReadableStream<Uint8Array> }): Promise<void>
+}
 type Props = {
   client: AgentMuxHostedClient | null; session: AgentMuxAgentSession | null; connected: boolean;
   promptOperationId: string | null; promptConfirmed: boolean;
@@ -60,6 +63,20 @@ export function MobileAttachments({ client, session, connected, promptOperationI
     for (const upload of uploads) if (upload.phase === 'inserted' && upload.identity.agentSessionId === session.agentSessionId) remove(upload)
   }, [promptConfirmed, promptOperationId])
 
+  async function stageSelectedAttachment(file: LocalAttachment): Promise<void> {
+    const originalClient = current.current.client, originalSession = current.current.session, originalScope = scope()
+    if (!originalClient || !originalSession || !originalScope.runtimeId) { setNotice('尚未确认原会话与 Mac；这次附件没有上传。原消息仍可编辑。'); return }
+    if ([...bytes.current.values()].reduce((total, item) => total + item.size, 0) + file.size > FILE_UPLOAD_MAX_BYTES * 4) {
+      throw new Error('待上传附件已占用这台设备的本次选择预算；先上传或移除一个附件，再选择新文件。原草稿保留。')
+    }
+    const identity: FileUploadIdentity = { hostId: originalSession.hostId, agentSessionId: originalSession.agentSessionId,
+      expectedRun: { runId: originalSession.run.runId }, operationId: file.id, name: file.name,
+      mimeType: file.mimeType, byteLength: file.size, revision: file.revision }
+    parseFileUploadParams({ ...identity, dataBase64: file.dataBase64 })
+    recordIds.current.set(file.id, getDeviceWorkface().recordIdentity())
+    bytes.current.set(file.id, file)
+    await retain({ runtimeId: originalScope.runtimeId, identity, phase: 'selected' })
+  }
   async function choose(): Promise<void> {
     if (choosing) return
     const originalClient = current.current.client, originalSession = current.current.session, originalScope = scope()
@@ -68,20 +85,22 @@ export function MobileAttachments({ client, session, connected, promptOperationI
     try {
       const file = await pickFile()
       if (!file) return
-      if ([...bytes.current.values()].reduce((total, item) => total + item.size, 0) + file.size > FILE_UPLOAD_MAX_BYTES * 4) {
-        throw new Error('待上传附件已占用这台设备的本次选择预算；先上传或移除一个附件，再选择新文件。原草稿保留。')
-      }
-      const identity: FileUploadIdentity = { hostId: originalSession.hostId, agentSessionId: originalSession.agentSessionId,
-        expectedRun: { runId: originalSession.run.runId }, operationId: file.id, name: file.name,
-        mimeType: file.mimeType, byteLength: file.size, revision: file.revision }
-      parseFileUploadParams({ ...identity, dataBase64: file.dataBase64 })
-      recordIds.current.set(file.id, getDeviceWorkface().recordIdentity())
-      bytes.current.set(file.id, file)
-      await retain({ runtimeId: originalScope.runtimeId, identity, phase: 'selected' })
+      await stageSelectedAttachment(file)
     } catch (error) { if (mounted.current) setNotice(errorMessage(error)) }
     finally { if (mounted.current) setChoosing(false) }
   }
-  useImperativeHandle(controls, () => ({ choose }))
+  async function stageFile(rawFile: { name: string; type?: string; mimeType?: string; size: number; stream(): ReadableStream<Uint8Array> }): Promise<void> {
+    if (choosing) return
+    const originalClient = current.current.client, originalSession = current.current.session, originalScope = scope()
+    if (!originalClient || !originalSession || !originalScope.runtimeId) { setNotice('尚未确认原会话与 Mac；这次附件没有上传。原消息仍可编辑。'); return }
+    setChoosing(true); setNotice(null)
+    try {
+      const file = await localAttachmentFromBlob(rawFile)
+      await stageSelectedAttachment(file)
+    } catch (error) { if (mounted.current) setNotice(errorMessage(error)) }
+    finally { if (mounted.current) setChoosing(false) }
+  }
+  useImperativeHandle(controls, () => ({ choose, stageFile }))
 
   async function add(upload: MobileFileUpload): Promise<void> {
     if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(upload.identity.operationId) ?? null) || !upload.path || !fileUploadScopeMatches(upload, scope())) throw new Error('原附件属于另一 Mac、Session 或 Run；回执已保留，当前草稿未改变。')
