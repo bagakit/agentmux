@@ -263,14 +263,14 @@ export class AgentSessionRecoveryService {
   }
 
   async completePreparedReopen(
-    reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, runs: readonly CtxmuxAdapterRun[]
+    reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, run: CtxmuxAdapterRun | null
   ): Promise<AgentMuxStoredAgentSession> {
-    return this.lifecycle.completePreparedReopen(reservation, runs)
+    return this.lifecycle.completePreparedReopen(reservation, run)
   }
 
   async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>,
-    runs: readonly CtxmuxAdapterRun[]): Promise<AgentMuxStoredAgentSession | null> {
-    return this.lifecycle.completePreparedResume(reservation, runs)
+    run: CtxmuxAdapterRun | null): Promise<AgentMuxStoredAgentSession | null> {
+    return this.lifecycle.completePreparedResume(reservation, run)
   }
 
   restore(sessions: readonly AgentMuxStoredAgentSession[]): void {
