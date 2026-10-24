@@ -55,6 +55,11 @@ const message = (sequence: number, extra = {}): RuntimeEvent => ({ type: 'core',
   type: 'agent-message-changed', messageId: `original-${sequence}`, sequence, messageSequence: sequence, live: true,
   recordKind: 'message', senderSessionId: 'notification-sender', recipientSessionId: 'notification-reader', ...extra
 } })
+const inboxUnavailable = (session = sessions[0]!): RuntimeEvent => ({ type: 'core', hostId: session.hostId, event: {
+  type: 'agent-error', agentSessionId: session.id, code: 'A2A_NOTIFICATION_UNCONFIRMED',
+  message: 'This Provider has no native input adapter for idle-only Inbox notifications. The original Inbox and healthy manual input remain available.',
+  evidence: { source: 'agentmux', run: { ...session.control.run }, observedAt: 1 }
+} })
 async function transition(state: 'done' | 'waiting' | 'working') {
   await act(async () => useAppStore.setState(current => ({ sessions: current.sessions.map(session => session.id === 'notification-reader'
     ? { ...session, status: { state, source: 'native-hook', observedAt: Date.now() } } : session) })))
@@ -71,6 +76,40 @@ it('keeps same-prose unknown operations as separate received records and retains
   const state = useAppStore.getState()
   expect(notificationEventIdentity(state.error!, state.errorNoticeContext)).toBe(records()[1]!.id)
   expect(records().map(event => event.occurrences)).toEqual([1, 1])
+})
+
+it('A2A unavailable observations retain their original Run and dismissed notification identity through the real subscription', async () => {
+  const before = useAppStore.getState()
+  await act(async () => emit(inboxUnavailable()))
+  expect(records()).toHaveLength(1)
+  const first = records()[0]!
+  expect(first.context?.subject).toEqual(sessions[0]!.control)
+  expect(first.context?.event).toBeUndefined()
+  expect(first.message).toContain('Last confirmed Agent state: working; Run state: running.')
+  await act(async () => emit(inboxUnavailable()))
+  expect(records()).toHaveLength(1)
+  expect(records()[0]).toMatchObject({ id: first.id, occurrences: 2 })
+  await act(async () => useAppStore.getState().dismissError())
+  const dismissed = records()[0]
+  await act(async () => emit(inboxUnavailable()))
+  expect(records()).toEqual([dismissed])
+  expect(useAppStore.getState().errorDismissed).toBe(true)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+})
+
+it('A2A unavailable observations cannot assign an earlier Run failure to its replacement', async () => {
+  await act(async () => emit(inboxUnavailable()))
+  const original = records()[0]!
+  const successor = { ...sessions[0]!, control: { ...sessions[0]!.control, run: { runId: 'successor-run' } } }
+  await act(async () => useAppStore.setState({ sessions: [successor, sessions[1]!] }))
+  await act(async () => emit(inboxUnavailable()))
+  expect(records()).toEqual([original])
+  await act(async () => emit(inboxUnavailable(successor)))
+  expect(records()).toHaveLength(2)
+  expect(records()[0]?.context?.subject).toEqual(sessions[0]!.control)
+  expect(records()[1]?.context?.subject).toEqual(successor.control)
+  expect(records()[1]?.id).not.toBe(original.id)
 })
 
 it('updates receipt metadata for one producer occurrence without reviving unread; new objects, kinds and occurrences stay independent', async () => {

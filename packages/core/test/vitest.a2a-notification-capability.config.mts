@@ -6,16 +6,22 @@ import base from './vitest.a2a-idle-input.config.mts'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_NOTIFICATION_CAPABILITY_MUTATION
-if (mutation && mutation !== 'missing-transport-silenced') throw new Error('Unknown A2A notification capability mutation')
+const mutations = {
+  'missing-transport-silenced': { file: 'client.ts', before: 'if (!provider.prepareNativeInput) return { ...observation, unavailable:', after: 'if (false) return { ...observation, unavailable:' },
+  'diagnostic-repeat': { file: 'agent-message-notifications.ts', before: 'if (this.unavailableReads.get(agentSessionId) !== failure)', after: 'if (true)' },
+  'diagnostic-recovery-stuck': { file: 'agent-message-notifications.ts', before: '    this.unavailableReads.delete(agentSessionId)\n', after: '' },
+  'diagnostic-run-omitted': { file: 'client.ts', before: 'evidence: { source: \'agentmux\', observedAt: Date.now(), ...(run ? { run } : {}) }', after: 'evidence: { source: \'agentmux\', observedAt: Date.now() }' }
+} as const
+if (mutation && !Object.hasOwn(mutations, mutation)) throw new Error('Unknown A2A notification capability mutation')
 export default defineConfig({ ...base, plugins: [...(base.plugins ?? []), {
   name: 'a2a-notification-capability-source', enforce: 'pre', transform(source, id) {
     const file = id.split('?')[0]!
     if (!file.startsWith(root + '/') || file.includes('/node_modules/')) return
     let code = source
-    if (mutation && file === resolve(root, 'packages/core/src/client.ts')) {
-      const before = 'if (!provider.prepareNativeInput) throw new AgentMuxError('
-      if (source.split(before).length !== 2) throw new Error('Missing-transport mutation must match one actual Core guard')
-      code = source.replace(before, 'if (false) throw new AgentMuxError(')
+    const selected = mutation ? mutations[mutation as keyof typeof mutations] : undefined
+    if (selected && file === resolve(root, 'packages/core/src', selected.file)) {
+      if (source.split(selected.before).length !== 2) throw new Error('Notification mutation must match one actual Core branch')
+      code = source.replace(selected.before, selected.after)
     }
     const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
     if (process.env.AGENTMUX_NOTIFICATION_CAPABILITY_LOADED) appendFileSync(process.env.AGENTMUX_NOTIFICATION_CAPABILITY_LOADED,
