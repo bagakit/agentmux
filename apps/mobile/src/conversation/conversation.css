@@ -160,6 +160,13 @@
 .mobile-attachment-copy small { display: block; margin-top: 2px; color: var(--text-3); font-size: 10px; }
 .mobile-attachment-copy p, .mobile-attachment-notice { color: var(--text-3); font-size: 11px; line-height: 1.4; margin: 5px 0 0; overflow-wrap: anywhere; }
 .mobile-attachment-notice { display: flex; align-items: center; gap: 6px; padding: 0 4px; }
+.mobile-attachment-pending__row { display: flex; align-items: center; min-width: 0; gap: 4px; }
+.mobile-attachment-pending__status { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--text-2); text-align: left; font: inherit; font-size: 12px; }
+.mobile-attachment-pending__status > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-attachment-pending__status > small { flex: none; color: var(--text-3); font-size: 11px; }
+.mobile-attachments .mobile-attachment-pending__row > .mobile-text-button { flex: none; min-width: 44px; padding-inline: 6px; white-space: nowrap; }
+.mobile-attachment-pending__identity { margin: 0 4px 6px; color: var(--text-2); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.mobile-attachment-copy p.mobile-attachment-original { color: var(--text-2); font-size: 12px; }
 .mobile-attachment[data-phase="unknown"] { border-color: var(--amber); }
 .mobile-message-tools { display: flex; flex-direction: column; overflow: hidden; }
 .mobile-message-tools__records { flex: 1; max-height: 60dvh; }
