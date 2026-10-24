@@ -1081,10 +1081,11 @@ export function SessionPane({
   </div> : null
 
   const restoreSurface = <FullPageLoadingSurface scope="region" phase={frontendSurface ? frontendNotice.phase ?? 'parked' : restorePresentation?.phase ?? 'parked'} eyebrow="Session retained"
+                {...(frontendSurface && frontendNotice.kind === 'detached' && frontendNotice.phase === 'failed' ? { className: 'session-frontend-exit' } : {})}
                 visible={visible && !parked && !historyOpen}
                 title={frontendSurface ? frontendNotice.title : restorePresentation?.title ?? 'Session state unconfirmed'}
                 description={frontendSurface ? frontendNotice.description : undefined}
-                detail={frontendSurface ? frontendNotice.detail : restorePresentation?.detail ?? 'The saved Session is retained. Its process state is not yet confirmed.'}
+                detail={frontendSurface ? frontendNotice.surfaceDetail ?? frontendNotice.detail : restorePresentation?.detail ?? 'The saved Session is retained. Its process state is not yet confirmed.'}
                 actions={!historyOpen ? agentRecoveryAction : null}
                 supplement={<>{identityNotice}{originalReadNotice}{session.kind === 'agent' && !frontendSurface ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}</>}
                 details={{ summary: frontendSurface ? frontendNotice.kind === 'initialization' ? 'Session and startup details' : 'Session and failure details' : 'Retained session', content: <>{frontendDiagnostic}<dl>
@@ -1181,7 +1182,7 @@ export function SessionPane({
                 <span>{recoveryDetail}</span>
                 {identityNotice}{originalReadNotice}
               </div>
-              <div className="terminal-recovery__actions">
+              <div className={`terminal-recovery__actions${frontendSurface && frontendNotice.kind === 'detached' && frontendNotice.phase === 'failed' ? ' session-frontend-exit__actions' : ''}`}>
                 {!projectionPolicy.allowsRecovery ? (
                   <span className="terminal-recovery__readonly">Open this Session in its Project to recover it.</span>
                 ) : session.kind === 'terminal' ? (

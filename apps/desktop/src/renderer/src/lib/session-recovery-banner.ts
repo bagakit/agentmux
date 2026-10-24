@@ -3,7 +3,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { currentRunRecoveryOperation } from './continuity-presentation'
 
 /** A live Run and its terminal frontend have distinct, source-owned lifetimes. */
-export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'initialization' | 'unknown'; phase?: 'failed' | 'recovering' | 'parked'; fullPage?: boolean; title: string; description?: string; detail: string; actionLabel?: string; actionDetail?: string; diagnostic?: string } | null {
+export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'initialization' | 'unknown'; phase?: 'failed' | 'recovering' | 'parked'; fullPage?: boolean; title: string; description?: string; detail: string; surfaceDetail?: string; actionLabel?: string; actionDetail?: string; diagnostic?: string } | null {
   if (session?.kind !== 'agent' || session.processState !== 'running') return null
   const frontend = session.terminalFrontend
   if (!frontend || frontend.run.runId !== session.control.run.runId) return null
@@ -56,14 +56,18 @@ export function sessionFrontendPresentation(session: SessionSnapshot | undefined
       actionDetail: 'Follows the original setup. You can keep writing your draft while it completes.'
     }
   }
-  if (frontend.state === 'detached' && typeof frontend.exitCode === 'number' && frontend.exitCode !== 0) return {
-    kind: 'detached', fullPage: true, phase: 'failed', title: 'Terminal process exited',
-    detail: `The terminal process exited with code ${frontend.exitCode}. ${frontend.backendState === 'running'
+  if (frontend.state === 'detached' && typeof frontend.exitCode === 'number' && frontend.exitCode !== 0) {
+    const description = `The terminal process exited with code ${frontend.exitCode}. ${frontend.backendState === 'running'
       ? 'The backend is still running.' : frontend.backendState === 'stopping'
         ? 'The backend is finishing its shutdown.' : frontend.backendState === 'exited'
           ? 'The backend is also reported exited.' : 'The backend state is unconfirmed.'}${session.nativeHandle?.kind === 'provider'
-      ? '' : ' The native conversation identity is not yet confirmed.'} Your Session, draft and available input are kept. Check the CLI startup environment, then choose Resume or restart AgentMux.`,
-    diagnostic: frontend.message?.trim() || 'The terminal process did not report a diagnostic. The cause is unknown; read the original output for details.'
+      ? '' : ' The native conversation identity is not yet confirmed.'}`
+    const surfaceDetail = 'Your Session, draft and available input are kept. Check the CLI startup environment, then choose Resume or restart AgentMux.'
+    return {
+      kind: 'detached', fullPage: true, phase: 'failed', title: 'Terminal process exited',
+      description, surfaceDetail, detail: `${description} ${surfaceDetail}`,
+      diagnostic: frontend.message?.trim() || 'The terminal process did not report a diagnostic. The cause is unknown; read the original output for details.'
+    }
   }
   if (frontend.state === 'detached') return {
     kind: 'detached',

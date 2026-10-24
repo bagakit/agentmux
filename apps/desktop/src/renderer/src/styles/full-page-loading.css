@@ -42,6 +42,14 @@
 .full-page-loading--region .session-recap { margin-top: var(--sp-8); padding-top: var(--sp-7); }
 .full-page-loading--region .session-recap__excerpt { max-height: 6.6em; font-size: var(--fs-body); }
 .full-page-loading--region.full-page-loading--failed { --recovery-accent: var(--red); }
+/* Both original actions belong to one recovery decision, with equal geometry. */
+:is(.session-frontend-exit .surface-state__actions, .session-frontend-exit__actions) :is(.primary-button, .small-button) {
+  box-sizing: border-box; min-height: 36px; max-width: 100%; padding: 8px 12px;
+  line-height: 1.25; white-space: normal; text-align: center;
+}
+:is(.session-frontend-exit .surface-state__actions, .session-frontend-exit__actions) :is(.primary-button, .small-button):focus-visible {
+  outline: 2px solid var(--focus-line); outline-offset: 2px;
+}
 .session-frontend-diagnostic { width: 100%; min-width: 0; margin-top: var(--sp-6); font-size: var(--fs-meta); line-height: 1.5; }
 .session-frontend-diagnostic > span { color: var(--text-3); }
 .session-frontend-diagnostic pre { max-height: 12em; overflow: auto; margin: var(--sp-3) 0 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
