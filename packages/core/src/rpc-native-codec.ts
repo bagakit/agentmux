@@ -1,5 +1,6 @@
 import { parseAgentInputJournalCut } from './agent-input-conversation.js'
 import { parseGoalParticipationConfirm } from './goal-participation.js'
+import { parseTerminalRecoveryInput, parseTerminalRecoveryResult } from './terminal-recovery.js'
 import { isAgentProgressMethod, parseAgentProgressParams, parseAgentProgressResult } from './agent-progress.js'
 import { parseAgentAutomationTarget, parseAgentAutomationInspection } from './agent-automation.js'
 import { isMobileAssetsMethod, parseMobileAssetsParams, parseMobileAssetsResult, parseMobileWebReportParams, parseMobileWebReportReceipt } from './mobile-web-codec.js'
@@ -525,6 +526,10 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         const result = parseAgentContinuityControlResult(value, parseAgentContinuityControlInput(input))
         if (result.state === 'active') parseRpcAgentSession(result.session)
         return result as unknown as Record<string, unknown>
+      }
+      case 'terminal.recover': {
+        const { hostId: _host, ...request } = input
+        return parseTerminalRecoveryResult(value, parseTerminalRecoveryInput(request)) as unknown as Record<string, unknown>
       }
       case 'agent.restart': {
         record(p, ['session'])

@@ -2102,15 +2102,17 @@ export class RuntimeController {
   ): Promise<SessionRecoveryResult> {
     const client = await this.connectedClient(control.hostId, 'runtime')
     if (control.kind === 'terminal') {
+      if (control.runId !== control.run.runId) throw new AgentMuxError('Terminal recovery control refers to different original Runs.', 'TERMINAL_RECOVERY_TARGET_MISMATCH')
       const cwd = workspacePath ?? (await this.sessionByTarget(
         client,
         { kind: 'terminal-run', runId: control.runId },
         config
       )).workspacePath
-      const run = await client.createTerminal({
-        createOperationId: mintObjectId(),
-        workspacePath: cwd
-      })
+      const recovery = await client.recoverTerminal({ expectedRun: control.run, operationId, workspacePath: cwd,
+        runtimeId: (await client.terminalCreationRuntimeIdentity()).runtimeId,
+        action: request?.trigger === 'startup' || request?.trigger === 'attachment' ? 'recover' : 'continue' })
+      if (recovery.kind === 'pending') return { kind: 'terminal-pending', recovery }
+      const run = recovery.run
       this.terminalInputCursors.set(
         terminalInputKey(control.hostId, run.runId),
         run.acceptedInputBytes

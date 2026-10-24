@@ -1,5 +1,7 @@
 import { originalMessageInputKey } from './agent-message-query.js'
 import { decodePreparedTerminal, parsePreparedTerminal, parsePreparedTerminalStop, type AgentMuxPreparedTerminal, type AgentMuxPreparedTerminalStop } from './terminal-preparation.js'
+import { TerminalRecoveryOwner } from './terminal-recovery-owner.js'
+import { parseTerminalRecoveryInput, type AgentMuxTerminalRecoveryInput, type AgentMuxTerminalRecoveryResult } from './terminal-recovery.js'
 import type { AgentMuxCreationRuntime, AgentMuxTerminalCreationRetirement, AgentMuxTerminalCreationRetirementObservation } from './terminal-creation-retirement.js'
 import { AgentSessionRecoveryService } from './agent-session-recovery/service.js'
 import { retryAgentCreationResources } from './agent-creation-resource-retry.js'
@@ -3998,6 +4000,36 @@ export class AgentMuxClient {
   async createTerminal(input: AgentMuxTerminalCreateInput): Promise<AgentMuxRun> {
     this.requireConnected()
     return await this.createPreparedTerminal(await this.prepareTerminal(input))
+  }
+
+  /** One durable raw-Terminal recovery owner, shared by Desktop, SDK and public RPC. */
+  async recoverTerminal(value: AgentMuxTerminalRecoveryInput): Promise<AgentMuxTerminalRecoveryResult> {
+    this.requireConnected()
+    const input = parseTerminalRecoveryInput(value)
+    const rawOwnership = async (ref: AgentMuxRunRef) => {
+      const [sessions, retired] = await Promise.all([loadAgentSessionMetadata(this.store), this.store.loadRetiredAgentSessions()])
+      if (sessions.some(session => session.run.runId === ref.runId || session.retiredRuns.some(run => run.runId === ref.runId)) ||
+          retired.some(session => session.run.runId === ref.runId) || this.registry.findByRun(ref) || this.registry.isRetiredRun(ref))
+        throw new AgentMuxError('The original Run belongs to an Agent Session. Its identity and healthy input are retained.', 'RUN_KIND_MISMATCH')
+    }
+    const owner = new TerminalRecoveryOwner(join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'terminal-recoveries'), {
+      runtime: () => this.terminalCreationRuntimeIdentity(),
+      original: async request => {
+        await rawOwnership(request.expectedRun)
+        let run: CtxmuxAdapterRun
+        try { run = await this.kernel.status(request.expectedRun.runId) }
+        catch (error) { if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') return null; throw error }
+        if (run.runId !== request.expectedRun.runId || run.workspacePath !== request.workspacePath)
+          throw new AgentMuxError('The original Terminal Run or execution directory does not match this recovery.', 'TERMINAL_RECOVERY_TARGET_MISMATCH')
+        return this.projectRun(run)
+      },
+      prepare: async (createOperationId, workspacePath) => await this.prepareTerminal({ createOperationId, workspacePath }),
+      start: prepared => this.createPreparedTerminal(prepared),
+      inspect: async (prepared, ref) => { const run = await this.inspectPreparedTerminal(prepared, ref); if (run) await rawOwnership(run); return run },
+      retire: (prepared, runtime) => this.retirePreparedTerminalCreation(prepared, runtime),
+      observeRetirement: (prepared, runtime) => this.observePreparedTerminalCreationRetirement(prepared, runtime)
+    })
+    return await owner.recover(input)
   }
 
   async createPreparedTerminal(input: AgentMuxPreparedTerminal): Promise<AgentMuxRun> {

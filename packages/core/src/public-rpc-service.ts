@@ -18,6 +18,7 @@ import { isAgentLearningMethod, parseAgentLearningParams, parseAgentLearningResu
 import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap } from './mote-chat-contract.js'
 import { isConnectionDeletionMethod, parseConnectionDeletionParams } from './connection-deletion-codec.js'
 import { mintObjectId } from './object-id.js'
+import { parseTerminalRecoveryInput, parseTerminalRecoveryResult } from './terminal-recovery.js'
 import { isMobileAssetsMethod, parseMobileAssetsParams, parseMobileAssetsResult, parseMobileWebReportParams, parseMobileWebReportReceipt } from './mobile-web-codec.js'
 import { readConnectionDiagnosis } from './connection-diagnosis.js'
 import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
@@ -131,7 +132,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
-  'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
+  'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
@@ -313,6 +314,7 @@ const NATIVE_FIELDS = {
   'name.confirm': ['operationId'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'providerId', 'status', 'semantic', 'readiness', 'since', 'activitySince', 'cursor', 'limit'],
   'agent.inspect': ['target'],
+  'terminal.recover': ['hostId', 'expectedRun', 'runtimeId', 'workspacePath', 'operationId', 'action'],
   'skill.ls': ['hostId', 'agentSessionId'],
   'agent.continuity.control': ['agentSessionId', 'intentOperationId', 'expectedRun', 'operationId', 'action', 'additionalAttempts'],
   'agent.restart': ['agentSessionId', 'expectedRun', 'operationId'],
@@ -1997,6 +1999,19 @@ export class AgentMuxRpcService {
         if ((verified.state === 'active' ? verified.session.hostId : verified.retirement.hostId) !== 'local') throw new AgentMuxError(
           'The recovery control returned another original Host.', 'CONTROL_PROTOCOL_ERROR')
         return verified as AgentMuxRpcResult<M>
+      }
+      case 'terminal.recover': {
+        if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind))
+          throw new AgentMuxError('Raw Terminal recovery requires its transport-approved user or device owner.', 'CONTROL_PERMISSION_DENIED')
+        const hostId = rpcString(p.hostId, 'Execution Host'), { hostId: _host, ...raw } = p
+        const input = parseTerminalRecoveryInput(raw)
+        const selected = (await this.clients()).filter(scope => scope.hostId === hostId)
+        if (selected.length !== 1) throw new AgentMuxError('The exact Terminal execution Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const scope = selected[0]!
+        result = parseTerminalRecoveryResult(scope.client.forwardRpc
+          ? await scope.client.forwardRpc('terminal.recover', { ...input, hostId: 'local' }, await this.inputForwardContext(context))
+          : await scope.client.recoverTerminal(input), input)
+        break
       }
       case 'agent.refresh': {
         const agentSessionId = rpcString(p.agentSessionId, 'Complete original Session ID')

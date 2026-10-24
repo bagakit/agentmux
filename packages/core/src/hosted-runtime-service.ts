@@ -1,4 +1,5 @@
 import { mintObjectId } from './object-id.js'
+import { parseTerminalRecoveryInput } from './terminal-recovery.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { parseConversationCheckpointInput } from './conversation-changes.js'
 import { sanitizeHostedInputInvocation } from './performance-diagnostics.js'
@@ -234,6 +235,10 @@ export class AgentMuxHostedRuntimeService {
         { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
+    if (invocation.method === 'recoverTerminal') {
+      if (invocation.args.length !== 1) throw new AgentMuxError('Terminal recovery accepts one exact original intent.', 'INVALID_CONTROL_REQUEST')
+      parseTerminalRecoveryInput(invocation.args[0])
+    }
     if ((invocation.method === 'readAgentStartupDiagnostic' || invocation.method === 'findAgentStartupDiagnostics') && invocation.args.length !== 1)
       throw new AgentMuxError('Startup evidence reads accept one original scoped request.', 'INVALID_CONTROL_REQUEST')
     if (invocation.method === 'readAgentSession' && (invocation.args.length !== 1 ||
