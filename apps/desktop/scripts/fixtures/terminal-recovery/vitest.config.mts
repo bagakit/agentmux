@@ -12,8 +12,11 @@ const uiAliases = Object.entries(ui.exports).map(([key, value]) => {
   return { find: new RegExp('^' + ('@agentmux/client-ui' + (key === '.' ? '' : key.slice(1))).split('*').map(escape).join('(.*)') + '$'), replacement: resolve(root, 'packages/client-ui', target.replace('*', '$1')) }
 }).sort((a, b) => b.find.source.length - a.find.source.length)
 const changes: Record<string, [string, string, string]> = {
-  'replay-unknown': ['packages/core/src/terminal-recovery-owner.ts', "if (intent.phase !== 'not_applied' && input.action !== 'continue') return this.result(intent)", "if (intent.phase !== 'not_applied' && input.action !== 'continue') { intent = await update(current => { current.phase = 'prepared' }); }"],
-  'forget-durable-intent': ['packages/core/src/terminal-recovery-owner.ts', "current.phase = 'dispatched'; dispatch = true", "current.phase = 'prepared'; dispatch = true"],
+  'replay-unknown': ['packages/core/src/terminal-recovery-owner.ts', "if (intent.phase !== 'not_applied' && input.action !== 'continue') return this.result(intent)", "if (intent.phase !== 'not_applied' && input.action !== 'continue') { intent = (await update(attempt, current => { current.phase = 'prepared'; return true })).current; }"],
+  'forget-durable-intent': ['packages/core/src/terminal-recovery-owner.ts', "current.phase = 'dispatched'; return true", "current.phase = 'prepared'; return true"],
+  'follow-replacement-attempt': ['packages/core/src/terminal-recovery-owner.ts', 'current.prepared.createOperationId === attempt.createOperationId && change(current)', 'change(current)'],
+  'follow-retirement-successor': ['packages/core/src/terminal-recovery-owner.ts', 'if (!admitted.changed) return this.result(intent)\n        const retirement = await this.port.retire(attempt, retirementRuntime!)', 'if (!admitted.changed) { /* Mutant follows the successor after losing admission. */ }\n        const retirement = await this.port.retire(intent.prepared, runtime)'],
+  'resurrect-retired-attempt': ['packages/core/src/terminal-recovery-owner.ts', "if (!['dispatched', 'retained'].includes(current.phase)) return false", '/* Mutant accepts a pre-fence retained reply. */'],
   'ignore-original-cwd': ['packages/core/src/client.ts', 'run.workspacePath !== request.workspacePath', 'false'],
   'desktop-new-terminal': ['apps/desktop/src/main/runtime-controller.ts', 'await client.recoverTerminal({', 'await client.createTerminal({'],
   'stop-late-view': ['apps/desktop/src/renderer/src/store.ts', '// A late view result ends only observation; it never authorizes Stop.', '// A late view result ends only observation; it never authorizes Stop.\n      await api.sessions.stop(session.control)'],
