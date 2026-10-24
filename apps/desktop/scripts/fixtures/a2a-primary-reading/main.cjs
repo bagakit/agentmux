@@ -16,9 +16,12 @@ async function waitFor(expression) {
 }
 async function painted() { await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await delay(40) }
 async function click(expression) {
-  const target = await evaluate(`(()=>{const e=${expression};if(!e)throw Error('Missing original input target');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect(),point={x:r.x+r.width/2,y:r.y+r.height/2},hit=document.elementFromPoint(point.x,point.y);if(hit!==e&&!e.contains(hit))throw Error('Original input target is covered by '+(hit?.tagName??'outside viewport')+'#'+(hit?.id??''));return{point,hit:{tag:hit.tagName,id:hit.id}}})()`)
+  await evaluate(`(()=>{const e=${expression};if(!e)throw Error('Missing original input target');e.scrollIntoView({block:'center',inline:'nearest'})})()`)
+  await painted()
+  const target = await evaluate(`(()=>{const e=${expression};if(!e)throw Error('Missing original input target');const r=e.getBoundingClientRect(),point={x:r.x+r.width/2,y:r.y+r.height/2},hit=document.elementFromPoint(point.x,point.y);return{point,bounds:{left:r.left,top:r.top,right:r.right,bottom:r.bottom},unobstructed:hit===e||e.contains(hit),hit:hit?{tag:hit.tagName,id:hit.id,className:hit.className}:null}})()`)
   const point = target.point
   receipt.operations.push({ kind: 'native-pointer-click', target: expression, ...target })
+  assert.equal(target.unobstructed, true, 'Original input target is covered: ' + JSON.stringify(target))
   for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
   await painted()
 }
