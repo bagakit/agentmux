@@ -729,6 +729,18 @@ export class DurableAgentMuxMessageQueue {
     }, true)
   }
 
+  /** Exact original input membership; never a scan, notification preparation position or dispatch. */
+  async readConversationInputOrigin(keyValue: AgentPromptInputKey): Promise<import('./agent-input-conversation.js').AgentInputJournalCut | null> {
+    const key = validateAgentPromptInputKey(keyValue)
+    return this.withLock(async () => {
+      const row = this.db.prepare('SELECT i.intent_sequence AS sequence, original.json AS json FROM input_intents i JOIN records original ON original.sequence=i.intent_sequence WHERE i.input_id=? AND i.recipient_id=?').get(agentInputJournalKey(key), key.agentSessionId)
+      if (!row) return null
+      const original = JSON.parse(String(row.json)) as Extract<AgentInputWaitJournalRecord, { kind: 'input-intent' | 'input-submission' }>
+      if (!isDeepStrictEqual(original.kind === 'input-intent' ? original.intent.key : original.key, key)) throw new AgentMuxError('Another producer owns this original input membership.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      return { queueId: this.queueId, incarnation: String(this.db.prepare('SELECT incarnation FROM metadata').get()!.incarnation), sequence: Number(row.sequence) }
+    })
+  }
+
   /** Bounded recovery of original membership; never dispatches or creates an input. */
   async readConversationInputCut(agentSessionId: string): Promise<import('./agent-input-conversation.js').AgentInputJournalCut> {
     return this.withLock(async () => ({ queueId: this.queueId,

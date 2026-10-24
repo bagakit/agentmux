@@ -6460,25 +6460,26 @@ export class AgentMuxClient {
 
   /** Read only this original notification and its producer-qualified input, without preparing or dispatching. */
   async inspectMessageNotification(input: { operationId: string; caller?: { agentSessionId: string; capability: string } }): Promise<{
-    notification: AgentMuxMessageNotification | null; input: import('./types.js').AgentPromptSubmissionRecord | null
+    notification: AgentMuxMessageNotification | null; inputOrigin: import('./agent-input-conversation.js').AgentInputJournalCut | null; input: import('./types.js').AgentPromptSubmissionRecord | null
   }> {
     const notification = await this.messageQueue.readNotification(safeId(input.operationId, 'Notification operation ID'))
     await this.messageNotificationAuthority(notification ? await this.messageQueue.readNotificationMessages(notification.messageIds) : [], input.caller)
-    if (!notification) return { notification: null, input: null }
+    if (!notification) return { notification: null, inputOrigin: null, input: null }
+    const inputOrigin = await this.messageQueue.readConversationInputOrigin(notification.key)
     const record = await this.inspectAgentPromptSubmission(notification.key)
     if (record && !isMessageNotificationInput(notification, record)) throw new AgentMuxError(
       'Another original input owns this notification identity. Its outcome cannot sign the Inbox notification.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-    if (!record || notification.state === 'submitted') return { notification, input: record }
+    if (!record || notification.state === 'submitted') return { notification, inputOrigin, input: record }
     const submitted = record.admission?.acknowledged === true || record.terminalPromptSubmission?.submit.acknowledged === true
     const notApplied = agentPromptNotApplied({ run: record.run,
       ...(record.admission ? { promptCompletionAdmission: record.admission } : {}),
       ...(record.terminalPromptSubmission ? { terminalPromptSubmission: record.terminalPromptSubmission } : {}) }) !== undefined
-    if (!submitted && !notApplied) return { notification, input: record }
+    if (!submitted && !notApplied) return { notification, inputOrigin, input: record }
     const { reason: _reason, resultRecordedAt, ...original } = notification
     const state = submitted ? 'submitted' : 'not-applied'
     return { notification: { ...original, state,
       ...(notification.state === state && resultRecordedAt !== undefined ? { resultRecordedAt } : {}),
-      ...(submitted ? {} : { reason: 'The original input owner confirmed this whole notification input was not applied.' }) }, input: record }
+      ...(submitted ? {} : { reason: 'The original input owner confirmed this whole notification input was not applied.' }) }, inputOrigin, input: record }
   }
 
   private async submitMessageNotification(notice: AgentMuxMessageNotification, context?: AgentInputCallContext,
