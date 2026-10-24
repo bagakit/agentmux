@@ -261,9 +261,15 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
       if (!this.wanted() || execution.ended) return
       execution.creationPending = true
       execution.stage = 'create'
-      const run = await port.create({ createOperationId: execution.id, workspacePath: launch.cwd,
+      let run: Awaited<ReturnType<ToolkitRunPort['create']>>
+      try { run = await port.create({ createOperationId: execution.id, workspacePath: launch.cwd,
         command: launch.runner, args: [launch.script, launch.cli], env: { ...launch.env, ...execution.channel.env, AGENTMUX_PERFORMANCE_CAPTURE_FAILURE: captureFailure ? '1' : '0' }, cols: 80, rows: 24 },
-      event => this.accept(execution, event))
+      event => this.accept(execution, event)) }
+      catch (error) {
+        if (error instanceof AgentMuxError && error.creationFailure?.operationId === execution.id &&
+            error.creationFailure.disposition === 'not_applied') execution.creationPending = false
+        throw error
+      }
       execution.ref = { runId: run.runId }
       execution.creationPending = false
       this.value.run = { hostId: 'local', runId: run.runId }
