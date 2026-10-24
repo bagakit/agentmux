@@ -32,6 +32,16 @@ export type AgentConversationRecord = {
 /** Read-only content and attribution over the same accepted events, without versioned event/record DTOs. */
 export type AgentConversationSummary = Omit<AgentConversationRecord, 'event' | 'records' | 'input'>
 
+/** Original producer facts qualify a notification; its wire text never does. */
+export function conversationA2ANotificationId({ original }: Pick<AgentConversationRecord, 'original'>): string | undefined {
+  if (original.kind === 'captured') {
+    const item = original.item
+    return item.kind === 'system_message' && item.source === 'agentmux' ? item.a2aNotificationId : undefined
+  }
+  const adopted = original.item.conversation?.adoptedInput
+  return adopted?.purpose === 'a2a-notification' && adopted.key.kind === 'prompt' ? adopted.key.submissionId : undefined
+}
+
 /** One accepted input event, with its original submission/adoption records.
  * The primary source remains the exact original reading/resource target. */
 export type ConversationInputEntity = AgentSessionUserMessage & {
