@@ -348,6 +348,20 @@ export class DeviceWorkfaceStore {
   }
   private tail: Promise<unknown> = Promise.resolve()
   private pending: Array<(value: DeviceWorkface) => DeviceWorkface> = []
+  private writeRevision = 0
+  /** Wait for writes already requested; the returned check also catches later edits. */
+  async preparePageReload(): Promise<() => boolean> {
+    const recordId = this.recordIdentity()
+    const revision = this.writeRevision
+    await this.tail
+    const raw = this.lastRaw
+    return () => {
+      try {
+        return this.writeRevision === revision && this.pending.length === 0 && !this.temporary && !this.issue
+          && (this.value.recordId ?? null) === recordId && this.storage().getItem(DEVICE_WORKFACE_KEY) === raw
+      } catch { return false }
+    }
+  }
   private projectPending(latest: DeviceWorkface): DeviceWorkface {
     // A conflicting pending operation is refused when its own transaction runs;
     // its optimistic projection cannot obscure the latest canonical facts.
@@ -367,6 +381,7 @@ export class DeviceWorkfaceStore {
   }
   private update<T = void>(change: (value: DeviceWorkface) => DeviceWorkface, expectedRecordId?: string | null,
     acknowledge?: (committed: DeviceWorkface) => T): Promise<T> {
+    this.writeRevision++
     this.refresh()
     const recordId = expectedRecordId === undefined ? this.value.recordId ?? null : expectedRecordId
     if ((this.value.recordId ?? null) !== recordId) throw new DeviceWorkfaceRecordChangedError('设备工作面已被替换；原回执不能改写新的记录，请核对原操作。')
@@ -653,6 +668,7 @@ export class DeviceWorkfaceStore {
     return parseDeviceWorkface(backup.workface)
   }
   replaceBackup(next: DeviceWorkface): Promise<void> {
+    this.writeRevision++
     const parsed = parseDeviceWorkface(next)
     const work = this.tail.then(() => this.exclusive(() => {
       const adopted = { ...parsed, recordId: randomClientRequestId() }
