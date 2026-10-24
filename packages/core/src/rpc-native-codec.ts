@@ -1,3 +1,4 @@
+import { isMobileAssetsMethod, parseMobileAssetsParams, parseMobileAssetsResult, parseMobileWebReportParams, parseMobileWebReportReceipt } from './mobile-web-codec.js'
 import { parseExternalConversationReceipt } from './external-conversation.js'
 import { isAgentLearningMethod, parseAgentLearningParams, parseAgentLearningResult } from './agent-learning.js'
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
@@ -314,6 +315,8 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (isMobileAssetsMethod(method)) return parseMobileAssetsResult(method, value, parseMobileAssetsParams(method, params)) as unknown as Record<string, unknown>
+    if (method === 'app.mobile.report') return parseMobileWebReportReceipt(value, parseMobileWebReportParams(params)) as unknown as Record<string, unknown>
     if (method === 'capsule.input') return parseCapsuleInputResult(value, parseCapsuleInputRequest(params)) as unknown as Record<string, unknown>
     if (isCapsuleRuntimeMethod(method)) return parseCapsuleRuntimeResult(value) as unknown as Record<string, unknown>
     if (isCapsuleMethod(method)) return parseCapsuleRpcResult(method, value, parseCapsuleRpcParams(method, params)) as unknown as Record<string, unknown>

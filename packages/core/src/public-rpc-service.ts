@@ -13,6 +13,7 @@ import { isAgentLearningMethod, parseAgentLearningParams, parseAgentLearningResu
 import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap } from './mote-chat-contract.js'
 import { isConnectionDeletionMethod, parseConnectionDeletionParams } from './connection-deletion-codec.js'
 import { mintObjectId } from './object-id.js'
+import { isMobileAssetsMethod, parseMobileAssetsParams, parseMobileAssetsResult, parseMobileWebReportParams, parseMobileWebReportReceipt } from './mobile-web-codec.js'
 import { readConnectionDiagnosis } from './connection-diagnosis.js'
 import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
 import { runAgentMessageBroadcast, normalizeBroadcastInput } from './agent-message-broadcast.js'
@@ -155,6 +156,8 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   goalDelegations?: GoalDelegationsOwner
   moteContext?: import('./diagnostic-evidence.js').AgentMuxMoteContextEvidencePort
   clientIncidents?: import('./client-incident.js').AgentMuxClientIncidentPort
+  mobileAssets?: import('./mobile-web.js').MobileAssetsPort
+  mobileWebReports?: import('./mobile-web.js').MobileWebReportPort
   clientNotifications?: import('./client-notifications.js').AgentMuxClientNotificationsPort
   deliveryAttempts?: { hostId: string; store: DeliveryAttemptStore }
   /** Original semantic owner identity; never ctxmux identity or a route alias. */
@@ -320,6 +323,10 @@ const NATIVE_FIELDS = {
   'agent.spawn.ls': ['hostId', 'participantSessionId', 'direction', 'creatorRuntimeId', 'cursor', 'limit'],
   'agent.handoff': ['toAgentSessionId', 'taskId'], 'agent.output': ['agentSessionId', 'afterByte', 'follow'],
   'system.diagnostics.inspect': ['target', 'includeRaw', 'includeRelated', 'budget'],
+  'app.mobile.assets.inspect': ['hostId', 'operationId', 'client'],
+  'app.mobile.assets.activate': ['hostId', 'operationId', 'candidatePath', 'candidateDigest', 'expectedActiveRevision'],
+  'app.mobile.assets.loaded': ['documentId', 'buildId', 'namespaceDigest', 'occurrenceId', 'observedAt'],
+  'app.mobile.report': ['documentId', 'buildId', 'namespaceDigest', 'occurrenceId', 'observedAt', 'observation', 'reporter'],
   'message.delivery.inspect': ['logId', 'hostId'], 'message.delivery.report': ['hostId', 'record'],
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
   'message.notify': ['operationId', 'messageIds', 'hostId'],
@@ -576,6 +583,58 @@ export class AgentMuxRpcService {
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
+    if (method === 'app.mobile.report') {
+      const input = parseMobileWebReportParams(params)
+      const caller = await this.authenticated(context)
+      if (caller || context.principal?.kind !== 'device' || !context.principal.id || !context.assertCurrent) throw new AgentMuxError('Mobile reports require the original authenticated device.', 'CONTROL_PERMISSION_DENIED')
+      context.signal?.throwIfAborted(); await context.assertCurrent(); await this.assertRuntimeFence(context)
+      const result = this.ports.mobileWebReports ? this.ports.mobileWebReports.report(input, context.principal.id)
+        : this.ports.forwardControl ? await this.ports.forwardControl('app.mobile.report', input, context)
+          : undefined
+      if (!result) throw new AgentMuxError('The original Main diagnostic archive is unavailable. The phone and its business operations remain available.', 'CONTROL_UNAVAILABLE')
+      if (result.producer.devicePrincipalId !== context.principal.id) throw new AgentMuxError('The mobile report receipt has another original producer.', 'CONTROL_PROTOCOL_ERROR')
+      return parseMobileWebReportReceipt(result, input) as AgentMuxRpcResult<M>
+    }
+    if (isMobileAssetsMethod(method)) {
+      const input = parseMobileAssetsParams(method, params)
+      const caller = await this.authenticated(context)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      if (method === 'app.mobile.assets.loaded') {
+        if (caller || context.principal?.kind !== 'device' || !context.principal.id || !context.assertCurrent) throw new AgentMuxError('A loaded page report requires its original authenticated device.', 'CONTROL_PERMISSION_DENIED')
+        if (!this.ports.mobileAssets) throw new AgentMuxError('This service does not own the original mobile assets.', 'CONTROL_UNAVAILABLE')
+        const typed = input as import('./mobile-web.js').MobileAssetsLoadedParams
+        const result = this.ports.mobileAssets.loaded(typed, context.principal.id)
+        if (result.producer.devicePrincipalId !== context.principal.id) throw new AgentMuxError('Loaded observation has another device producer.', 'CONTROL_PROTOCOL_ERROR')
+        return parseMobileAssetsResult(method, result, typed) as AgentMuxRpcResult<M>
+      }
+      const target = input as import('./mobile-web.js').MobileAssetsInspectParams | import('./mobile-web.js').MobileAssetsActivateParams
+      if (caller && target.hostId !== caller.hostId) throw new AgentMuxError('Mobile asset operations stay on the authenticated Agent Host.', 'CONTROL_PERMISSION_DENIED')
+      if (method === 'app.mobile.assets.activate') {
+        const author = this.requireCaller(caller)
+        const scope = { hostId: author.hostId, agentSessionId: author.agentSessionId, runId: author.session.run.runId, workspacePath: author.session.workspacePath }
+        const current = async () => {
+          context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+          const next = this.requireCaller(await this.authenticated(context))
+          if (next.hostId !== scope.hostId || next.agentSessionId !== scope.agentSessionId || next.session.run.runId !== scope.runId || next.session.workspacePath !== scope.workspacePath) throw new AgentMuxError('The original activation author or execution Workspace changed.', 'AGENT_CAPABILITY_STALE_RUN')
+        }
+        await current()
+        const typed = input as import('./mobile-web.js').MobileAssetsActivateParams
+        if (this.ports.mobileAssets) return parseMobileAssetsResult(method, await this.ports.mobileAssets.activate(typed, { ...scope, assertCurrent: current }), typed) as AgentMuxRpcResult<M>
+        // Main borrows exactly its configured original Host. A Host without this port
+        // must never fall through forwardControl and return the request to Main.
+        if (this.ports.callOriginalCore) return parseMobileAssetsResult(method, await this.ports.callOriginalCore(target.hostId, 'app.mobile.assets.activate', typed, context), typed) as AgentMuxRpcResult<M>
+        throw new AgentMuxError('The original Host mobile asset owner is unavailable.', 'CONTROL_UNAVAILABLE')
+      }
+      if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Mobile asset observation requires an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
+      const typed = input as import('./mobile-web.js').MobileAssetsInspectParams
+      if (context.principal?.kind === 'device' && typed.client && typed.client.devicePrincipalId !== context.principal.id) throw new AgentMuxError('This device can inspect only its own page observation.', 'CONTROL_PERMISSION_DENIED')
+      let result: import('./mobile-web.js').MobileAssetsInspection
+      if (this.ports.mobileAssets) result = this.ports.mobileAssets.inspect(typed)
+      else if (this.ports.callOriginalCore) result = await this.ports.callOriginalCore(target.hostId, 'app.mobile.assets.inspect', typed, context)
+      else throw new AgentMuxError('The original Host mobile asset owner is unavailable.', 'CONTROL_UNAVAILABLE')
+      if (context.principal?.kind === 'device') result = { ...result, clients: result.clients.filter(item => item.producer.devicePrincipalId === context.principal!.id) }
+      return parseMobileAssetsResult(method, result, typed) as AgentMuxRpcResult<M>
+    }
     if (isNativeDesktopMethod(method)) {
       const caller = await this.authenticated(context)
       if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim()))

@@ -1,3 +1,4 @@
+import { parseMobileAssetsParams } from './mobile-web-codec.js'
 import { parseMoteChatParams } from './mote-chat-codec.js'
 import { parseAgentLearningParams } from './agent-learning.js'
 import { mintObjectId } from './object-id.js'
@@ -728,6 +729,8 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       ...fields(f, { '--host': 'hostId', '--participant': 'participantSessionId', '--after-source-message': 'afterSourceMessageId' }), ...numbers(f, { '--limit': 'limit' }) }),
     'Managed Agents list their own participation. Continue with the returned nextSourceMessageId at the same original Host. Unavailable is not an empty directory; no Run or input is changed.'),
   command('message.dispatch.report', '--source-message ID --reply-message ID --kind KIND', 'Record an actual reply under the original participant and thread rules.', { '--source-message': 'data', '--reply-message': 'data', '--kind': 'value' }, f => ({ sourceMessageId: id(f, '--source-message'), replyMessageId: id(f, '--reply-message'), kind: value(f, '--kind', true) })),
+  command('app.mobile.assets.inspect', '--input FILE|-', 'Read the original mobile asset owner, activation operation or exact reported page.', { '--input': 'data' }, async f => parseMobileAssetsParams('app.mobile.assets.inspect', await readControlJsonInput(value(f, '--input', true)!, 'Mobile asset target')) as unknown as Record<string, unknown>, 'Read {hostId,operationId?} or {hostId,client:{devicePrincipalId,documentId}}. No device administration, page reload or operation replay. Retention is current Host instance, active and previous namespaces; not-retained is not proof of non-application.'),
+  command('app.mobile.assets.activate', '--input FILE|-', 'Activate a complete phone Web candidate from the authenticated Agent execution Workspace.', { '--input': 'data' }, async f => parseMobileAssetsParams('app.mobile.assets.activate', await readControlJsonInput(value(f, '--input', true)!, 'Mobile candidate')) as unknown as Record<string, unknown>, 'Requires the original managed Agent on the exact hostId. Input freezes operationId,candidatePath,candidateDigest,expectedActiveRevision; candidatePath is a literal relative build directory inside its original execution Workspace. Inspect an unknown original operation before another write. Activation changes HTTP bytes only; it never reloads a page or restarts an Agent/Host, and does not certify loaded.'),
   command('app.inspect', '[--input FILE|-]', 'Inspect actual Desktop selection, or an exact mounted conversation consumer without activating it.',
     { '--input': 'data' }, async f => {
       const path = value(f, '--input')

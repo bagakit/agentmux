@@ -15,7 +15,7 @@ import { startRelayTransport, type RelayTransportController, type RelayLogger } 
 import { connectionOfferUrl, isLocalNetworkHost } from '@agentmux/relay/offer'
 import { exportPublicKey } from '@agentmux/relay/e2ee'
 import { loadOrCreateRelayKeyPair } from '@agentmux/core/relay-identity'
-import { loadMobileAssets } from './mobile-assets.js'
+import { MobileAssetsOwner } from './mobile-assets-owner.js'
 import { createDeviceAdministration } from './device-administration.js'
 import { createCapsuleDesktopAdapters } from './capsules.js'
 import { createHostConnectionOwner, type HostConnectionOptions } from './connections.js'
@@ -55,6 +55,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     if (errors.length === 1) throw errors[0]
     if (errors.length) throw new AggregateError(errors, 'Host shutdown has unconfirmed resource releases. Original Agent Runs are retained.')
   }
+  const mobileAssets = new MobileAssetsOwner('local')
   let mobileState: AgentMuxRpcMobileAccessState = { state: 'starting', message: '正在启动手机连接' }
   let offerUrl: (() => string) | undefined
   let resolveAuthority!: (value: DeviceAuthority) => void, rejectAuthority!: (error: unknown) => void
@@ -81,6 +82,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const service = {
+    mobileAssets,
     fileUploads: options.fileUploads ?? new FileUploadOwner(),
     ...(agentLearning ? { agentLearning } : {}),
     ...(connectionOwner ? { connections: connectionOwner.connections, spatialState: connectionOwner.spatial,
@@ -135,8 +137,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     if (authority && options.store instanceof AgentMuxFileAgentSessionStore) {
       try {
         const keyPair = await loadOrCreateRelayKeyPair(join(dirname(options.store.path), 'agentmux-relay-keypair.json'))
-        const assets = await loadMobileAssets(options.mobileBuildDirectory!)
-        local = await startLocalRelay({ serverId: authority.hostId, port: options.mobilePort ?? 8443, route: assets.route })
+        await mobileAssets.initialize(options.mobileBuildDirectory!)
+        local = await startLocalRelay({ serverId: authority.hostId, port: options.mobilePort ?? 8443, route: mobileAssets.route })
         const owner = authority, originalServer = runtime!.server
         offerUrl = () => {
           const addresses = Object.entries(networkInterfaces()).sort(([a], [b]) => Number(!/^(en|eth|wlan)/.test(a)) - Number(!/^(en|eth|wlan)/.test(b))).flatMap(([, list]) => list ?? []).filter(a => a.family === 'IPv4' && !a.internal && isLocalNetworkHost(a.address))

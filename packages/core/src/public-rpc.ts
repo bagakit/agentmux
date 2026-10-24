@@ -265,6 +265,10 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'agent.spawn.ls': import('./agent-spawn-query.js').AgentMuxSpawnQuery & { hostId: string }
   'agent.handoff': { toAgentSessionId: string; taskId: string }
   'agent.output': { agentSessionId: string; afterByte?: number; follow?: boolean }
+  'app.mobile.assets.inspect': import('./mobile-web.js').MobileAssetsInspectParams
+  'app.mobile.assets.activate': import('./mobile-web.js').MobileAssetsActivateParams
+  'app.mobile.assets.loaded': import('./mobile-web.js').MobileAssetsLoadedParams
+  'app.mobile.report': import('./mobile-web.js').MobileWebReportParams
   'system.diagnostics.inspect': import('./diagnostic-evidence.js').AgentMuxDiagnosticEvidenceInspectParams
   'message.delivery.inspect': { logId: string; hostId?: string }
   'message.delivery.report': { hostId: string; record: import('./delivery-attempt.js').DeliveryAttempt }
@@ -346,6 +350,10 @@ type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'agent.spawn.ls': import('./agent-spawn-query.js').AgentMuxSpawnPage & { hostId: string }
   'agent.handoff': ReturnType<AgentMuxClient['handOff']>
   'agent.output': AgentMuxRpcOutputInitial & { replay: AgentMuxRpcOutputBytes[] }
+  'app.mobile.assets.inspect': import('./mobile-web.js').MobileAssetsInspection
+  'app.mobile.assets.activate': import('./mobile-web.js').MobileAssetsActivationReceipt
+  'app.mobile.assets.loaded': import('./mobile-web.js').MobileAssetsLoadedReceipt
+  'app.mobile.report': import('./mobile-web.js').MobileWebReportReceipt
   'system.diagnostics.inspect': import('./diagnostic-evidence.js').AgentMuxDiagnosticEvidenceResult
   'message.delivery.inspect': import('./delivery-attempt.js').DeliveryAttemptLookup
   'message.delivery.report': import('./delivery-attempt.js').DeliveryAttemptLookup
@@ -414,6 +422,10 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short', 'agent.spawn.ls': 'short',
   'agent.input.ls': 'short', 'agent.input.submit': 'long', 'agent.input.inspect': 'short', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.broadcast': 'long', 'agent.broadcast.inspect': 'short', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'browser.input.inspect': 'long',
+  'app.mobile.assets.inspect': 'short',
+  'app.mobile.assets.activate': 'long',
+  'app.mobile.assets.loaded': 'short',
+  'app.mobile.report': 'short',
   'system.diagnostics.inspect': 'short',
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',

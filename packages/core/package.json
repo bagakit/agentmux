@@ -14,12 +14,18 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    "./agent-learning": { "types": "./dist/agent-learning.d.ts", "import": "./dist/agent-learning.js" },
+    "./agent-learning": {
+      "types": "./dist/agent-learning.d.ts",
+      "import": "./dist/agent-learning.js"
+    },
     "./capsule": {
       "types": "./dist/capsule.d.ts",
       "import": "./dist/capsule.js"
     },
-    "./mote-chat": { "types": "./dist/mote-chat.d.ts", "import": "./dist/mote-chat.js" },
+    "./mote-chat": {
+      "types": "./dist/mote-chat.d.ts",
+      "import": "./dist/mote-chat.js"
+    },
     "./browser-page-capability": {
       "types": "./dist/browser-page-capability.d.ts",
       "import": "./dist/browser-page-capability.js"
@@ -343,6 +349,14 @@
     "./agent-session-recovery": {
       "types": "./dist/agent-session-recovery.d.ts",
       "import": "./dist/agent-session-recovery.js"
+    },
+    "./mobile-web": {
+      "types": "./dist/mobile-web.d.ts",
+      "import": "./dist/mobile-web.js"
+    },
+    "./mobile-web-codec": {
+      "types": "./dist/mobile-web-codec.d.ts",
+      "import": "./dist/mobile-web-codec.js"
     }
   },
   "bin": {
