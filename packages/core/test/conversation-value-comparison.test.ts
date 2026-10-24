@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { jsonl, nativeHistoryFixture } from './fixtures/native-history-session.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
-import { consumeConversationWindowPage, parseConversationUnit, type ConversationWindowAssembly } from '../src/conversation-changes.js'
+import { consumeConversationWindowPage, parseConversationChangesInput, parseConversationUnit, type ConversationWindowAssembly } from '../src/conversation-changes.js'
 import * as timeline from '../src/conversation-stream.js'
 import type { AgentTimelineItem } from '../src/types.js'
 
@@ -13,13 +13,13 @@ const ref = { hostId: 'local', agentSessionId: 'private-agent' }
 const release: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of release.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 
-async function fixture(body = 'Original contribution') {
-  const f = await nativeHistoryFixture('claude', jsonl([{ uuid: 'native', type: 'assistant', sessionId: 'native-main',
+async function fixture(body: string | null = 'Original contribution') {
+  const f = await nativeHistoryFixture('claude', jsonl(body === null ? [] : [{ uuid: 'native', type: 'assistant', sessionId: 'native-main',
     timestamp: new Date(_tailFixtureEpoch(0, 0, 100)).toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: body }] } }]))
   release.push(f.close)
   const captured: AgentTimelineItem = { id: 'captured', agentSessionId: ref.agentSessionId, kind: 'assistant_message',
-    source: 'native-hook', status: 'complete', title: 'Original observation', content: body, createdAt: _tailFixtureEpoch(0, 0, 200), updatedAt: _tailFixtureEpoch(0, 0, 200) }
-  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: captured })
+    source: 'native-hook', status: 'complete', title: 'Original observation', content: body ?? '', createdAt: _tailFixtureEpoch(0, 0, 200), updatedAt: _tailFixtureEpoch(0, 0, 200) }
+  if (body !== null) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: captured })
   const server = new AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: () => [{ hostId: 'local', client: f.client }] })
   await server.start(); release.push(() => server.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); release.push(() => rpc.dispose())
@@ -36,6 +36,52 @@ it('uses the existing canonical representation while preserving content revision
   expect(timeline.conversationValuesEqual([1, 2], [2, 1])).toBe(false)
   expect(timeline.conversationValuesEqual({ body: 'first' }, { body: 'second' })).toBe(false)
   expect(timeline.conversationValuesEqual([undefined, Number.NaN], [null, null])).toBe(true)
+})
+
+it('replays an original empty window without hashing scope equality', async () => {
+  const f = await fixture(null), first = await f.rpc.call('agent.conversation.inspect', ref)
+  expect(first.window.complete).toBe(true)
+  expect(first.items).toEqual([])
+  expect(first.scope.sources.length).toBeGreaterThan(0)
+  const view = first.window.view!
+  expect(view).toBeTruthy()
+  const digest = vi.spyOn(timeline, 'conversationRevision')
+  const replay = await f.rpc.call('agent.conversation.inspect', { ...ref, view })
+  expect(replay.window.id).toBe(first.window.id)
+  expect(replay.scope).toEqual(first.scope)
+  expect(replay.window.checkpoint).toEqual(first.window.checkpoint)
+  expect(consumeConversationWindowPage(replay).kind).toBe('complete')
+  expect(digest, 'scope comparison needs no content digest; an empty window has no record/event versions to hash').not.toHaveBeenCalled()
+  const opening = vi.fn()
+  const watch = await f.rpc.subscribe('agent.conversation.watch', { ...ref, view }, { onInitial: opening, onEvent() {} })
+  try {
+    expect(opening).toHaveBeenCalledOnce()
+    expect(opening.mock.calls[0]![0].scope).toEqual(first.scope)
+    const anotherScope = structuredClone(replay.window.checkpoint), anotherCut = structuredClone(replay.window.checkpoint)
+    const scopedSource = anotherScope.frontier.scope.sources.find(source => source.kind === 'captured')!
+    const scopedCut = anotherScope.frontier.cuts.find(cut => cut.kind === 'captured')!
+    const changedCut = anotherCut.frontier.cuts.find(cut => cut.kind === 'captured')!
+    expect(scopedSource?.kind).toBe('captured'); expect(scopedCut?.kind).toBe('captured'); expect(changedCut?.kind).toBe('captured')
+    if (scopedSource.kind !== 'captured' || scopedCut.kind !== 'captured' || changedCut.kind !== 'captured') throw Error('Expected original captured cut')
+    scopedSource.epoch += '-different'; scopedCut.epoch = scopedSource.epoch
+    changedCut.sequence += 1
+    for (const checkpoint of [anotherScope, anotherCut]) {
+      const input = { ...ref, view, checkpoint }
+      expect(() => parseConversationChangesInput(input), 'a well-formed but different original scope or cut').not.toThrow()
+      await expect(f.rpc.call('agent.conversation.changes', input)).rejects.toThrow(/scope|frontier|cut/)
+    }
+    const changes = await f.rpc.call('agent.conversation.changes', { ...ref, view, checkpoint: replay.window.checkpoint })
+    expect(changes.window.id).toBe(first.window.id)
+    expect(consumeConversationWindowPage(changes).kind).toBe('complete')
+  } finally { await watch.dispose() }
+  await expect(f.rpc.call('agent.conversation.inspect', { ...ref, view: view + 'changed' })).rejects.toThrow()
+  expect((await f.rpc.call('agent.conversation.release', { ...ref, view })).released).toBe(true)
+  await expect(f.rpc.call('agent.conversation.inspect', { ...ref, view })).rejects.toThrow(/expired/)
+  expect((await f.bytes()).native).toEqual(f.before.native)
+  const saved = (await f.store.load()).find(session => session.agentSessionId === ref.agentSessionId)!
+  expect(saved.run).toEqual(f.session.run)
+  expect(saved.retiredRuns).toEqual(f.session.retiredRuns)
+  expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
 })
 
 it('keeps the record and event hash budget at both decoder and complete-window boundaries', async () => {
