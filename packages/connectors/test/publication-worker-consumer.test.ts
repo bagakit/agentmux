@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { createConnectionServices } from '../src/connection-services.js'
 import { ConnectionHost } from '../src/connection-host.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
@@ -13,6 +13,8 @@ import { connectAgentMuxRpc } from '../../core/dist/public-rpc-client.js'
 import { connectionDiagnosisRecordKey, connectionDiagnosisEventKey, connectionDiagnosisCheckpointKey, formatGroupDiagnosis } from '../../core/dist/connections.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
+let recentDeliveryFacts: unknown
+afterAll(async () => { if (process.env.AGENTMUX_TEST_DELIVERY_ORDER_FACTS) await writeFile(process.env.AGENTMUX_TEST_DELIVERY_ORDER_FACTS, JSON.stringify(recentDeliveryFacts ?? null, null, 2) + '\n') })
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 const row = (id: string, text = 'Same original reply', content?: unknown[]) => JSON.stringify({ sessionId: 'original-native', uuid: id,
   type: 'assistant', message: { role: 'assistant', content: content ?? [{ type: 'text', text }] } }) + '\n'
@@ -54,6 +56,72 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
   }
   return { ...original, services, dispatched, adapter, conversation, binding: binding.binding, cli, speech, sdk, diagnose }
 }
+
+it('recent delivery ordering follows scoped original ordinals through SDK and compiled CLI while diagnosis retains independent unknown effects', async () => {
+  const f = await fixture(async request => JSON.parse(request.request.body!).text === 'Old unknown original'
+    ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'confirmed', mapping: { messageId: 'native-' + request.requestKey } })
+  await appendFile(f.transcript, Array.from({ length: 7 }, (_, i) => row('ordered-reply-' + i, i === 0 ? 'Old unknown original' : 'Original reply ' + i)).join(''))
+  await vi.waitFor(() => expect(f.speech()).toHaveLength(7))
+  await vi.waitFor(() => expect(f.speech().slice(1).every(op => op.state === 'confirmed')).toBe(true))
+  const originalUnknown = structuredClone(f.speech()[0]!), originalEffects = f.dispatched.length
+  expect(originalUnknown.state).toBe('unknown')
+  const all = f.services.publication!.store.list(f.binding), ids = all.map(op => op.operationId), newest = [...ids].reverse()
+  expect(all).toHaveLength(8)
+  expect(f.speech().map(op => op.reference.source.kind === 'native' ? op.reference.source.recordId : null)).toEqual(Array.from({ length: 7 }, (_, i) => 'ordered-reply-' + i))
+  const input = { connectionId: config.connectionId, bindingId: f.binding.bindingId, bindingRevision: f.binding.revision, limit: 3 }
+  const first = await f.sdk.call('connection.delivery.ls', input)
+  expect(first.deliveries.map(op => op.operationId)).toEqual(ids.slice(0, 3))
+  expect(await f.sdk.call('connection.delivery.ls', { ...input, order: 'oldest' })).toEqual(first)
+  const olderNext = await f.sdk.call('connection.delivery.ls', { ...input, after: first.next! })
+  expect(olderNext.deliveries.map(op => op.operationId)).toEqual(ids.slice(3, 6))
+  const latest = await f.sdk.call('connection.delivery.ls', { ...input, order: 'newest' })
+  expect(latest.deliveries.map(op => op.operationId), 'Newest-first public delivery returns the last original operation rather than walking old history').toEqual(newest.slice(0, 3))
+  const latestNext = await f.sdk.call('connection.delivery.ls', { ...input, order: 'newest', after: latest.next! })
+  expect(latestNext.deliveries.map(op => op.operationId)).toEqual(newest.slice(3, 6))
+  expect((await f.sdk.call('connection.delivery.ls', { ...input, order: 'newest', after: latestNext.next! })).deliveries.map(op => op.operationId)).toEqual(newest.slice(6))
+  const args = ['ls', '--connection', config.connectionId, '--binding', f.binding.bindingId, '--binding-revision', String(f.binding.revision), '--limit', '3']
+  expect((await f.cli(args)).deliveries.map((op: { operationId: string }) => op.operationId)).toEqual(ids.slice(0, 3))
+  expect((await f.cli([...args, '--order', 'newest'])).deliveries.map((op: { operationId: string }) => op.operationId)).toEqual(newest.slice(0, 3))
+  expect((await f.cli([...args, '--order', 'newest', '--after', latest.next!])).deliveries.map((op: { operationId: string }) => op.operationId)).toEqual(newest.slice(3, 6))
+  for (const order of ['sideways', '', 1, null]) await expect(f.sdk.call('connection.delivery.ls', { ...input, order } as never)).rejects.toMatchObject({ code: 'INVALID_CONNECTION_DELIVERY_DATA' })
+
+  const changes = vi.spyOn(f.conversation, 'changes').mockRejectedValue(new AgentMuxError('Controlled original source gap', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'))
+  f.services.publication!.refresh()
+  await vi.waitFor(async () => expect((await f.services.publication!.list(input)).sourceObservation?.state).toBe('unavailable'))
+  const report = await f.sdk.call('connection.diagnose', { executionHostId: 'local', agentSessionId: f.session.agentSessionId })
+  const outgoing = report.groups.value!.items[0]!.outgoing.value!
+  recentDeliveryFacts = { originalIds: ids, expectedRecent: newest.slice(0, 5), observedRecent: outgoing.deliveries.map(op => op.operationId),
+    originalUnknown: { operationId: originalUnknown.operationId, state: originalUnknown.state }, effectObservation: outgoing.effectObservation, sourceObservation: outgoing.sourceObservation,
+    originalEffects, effectsAfterRead: f.dispatched.length }
+  expect(outgoing.deliveries.map(op => op.operationId), 'Diagnosis reads only the newest five original outgoing operations').toEqual(newest.slice(0, 5))
+  expect(outgoing.deliveries.every(op => op.receipt === 'confirmed')).toBe(true)
+  expect(outgoing.effectObservation).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' })
+  expect(outgoing.sourceObservation).toMatchObject({ state: 'unavailable', code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  const cliReport = await f.diagnose()
+  recentDeliveryFacts = { ...(recentDeliveryFacts as Record<string, unknown>), sdkReport: report, cliReport }
+  expect(cliReport.target).toEqual(report.target)
+  expect(cliReport.groups.value!.items[0]!.outgoing.value).toEqual(outgoing)
+  expect(f.services.publication!.store.inspect(originalUnknown.operationId)).toEqual(originalUnknown)
+  expect(f.dispatched).toHaveLength(originalEffects)
+  changes.mockRestore()
+
+  const otherSession = { ...f.session, agentSessionId: 'ordered-other-agent', run: { runId: 'ordered-other-run' } }
+  await f.store.compareAndSwap(null, otherSession)
+  await f.change(graph => { graph.regions.find(region => region.regionId === 'other-region')!.agentSessionId = otherSession.agentSessionId })
+  const other = await f.sdk.call('connection.bind', { ...f.input, operationId: 'ordered-other-binding', bindingId: 'ordered-other-binding', agentSessionId: otherSession.agentSessionId, regionAnchor: { regionId: 'other-region' }, externalConversationId: 'ordered-other-room' })
+  expect(other.state, JSON.stringify(other)).toBe('applied')
+  await expect(f.sdk.call('connection.delivery.ls', { ...input, bindingId: 'ordered-other-binding', after: latest.next!, order: 'newest' })).rejects.toMatchObject({ code: 'INVALID_PUBLICATION_REQUEST' })
+  const revised = await f.sdk.call('connection.binding.relink', { ...f.input, operationId: 'ordered-new-revision', expectedRevision: 1 })
+  expect(revised.state).toBe('applied')
+  await expect(f.sdk.call('connection.delivery.ls', { ...input, bindingRevision: 2, after: latest.next!, order: 'newest' })).rejects.toMatchObject({ code: 'INVALID_PUBLICATION_REQUEST' })
+  expect((await f.sdk.call('connection.delivery.ls', { ...input, limit: 100, order: 'newest' })).deliveries.map(op => op.operationId)).toEqual(newest)
+  await expect(f.sdk.call('connection.delivery.ls', { ...input, connectionId: 'foreign-connection' })).rejects.toMatchObject({ code: 'PUBLICATION_SOURCE_CONFLICT' })
+  const plans = f.services.database!.prepare('EXPLAIN QUERY PLAN SELECT operation_json,state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?').all(f.binding.bindingId, f.binding.revision, Number.MAX_SAFE_INTEGER, 3)
+  expect(plans.some(plan => /SEARCH.*connector_publication_audit/.test(String(plan.detail)))).toBe(true)
+  expect(plans.some(plan => /SCAN|TEMP B-TREE/.test(String(plan.detail)))).toBe(false)
+  expect(f.services.publication!.store.inspect(originalUnknown.operationId)).toEqual(originalUnknown)
+  expect(f.dispatched.filter(effect => effect.request.requestKey === originalUnknown.operationId)).toHaveLength(1)
+}, 35_000)
 
 it('publication source failures remain distinct from old unknown effects through SDK, CLI and diagnosis export', async () => {
   const f = await fixture(async () => ({ state: 'unknown', reason: 'effect-unconfirmed' }))
