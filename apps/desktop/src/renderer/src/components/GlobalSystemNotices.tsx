@@ -245,6 +245,15 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       return [first ? `First received: ${first.dateTime}` : undefined,
         last && last.dateTime !== first?.dateTime ? `Last received: ${last.dateTime}` : undefined].filter(Boolean).join('\n')
     }
+    const operationDetails = (record: NotificationEvent) => {
+      const original = record.context?.runtimeOperation
+      return original ? `Host: ${original.hostId}\nSession: ${original.agentSessionId}\nOperation: ${original.lifecycle.operationId ?? 'unconfirmed'}\nLifecycle operation: ${original.lifecycle.lifecycleOperationId}\n` +
+        `Lifecycle: ${original.lifecycle.kind}; phase: ${original.lifecycle.phase}` +
+        (original.lifecycle.expectedRun ? `\nExpected Run: ${original.lifecycle.expectedRun.runId}` : '\nRun: unconfirmed') +
+        (original.resolvedAt === undefined ? '' : `\nOriginal operation confirmed: ${new Date(original.resolvedAt).toISOString()}`) : undefined
+    }
+    const priorDetails = (record: NotificationEvent) => record.previousObservations?.map(prior =>
+      `Earlier observation (${new Date(prior.observedAt).toISOString()}):\n${prior.message}`).join('\n\n')
     const objectSubject = (object: NotificationEventObject): NotificationSubject => {
       const names: Record<NotificationEventObject['kind'], string> = {
         application: 'Application', host: 'Connection', workspace: 'Workspace', document: 'Document',
@@ -291,6 +300,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     append(navigationInbox, 'operations', system('navigation', 'Workspace navigation'))
     append(currentErrorInbox, 'operations', item => ({ key: JSON.stringify(['workflow', item.id]), label: 'Original operation', context: 'Object not recorded' }))
     for (const record of projection.current) {
+      const operation = record.context?.runtimeOperation
       const lifecycle = record.context?.lifecycle
       const notice = lifecycle ? agentLifecycleFailureNotice(lifecycle, record.message) : {
         kind: 'indeterminate' as const, notice: {
@@ -299,48 +309,59 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
         }
       }
       const subject = lifecycle?.step === 'resume' ? lifecycle.subject : record.context?.subject
-      const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId])) : undefined
+      const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId]))
+        : operation ? sessionsByIdentity.get(JSON.stringify([operation.hostId, operation.agentSessionId])) : undefined
       const launcher = lifecycle?.step === 'launch' ? launcherTabs.get(lifecycle.regionId) : undefined
       const source = lifecycle?.step === 'launch'
         ? `Region ${lifecycle.regionId} · Tab ${launcher?.id ?? lifecycle.tabId}`
-        : subject?.kind === 'agent' ? `Host ${subject.hostId} · Session ${subject.agentSessionId} · Run ${subject.run.runId}` : undefined
+        : subject?.kind === 'agent' ? `Host ${subject.hostId} · Session ${subject.agentSessionId} · Run ${subject.run.runId}` : operationDetails(record)
       const target: NotificationSubject = subject?.kind === 'agent'
         ? { key: JSON.stringify(['agent', subject.hostId, subject.agentSessionId, subject.run.runId]), label: session?.label ?? subject.agentSessionId, context: config?.hosts.find(host => host.id === subject.hostId)?.label ?? subject.hostId }
         : lifecycle?.step === 'launch'
           ? { key: JSON.stringify(['region', lifecycle.tabId, lifecycle.regionId]), label: launcher?.name ?? 'Original launch location', context: `Region ${lifecycle.regionId}` }
-          : { key: record.id, label: 'Original operation', context: 'Object not recorded' }
-      currentEntries.push({ ...eventPresentation(record), id: record.id, noticeId: record.id, category: subject?.kind === 'agent' ? 'agents' : 'operations', subject: target,
+          : operation ? { key: JSON.stringify(['agent', operation.hostId, operation.agentSessionId]), label: session?.label ?? operation.agentSessionId,
+            context: config?.hosts.find(host => host.id === operation.hostId)?.label ?? operation.hostId }
+            : { key: record.id, label: 'Original operation', context: 'Object not recorded' }
+      currentEntries.push({ ...eventPresentation(record), id: record.id, noticeId: record.id, category: subject?.kind === 'agent' || operation ? 'agents' : 'operations', subject: target,
         kind: notice.kind, title: notice.notice.step, impact: notice.notice.mode,
-        get detail() { return [source, eventTimeDetails(record), notice.notice.step, notice.notice.mode, notice.notice.restore].filter(Boolean).join('\n') },
+        get detail() { return [source, eventTimeDetails(record), priorDetails(record), notice.notice.step, notice.notice.mode, notice.notice.restore].filter(Boolean).join('\n') },
         observation: { source: 'events', get version() { return JSON.stringify(record) }, observedAt: record.lastObservedAt ?? record.firstObservedAt,
           subject: subject?.kind === 'agent' ? { kind: 'agent', hostId: subject.hostId, agentSessionId: subject.agentSessionId, runId: subject.run.runId }
-            : lifecycle?.step === 'launch' ? { kind: 'region', regionId: lifecycle.regionId, tabId: lifecycle.tabId } : { kind: 'unknown' } },
+            : operation ? { kind: 'agent', hostId: operation.hostId, agentSessionId: operation.agentSessionId,
+              ...(operation.lifecycle.operationId ? { operationId: operation.lifecycle.operationId } : {}), ...(operation.lifecycle.expectedRun ? { runId: operation.lifecycle.expectedRun.runId } : {}) }
+              : lifecycle?.step === 'launch' ? { kind: 'region', regionId: lifecycle.regionId, tabId: lifecycle.tabId } : { kind: 'unknown' } },
         unread: unreadEventIds.has(record.id), onRead: () => eventInbox.acknowledge([record.id]),
         action: session ? navigationAction({ label: 'View Session', run: () => { void selectSession(session.id) } }) : undefined
       })
     }
     for (const event of [...projection.history].reverse()) {
+      const operation = event.context?.runtimeOperation
       const subject = event.context?.subject
-      const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId])) : undefined
+      const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId]))
+        : operation ? sessionsByIdentity.get(JSON.stringify([operation.hostId, operation.agentSessionId])) : undefined
       const origin = event.context?.event, object = origin?.object
       const category: NotificationCategory = origin?.source === 'desktop-notifications' ? 'system'
         : origin?.source === 'spatial' ? 'operations' : origin?.source === 'agent-attention' ? 'agents'
         : object?.kind === 'host' ? 'connections' : object?.kind === 'application' ? 'system'
-        : !object && subject?.kind === 'agent' ? 'agents' : 'operations'
+        : !object && (subject?.kind === 'agent' || operation) ? 'agents' : 'operations'
       const provenance = [origin ? `Source: ${origin.source}\nEvent: ${origin.key}` : undefined,
         object ? `Object: ${object.kind} ${object.id}${object.hostId ? `\nHost: ${object.hostId}` : ''}${object.workspaceId ? `\nWorkspace: ${object.workspaceId}` : ''}` : undefined,
         subject?.kind === 'agent' ? `Session: ${subject.agentSessionId}\nHost: ${subject.hostId}\nRun: ${subject.run.runId}` : undefined,
-        eventTimeDetails(event)].filter(Boolean).join('\n')
+        operationDetails(event), eventTimeDetails(event), priorDetails(event)].filter(Boolean).join('\n')
       historyEntries.push({ ...eventPresentation(event), id: event.id, eventId: event.id,
         category,
         subject: object ? objectSubject(object) : subject?.kind === 'agent'
           ? { key: JSON.stringify(['agent', subject.hostId, subject.agentSessionId, subject.run.runId]), label: session?.label ?? subject.agentSessionId, context: config?.hosts.find(host => host.id === subject.hostId)?.label ?? subject.hostId }
-          : { key: event.id, label: 'Operation', context: 'Object not recorded' },
+          : operation ? { key: JSON.stringify(['agent', operation.hostId, operation.agentSessionId]), label: session?.label ?? operation.agentSessionId,
+            context: config?.hosts.find(host => host.id === operation.hostId)?.label ?? operation.hostId }
+            : { key: event.id, label: 'Operation', context: 'Object not recorded' },
         kind: event.context?.kind ?? 'indeterminate',
         title: event.context?.summary ?? (event.context?.kind === 'agent-broken' ? 'Agent stopped unexpectedly' : event.message),
         detail: event.message, summary: event.context?.summary,
         observation: { source: 'events', get version() { return JSON.stringify(event) }, observedAt: event.lastObservedAt ?? event.firstObservedAt, provenance,
           subject: subject?.kind === 'agent' ? { kind: 'agent', hostId: subject.hostId, agentSessionId: subject.agentSessionId, runId: subject.run.runId }
+            : operation ? { kind: 'agent', hostId: operation.hostId, agentSessionId: operation.agentSessionId,
+              ...(operation.lifecycle.operationId ? { operationId: operation.lifecycle.operationId } : {}), ...(operation.lifecycle.expectedRun ? { runId: operation.lifecycle.expectedRun.runId } : {}) }
             : object ? { kind: object.kind, objectKey: compactNotificationIdentity(JSON.stringify([object.kind, object.id, object.hostId, object.workspaceId])), ...(object.hostId ? { hostId: object.hostId } : {}), ...(object.workspaceId ? { workspaceId: object.workspaceId } : {}),
               ...(object.kind === 'host' ? { hostId: object.id } : object.kind === 'workspace' ? { workspaceId: object.id } : object.kind === 'tab' ? { tabId: object.id } : object.kind === 'region' ? { regionId: object.id } : {}) } : { kind: 'unknown' } },
         impact: event.context?.summary ? event.message : undefined,

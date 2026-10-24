@@ -1,4 +1,5 @@
 import { originalMessageInputKey } from './agent-message-query.js'
+import { lifecycleDiagnosticSource, lifecycleObserved } from './lifecycle-diagnostic.js'
 import { decodePreparedTerminal, parsePreparedTerminal, parsePreparedTerminalStop, type AgentMuxPreparedTerminal, type AgentMuxPreparedTerminalStop } from './terminal-preparation.js'
 import { TerminalRecoveryOwner } from './terminal-recovery-owner.js'
 import { parseTerminalRecoveryInput, type AgentMuxTerminalRecoveryInput, type AgentMuxTerminalRecoveryResult } from './terminal-recovery.js'
@@ -5213,6 +5214,7 @@ export class AgentMuxClient {
     this.runPids.set(run.runId, run.pid)
     this.publishSession(ready)
     this.publisher.publishRunState(this.projectRun(run, ready), ready.agentSessionId)
+    this.publisher.publish(lifecycleObserved(reservation, ready.run))
     return ready
   }
 
@@ -7101,6 +7103,7 @@ export class AgentMuxClient {
         try { await this.completePreparedCreate(reservation, await this.kernel.inspectCreation(reservation.operationId)) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
           code: 'AGENT_CREATION_UNCONFIRMED', message: error instanceof Error ? error.message : String(error),
+          lifecycle: lifecycleDiagnosticSource(reservation), failure: deliveryFailure(error),
           evidence: { source: 'agentmux', observedAt: Date.now() } }) }
         // A prepared fork owns an actual-or-unknown start, never an orphan authorized for killing.
         continue
@@ -7109,20 +7112,25 @@ export class AgentMuxClient {
         try { await this.recovery.completePreparedReopen(reservation, await this.kernel.inspectCreation(reservation.operationId)) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
           code: 'AGENT_REOPEN_UNCONFIRMED', message: error instanceof Error ? error.message : String(error),
+          lifecycle: lifecycleDiagnosticSource(reservation), failure: deliveryFailure(error),
           evidence: { source: 'agentmux', observedAt: Date.now() } }) }
         continue
       }
       if (reservation.kind === 'resume' && reservation.restart && !reservation.preparedSession) {
-        try { await this.store.recordRestartAdmission(reservation, 'restore') }
+        try { await this.store.recordRestartAdmission(reservation, 'restore')
+          this.publisher.publish(lifecycleObserved(reservation, reservation.expectedRun, 'restart-accounting')) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
           code: 'AGENT_RESTART_RECEIPT_UNCONFIRMED', message: `Original restart ${reservation.restart.request.operationId} could not be recovered: ${error instanceof Error ? error.message : String(error)}. The Session, Run and original requests are retained; inspect this original restart or explicitly close the exact Session to retain its history.`,
+          lifecycle: lifecycleDiagnosticSource(reservation, 'restart-accounting'), failure: deliveryFailure(error),
           evidence: { source: 'agentmux', run: reservation.expectedRun, observedAt: Date.now() } }) }
         continue
       }
       if (reservation.kind === 'resume' && reservation.preparedSession) {
         try { await this.recovery.completePreparedResume(reservation, await this.kernel.inspectCreation(reservation.operationId)) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
-          code: 'AGENT_CONTINUITY_UNCONFIRMED', message: String(error), evidence: { source: 'agentmux', observedAt: Date.now() } }) }
+          code: 'AGENT_CONTINUITY_UNCONFIRMED', message: String(error),
+          lifecycle: lifecycleDiagnosticSource(reservation), failure: deliveryFailure(error),
+          evidence: { source: 'agentmux', observedAt: Date.now() } }) }
         continue
       }
       if (reservation.kind === 'stop') {

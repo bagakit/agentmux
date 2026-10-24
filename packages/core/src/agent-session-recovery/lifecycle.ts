@@ -1,4 +1,5 @@
 import { hasSelectedNativeTarget } from '../agent-native-source.js'
+import { lifecycleObserved } from '../lifecycle-diagnostic.js'
 import type { AgentSessionRecoveryReconciler } from './reconciliation.js'
 import { assertAgentPromptSize } from '../agent-runtime-helpers.js'
 import { parseAgentRestartInput, type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './restart-contract.js'
@@ -298,6 +299,7 @@ export class AgentSessionRunLifecycle {
       await this.ports.sessions.registry.load('local')
     }
     await this.restoreReopenObservation(this.ports.sessions.registry.get(next.agentSessionId), run, reservation.operationId)
+    this.ports.events.publisher.publish(lifecycleObserved(reservation, runRef(run.runId)))
     return this.ports.sessions.registry.get(next.agentSessionId)
   }
 
@@ -884,12 +886,15 @@ export class AgentSessionRunLifecycle {
       throw error
     }
     const carried = prepared.continuity && restored.continuityOperations?.[prepared.continuity.operationId]?.launchInput
-    if (carried?.delivery === 'post-launch' && prepared.continuity) return await this.reconciler.settleContinuityPostLaunchInput(restored, prepared.continuity.operationId)
+    if (carried?.delivery === 'post-launch' && prepared.continuity) {
+      restored = await this.reconciler.settleContinuityPostLaunchInput(restored, prepared.continuity.operationId)
+    }
     if (carried?.delivery === 'launch' && carried.state === 'launch-carried') {
       // The exact original Start is now known, so its frozen history can be
       // recorded under the same input ID without dispatching any input again.
       await this.ports.input.recordPromptMessageAfterSideEffect(restored, carried.input.submissionId, 'Resume prompt', carried.message)
     }
+    this.ports.events.publisher.publish(lifecycleObserved(reservation, restored.run))
     return restored
   }
   async settle(): Promise<void> {

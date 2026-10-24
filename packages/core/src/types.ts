@@ -1778,6 +1778,16 @@ export type AgentMuxObservationOrigin =
   /** The observer's exact connection boundary, not a Run lifecycle or business receipt. */
   | { kind: 'runtime-connection'; boundary: 'core-ctxmux' | 'consumer-core' }
 
+/** Original prepared lifecycle diagnostic identity; it grants no execution or input authority. */
+export type AgentMuxLifecycleDiagnosticSource = {
+  kind: 'create' | 'resume' | 'reopen'
+  lifecycleOperationId: string
+  /** Original public business request, when the frozen reservation retained it. */
+  operationId?: string
+  phase: 'prepared-run' | 'restart-accounting'
+  expectedRun?: AgentMuxRunRef
+}
+
 export type AgentMuxClientEvent = (
   /** Original journal change; live=false is initial/recovered catch-up, never a fresh user alert. */
   | { type: 'agent-message-changed'; messageId: string; sequence: number; messageSequence: number; live: boolean;
@@ -1902,6 +1912,14 @@ export type AgentMuxClientEvent = (
       message: string
       evidence: AgentMuxEvidence
       failure?: import('./delivery-attempt.js').DeliveryFailure
+      lifecycle?: AgentMuxLifecycleDiagnosticSource
+    }
+  | {
+      /** The original owner confirmed this exact prepared operation, never a generic connection recovery. */
+      type: 'agent-lifecycle-observed'
+      agentSessionId: string
+      lifecycle: AgentMuxLifecycleDiagnosticSource
+      evidence: AgentMuxEvidence
     }
   | {
       /**
