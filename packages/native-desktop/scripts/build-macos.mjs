@@ -14,24 +14,32 @@ const option = name => {
 const scratch = resolve(option('--scratch-path') ?? join(packageDirectory, '.build'))
 const configuration = option('--configuration') ?? 'release'
 const arch = option('--arch')
+const bare = args.includes('--bare')
 const run = (command, commandArgs, capture = false) => {
-  const result = spawnSync(command, commandArgs, { stdio: capture ? 'pipe' : 'inherit', encoding: 'utf8' })
+  const result = spawnSync(command, commandArgs, { stdio: capture ? 'pipe' : ['ignore', 2, 2], encoding: 'utf8' })
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error(`${command} failed (${result.status ?? result.signal}): ${result.stderr ?? ''}`)
   return result.stdout?.trim()
 }
 if (process.platform !== 'darwin') throw new Error('AgentMux native macOS can only be built on macOS')
 if (!['debug', 'release'].includes(configuration)) throw new Error('configuration must be debug or release')
+if (bare && configuration !== 'debug') throw new Error('--bare requires configuration debug')
+if (!bare && configuration !== 'release') throw new Error('debug native builds require --bare; the application profile is release')
 if (arch && !['arm64', 'x86_64'].includes(arch)) throw new Error('arch must be arm64 or x86_64')
 const buildArgs = ['build', '--package-path', packageDirectory, '--scratch-path', scratch, '--configuration', configuration, '--jobs', '1']
 if (arch) buildArgs.push('--arch', arch)
 run('swift', buildArgs)
 const binDirectory = run('swift', [...buildArgs, '--show-bin-path'], true)
+const binaryPath = join(binDirectory, 'agentmux-native-macos')
+if (bare) {
+  process.stdout.write(`${JSON.stringify({ schema: 'agentmux.native-build.v1', executablePath: binaryPath, binaryPath,
+    profile: 'bare-debug', configuration: 'debug', arch: arch ?? process.arch, signed: false })}\n`)
+} else {
 const appPath = resolve(option('--output') ?? join(binDirectory, 'AgentMux Native.app'))
 const executablePath = join(appPath, 'Contents', 'MacOS', 'agentmux-native-macos')
 mkdirSync(dirname(executablePath), { recursive: true })
 mkdirSync(join(appPath, 'Contents', 'Resources'), { recursive: true })
-copyFileSync(join(binDirectory, 'agentmux-native-macos'), executablePath)
+copyFileSync(binaryPath, executablePath)
 copyFileSync(join(packageDirectory, 'LICENSE.orca'), join(appPath, 'Contents', 'Resources', 'LICENSE.orca'))
 chmodSync(executablePath, 0o755)
 writeFileSync(join(appPath, 'Contents', 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
@@ -52,4 +60,6 @@ writeFileSync(join(appPath, 'Contents', 'Info.plist'), `<?xml version="1.0" enco
 <key>NSScreenCaptureUsageDescription</key><string>AgentMux Native captures the window, display or selected rectangle you request.</string>
 </dict></plist>
 `)
-process.stdout.write(`${JSON.stringify({ appPath, executablePath, bundleId: 'dev.agentmux.native', signed: false })}\n`)
+process.stdout.write(`${JSON.stringify({ schema: 'agentmux.native-build.v1', appPath, executablePath, binaryPath,
+  bundleId: 'dev.agentmux.native', profile: 'application', configuration: 'release', arch: arch ?? process.arch, signed: false })}\n`)
+}
