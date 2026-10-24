@@ -50,6 +50,8 @@ export type ConversationMessageProps = {
   /** An already-open original disclosure owns the full body, including long human input. */
   expandedContent?: boolean
   /** Keep secondary identity/context facts in the existing Info disclosure. */
+  /** Compact clients keep full provenance in the existing details disclosure. Unread sources stay visible. */
+  sourceLabelsInDetails?: boolean
   detailsOnlyMetadata?: boolean
   /** A Provider-recorded public message phase; never inferred from the text. */
   messagePhase?: AgentSessionHistoryMessagePhase
@@ -177,7 +179,7 @@ function ConversationCollaborationOriginal({ parts, identity, hasResources }: {
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  active = true, compact = false, continuation = false, expandedContent = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy, copyInParent = false,
+  active = true, compact = false, continuation = false, expandedContent = false, detailsOnlyMetadata = false, sourceLabelsInDetails = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy, copyInParent = false,
   speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
@@ -328,7 +330,7 @@ export function ConversationMessage({
             </span> : null
   const metadata = hasMetadata || sources && !detailsOnlyMetadata ? <div className="log-turn__meta">
         {sources?.submissions ? <ConversationSubmissionMetadata records={sources.submissions} renderClock={renderClock} nativeReadable={hasContent} {...(renderSubmissionOriginal ? { renderOriginal: renderSubmissionOriginal } : {})} /> : null}
-        {!detailsOnlyMetadata ? <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply} /> : null}
+        {!detailsOnlyMetadata && (!sourceLabelsInDetails || sources?.main?.unread) ? <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply} /> : null}
         {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
         {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
         {showOrigin && inputOrigin ? <span className="log-turn__input-source" title={inputOrigin.title}>
@@ -361,13 +363,13 @@ export function ConversationMessage({
         <SemanticIcon name="action.copy" size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
       </button> : null}
     </span> : null,
-    details: isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata || nativeCollaboration
+    details: isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata || sourceLabelsInDetails && sources || nativeCollaboration
       ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
         declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>
-        {detailsOnlyMetadata ? senderIdentity : null}{metadataInDetails ? metadata : null}{messageDetails}{collaborationOriginal}
+        {detailsOnlyMetadata ? senderIdentity : null}{metadataInDetails ? metadata : null}{sourceLabelsInDetails && sources ? <ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /> : null}{messageDetails}{collaborationOriginal}
       </ConversationInputDetails> : null,
     metadata: <>{!metadataInDetails ? metadata : null}
-      {sources && detailsOnlyMetadata && !nativeCollaboration ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /></div> : null}
+      {sources && detailsOnlyMetadata && !nativeCollaboration && (!sourceLabelsInDetails || sources.main?.unread) ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /></div> : null}
     </>,
     renderBody
   }
