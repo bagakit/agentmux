@@ -121,9 +121,13 @@ export function deferred<T>() {
 
 /** Directory disclosure is presentation; entering a Session requires its explicit original Agent row. */
 export async function openTreeSession(element: HTMLElement): Promise<void> {
-  const branch = element.querySelector<HTMLButtonElement>('.mobile-space-row')
-  expect(branch, 'Original tree branch').not.toBeNull()
-  if (branch!.getAttribute('aria-expanded') !== 'true') await click(branch!)
+  const mote = element.querySelector<HTMLButtonElement>('.mobile-mote-choice')
+  if (mote) await click(mote)
+  else {
+    const branch = element.querySelector<HTMLButtonElement>('.mobile-space-row')
+    expect(branch, 'Original tree branch').not.toBeNull()
+    if (branch!.getAttribute('aria-expanded') !== 'true') await click(branch!)
+  }
   const target = element.querySelector<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list button, .mobile-mote-agents .mobile-agent-row__open')
   expect(target, 'Original Agent Session row').not.toBeNull()
   await click(target!)

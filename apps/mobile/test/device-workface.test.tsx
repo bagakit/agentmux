@@ -108,6 +108,8 @@ describe('one durable mobile workface owner', () => {
     expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(raw)
     expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record).toEqual(durable)
     const restored = await mount(app())
+    expect(restored.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
+    await click(button(restored.element, primary === 'space' ? '返回 Space' : '返回 Survey'))
     await vi.waitFor(async () => { await act(async () => {}); expect(restored.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确长 ID 原文件') })
     expect(getDeviceWorkface().snapshot().record.presentation![family]).toEqual(reference)
     expect(getDeviceWorkface().snapshot().record.conversation).toEqual(seeded.conversation)
@@ -252,7 +254,7 @@ describe('one durable mobile workface owner', () => {
     expect(editor(view.element).textContent).toBe('原草稿')
     expect(view.element.textContent).toContain('重启后的原输入回执未知')
     expect(button(view.element, 'Send').disabled).toBe(false); expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
-    expect(domain(JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!))).toEqual(original())
+    expect(domain(JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!))).toEqual({ ...original(), presentation: expect.objectContaining({ showSession: true, showGoalWork: false }) })
   })
   it('exports from the actual recovery action without including an authorization secret', async () => {
     await getDeviceWorkface().replaceBackup(original() as ReturnType<DeviceWorkfaceStore['snapshot']>['record'])
@@ -299,6 +301,7 @@ describe('one durable mobile workface owner', () => {
     f.client.forwardRpc = vi.fn().mockImplementation(async () => ({ catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [],
       agentPresentation: [{ agentSessionId: 'session-original', name: 'Original Agent', project: '', group: 'working', state: 'working', detail: '', providerId: 'codex' }] } }))
     const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原 Mac 已连接' }} platform={createBrowserPlatform()} />)
+    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
     await click(view.element.querySelector<HTMLButtonElement>('.mobile-session-list button')!)
     await view.render(<MobileApp client={null} connection={{ state: 'disconnected', message: '原 Mac 暂不可达' }} platform={createBrowserPlatform()} />)
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)

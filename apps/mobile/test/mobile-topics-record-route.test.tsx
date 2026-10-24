@@ -102,6 +102,7 @@ describe('actual App Topics route consumes original device fields', () => {
     await unmount(view)
     // Original stored record and draft are the only input to the new actual App.
     const restored = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
+    await click(button(restored.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Topics'))
     await vi.waitFor(() => expect(restored.element.querySelector('.mobile-topic-source-reader h1')?.textContent).toBe('second.md'))
     const reader = restored.element.querySelector<HTMLElement>('.mobile-topic-source-reader')!
     await click(button(reader, '返回上层来源')); await click(button(reader, '返回知识'))

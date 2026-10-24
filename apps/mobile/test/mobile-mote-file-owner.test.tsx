@@ -109,10 +109,11 @@ describe('actual Mote Profile editor → public Files → original native owner'
     const platform = createBrowserPlatform({ overlayContainer: () => overlay })
     const conversationBefore = getDeviceWorkface().snapshot().record.conversation
     const view = await mount(<MobileApp client={f.f.client} connection={{ state: 'connected', message: '原私有 Host' }} platform={platform} />)
+    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Mote'))
     await waitFor(() => expect(view.element.textContent).toContain('准确第二 Mote'))
     expect(f.reads).not.toHaveBeenCalled()
-    await click([...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(value => value.textContent?.includes('准确第二 Mote'))!)
-    await click(button(view.element, '查看 Mote 资料'))
+    await click(view.element.querySelector('.mobile-mote-choice[data-space-id="second-mote"]')!)
+    await click(button(view.element, '查看 Mote 资料 · 准确第二 Mote'))
     await f.enter(overlay)
     await waitFor(() => expect(getDeviceWorkface().snapshot().record.presentation?.profile?.sourcePath).toBe('SOUL.md'))
     const before = getDeviceWorkface().snapshot().record

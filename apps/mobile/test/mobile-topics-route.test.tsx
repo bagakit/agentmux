@@ -76,6 +76,7 @@ it.each(['browser', 'native'])('%s Back leaves the exact cached source child bef
     throw new Error('Unexpected public operation: ' + method)
   })
   const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原连接' }} platform={createBrowserPlatform()} native={mode === 'native'} />)
+  await click(visibleButton(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Topics'))
   await click(visibleButton(view.element, '原知识事实')); await click(visibleButton(view.element, '编辑知识'))
   const draft = view.element.querySelector<HTMLTextAreaElement>('[aria-label="知识正文"]')!
   await act(async () => {

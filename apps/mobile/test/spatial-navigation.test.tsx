@@ -13,10 +13,12 @@ const catalog = { spaces: [{ spaceId: 'space', kind: 'folder', name: 'Actual Spa
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
 describe('mobile production workspace navigation', () => {
-  it('opens the configured Space through actual bindings, keeps shared conversation mounted and removes history controls', async () => {
+  it('opens the configured Space explicitly from initial chat through actual bindings and keeps shared conversation mounted', async () => {
     localStorage.setItem('agentmux-mobile-home', 'space')
     const f = fixture(); f.client.forwardRpc = vi.fn().mockImplementation(async (method: string) => method === 'app.snapshot' ? { agents: [] } : method === 'agent.inspect' ? { session: f.client.agentSession('session-original'), displayName: { override: null, availability: 'observed' } } : { catalog })
     const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />)
+    expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
+    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
     expect(view.element.querySelector('h1')?.textContent).toBe('Space')
     expect(view.element.querySelector('.mobile-connect-page')).toBeNull()
     const space = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(item => item.textContent?.includes('Actual Space'))!
@@ -35,7 +37,7 @@ describe('mobile production workspace navigation', () => {
     expect(f.disposeHistory).toHaveBeenCalled()
     expect(f.submit).not.toHaveBeenCalled()
   })
-  it('shows authoritative project and Agent name separately from provider and opens original Mote Tabs and explicitly selects its original Session', async () => {
+  it('shows authoritative project and Agent name separately from provider and explicitly selects its original Session from the Mote rail', async () => {
     localStorage.setItem('agentmux-mobile-home', 'focus')
     const f = fixture()
     Object.assign(f.client.agentSession('session-original'), { semanticStatus: { state: 'working' } })
@@ -51,6 +53,7 @@ describe('mobile production workspace navigation', () => {
       : { catalog: originalCatalog })
     const overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
+    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
     const row = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(item => item.textContent?.includes('Original Project'))!
     expect(row.textContent).toContain('Chosen Agent')
     expect(row.textContent).toContain('执行中')
@@ -129,6 +132,7 @@ it('shows a presentation owner failure in a mounted directory without taking awa
   const failed = { ...catalog, spaces: [{ ...catalog.spaces[0], issue: '原头像读取失败：appearance owner unavailable；可刷新重试' }] }
   f.client.forwardRpc = vi.fn().mockResolvedValue({ catalog: failed })
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />)
+  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
   expect(view.element.textContent).toContain('appearance owner unavailable')
   expect(button(view.element, '刷新原目录与呈现')).toBeDefined()
   await click([...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(value => value.textContent?.includes('Actual Space'))!)
