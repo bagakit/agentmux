@@ -357,6 +357,10 @@
     "./mobile-web-codec": {
       "types": "./dist/mobile-web-codec.d.ts",
       "import": "./dist/mobile-web-codec.js"
+    },
+    "./agent-automation": {
+      "types": "./dist/agent-automation.d.ts",
+      "import": "./dist/agent-automation.js"
     }
   },
   "bin": {

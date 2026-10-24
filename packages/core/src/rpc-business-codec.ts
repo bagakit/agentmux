@@ -138,6 +138,28 @@ export function rpcControlResult(method: AgentMuxRpcMethod, result: AgentMuxCont
   return operationKeys(canonical, false)
 }
 
+/** Client adaptation for the existing Goal contract; domain writes stay in its original Host. */
+export async function callPublicGoalControl(request: AgentMuxControlRequest,
+  call: (method: AgentMuxRpcMethod, params: unknown) => Promise<unknown>): Promise<AgentMuxControlResult> {
+  if (!request.operation.startsWith('demand.')) throw new AgentMuxError('Only Goal business requests belong to this owner.', 'INVALID_CONTROL_REQUEST')
+  const entry = Object.entries(AGENTMUX_RPC_CONTROL_METHODS).find(([, operation]) => operation === request.operation)
+  if (!entry) throw new AgentMuxError('This Goal capability has no public operation.', 'CONTROL_UNAVAILABLE')
+  const method = entry[0] as AgentMuxRpcMethod
+  const { schemaVersion: _schema, operation: _operation, requestId, caller: _caller, ...body } = request as AgentMuxControlRequest & { caller?: unknown }
+  const params: Record<string, unknown> = { ...goalKeys(body, false), ...(method === 'goal.ls' ? {} : { operationId: requestId }) }
+  if ((method === 'goal.create' || method === 'goal.update') && params.decision && typeof params.decision === 'object') {
+    const { recordedAt: _at, sourceSessionId: _source, ...decision } = params.decision as Record<string, unknown>
+    params.decision = decision
+  }
+  const result = goalKeys(operationKeys(rpcRecord(await call(method, params)), true), true)
+  const receipt = parseAgentMuxControlReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true,
+    operation: request.operation, result })
+  if (!receipt.ok) throw new AgentMuxError('The original Goal result was not confirmed.', 'CONTROL_PROTOCOL_ERROR')
+  const outcome = { operation: request.operation, ...receipt.result } as AgentMuxControlResult
+  assertControlResultTarget(request, outcome)
+  return outcome
+}
+
 /** The original DTO owns identities. Validate a result against that same admitted request. */
 export function assertControlResultTarget(request: AgentMuxControlRequest, result: AgentMuxControlResult): void {
   const fail = () => { throw new AgentMuxError('Business result belongs to another target.', 'CONTROL_PROTOCOL_ERROR') }

@@ -1,3 +1,4 @@
+import { AGENT_PROGRESS_METHODS, type AgentProgressParams, type AgentProgressResults } from './agent-progress.js'
 import { MOTE_CHAT_RPC_METHODS } from './mote-chat-codec.js'
 import { AGENT_LEARNING_METHODS, type AgentLearningMethod, type AgentLearningParamsMap, type AgentLearningResultMap } from './agent-learning.js'
 import { CAPSULE_METHODS, type CapsuleParamsMap, type CapsuleResultMap } from '@agentmux/capsule'
@@ -68,7 +69,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'goal.start': 'demand.start', 'goal.continuation-action': 'demand.continuation-action', 'goal.handoff': 'demand.handoff',
   'goal.link-session': 'demand.link-session', 'goal.link-project': 'demand.link-project',
   'goal.decisions': 'demand.decision-log', 'goal.focus': 'focus',
-  'goal.activity.append': 'demand.activity.append', 'goal.activity.inspect': 'demand.activity.inspect',
+  'goal.activity.read': 'demand.activity.read', 'goal.activity.append': 'demand.activity.append', 'goal.activity.inspect': 'demand.activity.inspect',
   'app.inspect': 'inspect.client', 'app.focus': 'focus',
   'settings.inspect': 'settings.get', 'settings.set': 'settings.set',
   'settings.hosts.ls': 'settings.hosts.list', 'settings.hosts.update': 'settings.hosts.update', 'settings.hosts.test': 'settings.hosts.test',
@@ -182,7 +183,7 @@ export type AgentMuxRpcSnapshot = {
   executors: Extract<AgentMuxControlResult, { operation: 'list.agents' }>['agents'];
   agents: import('./control.js').AgentMuxControlActiveAgent[];
   sessions: AgentMuxRpcAgentObservation[]; goals: AgentMuxRpcGoal[];
-  decisions: Array<{ goalId: string; decisions: import('./control.js').AgentMuxDemandDecision[] }>;
+  decisions: Array<{ goalId: string; decisions: import('@agentmux/demand').DemandDecision[] }>;
   activity: Array<import('./control.js').AgentMuxDemandActivity & { goalId: string }>;
   unavailable: Array<AgentMuxRpcUnavailable & { source: string }>
 }
@@ -206,7 +207,9 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInputRequest } & CapsuleRuntimeParamsMap & CapsuleParamsMap & ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & ScheduleParamsMap & NativeDesktopParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInputRequest } & CapsuleRuntimeParamsMap & CapsuleParamsMap & ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & ScheduleParamsMap & AgentProgressParams & NativeDesktopParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+  'goal.participation.confirm': import('./goal-participation.js').GoalParticipationConfirm
+  'goal.watch': Record<string, never>
   'settings.appearance.watch': Record<string, never>
   'notebook.ls': Record<string, never>
   'notebook.inspect': { notebookId?: string; noteId?: string; operationId?: string; content?: boolean; maxBytes?: number }
@@ -252,6 +255,8 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'agent.role.resolve': { role: string; workspacePath?: string }
   'agent.input.ls': import('./agent-input-mailbox.js').AgentInputMailboxRead & { hostId: string }
   'agent.input.submit': import('./agent-input-submit.js').AgentInputSubmit
+  'agent.automation.pause': import('./agent-automation.js').AgentAutomationPause
+  'agent.automation.inspect': import('./agent-automation.js').AgentAutomationTarget
   'browser.input.inspect': import('./agent-input-context-capture.js').AgentInputContextCaptureReference
   'agent.input.inspect': import('./agent-input-wait.js').AgentInputSelector
   'agent.input.stop': { ref: import('./agent-input-wait.js').AgentInputWaitRef; cancelOperationId: string }
@@ -293,7 +298,9 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInputResult } & CapsuleRuntimeResultMap & CapsuleResultMap & ApplicationAccessResultMap & AgentLearningResultMap & MoteChatResultMap & MoteConnectionResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & AppWindowResultMap & ScheduleResultMap & NativeDesktopResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInputResult } & CapsuleRuntimeResultMap & CapsuleResultMap & ApplicationAccessResultMap & AgentLearningResultMap & MoteChatResultMap & MoteConnectionResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & AppWindowResultMap & ScheduleResultMap & AgentProgressResults & NativeDesktopResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+  'goal.participation.confirm': import('./goal-participation.js').GoalParticipationReceipt
+  'goal.watch': never
   'settings.appearance.watch': never
   'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
   'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null; storageOperation?: import('./notes-storage.js').NotesStorageOperation | null; resourceChanges?: import('./notes-storage.js').NotesResourceChange[]; conversionIssues?: import('./notes-storage.js').NotesConversionIssue[]; titleOperation?: import('./note-title.js').NoteTitleInspection; content?: import('./notebook-observation.js').NoteContentObservation }
@@ -340,6 +347,8 @@ type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'agent.role.resolve': { binding: AgentRoleBinding }
   'agent.input.ls': import('./agent-input-mailbox.js').AgentInputMailboxPage & { hostId: string }
   'agent.input.submit': import('./agent-input-submit.js').AgentInputSubmitResult
+  'agent.automation.pause': import('./agent-automation.js').AgentAutomationPauseInspection
+  'agent.automation.inspect': import('./agent-automation.js').AgentAutomationPauseInspection
   'browser.input.inspect': import('./agent-input-context-capture.js').AgentInputContextCaptureRead
   'agent.input.inspect': { record: Awaited<ReturnType<AgentMuxClient['inspectAgentPromptSubmission']>>; input?: import('./agent-input-wait.js').AgentInputSubmissionReceipt | null }
   'agent.input.stop': import('./agent-input-wait.js').AgentInputWaitStopReceipt
@@ -379,7 +388,7 @@ type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams
-type PublicParameterMap = ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & NativeDesktopParamsMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
+type PublicParameterMap = ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentProgressParams & NativeDesktopParamsMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
   [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | ApplicationAccessMethod | AgentLearningMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | FileMethod | GitMethod | ScheduleMethod | NativeDesktopMethod>]: NativeParams[M] & { operationId?: string }
 } & { [M in ControlMethod]: ControlParams<M> & { operationId?: string } }
 export type AgentMuxRpcParams<M extends AgentMuxRpcMethod> = PublicParameterMap[M]
@@ -410,17 +419,21 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_GIT_METHODS,
   ...AGENTMUX_RPC_WINDOW_METHODS,
   ...AGENTMUX_RPC_SCHEDULE_METHODS,
+  ...AGENT_PROGRESS_METHODS,
   ...CONNECTION_RPC_METHODS,
   ...AGENTMUX_RPC_DEVICE_METHODS,
   ...AGENTMUX_RPC_HOST_SETTINGS_METHODS,
   ...APPLICATION_ACCESS_METHODS,
   ...AGENTMUX_HOSTED_RPC_METHODS,
+  'goal.participation.confirm': 'short',
+  'goal.watch': 'long',
   'settings.appearance.watch': 'long',
   'notebook.scan': 'long', 'notebook.ls': 'short', 'notebook.inspect': 'long', 'notebook.graph': 'long', 'notebook.resolve': 'long', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   'agent.conversation.landmark.ls': 'short', 'agent.conversation.landmark.apply': 'long',
   whoami: 'short', 'skill.ls': 'long', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.record': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short', 'agent.spawn.ls': 'short',
+  'agent.automation.pause': 'short', 'agent.automation.inspect': 'short',
   'agent.input.ls': 'short', 'agent.input.submit': 'long', 'agent.input.inspect': 'short', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.broadcast': 'long', 'agent.broadcast.inspect': 'short', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'browser.input.inspect': 'long',
   'app.mobile.assets.inspect': 'short',
@@ -436,7 +449,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 
-export type AgentMuxRpcStreamMethod = 'agent.conversation.watch' | 'agent.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' | 'settings.appearance.watch' | 'connection.metadata.watch' |
+export type AgentMuxRpcStreamMethod = 'goal.watch' | 'agent.conversation.watch' | 'agent.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' | 'settings.appearance.watch' | 'connection.metadata.watch' |
   AgentMuxHostedStreamMethod
 export type AgentMuxRpcStreamParams<M extends AgentMuxRpcStreamMethod> = AgentMuxRpcParams<M> &
   (M extends 'agent.output' ? { follow?: boolean } : Record<never, never>)
@@ -446,6 +459,7 @@ type AgentMuxRpcStreamInitialMap = AgentMuxHostedStreamInitialMap & {
   'browser.follow': { runOperation: import('./control.js').AgentMuxControlBrowserOperation | null;
     gap: { droppedThrough: number } | null }
   'toolkit.watch': { toolId: string }
+  'goal.watch': import('./goal-changes.js').GoalChanges
   'connection.metadata.watch': Record<string, never>
   'settings.appearance.watch': { observation: import('./public-rpc-settings-observation.js').AgentMuxAppearanceObservation }
   'system.metrics.watch': { observation: import('./metrics.js').MetricsObservation }
@@ -456,6 +470,7 @@ export type AgentMuxRpcStreamEvent<M extends AgentMuxRpcStreamMethod> =
   | { type: 'error'; error: { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: import('./errors.js').AgentMuxControlFailure; logId?: string; creationFailure?: import('./errors.js').AgentMuxCreationFailure; storageFailure?: import('./errors.js').AgentMuxStorageFailure; evidence?: import('./types.js').AgentMuxEvidence } }
   | (M extends AgentMuxHostedStreamMethod ? Extract<AgentMuxHostedStreamEvent, { type: 'snapshot' }>
     : M extends 'agent.conversation.watch' ? { type: 'snapshot'; data: import('./conversation-changes.js').ConversationObservation }
+    : M extends 'goal.watch' ? { type: 'change'; data: import('./goal-changes.js').GoalChanges }
     : M extends 'connection.metadata.watch' ? { type: 'change'; data: import('./channel-metadata-contract.js').ChannelMetadataChange }
     : M extends 'agent.output' ? { type: 'output'; data: AgentMuxRpcOutputBytes }
     : M extends 'browser.follow' ? { type: 'progress'; data: import('./control.js').AgentMuxControlBrowserEvent }
@@ -466,7 +481,7 @@ export function isAgentMuxRpcMethod(value: unknown): value is AgentMuxRpcMethod 
     Object.hasOwn(AGENTMUX_RPC_NATIVE_METHODS, value))
 }
 export function isAgentMuxRpcStream(method: AgentMuxRpcMethod, params: Record<string, unknown>): method is AgentMuxRpcStreamMethod {
-  return method === 'connection.metadata.watch' || method === 'agent.conversation.watch' || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch' ||
+  return method === 'goal.watch' || method === 'connection.metadata.watch' || method === 'agent.conversation.watch' || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch' ||
     method === 'agent.output' || method === 'runtime.events' || method === 'runtime.conversation-watch' || method === 'runtime.history-watch' ||
     method === 'runtime.attachment-watch' || method === 'runtime.replay-watch'
 }

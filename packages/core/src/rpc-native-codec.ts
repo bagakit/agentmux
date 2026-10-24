@@ -1,3 +1,6 @@
+import { parseGoalParticipationConfirm } from './goal-participation.js'
+import { isAgentProgressMethod, parseAgentProgressParams, parseAgentProgressResult } from './agent-progress.js'
+import { parseAgentAutomationTarget, parseAgentAutomationInspection } from './agent-automation.js'
 import { isMobileAssetsMethod, parseMobileAssetsParams, parseMobileAssetsResult, parseMobileWebReportParams, parseMobileWebReportReceipt } from './mobile-web-codec.js'
 import { parseExternalConversationReceipt } from './external-conversation.js'
 import { isAgentLearningMethod, parseAgentLearningParams, parseAgentLearningResult } from './agent-learning.js'
@@ -348,6 +351,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isConnectionMethod(method)) return parseConnectionResult(method, value, parseConnectionParams(method, params)) as unknown as Record<string, unknown>
     if (isApplicationAccessMethod(method)) return parseApplicationAccessResult(method,value,parseApplicationAccessParams(method,params)) as unknown as Record<string,unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
+    if (isAgentProgressMethod(method)) return parseAgentProgressResult(method, value, parseAgentProgressParams(method, params)) as unknown as Record<string, unknown>
     if (isScheduleMethod(method)) return validateScheduleRpcResult(method, value, parseScheduleRpcParams(method, params)) as unknown as Record<string, unknown>
     if (isNativeDesktopMethod(method)) return parseNativeDesktopResult(method, value, parseNativeDesktopParams(method, params)) as unknown as Record<string, unknown>
     if (isTopicMethod(method)) return parseTopicResult(method, value, parseTopicParams(method, params)) as unknown as Record<string, unknown>
@@ -635,6 +639,14 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.role.register': case 'agent.role.resolve': { record(p, ['binding']); const binding = role(p.binding)
         if (binding.role !== input.role || input.workspacePath !== undefined && binding.workspacePath !== input.workspacePath ||
           method === 'agent.role.register' && credentials && binding.agentSessionId !== credentials.agentSessionId) fail(); break }
+      case 'goal.participation.confirm': {
+        const original = parseGoalParticipationConfirm(input)
+        record(p, ['goal','operationId','diskDurability'])
+        parseRpcControlResult('goal.inspect', { goal: p.goal, goalContinuations: [] })
+        if ((p.goal as Record<string, unknown>).id !== original.goalId || p.operationId !== original.operationId || p.diskDurability !== 'confirmed') fail()
+        break
+      }
+      case 'agent.automation.pause': case 'agent.automation.inspect': { parseAgentAutomationInspection(p, parseAgentAutomationTarget(input)); break }
       case 'agent.input.submit': {
         record(p, ['key', 'record', 'input'])
         const key = validateAgentPromptInputKey(p.key)

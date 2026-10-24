@@ -542,6 +542,11 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       ...(source.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: arrayOfIds(source.assigneeSessionIds, 'Goal assignee Sessions') }),
       ...(source.supervisorSessionId === undefined ? {} : { supervisorSessionId: source.supervisorSessionId === null ? null : id(source.supervisorSessionId, 'Goal Supervisor is invalid.', 'INVALID_CONTROL_REQUEST') }),
       ...(source.contentRefs === undefined ? {} : { contentRefs: contentReferences(source.contentRefs) }),
+      ...(source.tags === undefined ? {} : { tags: arrayOfIds(source.tags, 'Goal tags') }),
+      ...(source.plannedStartAt === undefined ? {} : { plannedStartAt: source.plannedStartAt === null ? null : finiteNumber(source.plannedStartAt, 'Goal planned start is invalid.') }),
+      ...(source.targetAt === undefined ? {} : { targetAt: source.targetAt === null ? null : finiteNumber(source.targetAt, 'Goal target is invalid.') }),
+      ...(source.parentDemandId === undefined ? {} : { parentDemandId: source.parentDemandId === null ? null : id(source.parentDemandId, 'Parent Goal is invalid.', 'INVALID_CONTROL_REQUEST') }),
+      ...(source.phaseIndex === undefined ? {} : { phaseIndex: source.phaseIndex === null ? null : finiteNumber(source.phaseIndex, 'Goal phase is invalid.') }),
       ...(source.decision === undefined ? {} : { decision: demandDecision(source.decision) })
     }
   }
@@ -580,18 +585,18 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: source.expectedUpdatedAt as number }), ...(source.decision === undefined ? {} : { decision: demandDecision(source.decision) }) }
   }
   if (source.operation === 'demand.patrol-all') {
-    if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation', 'caller'].includes(key))) {
+    if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation', 'caller', 'executorId'].includes(key))) {
       throw new AgentMuxError('Global inspection accepts only its original operation identity and caller.', 'INVALID_CONTROL_REQUEST')
     }
     const owner = optionalCaller(source.caller)
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
-      ...(owner ? { caller: owner } : {}) }
+      ...(owner ? { caller: owner } : {}), ...(source.executorId === undefined ? {} : { executorId: id(source.executorId, 'The explicit Agent choice is invalid.', 'INVALID_CONTROL_REQUEST') }) }
   }
   if (source.operation === 'demand.discuss' || source.operation === 'demand.confirm' || source.operation === 'demand.accept') {
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, demandId: id(source.demandId, 'Goal id is invalid.', 'INVALID_CONTROL_REQUEST') }
     if (source.operation === 'demand.discuss') {
       if (!['open', 'grill', 'grounding'].includes(source.mode as string)) throw new AgentMuxError('Goal discussion mode is invalid.', 'INVALID_CONTROL_REQUEST')
-      return { ...base, operation: source.operation, mode: source.mode as 'open' | 'grill' | 'grounding' }
+      return { ...base, operation: source.operation, mode: source.mode as 'open' | 'grill' | 'grounding', ...(source.executorId === undefined ? {} : { executorId: id(source.executorId, 'The explicit Agent choice is invalid.', 'INVALID_CONTROL_REQUEST') }) }
     }
     const revision = source.operation === 'demand.confirm' ? source.expectedRevision : source.expectedAlignmentRevision
     if (!Number.isSafeInteger(revision) || (revision as number) < 1) throw new AgentMuxError('The exact positive Goal alignment revision is required.', 'INVALID_CONTROL_REQUEST')
@@ -952,12 +957,15 @@ function parseDemand(value: unknown): AgentMuxDemand {
     priority: demandPriority(source.priority) as AgentMuxDemand['priority'],
     projectId: source.projectId === null ? null : spaceControlId(source.projectId, 'Control demand project is invalid.', 'CONTROL_PROTOCOL_ERROR', true),
     projectName: source.projectName === null ? null : text(source.projectName, 'Control demand project name', 'CONTROL_PROTOCOL_ERROR'),
+    ...(source.executorId === undefined ? {} : { executorId: source.executorId === null ? null : id(source.executorId, 'Original executor is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
     assigneeSessionIds, supervisorSessionId, participations,
     ...(creationOrigin === undefined ? {} : { creationOrigin }),
+    ...(source.discussionOperationId === undefined ? {} : { discussionOperationId: id(source.discussionOperationId, 'Original discussion operation is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
     ...(source.tags === undefined ? {} : { tags: Array.isArray(source.tags) ? source.tags.map((tag) => text(tag, 'Control demand tag', 'CONTROL_PROTOCOL_ERROR')) : (() => { throw new AgentMuxError('Control demand tags are invalid.', 'CONTROL_PROTOCOL_ERROR') })() }),
     ...(source.activityLog === undefined ? {} : { activityLog: Array.isArray(source.activityLog)
       ? source.activityLog.map(item => text(item, 'Control Goal activity', 'CONTROL_PROTOCOL_ERROR'))
       : (() => { throw new AgentMuxError('Control Goal activity is invalid.', 'CONTROL_PROTOCOL_ERROR') })() }),
+    ...(source.decisions === undefined ? {} : { decisions: parseDemandDecisions(source.decisions) }),
     ...(source.activities === undefined ? {} : { activities: Array.isArray(source.activities) ? source.activities.map(parseControlDemandActivity)
       : (() => { throw new AgentMuxError('Control Goal activities are invalid.', 'CONTROL_PROTOCOL_ERROR') })() }),
     ...(source.plannedStartAt === undefined ? {} : { plannedStartAt: source.plannedStartAt === null ? null : finiteNumber(source.plannedStartAt, 'Control demand planned start timestamp is invalid.') }),
@@ -982,9 +990,17 @@ export function parseControlDemandActivity(value: unknown): import('./control.js
     ...(source.operationId === undefined ? {} : { operationId: id(source.operationId, 'Activity operation is invalid.', 'CONTROL_PROTOCOL_ERROR') }),
     ...(source.nameChangeId === undefined ? {} : { nameChangeId: id(source.nameChangeId, 'Activity name change is invalid.', 'CONTROL_PROTOCOL_ERROR') }) }
 }
-function parseDemandDecisions(value: unknown): AgentMuxDemandDecision[] {
-  if (!Array.isArray(value)) throw new AgentMuxError('Control demand decisions are invalid.', 'CONTROL_PROTOCOL_ERROR')
-  return value.map((item) => demandDecision(item))
+function parseDemandDecisions(value: unknown): import('@agentmux/demand').DemandDecision[] {
+  if (!Array.isArray(value)) throw new AgentMuxError('Original Goal decisions are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return value.map(value => {
+    const source = object(value, 'Original Goal decision is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { id: id(source.id, 'Decision identity is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      question: text(source.question, 'Decision question', 'CONTROL_PROTOCOL_ERROR'),
+      decision: text(source.decision, 'Original decision', 'CONTROL_PROTOCOL_ERROR'),
+      rationale: text(source.rationale, 'Decision rationale', 'CONTROL_PROTOCOL_ERROR'),
+      actorId: source.actorId === null ? null : id(source.actorId, 'Decision actor is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      createdAt: finiteNumber(source.createdAt, 'Decision creation fact is invalid.') }
+  })
 }
 
 function successReceipt(request: AgentMuxControlRequest, result: AgentMuxControlResult): AgentMuxControlSuccessReceipt {

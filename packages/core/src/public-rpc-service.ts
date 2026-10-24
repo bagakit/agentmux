@@ -1,4 +1,8 @@
 import { isBackgroundLocalAgentOpen } from './spatial-agent-open-contract.js'
+import { parseGoalParticipationConfirm } from './goal-participation.js'
+import { parseGoalChanges, type GoalChangePort } from './goal-changes.js'
+import { isAgentProgressMethod, parseAgentProgressParams, parseAgentProgressResult, type AgentProgressOwner, type AgentProgressMethod } from './agent-progress.js'
+import { parseAgentAutomationTarget, parseAgentAutomationInspection } from './agent-automation.js'
 import { isConnectionApplicationAccessMethod, parseConnectionApplicationAccessParams } from './connection-application-access-codec.js'
 import { isConnectionCredentialMethod } from './connection-credential-codec.js'
 import { homedir } from 'node:os'
@@ -140,7 +144,9 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 type BorrowedHostedRuntime = Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> & Partial<Pick<AgentMuxHostedRuntimeService, 'client' | 'externalAuthor'>>
-export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'execute'> & {
+  execute?(request: AgentMuxControlRequest, nameContext?: AgentMuxNameContext,
+    originalContext?: AgentMuxRpcCallContext): Promise<AgentMuxControlResult>
   /** Borrow the original UI-free Capsule owner; no content or configuration is stored here. */
   capsules?: { call<M extends CapsuleMethod>(method: M, params: CapsuleParamsMap[M], context?: CapsuleCallContext,
     originalContext?: AgentMuxRpcCallContext): Promise<CapsuleResultMap[M]> }
@@ -177,7 +183,14 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   /** Original Host resource reads; editable application settings keep their existing owner. */
   settingsResources?(request: Extract<import('./control.js').AgentMuxControlSettingsResourceRequest,
     { operation: 'settings.resource.list' | 'settings.resource.get' }>): Promise<import('./control.js').AgentMuxControlSettingsResourceResult>
+  goalParticipation?: import('./goal-participation.js').GoalParticipationOwner
+  goalChanges?: GoalChangePort
+  progress?: AgentProgressOwner
   schedules?: AgentMuxRpcSchedulesOwner
+  automaticInput?: import('./agent-automation.js').AgentAutomationOwner
+  /** Original portable Goal business owner; screen focus remains a client capability. */
+  goalControl?(request: AgentMuxControlRequest, context?: AgentMuxNameContext,
+    originalContext?: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined>
   nativeDesktop?: AgentMuxRpcNativeDesktopOwner
   spatialState?: AgentMuxSpatialStateStore
   /** Original Host policy over Core-owned spatial creation associations, without a screen. */
@@ -289,6 +302,8 @@ const NATIVE_FIELDS = {
   'goal.patrol': ['goalId', 'operationId'],
   'goal.patrol.continue': ['goalId', 'patrolOperationId', 'operationId', 'expectedRunId'],
   'goal.patrol.report': ['goalId', 'patrolOperationId', 'report'],
+  'goal.participation.confirm': ['goalId','creationOperationId','hostId','agentSessionId','expectedRun','evidence','operationId'],
+  'goal.watch': [],
   'settings.appearance.watch': [],
   'notebook.scan': ['workspaceId','path','maxFiles','maxDirectories','maxBytes','query','limit'],
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.resolve': ['mode','query','limit','text','select','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
@@ -325,6 +340,11 @@ const NATIVE_FIELDS = {
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
   'agent.input.ls': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes'],
   'agent.input.submit': AGENT_INPUT_SUBMIT_FIELDS,
+  'agent.progress.list': ['target'],
+  'agent.progress.create': ['target','intervalMs','prompt','taskSource','operationId'],
+  'agent.progress.action': ['target','loopId','action','expectedLoop','operationId'],
+  'agent.automation.pause': ['agentSessionId', 'expectedRun', 'ownerInstanceId', 'operationId'],
+  'agent.automation.inspect': ['agentSessionId', 'expectedRun', 'ownerInstanceId', 'operationId'],
   'browser.input.inspect': ['hostId', 'operationId'],
   'agent.input.inspect': ['key', 'kind', 'originalControlOperationId'],
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
@@ -582,9 +602,10 @@ export class AgentMuxRpcService {
     let result: AgentMuxControlResult | undefined = request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get'
       ? await this.ports.settingsResources?.(request) : undefined
     if (!result && executionContext && (request.operation === 'agent.open' || request.operation === 'space.inspect')) result = await this.ports.spatialAgentControl?.(request, executionContext)
+    if (!result && request.operation.startsWith('demand.')) result = await this.ports.goalControl?.(request, context, executionContext)
     if (!result) {
       if (!this.ports.execute) throw new AgentMuxError('The original business owner is unavailable. Original objects, input and healthy Agents remain available.', 'CONTROL_UNAVAILABLE')
-      result = await this.ports.execute(request, context)
+      result = await this.ports.execute(request, context, executionContext)
     }
     if (result.operation !== request.operation) throw new AgentMuxError('Business owner returned another operation.', 'CONTROL_PROTOCOL_ERROR')
     const { operation, ...body } = result
@@ -1124,6 +1145,7 @@ export class AgentMuxRpcService {
     if (isGoalDelegationMethod(method)) {
       const input = parseGoalDelegationParams(method, params)
       if (!this.ports.goalDelegations) {
+        if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', method, input as AgentMuxRpcParams<M>, context)
         if (this.ports.forwardControl) return await this.ports.forwardControl(method, input as AgentMuxRpcParams<M>, context) as AgentMuxRpcResult<M>
         throw new AgentMuxError('The original Goal delegation owner is unavailable. Original work and message identities remain available.', 'CONTROL_UNAVAILABLE')
       }
@@ -1279,10 +1301,22 @@ export class AgentMuxRpcService {
       const result = this.ports.files ? await this.ports.files.read(input) : await this.ports.forwardControl!('file.read', input, context)
       return parseFileReadResult(result, input) as AgentMuxRpcResult<M>
     }
+    if (isAgentProgressMethod(method)) {
+      const progressMethod: AgentProgressMethod = method
+      const input = parseAgentProgressParams(progressMethod, params)
+      if (!caller && (!context.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('Continuous progress requires its original authenticated actor.', 'CONTROL_PERMISSION_DENIED')
+      if (!this.ports.progress) {
+        if (this.ports.callOriginalCore) return await this.ports.callOriginalCore<AgentProgressMethod>('local', progressMethod, input, context) as AgentMuxRpcResult<M>
+        if (this.ports.forwardControl) return await this.ports.forwardControl<AgentProgressMethod>(progressMethod, input, context) as AgentMuxRpcResult<M>
+        throw new AgentMuxError('The original continuous progress owner is unavailable. Original arrangements and Agents remain available.', 'CONTROL_UNAVAILABLE')
+      }
+      return parseAgentProgressResult<AgentProgressMethod>(progressMethod, await this.ports.progress.call<AgentProgressMethod>(progressMethod, input, context), input) as AgentMuxRpcResult<M>
+    }
     if (isScheduleMethod(method)) {
       const scheduleMethod: ScheduleMethod = method
       const input = parseScheduleRpcParams(scheduleMethod, params)
       context.signal?.throwIfAborted()
+      if (!this.ports.schedules && this.ports.callOriginalCore) return await this.ports.callOriginalCore<ScheduleMethod>('local', scheduleMethod, input, context) as AgentMuxRpcResult<M>
       if (!this.ports.schedules && !this.ports.forwardControl) throw new AgentMuxError('The original Host arrangement owner is unavailable. Saved arrangements and Agents are retained.', 'CONTROL_UNAVAILABLE')
       const result = this.ports.schedules ? await this.ports.schedules.call<ScheduleMethod>(scheduleMethod, input, context) : await this.ports.forwardControl!<ScheduleMethod>(scheduleMethod, input, context)
       return validateScheduleRpcResult<ScheduleMethod>(scheduleMethod, result, input) as AgentMuxRpcResult<M>
@@ -1497,7 +1531,7 @@ export class AgentMuxRpcService {
           return rpcControlResult(method, { operation: method, catalog }) as AgentMuxRpcResult<M>
         }
       }
-      if (this.ports.forwardControl && !(this.ports.spatialAgentControl && independentSpatial)) return await this.ports.forwardControl(method, params, context)
+      if (this.ports.forwardControl && !(this.ports.spatialAgentControl && independentSpatial) && !(this.ports.goalControl && method.startsWith('goal.') && method !== 'goal.focus')) return await this.ports.forwardControl(method, params, context)
       let body = p
       if (method === 'space.inspect') {
         const target = rpcRecord(p.target)
@@ -2201,6 +2235,25 @@ export class AgentMuxRpcService {
               kind: p.kind as Parameters<AgentMuxClient['recordDispatchEvent']>[0]['kind'] })
         } break
       }
+      case 'goal.participation.confirm': {
+        const input = parseGoalParticipationConfirm(p)
+        if (this.ports.goalParticipation) { result = await this.ports.goalParticipation.confirm(input, context); break }
+        if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', 'goal.participation.confirm', input, context) as AgentMuxRpcResult<M>
+        throw new AgentMuxError('The original Goal participation owner is unavailable. Retain its Goal and input operation; no input was repeated.', 'CONTROL_UNAVAILABLE')
+      }
+      case 'agent.automation.pause': case 'agent.automation.inspect': {
+        if (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Only the original person or device may pause automatic input. This action stops no Agent and grants no input permission.', 'CONTROL_PERMISSION_DENIED')
+        const input = parseAgentAutomationTarget(p), scope = await this.owner(input.agentSessionId)
+        if (scope.client.forwardRpc) return (method === 'agent.automation.pause'
+          ? await scope.client.forwardRpc('agent.automation.pause', input, await this.inputForwardContext(context))
+          : await scope.client.forwardRpc('agent.automation.inspect', input, await this.inputForwardContext(context))) as AgentMuxRpcResult<M>
+        if (scope.hostId === 'local' && this.ports.callOriginalCore) return (method === 'agent.automation.pause'
+          ? await this.ports.callOriginalCore(scope.hostId, 'agent.automation.pause', input, await this.inputForwardContext(context))
+          : await this.ports.callOriginalCore(scope.hostId, 'agent.automation.inspect', input, await this.inputForwardContext(context))) as AgentMuxRpcResult<M>
+        if (!this.ports.automaticInput) throw new AgentMuxError('The original automatic input owner is unavailable. Keep this pause operation and inspect it after reconnecting; manual Agent input remains available.', 'CONTROL_UNAVAILABLE')
+        const value = method === 'agent.automation.pause' ? await this.ports.automaticInput.pause(input, context) : await this.ports.automaticInput.inspect(input, context)
+        result = parseAgentAutomationInspection(value, input); break
+      }
       case 'agent.input.submit': {
         if (context.caller !== undefined) throw new AgentMuxError('Managed Agents must use agent.send for cross-Session input; agent.input.submit cannot impersonate a local prompt author.', 'MANAGED_AGENT_PROMPT_FORBIDDEN')
         if (!context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Prompt intake requires its transport-approved local user or device. No input was submitted.', 'CONTROL_PERMISSION_DENIED')
@@ -2765,7 +2818,7 @@ export class AgentMuxRpcService {
         forwardOutput = true
       }
     }
-    if (this.ports.forwardSubscription && (forwardOutput || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch' && !this.ports.appearance)) {
+    if (this.ports.forwardSubscription && (forwardOutput || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch' && !this.ports.appearance || method === 'goal.watch' && !this.ports.goalChanges)) {
       let initial: AgentMuxRpcStreamInitial<M> | undefined
       const subscription = await this.ports.forwardSubscription(method, params as import('./public-rpc.js').AgentMuxRpcStreamParams<M>, {
         onInitial: value => { initial = value }, onEvent: event => { void onEvent(event) },
@@ -2843,6 +2896,11 @@ export class AgentMuxRpcService {
         if (request.operation !== 'browser.subscribe' || !this.ports.subscribeBrowserOperation) throw new AgentMuxError('Browser subscriptions are unavailable.', 'BROWSER_SUBSCRIBE_UNSUPPORTED')
         const sub = await this.ports.subscribeBrowserOperation(request, event => emit({ type: 'progress', data: event }))
         initial = { runOperation: sub.runOperation, gap: sub.gap }; cleanup = () => sub.dispose()
+      } else if (method === 'goal.watch') {
+        rpcRecord(params, [])
+        if (!this.ports.goalChanges) throw new AgentMuxError('The original Goal change owner is unavailable. Keep the last confirmed Goal and reconnect this reader.', 'CONTROL_UNAVAILABLE')
+        const sub = await this.ports.goalChanges.subscribe(change => emit({ type: 'change', data: parseGoalChanges(change) }), error => emit(error ? { type: 'error', error: readerError(error) } : { type: 'end', data: {} }), controller.signal)
+        cleanup = () => sub.dispose(); initial = parseGoalChanges(sub.initial)
       } else if (method === 'settings.appearance.watch') {
         rpcRecord(params, [])
         if (!this.ports.appearance) throw new AgentMuxError('Appearance observations are unavailable. Keep the last confirmed theme and reconnect this reader.', 'CONTROL_UNAVAILABLE')

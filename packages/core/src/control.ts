@@ -411,6 +411,7 @@ export type AgentMuxDemand = {
   priority: AgentMuxDemandPriority
   projectId: string | null
   projectName: string | null
+  executorId?: string | null
   assigneeSessionIds: string[]
   supervisorSessionId: string | null
   tags?: string[]
@@ -424,8 +425,10 @@ export type AgentMuxDemand = {
   progressUpdates?: import('@agentmux/demand').DemandProgress[]
   patrols?: import('@agentmux/demand').DemandPatrol[]
   activities?: AgentMuxDemandActivity[]
+  decisions?: import('@agentmux/demand').DemandDecision[]
   participations: import('@agentmux/demand').DemandParticipation[]
   creationOrigin?: import('@agentmux/demand').DemandCreationOrigin
+  discussionOperationId?: string
   sessionIds: string[]
   contentRefs?: DemandContentReference[]
   createdAt: number
@@ -459,6 +462,11 @@ export type AgentMuxControlDemandCreateRequest = RequestBase & {
   supervisorSessionId?: string | null
   sessionIds?: string[]
   contentRefs?: DemandContentReference[]
+  tags?: string[]
+  plannedStartAt?: number | null
+  targetAt?: number | null
+  parentDemandId?: string | null
+  phaseIndex?: number | null
   decision?: AgentMuxDemandDecision
 }
 export type AgentMuxControlDemandUpdateRequest = RequestBase & {
@@ -468,8 +476,8 @@ export type AgentMuxControlDemandUpdateRequest = RequestBase & {
   patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'contentRefs'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
   decision?: AgentMuxDemandDecision
 }
-export type AgentMuxControlGoalDiscussRequest = RequestBase & { operation: 'demand.discuss'; demandId: string; mode: 'open' | 'grill' | 'grounding' }
-export type AgentMuxControlGoalPatrolAllRequest = RequestBase & { operation: 'demand.patrol-all'; caller?: { agentSessionId: string; capability?: string } }
+export type AgentMuxControlGoalDiscussRequest = RequestBase & { operation: 'demand.discuss'; demandId: string; mode: 'open' | 'grill' | 'grounding'; executorId?: string }
+export type AgentMuxControlGoalPatrolAllRequest = RequestBase & { operation: 'demand.patrol-all'; executorId?: string; caller?: { agentSessionId: string; capability?: string } }
 export type AgentMuxControlGoalConfirmRequest = RequestBase & { operation: 'demand.confirm'; demandId: string; expectedRevision: number }
 export type AgentMuxControlGoalAcceptRequest = RequestBase & { operation: 'demand.accept'; demandId: string; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean; finish?: boolean }
 export type AgentMuxControlDemandAssignRequest = RequestBase & {
@@ -821,7 +829,7 @@ export type AgentMuxControlResult =
   | { operation: 'demand.delete'; demand: AgentMuxDemand; receipt: { demandId: string; deletedAt: number } }
   | { operation: 'demand.link-session'; demand: AgentMuxDemand; receipt: { demandId: string; sessionId: string } }
   | { operation: 'demand.link-project'; demand: AgentMuxDemand; receipt: { demandId: string; projectId: string } }
-  | { operation: 'demand.decision-log'; demandId: string; decisions: AgentMuxDemandDecision[] }
+  | { operation: 'demand.decision-log'; demandId: string; decisions: import('@agentmux/demand').DemandDecision[] }
   | { operation: 'demand.activity.append'; demand: AgentMuxDemand; activity: AgentMuxDemandActivity; receipt: { demandId: string; requestId: string; activityId: string; diskDurability: 'confirmed'; replayed: boolean } }
   | { operation: 'demand.activity.inspect'; demandId: string; requestId: string; activity: AgentMuxDemandActivity | null; diskDurability: 'confirmed' }
   | { operation: 'demand.activity.read'; demandId: string; activities: AgentMuxDemandActivity[]; diskDurability: 'confirmed' }
