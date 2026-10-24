@@ -41,6 +41,53 @@ function intersects(a: { x: number; y: number; width: number; height: number }, 
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }
 describe('finite collaboration Worker engine', () => {
+  it('reserves physical port clearance in nested force packing so unchanged reconciliation keeps every member fixed', async () => {
+    const nodes = Array.from({ length: 24 }, (_, index) => ({ id: 'member-' + String(index).padStart(2, '0'),
+      areaId: index < 2 ? 'leaf' : 'root', width: 250, height: 94 }))
+    const connections = [edge('neighbors', nodes[0]!.id, nodes[1]!.id), edge('across-ancestors', nodes[1]!.id, nodes[2]!.id)]
+    const input: CollaborationLayoutInput = { nodes, connections, areas: [
+      { id: 'root', name: 'Original parent', members: nodes.slice(2).map(node => node.id), folded: false },
+      { id: 'middle', name: 'Original ancestor without direct members', members: [], folded: false, parentId: 'root' },
+      { id: 'leaf', name: 'Original nested neighborhood', members: nodes.slice(0, 2).map(node => node.id), folded: false, parentId: 'middle' }
+    ] }
+    const boxes = await arrangeCollaboration(input), members = boxes.filter(box => box.kind === 'agent')
+    for (let left = 0; left < members.length; left++) for (let right = left + 1; right < members.length; right++) {
+      const a = members[left]!, b = members[right]!
+      expect(intersects({ x: a.x - 14, y: a.y - 14, width: a.width + 28, height: a.height + 28 }, b),
+        'Real cards need room for their 8px stems and the unchanged reconciliation clearance').toBe(false)
+    }
+    const settled = new Map(reconcileCollaborationLayout(input, boxes, null).map(box => [box.id, box]))
+    for (const member of members) expect(settled.get(member.id)).toEqual(member)
+    const paths = await successfulRoutes(boxes, connections)
+    expect(paths.map(path => path.id).sort()).toEqual(connections.map(edge => edge.id).sort())
+    // The unchanged original card bodies, not the padded force boxes, remain routing obstacles.
+    for (const path of paths) for (let segment = 0; segment < path.points.length - 1; segment += 3) {
+      const [a, b, c, d] = path.points.slice(segment, segment + 4)
+      for (let index = 1; index < 80; index++) {
+        const t = index / 80, u = 1 - t
+        const x = u ** 3 * a!.x + 3 * u * u * t * b!.x + 3 * u * t * t * c!.x + t ** 3 * d!.x
+        const y = u ** 3 * a!.y + 3 * u * u * t * b!.y + 3 * u * t * t * c!.y + t ** 3 * d!.y
+        for (const body of members) expect(x > body.x + .25 && x < body.x + body.width - .25 && y > body.y + .25 && y < body.y + body.height - .25).toBe(false)
+      }
+    }
+  })
+
+  it('keeps the exact empty shelf headings fixed through unchanged reconciliation', async () => {
+    const input: CollaborationLayoutInput = { nodes: [{ id: 'original-member', areaId: 'occupied', width: 250, height: 94 }], connections: [],
+      areas: [{ id: 'occupied', name: 'Original occupied area', members: ['original-member'], folded: false },
+        ...Array.from({ length: 24 }, (_, index) => ({ id: 'empty-' + String(index).padStart(2, '0'), name: 'Original empty place', members: [], folded: false }))] }
+    const boxes = await arrangeCollaboration(input), settled = new Map(reconcileCollaborationLayout(input, boxes, null).map(box => [box.id, box]))
+    for (const box of boxes) {
+      const after = settled.get(box.id)!
+      if (box.kind === 'agent') expect(after).toEqual(box)
+      else {
+        expect(after.kind).toBe('area')
+        if (after.kind === 'area') expect({ x: after.x + after.heading.x, y: after.y + after.heading.y, width: after.heading.width, height: after.heading.height })
+          .toEqual({ x: box.x + box.heading.x, y: box.y + box.heading.y, width: box.heading.width, height: box.heading.height })
+      }
+    }
+  })
+
   it('lets expanded cached members yield to current occupants of their former positions', () => {
     const area = (id: string, x: number, folded: boolean): CollaborationLayoutBox => ({ id, areaId: id, kind: 'area', folded, x, y: -100, width: 276, height: folded ? 54 : 200, heading: { x: 0, y: 0, width: 184, height: 40 } })
     const cached = [area('folded', 400, true), area('visible', 0, false), box('a', 0, 0, 24, 24, 'folded'), box('b', 0, 0, 24, 24, 'visible')]
