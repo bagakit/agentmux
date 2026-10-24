@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { pngBytes, pngFromBytes, type NativePng } from './image.js'
-import { decodeResponse, NATIVE_MUTATIONS, NATIVE_PROTOCOL_VERSION, NATIVE_PROVIDER,
+import { decodeResponse, isNativeMutation, NATIVE_PROTOCOL_VERSION, NATIVE_PROVIDER,
   type CaptureParams, type CaptureResult, type Json, type JsonObject,
   type NativeMethod, type NativeOperation, type NativeResponse } from './protocol.js'
 
@@ -27,7 +27,7 @@ function freezeReceivedJson(value: Json): Json {
 
 export class NativeRequestError extends Error {
   constructor(readonly code: string, message: string, readonly operation?: NativeOperation) {
-    super(message)
+    super(operation ? `${message} Original native operation: ${operation.operationId}; instance: ${operation.instanceId}; request: ${operation.requestId}; receipt: ${operation.state}.` : message)
     this.name = 'NativeRequestError'
   }
 }
@@ -45,7 +45,11 @@ export interface NativeConnectionOptions {
   token: string
   requestTimeoutMs?: number
 }
-export interface NativeRequestOptions { operationId?: string; expectedInstanceId?: string; timeoutMs?: number }
+export interface NativeRequestOptions {
+  operationId?: string; expectedInstanceId?: string; timeoutMs?: number
+  /** Original host authority, checked after lazy connection and immediately before submission. */
+  beforeSubmit?(): void | Promise<void>
+}
 
 /** One authenticated native connection. Lost writes are never re-sent. */
 export class NativeConnection {
@@ -96,8 +100,9 @@ export class NativeConnection {
   }
 
   async request(method: NativeMethod, params: JsonObject, options: NativeRequestOptions = {}): Promise<Json> {
+    await options.beforeSubmit?.()
     if (this.closed) throw new NativeRequestError('unavailable', 'The original native connection is closed')
-    const mutation = NATIVE_MUTATIONS.has(method)
+    const mutation = isNativeMutation(method, params)
     const expectedInstanceId = options.expectedInstanceId ?? this.instance
     if (method !== 'handshake' && (!expectedInstanceId || expectedInstanceId !== this.instance)) {
       throw new NativeRequestError('instance_mismatch', 'The original native instance is unavailable; the operation was not re-sent')
@@ -237,14 +242,18 @@ export class NativeDesktop {
     if (this.disposed) throw new NativeRequestError('unavailable', 'The native desktop owner is disposed')
     const connection = await this.ensureConnection()
     if (this.disposed) throw new NativeRequestError('unavailable', 'The native desktop owner is disposed')
-    if (NATIVE_MUTATIONS.has(method)) {
+    const beforeSubmit = async () => {
+      await options.beforeSubmit?.()
+      if (this.disposed) throw new NativeRequestError('unavailable', 'The native desktop owner is disposed')
+    }
+    if (isNativeMutation(method, params)) {
       const operationId = options.operationId ?? randomUUID()
       if (this.submittedOperationIds.has(operationId)) throw new NativeRequestError('duplicate_operation', 'Inspect the original operation; it will not be executed again')
       if (options.expectedInstanceId !== undefined && options.expectedInstanceId !== connection.instanceId) throw new NativeRequestError('instance_mismatch', 'The original native instance is unavailable')
       this.submittedOperationIds.add(operationId)
-      return await connection.request(method, params, { ...options, operationId })
+      return await connection.request(method, params, { ...options, operationId, beforeSubmit })
     }
-    return await connection.request(method, params, options)
+    return await connection.request(method, params, { ...options, beforeSubmit })
   }
 
   inspectOperation(operationId: string, instanceId: string): NativeOperation | { operationId: string; instanceId: string; state: 'unknown'; reason: string } {
@@ -259,23 +268,28 @@ export class NativeDesktop {
   }
 
   async captureScreenshot(params: CaptureParams = { mode: 'selection' }): Promise<CaptureResult> {
-    const raw = await this.request('captureScreenshot', params as unknown as JsonObject, { timeoutMs: 120_000 })
+    const operationId = randomUUID()
+    const raw = await this.request('captureScreenshot', params as unknown as JsonObject, { operationId, timeoutMs: 120_000 })
+    const invalid = (message: string) => new NativeRequestError('invalid_capture_result', message,
+      this.connections.map(connection => connection.inspectOperation(operationId)).find(Boolean))
     if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.state !== 'string' || !['captured', 'cancelled', 'failed'].includes(raw.state)) {
-      throw new NativeRequestError('invalid_capture_result', 'Native capture did not return a typed outcome')
+      throw invalid('Native capture did not return a typed outcome')
     }
     const result = raw as unknown as CaptureResult
     if (result.state === 'captured') {
       const screenshot = result.screenshot
-      if (!screenshot || typeof screenshot.data !== 'string' || !Number.isFinite(screenshot.scale) || screenshot.scale <= 0) {
-        throw new NativeRequestError('invalid_capture_result', 'Native capture did not return a PNG')
+      if (!screenshot || screenshot.format !== 'png' || typeof screenshot.data !== 'string' || !Number.isFinite(screenshot.scale) || screenshot.scale <= 0) {
+        throw invalid('Native capture did not return a PNG')
       }
-      pngBytes({ mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + screenshot.data,
-        width: screenshot.width, height: screenshot.height, byteLength: Buffer.from(screenshot.data, 'base64').byteLength })
-      if (result.error !== undefined) throw new NativeRequestError('invalid_capture_result', 'Captured result also reported a failure')
+      try {
+        pngBytes({ mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + screenshot.data,
+          width: screenshot.width, height: screenshot.height, byteLength: Buffer.from(screenshot.data, 'base64').byteLength })
+      } catch (error) { throw invalid(error instanceof Error ? error.message : 'Native capture PNG is invalid') }
+      if (result.error !== undefined) throw invalid('Captured result also reported a failure')
     } else {
-      if (result.screenshot !== undefined) throw new NativeRequestError('invalid_capture_result', 'Uncaptured result contains screenshot pixels')
+      if (result.screenshot !== undefined || result.state === 'cancelled' && result.error !== undefined) throw invalid('Uncaptured result contains pixels or a contradictory failure')
       if (result.state === 'failed' && (!result.error || typeof result.error.code !== 'string' || !result.error.code || typeof result.error.message !== 'string')) {
-        throw new NativeRequestError('invalid_capture_result', 'Failed capture is missing its failure receipt')
+        throw invalid('Failed capture is missing its failure receipt')
       }
     }
     return result
@@ -283,20 +297,35 @@ export class NativeDesktop {
 
   async readClipboardText(): Promise<string> {
     const result = await this.request('clipboardRead', { format: 'text' })
-    if (!result || typeof result !== 'object' || Array.isArray(result) || typeof result.data !== 'string') throw new NativeRequestError('invalid_clipboard_result', 'Native clipboard did not return text')
+    if (!result || typeof result !== 'object' || Array.isArray(result) || result.format !== 'text' ||
+        !Number.isSafeInteger(result.changeCount) || (result.changeCount as number) < 0) throw new NativeRequestError('invalid_clipboard_result', 'Native clipboard did not return a text receipt')
+    if (result.data === null && result.state === 'empty') return ''
+    if (result.state !== 'read' || typeof result.data !== 'string') throw new NativeRequestError('invalid_clipboard_result', 'Native clipboard did not return text')
     return result.data
   }
-  async writeClipboardText(text: string): Promise<void> { await this.request('clipboardWrite', { format: 'text', data: text }) }
+  async writeClipboardText(text: string): Promise<void> { await this.writeClipboard('text', text) }
   async readClipboardImage(): Promise<NativePng | null> {
     const result = await this.request('clipboardRead', { format: 'png' })
-    if (!result || typeof result !== 'object' || Array.isArray(result)) throw new NativeRequestError('invalid_clipboard_result', 'Invalid native clipboard image result')
-    if (result.data === null) return null
-    if (typeof result.data !== 'string') throw new NativeRequestError('invalid_clipboard_result', 'Native clipboard did not return PNG data')
+    if (!result || typeof result !== 'object' || Array.isArray(result) || result.format !== 'png' ||
+        !Number.isSafeInteger(result.changeCount) || (result.changeCount as number) < 0) throw new NativeRequestError('invalid_clipboard_result', 'Invalid native clipboard image receipt')
+    if (result.data === null && result.state === 'empty') return null
+    if (result.state !== 'read' || typeof result.data !== 'string') throw new NativeRequestError('invalid_clipboard_result', 'Native clipboard did not return PNG data')
     const image = pngFromBytes(Buffer.from(result.data, 'base64'))
     pngBytes({ ...image, dataUrl: 'data:image/png;base64,' + result.data })
     return image
   }
-  async writeClipboardImage(image: NativePng): Promise<void> { await this.request('clipboardWrite', { format: 'png', data: pngBytes(image).toString('base64') }) }
+  async writeClipboardImage(image: NativePng): Promise<void> { await this.writeClipboard('png', pngBytes(image).toString('base64')) }
+
+  private async writeClipboard(format: 'text' | 'png', data: string): Promise<void> {
+    const operationId = randomUUID()
+    const result = await this.request('clipboardWrite', { format, data }, { operationId })
+    const expectedBytes = format === 'text' ? Buffer.byteLength(data) : Buffer.from(data, 'base64').byteLength
+    if (!result || typeof result !== 'object' || Array.isArray(result) || result.format !== format || result.state !== 'written' ||
+        result.byteLength !== expectedBytes || !Number.isSafeInteger(result.changeCount) || (result.changeCount as number) < 0) {
+      const operation = this.connections.map(connection => connection.inspectOperation(operationId)).find(Boolean)
+      throw new NativeRequestError('invalid_clipboard_result', 'The native clipboard write receipt is unconfirmed', operation)
+    }
+  }
 
   async dispose(): Promise<void> {
     this.disposed = true
