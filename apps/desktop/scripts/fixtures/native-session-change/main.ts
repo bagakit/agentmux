@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
@@ -104,14 +105,16 @@ app.whenReady().then(async()=>{
     assert.equal(await read(`window.nativeTheme(${JSON.stringify(mode)}).applied`),true)
     await read('Promise.allSettled([document.fonts.ready,...document.getAnimations().filter(a=>a.playState==="running"&&Number.isFinite(a.effect?.getComputedTiming().iterations)).map(a=>a.finished)])')
     await read('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+    assert.deepEqual(await read('({theme:document.documentElement.dataset.theme,mode:document.documentElement.dataset.appearance})'),{theme:'graphite',mode})
     const observation=await facts(),geometry=observation.menuGeometry
-    if(geometry)assert.ok(geometry.y>=0&&geometry.bottom<=geometry.viewport.height,'Actual Session details stays inside the viewport')
+    if(geometry)assert.ok(geometry.x>=0&&geometry.x+geometry.width<=geometry.viewport.width&&geometry.y>=0&&geometry.bottom<=geometry.viewport.height,'Actual Session details stays inside the viewport')
     assert.equal(observation.state.terminalCount,1)
     assert.equal(await read('window.nativeTerminalNode()===window.originalTerminalForProof'),true,'Original terminal component remains mounted')
     const file=`${phase}-${label}-${mode}-${width}.png`,image=await win.capturePage()
     assert.equal(image.isEmpty(),false)
-    await fs.writeFile(path.join(evidence,file),image.toPNG())
-    result.screenshots.push({label,mode,width,file,facts:observation})
+    const png=image.toPNG()
+    await fs.writeFile(path.join(evidence,file),png)
+    result.screenshots.push({label,mode,width,file,sha256:createHash('sha256').update(png).digest('hex'),facts:observation})
    }
   }
   const raw=async()=>{
