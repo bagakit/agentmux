@@ -86,14 +86,19 @@ export function useComposerAttachments({ scope, hostId, workspacePath, disabled,
     const originalFocus = shortcutFocus.current?.key === shortcutKey ? shortcutFocus.current.element : null
     if (returnToDraft && !originalFocus) throw new Error('Focus the intended Message Tool before taking a screenshot. Your draft is kept.')
     let savedPath: string | null = null
-    await insertResolved(async () => {
-      requireLocal()
-      savedPath = await api.ui.captureScreenshot()
-      if (savedPath && (!isCurrent() || insertion.current !== originalEditor)) {
-        throw new Error(`The original message editor changed. The screenshot is saved at ${savedPath}; your drafts were not replaced. Reference this image from the intended Message Tool.`)
-      }
-      return savedPath ? appendFileReferences('', [savedPath]) : null
-    })
+    try {
+      await insertResolved(async () => {
+        requireLocal()
+        savedPath = await api.ui.captureScreenshot()
+        if (savedPath && (!isCurrent() || insertion.current !== originalEditor)) {
+          throw new Error('The original message editor changed; your drafts were not replaced.')
+        }
+        return savedPath ? appendFileReferences('', [savedPath]) : null
+      })
+    } catch (cause) {
+      if (savedPath) throw new Error(`Screenshot insertion into the original draft was not confirmed. The image is saved at ${savedPath}. ${presentError(cause)} Check the original draft and reference this image there if needed.`, { cause })
+      throw cause
+    }
     if (savedPath && returnToDraft && isCurrent() && insertion.current === originalEditor) {
       if (shortcut.current.key !== shortcutKey || !shortcut.current.enabled || !originalFocus?.isConnected) {
         throw new Error(`The screenshot was added to the original draft, but its workface is no longer selected. The image is saved at ${savedPath}. Return to that Message Tool to continue.`)
