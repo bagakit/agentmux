@@ -228,6 +228,34 @@
     "./goal-project-context": {
       "types": "./dist/goal-project-context.d.ts",
       "import": "./dist/goal-project-context.js"
+    },
+    "./goal-delegation-owner": {
+      "types": "./dist/goal-delegation-owner.d.ts",
+      "import": "./dist/goal-delegation-owner.js"
+    },
+    "./goal-delegation-attention": {
+      "types": "./dist/goal-delegation-attention.d.ts",
+      "import": "./dist/goal-delegation-attention.js"
+    },
+    "./goal-start-responsibility": {
+      "types": "./dist/goal-start-responsibility.d.ts",
+      "import": "./dist/goal-start-responsibility.js"
+    },
+    "./goal-responsibility-owner": {
+      "types": "./dist/goal-responsibility-owner.d.ts",
+      "import": "./dist/goal-responsibility-owner.js"
+    },
+    "./goal-patrol-owner": {
+      "types": "./dist/goal-patrol-owner.d.ts",
+      "import": "./dist/goal-patrol-owner.js"
+    },
+    "./goal-dispatch-input": {
+      "types": "./dist/goal-dispatch-input.d.ts",
+      "import": "./dist/goal-dispatch-input.js"
+    },
+    "./continuous-progress-delivery": {
+      "types": "./dist/continuous-progress-delivery.d.ts",
+      "import": "./dist/continuous-progress-delivery.js"
     }
   }
 }

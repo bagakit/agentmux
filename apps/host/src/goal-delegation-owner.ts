@@ -1,6 +1,6 @@
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { isDeepStrictEqual } from 'node:util'
-import { prepareGoalDelegationMaterials } from '@agentmux/host/goal-delegation-materials'
+import { prepareGoalDelegationMaterials } from './goal-delegation-materials.js'
 import type { FileReadParams, FileReadResult } from '@agentmux/core/files'
 import { AgentMuxError } from '@agentmux/core'
 import { assertGoalDelegationSource, assertGoalDelegationReply, readGoalDelegationWireReport, goalDelegationReportBody } from '@agentmux/core/goal-delegation'
@@ -11,7 +11,7 @@ import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxR
 import { validateDemandDelegationReport, type DemandDelegation, type DemandDelegationReportInput } from '@agentmux/demand/delegations'
 import type { DurableAgentMuxMessage } from '@agentmux/core'
 import type { DemandStore, Demand, DemandDispatch, GoalStartObservation } from '@agentmux/demand'
-import type { RuntimeController } from './runtime-controller.js'
+import type { GoalRuntimePort } from './goal-runtime.js'
 import type { GoalPatrolOwner } from './goal-patrol-owner.js'
 import type { GoalResponsibilityOwner } from './goal-responsibility-owner.js'
 
@@ -25,7 +25,7 @@ export interface GoalDelegationCorePort {
 /** Original Demand owner and original Host clients; no private journal or second queue. */
 export class GoalDelegationOwner implements GoalDelegationsOwner {
   constructor(private readonly demands: DemandStore,
-    private readonly runtime: Pick<RuntimeController, 'agentCreation'>,
+    private readonly runtime: Pick<GoalRuntimePort, 'agentCreation'>,
     private readonly readMaterials?: (input: FileReadParams) => Promise<FileReadResult>,
     private readonly core?: GoalDelegationCorePort,
     private readonly readAttention?: (goalId: string, delegation: DemandDelegation) => Promise<GoalDelegationObservation['attention']>,
