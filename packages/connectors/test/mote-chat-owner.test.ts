@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
-import { projectConversationTimeline, type ConversationCheckpointPage } from '@agentmux/core/conversation'
 import { parseMoteChatParams, parseMoteChatResult, type MoteChatConfigure, type MoteChatGeneration } from '@agentmux/core/mote-chat'
 import { ConnectionHost } from '../src/connection-host.js'
 import { MoteChatHost, composeMoteChatBindings, type MoteChatAgentPort, type MoteChatCreatedAgent, type MoteChatIncoming, type MoteChatPreparedLaunch } from '../src/mote-chat.js'
@@ -16,12 +15,6 @@ const application = { domain: 'chat.example', appId: 'original-app' }
 const creator = { application, idType: 'open_id', userId: 'creator' }
 const guest = { ...creator, userId: 'guest' }
 const target = { spaceId: 'original-mote', zoneId: 'original-home', expectedResource: { hostId: 'local', workspaceId: 'mote-files', workspacePath: 'mote-home' } }
-function checkpoint(agentSessionId: string): ConversationCheckpointPage {
-  const source = { providerId: 'claude', nativeSessionId: `native-${agentSessionId}` }
-  const timeline = projectConversationTimeline({ agentSessionId, executionHostId: 'local', historyPage: { agentSessionId, source, items: [], nextCursor: null } })
-  const ref = { hostId: 'local', agentSessionId }
-  return { ...ref, sourceHostId: 'local', scope: timeline.scope, coverage: timeline.coverage, checkpoint: { ...ref, sourceHostId: 'local', frontier: { ...ref, scope: timeline.scope, cuts: [{ kind: 'native', checkpoint: { agentSessionId, source, cursor: 'original-source-cut' } }] } } }
-}
 async function fixture(limit = 4) {
   const root = await mkdtemp(join(tmpdir(), 'mote-chat-owner-')), databasePath = join(root, 'connections.sqlite')
   const connection = { connectionId: 'original-connection', adapterId: 'sample', application, label: 'Same name', enabled: true, credentialRef: 'private-ref' }
@@ -39,7 +32,7 @@ async function fixture(limit = 4) {
     }),
     create: vi.fn(async plan => {
       const agentSessionId = plan.input.agentSessionId!
-      const result = { executionHostId: plan.executionHostId, agentSessionId, regionId: `region-${agentSessionId}`, checkpoint: checkpoint(agentSessionId) }
+      const result = { executionHostId: plan.executionHostId, agentSessionId, regionId: `region-${agentSessionId}` }
       created.set(plan.input.createOperationId!, result); return result
     }),
     inspect: vi.fn(async plan => created.get(plan.input.createOperationId!) ?? null),

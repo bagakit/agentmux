@@ -53,23 +53,24 @@ it('diagnoses retained private preparation through authenticated CLI without gra
   expect(after.incoming!.rows[0]).toMatchObject({ key: report.incoming.rows[0].key, code: null, codeRecorded: false, preparation: 'ready', state: 'claimed' })
 }, 20_000)
 
-it('distinguishes source preparation from present readiness and preserves one dispatched creation', async () => {
+it('distinguishes an unconfirmed creation response from present readiness and preserves one dispatched creation', async () => {
   const f = await fixture(1, 60_000, 'headless')
-  const create = vi.spyOn(f.client, 'createHostAgentWithDelivery')
-  const checkpoint = vi.spyOn(f.client, 'conversationCheckpoint')
-  checkpoint.mockRejectedValueOnce(new core.AgentMuxError('private exception detail must not escape', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE'))
-  expect(await f.wire.post(f.message('source-wait'))).toBe(202)
-  await vi.waitFor(async () => expect((await f.records())[0]).toMatchObject({ state: 'received', code: 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE' }))
+  const original = f.client.createHostAgentWithDelivery.bind(f.client)
+  const create = vi.spyOn(f.client, 'createHostAgentWithDelivery').mockImplementationOnce(async (...args) => {
+    await original(...args)
+    throw new core.AgentMuxError('private exception detail must not escape', 'MOTE_CHAT_CONTEXT_UNCONFIRMED')
+  })
+  expect(await f.wire.post(f.message('creation-wait'))).toBe(202)
+  await vi.waitFor(async () => expect((await f.records())[0]).toMatchObject({ state: 'received', code: 'MOTE_CHAT_CONTEXT_UNCONFIRMED' }))
   const before = await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
   expect(before).toMatchObject({ readiness: { state: 'ready', code: null }, incoming: { rows: [
-    { preparation: 'creation-dispatched', code: 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE', input: { observation: 'not-started' } }
+    { preparation: 'creation-dispatched', code: 'MOTE_CHAT_CONTEXT_UNCONFIRMED', input: { observation: 'not-started' } }
   ] } })
   expect(JSON.stringify(before)).not.toContain('private exception')
-  expect(checkpoint).toHaveBeenCalledOnce()
   expect(create).toHaveBeenCalledOnce()
   expect(f.inner.kernel.input).not.toHaveBeenCalled()
   await f.restart()
-  await f.claimed('source-wait')
+  await f.claimed('creation-wait')
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   expect(create).toHaveBeenCalledOnce()
   expect((await f.sdk.call('space.mote.chat.diagnose', { target: f.target })).incoming!.rows[0])

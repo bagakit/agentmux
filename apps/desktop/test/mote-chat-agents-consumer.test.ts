@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient, AgentMuxError, AgentMuxFileAgentSessionStore, AgentProviderRegistry, type AgentMuxAgentCreateInput, type AgentMuxAgentSession } from '@agentmux/core'
 import { spatialCatalog } from '@agentmux/core/spatial-state'
-import { projectConversationTimeline, type ConversationCheckpointPage } from '@agentmux/core/conversation'
 import { ConnectionHost, MoteChatHost } from '@agentmux/connectors'
 import { createMoteChatAgents } from '../src/main/mote-chat-agents.js'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
@@ -17,14 +16,6 @@ afterEach(async () => {
   try { for (const cleanup of close.splice(0).reverse()) await cleanup() }
   finally { vi.restoreAllMocks(); vi.unstubAllEnvs() }
 })
-function checkpoint(agentSessionId: string): ConversationCheckpointPage {
-  const source = { providerId: 'claude', nativeSessionId: `native-${agentSessionId}` }
-  const ref = { hostId: 'local', agentSessionId }
-  const timeline = projectConversationTimeline({ agentSessionId, executionHostId: 'local', historyPage: { agentSessionId, source, items: [], nextCursor: null } })
-  return { ...ref, sourceHostId: 'local', scope: timeline.scope, coverage: timeline.coverage,
-    checkpoint: { ...ref, sourceHostId: 'local', frontier: { ...ref, scope: timeline.scope,
-      cuts: [{ kind: 'native', checkpoint: { agentSessionId, source, cursor: 'original-cut' } }] } } }
-}
 async function fixture(savedExecutor = true) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'mote-chat-agents-')))
   close.push(() => rm(root, { recursive: true, force: true }))
@@ -73,8 +64,8 @@ async function fixture(savedExecutor = true) {
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
   inner.promptSubmission.submitInputPlan = vi.fn(async () => {})
 
-  const clients = [{ hostId: 'local', client }], source = vi.fn(async ({ agentSessionId }: { agentSessionId: string }) => checkpoint(agentSessionId))
-  const options = { config: () => config, catalog: async () => spatialCatalog(graph), topics, clients: () => clients, checkpoint: source }
+  const clients = [{ hostId: 'local', client }]
+  const options = { config: () => config, catalog: async () => spatialCatalog(graph), topics, clients: () => clients }
   const agents = createMoteChatAgents(options)
   const application = { domain: 'chat.example', appId: 'original-app' }, actor = { application, idType: 'open_id', userId: 'original-creator' }
   const connections = new ConnectionHost({ databasePath: join(root, 'connections.sqlite'), secrets: { resolve: async () => 'private-credential' }, adapters: [{
@@ -90,7 +81,7 @@ async function fixture(savedExecutor = true) {
   { actor: { kind: 'user', id: 'original-device-user' } })
   const incoming = { conversationKind: 'direct' as const, ingressId: 'original-ingress', connectionId: 'original-bot', application,
     externalMessageId: 'original-message', externalConversationId: 'original-private-chat', actor }
-  return { root, workspace, topic, target, graph, config, store, client, start, stop, source, clients, options, agents, host, connections, incoming }
+  return { root, workspace, topic, target, graph, config, store, client, start, stop, clients, options, agents, host, connections, incoming }
 }
 
 it('lazily creates through the real Mote and Core owners without a Region or fabricated initial user message', async () => {
@@ -132,10 +123,11 @@ it('requires this exact Mote saved Executor and never chooses the first Provider
   expect(f.start).not.toHaveBeenCalled()
 })
 
-it('keeps the original created Agent when native source is unavailable and inspects instead of creating again', async () => {
+it('keeps the original created Agent usable without waiting for native history', async () => {
   const f = await fixture(), creation = vi.spyOn(f.client, 'createAgentWithDelivery'), inspection = vi.spyOn(f.client, 'inspectAgentCreation')
-  f.source.mockRejectedValueOnce(new AgentMuxError('Original native source is not observed yet', 'CONVERSATION_SOURCE_UNAVAILABLE'))
-  await expect(f.host.prepareIncoming(f.incoming)).rejects.toMatchObject({ code: 'CONVERSATION_SOURCE_UNAVAILABLE' })
+  const checkpoint = vi.spyOn(f.client, 'conversationCheckpoint').mockRejectedValue(new AgentMuxError('Original native source is not observed yet', 'CONVERSATION_SOURCE_UNAVAILABLE'))
+  await expect(f.host.prepareIncoming(f.incoming)).resolves.toMatchObject({ sourceCheckpoints: [], publicationOrigin: { createOperationId: expect.any(String) } })
+  expect(checkpoint).not.toHaveBeenCalled()
   expect(creation).toHaveBeenCalledTimes(1)
   const original = structuredClone(creation.mock.calls[0]![0])
   f.config.executors.chosen!.command = 'later-executor-command'
@@ -144,7 +136,7 @@ it('keeps the original created Agent when native source is unavailable and inspe
     agents: createMoteChatAgents(f.options), assertTarget: f.agents.assertTarget })
   const result = await restarted.prepareIncoming(f.incoming)
   expect(result).toMatchObject({ agentSessionId: original.agentSessionId })
-  expect(inspection).toHaveBeenCalledWith(original.agentSessionId)
+  expect(inspection).not.toHaveBeenCalled()
   expect(creation).toHaveBeenCalledTimes(1); expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled()
 })
 

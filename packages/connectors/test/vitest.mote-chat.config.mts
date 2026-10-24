@@ -19,7 +19,6 @@ const mutations: Record<string, { path: string; changes: Array<[string, string]>
   'borrow-paused-private-audience': { path: owner, changes: [['findActiveAudience: input => chat.knowsAudience(input) ? chat.findActiveAudience(input) : groups.findActiveAudience(input)', 'findActiveAudience: input => chat.findActiveAudience(input) ?? groups.findActiveAudience(input)']] },
   'skip-mote-preparation': { path: 'packages/connectors/src/connection-services.ts', changes: [["if (record.conversationKind === 'direct')", 'if (false)']] },
   'retarget-frozen-authority': { path: 'packages/connectors/src/durable-ingress.ts', changes: [['const binding = expected ? this.options.bindings.readExact(expected.author.bindingId, expected.author.bindingRevision) : this.binding(record)', 'const binding = this.binding(record)']] },
-  'require-native-rpc-input': { path: owner, changes: [['sourceCheckpoints: native.map(cut => cut.checkpoint),', "inputTarget: { kind: 'native-conversation', source: native[0]!.checkpoint.source }, sourceCheckpoints: native.map(cut => cut.checkpoint),"]] },
   'skip-new-binding-publication': { path: 'packages/connectors/src/connection-services.ts', changes: [['if (binding) publication?.refresh()', 'if (false && binding) publication?.refresh()']] }
 }
 const mutation = process.env.AGENTMUX_MOTE_CHAT_MUTANT
