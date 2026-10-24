@@ -45,6 +45,18 @@ function verify(data, actualFrames) {
   assert.ok(data && data.scope?.members?.length === 12 && new Set(data.scope.members.map(member => member.nodeId)).size === 12)
   assert.deepEqual(data.phases?.map(phase => phase.name), phaseNames, 'Every native structural and intent phase is mandatory')
   assert.ok(data.scope.areas.length === 5 && data.scope.control.nodeId && data.readerNodeId && data.farthestNodeId)
+  const reader = data.scope.members.find(member => member.nodeId === data.readerNodeId), peer = data.scope.members.find(member => member.nodeId === data.farthestNodeId), demand = data.addDemand
+  assert.ok(reader?.id === data.scope.reader && peer && peer.id !== reader.id, 'Reading demand joins the exact original reader and independently selected peer')
+  assert.ok(demand && Number.isFinite(demand.at) && demand.at >= 0 && demand.at <= data.phases[0].before.at, 'Original pre-add reading demand must be recorded before the structural change')
+  assert.deepEqual(demand.selected, [peer.id], 'The original selected peer keeps its exact reading demand')
+  assert.deepEqual(demand.hovered, [reader.id], 'The actual pointer protects the original Reader occurrence')
+  assert.ok(Array.isArray(demand.reads) && [reader.id, peer.id].every(id => demand.reads.some(row => row?.kind === 'events' && row.participant === id && row.options?.limit > 0 && row.options.limit <= 50)), 'Both original participants have nonempty bounded event reads')
+  assert.equal(demand.reading, false, 'The original pre-add source reads have completed')
+  assert.equal(demand.held?.readers, 1, 'Exactly the original Reader remains before addition')
+  for (const key of ['sameReader', 'sameAnchor', 'sameSubject', 'sameFocus']) assert.equal(demand.held[key], true, 'The pre-add reading demand preserves ' + key)
+  assert.equal(demand.held.subject, reader.id, 'The pre-add subject is the exact original Reader')
+  assert.equal(demand.held.hostId, 'local', 'The pre-add Reader retains its exact original Host')
+  assert.equal(demand.held.runId, reader.runId, 'The pre-add Reader retains its exact original Run')
   for (const label of frames) assert.ok(actualFrames.some(frame => frame.label === label), 'Missing complete adaptive native frame: ' + label)
   for (const phase of data.phases) {
     assert.ok(phase.trace.samples.length >= 2 && phase.workers.length > 0 && phase.target?.geometry?.length > 0, 'No empty native structural phase: ' + phase.name)
@@ -80,10 +92,12 @@ function verify(data, actualFrames) {
   const added = data.phases[0], before = map(added.before), after = map(added.after), fresh = after.get(added.fact.member.nodeId)
   assert.equal(added.fact.evidence.length, 64); assert.equal(new Set(added.fact.evidence.map(row => row.id)).size, 64)
   assert.ok(added.fact.evidence.every(row => row.hostId === 'local' && row.live === false))
+  assert.equal(added.target.request.anchor, data.readerNodeId, 'The actual placement protects the original Reader occurrence, not its selected peer')
+  const strong = added.target.input.edges.filter(edge => edge.source === fresh.id && [data.readerNodeId, data.farthestNodeId].includes(edge.target))
+  assert.deepEqual(strong.map(edge => edge.target).sort(), [data.readerNodeId, data.farthestNodeId].sort(), 'Both exact relationships must be known in the structural placement input before judging their layout')
+  assert.ok(strong.every(edge => edge.strength >= 16), 'Both known strong relationships reached the real Worker through the original bounded reader')
   assert.ok(distance(before.get(data.farthestNodeId), after.get(data.farthestNodeId)) > 1, 'A surviving original neighbor really moves on addition')
   assert.ok(distance(fresh, after.get(data.readerNodeId)) + distance(fresh, after.get(data.farthestNodeId)) < distance(before.get(data.readerNodeId), before.get(data.farthestNodeId)) * .95, 'The independently fixed two-edge span improves by at least five percent')
-  const strong = added.target.input.edges.filter(edge => edge.source === fresh.id && [data.readerNodeId, data.farthestNodeId].includes(edge.target))
-  assert.equal(strong.length, 2); assert.ok(strong.every(edge => edge.strength >= 16), 'Both known strong relationships reached the real Worker through the original bounded reader')
   const removed = data.phases[1], old = map(removed.before), surviving = map(removed.after)
   assert.ok(old.has(removed.fact.oldNodeId) && !surviving.has(removed.fact.oldNodeId) && surviving.has(removed.fact.nodeId), 'Membership removal preserves the same Session in its actual new area')
   const hole = values => data.surrounding.reduce((sum, id) => sum + distance(values.get(id), old.get(removed.fact.oldNodeId)), 0)
@@ -138,13 +152,29 @@ module.exports = async function adaptive({ win, result, read, click, key, move, 
       }
       await settled()
     }
-    async function holdReader() {
+    const identity = id => '.collaboration-agent__identity-layer:not([inert]) [data-session-id=' + JSON.stringify(id) + ']'
+    async function holdReader(pointerOnAnchor = false) {
       await read(`(()=>{const anchor=document.querySelector('.collaboration-agent__identity-layer:not([inert]) [data-session-id="fixture-adaptive-00"]');if(!anchor)throw Error('The real adaptive identity anchor must be in this view');window.__adaptiveAnchor=anchor;anchor.focus()})()`)
       await key('ArrowDown'); await until('the exact original adaptive anchor enters its own Reader', () => read(`(()=>{const anchor=window.__adaptiveAnchor,id=anchor?.getAttribute('aria-describedby'),reader=id&&document.getElementById(id);return anchor?.isConnected&&reader?.matches('.agent-information-reader')&&reader.contains(document.activeElement)})()`))
-      if (await read(`Boolean(document.querySelector('[aria-label="Pin Agent bookmark"]'))`)) await click('[aria-label="Pin Agent bookmark"]')
-      await move('.agent-information-reader__reading'); await read('window.graphCapture.adaptiveRemember()')
+      const readerId = await read('window.__adaptiveAnchor.getAttribute("aria-describedby")'), pin = '[id=' + JSON.stringify(readerId) + '] [aria-label="Pin Agent bookmark"]'
+      if (await read(`Boolean(document.querySelector(${JSON.stringify(pin)}))`)) await click(pin)
+      await move(pointerOnAnchor ? identity(scope.reader) : '.agent-information-reader__reading'); await read('window.graphCapture.adaptiveRemember()')
     }
-    await locate(scope.reader); await closeDetails(); await fitWork(.55); await holdReader(); await frame('adaptive-before-dark')
+    await locate(scope.reader); await closeDetails(); await fitWork(.55)
+    const firstRead = await read('window.graphCapture.reads.length')
+    // The two endpoints must have real reading demand when the original typed
+    // notifications arrive. Cached visits do not keep idle/offscreen IO active.
+    // Select the peer, then return the actual pointer and keyboard reading to 00;
+    // selecting 00 and hovering the peer would protect the wrong occurrence.
+    await click(identity(farthest.id)); await holdReader(true)
+    const addDemand = () => read(`(()=>{const selector='.collaboration-agent__identity-layer:not([inert]) [data-session-id]',anchors=[...document.querySelectorAll(selector)],reads=window.graphCapture.reads.slice(${firstRead}).filter(row=>row.kind==='events'&&${JSON.stringify([scope.reader, farthest.id])}.includes(row.participant));return{at:performance.now(),selected:anchors.filter(anchor=>anchor.getAttribute('aria-pressed')==='true').map(anchor=>anchor.dataset.sessionId),hovered:anchors.filter(anchor=>anchor.matches(':hover')).map(anchor=>anchor.dataset.sessionId),reads,held:window.graphCapture.adaptiveSample().held,reading:Boolean(document.querySelector('.collaboration-map__reading'))}})()`)
+    await until('both exact original endpoints have active bounded reads while the sole original Reader keeps focus', async () => {
+      const demand = await addDemand()
+      return demand.selected.length === 1 && demand.selected[0] === farthest.id && demand.hovered.length === 1 && demand.hovered[0] === scope.reader
+        && [scope.reader, farthest.id].every(id => demand.reads.some(row => row.participant === id)) && !demand.reading
+        && demand.held.readers === 1 && demand.held.sameReader && demand.held.sameAnchor && demand.held.sameSubject && demand.held.sameFocus
+    })
+    data.addDemand = await addDemand(); await settled(); await frame('adaptive-before-dark')
     async function phase(name, expression, { middle, after, gesture = false } = {}) {
       const before = await sample(), first = await read('window.graphCapture.workerSamples().length')
       await read(`window.graphCapture.adaptiveTraceStart(${JSON.stringify(name)})`)
