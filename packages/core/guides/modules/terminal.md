@@ -18,3 +18,11 @@ original operation and returned terminal/Run facts. After an unknown opening res
 inspect the same destination and original owner instead of opening another terminal or injecting
 probe commands. Navigation and input eligibility remain separate from creation. For a new
 split/Tab, read amux space --skill first and choose from the actual visible geometry.
+
+For an existing raw Terminal, read terminal recover --help. Recovery uses the exact
+execution Host, persistent Native Runtime, original Run and cwd. It reenters one
+durable Core intent, including after the client or Core process restarts. Unknown
+Start is observed, never replayed; an explicit continue first fences the original
+creation before a successor. Keep its canonical operation receipt. Closing a view
+does not stop that recovered Run. This raw Runtime action requires the original
+transport-approved user or device; Agent Sessions use semantic recovery.
