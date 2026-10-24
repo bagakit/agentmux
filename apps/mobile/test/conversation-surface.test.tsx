@@ -359,7 +359,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await act(async () => f.emit({ type: 'agent-session', session: value }))
     expect(view.element.textContent).toContain('答复回执未知')
     expect(view.element.querySelector('[data-request-id="request-original"]')).not.toBeNull()
-    expect([...view.element.querySelectorAll<HTMLButtonElement>('[data-request-id="request-original"] button')]
+    expect([...view.element.querySelectorAll<HTMLButtonElement>('[data-request-id="request-original"] button:not(.mobile-notice__dismiss)')]
       .map(item => ({ label: item.textContent, disabled: item.disabled }))).toEqual([{ label: '查询原答复回执', disabled: false }])
     expect(f.respond).toHaveBeenCalledOnce()
   })
@@ -436,7 +436,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     const restored = await mount(<MobileConversationSurface {...options} />)
     expect(restored.element.querySelector('[data-request-id="request-original"]')).not.toBeNull()
     expect(restored.element.textContent).toContain('重启后的原请求答复回执未知')
-    expect([...restored.element.querySelectorAll<HTMLButtonElement>('[data-request-id="request-original"] button')]
+    expect([...restored.element.querySelectorAll<HTMLButtonElement>('[data-request-id="request-original"] button:not(.mobile-notice__dismiss)')]
       .map(item => ({ label: item.textContent, disabled: item.disabled }))).toEqual([{ label: '查询原答复回执', disabled: false }])
     expect(f.respond).toHaveBeenCalledOnce()
     await refreshOriginal(restored.element)
