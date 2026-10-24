@@ -2,6 +2,7 @@ import { fixturePath } from '../../../../../test/fixture-values.mjs'
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import type { AgentMuxAgentSession } from '@agentmux/core'
+import { projectConversationTimeline, type AgentConversationReadPage } from '@agentmux/core/conversation'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { MobileApp } from '../../../src/MobileApp'
 import { createBrowserPlatform } from '../../../src/platform/browser'
@@ -27,6 +28,30 @@ const client = {
       { id: 'original-answer', kind: 'assistant-message', contentParts: [{ kind: 'text', text: '可以。把手头资料发给我，我先整理依据，再给你一个小步可验证的建议。' }] }] }),
   sessionTimeline: async () => ({ agentSessionId: session.agentSessionId, revision: 1, items: [] }),
   observeSessionHistory: async () => ({ source: { providerId: 'codex', nativeSessionId: 'native-original' }, dispose() {} }),
+  readAgentConversation: async (input: Parameters<AgentMuxHostedClient['readAgentConversation']>[0]) => {
+    const historyPage = await client.sessionHistoryPage(input.agentSessionId)
+    const captured = await client.sessionTimeline(input.agentSessionId)
+    const timeline = projectConversationTimeline({ agentSessionId: input.agentSessionId, executionHostId: 'local',
+      historyPage: { ...historyPage, sourceHostId: 'local' }, timeline: { ...captured, sourceHostId: 'local',
+        stream: { epoch: 'attachment-stream', sequence: 0, revision: 1, origin: 'beginning', gaps: [], positions: [] } } })
+    const reference = { hostId: input.hostId, agentSessionId: input.agentSessionId }
+    const checkpoint = { ...reference, sourceHostId: 'local', frontier: { ...reference, scope: timeline.scope, cuts: [] } }
+    return { ...reference, sourceHostId: 'local', scope: timeline.scope, coverage: timeline.coverage,
+      order: { ...timeline.order, direction: 'newest-first' }, budgetBytes: input.maxBytes ?? 128 * 1024, nextCursor: null,
+      items: [...timeline.events].reverse().map(event => ({ kind: 'item', item: { event,
+        records: timeline.records.filter(recordEntry => event.recordIds.includes(recordEntry.id)) } })),
+      window: { id: 'attachment-window', revision: 1, itemCount: timeline.events.length, complete: true,
+        view: 'attachment-view', replay: 'attachment-replay-1', checkpoint,
+        outside: { older: null, newer: null }, navigation: { older: null, newer: null } } } satisfies AgentConversationReadPage
+  },
+  readConversationChanges: async (input: Parameters<AgentMuxHostedClient['readConversationChanges']>[0]) => ({ ...await client.readAgentConversation(input), checkpoint: input.checkpoint, more: false }),
+  observeConversation: async (input: Parameters<AgentMuxHostedClient['observeConversation']>[0]) => {
+    const frame = await client.readAgentConversation(input)
+    return { hostId: frame.hostId, sourceHostId: frame.sourceHostId, agentSessionId: frame.agentSessionId,
+      scope: frame.scope, coverage: frame.coverage, closed: new AbortController().signal, dispose() {} }
+  },
+  releaseConversationView: async () => ({}),
+  subscribeRpc: async () => ({ subscriptionId: 'fixture-appearance', dispose: async () => {} }),
   submitAgentPrompt: async () => { throw new Error('This Renderer fixture never sends Agent input.') },
   forwardRpc: async (method: string, params: Record<string, unknown>) => {
     calls.push({ method, params: structuredClone(params) })
