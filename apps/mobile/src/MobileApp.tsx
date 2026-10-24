@@ -9,6 +9,7 @@ import { MobileSurveySurface, type MobileSurveyContext } from './survey/MobileSu
 import { MobileGoalsSurface } from './goals/MobileGoalsSurface'
 import { MobileZoneWorkface } from './navigation/MobileZoneWorkface'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
+import { MobileAgentCreate, type MobileAgentCreateTarget } from './navigation/MobileAgentCreate'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
 import { MobileTerminalViewer } from './terminal/MobileTerminalViewer'
 import { useHostAppearance } from './appearance/useHostAppearance'
@@ -158,7 +159,9 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     }).catch(error => setNotice(error instanceof Error ? error.message : String(error)))
   }
   const sessionTitle = objectIdentity?.name ?? null
-  const [sheet, setSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | null>(initial.current.presentation?.profile ? 'identity' : null)
+  const [sheet, setSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'create' | null>(initial.current.presentation?.profile ? 'identity' : null)
+  const [createTarget, setCreateTarget] = useState<MobileAgentCreateTarget>({})
+  const createAgent = (target: MobileAgentCreateTarget) => { setCreateTarget(target); setSheet('create') }
   const openProfile = (identity: MobileObjectIdentity) => {
     navigationRevision.current += 1
     setProfileIdentity(identity); setProfileSourcePath(null); setSheet('identity')
@@ -291,14 +294,14 @@ export function MobileApp({ client, connection, platform, native = false, focusC
         <button className="mobile-secondary" onClick={() => setSheet('connection')}><ThemeObjectConnectionIcon size={16} />连接详情</button>
       </section>}
       {workspaceVisible && <>
-        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} sessions={sessions} openSession={openSession} openProfile={openProfile} onBackChange={registerSpatialBack}
+        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} sessions={sessions} openSession={openSession} openProfile={openProfile} onBackChange={registerSpatialBack}
           initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
         <div hidden={showSession || secondary !== 'topics' || Boolean(source && source.kind !== 'topic')}><MobileTopicsSurface rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (!source || source.kind === 'topic')} topicId={topicId}
           client={client} connected={connected} {...(topicsRoute.knowledge ? { initialKnowledge: topicsRoute.knowledge } : {})} onKnowledgeChange={updateKnowledgeReference}
           initialContext={topicsRoute.context} onContextChange={updateTopicsContext}
           {...(source?.kind === 'topic' ? { onLeaveTopic: leaveSource, topicBackLabel: '返回知识' } : {})}
           onOpenTopic={topic => updateTopicsContext({ ...topicsRoute.context, topicId: topic.topicId, mode: 'discussion' })} openSource={openSource} openHttpLink={openBrowserHttpLink} onBackChange={registerTopicsBack}
-          renderWorkface={(topic, visible) => <MobileZoneWorkface key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible}
+          renderWorkface={(topic, visible) => <MobileZoneWorkface key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible} onCreateAgent={createAgent}
             {...(source?.kind === 'topic' && source.topicId === topic.topicId ? { tabId: source.chatId, regionId: source.threadId } : {})} openSession={openSession} />} /></div>
         <div hidden={showSession || secondary !== 'survey'}><MobileSurveySurface client={client} connected={connected} visible={exposed && !showSession && secondary === 'survey'} openSession={openSession}
           openTopic={openSurveyTopic} initialContext={surveyContext} onContextChange={updateSurveyContext} onBackChange={registerSurveyBack} openHttpLink={openBrowserHttpLink} /></div>
@@ -328,7 +331,8 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     </main>
     {(serviceNotices.length > 0 || !canPersist) && <aside className="mobile-service-notice" role="status"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></aside>}
     <footer className="mobile-navigation-bar">{menuButton}{workspaceVisible && <MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} />}</footer>
-    <Dialog.Root open={sheet !== null} onOpenChange={open => { if (!open) setSheet(null) }}>
+    <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: '原 Agent', project: '项目未确认' })} />
+    <Dialog.Root open={sheet !== null && sheet !== 'create'} onOpenChange={open => { if (!open) setSheet(null) }}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : 'mobile-sheet'} aria-describedby="mobile-sheet-description">
         <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'identity' ? profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></Dialog.Close></div>
         {sheet === 'settings' ? <>

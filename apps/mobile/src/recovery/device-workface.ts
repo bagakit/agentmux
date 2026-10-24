@@ -1,3 +1,4 @@
+import { parseMobileAgentCreateIntent, type MobileAgentCreateIntent } from './agent-create-intents'
 import { moteQuickDraftKey, parseMoteQuickDraft, parseMoteQuickDrafts, MoteQuickDraftInvalidError, MoteQuickDraftCapacityError, type MoteQuickDraft, type MoteQuickDraftCommit } from './mote-quick-drafts'
 import { parseQuestionReplyAttempt } from '@agentmux/client-ui/conversation-question-reply'
 import type { MobileQuestionReplyAttempt } from '../conversation/question-replies'
@@ -61,7 +62,7 @@ function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): bool
   return keys.length === Object.keys(b).length && keys.every(key => a[key] === b[key])
 }
 export type DeviceWorkface = Navigation & { version: 1;
-  recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[]; goalDrafts?: MobileGoalDraft[]; goalDraftConflicts?: MobileGoalDraft[]; knowledgeDrafts?: MobileKnowledgeDraft[]; knowledgeDraftConflicts?: MobileKnowledgeDraft[];
+  agentCreates?: MobileAgentCreateIntent[]; recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[]; goalDrafts?: MobileGoalDraft[]; goalDraftConflicts?: MobileGoalDraft[]; knowledgeDrafts?: MobileKnowledgeDraft[]; knowledgeDraftConflicts?: MobileKnowledgeDraft[];
   moteFileDrafts?: MoteFileDraft[]; moteFileDraftConflicts?: MoteFileDraft[]; moteQuickDrafts?: MoteQuickDraft[]; moteQuickDraftConflicts?: MoteQuickDraft[] }
 type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
@@ -209,7 +210,14 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   if (value && typeof value === 'object' && Object.hasOwn(value, 'moteFileDraftConflicts')) keys.push('moteFileDraftConflicts')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'moteQuickDrafts')) keys.push('moteQuickDrafts')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'moteQuickDraftConflicts')) keys.push('moteQuickDraftConflicts')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'agentCreates')) keys.push('agentCreates')
   const v = record(value, keys)
+  if (v.agentCreates !== undefined) {
+    if (!Array.isArray(v.agentCreates) || v.agentCreates.length > MAX_ENTRIES) throw invalid()
+    const operations = new Set<string>()
+    for (const raw of v.agentCreates) { const intent = parseMobileAgentCreateIntent(raw); if (operations.has(intent.input.operationId)) throw invalid(); operations.add(intent.input.operationId) }
+  }
+
   if (v.recordId !== undefined && !id(v.recordId)) throw invalid()
   if (v.version !== 1 || !(v.selectedSessionId === null || id(v.selectedSessionId))
     || !(v.hostUrl === '' || origin(v.hostUrl))
@@ -390,6 +398,18 @@ export class DeviceWorkfaceStore {
     })
     this.tail = work.catch(() => {})
     return work
+  }
+  /** Preserve other tabs and refuse a replacement device record or changed original packet. */
+  retainAgentCreate(intent: MobileAgentCreateIntent, expectedRecordId: string | null): Promise<void> {
+    const captured = parseMobileAgentCreateIntent(intent)
+    return this.update(record => {
+      const all = record.agentCreates ?? []
+      const retainedConfirmed = new Set(all.filter(item => item.phase === 'confirmed').slice(-31))
+      const current = all.filter(item => item.phase !== 'confirmed' || retainedConfirmed.has(item)), prior = current.find(item => item.input.operationId === captured.input.operationId)
+      if (prior && (!sameValue(prior.input, captured.input) || prior.runtimeId !== captured.runtimeId || prior.deviceHostId !== captured.deviceHostId || prior.agentSessionId && prior.agentSessionId !== captured.agentSessionId)) throw new Error('原创建操作已绑定另一目标；未覆盖原记录。')
+      if (prior?.phase === 'confirmed') return record
+      return { ...record, agentCreates: prior ? current.map(item => item === prior ? captured : item) : [...current, captured] }
+    }, expectedRecordId)
   }
   updateNavigation(navigation: Navigation): Promise<void> {
     const captured = structuredClone(navigation)
