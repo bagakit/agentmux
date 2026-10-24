@@ -1,4 +1,6 @@
 import { isConnectionCredentialMethod } from './connection-credential-codec.js'
+import { homedir } from 'node:os'
+import { discoverAgentSkills } from './agent-skills.js'
 import { isChannelMetadataMethod, parseChannelMetadataParams, parseChannelMetadataChange } from './channel-metadata-codec.js'
 import { parseCapsuleInputRequest, parseCapsuleInputResult, type CapsuleInputPort } from './capsule-input.js'
 import { isCapsuleRuntimeMethod, parseCapsuleRuntimeParams, parseCapsuleRuntimeResult, type CapsuleRuntimeMethod, type CapsuleRuntimePort } from './capsule-runtime.js'
@@ -278,6 +280,7 @@ const NATIVE_FIELDS = {
   'name.confirm': ['operationId'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'providerId', 'status', 'semantic', 'readiness', 'since', 'activitySince', 'cursor', 'limit'],
   'agent.inspect': ['target'],
+  'skill.ls': ['hostId', 'agentSessionId'],
   'agent.continuity.control': ['agentSessionId', 'intentOperationId', 'expectedRun', 'operationId', 'action', 'additionalAttempts'],
   'agent.restart': ['agentSessionId', 'expectedRun', 'operationId'],
   'agent.restart.inspect': ['agentSessionId', 'expectedRun', 'operationId'],
@@ -1750,6 +1753,25 @@ export class AgentMuxRpcService {
         const list = await this.sessions(p)
         if (aggregationIssue) list.errors.push({ hostId: 'local', agentSessionId: null, ...aggregationIssue })
         result = list; break
+      }
+      case 'skill.ls': {
+        const hostId = rpcString(p.hostId, 'Original route Host'), agentSessionId = rpcString(p.agentSessionId, 'Complete original Session ID')
+        const scopes = (await this.clients()).filter(scope => scope.hostId === hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The original skill discovery Host is unconfirmed. Select its exact configured route.', 'UNKNOWN_HOST')
+        const { client } = scopes[0]!
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        if (client.forwardRpc) {
+          const page = parseRpcNativeResult('skill.ls', await client.forwardRpc('skill.ls', { hostId: 'local', agentSessionId }, context), { hostId: 'local', agentSessionId })
+          result = { ...page, hostId }; break
+        }
+        const session = await client.readAgentSession(agentSessionId)
+        if (!session || session.agentSessionId !== agentSessionId || session.hostId !== hostId) throw new AgentMuxError('The exact original Session is unavailable for skill discovery.', 'UNKNOWN_AGENT_SESSION')
+        const catalog = client.catalog().find(entry => entry.id === session.providerId)
+        if (!catalog) throw new AgentMuxError('The original Provider skill roots are unconfirmed. The Session and draft remain available.', 'UNKNOWN_PROVIDER')
+        const skills = await discoverAgentSkills({ catalog, workspacePath: session.workspacePath, home: homedir() })
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        result = { hostId, sourceHostId: session.hostId, agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath, skills }
+        break
       }
       case 'agent.context': {
         const input = parseAgentContextParams(p)

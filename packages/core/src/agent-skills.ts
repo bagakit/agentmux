@@ -19,6 +19,11 @@ const MAX_DEPTH = 6
 // Hard ceiling on directories visited so a pathological tree degrades to "fewer skills", never a hang.
 const MAX_DIRS = 2048
 
+function isMissingPath(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('code' in error)) return false
+  return error.code === 'ENOENT' || error.code === 'ENOTDIR'
+}
+
 /** Walk the declared skill roots for actual SKILL.md files, without executing any skill content. */
 async function walkSkills(bases: readonly (readonly [string, AgentSkill['source']])[], roots: readonly string[]): Promise<AgentSkill[]> {
   const found: AgentSkill[] = []
@@ -26,12 +31,18 @@ async function walkSkills(bases: readonly (readonly [string, AgentSkill['source'
   async function visit(directory: string, source: AgentSkill['source'], depth = 0): Promise<void> {
     if (depth > MAX_DEPTH || seen.size >= MAX_DIRS) return
     let physical: string
-    try { physical = await realpath(directory) } catch { return }
+    try { physical = await realpath(directory) } catch (error) {
+      if (isMissingPath(error)) return
+      throw error
+    }
     // check+add is synchronous, so even the concurrent sibling walk below visits each physical dir once.
     if (seen.has(physical)) return
     seen.add(physical)
-    try {
-      const text = await readFile(join(directory, 'SKILL.md'), 'utf8')
+    let text: string | undefined
+    try { text = await readFile(join(directory, 'SKILL.md'), 'utf8') } catch (error) {
+      if (!isMissingPath(error)) throw error
+    }
+    if (text !== undefined) try {
       const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1]
       const data = frontmatter ? parse(frontmatter) : {}
       found.push({
@@ -40,9 +51,12 @@ async function walkSkills(bases: readonly (readonly [string, AgentSkill['source'
         path: join(directory, 'SKILL.md'), source
       })
       return
-    } catch { /* Containers and invalid skill files do not prevent discovering their siblings. */ }
+    } catch { /* Invalid skill frontmatter does not prevent discovering siblings. */ }
     let entries
-    try { entries = await readdir(directory, { withFileTypes: true }) } catch { return }
+    try { entries = await readdir(directory, { withFileTypes: true }) } catch (error) {
+      if (isMissingPath(error)) return
+      throw error
+    }
     // Concurrent, not serial: sibling skill directories are independent reads. Pruned first — SKIP_DIRS
     // is the difference between a scan proportional to real skill directories and one proportional to the
     // whole workspace.
@@ -61,9 +75,9 @@ async function walkSkills(bases: readonly (readonly [string, AgentSkill['source'
 }
 
 // 打开菜单不是"目录变了"的证据；只有目录真的变了才重新发现（设计 SSOT）. The freshness signature is the
-// mtime of each declared skill-root directory: adding or removing a skill changes its root's mtime, so a
-// changed set re-discovers at once while an unchanged one is served from cache — the same rootMtime model
-// as project-appearance.ts. Two changes it cannot catch by root mtime alone — an edit to an existing
+// metadata of each declared skill-root directory: adding or removing a skill changes its root's mtime,
+// and mode/ctime keep a root permission change from being hidden by a warm cache. A changed root
+// re-discovers at once while an unchanged one is served from cache. Two changes this cannot catch — an edit to an existing
 // SKILL.md's frontmatter, and a skill added below a root's direct child — heal when the TTL lapses.
 // This lives in Core, not in the composer component: the component's inputs (workspace/provider) mutate
 // in place without a remount, so it cannot tell a re-open apart from a real change. Both entry points
@@ -76,7 +90,13 @@ const CACHE_TTL_MS = 60_000
 
 async function rootSignature(rootPaths: readonly string[]): Promise<string> {
   const parts = await Promise.all(rootPaths.map(async (path) => {
-    try { return `${path}\n${(await stat(path)).mtimeMs}` } catch { return `${path}\n-` }
+    try {
+      const metadata = await stat(path)
+      return `${path}\n${metadata.mtimeMs}\n${metadata.ctimeMs}\n${metadata.mode}`
+    } catch (error) {
+      if (isMissingPath(error)) return `${path}\n-`
+      throw error
+    }
   }))
   return parts.join('|')
 }
