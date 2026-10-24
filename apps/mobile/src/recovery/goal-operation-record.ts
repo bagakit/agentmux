@@ -6,6 +6,7 @@ export type MobileGoalOperationRecord = {
   origin: string
   method: 'goal.assign' | 'goal.start' | 'goal.handoff' | 'goal.delete' | 'goal.link-session' | 'goal.link-project'
   request: Record<string, unknown> & { goalId: string; operationId: string }
+  confirmation?: 'confirmed'
 }
 
 export function parseMobileGoalOperationRecord(value: unknown): MobileGoalOperationRecord {
@@ -15,8 +16,9 @@ export function parseMobileGoalOperationRecord(value: unknown): MobileGoalOperat
     return v as Record<string, unknown>
   }
   const id = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length <= 256
-  const v = object(value, ['runtimeId', 'ownerInstanceId', 'deviceHostId', 'origin', 'method', 'request'])
+  const v = object(value, ['runtimeId', 'ownerInstanceId', 'deviceHostId', 'origin', 'method', 'request', ...(Object.hasOwn(value ?? {}, 'confirmation') ? ['confirmation'] : [])])
   if (!(v.runtimeId === null && v.ownerInstanceId === null || id(v.runtimeId) && id(v.ownerInstanceId)) || !(v.deviceHostId === null || id(v.deviceHostId)) || typeof v.origin !== 'string' || !v.origin || v.origin.length > 2048) return invalid()
+  if (v.confirmation !== undefined && v.confirmation !== 'confirmed') return invalid()
   const method = v.method
   if (!['goal.assign', 'goal.start', 'goal.handoff', 'goal.delete', 'goal.link-session', 'goal.link-project'].includes(String(method))) return invalid()
   const raw = v.request as Record<string, unknown>
