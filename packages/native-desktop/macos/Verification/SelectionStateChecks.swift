@@ -42,6 +42,16 @@ private struct SelectionStateChecks {
             let panel = NativeSelectionState.panelFrame(size: CGSize(width: 480, height: 76), preferredOrigin: CGPoint(x: 10000, y: -10000), screen: screen)
             check("panel stays within \(screen.width)pt display", screen.contains(panel))
         }
+        let screen = CGRect(x: 0, y: 0, width: 2056, height: 1329)
+        let edge = CGRect(x: 40, y: 20, width: 310, height: 130)
+        let toolbar = CGRect(x: 12, y: 162, width: 480, height: 40)
+        let dimension = NativeSelectionState.dimensionPanelFrame(size: CGSize(width: 130, height: 28), selection: edge, toolbar: toolbar, screen: screen)
+        check("edge dimensions avoid the flipped toolbar", !dimension.intersects(toolbar))
+        check("edge dimensions prefer the inside top when outside is occupied", dimension.minY == 114)
+        let top = CGRect(x: 40, y: screen.maxY - 130, width: 310, height: 130)
+        let topDimension = NativeSelectionState.dimensionPanelFrame(size: CGSize(width: 130, height: 28), selection: top,
+            toolbar: CGRect(x: 12, y: top.minY - 52, width: 480, height: 40), screen: screen)
+        check("top edge dimensions stay within the actual screen", screen.contains(topDimension))
         let report: [String: Any] = ["tests": names.count, "failures": failures, "cases": names]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]), let text = String(data: data, encoding: .utf8) { print(text) }
         if names.isEmpty || !failures.isEmpty { exit(1) }
