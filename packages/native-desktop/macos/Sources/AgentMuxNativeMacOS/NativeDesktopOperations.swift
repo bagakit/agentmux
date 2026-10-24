@@ -12,12 +12,18 @@ enum NativeDesktopOperations {
     static func capture(_ params: [String: JSONValue]) -> [String: Any] {
         do {
             let mode = params["mode"]?.string ?? "selection"
+            if let editing = params["allowEditing"], mode != "selection" || editing.bool == nil {
+                throw ProviderError.coded("invalid_argument", "allowEditing must be a boolean on a selection request")
+            }
             let rect: CGRect
             if mode == "selection" {
                 return try NativeSelectionCaptureLease.shared.withCapture { ownership in
-                    let selection = try NativeSelectionRequest.run()
+                    let allowEditing = params["allowEditing"]?.bool == true
+                    let selection = try NativeSelectionRequest.run(allowEditing: allowEditing)
                     guard let selection else { return ["state": "cancelled"] }
-                    return try capturedRectangle(selection, ownership: ownership)
+                    var result = try capturedRectangle(selection.rectangle, ownership: ownership)
+                    if allowEditing { result["completionAction"] = selection.completionAction.rawValue }
+                    return result
                 }
             } else if mode == "rect" {
                 guard case let .object(values)? = params["rect"],

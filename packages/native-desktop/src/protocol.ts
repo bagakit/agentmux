@@ -36,7 +36,7 @@ export interface NativeOperation {
   result?: Json
 }
 export type CaptureParams =
-  | { mode: 'selection' }
+  | { mode: 'selection'; allowEditing?: boolean }
   | { mode: 'display'; displayId: number }
   | { mode: 'window'; windowId: number; app: string; processStartedAt: number }
   | { mode: 'rect'; rect: { x: number; y: number; width: number; height: number }; displayId?: number }
@@ -45,6 +45,8 @@ export interface CaptureResult {
   screenshot?: { format: 'png'; data: string; width: number; height: number; scale: number }
   engine?: string
   selectionRect?: { x: number; y: number; width: number; height: number }
+  /** Host opt-in selection intent; no editing or output delivery happens in Native. */
+  completionAction?: 'capture' | 'edit'
   error?: NativeErrorData
 }
 

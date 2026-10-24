@@ -276,6 +276,14 @@ export class NativeDesktop {
       throw invalid('Native capture did not return a typed outcome')
     }
     const result = raw as unknown as CaptureResult
+    const allowsEditing = params.mode === 'selection' && params.allowEditing === true
+    if (result.state === 'captured' && allowsEditing) {
+      if (result.completionAction !== 'capture' && result.completionAction !== 'edit') {
+        throw invalid('Editable selection is missing its completion intent')
+      }
+    } else if (result.completionAction !== undefined) {
+      throw invalid('Capture returned a completion intent outside the original editable selection')
+    }
     if (result.state === 'captured') {
       const screenshot = result.screenshot
       if (!screenshot || screenshot.format !== 'png' || typeof screenshot.data !== 'string' || !Number.isFinite(screenshot.scale) || screenshot.scale <= 0) {
