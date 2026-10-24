@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { CLIENT_INCIDENT_MAX_STAGES, safeClientIncidentCode, type AgentMuxClientEvent, type AgentMuxClientIncidentMetadata,
-  type AgentMuxClientIncidentProducer, type AgentMuxClientIncidentReport, type AgentMuxClientReadingIncidentKind } from '@agentmux/core'
+  type AgentMuxClientIncidentProducer, type AgentMuxClientIncidentReport } from '@agentmux/core'
 import type { AppConfig, ExecutorDetection } from '../shared/contracts.js'
 import type { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import type { RuntimeController } from './runtime-controller.js'
@@ -132,7 +132,7 @@ export class ClientIncidentRuntimeOwner {
     } catch { /* This observer never fails or reconnects the original connection owner. */ }
   }
 
-  private record(hostId: string, kind: Exclude<AgentMuxClientIncidentReport['kind'], AgentMuxClientReadingIncidentKind>, stage: AgentMuxClientIncidentReport['stage'], attemptId: string,
+  private record(hostId: string, kind: Extract<AgentMuxClientIncidentReport, { reading?: never; mobile?: never }>['kind'], stage: AgentMuxClientIncidentReport['stage'], attemptId: string,
     relatedOccurrenceId: string | null, code: unknown, metadata: AgentMuxClientIncidentMetadata, stages: Stages, elapsedMs: number,
     observedAt = Date.now()): string {
     const occurrenceId = mintObjectId()
