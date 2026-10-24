@@ -165,6 +165,20 @@ Capsule 沿既有 [`amux://` 对象链接体系](../../specs/amux-protocol.md#�
 
 CLI 只适配公共业务合同，skill 的机械能力说明与运行时实际能力同源；使用指导解释如何选择模式、确认目标和处理未知。无 UI Host、Desktop 和其他 client 使用同一领域 owner，不能只完成 GUI、help 或生成一份静态 skill 就视为公共能力已交付。
 
+## 对话卡中的页面成果
+
+普通 `amux://capsule/<ID>` 及 Markdown 链接继续表达对象引用，不因阅读或 hover 执行页面。独立 Markdown 段落中的 `![页面标题](amux://capsule/<ID>)` 明确表达页面内嵌意图；同段可以包含多条同类引用，各自保原 URI、顺序与身份。沿 Core 严格对象 parser，不增加执行 query、任意 HTML 或 XML 控制协议；引用不认证作者、授予权限或证明页面已发布，完整消息 Copy 保原 wire。
+
+支持该呈现的 client 在原卡片真实可见时先沿原 Browser owner 回接准确既有文档；原服务查询失败不撤回仍可用的页面。首次没有原生文档时，读取准确 Capsule 并在原服务可用后创建消费者；消息到来和读取不 Start 服务、重新发布、导航其他页面或抢输入焦点。普通链接、代码、只读、文档模式及没有 adapter 的 client 保可读标题与原地址，不派发页面工作。服务停止、缺少路由、来源未知或呈现失败在原引用附近如实说明，保重读原对象与完整 Browser 打开入口，不替换成空页面或禁用正常对话。
+
+内嵌复用原 Browser 独立 partition、sandbox、准确文档和 Capsule 模式。页面不进入宿主 DOM，不继承 Node、Electron 或任意 RPC；注入沿原主文档及服务实例资格，隔离页仍没有 App 通道。人工回答仍由可信宿主问题控件和原输入 owner 确认，标签、URL 和页面脚本不能自称 Human。
+
+展示与页面身份分别成立：有 Region 的卡片消费真实承载位置，无空间 Region 的 Gallery／Focus 卡片按已鉴权原 Renderer 和窗口文档标识内嵌 occurrence，不制造 Core Region，不借焦点或 cwd 猜展示。准确原消息／来源、content part、Markdown 嵌入位置、原 URI 和承载工作面共同限定内嵌呈现引用；不同消息或同页的不同嵌入不合并。沿现有身份组件派生同一 Browser 寻址，原 native owner 的 existing／released 绑定保持唯一，消息暂离阅读窗口或组件卸载后再回原位置仍复用原 Browser，不以另开一页代替保留的表单和 DOM。缺少准确来源或承载位置的独立阅读面保原地址；位置未确认时就近说明并保完整打开动作，不创建匿名、可能互串的页面，也不因此判原页面故障。
+
+隐藏撤原 lease 与 capture，沿原 native release 的 released／retained／unknown 回执保原 Browser 和导航身份，不自动 Close、不清表单或重放未知操作。原生输入覆盖不能越出真实滚动窗口或遮住时间尺：部分裁剪时保 live capture 和原页，仅撤下不适用于当前几何的 native 输入覆盖；完整进入阅读窗口或打开原 Browser 后仍可交互，几何不成为页面／Agent 权限或健康事实。完整 Browser 打开仍沿原 Capsule 公共 owner。
+
+共享阅读通过窄 host adapter 呈现，不持页面事实或第二份 Browser／交互账本。外部原生 Channel 卡片按本平台实际能力保原文和引用，不因协议或 skill 获得网页执行能力。公开查询和打开复用 `capsule.inspect`／`capsule.open`，服务、模式、授权和操作查询合同保持。
+
 ## Browser 与 Toolkit Library 联动
 
 Capsule 的日常闭环是：Agent 生成或更新页面，经 Capsule owner 取得原页面 ID 和发布回执；可由 Toolkit 的真实执行结果提供该对象引用；人或 Agent 打开／定位同一页面，在已授权模式下查看并交互；可信输入 owner 将人的明确答复交给原准确 Agent，结果沿原 operation 核对。每一阶段保留原对象和来源，不以端口 URL 或显示文字接成另一条链。
