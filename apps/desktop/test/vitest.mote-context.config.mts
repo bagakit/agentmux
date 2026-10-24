@@ -8,8 +8,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const dependencyRepository = resolve(realpathSync(resolve(root, 'node_modules')), '..')
 // The isolated worktree has no shipping dist. Exercise these current public sources explicitly.
 const aliases: Alias[] = []
-for (const name of ['core', 'demand', 'git', 'identity', 'layout', 'client-ui', 'relay', 'diagnostic-evidence']) {
-  const directory = resolve(root, 'packages', name)
+for (const name of ['core', 'demand', 'git', 'identity', 'layout', 'client-ui', 'relay', 'diagnostic-evidence', 'host']) {
+  const directory = resolve(root, name === 'host' ? 'apps' : 'packages', name)
   const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8'))
   const exports = (Object.entries(manifest.exports ?? {}) as [string, { import?: string; browser?: string }][])
     .sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)
@@ -19,6 +19,18 @@ for (const name of ['core', 'demand', 'git', 'identity', 'layout', 'client-ui', 
     const stem = target.replace('./dist/src/', './src/').replace('./dist/', './src/').replace(/\.js$/, '.ts')
     const specifier = `@agentmux/${name}${entry === '.' ? '' : entry.slice(1)}`
     const pattern = specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    // This export embeds a generated runtime program; it has no source module.
+    // Resolve only the current tree's build, never a dependency-link sibling.
+    if (name === 'identity' && entry === './runtime-source') {
+      const generated = resolve(directory, target)
+      if (!existsSync(generated)) throw new Error('Build this tree’s @agentmux/identity runtime source before source-alias tests.')
+      aliases.push({ find: new RegExp(`^${pattern}$`), replacement: generated })
+      continue
+    }
+    if (name === 'identity' && entry === './runtime') {
+      aliases.push({ find: new RegExp(`^${pattern}$`), replacement: resolve(directory, 'src/runtime-entry.ts') })
+      continue
+    }
     if (entry.includes('*')) {
       aliases.push({ find: new RegExp(`^${pattern.replace('\\*', '(.*)')}$`), replacement: resolve(directory, stem.replace('*', '$1')) })
       continue

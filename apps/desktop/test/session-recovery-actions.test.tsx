@@ -283,8 +283,9 @@ describe('actual unobserved SessionPane original reference', () => {
   it('the retired-history recovery caller opens the same central picker and leaves history and drafts intact on cancel', async () => {
     const state = useAppStore.getState(), originalTab = state.tabs['original-tab'], drafts = state.agentComposerDrafts
     const original = state.sessions.find(item => item.id === 'original')!
-    vi.spyOn(api.sessions, 'historySources').mockResolvedValue([{ agentSessionId: 'original', hostId: 'local', state: 'retired', retiredAt: 10,
-      history: { providerId: 'codex', executorId: 'codex', workspacePath: _hygiene_fixturePath("repo"), createdAt: 1 } }])
+    const retained = [{ agentSessionId: 'original', hostId: 'local', state: 'retired' as const, retiredAt: 10,
+      history: { providerId: 'codex', executorId: 'codex', workspacePath: _hygiene_fixturePath("repo"), createdAt: 1 } }]
+    vi.spyOn(api.sessions, 'historySources').mockImplementation(async request => request?.observation ? { sources: retained, warnings: [] } : retained)
     vi.spyOn(api.spatial, 'read').mockResolvedValue(graphFor(original as Awaited<ReturnType<typeof unobservedOriginal>>))
     await act(async () => useAppStore.setState({ sessions: state.sessions.filter(item => item.id !== 'original') }))
     await mount()
