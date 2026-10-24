@@ -30,7 +30,9 @@ This bounded local read is available with the original managed caller. It expose
 the exact Connection's adapterService policy (adapterId, enabled and revision),
 transport, binding scope/grant counts and newest application/group intake with original Core
 outcome/waiting reasons, including receiver aliases. Outgoing diagnosis reads the newest five
-original delivery operations, retaining independent unknown effects and source gaps. For explicit
+original delivery operations, retaining independent unknown effects and source gaps.
+Diagnosis distinguishes bindingRevision from publicationRevision after trigger-only configuration
+changes; original intake authors and receipts retain their own configuration revision. For explicit
 delivery pages use connection delivery ls --order oldest|newest (default oldest); --after continues
 the same requested order, while --after-content independently pages unresolved content. A newer
 confirmed operation does not prove complete synchronization. It returns no bodies, member identities,
@@ -272,8 +274,9 @@ and future bound groups; it is not shared with other bots or Hosts and does not 
 Current connection binding inspect returns access separately from the original room grants.
 Each member has a local decision and a typed room/application effective source. An explicit
 group decision wins in full: missing capabilities are not filled from the application rule,
-and revoked group access denies all three. An earlier same-subject decision whose Binding
-revision differs remains visible for review; it never silently becomes application inheritance.
+and revoked group access denies all three. An original decision remains effective across an
+owner-confirmed unchanged publication relationship; a different relationship requires review.
+Neither case silently becomes application inheritance.
 Use connection binding member inherit with operationId, bindingId, expectedBindingRevision,
 actor and expectedGrant {grantId,revision} to explicitly remove that local override. This
 retains the original revisions and operation receipts. A historical inspection is not a
@@ -291,7 +294,13 @@ Session and sharing rules, captures a fresh source cut and never backfills the p
 A relink carries member decisions when the application, group, execution Host/Runtime,
 Agent Session and input target remain unchanged, including explicitly saved changes to
 message triggers or publication scope. Original capabilities and revocations persist;
-old Binding/grant references remain tied to their original revisions.
+old Binding/grant references remain tied to their original revisions. When only input triggers
+change on the same active ordinary full-sharing relationship, the owner returns
+publicationBoundary {revision} pointing directly to its original Binding row. This field is not
+caller input. Publication keeps its original source cut, pending operations and unknown effects;
+delivery inspection continues to use that original revision. Current member capabilities still
+govern input and actions. A changed audience, execution target/source or paused interval takes
+a new cut. Private Mote origins keep their separate creation contract.
 Detach ends current routing, retains original revisions and receipts, and never stops the Agent
 or deletes the platform group. Its original operation stays inspectable after the live list changes.
 Applied lifecycle operations reference independent notice deliveryOperationIds. Inspect or list those
