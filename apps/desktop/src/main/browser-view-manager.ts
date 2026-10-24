@@ -1691,6 +1691,12 @@ export class BrowserViewManager {
     if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     const entry = this.require(id)
     this.requireHumanInput(entry)
+    const target = classifyBrowserTarget(resolveBrowserAddress(rawUrl))
+    if (target.kind === 'hand-off') {
+      // Classify the address interpretation, but hand off its exact original URI.
+      await this.handOffAppLink(entry, rawUrl, target.scheme!)
+      return this.snapshot(entry)
+    }
     void this.startNavigation(entry, rawUrl).catch(() => {})
     return this.snapshot(entry)
   }
