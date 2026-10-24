@@ -804,7 +804,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         record(p, ['hostId', 'message']); string(p.hostId)
         if (input.hostId !== undefined && p.hostId !== input.hostId) fail()
         if (p.message !== null) {
-          const original = record(p.message, ['sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice'])
+          const original = record(p.message, ['sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice', 'inputOrigin'])
+          if (original.inputOrigin !== null) parseAgentInputJournalCut(original.inputOrigin)
           const envelope = message(original, input.notificationId as string | undefined)
           if ((input.messageId === undefined ? envelope.operationId !== input.operationId : envelope.messageId !== input.messageId) || credentials && envelope.senderSessionId !== credentials.agentSessionId &&
             envelope.recipientSessionId !== credentials.agentSessionId) fail()
