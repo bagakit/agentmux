@@ -26,7 +26,10 @@ import { MobileMailbox } from './MobileMailbox'
 import { MobileAttachments, type MobileAttachmentControls } from './MobileAttachments'
 import { fileUploadScopeMatches } from './attachments'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
+import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
+import { encodeSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 import { appendNamedFileReference } from '@agentmux/client-ui/composer-file-reference'
+import { formatSessionAddress } from '@agentmux/core/sharing'
 import { useMobilePromptController } from './use-mobile-prompt-controller'
 import { useMobileInteractionController } from './use-mobile-interaction-controller'
 import './conversation.css'
@@ -101,11 +104,48 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const providerCapabilities = (() => {
     try {
       const provider = session?.providerId ? client?.catalog?.().find(entry => entry.id === session.providerId) : undefined
-      return { route: provider?.capabilities.asyncQuestionReply, postureControl: provider?.postureControl }
-    } catch (error) { return { route: undefined, postureControl: undefined, issue: errorMessage(error) } }
+      return { route: provider?.capabilities.asyncQuestionReply, postureControl: provider?.postureControl, commands: provider?.composer?.commands }
+    } catch (error) { return { route: undefined, postureControl: undefined, commands: undefined, issue: errorMessage(error) } }
   })()
   const questionCapability = { route: providerCapabilities.route, issue: providerCapabilities.issue }
   const postureControl = providerCapabilities.postureControl
+  const commandSuggestions = useMemo<ComposerSuggestion[]>(() => (providerCapabilities.commands ?? []).map(command => ({
+    id: `command:${command.text}`,
+    text: command.text,
+    label: command.text,
+    description: command.description,
+    searchText: `${command.text} ${command.description}`,
+    insertText: command.text
+  })), [providerCapabilities.commands])
+  const agentReferences = useMemo<ComposerSuggestion[]>(() => {
+    try {
+      return (client?.agentSessions() ?? []).map(peer => {
+        const peerId = peer.agentSessionId
+        const label = peerId === agentSessionId && displayName ? displayName : `${peer.providerId} (${peerId.slice(0, 6)})`
+        const link = formatSessionAddress(peerId)
+        return {
+          id: `agent:${peerId}`,
+          text: `@${label}`,
+          label,
+          description: `${peer.hostId} · ${peerId}`,
+          group: 'Agents',
+          searchText: `${label} ${peerId} ${peer.providerId}`,
+          insertText: encodeSemanticReference({ kind: 'agent', token: `@${label}`, label, reference: link })
+        }
+      })
+    } catch { return [] }
+  }, [client, session, agentSessionId, displayName])
+  async function insertSuggestion(item: ComposerSuggestion) {
+    if (!insertion.current) {
+      setCopyNotice('原编辑器未准备好；草稿保留。')
+      return
+    }
+    try {
+      await insertion.current.insert(async () => item.insertText ?? item.text, { separate: true })
+    } catch (error) {
+      setCopyNotice(errorMessage(error))
+    }
+  }
   async function interruptCurrentTurn() {
     if (!client?.signalAgent || !session || !agentSessionId) return
     try {
@@ -392,7 +432,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
               return appendNamedFileReference('', path, original.identity.name)
             }, { separate: true })
           }} />}
+          commands={commandSuggestions} references={agentReferences}
           tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal}
+            commands={commandSuggestions} onCommand={item => { void insertSuggestion(item) }}
             {...(isWorking && available && Boolean(draft.trim()) ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})} />}
           {...(postureControl && available ? { postureTool: <MobilePosturePicker control={postureControl} disabled={!available} onSet={modeId => { void changePosture(modeId) }} /> } : {})}
           primaryAction={isWorking && !draft.trim() ? 'stop' : 'send'}
