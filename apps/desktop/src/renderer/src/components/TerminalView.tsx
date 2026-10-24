@@ -91,7 +91,7 @@ import {
 } from '@agentmux/client-ui/terminal/live-output'
 import { terminalStartupPhase } from '../lib/terminal-startup'
 import { isVanishedAgentRunError } from '../lib/terminal-attach-recovery'
-import { TerminalInitialObservationRecovery, recoverableInitialTerminalObservation } from '../lib/terminal-initial-observation-recovery'
+import { TerminalInitialObservationRecovery } from '../lib/terminal-initial-observation-recovery'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
   terminalAcceptsInput,
@@ -1901,7 +1901,7 @@ export function TerminalView({
             refreshOccurrence ?? initialFailureOccurrence ?? attachDeadlineOccurrence)
           if (attachmentId === null && !applyingReplay) {
             initialRecovery?.failure(error)
-            if (recoverableInitialTerminalObservation(error)) initialFailureOccurrence = failureOccurrence ?? initialFailureOccurrence
+            initialFailureOccurrence = failureOccurrence ?? initialFailureOccurrence
           }
           const vanishedAgentRun = session.kind === 'agent' && isVanishedAgentRunError(error)
           if (!refresh && vanishedAgentRun && recoverVanishedRunRef.current !== session.control.run.runId) {
