@@ -319,6 +319,7 @@ const store: AgentMuxAgentSessionStore = {
   async loadReopenCorrelations() { return [] },
   async compareAndSwap() {},
   async reserveLifecycle() {},
+  async recordRestartAdmission() { throw new Error('Read-only Store fixture cannot admit a restart') },
   async claimStaleLifecycles() { return [] },
   async releaseLifecycle() {},
   async retireRuns() {},
