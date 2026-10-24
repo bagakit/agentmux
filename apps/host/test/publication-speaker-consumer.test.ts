@@ -18,14 +18,22 @@ import { FeishuPublicationAdapter } from '../../../packages/connectors/src/adapt
 import { FeishuAdapter } from '../../../packages/connectors/src/adapters/feishu/index.js'
 import { publicationSpeaker } from '../../../packages/connectors/src/publication-speaker.js'
 import { createWorkspaceLayout } from '@agentmux/core/spatial-layout'
+import { rasterizeStaticAvatar, savedMoteAvatarDrawing } from '../src/static-avatar.js'
+import * as staticArtwork from '../src/static-avatar.js'
+import { createHash } from 'node:crypto'
+import { agentAvatarSvg } from '@agentmux/client-ui/agent-avatar-svg'
 
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
 const native = (sessionId: string, uuid: string, text: string) => JSON.stringify({ type: 'assistant', sessionId, uuid, message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n'
 
-async function fixture(ordinaryName?: string) {
+async function fixture(ordinaryName?: string, extraSessions: string[] = []) {
   const original = await rpcOwnerFixture(['ordinary-agent'], core, root => ({ providerId: 'claude', executorId: 'claude',
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'ordinary-native', transcriptPath: join(root, 'ordinary.jsonl') } }))
+  for (const id of extraSessions) {
+    const previous = (await original.store.readMetadata('ordinary-agent'))!, { nativeHandle: _handle, ...retained } = previous
+    await original.store.compareAndSwap(null, { ...retained, agentSessionId: id, run: { runId: 'run-' + id }, executorId: id + '-executor' })
+  }
   cleanup.push(original.close); const sdk = feishuSdkTransport()
   const remote = await feishuMediaPlatform(); cleanup.push(remote.close)
   const request = vi.mocked(defaultHttpInstance.request).getMockImplementation()!
@@ -96,7 +104,19 @@ async function fixture(ordinaryName?: string) {
     moteBinding = bindings.bindings.find(binding => binding.externalConversationId === 'original-private-room')!
     expect(moteBinding?.state).toBe('active')
   }, { timeout: 10_000 })
-  await vi.waitFor(() => expect(original.inner.kernel.input).toHaveBeenCalledTimes(2))
+  try { await vi.waitFor(async () => {
+    const page = await service().ingress!.list({ connectionId: feishuConfig.connectionId })
+    const intake = page.ingresses.find(record => record.externalMessageId === 'platform-message' && record.externalConversationId === 'original-private-room')
+    expect(intake?.input).toBeDefined()
+    const originalReceipt = intake && await service().ingress!.inspect({ ingressId: intake.ingressId })
+    expect(originalReceipt?.inputReceipt?.status).toBe('terminal-confirmed')
+  }, { timeout: 4000 }) }
+  catch (error) {
+    if (process.env.STATIC_AVATAR_DIAG) await writeFile(process.env.STATIC_AVATAR_DIAG,
+      JSON.stringify(await client.call('space.mote.chat.diagnose', { target }), null, 2) + '\n')
+    throw error
+  }
+  expect(original.inner.kernel.input).toHaveBeenCalledTimes(2)
   const ordinary = await client.call('connection.bind', { operationId: 'speaker-ordinary-bind', bindingId: 'speaker-ordinary-binding', connectionId: feishuConfig.connectionId,
     expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: 'ordinary-agent', externalConversationId: 'ordinary-room', expectedSource: { providerId: 'claude', nativeSessionId: 'ordinary-native' }, scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' } })
   expect(ordinary.state).toBe('applied'); if (ordinary.state !== 'applied') throw Error('Original ordinary Binding required')
@@ -146,8 +166,9 @@ it('default Host freezes exact Mote and ordinary speakers, reuses the original c
   await f.reply(f.ordinary, 'speaker-ordinary', 'Ordinary exact Session with the same display name')
   await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.state).toBe('confirmed'))
   const ordinary = f.operations(f.ordinary).at(-1)!
-  expect(ordinary.speaker).toMatchObject({ kind: 'agent', name: f.topic.title, reference: { agentSessionId: 'ordinary-agent' } }); expect(ordinary.speaker?.avatar).toBeUndefined()
-  expect(f.remote.uploads).toHaveLength(1)
+  expect(ordinary.speaker).toMatchObject({ kind: 'agent', name: f.topic.title, reference: { agentSessionId: 'ordinary-agent' }, avatar: { observation: 'available', image: { width: 64, height: 64 } } })
+  expect(ordinary.speaker?.mote).toBeUndefined(); expect(ordinary.speaker?.avatar?.target).toBeUndefined()
+  await vi.waitFor(() => expect(f.remote.uploads).toHaveLength(2))
   const publicReceipt = await f.client.call('connection.delivery.inspect', { operationId: second.operationId })
   for (const hidden of [f.png.toString('base64'), 'original-image-key-1']) expect(JSON.stringify(publicReceipt)).not.toContain(hidden)
   for (const hidden of ['speaker', 'avatarSource', 'avatarUploads']) expect(Object.hasOwn(publicReceipt.delivery!, hidden)).toBe(false)
@@ -159,7 +180,7 @@ it('default Host freezes exact Mote and ordinary speakers, reuses the original c
   expect(f.operations()).toEqual(before)
   await f.reply(f.moteBinding, 'speaker-after-reopen', 'Next original reply after reopen')
   await vi.waitFor(() => expect(f.operations()).toHaveLength(3)); await vi.waitFor(() => expect(f.operations().at(-1)?.state).toBe('confirmed'))
-  expect(f.remote.uploads).toHaveLength(1); expect(f.remote.calls.filter(call => call.method === 'POST')).toHaveLength(count + 1)
+  expect(f.remote.uploads).toHaveLength(2); expect(f.remote.calls.filter(call => call.method === 'POST')).toHaveLength(count + 1)
   expect(f.service().publication!.store.inspect(first.operationId)).toEqual(first)
   const renamed = await f.topics.renameTitle(f.workspace, f.topic.id, 'Exact changed Mote')
   const changedPng = imagePng(256, 256, [71, 103, 183]), changedRef = await saveObjectAvatarFile(renamed.physicalDirectoryPath!, changedPng)
@@ -172,22 +193,89 @@ it('default Host freezes exact Mote and ordinary speakers, reuses the original c
   const changedAvatar = await (await f.rpc()).call('space.mote.avatar.read', { target: { workspaceId: f.workspace.id, topicId: f.topic.id, objectKey: f.target.spaceId } })
   expect(f.operations().at(-1)?.speaker).toMatchObject({ name: renamed.title, avatar: { revision: changedAvatar.revision } })
   expect(changedAvatar.revision).not.toBe(first.speaker!.avatar!.revision)
-  expect(f.remote.uploads).toEqual([f.png, changedPng]); expect(f.service().publication!.store.inspect(first.operationId)).toEqual(first)
+  expect(f.remote.uploads).toHaveLength(3); expect(f.remote.uploads[0]).toEqual(f.png); expect(f.remote.uploads[2]).toEqual(changedPng)
+  expect(f.service().publication!.store.inspect(first.operationId)).toEqual(first)
   // A distinct application namespace on the same Host must make its own original upload claim.
   const rpc = await f.rpc(), config = { ...feishuConfig, connectionId: 'speaker-other-application', application: { ...feishuConfig.application, domain: 'open.larksuite.com' }, credentialRef: f.credential.credentialRef }
   await rpc.call('connection.configure', { operationId: 'speaker-other-configure', expectedRevision: null, connection: config })
   const session = await f.current().client.readAgentSession(f.moteBinding.agentSessionId), source = session!.nativeHandle!
   if (source.kind !== 'provider') throw Error('Original native source required')
   const bound = await rpc.call('connection.bind', { operationId: 'speaker-other-bind', bindingId: 'speaker-other-binding', connectionId: config.connectionId, expectedConnectionRevision: 1,
-    executionHostId: 'local', agentSessionId: f.moteBinding.agentSessionId, externalConversationId: 'other-application-room', expectedSource: { providerId: source.providerId, nativeSessionId: source.sessionId }, scope: f.moteBinding.scope })
+    executionHostId: 'local', agentSessionId: f.moteBinding.agentSessionId, externalConversationId: 'other-application-room', expectedSource: { providerId: source.providerId, nativeSessionId: source.sessionId }, scope: { ...f.moteBinding.scope, publication: 'future-shared-conversation' } })
   expect(bound.state).toBe('applied'); if (bound.state !== 'applied') throw Error('Exact other application Binding required')
   await f.reply(bound.binding, 'speaker-other-application', 'The other application owns its avatar effect')
   await vi.waitFor(() => expect(f.operations(bound.binding).at(-1)?.state).toBe('confirmed'))
   await vi.waitFor(() => expect(f.operations(bound.binding).at(-1)?.avatarUploads?.at(-1)?.state).toBe('confirmed'))
-  expect(f.operations(bound.binding).at(-1)?.avatarSource).toBeUndefined(); expect(f.remote.uploads).toEqual([f.png, changedPng, changedPng])
+  expect(f.operations(bound.binding).at(-1)?.avatarSource).toBeUndefined(); expect(f.remote.uploads).toHaveLength(4)
+  expect(f.remote.uploads.slice(2)).toEqual([changedPng, changedPng])
   await expect(stat(f.desktop)).rejects.toMatchObject({ code: 'ENOENT' })
   // The two original creator input phases are distinct from these read/publication operations.
   expect(f.original.inner.kernel.input).toHaveBeenCalledTimes(2); expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
+}, 40_000)
+
+it('default independent Host publishes the original built-in Mote portrait and keeps its exact upload and card across reopen', async () => {
+  const f = await fixture('Same visible name')
+  Object.assign(f.config.appearance.spaceObjectIcons, { [f.target.spaceId]: null }); await f.save()
+  const expected = await rasterizeStaticAvatar(savedMoteAvatarDrawing(null, f.config.appearance)!, 256)
+  const png = Buffer.from(expected.dataUrl.slice('data:image/png;base64,'.length), 'base64')
+  await f.reply(f.moteBinding, 'static-mote-first', 'First complete original Mote reply')
+  await vi.waitFor(() => expect(f.operations().at(-1)?.state).toBe('confirmed'))
+  expect(f.operations().at(-1)?.speaker?.avatar).toMatchObject({ observation: 'available', image: { width: 256, height: 256 } })
+  await vi.waitFor(() => expect(f.operations().at(-1)?.avatarUploads?.at(-1)?.state).toBe('confirmed'))
+  const first = f.operations().at(-1)!, firstWire = structuredClone(first.prepared)
+  expect(first.speaker).toMatchObject({ mote: f.target, avatar: { observation: 'available', image: { width: 256, height: 256 } } })
+  expect(f.remote.uploads).toEqual([png]); expect(png).not.toEqual(f.png)
+  await f.reply(f.moteBinding, 'static-mote-second', 'Second complete original Mote reply')
+  await vi.waitFor(() => expect(f.operations().at(-1)?.state).toBe('confirmed'))
+  const second = f.operations().at(-1)!, card = JSON.parse(JSON.parse(second.prepared!.request.body!).content)
+  expect(second.avatarSource).toEqual({ operationId: first.operationId, attempt: 1, imageKey: 'original-image-key-1' })
+  expect(card.body.elements[0]).toMatchObject({ text: { content: f.topic.title + ' · Agent' }, icon: { tag: 'custom_icon', img_key: 'original-image-key-1', size: '16px 16px' } })
+  const retained = structuredClone(second)
+  await f.stop(); await f.start()
+  expect(f.service().publication!.store.inspect(first.operationId)?.prepared).toEqual(firstWire)
+  expect(f.service().publication!.store.inspect(second.operationId)).toEqual(retained)
+  expect(f.remote.uploads).toEqual([png]); await expect(stat(f.desktop)).rejects.toMatchObject({ code: 'ENOENT' })
+  if (process.env.STATIC_AVATAR_PREVIEW) {
+    await writeFile(join(process.env.STATIC_AVATAR_PREVIEW, 'native-card.json'), JSON.stringify(card, null, 2) + '\n')
+    await writeFile(join(process.env.STATIC_AVATAR_PREVIEW, 'mote-avatar.png'), png)
+  }
+}, 40_000)
+
+it('default Host carries the authenticated A2A sender own saved Executor portrait through the original outbox and native card', async () => {
+  const f = await fixture('Equal visible name', ['peer-agent'])
+  Object.assign(f.config.executors, {
+    'peer-agent-executor': { label: 'Equal visible name', providerId: 'claude', avatar: { tint: '#67b9ef', badge: 'shield' } },
+    claude: { label: 'Equal visible name', providerId: 'claude', avatar: { tint: '#ed7777', badge: 'bolt' } }
+  }); await f.save()
+  await f.spatial.retainDisplayLabels([{ target: { kind: 'agent-session', id: 'peer-agent' }, value: 'Equal visible name' }])
+  const expectedSvg = agentAvatarSvg('claude', { tint: '#67b9ef', badge: 'shield' }, () => { throw Error('Original vector artwork selected an unexpected raster') })
+  const expectedRevision = 'sha256:' + createHash('sha256').update(expectedSvg).digest('hex')
+  const image = await rasterizeStaticAvatar(expectedSvg, 64), png = Buffer.from(image.dataUrl.split(',')[1]!, 'base64')
+  const sender = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: f.socket }, credentials: { agentSessionId: 'peer-agent', capability: f.original.capability } })
+  cleanup.push(() => sender.dispose())
+  vi.spyOn(f.current().client.providers.get('claude'), 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
+  const send = async (id: string, text: string) => {
+    await sender.call('agent.send', { target: { kind: 'agent-session', agentSessionId: 'ordinary-agent' }, operationId: 'send-' + id, messageId: id, text })
+    await f.current().client.notifyMessages({ messageIds: [id], operationId: 'notify-' + id }); f.service().publication!.refresh()
+    await vi.waitFor(() => expect(f.operations(f.ordinary).some(operation => operation.originalMessage?.messageId === id && operation.state === 'confirmed'),
+      JSON.stringify(f.operations(f.ordinary).map(operation => ({ messageId: operation.originalMessage?.messageId, state: operation.state })))).toBe(true), { timeout: 4000 })
+    return f.operations(f.ordinary).find(operation => operation.originalMessage?.messageId === id)!
+  }
+  const first = await send('peer-first', 'Original peer message, with its exact original author.')
+  expect(first.speaker).toMatchObject({ kind: 'agent', name: 'Equal visible name', reference: { hostId: 'local', agentSessionId: 'peer-agent' },
+    avatar: { observation: 'available', revision: expectedRevision, image: { width: 64, height: 64 } } })
+  expect(first.speaker?.mote).toBeUndefined(); expect(first.speaker?.avatar?.target).toBeUndefined()
+  await vi.waitFor(() => expect(f.service().publication!.store.inspect(first.operationId)?.avatarUploads?.at(-1)?.state).toBe('confirmed'))
+  expect(f.remote.uploads).toEqual([png]); expect(png).not.toEqual(f.png)
+  const second = await send('peer-second', 'Next complete peer message')
+  expect(second.avatarSource).toEqual({ operationId: first.operationId, attempt: 1, imageKey: 'original-image-key-1' })
+  const card = JSON.parse(JSON.parse(second.prepared!.request.body!).content)
+  expect(card.body.elements[0]).toMatchObject({ text: { content: 'Equal visible name · Agent' }, icon: { tag: 'custom_icon', img_key: 'original-image-key-1' } })
+  expect(card.body.elements[1].content).toBe('Next complete peer message')
+  if (process.env.STATIC_AVATAR_PREVIEW) {
+    await writeFile(join(process.env.STATIC_AVATAR_PREVIEW, 'peer-native-card.json'), JSON.stringify(card, null, 2) + '\n')
+    await writeFile(join(process.env.STATIC_AVATAR_PREVIEW, 'peer-avatar.png'), png)
+  }
 }, 40_000)
 
 it('optional unknown avatar never holds body delivery or reuploads the same asset and other authors stay distinct', async () => {
@@ -237,13 +325,19 @@ it('optional unknown avatar never holds body delivery or reuploads the same asse
   expect(JSON.parse(discord.request.body!).allowed_mentions).toEqual({ parse: [] })
 }, 35_000)
 
-it('group portraits follow the exact sender spatial relation while equal names and conflicting Motes do not supply an avatar', async () => {
+it('group portraits follow exact spatial relationships while unaffiliated or conflicting Motes retain their own Agent artwork', async () => {
   const f = await fixture('Original group author'), text = 'Complete group message from its exact original Agent'
+  const artworkErrors: string[] = [], draw = staticArtwork.savedAgentAvatarDrawing, raster = staticArtwork.rasterizeStaticAvatar
+  vi.spyOn(staticArtwork, 'savedAgentAvatarDrawing').mockImplementation((...args) => { try { return draw(...args) } catch (error) { artworkErrors.push(String(error)); throw error } })
+  vi.spyOn(staticArtwork, 'rasterizeStaticAvatar').mockImplementation(async (...args) => { try { return await raster(...args) } catch (error) { artworkErrors.push(String(error)); throw error } })
   await f.reply(f.ordinary, 'group-without-affiliation', text)
   await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.state).toBe('confirmed'))
   const unlinked = f.operations(f.ordinary).at(-1)!
   expect(unlinked.speaker).toMatchObject({ name: 'Original group author', reference: { agentSessionId: 'ordinary-agent' } })
-  expect(unlinked.speaker?.avatar).toBeUndefined(); expect(f.remote.uploads).toHaveLength(0)
+  expect(unlinked.speaker?.avatar).toMatchObject({ observation: 'available', image: { width: 64, height: 64 } })
+  expect(unlinked.speaker?.avatar?.target).toBeUndefined()
+  await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.avatarUploads?.at(-1)?.state).toBe('confirmed'))
+  expect(f.remote.uploads).toHaveLength(1)
   const original = await f.spatial.read(); if (!original) throw Error('Original fixture spatial graph required')
   original.graph.tabs = [{ tabId: 'speaker-group-tab', workspaceId: f.workspace.id, zoneId: f.target.zoneId, name: null, regionIds: ['speaker-group-region'] }]
   original.graph.regions = [{ tabId: 'speaker-group-tab', regionId: 'speaker-group-region', kind: 'agent', agentSessionId: 'ordinary-agent', runId: null,
@@ -257,7 +351,7 @@ it('group portraits follow the exact sender spatial relation while equal names a
   const first = f.operations(f.ordinary).at(-1)!
   expect(first.speaker).toMatchObject({ name: 'Original group author', mote: f.target, avatar: { target: { objectKey: f.target.spaceId }, observation: 'available' } })
   expect((await f.current().client.readAgentSession('ordinary-agent'))?.workspacePath).toBe(f.original.root)
-  expect(f.remote.uploads).toEqual([f.png])
+  expect(f.remote.uploads).toHaveLength(2); expect(f.remote.uploads[1]).toEqual(f.png)
   const branch = await f.spatial.read(); if (!branch) throw Error('Original fixture graph required')
   branch.graph.zones.push({ zoneId: 'speaker-mote-branch', workspaceId: f.workspace.id, kind: 'worktree', hostId: 'local', directoryPath: join(f.original.root, 'branch'), branch: 'speaker-branch' })
   branch.graph.bindings.push({ spaceId: f.target.spaceId, zoneId: 'speaker-mote-branch' })
@@ -267,8 +361,8 @@ it('group portraits follow the exact sender spatial relation while equal names a
   await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.payload).toMatchObject({ kind: 'speech', text: 'The next group card reuses the exact confirmed portrait' }))
   await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.state).toBe('confirmed'))
   const visible = f.operations(f.ordinary).at(-1)!, card = JSON.parse(JSON.parse(visible.prepared!.request.body!).content)
-  expect(card.body.elements[0]).toMatchObject({ text: { content: 'Original group author · Agent' }, icon: { img_key: 'original-image-key-1' } })
-  expect(visible.avatarSource).toMatchObject({ operationId: first.operationId, imageKey: 'original-image-key-1' })
+  expect(card.body.elements[0]).toMatchObject({ text: { content: 'Original group author · Agent' }, icon: { img_key: 'original-image-key-2' } })
+  expect(visible.avatarSource).toMatchObject({ operationId: first.operationId, imageKey: 'original-image-key-2' })
   const retained = structuredClone(visible)
   const other = await f.topics.ensureMote(f.workspace, 'view:other-group-author'), otherSpace = directoryIdentity('local', other.identityDirectoryPath!), otherZone = homeZoneId(otherSpace)
   const conflict = await f.spatial.read(); if (!conflict) throw Error('Original fixture graph required')
@@ -285,8 +379,10 @@ it('group portraits follow the exact sender spatial relation while equal names a
   await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.payload).toMatchObject({ kind: 'speech', text: 'Conflicting optional portraits do not hold the complete body' }))
   await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.state).toBe('confirmed'))
   const ambiguous = f.operations(f.ordinary).at(-1)!, plain = JSON.parse(JSON.parse(ambiguous.prepared!.request.body!).content)
-  expect(ambiguous.speaker?.avatar).toBeUndefined(); expect(ambiguous.speaker?.mote).toBeUndefined()
-  expect(plain.body.elements[0]).toMatchObject({ text: { content: 'Original group author · Agent' }, icon: { tag: 'standard_icon', token: 'robot_outlined' } })
-  expect(f.remote.uploads).toHaveLength(1); expect(f.service().publication!.store.inspect(visible.operationId)).toEqual(retained)
+  expect(ambiguous.speaker?.avatar, artworkErrors.join('\n')).toMatchObject({ observation: 'available' }); expect(ambiguous.speaker?.mote).toBeUndefined()
+  expect(ambiguous.speaker?.avatar?.target).toBeUndefined()
+  expect(ambiguous.avatarSource).toMatchObject({ operationId: unlinked.operationId, imageKey: 'original-image-key-1' })
+  expect(plain.body.elements[0]).toMatchObject({ text: { content: 'Original group author · Agent' }, icon: { tag: 'custom_icon', img_key: 'original-image-key-1' } })
+  expect(f.remote.uploads).toHaveLength(2); expect(f.service().publication!.store.inspect(visible.operationId)).toEqual(retained)
   expect(f.original.inner.kernel.input).toHaveBeenCalledTimes(2); expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
 }, 40_000)

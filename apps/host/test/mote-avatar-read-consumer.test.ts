@@ -13,6 +13,7 @@ import { ScratchTopics } from '../src/mote-resources.js'
 import { directoryIdentity, SCRATCH_WORKSPACE_ID } from '../src/mote-model.js'
 import { saveObjectAvatarFile } from '../src/object-avatar-files.js'
 import { moteAvatarOperationDirectory, savedMoteAvatarSnapshot } from '../src/mote-avatar-state.js'
+import { DEFAULT_MOTE_FACE } from '@agentmux/core/mote-face'
 
 const cleanup: Array<() => void | Promise<void>> = [], facts: unknown[] = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
@@ -124,7 +125,7 @@ it('reports a missing, corrupt or non-crop PNG without changing the saved choice
   const small = await saveObjectAvatarFile(f.directory, imagePng(16, 16))
   f.config.appearance.spaceObjectIcons[f.target.objectKey] = small; await f.save()
   const wrongSize = await f.read(); expect(wrongSize.image).toBeUndefined(); expect(wrongSize.issues.join(' ')).toContain('256 pixel')
-  f.config.appearance.spaceObjectIcons[f.target.objectKey] = 'rocket'; await f.save()
+  f.config.appearance.spaceObjectIcons[f.target.objectKey] = 'unavailable-icon'; await f.save()
   await expect(f.read()).rejects.toMatchObject({ code: 'MOTE_AVATAR_SOURCE_UNAVAILABLE' })
   f.config.appearance.spaceObjectIcons[f.target.objectKey] = f.ref; await f.save()
   expect(await readFile(f.configurationPath)).toEqual(configBefore)
@@ -150,4 +151,24 @@ it('leaves avatar save and series with their original Desktop owner instead of i
   expect(calls).toEqual(['space.mote.avatar.list', 'space.mote.avatar.save'])
   expect(await f.read()).toEqual(current)
   facts.push({ case: 'original-editor-routing', originalMethods: calls, saveState: saved.state, pngReadUnchanged: true })
+})
+
+it('reads built-in Mote, icon and face portraits through the independent Host public RPC and compiled CLI', async () => {
+  const f = await fixture(), revisions = new Set<string>()
+  for (const choice of [null, 'rocket', DEFAULT_MOTE_FACE]) {
+    f.config.appearance.spaceObjectIcons[f.target.objectKey] = choice; await f.save()
+    const result = await f.read()
+    expect(result.choice).toEqual(choice); expect(result.image).toMatchObject({ width: 256, height: 256 }); expect(result.issues).toEqual([])
+    expect(result.image?.dataUrl).not.toBe('data:image/png;base64,' + f.png.toString('base64'))
+    revisions.add(result.revision)
+  }
+  expect(revisions.size).toBe(3)
+  const original = await f.read(), config = await readFile(f.configurationPath)
+  const cli = await runCompiledObjectCli(['--endpoint', 'unix:' + f.socketPath, 'space', 'mote', 'avatar', 'read', '--input', '-'],
+    objectCliEnvironment(f.original.root, { pnpm_config_verify_deps_before_run: 'false' }), JSON.stringify({ target: f.target }))
+  expect(cli.code, cli.stdout + cli.stderr).toBe(0); expect(JSON.parse(cli.stdout).result).toEqual(original)
+  await f.stop(); await f.start(); expect(await f.read()).toEqual(original)
+  expect(await readFile(f.configurationPath)).toEqual(config)
+  await expect(stat(f.desktopPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(f.original.inner.kernel.input).not.toHaveBeenCalled(); expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
 })
