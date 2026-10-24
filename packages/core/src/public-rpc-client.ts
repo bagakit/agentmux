@@ -14,6 +14,7 @@ import { openAgentMuxRpcHttpRequest } from './public-rpc-http.js'
 import { createConnection } from 'node:net'
 import { openForwardedUnixRequest, type RpcForwardingSource } from './rpc-forwarding.js'
 export type { RpcForwardingSource } from './rpc-forwarding.js'
+import { AgentMuxRpcStreamTransport } from './rpc-stream-transport.js'
 import { AgentMuxRpcSshTransport, AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS } from './rpc-ssh-transport.js'
 import { rpcTransportError as transportError } from './rpc-transport-error.js'
 import { JSONRPCClient, type JSONRPCRequest, type JSONRPCResponse } from 'json-rpc-2.0'
@@ -287,7 +288,7 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   }
   throw new AgentMuxError('Reader received an event from another domain.', 'CONTROL_PROTOCOL_ERROR')
 }
-type RpcRoute = { endpoint: AgentMuxRpcEndpoint; ssh?: AgentMuxRpcSshTransport }
+type RpcRoute = { endpoint: AgentMuxRpcEndpoint; ssh?: AgentMuxRpcSshTransport; unix?: AgentMuxRpcStreamTransport }
 // Local transport provenance is intentionally not accepted from wire error fields.
 // It grants only original-operation reconciliation, never authority to replay input.
 const unconfirmedReplies = new WeakSet<object>()
@@ -421,6 +422,22 @@ class RpcClient implements AgentMuxRpcClient {
           if (route.endpoint.transport === 'ssh' && !(options.forwarding ?? this.forwarding)) {
             if (!route.ssh) route.ssh = new AgentMuxRpcSshTransport(agentMuxRpcSshArguments(route.endpoint), () => { delete route.ssh }, route.endpoint.socketPath)
             opening = route.ssh.open(payload, receive, end, controller.signal, armDeadline)
+          } else if (route.endpoint.transport === 'unix' && !(options.forwarding ?? this.forwarding)) {
+            if (!route.unix) {
+              const socket = createConnection({ path: route.endpoint.path })
+              let connected = false
+              const ready = new Promise<void>(resolve => socket.once('connect', () => { connected = true; resolve() }))
+              const channel = new AgentMuxRpcStreamTransport({ input: socket, output: socket, close: () => socket.destroy() },
+                () => { if (route.unix === channel) delete route.unix }, { ready, failure: error => {
+                  const failure = transportError(error, 'connection')
+                  return !connected && failure instanceof AgentMuxError
+                    ? new AgentMuxError(failure.message, failure.code, failure.detail,
+                      { disposition: 'not_applied', confirmedInputBytes: null }, failure.logId)
+                    : failure
+                } })
+              route.unix = channel
+            }
+            opening = route.unix.open(payload, receive, end, controller.signal, armDeadline)
           } else { armDeadline(); opening = openRequest(route.endpoint, payload, receive, end, controller.signal, this.relayKeyPair, options.forwarding ?? this.forwarding) }
           reader = await opening
         } catch (error) { end(transportError(error)); return }
@@ -483,7 +500,7 @@ class RpcClient implements AgentMuxRpcClient {
     } catch (error) { await dispose(); throw error }
   }
   async dispose(): Promise<void> { if (this.closed) return; this.closed = true
-    for (const route of [this.route, ...this.candidates]) route.ssh?.dispose()
+    for (const route of [this.route, ...this.candidates]) { route.ssh?.dispose(); route.unix?.dispose() }
     this.candidates.clear()
     await Promise.all([...this.readers].map(reader => reader.dispose())); this.readers.clear() }
 }

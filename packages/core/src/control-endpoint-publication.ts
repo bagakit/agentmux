@@ -9,7 +9,7 @@ import { probeSocketLiveness } from './socket-liveness.js'
 import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 
 type Identity = { dev: number; ino: number }
-type Listener = { child: ChildProcess; path: string; identity: Identity; alive: boolean; admitting: boolean; capacityBlocked: boolean; closed: Promise<void>; close(): Promise<void> }
+type Listener = { child: ChildProcess; path: string; identity: Identity; alive: boolean; admitting: boolean; closed: Promise<void>; close(): Promise<void> }
 const same = (a: Identity, b: Identity) => a.dev === b.dev && a.ino === b.ino
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
 const code = (error: unknown) => error instanceof AgentMuxError ? error.code : (error as NodeJS.ErrnoException).code ?? 'CONTROL_UNAVAILABLE'
@@ -120,7 +120,7 @@ export class ControlEndpointPublication {
       child.on('message', (message: unknown, handle: unknown) => {
         if (failure) { if (handle instanceof Socket) handle.destroy(); return }
         if (!message || typeof message !== 'object') { failure = new AgentMuxError('Listener worker returned invalid transport facts.', 'CONTROL_PROTOCOL_ERROR'); child.kill('SIGKILL'); return }
-        const value = message as { bound?: boolean; identity?: Identity; connection?: number; pending?: number; error?: { code?: string; message?: string } }
+        const value = message as { bound?: boolean; identity?: Identity; connection?: number; error?: { code?: string; message?: string } }
         // Node may deliver no handle when this particular Socket closed in transit.
         // Acknowledge its retirement without taking away healthy listener admission.
         if (adopted && Number.isSafeInteger(value.connection) && (handle instanceof Socket || handle == null)) {
@@ -133,12 +133,6 @@ export class ControlEndpointPublication {
             if (handle instanceof Socket) handle.destroy()
             this.publish({ state: 'unavailable', diagnostic: { code: 'CONTROL_UNAVAILABLE', message: `Control connection admission failed: ${error instanceof Error ? error.message : String(error)}` } })
           }
-          if (child.connected) child.send({ admitted: value.connection }, error => { if (error) child.kill('SIGTERM') })
-          return
-        }
-        if (adopted && Number.isSafeInteger(value.pending) && value.pending! >= 0 && value.pending! <= 64) {
-          adopted.capacityBlocked = value.pending === 64
-          if (this.current === adopted && adopted.capacityBlocked) this.capacityFailure()
           return
         }
         if (handle instanceof Socket) handle.destroy()
@@ -150,7 +144,7 @@ export class ControlEndpointPublication {
         if (adopted || handle || !value.identity || !Number.isSafeInteger(value.identity.dev) || !Number.isSafeInteger(value.identity.ino)) {
           failure = new AgentMuxError('Listener worker returned invalid ownership facts.', 'CONTROL_PROTOCOL_ERROR'); child.kill('SIGKILL'); return
         }
-        adopted = { child, path, identity: value.identity, alive: true, admitting: true, capacityBlocked: false, closed,
+        adopted = { child, path, identity: value.identity, alive: true, admitting: true, closed,
           close: async () => { adopted!.admitting = false; if (adopted!.alive) child.kill('SIGTERM'); await closed } }
         finish()
       })
@@ -164,17 +158,13 @@ export class ControlEndpointPublication {
       void closed.then(() => { if (!settled) finish(failure) })
     })
   }
-  private capacityFailure(): void {
-    this.publish({ state: 'unavailable', diagnostic: { code: 'CONTROL_CAPACITY', message: 'Control listener has 64 pending connection handoffs. Only new connections are refused; existing connections and Runs remain available. Retry the connection after admission catches up.' } })
-  }
   private async reconcile(): Promise<void> {
     try {
       try {
         const target = await lstat(this.path)
         if (this.current && target.isSocket() && same(target, this.current.identity) && target.uid === (process.getuid?.() ?? target.uid)) {
           if (this.current.alive) {
-            if (this.current.capacityBlocked) this.capacityFailure()
-            else this.publish({ state: 'available' })
+            this.publish({ state: 'available' })
             return
           }
           await this.discard(this.current, true)
