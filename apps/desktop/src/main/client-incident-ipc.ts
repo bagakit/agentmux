@@ -1,7 +1,7 @@
 import { mintObjectId, mintCapabilityToken } from '@agentmux/core/object-id'
 import type { IpcMainInvokeEvent, WebContents } from 'electron'
 import { type AgentMuxClientIncidentReport, type AgentMuxClientIncidentProducer } from '@agentmux/core'
-import { ClientIncidentArchive, type ClientIncidentReceipt } from './client-incident-archive.js'
+import { ClientIncidentArchive, type ClientIncidentReceipt } from '@agentmux/host/client-incident-archive'
 
 /** The receipt describes diagnostic admission only. It grants no Run or input authority. */
 export class ClientIncidentIpcOwner {

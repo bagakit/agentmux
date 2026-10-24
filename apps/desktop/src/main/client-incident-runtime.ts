@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { CLIENT_INCIDENT_MAX_STAGES, safeClientIncidentCode, type AgentMuxClientEvent, type AgentMuxClientIncidentMetadata,
   type AgentMuxClientIncidentProducer, type AgentMuxClientIncidentReport, type AgentMuxClientReadingIncidentKind } from '@agentmux/core'
 import type { AppConfig, ExecutorDetection } from '../shared/contracts.js'
-import type { ClientIncidentArchive } from './client-incident-archive.js'
+import type { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import type { RuntimeController } from './runtime-controller.js'
 
 type Runtime = Pick<RuntimeController, 'detect' | 'executionHost' | 'observeCoreEvents'>

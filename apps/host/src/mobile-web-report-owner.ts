@@ -3,7 +3,7 @@ import type { AgentMuxClientIncidentReport, AgentMuxClientIncidentProducer } fro
 import type { MobileWebReportPort } from '@agentmux/core/mobile-web'
 import type { ClientIncidentArchive } from './client-incident-archive.js'
 
-/** The existing Main archive receives bounded observations from the original authenticated phone. */
+/** The original Host archive receives bounded observations from the original authenticated phone. */
 export function mobileWebReportOwner(archive: ClientIncidentArchive): MobileWebReportPort {
   return { report(input, devicePrincipalId) {
     const producerInstanceId = deriveObjectId('mobile-web-producer', JSON.stringify([archive.appInstanceId, devicePrincipalId, input.documentId]))

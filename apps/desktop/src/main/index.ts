@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { ClientIncidentArchive } from './client-incident-archive.js'
+import { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import { PerformanceSceneOwner } from './performance-scene.js'
 import { AppMemoryEvidenceOwner } from './app-memory-evidence.js'
 import { RendererHeapSnapshotOwner } from './renderer-heap-snapshot.js'

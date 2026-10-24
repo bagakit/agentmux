@@ -10,8 +10,7 @@ import type { CapsulePort } from '@agentmux/core/capsule'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { ClientIncidentIpcOwner } from './client-incident-ipc.js'
 import { ClientIncidentRuntimeOwner } from './client-incident-runtime.js'
-import type { ClientIncidentArchive } from './client-incident-archive.js'
-import { mobileWebReportOwner } from './mobile-web-report-owner.js'
+import type { ClientIncidentArchive } from '@agentmux/host/client-incident-archive'
 import { isAgentSchedule } from '@agentmux/core'
 import { NoteFileMutations } from './note-file-mutations.js'
 import { parseFileShareUndoParams, parseFileShareUndoResult } from '@agentmux/core/files'
@@ -2450,7 +2449,7 @@ export async function registerIpc(args: {
     nativeDesktop: createNativeDesktopPublicOwner(getNativeDesktopOwner(), { hostId: 'local' }),
     windows: args.workbenchWindows,
     deliveryAttempts,
-    ...(args.clientIncidents ? { clientIncidents: args.clientIncidents, mobileWebReports: mobileWebReportOwner(args.clientIncidents) } : {}),
+    ...(args.clientIncidents ? { clientIncidents: () => args.clientIncidents! } : {}),
     clientNotifications: clientNotificationsPort(deliveryAttempts.hostId, (request, signal) => executeControl(request, undefined, signal)),
     moteContext: moteContextEvidencePort(deliveryAttempts.hostId, request => executeControl(request)),
     execute: executeControl,

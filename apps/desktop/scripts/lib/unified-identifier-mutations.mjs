@@ -1,5 +1,5 @@
 export const clientIdentityMutations = {
-  'incident-temp-reader': { file: 'apps/desktop/src/main/client-incident-archive.ts', before: '(?:[1-9A-HJ-NP-Za-km-z]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', after: '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', test: 'apps/desktop/test/client-incident-temp-cleanup.test.ts' },
+  'incident-temp-reader': { file: 'apps/host/src/client-incident-archive.ts', before: '(?:[1-9A-HJ-NP-Za-km-z]{12}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', after: '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', test: 'apps/desktop/test/client-incident-temp-cleanup.test.ts' },
   'input-observation-reader': { file: 'packages/core/src/performance-diagnostics.ts', before: 'isObjectId(observerId) || ', after: '', test: 'packages/core/test/performance-input-correlation.test.ts' },
   'journal-owner': { file: 'apps/desktop/src/main/browser-operation-journal.ts', before: 'options.id ?? mintObjectId', after: 'options.id ?? (() => crypto.randomUUID())', test: 'apps/desktop/test/browser-operation-journal.test.ts' },
   'note-block-owner': { file: 'apps/desktop/src/main/note-file-writer.ts', before: 'blockId: mintObjectId()', after: 'blockId: crypto.randomUUID()', test: 'apps/desktop/test/unified-note-identifiers.test.ts' },
