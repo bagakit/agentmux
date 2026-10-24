@@ -64,7 +64,7 @@ export function FocusMessagePreview({ active = true, autoFocus = true, message, 
   const insidePointer = useRef<PointerEvent | null>(null)
   const speaker = message?.speaker
   const reply = message?.kind === 'assistant-message'
-  const system = message?.kind === 'system-message'
+  const system = speaker?.role === 'system'
   const agent = speaker?.role === 'agent'
   const authorId = agent ? speaker.id : undefined
   const described = speaker ? describeSpeaker(speaker) : undefined
