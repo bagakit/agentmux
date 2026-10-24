@@ -11,6 +11,7 @@ export default defineConfig({
   ] },
   test: { ...overviewConfig.test, include: [
     'apps/desktop/test/settings-themes-control.test.ts',
+    'apps/desktop/test/settings-icon-catalog.test.ts',
     'apps/desktop/test/theme-public-files.test.ts',
     'apps/desktop/test/settings-resources-control.test.ts',
     'apps/desktop/test/settings-control.test.ts',
