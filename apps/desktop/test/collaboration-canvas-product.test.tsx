@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { act, useLayoutEffect, useState, type ComponentProps, type ReactNode } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { updateIconSprite } from '@agentmux/client-ui/icons'
+import { GRAPHITE_THEME } from '@agentmux/client-ui/theme'
+import type { CollaborationEvidence } from '../src/renderer/src/lib/agent-collaboration'
 import type { Node, ReactFlowProps, useStoreApi } from '@xyflow/react'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { installCollaborationCanvasGeometry } from './helpers/collaboration-canvas-dom'
@@ -1721,7 +1724,8 @@ it('shows immediate source and recipient activity while the original new path is
   expect(nodeElement(target)!.querySelector('[aria-label="Message received"]')).not.toBeNull()
   const edge = dom.container.querySelector<SVGGElement>('.collaboration-connections .react-flow__edge')!
   await act(async () => edge.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
-  expect(document.getElementById(edge.getAttribute('aria-describedby')!)!.textContent).toContain('Messages: Agent 0 → Agent 1')
+  expect(document.getElementById(edge.getAttribute('aria-describedby')!)!.querySelector('strong')?.textContent).toBe('Messages')
+  expect(document.getElementById(edge.getAttribute('aria-describedby')!)!.querySelector('span')?.textContent).toContain('Agent 0 → Agent 1')
   const operations = requests.length, camera = captured.store!.getState().transform
   await viewport(camera[0] * .25, camera[1] * .25, 20000, 20000, .25)
   const overviewPacket = dom.container.querySelector<SVGCircleElement>('.collaboration-edge__packet')!
@@ -1836,7 +1840,7 @@ it('reads the complete original relation in the window tooltip and releases it w
   expect(document.querySelector('[role="tooltip"]')).toBeNull()
   await act(async () => edge.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
   const description = document.getElementById(edge.getAttribute('aria-describedby')!)!
-  expect(description).not.toBeNull(); expect(description.getAttribute('role')).toBe('tooltip'); expect(description.textContent).toBe(label)
+  expect(description).not.toBeNull(); expect(description.getAttribute('role')).toBe('tooltip'); expect(description.querySelector('strong')?.textContent).toBe('Messages'); expect(description.querySelector('span')?.textContent).toBe(label.slice('Messages: '.length))
   expect(description.closest('[data-overlay-layer="tooltip"]')).not.toBeNull()
   expect(dom.container.contains(description)).toBe(false)
   await act(async () => edge.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })))
@@ -1844,16 +1848,16 @@ it('reads the complete original relation in the window tooltip and releases it w
   expect(description.isConnected).toBe(false)
   await act(async () => edge.focus())
   expect(document.activeElement).toBe(edge)
-  expect(document.getElementById(edge.getAttribute('aria-describedby')!)?.textContent).toBe(label)
+  expect(document.getElementById(edge.getAttribute('aria-describedby')!)?.querySelector('span')?.textContent).toBe(label.slice('Messages: '.length))
   await act(async () => edge.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })))
   await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
-  expect(document.getElementById(edge.getAttribute('aria-describedby')!)?.textContent).toBe(label)
+  expect(document.getElementById(edge.getAttribute('aria-describedby')!)?.querySelector('span')?.textContent).toBe(label.slice('Messages: '.length))
   await act(async () => edge.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
   expect(document.querySelector('[role="tooltip"]')).toBeNull()
   expect(select).toHaveBeenLastCalledWith(null)
   await act(async () => { edge.blur(); edge.focus() })
-  expect(document.getElementById(edge.getAttribute('aria-describedby')!)?.textContent).toBe(label)
+  expect(document.getElementById(edge.getAttribute('aria-describedby')!)?.querySelector('span')?.textContent).toBe(label.slice('Messages: '.length))
   await dom.render(graph(scene, null, scene.relations, [], scene.agents, { active: false }))
   expect(document.querySelector('[role="tooltip"]')).toBeNull(); expect(edgeElement(connection.id)).toBe(edge)
   await dom.render(graph(scene)); expect(document.querySelector('[role="tooltip"]')).toBeNull()
@@ -2069,4 +2073,77 @@ it('projects complete region identities and original Host and avatars without re
   await dom.render(graph({ ...scene, areas: scene.areas.map(area => area.id === 'area-0' ? { ...area, name: name + ' · 远程构建' } : area) }))
   expect(label('area-0').querySelector('strong')?.textContent).toBe(name + ' · 远程构建')
   expect(captured.nodes.map(node => node.data.box)).toEqual(geometry); expect(requests).toHaveLength(operations)
+})
+
+it('keeps creation category, original direction and recorded phase distinct through theme, LOD and folding', async () => {
+  const scene = scenario(4), creator = subject('canvas-0')
+  scene.areas = [{ id: 'creator', kind: 'project', name: 'Creator', members: [creator] },
+    { id: 'targets', kind: 'project', name: 'Creation records', members: [1, 2, 3].map(n => subject(`canvas-${n}`)) }]
+  const creation = (n: number, phase: 'prepared' | 'active' | 'retired'): CollaborationRelation => {
+    const id = `creation-${phase}`, sessionId = `canvas-${n}`
+    const evidence: CollaborationEvidence = { kind: 'creation', id, subject: { hostId: 'local', agentSessionId: 'canvas-0' }, record: {
+      agentSessionId: sessionId, phase, currentRun: null, createdAt: 1,
+      creation: { createOperationId: id, initialPrompt: 'not-requested', createdBy: { agentSessionId: 'canvas-0', run: { runId: 'original-run' }, owner: { kind: 'runtime', runtimeId: 'local-runtime' } } } } }
+    return { id, kind: 'creation', source: creator, target: subject(sessionId), evidence: [evidence] }
+  }
+  scene.relations = [creation(1, 'active'), creation(2, 'prepared'), creation(3, 'retired'),
+    { id: 'forward-message', kind: 'communication', source: creator, target: subject('canvas-1'), evidence: [] },
+    { id: 'reverse-message', kind: 'communication', source: subject('canvas-1'), target: creator, evidence: [] },
+    { id: 'dispatch', kind: 'supervision', source: creator, target: subject('canvas-1'), evidence: [] }]
+  const pending = scene.agents.get(subject('canvas-2'))!
+  scene.agents.set(pending.id, { ...pending, name: 'Agent 2', context: undefined, tier: 'unknown' })
+  await loaded(scene); await revealWorld()
+  const originalGeometry = structuredClone([...boxes]), originalRequests = requests.length
+  const edges = () => [...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')]
+  const byName = (text: string) => edges().find(edge => edge.getAttribute('aria-label')!.startsWith(text))!
+  expect(edges()).toHaveLength(6)
+  const prepared = byName('Creation unconfirmed: Agent 0 → Agent 2')
+  expect(prepared).toBeDefined()
+  expect(byName('Created: Agent 0 → Agent 1')).toBeDefined(); expect(byName('Created: Agent 0 → Agent 3')).toBeDefined()
+  const forward = byName('Messages: Agent 0 → Agent 1'), reverse = byName('Messages: Agent 1 → Agent 0'), dispatch = byName('Dispatch: Agent 0 → Agent 1')
+  expect(forward).toBeDefined(); expect(reverse).toBeDefined(); expect(dispatch).toBeDefined()
+  const path = (edge: SVGGElement) => edge.querySelector<SVGPathElement>('.react-flow__edge-path')!
+  expect(new Set([forward, reverse, dispatch, byName('Created: Agent 0 → Agent 1')].map(edge => path(edge).getAttribute('d'))).size).toBe(4)
+  const marker = (edge: SVGGElement) => {
+    const reference = /^url\(#(.+)\)$/.exec(path(edge).getAttribute('marker-end')!)
+    expect(reference, 'the directional head stays on the original target end').not.toBeNull()
+    return document.getElementById(reference![1]!)!
+  }
+  const originalMarker = marker(prepared)
+  expect(originalMarker.getAttribute('orient')).toBe('auto-start-reverse'); expect(originalMarker.getAttribute('refX')).toBe('19')
+  expect(originalMarker.querySelector('[data-direction-head="open"]')?.getAttribute('d')).toBe('M 13 2 L 19 6 L 13 10')
+  const category = originalMarker.querySelector('[data-semantic-icon="object.agent-creation"] use')!
+  expect(category).not.toBeNull()
+  expect(category.getAttribute('href')).toBe('#agentmux-icon-object.agent-creation')
+  expect(marker(forward).querySelector('[data-direction-head="filled"]')).not.toBeNull()
+  expect(marker(dispatch).querySelector('[data-direction-head="filled"]')).not.toBeNull()
+  expect(marker(forward).querySelector('[data-semantic-icon]')).toBeNull()
+  const originalPath = path(prepared).getAttribute('d'), originalHead = originalMarker.querySelector('[data-direction-head]')!.outerHTML
+  try {
+    updateIconSprite(document, GRAPHITE_THEME, '#000000')
+    expect(document.getElementById('agentmux-icon-object.agent-creation')!.innerHTML).toContain('M5 12h14')
+    updateIconSprite(document, { ...GRAPHITE_THEME, icons: { ...GRAPHITE_THEME.icons, 'object.agent-creation': { kind: 'glyph', glyph: 'circle' } } }, '#000000')
+    expect(document.getElementById('agentmux-icon-object.agent-creation')!.querySelector('circle')).not.toBeNull()
+    expect(originalMarker.querySelector('[data-direction-head]')!.outerHTML).toBe(originalHead)
+    expect(path(prepared).getAttribute('d')).toBe(originalPath); expect(prepared.getAttribute('aria-label')).toContain('Creation unconfirmed:')
+  } finally { updateIconSprite(document, GRAPHITE_THEME, '#000000') }
+  await act(async () => prepared.focus())
+  const tooltip = document.getElementById(prepared.getAttribute('aria-describedby')!)!
+  expect(tooltip.querySelector('strong')?.textContent).toBe('Creation unconfirmed')
+  expect(tooltip.querySelector('span')?.textContent).toBe('Agent 0 → Agent 2 · 1 original record')
+  await act(async () => prepared.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+  expect(select).toHaveBeenLastCalledWith({ kind: 'relation', id: 'creation-prepared', relatedIds: ['creation-prepared'] })
+  await act(async () => prepared.blur())
+  await viewport(0, 0, 20000, 20000, .1)
+  const captions = [...dom.container.querySelectorAll<HTMLElement>('.collaboration-edge__caption')]
+  expect(captions).toHaveLength(1); expect(captions[0]!.textContent).toBe('Creation unconfirmed')
+  expect(captions[0]!.dataset.creationUnconfirmed).toBe('true'); expect(captions[0]!.style.transform).toContain('scale(10)')
+  expect(requests).toHaveLength(originalRequests); expect([...boxes]).toEqual(originalGeometry)
+  await revealWorld(); await dom.click('[aria-label="Collapse Creation records"]')
+  await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull())
+  const mixed = byName('Creation records · includes unconfirmed: Agent 0 → Creation records')
+  expect(mixed).toBeDefined(); expect(mixed.getAttribute('aria-label')).toContain('3 original records')
+  await act(async () => mixed.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  expect(select).toHaveBeenLastCalledWith({ kind: 'relation', id: expect.any(String), relatedIds: expect.arrayContaining(['creation-active', 'creation-prepared', 'creation-retired']) })
+  expect(dom.container.querySelector('.collaboration-edge__caption[data-creation-unconfirmed="true"]')?.textContent).toBe('Creation records · includes unconfirmed')
 })
