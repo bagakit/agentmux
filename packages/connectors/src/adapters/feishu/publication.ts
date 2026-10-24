@@ -8,15 +8,15 @@ import { parsePreparedPublication, publicationSpeechText, type PreparedPublicati
 import type { FeishuAdapter } from './index.js'
 import { feishuFailure, feishuIdentity, FEISHU_MESSAGE_BODY_BYTES } from './message.js'
 import { feishuQuestionCard } from './question-card.js'
-import { feishuReplyCard, fragmentFeishuReply } from './reply-card.js'
+import { fragmentFeishuReply } from './reply-card.js'
 import { feishuRoleCard, type FeishuRoleSpeaker } from './role-card.js'
 import type { PublicationSpeaker } from '../../publication-speaker.js'
 import { feishuQueryReaction, readFeishuQueryReaction, feishuReactionMapping, feishuReactionReceipt } from './reaction.js'
 
 const path = '/open-apis/im/v1/messages'
-const currentCardRenderVersion = 'feishu-conversation-v8'
+const currentCardRenderVersion = 'feishu-conversation-v9'
 // Retained frozen cards use their original wire; this never prepares or replays an older effect.
-const nativeCardRenderVersions = ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', 'feishu-conversation-v6', 'feishu-conversation-v7', currentCardRenderVersion]
+const nativeCardRenderVersions = ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', 'feishu-conversation-v6', 'feishu-conversation-v7', 'feishu-conversation-v8', currentCardRenderVersion]
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 const unknown = (): PublicationReceipt => ({ state: 'unknown', reason: 'effect-unconfirmed' })
 const key = (operationId: string) => createHash('sha256').update(operationId).digest('base64url')
@@ -26,9 +26,12 @@ function inputStatus(payload: Extract<PublicationPayload, { kind: 'speech' }>): 
     admitted: 'Accepted by Agent', 'not-applied': 'Not delivered to Agent', unknown: 'Saved · delivery to Agent unconfirmed' }[input.status])
     + (input.observation === 'rejoin-needed' ? '\nReconnect this input in AgentMux' : '') : undefined
 }
-function appendInputStatus(card: Record<string, unknown>, payload: Extract<PublicationPayload, { kind: 'speech' }>, speaker: Pick<PublicationSpeaker, 'kind'>): void {
+function speechCard(payload: Extract<PublicationPayload, { kind: 'speech' }>, speaker: FeishuRoleSpeaker,
+  originalMessage?: PublicationOperation['originalMessage'], fragment?: PublicationOperation['fragment']): Record<string, unknown> {
   const status = speaker.kind === 'human' ? inputStatus(payload) : undefined
-  if (status) (object(card.body)!.elements as unknown[]).push({ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: status } })
+  return feishuRoleCard(publicationSpeechText({ ...payload, text: (payload.presentationContext?.before ?? '') + payload.text + (payload.presentationContext?.after ?? '') }), speaker,
+    { ...(payload.phase ? { phase: payload.phase } : {}), ...(fragment ? { fragment } : {}),
+      ...(payload.presentationContext?.literal ? { literal: true } : {}), incoming: originalMessage !== undefined, ...(status ? { status } : {}) })
 }
 function ownSender(value: unknown, application: ConnectionApplication): boolean {
   const sender = object(value)
@@ -60,15 +63,14 @@ function requestCard(prepared: PreparedPublication): Record<string, unknown> | n
   } catch { return null }
 }
 /** Feed preview only. Visible card text supplies the excerpt; no action values or private references. */
-function cardSummary(card: Record<string, unknown>, operation: Pick<PublicationOperation, 'payload' | 'presentationTime' | 'speaker'>): string {
+function cardSummary(card: Record<string, unknown>, operation: Pick<PublicationOperation, 'payload' | 'presentationTime' | 'speaker' | 'originalMessage'>): string {
   const at = operation.presentationTime, date = at === undefined || !Number.isFinite(at) || Math.abs(at) > 8.64e15 ? null : new Date(at)
   const time = date ? `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` : undefined
   const title = object(object(card.header)?.title)?.content
-  const purpose = operation.payload.kind === 'speech' && operation.speaker
-    ? [{ agent: 'Agent', human: 'User', external: 'External message', mixed: 'Mixed authors', unknown: 'Unknown author' }[operation.speaker.kind],
+  const purpose = operation.payload.kind === 'speech' && operation.originalMessage ? 'Agent · Incoming' : operation.payload.kind === 'speech'
+    ? [{ agent: 'Agent', human: 'User', external: 'External message', mixed: 'Mixed authors', unknown: 'Unknown author' }[operation.speaker?.kind ?? 'unknown'],
       operation.payload.phase === 'final' ? 'Reply' : operation.payload.phase === 'progress' ? 'Progress' : undefined].filter(Boolean).join(' · ')
-    : operation.payload.kind === 'permission' ? 'Permission' : typeof title === 'string' ? title : operation.payload.kind === 'speech'
-      ? operation.payload.phase === 'final' ? 'Agent reply' : operation.payload.phase === 'progress' ? 'Agent progress' : 'Conversation message' : 'Conversation message'
+    : operation.payload.kind === 'permission' ? 'Permission' : typeof title === 'string' ? title : 'Conversation message'
   const text = (elements: unknown): string[] => !Array.isArray(elements) ? [] : elements.flatMap(element => {
     const node = object(element), content = object(node?.text)?.content
     return node?.tag === 'markdown' && typeof node.content === 'string' ? [node.content]
@@ -78,7 +80,7 @@ function cardSummary(card: Record<string, unknown>, operation: Pick<PublicationO
       : node?.tag === 'div' && typeof content === 'string' ? [content]
       : node?.tag === 'form' ? text(node.elements) : node?.tag === 'img' && typeof object(node.alt)?.content === 'string' ? [String(object(node.alt)!.content)] : []
   })
-  const body = (operation.payload.kind === 'speech' && operation.speaker ? [publicationSpeechText(operation.payload)]
+  const body = (operation.payload.kind === 'speech' ? [publicationSpeechText(operation.payload)]
     : operation.payload.kind === 'question' ? [operation.payload.text, ...operation.payload.questions.map(question => question.prompt)].filter(Boolean)
     : [...(operation.payload.kind === 'permission' && typeof title === 'string' ? [title] : []),
       ...text(card.elements ?? object(card.body)?.elements)]).join(' ').replace(/\s+/gu, ' ').trim()
@@ -204,8 +206,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     return Math.max(4, Math.min(this.fragmentBytes, Math.floor((FEISHU_MESSAGE_BODY_BYTES - 1024 - Buffer.byteLength(JSON.stringify(target.externalConversationId))) / 8)))
   }
 
-  fragmentText(payload: Extract<PublicationPayload, { kind: 'speech' }>, target: PublicationTarget, speaker?: PublicationSpeaker): readonly PublicationTextFragment[] | undefined {
-    if (!speaker && (payload.phase !== 'final' || payload.relay)) return undefined
+  fragmentText(payload: Extract<PublicationPayload, { kind: 'speech' }>, target: PublicationTarget, speaker?: PublicationSpeaker, originalMessage?: PublicationOperation['originalMessage']): readonly PublicationTextFragment[] | undefined {
     // A first recorded time adds a fixed HH:mm prefix. Measure it too, and
     // reserve the largest possible continuation label for this source text.
     const count = Math.max(2, payload.text.length)
@@ -213,12 +214,10 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       // Without line breaks there cannot be a native table. Its Markdown
       // component preserves every source byte, so this lower bound is exact.
       if (!/[\r\n]/u.test(part.text) && Buffer.byteLength(part.text) > FEISHU_MESSAGE_BODY_BYTES) return false
-      const displayed = { ...payload, text: (part.presentationContext?.before ?? '') + part.text + (part.presentationContext?.after ?? '') }
-      const role = speaker ? { kind: speaker.kind, ...(speaker.name ? { name: speaker.name } : {}) } : undefined
-      const card = role ? feishuRoleCard(publicationSpeechText(displayed), role, { ...(payload.phase ? { phase: payload.phase } : {}), fragment, ...(part.presentationContext?.literal ? { literal: true } : {}) })
-        : feishuReplyCard(publicationSpeechText(displayed), fragment, part.presentationContext?.literal)
-      if (speaker) appendInputStatus(card, displayed, speaker)
-      card.config = { ...object(card.config), summary: { content: cardSummary(card, { payload: displayed, presentationTime: 0, ...(speaker ? { speaker } : {}) }) } }
+      const displayed = { ...payload, text: part.text, ...(part.presentationContext ? { presentationContext: part.presentationContext } : {}) }
+      const role: FeishuRoleSpeaker = speaker ? { kind: speaker.kind, ...(speaker.name ? { name: speaker.name } : {}) } : { kind: 'unknown' }
+      const card = speechCard(displayed, role, originalMessage, fragment)
+      card.config = { ...object(card.config), summary: { content: cardSummary(card, { payload: displayed, presentationTime: 0, ...(speaker ? { speaker } : {}), ...(originalMessage ? { originalMessage } : {}) }) } }
       return Buffer.byteLength(JSON.stringify({ receive_id: target.externalConversationId, msg_type: 'interactive', uuid: 'x'.repeat(43), content: JSON.stringify(card) })) <= FEISHU_MESSAGE_BODY_BYTES
     }
     if (fits({ text: payload.text }, { ordinal: 0, count: 1 })) return [{ text: payload.text }]
@@ -268,42 +267,13 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         { tag: 'div', text: { tag: 'plain_text', content: status } },
         ...payload.options.map(option => ({ tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: option.label }, value: { actionRef: option.actionRef } }] }))
       ] }
-    } else if (operation.payload.kind === 'speech' && operation.speaker) {
-      const payload = operation.payload, snapshot = operation.speaker, uploaded = operation.avatarUploads?.at(-1)
+    } else if (operation.payload.kind === 'speech') {
+      if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
+      const snapshot = operation.speaker ?? { kind: 'unknown' as const }, uploaded = operation.avatarUploads?.at(-1)
       const speaker: FeishuRoleSpeaker = { kind: snapshot.kind, ...(snapshot.name ? { name: snapshot.name } : {}),
         ...(operation.avatarSource?.imageKey ? { imageKey: feishuIdentity(operation.avatarSource.imageKey) }
           : uploaded?.state === 'confirmed' ? { imageKey: feishuIdentity(uploaded.imageKey) } : {}) }
-      card = feishuRoleCard(publicationSpeechText({ ...payload, text: (payload.presentationContext?.before ?? '') + payload.text + (payload.presentationContext?.after ?? '') }), speaker,
-        { ...(payload.phase ? { phase: payload.phase } : {}), fragment: operation.fragment, ...(payload.presentationContext?.literal ? { literal: true } : {}) })
-      appendInputStatus(card, payload, snapshot)
-    } else if (operation.payload.kind === 'speech' && operation.payload.relay) {
-      if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
-      const authors = operation.payload.relay.sources.map(source => source.author.kind)
-      const kinds = new Set(authors), human = authors.length > 0 && authors.every(kind => kind === 'human')
-      const title = human ? 'User' : kinds.size > 1 ? 'Mixed authors' : kinds.has('external') ? 'External message'
-        : kinds.has('agent') ? 'Agent input' : 'Unknown author'
-      const input = human ? operation.payload.inputSubmission : undefined
-      const inputStatus = input ? ({ waiting: 'Saved · waiting for Agent', stopped: 'Saved · delivery stopped',
-        'terminal-confirmed': 'Sent to Agent · acceptance not confirmed', admitted: 'Accepted by Agent',
-        'not-applied': 'Not delivered to Agent', unknown: 'Saved · delivery to Agent unconfirmed' }[input.status]
-        + (input.observation === 'rejoin-needed' ? '\nReconnect this input in AgentMux' : '')) : undefined
-      card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: title + ' · via amux' }, template: human ? 'green' : 'grey' },
-        elements: [{ tag: 'div', text: { tag: 'plain_text', content: publicationSpeechText(operation.payload) } },
-          ...(inputStatus ? [{ tag: 'div', text: { tag: 'plain_text', content: inputStatus } }] : [])] }
-    } else if (operation.payload.kind === 'speech') {
-      if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
-      const text = publicationSpeechText(operation.payload)
-      if (operation.payload.phase === 'final') {
-        card = feishuReplyCard(publicationSpeechText({ ...operation.payload, text: (operation.payload.presentationContext?.before ?? '') + operation.payload.text + (operation.payload.presentationContext?.after ?? '') }), operation.fragment, operation.payload.presentationContext?.literal)
-      } else if (operation.payload.phase === 'progress') {
-        card = { schema: '2.0', config: { update_multi: true },
-          body: { padding: '8px 12px 8px 12px', vertical_spacing: '4px',
-            elements: [{ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: text } }] } }
-      } else {
-        const title = 'Conversation message'
-        card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: title }, template: 'blue' },
-          elements: [{ tag: 'div', text: { tag: 'plain_text', content: text } }] }
-      }
+      card = speechCard(operation.payload, speaker, operation.originalMessage, operation.fragment)
     } else if (operation.payload.kind === 'image') {
       const uploaded = operation.uploads?.at(-1)
       if (uploaded?.state !== 'confirmed' || !('imageKey' in uploaded)) feishuFailure('FEISHU_IMAGE_UPLOAD_UNCONFIRMED')
@@ -316,8 +286,9 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       let body = encode()
       if (Buffer.byteLength(body) > FEISHU_MESSAGE_BODY_BYTES && operation.payload.kind === 'speech' && operation.speaker) {
         // The exact optional asset key cannot force another body fragment or delay its delivery.
-        const identity = (object(card.body)!.elements as Record<string, unknown>[])[0]!
-        if (identity.icon) { delete identity.icon; body = encode() }
+        card = speechCard(operation.payload, operation.speaker, operation.originalMessage, operation.fragment)
+        card.config = { ...object(card.config), summary: { content: cardSummary(card, operation) } }
+        body = encode()
       }
       if (Buffer.byteLength(body) > FEISHU_MESSAGE_BODY_BYTES) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {

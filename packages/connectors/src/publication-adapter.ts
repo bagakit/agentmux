@@ -1,4 +1,4 @@
-import type { PublicationTarget, PublicationReceipt, PublicationMapping, PublicationPayload, PublicationTextFragment } from './publication-store.js'
+import type { PublicationTarget, PublicationReceipt, PublicationMapping, PublicationPayload, PublicationTextFragment, PublicationOperation } from './publication-store.js'
 import type { PublicationImage, ImageUploadReceipt, PublicationFile, FileUploadReceipt } from './publication-resource.js'
 import type { PreparedPublication, PublicationPreparer, PublicationEffectContext } from './publication-wire.js'
 import type { PublicationSpeaker } from './publication-speaker.js'
@@ -10,7 +10,7 @@ export interface PublicationAdapter extends PublicationPreparer {
   fragmentBytesFor?(target: PublicationTarget): number
   /** Native text structure and encoded request budgets belong to the adapter.
    * Undefined delegates this payload to the ordinary UTF-8 budget. */
-  fragmentText?(payload: Extract<PublicationPayload, { kind: 'speech' }>, target: PublicationTarget, speaker?: PublicationSpeaker): readonly PublicationTextFragment[] | undefined
+  fragmentText?(payload: Extract<PublicationPayload, { kind: 'speech' }>, target: PublicationTarget, speaker?: PublicationSpeaker, originalMessage?: PublicationOperation['originalMessage']): readonly PublicationTextFragment[] | undefined
   /** This finite payload requires an explicit adapter implementation; speech support does not imply it. */
   readonly permissionActions?: true
   readonly questionActions?: true
