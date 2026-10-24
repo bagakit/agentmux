@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { parseMotePreferencesReadResult, type MoteConnectionPreferencesReadResult } from '@agentmux/core/mote-preferences'
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
@@ -65,6 +66,8 @@ export function useMoteIdentityReadings(active: boolean, revision: number, hosti
 }
 export type MoteIdentityReadings = ReturnType<typeof useMoteIdentityReadings>
 
+const NextIcon = semanticIconComponent('navigation.forward')
+
 function MoteIdentityCard({ reading, records, recordsIssue, onOpen, onRetry }: {
   reading: MoteIdentityReading; records: ConnectionRecord[]; recordsIssue: string
   onOpen(origin: MoteLarkSettingsOrigin, create: boolean): void; onRetry(): void
@@ -78,18 +81,19 @@ function MoteIdentityCard({ reading, records, recordsIssue, onOpen, onRetry }: {
   const status = issue || saved?.status === 'unconfirmed' ? 'Bot not confirmed'
     : ref ? choice?.record?.config.label ?? 'Saved bot'
     : unbound ? 'No bot linked' : 'Reading bot…'
+  const chat = reading.chat?.values.connection
+  const privateChat = reading.chatIssue ? 'Private chat not confirmed'
+    : !reading.chatRead ? 'Reading private chat…'
+    : chat ? `Private chat ${reading.chat?.values.enabled ? 'enabled' : 'paused'} · ${records.find(record => record.config.connectionId === chat.connectionId && record.config.application.appId === chat.application.appId && record.config.application.domain === chat.application.domain)?.config.label ?? chat.application.appId}`
+    : 'Private chat not configured'
   return <article className="connector-mote-card" data-mote-identity={scope.topic.id} data-identity-state={unbound ? 'unbound' : ref ? 'bound' : 'unconfirmed'}>
     <button type="button" className="connector-mote-card__identity" aria-label={`View bot for ${scope.topic.title}`} onClick={() => onOpen(origin, false)}>
       <span className="connector-mote-card__avatar"><SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon}
         avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} avatarObjectKey={target?.spaceId} /></span>
-      <span><strong>{scope.topic.title}</strong><small>{status}</small></span>
+      <span><strong>{scope.topic.title}</strong><small>New groups · {status}</small>{ref && !choice?.record ? <small>{ref.application.domain} · {ref.application.appId}</small> : null}<small>{privateChat}</small></span>
+      <NextIcon size={15} />
     </button>
-    <p className="connector-mote-card__caption">{ref ? `${ref.application.domain === 'open.feishu.cn' ? 'Feishu' : ref.application.domain === 'open.larksuite.com' ? 'Lark' : ref.application.domain} · ${choice?.issue || recordsIssue ? 'Needs attention' : 'Default bot'}` : unbound ? 'Uses this Mote’s saved profile.' : 'Your saved choice is kept.'}</p>
-    {issue ? <p className="connector-mote-card__issue" role="status">{issue}</p> : null}
-    <div className="connector-mote-card__actions">
-      <button type="button" className={unbound ? 'primary-button' : 'small-button'} data-mote-card-action={unbound ? 'create' : 'manage'} onClick={() => onOpen(origin, unbound)}>{unbound ? 'Create Feishu bot' : ref ? 'Manage bot' : 'Review bot'}</button>
-      {unbound ? <button type="button" className="connector-enrollment__text-action" onClick={() => onOpen(origin, false)}>Use existing</button> : issue ? <button type="button" className="connector-enrollment__text-action" onClick={onRetry}>Retry</button> : null}
-    </div>
+    {issue || choice?.issue || recordsIssue ? <div className="connector-mote-card__issue"><span role="status">{issue || choice?.issue || 'Saved bot details could not be checked.'}</span><button type="button" className="connector-enrollment__text-action" onClick={onRetry}>Refresh</button></div> : null}
   </article>
 }
 
@@ -97,9 +101,9 @@ function MoteIdentityCard({ reading, records, recordsIssue, onOpen, onRetry }: {
 export function MoteIdentityCards({ readings, records, recordsIssue, onOpen }: {
   readings: MoteIdentityReadings; records: ConnectionRecord[]; recordsIssue: string; onOpen(origin: MoteLarkSettingsOrigin, create: boolean): void
 }) {
-  return <section className="connector-mote-identities" aria-label="Mote bots">
-    <header><div><h3>Mote bots</h3><p>A bot with your Mote’s name and avatar.</p></div><span className="connector-identity-count">{readings.items.length || null}</span></header>
+  return <section className="connector-mote-identities" aria-label="Choose a Mote">
+    <header><div><h3>Choose a Mote</h3><p>Manage its default bot for new groups, or create an identity from its saved profile. Private chat is configured separately in the Mote Profile.</p></div><span className="connector-identity-count">{readings.items.length || null}</span></header>
     {readings.items.length ? <div className="connector-mote-grid">{readings.items.map(reading => <MoteIdentityCard key={JSON.stringify([reading.scope.workspace.hostId, reading.scope.workspace.id, reading.scope.topic.id])} reading={reading} records={records} recordsIssue={recordsIssue} onOpen={onOpen} onRetry={readings.refresh} />)}</div>
-      : <p className="settings-group-note" role="status">{readings.reading ? 'Reading your Motes…' : readings.issue ? 'Motes could not be read. Saved bots remain available below.' : 'Mote bots will appear here when you create a Mote.'}</p>}
+      : <p className="settings-group-note" role="status">{readings.reading ? 'Reading your Motes…' : readings.issue ? 'Motes could not be read. Return to bots to manage saved applications.' : 'Create a Mote to give it a bot identity. You can also use bots with Agents directly.'}</p>}
   </section>
 }

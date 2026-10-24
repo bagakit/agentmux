@@ -2,18 +2,9 @@
 .lark-settings { gap: var(--sp-6); }
 .lark-settings .connector-library,
 .lark-settings .connector-setup { gap: var(--sp-5); }
-.lark-settings .connector-identities-heading { gap: var(--sp-4); padding: 0; }
-.lark-settings .connector-identities-heading h3 { font-size: var(--fs-title); letter-spacing: -.015em; }
-.lark-settings .connector-identities-heading p { font-size: var(--fs-meta); line-height: 1.55; }
-.lark-settings .connector-identities-heading__actions { gap: var(--sp-2); }
 .lark-settings .connector-mote-identities { gap: var(--sp-3); }
 .lark-settings .connector-mote-identities h3 { font-size: var(--fs-body); }
 .lark-settings .connector-mote-identities header p { margin-top: var(--sp-1); font-size: var(--fs-meta); }
-.lark-settings .connector-mote-card { gap: var(--sp-3); padding: var(--sp-4); }
-.lark-settings .connector-mote-card__identity { gap: var(--sp-3); }
-.lark-settings .connector-mote-card__identity strong { font-size: var(--fs-body); }
-.lark-settings .connector-saved-identities { margin: 0; padding-top: var(--sp-4); }
-.lark-settings .connector-saved-identities > header > .small-button { border-color: transparent; }
 .lark-settings .connector-service-control { gap: var(--sp-3); }
 .lark-settings .connector-service-control__refresh { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .lark-settings .connector-service-control__refresh > svg { flex: none; }

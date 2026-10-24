@@ -22,9 +22,9 @@ export function ConnectionIdentityFacts({ record, readings, compact = false }: {
     : readings.complete ? 'No Mote association' : readings.reading ? 'Reading Mote associations…' : 'Mote associations not confirmed'
   if (compact) return <span className="connector-record__facts">
     <span className="connector-record__app"><code>{record.config.application.appId}</code></span>
-    <span data-identity-setup={record.initialSetup?.state ?? 'not-recorded'}>{connectionInitialSetupLabel(record)}</span>
-    <span data-identity-sync>{connectionSummary(record)}</span>
-    <span data-identity-motes>{linked}</span>
+    <span data-identity-setup={record.initialSetup?.state ?? 'not-recorded'}><small>Setup</small>{connectionInitialSetupLabel(record)}</span>
+    <span data-identity-sync><small>Connection</small>{connectionSummary(record)}</span>
+    <span data-identity-motes><small>Mote use</small>{linked}</span>
   </span>
   return <dl className="connector-identity connector-identity-facts" aria-label="Saved identity facts">
     <div><dt>App ID</dt><dd><code>{record.config.application.appId}</code></dd></div>
