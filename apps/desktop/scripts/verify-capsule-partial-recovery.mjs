@@ -69,6 +69,7 @@ const runs = []
 let baselineCount
 async function run(mutant) {
   const id = mutant?.id ?? 'baseline', report = join(output, id + '.tests.json'), capturePath = join(output, id + '.capture.json')
+  await Promise.all([rm(report, { force: true }), rm(capturePath, { force: true })])
   const chunks = []
   const exitCode = await new Promise((yes, no) => {
     const child = spawn(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config,
