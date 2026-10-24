@@ -12,9 +12,9 @@ export async function readGroupDiagnosis(source: typeof api.connections.call, ta
     const group = report.groups.value?.items.find(group => JSON.stringify(group.target) === JSON.stringify(target))
     if (group) return { ...group, service: report.service }
     const issue = report.groups.issue ?? 'target-unconfirmed'
-    return { target, window, limit: groupWindowLimit, service: report.service, connection: { value: null, issue }, binding: { value: null, issue }, outgoing: { value: null, issue }, incoming: { value: null, issue } }
+    return { target, window, limit: groupWindowLimit, service: report.service, adapterService: { value: null, issue }, connection: { value: null, issue }, binding: { value: null, issue }, outgoing: { value: null, issue }, incoming: { value: null, issue } }
   } catch {
     const issue = 'read-unavailable' as const
-    return { target, window, limit: groupWindowLimit, service: { value: null, issue }, connection: { value: null, issue }, binding: { value: null, issue }, outgoing: { value: null, issue }, incoming: { value: null, issue } }
+    return { target, window, limit: groupWindowLimit, service: { value: null, issue }, adapterService: { value: null, issue }, connection: { value: null, issue }, binding: { value: null, issue }, outgoing: { value: null, issue }, incoming: { value: null, issue } }
   }
 }

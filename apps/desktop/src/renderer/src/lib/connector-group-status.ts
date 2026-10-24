@@ -5,11 +5,11 @@ import type { CheckedGroupDiagnosis } from './use-connector-group-diagnosis'
 export function connectorGroupDiagnostics(snapshot: CheckedGroupDiagnosis | undefined) {
   const report = snapshot?.report
   if (!report) return { rows: [] as Array<[string, string]>, outcome: 'Not checked' }
-  const sections = [report.service, report.connection, report.binding, report.outgoing, report.incoming]
+  const sections = [report.service, report.adapterService, report.connection, report.binding, report.outgoing, report.incoming]
   const issues = sections.filter(section => section.issue), retained = sections.some(section => section.retained)
-  const config = report.binding.value, service = report.service.value, connection = report.connection.value, out = report.outgoing.value
+  const config = report.binding.value, service = report.service.value, adapterService = report.adapterService.value, connection = report.connection.value, out = report.outgoing.value
   const policy = [config ? config.state === 'active' ? 'Linked' : config.state === 'paused' ? 'Sharing paused' : 'Detached' : 'Link unconfirmed',
-    `Sync ${service ? service.enabled ? 'on' : 'off' : 'unknown'}`, `Bot ${connection ? connection.enabled ? 'on' : 'off' : 'unknown'}`].join(' · ')
+    `Sync ${service ? service.enabled ? 'on' : 'off' : 'unknown'}`, `Platform ${adapterService ? adapterService.enabled ? 'on' : 'off' : 'unknown'}`, `Bot ${connection ? connection.enabled ? 'on' : 'off' : 'unknown'}`].join(' · ')
   const { gapCount: gaps, counts, effects } = outgoingFacts(out)
   const source = !out ? 'Reading unavailable' : out.observation?.reason === 'content-unconfirmed' ? 'Content not confirmed' :
     out.sourceObservation?.state === 'ready' ? 'Read confirmed' : out.sourceObservation?.state === 'unavailable' ? 'Reading unavailable' : 'Reading unconfirmed'
@@ -36,7 +36,7 @@ function incomingStatus(report: GroupDiagnosis): string {
   return `${recorded} · ${input}`
 }
 
-export type ConnectorProblemKind = 'configuration-unconfirmed' | 'sync-off' | 'sharing-paused' | 'bot-off' | 'content-gap' | 'source-unconfirmed' |
+export type ConnectorProblemKind = 'configuration-unconfirmed' | 'sync-off' | 'platform-off' | 'sharing-paused' | 'bot-off' | 'content-gap' | 'source-unconfirmed' |
   'outgoing-unconfirmed' | 'outgoing-not-applied' | 'outgoing-read-unavailable' | 'incoming-read-unavailable' | 'member-access' | 'request-refused' | 'agent-waiting' | 'agent-stopped' | 'agent-not-applied' | 'agent-unconfirmed' | 'recording-unconfirmed'
 export type ConnectorProblem = { kind: ConnectorProblemKind; title: string; detail: string; tone: 'warning' | 'muted' }
 export type ConnectorDirectionSummary = { direction: 'outgoing' | 'incoming'; title: string; value: string; detail: string; tone: 'neutral' | 'warning' | 'muted' }
@@ -48,13 +48,14 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
   const add = (kind: ConnectorProblemKind, title: string, detail: string, tone: ConnectorProblem['tone'] = 'warning') => {
     problems.push({ kind, title, detail, tone })
   }
-  const sections = report ? [report.service, report.connection, report.binding, report.outgoing, report.incoming] : []
+  const sections = report ? [report.service, report.adapterService, report.connection, report.binding, report.outgoing, report.incoming] : []
   const retained = sections.some(section => section.retained)
-  const unread = report ? [[report.service.issue, 'Sync policy'], [report.connection.issue, 'Bot settings'], [report.binding.issue, 'Group link']].filter(([issue]) => issue).map(([, name]) => name) : []
+  const unread = report ? [[report.service.issue, 'Sync policy'], [report.adapterService.issue, 'Platform policy'], [report.connection.issue, 'Bot settings'], [report.binding.issue, 'Group link']].filter(([issue]) => issue).map(([, name]) => name) : []
   if (unread.length) add('configuration-unconfirmed', `${unread.join(', ')} unread`, 'These original settings could not be read. Earlier matching facts are kept.')
   if (report?.outgoing.issue) add('outgoing-read-unavailable', 'Platform receipt check unavailable', 'Earlier original platform receipts are kept; this check did not confirm them.')
   if (report?.incoming.issue) add('incoming-read-unavailable', 'Agent input check unavailable', 'Earlier input observations are kept; this check did not confirm them.')
   if (report?.service.value?.enabled === false) add('sync-off', 'Automatic sync is off', 'This is the saved policy for all bots.', 'muted')
+  if (report?.adapterService.value?.enabled === false) add('platform-off', 'Platform is turned off', 'Enable this platform in channel settings to resume its automatic messages.', 'muted')
   if (report?.binding.value?.state === 'paused') add('sharing-paused', 'Group sharing is paused', 'The saved group and its original requests are kept.', 'muted')
   if (report?.connection.value?.enabled === false) add('bot-off', 'Bot is disabled', 'Enable this original bot in its settings to resume its automatic work.', 'muted')
   const out = report?.outgoing.value
