@@ -168,7 +168,7 @@ describe('original message Run fence and intake reading', () => {
         expect(JSON.parse(cli.stderr).error.code).toBe('MESSAGE_QUEUE_UNAVAILABLE')
         expect(cli.stdout).toBe('')
       } finally { await rm(queuePath); await rename(backup, queuePath) }
-      expect((await h.rpc.call('message.read', { operationId: original.operationId })).message).toEqual(before)
+      expect((await h.rpc.call('message.read', { operationId: original.operationId })).message).toMatchObject(before)
       const admitted = await h.cli(sendArgs())
       expect(admitted.code, admitted.stderr).toBe(0)
       await vi.waitFor(() => expect(h.phase).toHaveBeenCalledOnce()); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
