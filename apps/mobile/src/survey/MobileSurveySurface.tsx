@@ -102,31 +102,31 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
     const row = catalog?.agentPresentation?.find(value => value.agentSessionId === region.agentSessionId)
     if (region.agentSessionId) openSession(region.agentSessionId, { name: row?.name ?? '名称未确认', project: row?.project ?? item?.name ?? '项目未确认', ...(address ? { context: address } : {}) })
   }
-  return <section className="mobile-survey" aria-label="Survey">
+  return <MobileNoticeScope owner={client} identity={[context.zoneId,context.tabId,context.regionId]}><section className="mobile-survey" aria-label="Survey">
     <header className="mobile-page-header">{activeBack && <button className="mobile-text-button" type="button" onClick={activeBack}>{context.regionId ? '返回研究内容' : '返回研究列表'}</button>}
       <h1>{context.regionId ? selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '原文件' : selected?.region.kind === 'browser' ? '原网页' : '原内容' : context.zoneId ? item?.name ?? selected?.zoneName ?? '原选择的研究' : 'Survey'}</h1>
       <button className="mobile-text-button" type="button" onClick={refresh}>刷新原研究</button></header>
-    {[issue, survey?.issue].filter(Boolean).map((message, index) => <p className="mobile-survey-issue" key={index} role="status">{message}</p>)}
+    {[issue, survey?.issue].filter(Boolean).map((message, index) => <MobileNotice owner={client} identity={[context.zoneId,message]} className="mobile-survey-issue" key={index}>{message}</MobileNotice>)}
     {!context.zoneId ? <><p className="mobile-survey-intro">已收集的研究与原内容</p>
-      {!survey ? <p role="status">原研究列表尚未确认。</p> : <nav aria-label="原研究列表"><ul>{survey.items.map(value => <li key={value.zoneId}>
+      {!survey ? <MobileNotice owner={client}>原研究列表尚未确认。</MobileNotice> : <nav aria-label="原研究列表"><ul>{survey.items.map(value => <li key={value.zoneId}>
         <button className="mobile-menu-row" type="button" onClick={() => { setContext({ zoneId: value.zoneId, tabId: null, regionId: null }); setSelectedKey(null) }}>
           <span><strong>{value.name || '名称未确认'}</strong>{survey.selection?.zoneId === value.zoneId && <small>原研究选择</small>}{value.issue && <small>{value.issue}</small>}</span></button>
       </li>)}</ul>{!survey.items.length && <p>暂无明确收集的研究。</p>}</nav>}
     </> : <>
-      {!catalog?.zones.some(zone => zone.zoneId === context.zoneId) && <p role="status">原 Zone 暂未确认；研究引用、选择与已有正文保留，请刷新原研究。</p>}
+      {!catalog?.zones.some(zone => zone.zoneId === context.zoneId) && <MobileNotice>原 Zone 暂未确认；研究引用、选择与已有正文保留，请刷新原研究。</MobileNotice>}
       <details className="mobile-survey-provenance"><summary>研究来源与原选择</summary><code>{context.zoneId}</code>
         {held && <ul>{held.selection.map(reference => <li key={JSON.stringify(reference)}><code>{reference.tabId} / {reference.regionId}</code>{held.active?.tabId === reference.tabId && held.active.regionId === reference.regionId ? ' · 原当前选择' : ''}</li>)}</ul>}
       </details>
       {context.regionId ? <><p className="mobile-survey-context">{selected?.zoneName ?? item?.name ?? '原研究'} · {selected?.tabName ?? '原标签'}</p>
-        {(selectionChanged || !selected) && <p role="status">原 Tab / Region 的当前绑定尚未重新确认；原引用、已有正文和草稿保留。可返回目录核对，不会改读别的内容。</p>}
+        {(selectionChanged || !selected) && <MobileNotice>原 Tab / Region 的当前绑定尚未重新确认；原引用、已有正文和草稿保留。可返回目录核对，不会改读别的内容。</MobileNotice>}
         <details className="mobile-survey-provenance"><summary>原工作面位置</summary><code>{context.tabId} / {context.regionId}</code>
           {catalog?.locations.filter(value => value.tabId === context.tabId && value.regionId === context.regionId).map(value => <code key={JSON.stringify(value)}>{value.displayWorkspaceId} / {value.groupId}{value.spaceId ? ` / ${value.spaceId}` : ''}</code>)}
         </details>
       </> : <section aria-label="研究工作面">
         <section className="mobile-survey-related" aria-label="关联 Topic"><h2>关联 Topic</h2>{topics.map(topic => <div key={topic.spaceId}>{openTopic ? <button className="mobile-menu-row" type="button" onClick={() => openTopic(topic.spaceId)}>{topic.name}</button> : <span>{topic.name}</span>}</div>)}
-          {relationsUnknown ? <p role="status">部分关联空间未确认，保留原关系；可刷新重试。</p> : !topics.length && <p>暂无已确认关联 Topic。</p>}
+          {relationsUnknown ? <MobileNotice>部分关联空间未确认，保留原关系；可刷新重试。</MobileNotice> : !topics.length && <p>暂无已确认关联 Topic。</p>}
         </section>
-        <section aria-label="原 Tab 与 Region">{tabs.map(tab => <article className="mobile-survey-tab" key={tab.tabId}><h2>{tab.name || 'Tab 名称未确认'}</h2>{tab.issue && <p role="status">{tab.issue}</p>}
+        <section aria-label="原 Tab 与 Region">{tabs.map(tab => <article className="mobile-survey-tab" key={tab.tabId}><h2>{tab.name || 'Tab 名称未确认'}</h2>{tab.issue && <MobileNotice identity={[tab.tabId,tab.issue]}>{tab.issue}</MobileNotice>}
           <ul>{tab.regionIds.map(regionId => {
             const regions = catalog?.regions.filter(value => value.tabId === tab.tabId && value.regionId === regionId) ?? [], region = regions.length === 1 ? regions[0] : undefined
             const row = catalog?.agentPresentation?.find(value => value.agentSessionId === region?.agentSessionId)
@@ -139,12 +139,13 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
                 {region?.kind === 'agent' && addresses.length > 1 && <button type="button" onClick={() => openAgent(region, address)}>从此原位置继续对话</button>}</div>)}</details>
             </li>
           })}</ul></article>)}</section>
-        {!tabs.length && <p role="status">原 Tab / Region 尚未确认，请刷新原研究。</p>}
+        {!tabs.length && <MobileNotice>原 Tab / Region 尚未确认，请刷新原研究。</MobileNotice>}
       </section>}
     </>}
     {visited.map(target => <div key={target.key} hidden={target.key !== selectedKey || !context.regionId}>
       {(target.region.kind === 'file' || target.region.kind === 'browser') && <MobileRegionContent client={client} connected={connected} showTitle={false} visible={visible && target.key === selectedKey && Boolean(context.regionId)}
         tabId={target.tabId} zoneId={target.zoneId} regionId={target.region.regionId} kind={target.region.kind} browserId={target.region.browserId} {...(target.region.file ? { file: target.region.file } : {})} {...(openHttpLink ? { openHttpLink } : {})} />}
     </div>)}
-  </section>
+  </section></MobileNoticeScope>
 }
+import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'

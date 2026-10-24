@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -134,7 +135,7 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
       <button onClick={() => setRefresh(value => value + 1)}>刷新</button>
       {topicId && <button onClick={() => startEdit()}>{edit ? '继续编辑草稿' : '新建知识'}</button>}
     </div>
-    {readIssue && <p className="mobile-topics-issue" role="status">{readIssue}</p>}
+    {readIssue && <MobileNotice identity={[readIssue]} className="mobile-topics-issue" role="status">{readIssue}</MobileNotice>}
     {!selection && !editorVisible && <ul className="mobile-topics-list">{entries.map(entry => <li key={`${entry.topicId}:${entry.entryId}`}>
       <button onClick={() => read(entry)}><strong>{'readError' in entry ? '条目读取未确认' : entry.title}</strong>
         <small>{'readError' in entry ? entry.readError : certaintyLabels[entry.certainty]}{!topicId ? ` · ${entry.topicId}` : ''}</small></button>
@@ -148,7 +149,7 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
         <AgentMarkdown content={selected.content} documentMode {...(openHttpLink ? { openHttpLink } : {})} />
         {selected.sources.length > 0 && <details className="mobile-topic-sources" open><summary>来源 · {selected.sources.length}</summary>{selected.sources.map((source, index) =>
           <button className="mobile-topic-source" key={index} onClick={() => { void Promise.resolve().then(() => openSource(source)).catch(error => setIssue(`原来源打开失败：${errorText(error)}。当前阅读保留。`)) }}>{sourceLabel(source)}</button>)}</details>}
-      </> : connected !== false && <p role="status">原条目正文待重新读取；准确引用与本机草稿保留。</p>}
+      </> : connected !== false && <MobileNotice identity={[]} role="status">原条目正文待重新读取；准确引用与本机草稿保留。</MobileNotice>}
     </article>}
     {edit && <div hidden={!editorVisible}><MobileTopicKnowledgeEditor key={editorKey} target={edit} client={client} connected={connected ?? false}
       rpc={rpc} onDraftKeyChange={draftKeyChanged} onClose={backToReading} onSaved={(entry, keepEditing) => {
@@ -178,10 +179,10 @@ export function MobileTopicKnowledgeEditor({ rpc: _rpc, target, onClose, onSaved
       <div className="mobile-topics-actions"><label>形式<select value={draft.form} onChange={event => editor.edit('form', event.target.value)}><option value="derived">整理成果</option><option value="reference">来源引用</option></select></label>
         <label>性质<select value={draft.certainty} onChange={event => editor.edit('certainty', event.target.value)}>{Object.entries(certaintyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
       <label>适用范围<TextInput aria-label="知识适用范围" value={draft.authoringScope} onChange={event => editor.edit('authoringScope', event.target.value)} /></label>
-      {editor.storageIssue && <p className="mobile-topics-issue" role="status">{editor.storageIssue}</p>}
-      {editor.notice && <p className="mobile-topics-issue" role="status">{editor.notice}</p>}
-      {!draft.scope && <p role="status">原 Host 身份尚未核实；本页正文可编辑和复制，尚未确认持久保全。</p>}
-      {blocked && !saving && <div className="mobile-topics-issue"><p role="status">保存未确认；原请求与后来正文保留，先检查同一条目。</p></div>}
+      {editor.storageIssue && <MobileNotice identity={[draft.entryId,editor.storageIssue]} className="mobile-topics-issue" role="status">{editor.storageIssue}</MobileNotice>}
+      {editor.notice && <MobileNotice kind="feedback" identity={[draft.entryId,editor.notice]} className="mobile-topics-issue" role="status">{editor.notice}</MobileNotice>}
+      {!draft.scope && <MobileNotice identity={[draft.entryId,JSON.stringify(draft.scope)]} role="status">原 Host 身份尚未核实；本页正文可编辑和复制，尚未确认持久保全。</MobileNotice>}
+      {blocked && !saving && <div className="mobile-topics-issue"><MobileNotice identity={[draft.entryId,draft.blockedAttemptId]} role="status">保存未确认；原请求与后来正文保留，先检查同一条目。</MobileNotice></div>}
       {draft.attempts.length > 0 && <details><summary>原保存请求与诊断 · {draft.attempts.length}</summary>{draft.attempts.map(attempt =>
         <div key={attempt.attemptId}><p>{attempt.issue ?? (saving && attempt.attemptId === blocked?.attemptId ? '此页明确保存进行中。' : '原保存回执尚未确认，重开不会重发。')}</p><pre>{JSON.stringify(attempt.input, null, 2)}</pre></div>)}</details>}
       {(blocked && !saving || !original.isNew) && <button type="button" onClick={() => { void editor.inspect() }}>检查原保存结果</button>}

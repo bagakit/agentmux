@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
@@ -17,7 +18,7 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
   return <section className="mobile-mote-quick-editor" aria-label="Mote 快捷配置编辑">
     <button type="button" className="mobile-text-button" onClick={onClose}>返回 Profile</button><h3>快捷配置</h3>
     <p>设置新对话使用的 Agent、原主对话和接回时机。保存不启动会话。</p>
-    <p role="status">{model.busy ? '正在保存原配置…' : model.adoptionBusy ? '正在采用当前修订…' : blocked ? '原保存未确认；选择和请求保留。' : model.notice || '正在核对原配置…'}</p>
+    <MobileNotice dismissible={!model.busy && !model.adoptionBusy} kind={blocked && !model.busy && !model.adoptionBusy ? "warning" : "feedback"} owner={client} identity={[JSON.stringify(target),blocked?.input.operationId,blocked?.phase,model.notice]} role="status">{model.busy ? '正在保存原配置…' : model.adoptionBusy ? '正在采用当前修订…' : blocked ? '原保存未确认；选择和请求保留。' : model.notice || '正在核对原配置…'}</MobileNotice>
     <form onSubmit={event => { event.preventDefault(); void model.save() }}>
       <label>新对话使用的 Agent<select aria-label="新对话使用的 Agent" value={executor} onChange={event => {
         const { executorId: _old, ...values } = draft.values; model.edit(event.target.value ? { ...values, executorId: event.target.value } : values)
@@ -41,7 +42,7 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
         <button type="button" className="mobile-text-button" onClick={() => copy(draft)}>复制配置与请求</button></div>
     </form>
     {read?.status === 'ready' && <button type="button" className="mobile-text-button" disabled={model.busy || model.adoptionBusy} onClick={() => { void model.adopt() }}>采用当前修订，保留我的选择</button>}
-    {model.storageIssue && <><p role="status">设备备份尚未确认；本页选择与请求保留。</p><details><summary>设备保存详情</summary><p>{model.storageIssue}</p></details>
+    {model.storageIssue && <><MobileNotice owner={client} identity={[JSON.stringify(target),model.storageIssue]} role="status">设备备份尚未确认；本页选择与请求保留。</MobileNotice><details><summary>设备保存详情</summary><MobileNotice owner={client} identity={[JSON.stringify(target),model.storageIssue]}>{model.storageIssue}</MobileNotice></details>
 
       {model.conflict && <button type="button" className="mobile-text-button" disabled={model.busy || model.adoptionBusy} onClick={() => { void model.chooseStored() }}>保全本页并采用设备原稿</button>}</>}
     {model.notice && <details><summary>本次操作详情</summary><p>{model.notice}</p></details>}

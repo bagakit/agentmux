@@ -1,3 +1,4 @@
+import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { useEffect, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
@@ -23,8 +24,8 @@ export function MobileZoneWorkface({ client, zoneId, name, visible, openSession,
     }).catch(error => { if (live) setIssue(error instanceof Error ? error.message : String(error)) })
     return () => { live = false }
   }, [client, zoneId, tabId, visible, revision])
-  return <section className="mobile-zone-workface" aria-label={`${name} 的讨论与内容`}>
-    {issue && <p className="mobile-spatial-notice" role="status">{issue}</p>}
+  return <MobileNoticeScope owner={client} identity={[zoneId,tabId,regionId]}><section className="mobile-zone-workface" aria-label={`${name} 的讨论与内容`}>
+    {issue && <MobileNotice owner={client} identity={[zoneId,tabId,regionId,issue]} className="mobile-spatial-notice" role="status">{issue}</MobileNotice>}
     <div className="mobile-zone-tools">{zoneId && onCreateAgent && <button className="mobile-icon-button" aria-label="在此 Topic 新建 Agent" onClick={() => onCreateAgent({ zoneId })}><SemanticIcon name="action.create-agent" size={18} /></button>}<button className="mobile-icon-button" aria-label="刷新讨论" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={17} /></button></div>
     {catalog?.tabs.filter(tab => !tabId || tab.tabId === tabId).map(tab => <section key={tab.tabId}>
       <h2 className="mobile-spatial-subheading">{tab.name || '讨论'}</h2>
@@ -39,5 +40,5 @@ export function MobileZoneWorkface({ client, zoneId, name, visible, openSession,
       })}
     </section>)}
     {catalog && !catalog.tabs.length && <p className="mobile-spatial-empty">此 Topic 暂无讨论。</p>}
-  </section>
+  </section></MobileNoticeScope>
 }

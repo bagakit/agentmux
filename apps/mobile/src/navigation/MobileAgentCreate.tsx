@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useRef, useState } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
@@ -82,7 +83,7 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
         {intent.phase !== 'confirmed' && <button className="mobile-text-button" disabled={busy || !connected} onClick={() => void run(intent)}>核对原创建操作</button>}
         {intent.agentSessionId && <button className="mobile-text-button" onClick={() => { openSession(intent.agentSessionId!); onClose() }}>打开原 Agent 对话</button>}
       </div>)}
-      {issue && <p className="mobile-spatial-notice" role="status">{issue}</p>}
+      {issue && <MobileNotice kind="feedback" owner={client} identity={[target.spaceId,target.zoneId,pending?.input.operationId,issue]} className="mobile-spatial-notice" role="status">{issue}</MobileNotice>}
     </Dialog.Content>
   </Dialog.Portal></Dialog.Root>
 }

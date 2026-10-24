@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
@@ -104,9 +105,9 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
       <button type="button" disabled={busy || !!retained || !!request && request.phase !== 'ready'} onClick={() => void invoke('new')}>{busy ? '原目标操作中…' : '新建目标'}</button>
       <details><summary>新目标的项目上下文</summary><label>项目<select aria-label="新目标项目" value={projectId} disabled={busy} onChange={event => setProjectId(event.target.value)}><option value="">未分配项目</option>{projectId && !projects.some(project => project.projectId === projectId) && <option value={projectId}>原项目暂未确认</option>}{projects.map(project => <option key={project.projectId} value={project.projectId}>{project.name}</option>)}</select></label><button type="button" onClick={() => reread(value => value + 1)}>刷新项目目录</button></details>
     </>}
-    {directoryIssue && <p role="status">{directoryIssue}</p>}{deviceIssue && <p role="status">{deviceIssue}</p>}
+    {directoryIssue && <MobileNotice kind="feedback" identity={[directoryIssue,deviceIssue]} role="status">{directoryIssue}</MobileNotice>}{deviceIssue && <MobileNotice identity={[directoryIssue,deviceIssue]} role="status">{deviceIssue}</MobileNotice>}
     {owner.snapshot().issue && <details><summary>保全设备意图</summary><MobileRecoveryPanel onRestored={() => reread(value => value + 1)} /><button type="button" onClick={async () => { try { await owner.replaceUnreadableWithCurrent(); setDirectoryIssue('当前工作面已保存，原 Goal 意图继续沿同一身份核对。') } catch { setDirectoryIssue('设备存储仍不可写；原字节和当前内存意图保留，可继续原 Goal 操作并导出备份。') } }}>存储恢复后保存当前工作面</button></details>}
-    {request && request.phase !== 'ready' && <><p role="status">{request.issue}</p>
+    {request && request.phase !== 'ready' && <><MobileNotice dismissible={!busy && request.phase !== "saving"} kind={busy || request.phase === "saving" ? "feedback" : "warning"} identity={[request?.input.operationId,request?.phase,request?.issue]} role="status">{request.issue}</MobileNotice>
       {request.phase === 'unknown' && <button type="button" disabled={busy} onClick={() => void invoke('read')}>读取同一目标核对</button>}
       {request.phase === 'not-saved' && <button type="button" disabled={busy} onClick={() => void invoke('save-same')}>明确保存同一目标</button>}
       {request.phase === 'pmo' && !busy && <button type="button" onClick={() => void invoke('open')}>打开这个目标的原讨论</button>}

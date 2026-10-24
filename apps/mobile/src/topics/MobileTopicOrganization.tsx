@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback, useEffect, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -76,7 +77,7 @@ function OrganizationEditor({ rpc, action, categories, onClose, onSaved }: {
     {original.kind === 'topic-move' ? <><p>{original.topic.title} · 原 Topic 整体移动，内容与执行身份保留。</p><label>目标分类<select aria-label="目标分类" value={destination} disabled={busy} onChange={event => setDestination(event.target.value)}>
       <option value="">选择分类</option>{categories.map(value => <option key={value.categoryId} value={value.categoryId}>{value.title}</option>)}</select></label></>
       : <label>名称<TextInput aria-label="分类或 Topic 名称" maxLength={120} value={title} readOnly={busy} onChange={event => setTitle(event.target.value)} /></label>}
-    {issue && <p className="mobile-topics-issue" role="status">{issue}</p>}
+    {issue && <MobileNotice kind="feedback" identity={[issue]} className="mobile-topics-issue" role="status">{issue}</MobileNotice>}
     {unknown && <button type="button" onClick={() => { void inspect() }}>检查原操作结果</button>}
     {unknown && checked && <button type="button" onClick={() => { setUnknown(false); setChecked(false); setIssue('已采用检查结果；继续操作须明确确认保存。') }}>以检查结果为基准继续</button>}
     <div className="mobile-topics-actions"><button type="button" onClick={onClose}>保留草稿并返回</button><button type="submit" disabled={busy || unknown}>{busy ? '保存中…' : '确认保存'}</button>

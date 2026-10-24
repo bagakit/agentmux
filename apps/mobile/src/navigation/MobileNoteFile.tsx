@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -99,9 +100,9 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
   if (read.result.status !== 'read') return null
   const document = read.result.document
   return <>
-    {conversionIssue && <p role="status">{conversionIssue}<button type="button" onClick={() => retryDraftLookup(value => value + 1)}>刷新原转换状态</button></p>}
-    {draftIssue && <p role="status">{draftIssue}<button type="button" onClick={() => retryDraftLookup(value => value + 1)}>重试原设备草稿续接</button></p>}
-    {draft.issue && <p role="status">{draft.issue}</p>}
+    {conversionIssue && <MobileNotice identity={[conversionIssue]} role="status">{conversionIssue}<button type="button" onClick={() => retryDraftLookup(value => value + 1)}>刷新原转换状态</button></MobileNotice>}
+    {draftIssue && <MobileNotice identity={[draftIssue]} role="status">{draftIssue}<button type="button" onClick={() => retryDraftLookup(value => value + 1)}>重试原设备草稿续接</button></MobileNotice>}
+    {draft.issue && <MobileNotice identity={[draft.issue]} role="status">{draft.issue}</MobileNotice>}
     <NoteReader content={document.content} path={document.path} workspaceId={params.expectedResource.workspaceId} revision={document.revision} noteProvenance={document.noteProvenance} documents={documents} target={target}
       readReference={target => { void discover(target) }} editing={read.resource ? { initial: draft.initial, subscribe: draft.subscribe, readDeviceDraft: draft.readDevice, adoptDeviceDraft: draft.adoptDevice,
         onDraft: value => { try { draft.save(value) } catch (error) { setIssue(error instanceof Error ? error.message : String(error)); throw error } },
@@ -117,7 +118,7 @@ function NoteFile({ rpc, params, read, visible = true, target }: MobileNoteFileP
           if (result.resource && ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => result.resource![key as keyof FileReadResource] !== read.resource![key as keyof FileReadResource])) throw new Error('原文件映射已改变；本次读取不是待确认保存的原文件，草稿与原保存记录保留')
           return result
         } } : undefined} />
-    {issue && <p role="status">{issue}</p>}
+    {issue && <MobileNotice kind="feedback" identity={[issue]} role="status">{issue}</MobileNotice>}
     {reference && <section aria-label="引用原文件选择"><button type="button" onClick={() => { void discover(reference) }}>刷新引用来源</button><ul>{candidates.map(({ path, params: scope }) => <li key={JSON.stringify([scope, path])}><button type="button" onClick={() => { const token = ++intent.current; void readCandidate(reference, path, token, scope).catch(error => { if (token === intent.current) setIssue(error instanceof Error ? error.message : String(error)) }) }}>{path.split('/').at(-1)}</button></li>)}</ul></section>}
   </>
 }

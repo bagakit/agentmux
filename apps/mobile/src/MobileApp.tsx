@@ -31,6 +31,7 @@ import { MobileMoteProfile } from './navigation/MobileMoteProfile'
 import { useMobileBack } from './navigation/useMobileBack'
 import { retainObjectReference, type MobilePresentationRoute, type MobileTopicsRoute, type MobileGoalsContext, type MobileKnowledgeReference } from './recovery/presentation-route'
 import type { MobileTopicSourceContentReference } from './topics/source-reference'
+import { MobileNotice, MobileNoticeProvider, MobileNoticeRestore, MobileNoticeScope, useMobileNotices } from './notices/MobileNotice'
 
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
 const ThemeObjectNetworkIcon = semanticIconComponent('object.network')
@@ -58,12 +59,16 @@ function loadWorkface(): { workface: Workface; presentation?: MobilePresentation
   }
 }
 
-export function MobileApp({ client, connection, platform, native = false, focusComposer = () => false,
-  connectionPanel }: {
+type MobileAppProps = {
   client: AgentMuxHostedClient | null; connection: MobileConnection; platform: ClientUiPlatform
   native?: boolean; focusComposer?: () => boolean
   connectionPanel?: ReactNode
-}) {
+}
+export function MobileApp(props: MobileAppProps) {
+  return <MobileNoticeProvider><MobileAppContent {...props} /></MobileNoticeProvider>
+}
+function MobileAppContent({ client, connection, platform, native = false, focusComposer = () => false, connectionPanel }: MobileAppProps) {
+  const notices = useMobileNotices()
   const initial = useRef<ReturnType<typeof loadWorkface> | null>(null)
   initial.current ??= loadWorkface()
   const navigationRecord = useRef<{ recordId: string | null } | null>(null)
@@ -160,7 +165,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     }).catch(error => setNotice(error instanceof Error ? error.message : String(error)))
   }
   const sessionTitle = objectIdentity?.name ?? null
-  const [sheet, setSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'create' | null>(initial.current.presentation?.profile ? 'identity' : null)
+  const [sheet, setSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'create' | 'notices' | null>(initial.current.presentation?.profile ? 'identity' : null)
   const [createTarget, setCreateTarget] = useState<MobileAgentCreateTarget>({})
   const createAgent = (target: MobileAgentCreateTarget) => { setCreateTarget(target); setSheet('create') }
   const openProfile = (identity: MobileObjectIdentity) => {
@@ -270,7 +275,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const serviceNotices = [...new Set([notice, projectionError, hostAppearance.issue,
     !conversationVisible ? connection.issue ?? (hasConnected && !connected ? connection.message : null) : null
   ].filter((message): message is string => Boolean(message)))]
-  return <div className="mobile-app" data-connection={connection.state} data-drawer={sheet === 'settings' ? 'open' : 'closed'} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
+  return <MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><div className="mobile-app" data-connection={connection.state} data-drawer={sheet === 'settings' ? 'open' : 'closed'} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
     {!primaryHeader && <header className={`mobile-header${workspaceVisible && showSession && !moteConversation ? ' mobile-header--session' : ''}`}>
       {workspaceVisible && showSession && !moteConversation ? <div className="mobile-session-toolbar">
         <button type="button" className="mobile-session-origin" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={16} /><span>{pageName}</span></button>
@@ -287,10 +292,10 @@ export function MobileApp({ client, connection, platform, native = false, focusC
         {showSession ? <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></button> : <span className="mobile-header-spacer" />}
       </>}
     </header>}
-    <main className="mobile-main">
+    <main className="mobile-main" tabIndex={-1}>
       {!workspaceVisible && <section className="mobile-connect-page"><img className="mobile-connect-dragon" src={brandIcon} alt="AgentMux 龙" /><h1>连接你的 Mac</h1>
         <p>在 Mac 的 Phone &amp; Devices 中复制连接链接，用手机打开。两台设备连接同一 Wi-Fi。</p>
-        <p className="mobile-spatial-notice" role="status">{connection.message}</p>{connectionPanel}
+        <MobileNotice owner={client} identity={[connection.state,connection.issue]} className="mobile-spatial-notice">{connection.message}</MobileNotice>{connectionPanel}
         <button className="mobile-secondary" onClick={() => setSheet('connection')}><ThemeObjectConnectionIcon size={16} />连接详情</button>
       </section>}
       {workspaceVisible && <>
@@ -329,12 +334,12 @@ export function MobileApp({ client, connection, platform, native = false, focusC
         <MobileTerminalViewer terminalPalette={hostAppearance.terminalPalette} client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} inputActive={exposed} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
       </section>
     </main>
-    {(serviceNotices.length > 0 || !canPersist) && <aside className="mobile-service-notice" role="status"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></aside>}
+    {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,projectionError,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></MobileNotice>}
     <footer className="mobile-navigation-bar">{menuButton}{workspaceVisible && <MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} />}</footer>
     <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: '原 Agent', project: '项目未确认' })} />
     <Dialog.Root open={sheet !== null && sheet !== 'create'} onOpenChange={open => { if (!open) setSheet(null) }}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : 'mobile-sheet'} aria-describedby="mobile-sheet-description">
-        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'identity' ? profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></Dialog.Close></div>
+        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></Dialog.Close></div>
         {sheet === 'settings' ? <>
           <Dialog.Description id="mobile-sheet-description">工作面与手机设置</Dialog.Description>
 
@@ -347,8 +352,12 @@ export function MobileApp({ client, connection, platform, native = false, focusC
             try { saveMobileHome(value); setDefaultHome(value); setHomeIssue(null) }
             catch { setHomeIssue('默认主页未保存；原设置和草稿保留。') }
           }}><option value="goals">Goals</option><option value="topics">Topics</option><option value="mote">Mote</option><option value="focus">Focus</option><option value="space">Space</option></select></label>
-          {homeIssue && <p className="mobile-spatial-notice" role="status">{homeIssue}</p>}
+          {homeIssue && <MobileNotice identity={[homeIssue]} className="mobile-spatial-notice">{homeIssue}</MobileNotice>}
+          <button className="mobile-menu-row" aria-label="提醒与诊断" onClick={() => setSheet('notices')}><ThemeStatusInfoIcon size={18} /><span>提醒与诊断<small>{notices?.hasDismissed ? '有已收起的提醒' : '收起或恢复原提醒'}</small></span><ThemeNavigationSubmenuIcon size={16} /></button>
           <button className="mobile-menu-row" onClick={() => setSheet('connection')}><ThemeObjectNetworkIcon size={18} /><span>连接与设备<small>{label} · {location.host}</small></span><ThemeNavigationSubmenuIcon size={16} /></button></div>
+        </> : sheet === 'notices' ? <>
+          <Dialog.Description id="mobile-sheet-description">本设备的提醒呈现</Dialog.Description>
+          <MobileNoticeRestore onRestored={() => setSheet(null)} />
         </> : sheet === 'identity' && profileIdentity ? <>
           <Dialog.Description id="mobile-sheet-description">原资料与当前工作</Dialog.Description>
           <MobileMoteProfile identity={profileIdentity} client={client} copyText={platform.copyText} visible={sheet === 'identity'} sourcePath={profileSourcePath} onSourceChange={setProfileSourcePath} onBackChange={registerProfileBack} onOpenGoals={id => {
@@ -365,9 +374,10 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           <p className="mobile-sheet-note">Mac 保持在线即可继续使用原会话。</p>
           {connectionPanel}
           <MobileRecoveryPanel {...(native ? { exportFile: exportNativeWorkfaceFile } : {})} />
+          <button className="mobile-menu-row" aria-label="提醒与诊断" onClick={() => setSheet('notices')}><ThemeStatusInfoIcon size={18} /><span>提醒与诊断</span><ThemeNavigationSubmenuIcon size={16} /></button>
           <p className="mobile-sheet-note">连接会自动恢复。{connection.message}</p>
         </>}
       </Dialog.Content></Dialog.Portal>
     </Dialog.Root>
-  </div>
+  </div></MobileNoticeScope>
 }

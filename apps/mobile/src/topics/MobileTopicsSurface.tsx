@@ -1,3 +1,4 @@
+import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -120,15 +121,15 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
   const matchesCategory = (value: TopicCategory) => value.title.toLocaleLowerCase().includes(normalizedQuery)
   const matchesTopic = (value: KnowledgeTopic) => `${value.title} ${value.summary}`.toLocaleLowerCase().includes(normalizedQuery)
   const matchingCategories = categories.filter(value => matchesCategory(value) || (topicDirectories[value.categoryId] ?? []).some(matchesTopic))
-  return <section className="mobile-topics" aria-label="Topics" hidden={!visible}>
+  return <MobileNoticeScope owner={client} identity={[categoryId,topicId]}><section className="mobile-topics" aria-label="Topics" hidden={!visible}>
     <header className="mobile-topics-actions mobile-page-header">
       {inTopic ? <button aria-label={topicBackLabel ?? '返回分类目录'} onClick={backToCategory}>{topicBackLabel ?? '返回'}</button>
         : categoryId && <button aria-label="返回所有分类" onClick={backToAllCategories}>返回</button>}
       <div className="mobile-topics-heading">{(inTopic || category) && <small>{category?.title ?? 'Topics'}</small>}<h1>{inTopic ? currentTopic?.title ?? '原 Topic 尚未确认' : 'Topics'}</h1></div>
     </header>
     <MobileTopicOrganization rpc={rpc} categories={categories} category={category} topic={currentTopic} visible={visible} onBackChange={reportOrganizationBack} onRefresh={() => setRefresh(value => value + 1)} onChanged={() => setRefresh(value => value + 1)} />
-    {[categoryIssue, openIssue].filter(Boolean).map((value, index) => <p key={index} className="mobile-topics-issue" role="status">{value}</p>)}
-    {deepLinkIssue && <p className="mobile-topics-issue" role="status">{deepLinkIssue}<button onClick={() => setDeepLinkRetry(value => value + 1)}>重试原 Topic</button></p>}
+    {[categoryIssue, openIssue].filter(Boolean).map((value, index) => <MobileNotice identity={[categoryId,topicId,value]} key={index} className="mobile-topics-issue" role="status">{value}</MobileNotice>)}
+    {deepLinkIssue && <MobileNotice identity={[topicId,deepLinkIssue]} className="mobile-topics-issue" role="status">{deepLinkIssue}<button onClick={() => setDeepLinkRetry(value => value + 1)}>重试原 Topic</button></MobileNotice>}
     <div hidden={Boolean(organizationBack)}>
     <div className="mobile-topics-tabs" role="group" aria-label="Topic 内容"><button aria-pressed={mode === 'topics'} onClick={() => setMode('topics')}>{inTopic ? '讨论' : 'Topics'}</button><button aria-pressed={mode === 'knowledge'} onClick={() => setMode('knowledge')}>知识</button></div>
     <div hidden={inTopic || mode !== 'topics'}>
@@ -153,7 +154,7 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
         </li>
       })}</ul>
       {!loading && !matchingCategories.length && <p className="mobile-topics-empty">{categoryIssue ? '目录尚未确认，原工作面仍保留。' : categories.length ? '没有匹配的分类或已读取 Topic。' : '暂无已确认分类。'}</p>}
-      {categoryId && !category && !loading && <p className="mobile-topics-issue" role="status">原分类尚未确认，原目录身份保留。可刷新目录或返回所有分类。</p>}
+      {categoryId && !category && !loading && <MobileNotice identity={[categoryId]} className="mobile-topics-issue" role="status">原分类尚未确认，原目录身份保留。可刷新目录或返回所有分类。</MobileNotice>}
     </div>
     <div hidden={mode !== 'knowledge' || inTopic}><ScopedKnowledge reportBack={reportKnowledgeBack} reportReference={reportKnowledgeReference} client={client ?? null} {...(connected !== undefined ? { connected } : {})}
       {...(initialContext?.topicId === null && initialKnowledge ? { initialReference: initialKnowledge } : {})}
@@ -163,7 +164,7 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
       visible={visible && !organizationBack && mode === 'knowledge' && selectedTopicId === value.topicId} rpc={rpc} topicId={value.topicId} title={value.title} openSource={openSource} {...(openHttpLink ? { openHttpLink } : {})} /></div>)}
     {visited.map(value => <div key={value.topicId} className="mobile-topic-workface" hidden={selectedTopicId !== value.topicId || mode !== 'topics'}>{renderWorkface(value, visible && selectedTopicId === value.topicId && mode === 'topics' && !organizationBack)}</div>)}
     </div>
-  </section>
+  </section></MobileNoticeScope>
 }
 
 /** Each retained reader reports only its own callback; hiding one cannot clear another scope. */

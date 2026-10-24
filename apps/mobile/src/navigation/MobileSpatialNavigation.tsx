@@ -1,3 +1,4 @@
+import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -189,7 +190,7 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
         <SemanticIcon name="object.conversation" size={15} />
         <span><strong>继续主对话</strong><small>{catalog?.agentPresentation?.find(row => row.agentSessionId === mainSession.agentSessionId)?.name ?? owner.name} · {confirmedMain.displayWorkspaceId} / {confirmedMain.groupId}</small></span>
       </button>}
-      {moteFact?.issue && <p className="mobile-spatial-notice" role="status">{moteFact.issue}</p>}
+      {moteFact?.issue && <MobileNotice identity={[moteFact?.spaceId,moteFact?.issue]} className="mobile-spatial-notice" role="status">{moteFact.issue}</MobileNotice>}
       {[...ownerZones].map(zoneId => <section className="mobile-spatial-zone" key={zoneId} data-zone-id={zoneId}>
         {catalog?.zones.find(zone => zone.zoneId === zoneId)?.kind === 'worktree' && <h3 className="mobile-spatial-zone-name">{catalog.zones.find(zone => zone.zoneId === zoneId)?.branch ?? 'Worktree'}</h3>}
         {ownerTabs.filter(tab => tab.zoneId === zoneId).map(tab => <section className="mobile-spatial-tab" key={tab.tabId}>{(tab.regionIds.length !== 1 || !catalog?.regions.some(region => region.tabId === tab.tabId && region.agentSessionId)) && <h3>{tab.name || '未命名 Tab'}</h3>}
@@ -208,11 +209,11 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     </>
   }
   const filteredSessions = (values: SessionReference[]) => values.filter(session => matching(name(session) + ' ' + identity(session).project + ' ' + session.providerId))
-  return <section className="mobile-spatial-panel">
+  return <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><section className="mobile-spatial-panel">
     <div className="mobile-section-heading mobile-page-header"><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
       <div className="mobile-section-actions">{onCreateAgent && <button className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></button>}<button className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></button></div></div>
-    {!connected && <p className="mobile-spatial-notice" role="status">连接暂不可用，原工作面与最近目录保留。</p>}
+    {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，原工作面与最近目录保留。</MobileNotice>}
     <MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
     {home === 'focus' ? <>
@@ -227,10 +228,10 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
       <button className="mobile-text-button" type="button" onClick={backToSpace}><SemanticIcon name="navigation.back" size={16} />返回空间内容</button>
       <h2 className="mobile-spatial-subheading">{selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '原文件' : selected?.region.kind === 'browser' ? '原网页' : '原内容'}</h2>
       <p>{selected?.spaceName ?? space?.name ?? '原空间'} · {selected?.tabName ?? '原标签'}</p>
-      {(selectionChanged || !selected) && <p role="status">原 Tab / Region 的当前绑定尚未重新确认；原引用、已有正文和草稿保留。可返回目录核对，不会改读别的内容。</p>}
+      {(selectionChanged || !selected) && <MobileNotice identity={[spaceId,context.tabId,context.regionId,selectionChanged]} role="status">原 Tab / Region 的当前绑定尚未重新确认；原引用、已有正文和草稿保留。可返回目录核对，不会改读别的内容。</MobileNotice>}
       <details><summary>原工作面位置</summary><code>{context.spaceId} / {context.tabId} / {context.regionId}</code></details>
     </> : <>
-      {spaceId && !space && <p className="mobile-spatial-notice" role="status">原空间绑定尚未重新确认，原引用与工作面保留；可刷新原目录。</p>}
+      {spaceId && !space && <MobileNotice identity={[spaceId]} className="mobile-spatial-notice" role="status">原空间绑定尚未重新确认，原引用与工作面保留；可刷新原目录。</MobileNotice>}
       {catalog ? <MobileSpaceDirectory key={home} catalog={catalog} home={home === 'mote' ? 'mote' : 'space'} query={query} selectedSpaceId={spaceId}
         onSelect={owner => { setContext(owner ? { spaceId: owner.spaceId, tabId: null, regionId: null } : EMPTY_CONTEXT); setSelectedKey(null) }}
         renderIdentity={owner => <MobileIdentity appearanceRevision={revision} objectSpaceId={owner.spaceId} appearance={catalog.appearance?.find(value => value.spaceId === owner.spaceId)} identity={spaceIdentity(owner)} client={client} connected={connected} visible={visible} size={28} />}
@@ -241,5 +242,5 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
         visible={visible && home !== 'focus' && target.key === selectedKey && Boolean(context.regionId)} tabId={target.tabId} regionId={target.region.regionId} zoneId={target.zoneId}
         kind={target.region.kind} browserId={target.region.browserId} {...(target.region.file ? { file: target.region.file } : {})} {...(openHttpLink ? { openHttpLink } : {})} />}
     </div>)}
-  </section>
+  </section></MobileNoticeScope>
 }

@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useRef, useState } from 'react'
 import { getDeviceWorkface, type DeviceWorkface } from './device-workface'
 import './recovery.css'
@@ -7,6 +8,7 @@ export function MobileRecoveryPanel({ onRestored = () => location.reload(), expo
   exportFile?: (filename: string, bytes: string) => Promise<void>
 }) {
   const [notice, setNotice] = useState<string | null>(null)
+  const [noticeGeneration, setNoticeGeneration] = useState(0)
   const [candidate, setCandidate] = useState<DeviceWorkface | null>(null)
   const [exporting, setExporting] = useState(false)
   const epoch = useRef(0)
@@ -15,6 +17,7 @@ export function MobileRecoveryPanel({ onRestored = () => location.reload(), expo
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++epoch.current } }, [])
   const exported = async () => {
     if (exporting) return
+    setNoticeGeneration(value => value + 1)
     setExporting(true)
     const active = ++epoch.current
     try {
@@ -34,6 +37,7 @@ export function MobileRecoveryPanel({ onRestored = () => location.reload(), expo
     const active = ++epoch.current
     setCandidate(null)
     if (!file) return
+    setNoticeGeneration(value => value + 1)
     try {
       if (file.size > 2 * 1024 * 1024) throw new Error('File is too large')
       const value = getDeviceWorkface().parseBackup(await file.text())
@@ -44,6 +48,7 @@ export function MobileRecoveryPanel({ onRestored = () => location.reload(), expo
   }
   const restore = async () => {
     if (!candidate) return
+    setNoticeGeneration(value => value + 1)
     try {
       await getDeviceWorkface().replaceBackup(candidate)
       setCandidate(null); setNotice('工作面已保存，正在重新读取。设备授权需另行确认，未知输入不会重投。')
@@ -65,6 +70,6 @@ export function MobileRecoveryPanel({ onRestored = () => location.reload(), expo
       <button className="mobile-secondary" onClick={restore}>恢复这份工作面</button>
       <button className="mobile-text-button" onClick={() => { ++epoch.current; setCandidate(null); setNotice(null) }}>保留当前工作面</button>
     </div>}
-    {notice && <p role="status">{notice}</p>}
+    {notice && <MobileNotice kind="feedback" identity={[noticeGeneration,notice]} role="status">{notice}</MobileNotice>}
   </section>
 }

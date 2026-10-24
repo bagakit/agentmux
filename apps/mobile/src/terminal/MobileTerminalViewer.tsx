@@ -1,3 +1,4 @@
+import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
@@ -160,7 +161,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   }
   const serviceMessage = renderIssue ?? (connection.state !== 'connected' ? connection.message : null) ?? inputState.notice ?? reading.notice ?? inputState.storageIssue ?? (inputState.queuedBytes > 0 ? `${inputState.queuedBytes} 字节未发送` : copyFeedback?.issue ? copyFeedback.message : null)
   const originalPending = control.current === controls.current.get(agentSessionId ?? '') ? control.current?.facts().pending : null
-  return <section className="mobile-terminal" data-control={inputState.mode} data-agent-session-id={agentSessionId ?? undefined} data-reading={client && agentSessionId ? reading.phase : 'unavailable'}>
+  return <MobileNoticeScope owner={client} identity={[agentSessionId]}><section className="mobile-terminal" data-control={inputState.mode} data-agent-session-id={agentSessionId ?? undefined} data-reading={client && agentSessionId ? reading.phase : 'unavailable'}>
     <div className="mobile-terminal-toolbar"><span><SemanticIcon name="object.terminal" size={16} />{inputState.mode === 'control' ? '控制终端' : '观看终端'}</span>
       {agentSessionId && (inputState.mode === 'watch' ? <button className="mobile-terminal-mode" disabled={!client || connection.state !== 'connected' || inputState.phase === 'unknown'} onClick={enableControl}><SemanticIcon name="object.keyboard" size={16} />控制终端</button>
         : <button className="mobile-terminal-mode" onClick={() => control.current?.watch()}><SemanticIcon name="action.reveal" size={16} />回到观看</button>)}
@@ -200,10 +201,10 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
           {inputState.queuedBytes > 0 && <div className="mobile-terminal-unsent"><p>{inputState.queuedBytes} 字节尚未提交，仅在当前页面保留。</p><div className="mobile-terminal-unsent__actions"><button onClick={() => {
             const text = control.current?.queuedText(); if (text) void copyText(text, '未发送输入已复制。')
           }}>复制未发送输入</button><button onClick={() => control.current?.discardUnsent()}>放弃未发送输入</button></div></div>}
-          {copyFeedback && <p role="status">{copyFeedback.message}</p>}
+          {copyFeedback && <MobileNotice kind="feedback" identity={[copyFeedback?.message,copyFeedback?.issue]} role="status">{copyFeedback.message}</MobileNotice>}
           {originalPending && <dl><dt>原 Run</dt><dd>{originalPending.runId}</dd><dt>本机操作记录</dt><dd>{originalPending.intentId}</dd></dl>}
         </div>
       </Dialog.Content></Dialog.Portal>
     </Dialog.Root>
-  </section>
+  </section></MobileNoticeScope>
 }
