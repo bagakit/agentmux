@@ -22,4 +22,16 @@ exact Workspace preference. An empty order restores creation order; new Sessions
 This changes no placement, focus or Run. Applied order and confirmed storage durability are
 separate receipts. After a partial/unknown save, read that exact scope before another write.
 
+Read the connected client Survey list with amux space survey-list. Global
+space ls --presentation includes the same organization and all original items,
+even inside collapsed groups. Groups organize Zone references only; they are not
+spatial Tab Groups. With --input FILE|- provide {organization:{ungrouped:[ZONE],
+groups:[{groupId,name,collapsed,zoneIds:[ZONE]}]},expected:originalStoredOrganization}.
+Use exact saved Zone and list-group IDs, each item once. Create, rename, collapse,
+dissolve and reorder by replacing that organization at its exact expected value.
+Membership, content, selection, cwd and Runs stay at their original owners;
+omitted members return to ungrouped. Applied organization and disk confirmation
+are separate. After a partial or unknown save, read this same list before changing it.
+A missing client owner is unavailable, never an empty confirmed list.
+
 [spatial](../shared/spatial.md "amux:include")
