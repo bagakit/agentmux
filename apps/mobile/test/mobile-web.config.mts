@@ -12,7 +12,13 @@ const variants: Record<string, { file: string; before: string; after: string }> 
   'native-controls-reporting': { file: 'apps/mobile/src/mobile-web/reporter.ts', before: "if (event.observationOrigin?.kind === 'runtime-connection' && event.observationOrigin.boundary === 'consumer-core') this.connected", after: 'if (true) this.connected' },
   'different-compiled-build': { file: 'apps/mobile/src/mobile-web/page-identity.ts', before: '? __AGENTMUX_MOBILE_BUILD_ID__ : null', after: "? 'another-served-build' : null" },
   'forget-original-namespace': { file: 'apps/mobile/src/mobile-web/page-identity.ts', before: 'documentId: mintObjectId(), buildId, namespaceDigest', after: 'documentId: mintObjectId(), buildId, namespaceDigest: null' },
-  'build-only-current': { file: 'apps/mobile/src/mobile-web/MobileWebDiagnostics.tsx', before: '&& inspection.active.digest === value.page.namespaceDigest', after: '&& true' },
+  'build-only-current': { file: 'apps/mobile/src/mobile-web/use-mobile-web-observation.ts', before: '&& inspection.active.digest === value.page.namespaceDigest', after: '&& true' },
+  'ignore-loaded-occurrence': { file: 'apps/mobile/src/mobile-web/use-mobile-web-observation.ts', before: 'target.loaded.occurrenceId !== loaded.occurrenceId ||', after: 'false ||' },
+  'no-foreground-check': { file: 'apps/mobile/src/mobile-web/use-mobile-web-observation.ts', before: '    check()\n    const timer = setInterval', after: '    // Omitted initial check\n    const timer = setInterval' },
+  'check-in-background': { file: 'apps/mobile/src/mobile-web/use-mobile-web-observation.ts', before: "if (document.visibilityState !== 'hidden') void refresh()", after: 'if (true) void refresh()' },
+  'no-inspection-single-flight': { file: 'apps/mobile/src/mobile-web/use-mobile-web-observation.ts', before: '      if (!requests.inspect) {', after: '      if (true) {' },
+  'hide-update-consumer': { file: 'apps/mobile/src/MobileApp.tsx', before: "hidden={mobileWebUpdateStatus(webObservation) !== 'available'}", after: 'hidden={true}' },
+  'ignore-host-instance': { file: 'apps/mobile/src/mobile-web/use-mobile-web-observation.ts', before: 'inspection.hostInstanceId !== loaded.hostInstanceId ||', after: 'false ||' },
   'native-as-phone-disconnect': { file: 'apps/mobile/src/connection/MobileConnectionRoot.tsx', before: "if (event.type !== 'connection-state' || event.observationOrigin?.boundary !== 'consumer-core') return", after: "if (event.type !== 'connection-state') return" },
   'remove-catalog-consumer': { file: 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx', before: 'if (observed) observeCatalog?.(observed)', after: 'if (false && observed) observeCatalog?.(observed)' }
 }
@@ -22,13 +28,14 @@ const aliases = Object.fromEntries(['core', 'relay', 'identity'].flatMap(name =>
   return Object.entries(manifest.exports).flatMap(([key, value]: [string, any]) => key.includes('*') ? [] :
     [[`@agentmux/${name}${key === '.' ? '' : key.slice(1)}`, resolve(root, `packages/${name}/src`, value.import.slice(7).replace(/\.js$/u, '.ts'))]])
 }))
+aliases['@agentmux/identity/runtime-source'] = resolve(root, 'packages/identity/dist/runtime-source.js')
 export default defineConfig({ root: resolve(root, 'apps/mobile'), cacheDir: resolve(root, '.tmp/mobile-web-ui', mutant ?? 'normal'),
   define: { __AGENTMUX_MOBILE_BUILD_ID__: JSON.stringify('reviewed-page-build') },
   resolve: { alias: Object.entries(aliases).sort(([left], [right]) => right.length - left.length).map(([find, replacement]) => ({ find, replacement })),
     conditions: ['browser', 'module', 'import'], dedupe: ['react', 'react-dom'] },
   plugins: [react(), { name: 'loaded-mobile-web-source', enforce: 'pre', transform(original, id) {
     const file = relative(root, id.split('?')[0]!)
-    if (!/^apps\/mobile\/src\/(?:mobile-web\/.*\.[jt]sx?|navigation\/MobileSpatialNavigation\.tsx|connection\/MobileConnectionRoot\.tsx)$/u.test(file)) return
+    if (!/^apps\/mobile\/src\/(?:mobile-web\/.*\.[jt]sx?|navigation\/MobileSpatialNavigation\.tsx|connection\/MobileConnectionRoot\.tsx|MobileApp\.tsx)$/u.test(file)) return
     let code = original
     const variant = mutant ? variants[mutant] : undefined
     if (variant?.file === file) {
@@ -42,6 +49,6 @@ export default defineConfig({ root: resolve(root, 'apps/mobile'), cacheDir: reso
     }
     return code === original ? undefined : { code, map: null }
   } }],
-  test: { include: ['test/mobile-web.test.tsx'], setupFiles: [resolve(root, 'apps/mobile/test/device-locks.ts')],
+  test: { include: ['test/mobile-web.test.tsx', 'test/mobile-web-update.test.tsx'], setupFiles: [resolve(root, 'apps/mobile/test/device-locks.ts')],
     environment: 'happy-dom', passWithNoTests: false, maxWorkers: 1, fileParallelism: false, restoreMocks: true, testTimeout: 15000 }
 })
