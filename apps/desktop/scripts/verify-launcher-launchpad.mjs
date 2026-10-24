@@ -27,11 +27,13 @@ async function bindings(){
  }
  const index=await readFile(join(sourceRoot,'styles/index.css'),'utf8');facts['style-entry']=sha(index.split('\n').filter(line=>/launcher\.css|resume\.css/.test(line)).join('\n'));assert.ok(index.includes("@import './launcher.css';")&&index.includes("@import './resume.css';"))
  for(const name of ['entry.tsx','main.cjs','motion.cjs','terminal-host.cjs','preload.cjs','index.html','vitest.owning.config.mts'])facts['fixture:'+name]=sha(await readFile(join(fixture,name)))
+ facts['fixture:values']=sha(await readFile(join(desktop,'scripts/lib/fixture-values.mjs')))
  facts['fixture:source-alias-owner']=sha(await readFile(join(desktop,'scripts/fixtures/bookmark-local-link/vitest.owning.config.mts')))
  facts['oracle']=sha(await readFile(import.meta.filename))
  facts['css-qualification-producer']=sha(await readFile(join(desktop,'scripts/verify-launcher-interaction-motion-css.mjs')))
- for(const [name,anchor] of [['agentmux-desktop-interaction.md','初始 Launcher'],['agentmux-surface-density.md','初始 Launcher']]){
-  const bytes=await readFile(join(designRoot,'docs/design',name),'utf8'),start=bytes.lastIndexOf(anchor);assert.ok(start>=0,'Reviewed Launcher SSOT section must be registered');let heading=bytes.lastIndexOf('\n#',start),end=bytes.indexOf('\n## ',start+anchor.length);if(end<0)end=bytes.length;facts['SSOT:'+name]=sha(bytes.slice(heading>=0?heading:start,end))
+ for(const name of ['behavior/workface-launcher.md','presentation/spaces-and-layout.md']){
+  const bytes=await readFile(join(designRoot,'docs/design',name),'utf8');
+  facts['SSOT:'+name]=sha(name.startsWith('presentation/')?section(bytes,'### 初始 Launcher 的现代工作台密度','## Agent 头像簇的可见判别'):bytes)
  }
  return {sources:facts,digest:sha(JSON.stringify(facts))}
 }
@@ -121,12 +123,15 @@ try{
  const loaded={},styles={}
  const wrapper=join(privateRoot,'xterm.mjs');await writeFile(wrapper,`import xterm from ${JSON.stringify(require.resolve('@xterm/xterm'))};export class Terminal extends xterm.Terminal {constructor(...args){super(...args);(globalThis.launchpadTerminals??=[]).push(this)}dispose(){this.disposed=true;return super.dispose()}}`);
  await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper},...sourceAliases]},plugins:[{name:'launcher-owned-source-identity',enforce:'pre',transform(bytes,id){if(id.startsWith(sourceRoot+'/')&&!id.includes('?'))loaded[id.slice(sourceRoot.length+1)]=sha(bytes)},async generateBundle(){for(const file of this.getWatchFiles())if(file.startsWith(sourceRoot+'/')&&file.endsWith('.css'))styles[file.slice(sourceRoot.length+1)]=sha(await readFile(file))}}],
-  define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},build:{outDir,emptyOutDir:true}})
+  define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},worker:{format:'es'},build:{outDir,emptyOutDir:true}})
  for(const file of modules.filter(name=>!name.endsWith('.css')))assert.equal(loaded[file],identity.sources[file],'Actual production module compiled: '+file)
  for(const file of modules.filter(name=>name.endsWith('.css')))assert.equal(styles[file],identity.sources[file],'Actual stylesheet imported: '+file)
  const compiled={};for(const entry of await readdir(outDir,{recursive:true,withFileTypes:true}))if(entry.isFile())compiled[join(entry.parentPath,entry.name).slice(outDir.length+1)]=sha(await readFile(join(entry.parentPath,entry.name)))
  assert.ok(Object.keys(compiled).length>0);result.compiled={files:compiled,loadedSources:loaded,importedStyles:styles}
- const main=join(privateRoot,'main.cjs');await writeFile(main,await readFile(join(fixture,'main.cjs')));await writeFile(join(privateRoot,'preload.cjs'),await readFile(join(fixture,'preload.cjs')));await writeFile(join(privateRoot,'motion.cjs'),await readFile(join(fixture,'motion.cjs')));await writeFile(join(privateRoot,'terminal-host.cjs'),await readFile(join(fixture,'terminal-host.cjs')))
+ const privateFixture=join(privateRoot,'scripts/fixtures/launcher-launchpad'),privateLib=join(privateRoot,'scripts/lib');await mkdir(privateFixture,{recursive:true});await mkdir(privateLib,{recursive:true})
+ for(const name of ['main.cjs','preload.cjs','motion.cjs','terminal-host.cjs'])await writeFile(join(privateFixture,name),await readFile(join(fixture,name)))
+ await writeFile(join(privateLib,'fixture-values.mjs'),await readFile(join(desktop,'scripts/lib/fixture-values.mjs')))
+ const main=join(privateFixture,'main.cjs')
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
  for(const phase of scenes==='terminal-host-mote'?['capture']:['capture','restart']){
   const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),profile,evidence,phase,scenes],{temporaryRoot:privateRoot,cwd:repository,env,timeoutMs:120000,onLine:line=>lines.push(line)})

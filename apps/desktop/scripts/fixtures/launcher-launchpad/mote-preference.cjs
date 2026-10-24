@@ -6,7 +6,7 @@ const fs = require('node:fs/promises'), path = require('node:path')
 module.exports = async function motePreference({ phase, evaluate, element, wait, paint, viewport, click, escape, frame, assertGeometry, report, profile, evidence }) {
   const leader = 'launcher:leader', design = 'launcher:design', research = 'launcher:research'
   const create = element('.launcher-mote__create'), target = element('.launcher-mote__target')
-  const icon = element('.launcher-mote__create .space-object-icon')
+  const icon = element('.launcher-mote__target .space-object-icon')
   const names = { design: 'Design & implementation partner with a long readable name', research: 'Research partner' }
   const menuItem = text => `[...document.querySelectorAll('[role="menuitem"]')].find(item=>item.textContent.includes(${JSON.stringify(text)}))`
   async function choose(name) {
@@ -17,7 +17,7 @@ module.exports = async function motePreference({ phase, evaluate, element, wait,
     return evaluate(`(()=>{const c=${create};const r=c.getBoundingClientRect();return{disabled:c.disabled,text:c.textContent.trim(),width:r.width,height:r.height}})()`)
   }
   async function assertAvatar(source, selectedRegion = 'launchpad-input') {
-    const selected = `document.querySelector('[data-workbench-region-id="${selectedRegion}"] .launcher-mote__create .space-object-icon')`
+    const selected = `document.querySelector('[data-workbench-region-id="${selectedRegion}"] .launcher-mote__target .space-object-icon')`
     await wait(`Boolean(${selected}) && ${selected}.dataset.spaceIconSource===${JSON.stringify(source)}`)
     if (source === 'image') await wait(`Boolean(${selected}.querySelector('img')) && ${selected}.querySelector('img').complete && ${selected}.querySelector('img').naturalWidth>0`)
     const facts = await evaluate(`(()=>{const e=${selected},r=e.getBoundingClientRect(),img=e.querySelector('img'),face=e.querySelector('.mote-face');return{source:e.dataset.spaceIconSource,avatar:e.dataset.spaceAvatar??null,width:r.width,height:r.height,img:img?{src:img.src,complete:img.complete,naturalWidth:img.naturalWidth}:null,face:face?{palette:face.dataset.moteFacePalette,eyes:face.dataset.moteFaceEyes}:null}})()`)
@@ -161,10 +161,10 @@ async function captureShortActions({ evaluate, element, wait, paint, viewport, c
     await wait('!document.querySelector("[role=menuitem]")')
   }
   await evaluate('launchpad.motePreferenceState("launcher:design","archived")'); await paint()
-  await wait(`Boolean(${element('.launcher-mote__create img')}) && ${element('.launcher-mote__create img')}.complete`)
+  await wait(`Boolean(${element('.launcher-mote__target img')}) && ${element('.launcher-mote__target img')}.complete`)
   await evaluate(`${element('.launch-surface__footer')}.scrollIntoView({block:'center'})`); await paint()
   const actions = await evaluate(`(()=>{const box=e=>{const r=e.getBoundingClientRect();return{top:r.top,bottom:r.bottom,left:r.left,right:r.right,width:r.width,height:r.height}};return{viewport:{width:innerWidth,height:innerHeight},region:box(document.querySelector('[data-workbench-region-id="launchpad-input"]')),controls:[...document.querySelectorAll('[data-workbench-region-id="launchpad-input"] .launch-surface__footer button')].map(e=>({text:e.textContent.trim(),disabled:e.disabled,box:box(e)}))}})()`)
-  for (const text of ['Create with Mote', 'Restore Mote', 'Resume', 'Launch']) {
+  for (const text of ['Create with', 'Restore Mote', 'Resume', 'Launch']) {
     const action = actions.controls.find(item => item.text === text)
     assert.ok(action, 'Short view retains the actual action: ' + text)
     assert.equal(action.disabled, false)

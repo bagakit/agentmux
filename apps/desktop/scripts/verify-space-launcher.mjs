@@ -4,18 +4,21 @@ const launcher = 'apps/desktop/src/renderer/src/components/NewTabSurface.tsx'
 const surface = 'apps/desktop/src/renderer/src/components/SurfaceState.tsx'
 const mote = 'apps/desktop/src/renderer/src/components/LauncherMoteAction.tsx'
 const secondary = 'apps/desktop/src/renderer/src/components/LauncherSecondarySurfaces.tsx'
+const environment = 'apps/desktop/src/renderer/src/components/LauncherEnvironment.tsx'
 
 // These mounted consumers edit the real rich input, submit through the original launch owner,
 // queue through the original Mote input owner and exercise each retained utility action.
 // The runner proves the modified source was loaded, then restores GREEN in a private copy.
 await verifyRendererSourceMutations({
   name: 'space-launcher',
-  tests: ['apps/desktop/test/space-launcher-interaction.test.tsx'],
-  sources: [launcher, surface, mote, secondary,
+  tests: ['apps/desktop/test/space-launcher-interaction.test.tsx', 'apps/desktop/test/launcher-mote-create.test.tsx'],
+  owningConfig: 'apps/desktop/scripts/fixtures/launcher-launchpad/vitest.owning.config.mts',
+  sources: [launcher, surface, mote, secondary, environment,
     'apps/desktop/test/helpers/composer-dom-fixture.tsx',
     'apps/desktop/test/helpers/client-ui-render.tsx',
     'apps/desktop/test/helpers/agent-information-root.tsx',
     'apps/desktop/scripts/lib/fixture-values.mjs',
+    'apps/desktop/scripts/fixtures/bookmark-local-link/vitest.owning.config.mts',
     'apps/desktop/browser-extension/protocol.js'],
   mutations: [
     { label: 'shared-body-disconnected', file: surface,
@@ -37,8 +40,12 @@ await verifyRendererSourceMutations({
       before: 'if (!hasDraft || submitted) { requestPmoTeamsTopicFloatingOpen(',
       after: 'if (submitted) { requestPmoTeamsTopicFloatingOpen(' },
     { label: 'mote-action-purpose-hidden', file: mote,
-      before: "hasDraft ? 'Create with Mote' : 'Open Mote'",
-      after: "'Create with Mote'" },
+      before: "<span>{pending ? 'Submitting…' : submitted ? `Request ${submission}` : hasDraft ? 'Create with' : 'Open'}</span>",
+      after: "<span>{pending ? 'Submitting…' : submitted ? `Request ${submission}` : 'Create with'}</span>" },
+    { label: 'selected-mote-avatar-borrows-primary', file: mote,
+      before: 'avatarTopicId={topicId}', after: 'avatarTopicId={PMO_TEAMS_TOPIC_ID}' },
+    { label: 'host-borrows-terminal-identity', file: environment,
+      before: "semanticIconComponent('object.host')", after: "semanticIconComponent('object.terminal')" },
     { label: 'healthy-terminal-extra-status', file: secondary,
       before: "kind === 'terminal' && expanded && !warmSession ? <small>",
       after: "kind === 'terminal' && expanded ? <small>" }

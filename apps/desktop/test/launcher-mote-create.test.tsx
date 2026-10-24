@@ -47,7 +47,7 @@ async function choose(name: string) {
 
 describe('explicit selected Mote creation request', () => {
   it('queues one complete request through the actual send owner and preserves both independent drafts', async () => {
-    await mount(); expect(createButton().textContent).toBe('Create with Mote'); expect(dom.container.querySelector('.launcher-mote__target')?.textContent).toBe('Mote')
+    await mount(); expect(createButton().textContent).toBe('Create with'); expect(dom.container.querySelector('.launcher-mote__target')?.textContent).toBe('Mote')
     const originalButton=createButton(),themed=structuredClone(GRAPHITE_THEME);themed.id='custom.mote-accepted';themed.name='Accepted request icon';themed.icons={'status.accepted':{kind:'paths',paths:[{d:'M4 4H20V20H4Z'}]}};await act(async()=>{expect(previewTheme(themed).applied).toBe(true)});await act(async () => { createButton().click(); createButton().click() });expect(createButton()).toBe(originalButton);expect(createButton().querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('status.accepted'));expect(document.getElementById(semanticIconHref('status.accepted').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
     const queue = useAppStore.getState().agentSteerQueues['selected-mote']
     expect(queue).toHaveLength(1); expect(queue![0]!.text).toContain('Help me create an Agent'); expect(queue![0]!.text).toContain(("Project: Project\nHost: local\nWorking directory: " + _hygiene_fixturePath("repo") + "\n\n")+sourcePrompt)
@@ -119,7 +119,7 @@ describe('explicit selected Mote creation request', () => {
     expect(dom.container.querySelector('.launcher-mote__target')?.textContent).toBe(designMote.title)
     await choose('Mote'); expect(useLauncherState.getState().moteTopicId).toBe(PMO_TEAMS_TOPIC_ID)
   })
-  it('uses the exact selected Mote image in both the chooser and create button, then replaces it with the next Mote face', async () => {
+  it('uses the exact selected Mote image in both the chooser and selected target, then replaces it with the next Mote face', async () => {
     await mount(); await catalog()
     const objectKey = topicSpaceIconTarget(scratch, designMote).key
     const dataUrl = 'data:image/png;base64,selected-avatar'
@@ -129,9 +129,9 @@ describe('explicit selected Mote creation request', () => {
     const choice = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.includes(designMote.title))!
     expect(choice.querySelector('img')?.getAttribute('src')).toBe(dataUrl)
     await act(async () => choice.click())
-    expect(createButton().querySelector('img')?.getAttribute('src')).toBe(dataUrl)
+    expect(dom.container.querySelector('.launcher-mote__target img')?.getAttribute('src')).toBe(dataUrl)
     expect(read).toHaveBeenCalledWith(SCRATCH_WORKSPACE_ID, designMote.id, { kind: 'image', fileName: 'mote-avatar.png' }, objectKey)
-    await choose('Mote'); expect(createButton().querySelector('img')).toBeNull(); expect(createButton().querySelector('.mote-face')).not.toBeNull()
+    await choose('Mote'); expect(dom.container.querySelector('.launcher-mote__target img')).toBeNull(); expect(dom.container.querySelector('.launcher-mote__target .mote-face')).not.toBeNull()
   })
   it('keeps an archived default identity and a usable creation path when every Mote is archived', async () => {
     await mount(); await catalog([primaryMote, designMote].map(mote => ({ ...mote, moteArchive: { state: 'archived', version: 'archived-' + mote.id } })))
