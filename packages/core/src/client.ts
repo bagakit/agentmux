@@ -6929,7 +6929,13 @@ export class AgentMuxClient {
           evidence: { source: 'agentmux', observedAt: Date.now() } }) }
         continue
       }
-      if (reservation.kind === 'resume' && reservation.restart && !reservation.preparedSession) continue
+      if (reservation.kind === 'resume' && reservation.restart && !reservation.preparedSession) {
+        try { await this.store.recordRestartAdmission(reservation, 'restore') }
+        catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
+          code: 'AGENT_RESTART_RECEIPT_UNCONFIRMED', message: `Original restart ${reservation.restart.request.operationId} could not be recovered: ${error instanceof Error ? error.message : String(error)}. The Session, Run and original requests are retained; inspect this original restart or explicitly close the exact Session to retain its history.`,
+          evidence: { source: 'agentmux', run: reservation.expectedRun, observedAt: Date.now() } }) }
+        continue
+      }
       if (reservation.kind === 'resume' && reservation.preparedSession) {
         try { await this.recovery.completePreparedResume(reservation, await this.kernel.inspectCreation(reservation.operationId)) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,

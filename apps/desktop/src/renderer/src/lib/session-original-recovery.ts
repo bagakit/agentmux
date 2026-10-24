@@ -6,7 +6,7 @@ type Agent = Extract<SessionSnapshot, { kind: 'agent' }>
 /** The current pointer is a view; original operations remain owned by Core's retained map. */
 function originalOperations(session: Agent): AgentMuxContinuityOperation[] {
   const operations = new Map(Object.entries(session.continuityOperations ?? {}))
-  if (session.continuity) operations.set(session.continuity.operationId, session.continuity)
+  if (session.continuity && !operations.has(session.continuity.operationId)) operations.set(session.continuity.operationId, session.continuity)
   return [...operations.values()].filter(operation => operation.agentSessionId === session.control.agentSessionId)
 }
 
