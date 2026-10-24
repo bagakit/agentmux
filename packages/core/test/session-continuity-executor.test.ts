@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { appendFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -26,7 +27,11 @@ afterEach(async () => {
     try { vi.restoreAllMocks() } catch (error) { errors.push(error) }
     try { vi.unstubAllEnvs() } catch (error) { errors.push(error) }
   }
-  if (errors.length) throw new AggregateError(errors, 'Continuity fixture cleanup failed.')
+  if (errors.length) {
+    if (process.env.SESSION_EXECUTOR_FACTS) appendFileSync(process.env.SESSION_EXECUTOR_FACTS, JSON.stringify({ cleanup: 'unknown', errors: errors.map(error => error instanceof Error ? { message: error.message, stack: error.stack, cause: error.cause } : String(error)) }) + '\n')
+    throw new AggregateError(errors, 'Continuity fixture cleanup failed.')
+  }
+  if (process.env.SESSION_EXECUTOR_FACTS) appendFileSync(process.env.SESSION_EXECUTOR_FACTS, JSON.stringify({ cleanup: 'confirmed', surface: 'core' }) + '\n')
 })
 const rootId = 'original-intent', sentinel = 'sdk-private-value'
 async function recordConsumer(name: string, facts: unknown) {
@@ -34,7 +39,7 @@ async function recordConsumer(name: string, facts: unknown) {
   if (directory && !process.env.AGENTMUX_TEST_CONTINUITY_EXECUTOR_MUTANT) await writeFile(join(directory, name + '.json'),
     JSON.stringify({ schema: 'agentmux.continuity-executor-consumer.v1', name, userRuntimeTouched: false, facts }, null, 2))
 }
-async function fixture(options: { owner?: boolean; healthy?: boolean; args?: string[]; env?: Record<string, string> } = {}) {
+async function fixture(options: { owner?: boolean; configuration?: boolean; healthy?: boolean; args?: string[]; env?: Record<string, string> } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'aex-')))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   const runtime = join(root, 'runtime'), state = join(root, 'state'); await mkdir(runtime); await mkdir(state)
@@ -64,8 +69,12 @@ async function fixture(options: { owner?: boolean; healthy?: boolean; args?: str
   const configure = async (command = scripts.catalog!, value = 'owner-initial') => { const configured = await hostOwner!.configure({ executorId: 'original-executor', ...(currentRevision ? { expectedRevision: currentRevision } : {}), config: {
     label: 'Private configured source', providerId: provider.id, command, args: ['owner-argument'], env: { SDK_RECOVERY_SENTINEL: value }, injectAgentMuxGuide: false } }); currentRevision = configured.executor.configRevision; return configured }
   if (hostOwner) await configure()
+  let configuration: import('../src/types.js').AgentExecutorConfig = { label: 'Original Session configuration', providerId: provider.id, command: scripts.owner!,
+    args: ['configuration-argument'], env: { SDK_RECOVERY_SENTINEL: 'configuration-current' }, injectAgentMuxGuide: false }
+  const configurationReader = vi.fn(async (_executorId: string) => structuredClone(configuration))
   async function reader() {
-    const store = new core.AgentMuxFileAgentSessionStore(storePath), client = new core.AgentMuxClient({ store, providers: [provider], ...(hostOwner ? { hostExecutorOwner: hostOwner } : {}) }), inner = client as any
+    const store = new core.AgentMuxFileAgentSessionStore(storePath), client = new core.AgentMuxClient({ store, providers: [provider],
+      ...(options.configuration ? { sessionExecutorConfiguration: configurationReader } : {}), ...(hostOwner ? { hostExecutorOwner: hostOwner } : {}) }), inner = client as any
     Object.defineProperty(inner.hookServer, 'port', { value: 0 }); await client.connect()
     const nativeList = inner.kernel.list.bind(inner.kernel), nativeStart = inner.kernel.start.bind(inner.kernel)
     const value = { store, client, inner, nativeList, nativeStart, start: vi.spyOn(inner.kernel, 'start'), stop: vi.spyOn(inner.kernel, 'stop'), input: vi.spyOn(inner.kernel, 'input') }
@@ -82,9 +91,10 @@ async function fixture(options: { owner?: boolean; healthy?: boolean; args?: str
   })
   const seed = await original.nativeStart({ operationKey: 'original-seed', program: process.execPath, args: ['-e', 'process.exit(0)'], cwd: root, env: {} })
   await vi.waitFor(async () => expect((await original.inner.kernel.status(seed.runId)).state.type).toBe('exited'))
+  const activityAt = options.configuration ? Date.now() : _historyFixtureEpoch(0, 0, 1)
   const previous: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'original-session', providerId: provider.id, executorId: 'original-executor',
-    hostId: 'local', workspacePath: root, run: { runId: seed.runId }, retiredRuns: [], createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1), hookBindingId: 'original-binding', hookToken: 'original-token',
-    nativeHandle: { kind: 'provider', providerId: provider.id, sessionId: 'original-native' }, semanticStatus: { state: 'working', source: 'native-hook', observedAt: _historyFixtureEpoch(0, 0, 1) } }
+    hostId: 'local', workspacePath: root, run: { runId: seed.runId }, retiredRuns: [], createdAt: activityAt, updatedAt: activityAt, hookBindingId: 'original-binding', hookToken: 'original-token',
+    nativeHandle: { kind: 'provider', providerId: provider.id, sessionId: 'original-native' }, semanticStatus: { state: 'working', source: 'native-hook', observedAt: activityAt } }
   await original.store.compareAndSwap(null, previous); await original.client.refreshAgentSession(previous.agentSessionId)
   const overrides = { commandOverride: scripts.sdk!, args: options.args ?? ['sdk-argument'], env: options.env ?? { SDK_RECOVERY_SENTINEL: sentinel } }
   const request = { agentSessionId: previous.agentSessionId, expectedRun: previous.run, operationId: rootId, trigger: 'startup' as const,
@@ -125,7 +135,8 @@ async function fixture(options: { owner?: boolean; healthy?: boolean; args?: str
     const [code] = await once(child, 'exit'); expect(code, stderr).toBe(0)
     return JSON.parse(stdout)
   }
-  return { ...original, root, scripts, readers, provider, previous, request, overrides, saved, phase, next, raw, mutate, reader, child, control, configure }
+  return { ...original, root, scripts, readers, provider, previous, request, overrides, saved, phase, next, raw, mutate, reader, child, control, configure,
+    configurationReader, setConfiguration(value: Partial<typeof configuration>) { configuration = { ...configuration, ...value } } }
 }
 function originalSdk(f: any, observed: any, args = ['sdk-argument'], env: string | null = sentinel, first = false) {
   expect(observed.witness.program).toBe(f.scripts.sdk)
@@ -262,4 +273,74 @@ it('Hosted and actual compiled CLI consume the original control without exposing
   expect(f.start).toHaveBeenCalledTimes(before); expect(f.input).toHaveBeenCalledTimes(inputs); expect(f.stop).not.toHaveBeenCalled()
   await f.raw(observed.current)
   await recordConsumer('public-cli-hosted', { packet, control: JSON.parse(control.stdout), inspect: JSON.parse(inspect.stdout), witness: observed.witness, readStarts: f.start.mock.calls.length - before, readInputs: inputs, privateExcluded: true })
+})
+
+const configurationRequest = (f: Awaited<ReturnType<typeof fixture>>, operationId = rootId) => ({
+  agentSessionId: f.previous.agentSessionId, expectedRun: f.previous.run, operationId, trigger: 'manual' as const
+})
+it('session configuration supports a standalone owner and its automatic context-only retry', async () => {
+  const f = await fixture({ configuration: true, healthy: true })
+  const first = await f.client.ensureAgentContinuity({ ...configurationRequest(f), trigger: 'startup',
+    policy: { retryMaxAttempts: 1, retryInitialDelayMs: 20, retryMaxDelayMs: 20 } })
+  await recordConsumer('configuration-first-observation', { first, saved: await f.saved() })
+  expect(first.kind).toBe('resumed')
+  const original = await f.next(f.previous.run)
+  expect(original.witness).toMatchObject({ kind: 'owner', sentinel: 'configuration-current' })
+  expect(original.witness.args.slice(0, 3)).toEqual(['configuration-argument', 'resume', 'original-native'])
+  f.setConfiguration({ env: { SDK_RECOVERY_SENTINEL: 'configuration-after-exit' } })
+  await f.client.writeAgent({ agentSessionId: f.previous.agentSessionId, expectedRun: original.current.run, source: 'user', data: 'fixture-exit7' })
+  const recovered = await f.next(original.current.run)
+  expect(recovered.witness).toMatchObject({ kind: 'owner', sentinel: 'configuration-after-exit' })
+  expect(recovered.witness.args).toEqual(['configuration-argument', 'resume', 'original-native'])
+  expect(f.configurationReader).toHaveBeenCalledWith(f.previous.executorId)
+  expect(f.start).toHaveBeenCalledTimes(2); expect(f.input).toHaveBeenCalledTimes(1)
+  await recordConsumer('configuration-automatic', { original: original.witness, recovered: recovered.witness, sameNativeHandle: recovered.current.nativeHandle })
+})
+it('session configuration is consumed by an explicit restart without a registry', async () => {
+  const f = await fixture({ configuration: true, healthy: true })
+  await f.client.ensureAgentContinuity(configurationRequest(f)); const first = await f.next(f.previous.run)
+  const reader = f.configurationReader.getMockImplementation()!, calls = f.configurationReader.mock.calls.length
+  f.configurationReader.mockRejectedValue(new core.AgentMuxError('Original configuration temporarily unreadable', 'ORIGINAL_CONFIGURATION_UNAVAILABLE'))
+  await expect(f.client.ensureAgentContinuity({ ...configurationRequest(f, 'healthy-original-reattach'), expectedRun: first.current.run })).resolves.toMatchObject({ kind: 'reattachable', run: first.current.run })
+  expect(f.configurationReader).toHaveBeenCalledTimes(calls)
+  await f.raw(first.current)
+  f.configurationReader.mockImplementation(reader)
+  const restarted = await f.client.restartAgent({ agentSessionId: f.previous.agentSessionId, expectedRun: first.current.run, operationId: 'configuration-restart' })
+  const next = await f.next(first.current.run)
+  expect(next.witness).toMatchObject({ kind: 'owner', sentinel: 'configuration-current' })
+  expect(restarted.agentSessionId).toBe(f.previous.agentSessionId); expect(next.current.nativeHandle).toEqual(f.previous.nativeHandle)
+  expect(f.start).toHaveBeenCalledTimes(2); expect(f.input).toHaveBeenCalledTimes(1)
+  await recordConsumer('configuration-restart', { original: first.current.run, restarted: next.current.run, witness: next.witness })
+})
+it('session configuration does not replace target-owned registry authority', async () => {
+  const f = await fixture({ owner: true, configuration: true, healthy: true })
+  const configured = await f.configure(f.scripts.owner, 'target-owner-authority')
+  await f.mutate(value => ({ ...value, creation: { createOperationId: 'original-target-creation', initialPrompt: 'not-requested', intentDigest: 'd'.repeat(64), executorRevision: configured.executor.configRevision } }))
+  await f.client.ensureAgentContinuity(configurationRequest(f)); const next = await f.next(f.previous.run)
+  expect(next.witness).toMatchObject({ kind: 'owner', sentinel: 'target-owner-authority' })
+  expect(next.witness.args).toEqual(['owner-argument', 'resume', 'original-native'])
+  expect(f.configurationReader).not.toHaveBeenCalled(); expect(f.start).toHaveBeenCalledTimes(1)
+})
+it('session configuration retains explicit SDK roots and original history options', async () => {
+  const f = await fixture({ owner: true, configuration: true, args: [], env: {} })
+  const history = {}
+  expect(await f.inner.sessionExecutorOptions(f.previous, history, f.previous.agentSessionId)).toEqual(history)
+  const first = await f.client.ensureAgentContinuity(f.request)
+  const next = await f.next(first.kind === 'resumed' ? first.run : f.previous.run)
+  originalSdk(f, next, [], null); expect(f.configurationReader).not.toHaveBeenCalled()
+  expect(f.start).toHaveBeenCalledTimes(2); expect(f.input).not.toHaveBeenCalled()
+})
+it.each(['unreadable', 'provider-conflict'] as const)('session configuration %s retains the original identity without fallback', async failure => {
+  const f = await fixture({ owner: true, configuration: true, healthy: true })
+  if (failure === 'unreadable') f.configurationReader.mockRejectedValue(new core.AgentMuxError('Original configuration unreadable', 'ORIGINAL_CONFIGURATION_UNAVAILABLE'))
+  else f.setConfiguration({ providerId: 'another-provider' })
+  const request = configurationRequest(f)
+  const result = await f.client.ensureAgentContinuity(request)
+  expect(result.kind).not.toBe('resumed')
+  expect((await f.saved()).continuity).toMatchObject({ errorCode: failure === 'unreadable' ? 'ORIGINAL_CONFIGURATION_UNAVAILABLE' : 'EXECUTOR_PROVIDER_CONFLICT' })
+  expect(f.start).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+  expect(f.client.agentSession(f.previous.agentSessionId)).toMatchObject({ run: f.previous.run, nativeHandle: f.previous.nativeHandle, workspacePath: f.previous.workspacePath })
+  f.configurationReader.mockReset(); f.configurationReader.mockResolvedValue({ label: 'Restored original', providerId: f.provider.id, command: f.scripts.owner!, args: [], env: {}, injectAgentMuxGuide: false })
+  await expect(f.client.ensureAgentContinuity(request)).resolves.toMatchObject({ kind: 'resumed' })
+  expect((await f.next(f.previous.run)).witness.kind).toBe('owner')
 })
