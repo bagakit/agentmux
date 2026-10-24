@@ -11,7 +11,7 @@ const repository = resolve(import.meta.dirname, '../../..')
 const hash = value => createHash('sha256').update(value).digest('hex')
 const evidence = join(repository, '.tmp/demand-supervisor', String(globalThis.crypto.randomUUID()))
 await mkdir(evidence, { recursive: true })
-const owners = ['apps/desktop/src/main/continuous-progress-loop-manager.ts', 'apps/desktop/src/main/continuous-progress-task-source.ts',
+const owners = ['apps/host/src/continuous-progress-loop-manager.ts', 'apps/host/src/continuous-progress-task-source.ts',
   'apps/desktop/src/renderer/src/components/GoalContinuationControl.tsx', 'apps/desktop/src/renderer/src/styles/goal-continuation.css',
   'apps/desktop/src/renderer/src/lib/continuous-progress-input.ts', 'apps/desktop/src/renderer/src/lib/session-presentation.ts',
   'apps/desktop/src/renderer/src/lib/session-state.ts', 'apps/desktop/src/renderer/src/lib/steer-queue-delivery.ts',

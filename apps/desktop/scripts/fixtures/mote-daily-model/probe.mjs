@@ -152,9 +152,9 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
       '../../../src/main/config-store': { DEFAULT_CONFIG: {}, ConfigStore: class { async save(value) { return value } } },
       '../../../src/main/runtime-controller': { RuntimeController: Runtime }, '../../../src/main/desktop-host': { connectDesktopAgentMuxHost() {} },
       '../../../src/main/scratch-topics': { ScratchTopics: class {} }, '../../../src/main/ipc': { registerIpc: async () => async () => { calls.push('ipc.dispose') } },
-      '../../../src/main/continuous-progress-loop-manager': { ContinuousProgressLoopManager: Manager },
-      '../../../src/main/continuous-progress-loop-store': { ContinuousProgressLoopStore: { forUserData() {} } },
-      '../../../src/main/continuous-progress-delivery': { deliverContinuousProgress() {} },
+      '../../../../host/src/continuous-progress-loop-manager': { ContinuousProgressLoopManager: Manager },
+      '../../../../host/src/continuous-progress-loop-store': { ContinuousProgressLoopStore: { forUserData() {} } },
+      '../../../../host/src/continuous-progress-delivery': { deliverContinuousProgress() {} },
       '../../../../../packages/core/src/durable-write': durableModule.exports
     }
     const instrumentation = scenario === 'spent-four-refuses-next-input'

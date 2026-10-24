@@ -19,7 +19,7 @@ import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessio
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
 import { moteAgent, moteConfig } from './fixtures/mote-workface'
 import { observeAgent, type ContinuousProgressLoop } from '@agentmux/core'
-import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
+import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager'
 import type { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 const initial = useAppStore.getState()

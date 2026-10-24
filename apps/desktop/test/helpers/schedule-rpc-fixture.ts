@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { connectAgentMuxRpc, type ContinuousProgressLoop } from '@agentmux/core'
 import { AgentMuxControlServer } from '../../../../packages/core/src/public-rpc-server.js'
-import { ContinuousProgressLoopManager, type FutureProgressInputOwner } from '../../src/main/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager, type FutureProgressInputOwner } from '../../../host/src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 /** Real original Store/Main/RPC boundary. No Agent, Runtime or model is created;

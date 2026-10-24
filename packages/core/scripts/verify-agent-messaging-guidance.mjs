@@ -31,7 +31,7 @@ await runA2aProof({
     'packages/core/src/control-host.ts', 'packages/core/src/public-rpc-service.ts',
     'packages/core/src/agentmux-cli-help.ts', 'packages/core/src/agentmux-cli-module-skills.ts', 'packages/core/src/agentmux-cli-shared-guides.ts',
     'packages/core/src/agentmux-cli-commands.ts', 'packages/core/src/agentmux-cli-browser-guide.ts',
-    'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/main/continuous-progress-loop-manager.ts',
+    'apps/desktop/src/main/runtime-controller.ts', 'apps/host/src/continuous-progress-loop-manager.ts',
     'apps/desktop/scripts/verify-injected-context-progress.mjs',
     'packages/core/src/agent-outbound-message.ts', 'packages/core/src/agent-message-render.ts', 'packages/core/src/agent-session-recovery/input.ts',
     'packages/core/src/agent-session-recovery/continuity-contract.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts', 'packages/core/src/agent-session-recovery/supervisor.ts', 'packages/core/src/agent-session-store.ts',

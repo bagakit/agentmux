@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
-import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 

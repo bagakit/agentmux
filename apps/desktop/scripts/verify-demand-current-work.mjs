@@ -8,7 +8,7 @@ import { join, relative, resolve } from 'node:path'
 const repository = resolve(import.meta.dirname, '../../..'), evidence = join(repository, '.tmp/demand-current-work', 'source-' + globalThis.crypto.randomUUID())
 await mkdir(evidence, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const store = 'apps/desktop/src/renderer/src/store.ts', domain = 'packages/demand/src/demand-store.ts', input = 'apps/desktop/src/main/goal-dispatch-input.ts'
+const store = 'apps/desktop/src/renderer/src/store.ts', domain = 'packages/demand/src/demand-store.ts', input = 'apps/host/src/goal-dispatch-input.ts'
 const projection = 'apps/desktop/src/renderer/src/lib/goal-current-work.ts', widget = 'apps/desktop/src/renderer/src/components/RegionCurrentDemand.tsx'
 const files = [domain, input, store, projection, widget, 'packages/demand/src/dispatch.ts', 'packages/demand/src/demand-types.ts', 'packages/demand/src/index.ts',
   'packages/core/src/control.ts', 'packages/core/src/control-codec.ts', 'packages/core/src/agentmux-cli-commands.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/ipc-sender-trust.ts',

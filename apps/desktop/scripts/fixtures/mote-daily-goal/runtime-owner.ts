@@ -5,9 +5,9 @@ import { AgentMuxFileAgentSessionStore, defaultAgentMuxControlSocketPath, loadAg
 import { openDemandStore } from '@agentmux/demand'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { connectDesktopAgentMuxHost } from '../../../src/main/desktop-host'
-import { ContinuousProgressLoopStore } from '../../../src/main/continuous-progress-loop-store'
-import { ContinuousProgressLoopManager } from '../../../src/main/continuous-progress-loop-manager'
-import { deliverContinuousProgress } from '../../../src/main/continuous-progress-delivery'
+import { ContinuousProgressLoopStore } from '../../../../host/src/continuous-progress-loop-store'
+import { ContinuousProgressLoopManager } from '../../../../host/src/continuous-progress-loop-manager'
+import { deliverContinuousProgress } from '../../../../host/src/continuous-progress-delivery'
 import type { AppConfig } from '../../../src/shared/contracts'
 const root = process.env.DIRECTORY_RUNTIME_PRIVATE_ROOT!, phase = process.env.DIRECTORY_RUNTIME_PHASE!, nativeCli = process.env.DIRECTORY_RUNTIME_NATIVE_CLI!
 assert.ok(root && phase && nativeCli)

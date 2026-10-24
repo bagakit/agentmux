@@ -56,7 +56,7 @@ if (!sourceOnly && !nativeOnly) {
     for (const [path, digest] of Object.entries({ ...native.source, ...native.harnessSource }))
       assert.equal(sha(overlays.includes(path) ? await candidateBytes(path) : baseBytes(path)), digest, 'Native admission import differs: ' + path)
     for (const path of [definition, calendar, caller, nativeOwner, 'apps/desktop/src/main/runtime-controller.ts',
-      'apps/desktop/src/main/continuous-progress-loop-manager.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/prompt-submission.ts'])
+      'apps/host/src/continuous-progress-loop-manager.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/prompt-submission.ts'])
       assert.ok(native.source[path], 'The actual producer and admission owner must be loaded: ' + path)
     assert.equal(native.producer.code, 0); assert.equal(native.producer.signal, null)
     const producerBytes = await readFile(resolve(repository, native.producer.report))

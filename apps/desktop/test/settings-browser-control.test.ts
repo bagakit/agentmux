@@ -45,7 +45,7 @@ import { registerIpc } from '../src/main/ipc.js'
 import { executeSettingsControl } from '../src/main/settings-control.js'
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from '../src/main/settings-browser-control.js'
 import { scalarSettingsSchemaKeys } from './helpers/settings-schema-keys.js'
-import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 const directories: string[] = []

@@ -14,7 +14,7 @@ import {
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { CtxmuxRunAdapter } from '../../../packages/core/src/ctxmux-run-adapter.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
-import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { nextCalendarOccurrence } from '@agentmux/core/schedule-calendar'
 import { privateTracker } from './helpers/continuous-progress-tracker'
@@ -363,7 +363,7 @@ describe('continuous progress uses the public ingress and shared observation', (
     vi.resetModules()
     vi.doMock('@agentmux/core', () => ({ ...realCore,
       AGENTMUX_AGENT_MESSAGING_ENTRY: 'Rules for a future claim; never replace the pending message.' }))
-    const { ContinuousProgressLoopManager: CurrentManager } = await import('../src/main/continuous-progress-loop-manager.js')
+    const { ContinuousProgressLoopManager: CurrentManager } = await import('../../host/src/continuous-progress-loop-manager.js')
     const cold = owner.make(CurrentManager); await cold.start(); owner.at(1000); await cold.check()
     expect(cold.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown', pendingCompletion: original })
     expect(f.requests).toHaveLength(1)

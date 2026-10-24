@@ -5,9 +5,9 @@ import { AgentMuxFileAgentSessionStore, defaultAgentMuxControlSocketPath, loadAg
 import { AgentMuxControlServer } from '../../../../../packages/core/src/public-rpc-server'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { connectDesktopAgentMuxHost } from '../../../src/main/desktop-host'
-import { ContinuousProgressLoopManager } from '../../../src/main/continuous-progress-loop-manager'
-import { ContinuousProgressLoopStore } from '../../../src/main/continuous-progress-loop-store'
-import { deliverContinuousProgress } from '../../../src/main/continuous-progress-delivery'
+import { ContinuousProgressLoopManager } from '../../../../host/src/continuous-progress-loop-manager'
+import { ContinuousProgressLoopStore } from '../../../../host/src/continuous-progress-loop-store'
+import { deliverContinuousProgress } from '../../../../host/src/continuous-progress-delivery'
 import type { AppConfig } from '../../../src/shared/contracts'
 
 const state = process.env.AGENTMUX_STATE_DIRECTORY!, runtimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY!

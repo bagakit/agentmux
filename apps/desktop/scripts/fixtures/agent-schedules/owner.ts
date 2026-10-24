@@ -2,10 +2,10 @@ import { join } from 'node:path'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { AgentMuxFileAgentSessionStore, defineAgentProvider, startHeadlessAgentMux, connectAgentMuxRpc, connectHostedAgentMux, type AgentMuxHostedRpcPort, type AgentMuxHostedRuntimeParameterMap } from '@agentmux/core'
 import { AgentMuxControlServer } from '../../../../../packages/core/dist/public-rpc-server.js'
-import { ContinuousProgressLoopManager } from '../../../src/main/continuous-progress-loop-manager.js'
-import { ContinuousProgressLoopStore } from '../../../src/main/continuous-progress-loop-store.js'
+import { ContinuousProgressLoopManager } from '../../../../host/src/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopStore } from '../../../../host/src/continuous-progress-loop-store.js'
 import { RuntimeController } from '../../../src/main/runtime-controller.js'
-import { deliverContinuousProgress } from '../../../src/main/continuous-progress-delivery.js'
+import { deliverContinuousProgress } from '../../../../host/src/continuous-progress-delivery.js'
 const state = process.env.AGENTMUX_STATE_DIRECTORY!, workspace = process.env.SCHEDULE_PROBE_WORKSPACE!
 // This private process owns a small authenticated begin/finish protocol, not Codex's vetoable Stop callback.
 const provider = defineAgentProvider({ catalog: { id: 'schedule-test', label: 'Schedule private test', executable: process.execPath,

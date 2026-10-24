@@ -72,7 +72,7 @@ if (slice === 'patrol') for (const name of Object.values(patrolNames)) fullOracl
 const patrolCases = [
   { name: 'gui-click-only-reads-instead-of-requesting-original-patrol', file: 'apps/desktop/src/renderer/src/components/GoalPatrolControl.tsx',
     changes: [["api.demands.delegation('goal.patrol', { goalId, operationId })", "api.demands.delegation('goal.delegations', { goalId })"]], test: product, oracle: patrolNames.click },
-  { name: 'unknown-original-attempt-replayed-after-owner-restart', file: 'apps/desktop/src/main/goal-patrol-owner.ts',
+  { name: 'unknown-original-attempt-replayed-after-owner-restart', file: 'apps/host/src/goal-patrol-owner.ts',
     changes: [['if (!attempt || attempt.attemptedAt || attempt.supersededAt || patrol.report || demandResponsibilityScope(goal) !== patrol.expectedScope) return',
       'if (!attempt || attempt.supersededAt || patrol.report || demandResponsibilityScope(goal) !== patrol.expectedScope) return'],
       ['if (admission.replayed) return // Another original owner already attempted; this read grants no submit.', 'void admission.replayed // Mutation: a persisted original attempt incorrectly grants submit again.']], test: product, oracle: patrolNames.replay },
@@ -96,7 +96,7 @@ const costCases = [
 ]
 const delegationOracle = 'actual compiled delegation preserves the original authenticated Core source and canonical executor role through the mounted consumer'
 if (slice === 'delegation') fullOracle[delegationOracle] = delegationOracle
-const delegationCases = [{ name: 'original-delegation-producer-discards-canonical-executor-context', file: 'apps/desktop/src/main/goal-delegation-owner.ts',
+const delegationCases = [{ name: 'original-delegation-producer-discards-canonical-executor-context', file: 'apps/host/src/goal-delegation-owner.ts',
   changes: [["const guidance = goalRoleGuidance({ role: 'executor', goalId: input.goalId, agentSessionId: intent.workerAgentSessionId, runId: intent.workerRunId, source: { kind: 'goal-delegation', operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId } })", "const guidance = ''"]],
   test: product, oracle: delegationOracle }]
 const cases = slice === 'delegation' ? delegationCases : slice === 'cost' ? costCases : slice === 'patrol' ? patrolCases : responsibilityCases
