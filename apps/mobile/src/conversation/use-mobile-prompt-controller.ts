@@ -10,6 +10,7 @@ import { ClientDeliveryDiagnostics, startDeliveryAttempt, type DeliveryAttemptSe
 import { deliveryOutcome, errorMessage } from './delivery'
 import type { createLocalDrafts, PromptAttempt } from './local-drafts'
 import type { MobileConnection } from './use-hosted-conversation'
+import type { ConfirmedAttachmentPrompt } from './attachments'
 
 function originalPromptRequest(session: AgentMuxAgentSession | null | undefined, agentSessionId: string | null,
   attempt: PromptAttempt | undefined) {
@@ -75,6 +76,8 @@ type MobilePromptControllerOptions = {
 }
 export type MobilePromptPreparation = {
   prepare(body: string): Promise<string>
+  /** Stop only this undispatched preparation; an original upload already requested is retained. */
+  cancel?(): void
   /** Called only after the complete original message has been retained. */
   commit(): Promise<void>
 }
@@ -86,7 +89,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
   const drafts = useRef(local.drafts), attempts = useRef(local.attempts)
   const [diagnostics] = useState(() => new ClientDeliveryDiagnostics())
   const [revision, redraw] = useState(0)
-  const preparingKeys = useRef(new Set<string>())
+  const preparingKeys = useRef(new Map<string, { cancelled: boolean; cancel?: (() => void) | undefined }>())
   const [preparationIssue, setPreparationIssue] = useState<{ client: AgentMuxHostedClient | null; sessionId: string | null; message: string } | null>(null)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -274,11 +277,17 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     if (attempts.current.get(key) === original) local.save()
     if (mounted.current) redraw(value => value + 1)
   }
-  async function submit(explicit = true, originalBody?: PromptAttempt, selectedKey = draftKey, preparation?: MobilePromptPreparation | null): Promise<void> {
+  async function submit(explicit = true, originalBody?: PromptAttempt, selectedKey = draftKey, preparation?: MobilePromptPreparation | null, bodyOnly = false): Promise<void> {
     const existing = attempts.current.get(selectedKey)
     const initialBody = originalBody?.draft ?? drafts.current.get(selectedKey) ?? ''
     let body = initialBody
-    if (preparingKeys.current.has(selectedKey) || existing?.phase === 'sending' || !body.trim() && !preparation || originalBody && originalBody !== existing) return
+    if (preparingKeys.current.has(selectedKey) && !bodyOnly || existing?.phase === 'sending' || !body.trim() && !preparation || originalBody && originalBody !== existing) return
+    if (bodyOnly) {
+      const previous = preparingKeys.current.get(selectedKey)
+      if (previous) { previous.cancelled = true; previous.cancel?.() }
+      preparingKeys.current.delete(selectedKey)
+    }
+    const preparing = { cancelled: false, cancel: preparation?.cancel }
     setPreparationIssue(null)
     const preparedTarget = preparation && client && session ? {
       client, sessionId: session.agentSessionId, hostId: session.hostId, runId: session.run.runId,
@@ -286,6 +295,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     } : null
     const assertPreparedTarget = () => {
       if (!preparation) return
+      if (preparing.cancelled) throw new Error('本次已明确选择仅发送正文；原上传和附件仍保留。')
       const selected = preparedTarget?.client.agentSession(preparedTarget.sessionId)
       if (!preparedTarget || current.current.client !== preparedTarget.client || current.current.agentSessionId !== preparedTarget.sessionId ||
           selected?.hostId !== preparedTarget.hostId || selected.run.runId !== preparedTarget.runId ||
@@ -294,12 +304,12 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
       }
     }
     if (preparation) {
-      preparingKeys.current.add(selectedKey); redraw(value => value + 1)
+      preparingKeys.current.set(selectedKey, preparing); redraw(value => value + 1)
       try { body = await preparation.prepare(initialBody); assertPreparedTarget() }
       catch (error) {
-        if (mounted.current) setPreparationIssue({ client, sessionId: agentSessionId, message: errorMessage(error) })
+        if (mounted.current && !preparing.cancelled) setPreparationIssue({ client, sessionId: agentSessionId, message: errorMessage(error) })
         return
-      } finally { preparingKeys.current.delete(selectedKey); if (mounted.current) redraw(value => value + 1) }
+      } finally { if (preparingKeys.current.get(selectedKey) === preparing) preparingKeys.current.delete(selectedKey); if (mounted.current) redraw(value => value + 1) }
       if (!body.trim()) return
     }
     const refused = existing?.manualInput ? existing.inputReceipt?.status === 'not-applied'
@@ -309,7 +319,10 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     // draft became active. A distinct explicit body is a new intent for Core to qualify.
     const unresolved = !originalBody && promptAttemptsForSession(attempts.current, agentSessionId).find(([, value]) =>
       value.phase === 'unknown' && expandSemanticReferences(value.draft) === expandSemanticReferences(body))
-    if (unresolved) { await retryOriginalPrompt(unresolved[0]); return }
+    if (unresolved) {
+      if (bodyOnly) { setPreparationIssue({ client, sessionId: agentSessionId, message: '同一正文已有未确认输入；原记录保留，请从原消息核对回执。本次仅正文不会重放它。' }); return }
+      await retryOriginalPrompt(unresolved[0]); return
+    }
     if (!refused && existing?.phase === 'rejected' && existing.draft === body) { await retryOriginalPrompt(selectedKey); return }
     const originalClient = client, originalId = agentSessionId
     const original: PromptAttempt = { operationId: randomClientRequestId(), runId: session?.run.runId ?? null,
@@ -446,7 +459,18 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     .map(([key, original]) => ({ id: key + ':' + original.operationId, text: original.draft,
       ...(original.manualInput && original.originalHostId ? { inputOrigin: { hostId: original.originalHostId, key: manualKey(original) } } : {}) }))
   const retainedAttempts = allAttempts.filter(([key, original]) => key !== draftKey && original.phase !== 'confirmed')
+  let confirmedAttachmentPrompt: ConfirmedAttachmentPrompt | null = null
+  if (attempt?.phase === 'confirmed') {
+    const runtimeId = attempt.manualInput?.runtimeId ?? attempt.request?.runtimeId ?? attempt.originalRuntimeId
+    const hostId = attempt.originalHostId, runId = attempt.manualInput?.expectedRun.runId ?? attempt.request?.condition.expectedRun.runId ?? attempt.runId
+    // The draft Map key is the original saved Session route, never today's Session metadata.
+    const savedKey: unknown = JSON.parse(draftKey)
+    const sessionId = attempt.manualInput?.agentSessionId ?? (Array.isArray(savedKey) && savedKey[0] === 'draft' && typeof savedKey[1] === 'string' ? savedKey[1] : null)
+    if (runtimeId && hostId && runId && sessionId) confirmedAttachmentPrompt = { operationId: attempt.operationId, body: attempt.draft, source: { runtimeId, hostId, sessionId, runId } }
+  }
   return { draftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput,
+    confirmedAttachmentPrompt,
+    sendBodyOnly: () => submit(true, undefined, draftKey, undefined, true),
     preparing: preparingKeys.current.has(draftKey), preparationIssue: preparationIssue?.client === client && preparationIssue.sessionId === agentSessionId ? preparationIssue.message : null,
     historyLocalEntries, retainedAttempts, sessionAttempts: allAttempts,
     promptWasRefused: (original: PromptAttempt) => originalPromptRefused(session, agentSessionId, original, client?.runtimeOwnerIdentity?.()?.runtimeId) }
