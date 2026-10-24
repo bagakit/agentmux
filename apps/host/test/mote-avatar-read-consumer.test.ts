@@ -29,10 +29,12 @@ async function fixture() {
   const topics = new ScratchTopics(), topic = await topics.ensureMote(workspace, 'view:original-avatar')
   const target = { workspaceId: workspace.id, topicId: topic.id, objectKey: directoryIdentity('local', topic.identityDirectoryPath!) }
   const directory = topic.physicalDirectoryPath!, png = imagePng(), ref = await saveObjectAvatarFile(directory, png)
-  const configurationPath = join(original.root, 'original-app-config.json'), socketPath = join(original.root, 'host.sock'), desktopPath = join(original.root, 'desktop.sock')
+  const configurationPath = join(original.root, 'original-app-config.json'), hostingPath = join(original.root, 'original-host-routes.json'),
+    socketPath = join(original.root, 'host.sock'), desktopPath = join(original.root, 'desktop.sock'), connectionDirectory = join(original.root, 'connections')
   const config = { workspaces: [workspace], appearance: { spaceObjectIcons: { [target.objectKey]: ref as unknown }, spaceObjectIconRevisions: { [target.objectKey]: 'original-publication' } } }
   const save = () => writeFile(configurationPath, JSON.stringify(config))
-  await save(); await original.client.dispose()
+  await save(); await writeFile(hostingPath, JSON.stringify({ hosts: [{ id: 'local', kind: 'local', label: 'Original Host' }] }))
+  await mkdir(connectionDirectory, { mode: 0o700 }); await original.client.dispose()
   let host: Awaited<ReturnType<typeof startAgentMuxHost>> | undefined
   async function start() {
     const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function () {
@@ -43,7 +45,8 @@ async function fixture() {
     })
     try {
       host = await startAgentMuxHost({ store: original.store, socketPath, desktopSocketPath: desktopPath,
-        configurationPath, mobileBuildDirectory: join(original.root, 'absent-mobile-assets') })
+        configurationPath: hostingPath, connections: { directory: connectionDirectory, adapters: [], moteConfigurationPath: configurationPath },
+        mobileBuildDirectory: join(original.root, 'absent-mobile-assets') })
       await vi.waitFor(() => expect((host!.client as unknown as { connected: boolean }).connected).toBe(true))
     } finally { connect.mockRestore() }
   }
@@ -90,7 +93,7 @@ it('default Host reads the exact saved Mote PNG through public RPC and compiled 
   expect(await readFile(f.configurationPath)).toEqual(configBefore); expect(await readFile(receiptPath)).toEqual(receiptBefore)
   expect(f.original.inner.kernel.input).not.toHaveBeenCalled(); expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
   facts.push({ case: 'default-rpc-cli-reopen', exactTarget: f.target, sourceRevision: first.revision, pngSHA256: digest(f.png), originalOperation: operation,
-    sameRuntime: true, newInstance: true, sameReceipt: true, sameChoice: true, desktopAbsent: true, inputEffects: 0, cliExit: cli.code })
+    sameRuntime: true, newInstance: true, sameReceipt: true, sameChoice: true, distinctHostingAndMoteConfiguration: true, desktopAbsent: true, inputEffects: 0, cliExit: cli.code })
 })
 
 it('rejects a foreign Mote object and remote resource while keeping the original PNG, Session and local read available', async () => {
