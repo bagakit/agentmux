@@ -456,7 +456,7 @@ not download a browser. This works independently of an open Desktop window and
 does not attach to a person's browser profile. The private page cannot load
 external or local resources, and diagram directives cannot relax its policy.
 
-The engine's native source/edge limits and the existing Core raster decode
+The engine's native edge limit and the existing Core raster decode
 budget constrain only this derived image. A single render has a cancellable
 30-second observation window, matching other Host resource observations; expiry
 does not declare the original Agent or message failed. Missing browsers, invalid
