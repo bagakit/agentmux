@@ -4,6 +4,8 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcGoal, AgentMuxRpcResult } from '@agentmux/core'
+import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
+import { beginGoalOperation, finishGoalOperation } from './goal-operation-recovery'
 
 export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
   client: AgentMuxHostedClient | null; goal: AgentMuxRpcGoal; visible: boolean
@@ -16,6 +18,13 @@ export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
   const [messages, setMessages] = useState<Array<{ operationId: string; text: string; action: string; request: Record<string, unknown> }>>([])
   const [pending, setPending] = useState(false), [confirmDelete, setConfirmDelete] = useState(false)
   const inFlight = useRef(false)
+  const original = useRef({ assigneeIds, supervisorId, sessionId })
+  const local = useRef({ assigneeIds, supervisorId, sessionId })
+  local.current = { assigneeIds, supervisorId, sessionId }
+  useMobileWebUpdateSafetyOwner(() => {
+    if (local.current.assigneeIds !== original.current.assigneeIds || local.current.supervisorId !== original.current.supervisorId || local.current.sessionId !== original.current.sessionId) return '目标操作输入仅保留在当前页面；请先保存、清空或还原输入，再更新网页。'
+    return null
+  })
   useEffect(() => {
     if (!expanded || !visible || !client?.forwardRpc) return
     let live = true
@@ -29,39 +38,53 @@ export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
     const operationId = randomClientRequestId()
     const common = { goalId: goal.id, operationId }
     let request: Record<string, unknown> = common
+    let operation: ReturnType<typeof beginGoalOperation> | undefined
     const report = (text: string) => setMessages(values => [...values, { operationId, text, action, request }])
     if (!client?.forwardRpc) { report('操作未发送：目标公共端口暂不可用，原目标与输入保留。'); return }
     inFlight.current = true; setPending(true)
+    let presentReceipt: () => void = () => {}
     try {
       if (action === 'delete') {
         const params = { ...common, confirmation: 'delete' as const }; request = params
-        const result = await client.forwardRpc('goal.delete', params)
-        deleted(result.goal.id)
+        operation = beginGoalOperation(client, 'goal.delete', params)
+        const result = await client.forwardRpc('goal.delete', params, undefined, operation.fence)
+        presentReceipt = () => deleted(result.goal.id)
       } else if (action === 'assign') {
         const params = { ...common, assigneeSessionIds: assigneeIds.split(',').map(value => value.trim()).filter(Boolean), supervisorSessionId: supervisorId.trim() || null, expectedUpdatedAt: goal.updatedAt, start: false }; request = params
-        const result = await client.forwardRpc('goal.assign', params)
-        updated(result.goal, ['assigneeSessionIds', 'supervisorSessionId', 'sessionIds', 'activityLog']); report('负责人分配已保存，未开始执行。')
+        operation = beginGoalOperation(client, 'goal.assign', params)
+        original.current = { ...original.current, assigneeIds, supervisorId }
+        const result = await client.forwardRpc('goal.assign', params, undefined, operation.fence)
+        presentReceipt = () => { updated(result.goal, ['assigneeSessionIds', 'supervisorSessionId', 'sessionIds', 'activityLog']); report('负责人分配已保存，未开始执行。') }
       } else if (action === 'handoff') {
         const params = { ...common, assigneeSessionIds: assigneeIds.split(',').map(value => value.trim()).filter(Boolean), supervisorSessionId: supervisorId.trim() || null, expectedUpdatedAt: goal.updatedAt, ...(sessionId ? { sessionId } : {}) }; request = params
-        const result = await client.forwardRpc('goal.handoff', params)
-        updated(result.goal, ['assigneeSessionIds', 'supervisorSessionId', 'sessionIds', 'activityLog']); report('交接关系已保存，未自动发送新任务。')
+        operation = beginGoalOperation(client, 'goal.handoff', params)
+        original.current = { assigneeIds, supervisorId, sessionId }
+        const result = await client.forwardRpc('goal.handoff', params, undefined, operation.fence)
+        presentReceipt = () => { updated(result.goal, ['assigneeSessionIds', 'supervisorSessionId', 'sessionIds', 'activityLog']); report('交接关系已保存，未自动发送新任务。') }
       } else {
         const params = { ...common, ...(sessionId ? { sessionId } : {}) }; request = params
-        const result = await client.forwardRpc('goal.start', params)
-        updated(result.goal, ['status', 'sessionIds', 'activityLog'])
-        report(result.receipt.sessionId ? '开始请求已处理；请在关联会话查看实际执行。' : '开始请求已返回，执行会话尚未确认。')
+        operation = beginGoalOperation(client, 'goal.start', params)
+        original.current = { ...original.current, sessionId }
+        const result = await client.forwardRpc('goal.start', params, undefined, operation.fence)
+        presentReceipt = () => { updated(result.goal, ['status', 'sessionIds', 'activityLog']); report(result.receipt.sessionId ? '开始请求已处理；请在关联会话查看实际执行。' : '开始请求已返回，执行会话尚未确认。') }
       }
-    } catch (error) { report(`${action === 'delete' ? '删除' : action === 'start' ? '开始执行' : action === 'handoff' ? '交接' : '分配'}回执未确认：${error instanceof Error ? error.message : String(error)}。原目标、输入与操作身份保留；先读取当前目标核对，不会自动重发。`) }
+    } catch (error) {
+      if (operation) void finishGoalOperation(operation, false)
+      report(`${action === 'delete' ? '删除' : action === 'start' ? '开始执行' : action === 'handoff' ? '交接' : '分配'}回执未确认：${error instanceof Error ? error.message : String(error)}。原目标、输入与操作身份保留；先读取当前目标核对，不会自动重发。`)
+      return
+    }
     finally { inFlight.current = false; setPending(false) }
+    if (operation) void finishGoalOperation(operation, true)
+    try { presentReceipt() } catch (error) { report(`原操作已收到回执，但当前页面未能更新：${error instanceof Error ? error.message : String(error)}。请重新读取原目标。`) }
   }
   return <details onToggle={event => expand(event.currentTarget.open)}><summary>分配、执行与删除</summary>
     {discoveryIssue && <MobileNotice identity={[discoveryIssue]} role="status">{discoveryIssue}</MobileNotice>}
-    <label>负责人会话<TextInput aria-label="分配 Session IDs" list={`goal-assignees-${goal.id}`} value={assigneeIds} onChange={event => setAssigneeIds(event.target.value)} placeholder="准确 Session ID，多个用逗号分隔，清空表示未分配" /></label>
+    <label>负责人会话<TextInput aria-label="分配 Session IDs" list={`goal-assignees-${goal.id}`} value={assigneeIds} onChange={event => { local.current.assigneeIds = event.target.value; setAssigneeIds(event.target.value) }} placeholder="准确 Session ID，多个用逗号分隔，清空表示未分配" /></label>
     <datalist id={`goal-assignees-${goal.id}`}>{sessions.map(item => <option key={item.session.agentSessionId} value={item.session.agentSessionId}>{item.session.agentSessionId} · {item.session.providerId}</option>)}</datalist>
-    <label>Supervisor 会话<TextInput aria-label="Supervisor Session ID" value={supervisorId} onChange={event => setSupervisorId(event.target.value)} placeholder="单一负责人 Session ID，清空表示不指定" /></label>
+    <label>Supervisor 会话<TextInput aria-label="Supervisor Session ID" value={supervisorId} onChange={event => { local.current.supervisorId = event.target.value; setSupervisorId(event.target.value) }} placeholder="单一负责人 Session ID，清空表示不指定" /></label>
     <button onClick={() => refresh(value => value + 1)}>刷新会话目录</button>
     <button disabled={pending} onClick={() => { void execute('assign') }}>保存负责人分配</button>
-    <label>执行或交接的会话<TextInput aria-label="执行 Session ID" value={sessionId} onChange={event => setSessionId(event.target.value)} placeholder="可选准确 Session ID" /></label>
+    <label>执行或交接的会话<TextInput aria-label="执行 Session ID" value={sessionId} onChange={event => { local.current.sessionId = event.target.value; setSessionId(event.target.value) }} placeholder="可选准确 Session ID" /></label>
     <p>填写会话时明确指向它；不填写时，开始执行需有唯一准确负责人。交接只保存明确负责人和历史关系，不启动或重绑循环。</p>
     <button disabled={pending} onClick={() => { void execute('start') }}>开始执行此目标</button>
     <button disabled={pending} onClick={() => { void execute('handoff') }}>保存交接关系</button>
