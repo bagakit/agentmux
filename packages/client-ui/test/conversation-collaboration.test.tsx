@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
+import { jsonl, nativeHistoryFixture } from '../../core/test/fixtures/native-history-session.js'
 import { ConversationMessage } from '../src/components/ConversationMessage.js'
 import type { ConversationHistoryResourceReader } from '../src/components/ConversationResourceImage.js'
 import type { AgentTimelineItem } from '@agentmux/core'
@@ -92,10 +94,11 @@ it('assembles the full collaboration original only while its Details consumer is
 
     await click('[aria-label="Message details"]')
     const originalNode = host.querySelector<HTMLDetailsElement>('.log-turn__collaboration-original')!
+    originalNode.open = true
+    await click('.log-turn__collaboration-original .conversation-progressive-body__placeholder button')
     expect(originalNode.querySelector('pre')?.textContent).toBe(fullOriginal)
     expect(originalJoins).toBe(1)
     expect(originalCharacters).toBe(fullOriginal.length)
-    originalNode.open = true
     await click('[aria-label="Copy original record"]')
     expect(copy).toHaveBeenLastCalledWith(fullOriginal, expect.any(Function))
 
@@ -105,6 +108,7 @@ it('assembles the full collaboration original only while its Details consumer is
     expect(host.querySelector('.log-turn__collaboration-original')).toBeNull()
     expect(originalJoins).toBe(beforeClosedUpdate)
     await click('[aria-label="Message details"]')
+    await click('.log-turn__collaboration-original .conversation-progressive-body__placeholder button')
     expect(host.querySelector('.log-turn__collaboration-original pre')?.textContent).toBe(fullOriginal)
     expect(originalJoins).toBe(beforeClosedUpdate + 1)
   } finally { observedJoin.mockRestore() }
@@ -131,7 +135,9 @@ it('preserves opened original nodes and selection across unrelated and hidden up
 it('keeps opaque originals available without putting them in preview or expanded reading', async () => {
   const opaque = '{"type":"encrypted_content","encrypted_content":"original-ciphertext"}'
   await render([{ ...item, contentParts: [{ kind: 'text', text: opaque, readingRange: { start: 0, end: 0 }, contentEligibility: 'unconfirmed' }] }])
-  expect(host.querySelector('.log-turn__collaboration-preview')?.textContent).toBe('暂无可读正文 · 原始内容已保留')
+  expect(host.querySelector('.log-turn__collaboration-preview')).toBeNull()
+  expect(host.querySelector('.log-turn')?.getAttribute('data-collaboration-empty')).toBe('true')
+  expect(host.textContent).not.toContain('暂无可读正文')
   expect(host.textContent).not.toContain('original-ciphertext')
   await click('.log-turn__collaboration-toggle')
   expect(host.querySelector('.log-turn__collaboration-content')?.textContent).toContain('原生记录未提供可读正文')
@@ -139,6 +145,59 @@ it('keeps opaque originals available without putting them in preview or expanded
   await click('[aria-label="Message details"]')
   expect(host.querySelector('.log-turn__collaboration-original')?.textContent).toContain(opaque)
   await click('[aria-label="Copy message"]'); expect(copy).toHaveBeenLastCalledWith(opaque, expect.any(Function))
+})
+
+it('keeps each empty native report independently inspectable without an empty preview row', async () => {
+  await render([0, 1, 2].map(index => ({ ...item, id: `empty-report-${index}`, contentParts: [] })))
+  const reports = [...host.querySelectorAll<HTMLElement>('[data-native-collaboration]')]
+  expect(reports).toHaveLength(3)
+  expect(new Set(reports.map(report => report.closest<HTMLElement>('[data-native-record-id]')!.dataset.nativeRecordId)).size).toBe(3)
+  for (const report of reports) {
+    expect(report.dataset.collaborationEmpty).toBe('true')
+    expect(report.querySelector('.log-turn__collaboration-preview')).toBeNull()
+    expect(report.querySelector('[aria-label="Message details"]')).not.toBeNull()
+    const toggle = report.querySelector<HTMLButtonElement>('.log-turn__collaboration-toggle')!
+    await act(async () => toggle.click())
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    const content = report.querySelector('.log-turn__collaboration-content')!
+    expect(content.textContent).toContain('原生记录未提供可读正文')
+    await act(async () => toggle.click())
+    expect(content.hasAttribute('hidden')).toBe(true)
+    await act(async () => toggle.click())
+    expect(report.querySelector('.log-turn__collaboration-content')).toBe(content)
+  }
+})
+
+it('reads native header-only reports through Core and the actual shared conversation without inventing a body', async () => {
+  const header = `Message Type: MESSAGE\nTask name: ${recipient}\nSender: ${sender}\nPayload:\n`
+  const opaque = { type: 'encrypted_content', encrypted_content: 'original-opaque-payload' }
+  const native = await nativeHistoryFixture('codex', root => jsonl([
+    { type: 'session_meta', payload: { id: source.nativeSessionId, cwd: root, history_mode: 'paginated' } },
+    ...['preview-readable', 'preview-opaque', 'preview-mixed', 'preview-opaque-later', 'preview-opaque-tail'].map(id => ({ type: 'response_item', payload: {
+      type: 'agent_message', id, author: sender, recipient, content: [{ type: 'input_text', text: header +
+        (id.startsWith('preview-opaque') ? '' : '**检查完成**，保留原输入。\n\n[查看说明](https://example.test/review)') }, opaque]
+    } }))
+  ]), { nativeSessionId: source.nativeSessionId })
+  try {
+    const page = await native.client.sessionHistoryPage(native.session.agentSessionId)
+    expect(page.items).toHaveLength(5)
+    expect(page.items[1]!.contentParts).toEqual([
+      { kind: 'text', text: header, readingRange: { start: header.length, end: header.length }, contentEligibility: 'public' },
+      { kind: 'text', text: JSON.stringify(opaque), readingRange: { start: 0, end: 0 }, contentEligibility: 'unconfirmed' }
+    ])
+    await render(page.items, true, page.source)
+    const report = host.querySelector('[data-native-record-id="preview-opaque"]')!
+    expect(report.querySelector('.log-turn__collaboration-preview')).toBeNull()
+    expect(report.querySelector('[data-collaboration-empty="true"]')).not.toBeNull()
+    const toggle = report.querySelector<HTMLButtonElement>('.log-turn__collaboration-toggle')!
+    await act(async () => toggle.click())
+    expect(report.textContent).toContain('原生记录未提供可读正文')
+    await act(async () => report.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
+    expect(copy).toHaveBeenLastCalledWith(header + '\n' + JSON.stringify(opaque), expect.any(Function))
+    expect(await native.bytes()).toEqual(native.before)
+    expect(native.controls.every(control => control.mock.calls.length === 0)).toBe(true)
+    if (process.env.AGENTMUX_EMPTY_REPORT_SCENE) await writeFile(process.env.AGENTMUX_EMPTY_REPORT_SCENE, JSON.stringify(page))
+  } finally { await native.close(); vi.restoreAllMocks() }
 })
 
 it('does not interpret provider-looking prose as collaboration and preserves unknown native content', async () => {
@@ -161,6 +220,7 @@ it('distinguishes deferred content from unavailable text and copies its complete
   await act(async () => root.render(<ClientUiProvider platform={platform}><ConversationMessage messageId="deferred" content={[part]} nativeCollaboration={item.collaboration as Extract<NonNullable<AgentSessionHistoryItem['collaboration']>, {kind:'message'}>}
     conversationSessionId={sid} readHistoryResource={read} nativeResourceRecord={{ source, recordId: 'deferred' }} /></ClientUiProvider>))
   expect(host.querySelector('.log-turn__collaboration-preview')?.textContent).toBe('包含按需读取的内容 · 展开查看')
+  expect(host.querySelector('.log-turn')?.hasAttribute('data-collaboration-empty')).toBe(false)
   expect(read).not.toHaveBeenCalled()
   await click('[aria-label="Message details"]')
   expect(host.querySelector('.log-turn__collaboration-original')?.textContent).toContain('原始记录与资源引用')
@@ -182,6 +242,10 @@ it.each(['failed', 'streaming'] as const)('keeps the original %s submission cont
   const contribution = host.querySelector('.conversation-submission')!
   expect(contribution).not.toBeNull()
   expect(contribution.closest('[hidden]')).toBeNull()
-  expect(contribution.textContent).toContain(status === 'failed' ? '提交失败' : '提交未确认')
+  expect(contribution.getAttribute('data-status')).toBe(status)
+  const disclosure = contribution.querySelector<HTMLDetailsElement>('.message-disclosure')!
+  await act(async () => { disclosure.open = true; disclosure.dispatchEvent(new Event('toggle')) })
+  const label = [...contribution.querySelectorAll('dt')].find(node => node.textContent === '原记录状态')!
+  expect(label.nextElementSibling?.textContent).toBe(status)
   expect(host.querySelector('.log-turn__collaboration-toggle')?.getAttribute('aria-expanded')).toBe('false')
 })
