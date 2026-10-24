@@ -636,7 +636,7 @@ export class PublicationStore {
           ? sourceTime : prior?.presentationTime ?? Date.now())
         const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision, presentationTime, ...(event ? { event } : {}), sourceRecords: [...references],
           ...(speaker && payload.kind === 'speech' ? { speaker } : {}),
-          ...(originalMessage ? { originalMessage: { messageId: originalMessage.messageId, senderSessionId: originalMessage.senderSessionId, notificationId: originalMessage.notificationId } } : {}),
+          ...(originalMessage ? { originalMessage: { messageId: originalMessage.messageId, senderSessionId: originalMessage.senderSessionId, ...(originalMessage.notificationId ? { notificationId: originalMessage.notificationId } : {}) } } : {}),
           bindingId: boundary.bindingId, bindingRevision: boundary.revision, publicationScope: boundary.scope.publication,
           reference: unit.event.reference!, target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
           payload, ...(plan.relay ? { relay: plan.relay } : {}), effect, fragment: { ordinal, count: parts.length }, state: 'pending', ...(parent ? { predecessorOperationId: parent.operationId } : {}) }
@@ -653,16 +653,26 @@ export class PublicationStore {
     }
   }
   /** Journal originals reuse this Outbox; a repeated notification cannot acquire a second representation. */
-  private projectOriginalMessages(boundary: PublicationBoundary, unit: ConversationUnit, values: readonly PublicationA2A[], frontier: ConversationCheckpoint, fragmentBytes: number, fragmentText?: PublicationPageOptions['fragmentText']): void {
+  private projectOriginalMessages(boundary: PublicationBoundary, unit: ConversationUnit, values: readonly PublicationA2A[], frontier: ConversationCheckpoint, fragmentBytes: number, fragmentText?: PublicationPageOptions['fragmentText'], sourceEvent: ConnectionDelivery['event'] | null = { id: unit.event.id, revision: unit.event.revision }): void {
     if (boundary.scope.publication !== 'future-shared-conversation') return
     for (const value of values) {
-      const gapId = 'a2a-gap-' + digest([...scopeKey(boundary), conversationRecordId(value.record), value.revision, value.notificationId])
+      const gapId = 'a2a-gap-' + digest([...scopeKey(boundary), conversationRecordId(value.record), value.revision, value.notificationId ?? value.key])
       if (value.unavailable) {
         const gap: ConnectionDeliveryGap = { gapId, reason: value.startUnconfirmed ? 'start-cut-unconfirmed' : 'resource-unavailable', code: 'PUBLICATION_A2A_ORIGINAL_UNAVAILABLE',
           event: { id: unit.event.id, revision: unit.event.revision }, record: value.record, ...(value.part ? { part: value.part } : {}),
           anchor: { record: value.record, revision: value.revision, frontier } }
         this.saveDecision(boundary, gapId, value.revision, { kind: 'gap', gap, state: 'unresolved' })
       } else this.database.prepare("UPDATE connector_publication_decision SET decision_json=json_set(decision_json,'$.state','resolved') WHERE binding_id=? AND binding_revision=? AND record_id=?").run(...scopeKey(boundary), gapId)
+      // A native direct input's public body is the journal original, not its raw envelope.
+      // Resolve only the exact text-wire gap; unrelated resources and purposes keep their own gaps.
+      const record = unit.records.find(record => same(record.reference, value.record) && record.revision === value.revision)
+      if (sourceEvent && value.originalAgentInput && record?.original.kind === 'native' && record.original.item.kind === 'user-message') {
+        for (const [partIndex, part] of record.original.item.contentParts.entries()) if (part.kind === 'text' && part.contentRole !== 'tool' && part.contentRole !== 'reasoning') {
+          const exact = { record: value.record, recordRevision: value.revision, selector: { kind: 'native-part', partIndex } }
+          const gapId = 'gap-' + digest([...scopeKey(boundary), sourceEvent, exact, 'public-content-unconfirmed'])
+          this.database.prepare("UPDATE connector_publication_decision SET decision_json=json_set(decision_json,'$.state','resolved') WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved'").run(...scopeKey(boundary), gapId, value.revision)
+        }
+      }
       for (const message of value.messages) {
         const projectionId = 'a2a-original-' + digest([...scopeKey(boundary), boundary.executionHostId, boundary.agentSessionId, message.messageId])
         if (this.latestProjection(projectionId)) continue
@@ -675,8 +685,10 @@ export class PublicationStore {
     if (!gap.anchor || gap.code !== 'PUBLICATION_A2A_ORIGINAL_UNAVAILABLE') return
     this.transaction(() => {
       if (!authorized()) return
-      const row = this.database.prepare("SELECT 1 FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND record_id=? AND json_extract(decision_json,'$.state')='unresolved'").get(...scopeKey(boundary), gap.gapId)
-      if (row) this.projectOriginalMessages(boundary, unit, values.filter(value => same(value.record, gap.anchor!.record) && value.revision === gap.anchor!.revision), gap.anchor!.frontier, fragmentBytes, fragmentText)
+      const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision=? AND json_extract(decision_json,'$.state')='unresolved'").get(...scopeKey(boundary), gap.gapId, gap.anchor!.revision)
+      if (!row) return
+      const current = JSON.parse(String(row.decision_json)).gap as ConnectionDeliveryGap
+      if (current.anchor) this.projectOriginalMessages(boundary, unit, values.filter(value => same(value.record, current.anchor!.record) && value.revision === current.anchor!.revision), current.anchor.frontier, fragmentBytes, fragmentText, current.event ?? null)
     })
   }
   recoverableGaps(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, after = 0): Array<{ ordinal: number; gap: ConnectionDeliveryGap }> {
