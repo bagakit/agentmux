@@ -100,6 +100,9 @@ export type Demand = {
   supervisorSessionId: string | null
   participations: DemandParticipation[]
   creationOrigin?: DemandCreationOrigin
+  /** New Host creation only; absent original records retain unknown discussion provenance. */
+  discussionOperationId?: string
+  discussionIntent?: import('./discussion.js').DemandDiscussionIntent
   /** Append-only original content provenance, not execution or display ownership. */
   contentRefs?: DemandContentReference[]
   /** Explicit Start provenance. Historical relations and activity never author this fact. */
@@ -151,6 +154,7 @@ export type UpdateDemandInput = Partial<Pick<
 >> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
 
 export type DemandCreateOptions = {
+  discussionOperationId?: string
   operationId?: string
   context?: DemandNameContext
   participation?: DemandParticipationSource
