@@ -301,6 +301,13 @@ caller input. Publication keeps its original source cut, pending operations and 
 delivery inspection continues to use that original revision. Current member capabilities still
 govern input and actions. A changed audience, execution target/source or paused interval takes
 a new cut. Private Mote origins keep their separate creation contract.
+Group ingress inspection retains publicationRevision on its original group target when the
+intake owner qualified that boundary, including before claim. bindingRevision and input.author
+keep their original configuration. This observation joins accepted context positions across
+trigger edits; it never grants input or changes a frozen quote. An original intake without
+this field keeps its own configuration position; no prior root is inferred. Only the exact
+complete native-admitted input advances the position, including a late historical receipt
+after permissions change. Byte confirmation, unknown effects and gapped quotes do not advance.
 Detach ends current routing, retains original revisions and receipts, and never stops the Agent
 or deletes the platform group. Its original operation stays inspectable after the live list changes.
 Applied lifecycle operations reference independent notice deliveryOperationIds. Inspect or list those
