@@ -47,6 +47,8 @@ app.whenReady().then(async () => {
       assert.equal(geometry.width,geometry.scrollWidth,'No horizontal overflow')
       assert.ok(geometry.composer.width > geometry.body.width * .9, 'Composer retains a usable full-width input')
       assert.equal(geometry.live,false,'Editing is outside live status announcements'); assert.equal(geometry.choices,6)
+      assert.equal(await evaluate('Boolean(document.querySelector(".agent-catalog__scroll"))'), false, 'A fitting catalog must not imply hidden Agents')
+      assert.equal(await evaluate('getComputedStyle(document.querySelector(".launcher-mote__actions")).borderTopWidth'), '1px', 'The whole Mote action has a visible button boundary')
       receipt.checks.push({name,geometry}); await frame(name)
       if (name === 'narrow-dark' || name === 'short-dark') {
         await evaluate(`document.querySelector('[aria-label="Expand Note"]').scrollIntoView({block:'nearest'})`); await frame(name+'-tools')
@@ -77,12 +79,36 @@ app.whenReady().then(async () => {
     assert.ok(selectedMote.includes('long readable name'))
     for (const [name,width,height,theme] of [['catalog-16-dark',1180,850,'dark'],['catalog-16-light',1180,850,'light'],['catalog-16-narrow',460,760,'dark'],['catalog-16-short',840,430,'dark']]) {
       await viewport(width,height); await evaluate(`launchpad.scene({executorCount:16,theme:${JSON.stringify(theme)}});spaceLauncher.theme(${JSON.stringify(theme)})`); await paint()
-      await evaluate('document.querySelector(".launch-surface").scrollTop=0;document.querySelector(".agent-catalog").scrollTop=document.querySelector(".agent-catalog").scrollHeight'); await paint()
+      await evaluate('document.querySelector(".launch-surface").scrollTop=0;document.querySelector(".agent-catalog").scrollTop=0'); await paint()
+      const overflowing = await evaluate('document.querySelector(".agent-catalog").scrollHeight > document.querySelector(".agent-catalog").clientHeight + 1')
+      assert.equal(await evaluate('Boolean(document.querySelector(".agent-catalog__scroll"))'), overflowing, 'Overflow is discoverable before any scrolling')
+      await frame(name+'-start')
+      if (overflowing) {
+        assert.equal(await evaluate('document.querySelector(".agent-catalog__scroll").textContent.trim()'), 'More agents')
+        for (let page = 0; page < 20; page++) {
+          if (await evaluate('document.querySelector(".agent-catalog__scroll").textContent.trim() === "Back to top"')) break
+          const before = await evaluate('document.querySelector(".agent-catalog").scrollTop')
+          await click('.agent-catalog__scroll')
+          assert.ok(await evaluate(`document.querySelector('.agent-catalog').scrollTop > ${before}`), 'More agents advances the real catalog')
+        }
+        assert.equal(await evaluate('document.querySelector(".agent-catalog__scroll").textContent.trim()'), 'Back to top')
+      }
       const facts = await evaluate(`(()=>{const s=document.querySelector('.launch-surface'),c=s.querySelector('.agent-catalog'),p=s.querySelector('.launcher-composer'),last=c.querySelector('.agent-pick:last-child');return{count:c.querySelectorAll('.agent-pick[data-executor-id]').length,gap:p.getBoundingClientRect().top-c.getBoundingClientRect().bottom,lastBottom:last.getBoundingClientRect().bottom,catalogBottom:c.getBoundingClientRect().bottom,scrollTop:c.scrollTop,scrollHeight:c.scrollHeight,clientHeight:c.clientHeight,width:s.clientWidth,scrollWidth:s.scrollWidth,background:getComputedStyle(s).backgroundImage,target:s.querySelector('.launcher-mote__target').textContent.trim(),warmRun:launchpad.facts().warmRun,originalWarmRun:launchpad.facts().originalWarmRun}})()`)
       assert.equal(facts.count,16); assert.equal(facts.width,facts.scrollWidth); assert.ok(facts.gap>=8,'Catalog scroll ends before the input gap'); assert.ok(facts.lastBottom<=facts.catalogBottom+1,'The last candidate remains readable at scroll end'); assert.equal(facts.warmRun,facts.originalWarmRun); assert.equal(facts.target,selectedMote); assert.ok(facts.background.includes('url('),'The original banner is consumed by the product surface')
       receipt.checks.push({name,facts}); await frame(name)
+      await click('.agent-pick:last-child')
+      assert.equal(await evaluate('document.querySelector(".agent-pick:last-child").getAttribute("aria-pressed")'), 'true', 'The last Agent remains selectable')
+      assert.equal(await evaluate('launchpad.facts().sourceDraft'),draft, 'Browsing and choosing preserve the original prompt')
+      if (overflowing) {
+        await click('.agent-catalog__scroll')
+        assert.equal(await evaluate('document.querySelector(".agent-catalog").scrollTop'), 0, 'Back to top returns to the first choices')
+      }
     }
+    assert.equal(await evaluate('document.activeElement.classList.contains("agent-catalog__scroll")'), true)
     await viewport(1180,850); await evaluate('launchpad.scene({executorCount:16});spaceLauncher.theme("dark")'); await paint()
+    assert.equal(await evaluate('document.querySelector(".agent-catalog__scroll")'), null, 'All choices fit after expanding the Region')
+    assert.equal(await evaluate('document.activeElement.matches(".agent-pick[aria-pressed=true]")'), true, 'The disappearing scroll control keeps keyboard focus in the same Agent choices')
+    await frame('catalog-expanded-keyboard-focus')
     await evaluate('document.querySelector(".launcher-mote__target").focus()')
     for (const expected of ['launcher-resume-trigger','launcher-launch-button']) {
       for (const type of ['keyDown','keyUp']) await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9})
@@ -102,7 +128,9 @@ app.whenReady().then(async () => {
     receipt.failure = {message:error.message,stack:error.stack}
     if (window) await fs.writeFile(path.join(output,'failure.png'),(await window.webContents.capturePage()).toPNG())
   } finally {
-    await fs.writeFile(path.join(output,'ui-receipt.json'),JSON.stringify(receipt,null,2))
-    window?.destroy(); app.exit(receipt.passed ? 0 : 1)
+    let exitCode = receipt.passed ? 0 : 1
+    try { await fs.writeFile(path.join(output,'ui-receipt.json'),JSON.stringify(receipt,null,2)) }
+    catch (error) { console.error(error); exitCode = 1 }
+    finally { window?.destroy(); app.exit(exitCode) }
   }
 })
