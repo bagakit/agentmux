@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { AgentMuxError } from './errors.js'
 import { SESSION_HISTORY_MAX_PAGE_BYTES } from './session-history.js'
 import { SESSION_HISTORY_IMAGE_MAX_BYTES, unavailable } from './session-history-resource.js'
-import { readRecordedFile, readRecordedImage } from './session-history-resource-read.js'
+import { readRecordedFile, readRecordedImage, readRecordedMarkdownImage } from './session-history-resource-read.js'
 import { readSessionHistoryTextResource } from './session-history-content.js'
 import type { AgentProviderSessionHistoryContext, AgentSessionHistoryContentPart, AgentSessionHistoryItem,
   AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult } from './types.js'
@@ -159,7 +159,7 @@ export async function readNativeContentResource(
     let part: AgentSessionHistoryContentPart
     try {
       part = await readSessionHistoryTextResource({ kind: 'resource', resourceType: 'text', reference: input.expectedReference,
-        content: { encoding: 'json-utf8', kind: 'resource', byteLength: reference.byteLength, sha256: reference.sha256 } }, input.partIndex, { source: input.source, recordId: input.recordId, ...(input.turnId === undefined ? {} : { turnId: input.turnId }) }, async request => ({
+        content: { encoding: 'json-utf8', kind: input.markdownImage ? 'text' : 'resource', byteLength: reference.byteLength, sha256: reference.sha256 } }, input.partIndex, { source: input.source, recordId: input.recordId, ...(input.turnId === undefined ? {} : { turnId: input.turnId }) }, async request => ({
         ...(context.agentSessionId === undefined ? {} : { agentSessionId: context.agentSessionId }), source: context.source,
         recordId: input.recordId, partIndex: input.partIndex, ...(input.turnId === undefined ? {} : { turnId: input.turnId }), reference: request.expectedReference,
         result: await readNativeContentResource(context, request)
@@ -169,6 +169,7 @@ export async function readNativeContentResource(
       if (error instanceof AgentMuxError) throw error
       return unavailable('AGENT_SESSION_HISTORY_RESOURCE_CONTENT_INVALID', 'The original signed part could not be verified as a complete resource. Its original reference remains available.')
     }
+    if (input.markdownImage) return readRecordedMarkdownImage(part, input, maxBytes, context.signal, true)
     if (part.kind !== 'resource' || part.resourceType !== input.representation) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'This original signed part has another resource type.')
     if (input.representation === 'file') return await readRecordedFile(part.reference, maxBytes, context.signal, part.label)
     return await readRecordedImage(part.reference, maxBytes, context.signal)

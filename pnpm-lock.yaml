@@ -627,9 +627,15 @@ importers:
       node-diff3:
         specifier: 3.2.1
         version: 3.2.1(patch_hash=921b08abe21722b700dcb6036f7a33eebf583f414dbb286e8a02541ff17a0d48)
+      remark-parse:
+        specifier: ^11.0.0
+        version: 11.0.0
       stream-json:
         specifier: 3.7.0
         version: 3.7.0
+      unified:
+        specifier: ^11.0.5
+        version: 11.0.5
       wa-sqlite:
         specifier: 1.0.0
         version: 1.0.0
@@ -646,6 +652,9 @@ importers:
       '@types/luxon':
         specifier: 3.7.6
         version: 3.7.6
+      '@types/mdast':
+        specifier: ^4.0.4
+        version: 4.0.4
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3

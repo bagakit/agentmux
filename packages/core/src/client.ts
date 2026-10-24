@@ -141,7 +141,7 @@ import { CTXMUX_COMMIT, CTXMUX_VERSION, CtxmuxRunAdapter, type CtxmuxAdapterAtta
 import { supportedCtxmuxArtifactPlatform } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
 import { parseSessionHistoryResourceOptions, SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
-import { readRecordedFile, readRecordedImage } from './session-history-resource-read.js'
+import { readRecordedFile, readRecordedImage, readRecordedMarkdownImage } from './session-history-resource-read.js'
 import { isNativeContentReference, nativeContentNeedsRevalidation, readNativeContentResource, revalidateNativeContentReference } from './native-history-content.js'
 import { readAgentSessionHistory, type AgentSessionHistoryReadInput, type AgentSessionHistoryReadPage } from './session-history-reader.js'
 import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
@@ -2792,8 +2792,15 @@ export class AgentMuxClient {
       }
       if (request.offsetBytes !== undefined) throw new AgentMuxError('Binary resources do not accept a text-content offset.', 'INVALID_AGENT_SESSION_HISTORY_RESOURCE')
       const item = await locateRecord(), part = item.contentParts[request.partIndex]
-      if (item.id !== request.recordId || request.turnId !== undefined && item.turnId !== request.turnId ||
-        part?.kind !== 'resource' || part.resourceType !== (request.representation === 'file' ? 'file' : 'image') || part.reference !== request.expectedReference) {
+      if (item.id !== request.recordId || request.turnId !== undefined && item.turnId !== request.turnId)
+        throw new AgentMuxError('The native lookup returned another record.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
+      if (request.markdownImage) {
+        await read(assertSource())
+        const result = await read(readRecordedMarkdownImage(part, request, request.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, controller.signal))
+        await read(assertSource())
+        return { ...identity, result }
+      }
+      if (part?.kind !== 'resource' || part.resourceType !== (request.representation === 'file' ? 'file' : 'image') || part.reference !== request.expectedReference) {
         throw new AgentMuxError('The exact recorded resource changed or has another type.', 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH')
       }
       await read(assertSource())
@@ -3374,6 +3381,12 @@ export class AgentMuxClient {
       if (record.id !== input.recordId || input.turnId !== undefined && record.turnId !== input.turnId)
         throw new AgentMuxError('The native lookup returned another record.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
       const part = record.contentParts[input.partIndex]
+      if (input.markdownImage) {
+        await read(binding.assertCurrent())
+        const result = await read(readRecordedMarkdownImage(part, input, input.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, controller.signal))
+        await read(binding.assertCurrent())
+        return { ...identity, reference: input.expectedReference, result }
+      }
       if (!part || part.kind !== 'resource' || part.resourceType !== (input.representation === 'file' ? 'file' : 'image') || part.reference !== input.expectedReference)
         throw new AgentMuxError('The exact resource part changed or has another type.', 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH')
       await read(binding.assertCurrent())

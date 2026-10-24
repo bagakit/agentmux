@@ -1058,6 +1058,8 @@ export type AgentSessionHistoryResourceRequest = {
   maxBytes?: number
   /** Explicit image or self-contained file bytes for this same original part, including a signed wrapper. Omit for its recorded representation. */
   representation?: 'image' | 'file'
+  /** An image node in this exact original text revision. The reference remains a compare constraint, never a caller path grant. */
+  markdownImage?: { index: number; textSha256: string }
   /** Byte position in the exact serialized text part. Explicit binary representations do not accept an offset. */
   offsetBytes?: number
 }

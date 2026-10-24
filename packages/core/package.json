@@ -377,6 +377,8 @@
     "fs-native-extensions": "1.5.1",
     "json-rpc-2.0": "1.8.1",
     "node-diff3": "3.2.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5",
     "stream-json": "3.7.0",
     "wa-sqlite": "1.0.0",
     "yaml": "2.9.0",
@@ -403,6 +405,7 @@
   "devDependencies": {
     "@ctxmux/sdk": "file:vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz",
     "@types/node": "^24.0.0",
+    "@types/mdast": "^4.0.4",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0",
