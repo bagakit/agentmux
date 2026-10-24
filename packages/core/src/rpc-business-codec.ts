@@ -146,7 +146,7 @@ export async function callPublicGoalControl(request: AgentMuxControlRequest,
   if (!entry) throw new AgentMuxError('This Goal capability has no public operation.', 'CONTROL_UNAVAILABLE')
   const method = entry[0] as AgentMuxRpcMethod
   const { schemaVersion: _schema, operation: _operation, requestId, caller: _caller, ...body } = request as AgentMuxControlRequest & { caller?: unknown }
-  const params: Record<string, unknown> = { ...goalKeys(body, false), ...(method === 'goal.ls' ? {} : { operationId: requestId }) }
+  const params: Record<string, unknown> = { ...goalKeys(body, false), ...(method === 'goal.ls' ? { all: true } : { operationId: requestId }) }
   if ((method === 'goal.create' || method === 'goal.update') && params.decision && typeof params.decision === 'object') {
     const { recordedAt: _at, sourceSessionId: _source, ...decision } = params.decision as Record<string, unknown>
     params.decision = decision

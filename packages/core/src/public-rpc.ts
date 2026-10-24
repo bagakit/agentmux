@@ -160,7 +160,7 @@ export type AgentMuxRpcSessionTarget = AgentMuxAgentSessionLookup | { kind: 'sel
 export type AgentMuxRpcUnavailable = { code: string; message: string; recovery: string }
 export type AgentMuxRpcGoalFilters = {
   goalId?: string; projectId?: string; agentSessionId?: string; assigneeSessionId?: string; supervisorSessionId?: string;
-  status?: string; since?: number; limit?: number
+  status?: string; since?: number; limit?: number; all?: true
 }
 /** Route identity belongs to the selected service; native Session facts stay unchanged. */
 export type AgentMuxRpcAgentObservation = import('./agent-discovery.js').AgentDiscoveryObservation
@@ -292,7 +292,7 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'message.dispatch.report': { sourceMessageId: string; replyMessageId: string; kind: import('./agent-handoff.js').DispatchEventKind }
   'app.search': import('./search-contract.js').AgentMuxSearchInput
   'app.snapshot': AgentMuxRpcSnapshotParams
-  'goal.activity': AgentMuxRpcGoalFilters
+  'goal.activity': Omit<AgentMuxRpcGoalFilters, 'all'>
   'system.storage': { hostId: string; runId: string }
   'system.doctor': { workspacePath?: string }
   'system.endpoint': Record<string, never>

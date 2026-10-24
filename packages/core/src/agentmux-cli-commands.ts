@@ -647,7 +647,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     if (Number(f.booleans.has('--preview')) + Number(f.booleans.has('--run')) + Number(f.values.has('--step')) > 1) invalid('Choose one replay mode.')
     return { browserId: id(f, '--browser', true), operationId: id(f, '--operation-id'), mode: f.booleans.has('--preview') ? 'preview' : f.values.has('--step') ? 'step' : 'run', ...numbers(f, { '--step': 'step' }) }
   }),
-  command('goal.ls', '[--goal ID] [--project ID] [--session ID] [--assignee SESSION] [--supervisor SESSION] [--status VALUE] [--since MS] [--limit N]', 'List original durable Goals; historical Sessions, current assignees and Supervisor are separate filters.', GOAL_FILTERS, filters),
+  command('goal.ls', '[--goal ID] [--project ID] [--session ID] [--assignee SESSION] [--supervisor SESSION] [--status VALUE] [--since MS] [--all | --limit N]', 'List original durable Goals; historical Sessions, current assignees and Supervisor are separate filters. Defaults to 100 records; --all reads the complete matching set.', { ...GOAL_FILTERS, '--all': 'boolean' }, f => {
+    if (f.booleans.has('--all') && f.values.has('--limit')) invalid('Choose --all or --limit, not both.')
+    return { ...filters(f), ...(f.booleans.has('--all') ? { all: true } : {}) }
+  }),
   command('goal.patrol.all', '--operation-id ID [--executor ID]', 'Open one new primary PMO Mote discussion to inspect every durable Goal and discuss confirmed next actions.', { ...OP, '--executor': 'data' },
     f => ({ operationId: id(f, '--operation-id', true), ...fields(f, { '--executor': 'executorId' }) }),
     'Retain this original operation. Inspect its original agent.open with space inspect --operation-id ID after an unknown reply. This starts inspection and discussion only; creation/input receipts do not prove inspection finished. Goal changes require explicit confirmation of the proposed exact actions.'),

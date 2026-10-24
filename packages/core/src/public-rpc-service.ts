@@ -2475,18 +2475,20 @@ export class AgentMuxRpcService {
     return readAgentDiscovery(await this.clients(), parseAgentDiscoveryFilters(filters))
   }
   private async goals(filters: Record<string, unknown>): Promise<AgentMuxDemand[]> {
-    rpcRecord(filters, NATIVE_FIELDS['goal.activity'])
+    rpcRecord(filters, [...NATIVE_FIELDS['goal.activity'], 'all'])
+    if (filters.all !== undefined && filters.all !== true) throw new AgentMuxError('Complete Goal discovery requires all=true.', 'INVALID_CONTROL_REQUEST')
+    if (filters.all === true && filters.limit !== undefined) throw new AgentMuxError('Choose complete Goal discovery or an explicit limit, not both.', 'INVALID_CONTROL_REQUEST')
     validateFilters(filters)
     const result = await this.execute(this.request('demand.list'))
     if (result.operation !== 'demand.list') throw new AgentMuxError('Goal list is mismatched.', 'CONTROL_PROTOCOL_ERROR')
-    return result.demands.filter(goal => (!filters.goalId || goal.id === filters.goalId) &&
+    const goals = result.demands.filter(goal => (!filters.goalId || goal.id === filters.goalId) &&
       (!filters.projectId || goal.projectId === filters.projectId) &&
       (!filters.agentSessionId || goal.sessionIds.includes(String(filters.agentSessionId))) &&
       (!filters.assigneeSessionId || goal.assigneeSessionIds.includes(String(filters.assigneeSessionId))) &&
       (!filters.supervisorSessionId || goal.supervisorSessionId === filters.supervisorSessionId) &&
       (!filters.status || goal.status === filters.status) &&
       (filters.since === undefined || goal.updatedAt >= rpcCount(filters.since, 0)))
-      .slice(0, rpcCount(filters.limit, 100, 1000))
+    return filters.all === true ? goals : goals.slice(0, rpcCount(filters.limit, 100, 1000))
   }
   /** The existing ingress Core journal retains only routing facts, never another envelope/body. */
   private async messageRouteJournal() {
