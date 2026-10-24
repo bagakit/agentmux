@@ -62,6 +62,38 @@ export async function performAgentContinuity(
     current = await ports.sessions.registry.refresh(input.agentSessionId, current.run)
     ports.connection.assertConnectionEpoch(epoch)
   }
+  // An admitted explicit restart owns its frozen Stop/Start transaction. A
+  // generic observer may report it, but must never reconstruct its executor,
+  // schedule it as automatic recovery or replace its original receipt.
+  const requested = current?.continuityOperations?.[input.operationId]
+  if (requested?.action === 'restart') {
+    if (input.input) throw new AgentMuxError('An explicit restart has no authored input. Keep its original operation and submit new input separately.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    if (!sameRun(requested.previousRun, input.expectedRun)) throw new AgentMuxError('A restart observation must retain its original Run.', 'CONTINUITY_OPERATION_MISMATCH')
+    if (requested.kind === 'unavailable' && requested.errorCode === AGENT_TERMINAL_HANDSHAKE_FAILED && requested.newRun) {
+      throw new AgentMuxError(requested.error ?? 'The original restart replacement exited during startup.', requested.errorCode)
+    }
+  }
+  const reservation = current && !input.input && sameRun(current.run, input.expectedRun)
+    ? await ports.sessions.store.readLifecycleReservation(input.agentSessionId) : null
+  const restart = requested?.action === 'restart' ? requested : reservation?.kind === 'resume' && reservation.restart &&
+    sameRun(reservation.expectedRun, input.expectedRun)
+    ? current?.continuityOperations?.[reservation.restart.request.operationId] : undefined
+  if (current && restart?.action === 'restart' && sameRun(restart.previousRun, input.expectedRun)) {
+    const continuity = structuredClone(restart)
+    const evidence = { kind: 'run-unknown' as const, observedAt: Date.now(),
+      message: 'The original explicit restart is retained. Inspect or explicitly continue that restart operation.' }
+    if (restart.kind === 'resumed' && restart.newRun && sameRun(restart.newRun, current.run) &&
+      restart.nativeTarget?.kind === 'provider' && matchesProviderNativeSessionTarget(restart.nativeTarget, current.nativeHandle)) {
+      return { kind: 'resumed', session: ports.events.projectSession(current), previousRun: { ...input.expectedRun }, run: { ...restart.newRun },
+        evidence: { kind: 'provider-native', providerId: restart.nativeTarget.providerId, nativeSessionId: restart.nativeTarget.sessionId,
+          previousRun: evidence }, continuity }
+    }
+    if (!sameRun(current.run, input.expectedRun)) return { kind: 'conflict', agentSessionId: input.agentSessionId,
+      previousRun: { ...input.expectedRun }, currentRun: { ...current.run }, reason: 'session-run-changed',
+      evidence: { kind: 'agent-session-store' }, continuity }
+    return { kind: 'pending', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun },
+      reason: 'operation-unconfirmed', evidence, continuity }
+  }
   const retained = current && supervisor.retainedAutomaticIntent(current, input)
   if (current && retained) {
     if (retained.initializationRecovery || current.nativeActor?.initializationControl) return await performAgentContinuity(context, { agentSessionId: input.agentSessionId,
