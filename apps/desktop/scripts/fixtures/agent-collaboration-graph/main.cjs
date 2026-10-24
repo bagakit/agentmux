@@ -127,7 +127,35 @@ app.whenReady().then(async () => {
       await until('located original card or mark', () => read(`Boolean(document.querySelector('.collaboration-map [data-session-id=${JSON.stringify(id)}]'))`))
       await until('located Agent is actually actionable after its finite camera transition', async () => (await rect(`.collaboration-map [data-session-id="${id}"]`)).hit)
     }
-    const measure = async (label, action) => { await read(`window.graphCapture.beginMeasurement(${JSON.stringify(label)})`); try { await action() } finally { result.performance.push(await read('window.graphCapture.endMeasurement()')); await checkpoint() } }
+    const measure = async (label, action) => {
+      // One bounded original pan profile identifies actual JS/layout costs. This
+      // diagnostic run is explicitly instrumented, not an unprofiled benchmark.
+      const profiling = label === 'perception-pan-240'
+      let beforeMetrics
+      if (profiling) {
+        await win.webContents.debugger.sendCommand('Performance.enable')
+        await win.webContents.debugger.sendCommand('Profiler.enable')
+        await win.webContents.debugger.sendCommand('Profiler.setSamplingInterval', { interval: 1000 })
+        beforeMetrics = await win.webContents.debugger.sendCommand('Performance.getMetrics')
+        await win.webContents.debugger.sendCommand('Profiler.start')
+      }
+      await read(`window.graphCapture.beginMeasurement(${JSON.stringify(label)})`)
+      try { await action() } finally {
+        const measurement = await read('window.graphCapture.endMeasurement()'); result.performance.push(measurement)
+        if (profiling) {
+          const { profile } = await win.webContents.debugger.sendCommand('Profiler.stop')
+          const afterMetrics = await win.webContents.debugger.sendCommand('Performance.getMetrics')
+          await win.webContents.debugger.sendCommand('Profiler.disable'); await win.webContents.debugger.sendCommand('Performance.disable')
+          const file = 'perception-pan-240.cpuprofile', bytes = JSON.stringify(profile) + '\n'
+          await fs.writeFile(path.join(evidence, file), bytes)
+          const before = new Map(beforeMetrics.metrics.map(metric => [metric.name, metric.value]))
+          measurement.profile = { file, sha256: require('node:crypto').createHash('sha256').update(bytes).digest('hex'), intervalMicroseconds: 1000,
+            metricsDelta: Object.fromEntries(afterMetrics.metrics.map(metric => [metric.name, metric.value - before.get(metric.name)])),
+            boundary: 'Original native pan under Chromium CPU sampling; same input, consumer and geometry. Sampling overhead is uncalibrated and not subtracted. No claim of uninstrumented frame latency.' }
+        }
+        await checkpoint()
+      }
+    }
     const worldProjection = () => read(`(()=>{
       const sample=window.graphCapture.workerSamples().filter(sample=>sample.geometry).at(-1),boxes=new Map(sample.geometry.map(box=>[box.id,box])),nodes=new Map([...document.querySelectorAll('.collaboration-map .react-flow__node')].map(node=>[node.dataset.id,node]));
       const envelopes=[],endpoints=[];
