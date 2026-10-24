@@ -56,7 +56,7 @@ it('saves commit-time preference through the durable owner and changes the live 
   expect(times().length).toBeGreaterThan(0)
   const known = dom.container.querySelector<HTMLTimeElement>('.git-history-commit time')!
   expect(known.dateTime).toBe(new Date(authoredAt).toISOString())
-  expect(known.title).toBe(new Date(authoredAt).toLocaleString())
+  expect(known.title).toBe(`Author time · ${new Date(authoredAt).toLocaleString()} (local time)`)
   expect(known.textContent).toMatch(/\d/)
   expect([...times()].filter(node => node.textContent === 'Time unknown')).toHaveLength(2)
   expect([...times()].filter(node => node.textContent === 'Time unknown').map(node => node.tagName)).toEqual(['SPAN', 'SPAN'])

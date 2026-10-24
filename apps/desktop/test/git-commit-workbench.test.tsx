@@ -139,7 +139,8 @@ it('keeps observed repository history separate from the original fixed review an
   expect(original?.kind === 'git' && original.scope.repoPath).toBe(_hygiene_fixturePath("repo"))
   await click('[data-sidebar] [aria-label="Refresh history"]')
   await vi.waitFor(() => expect(element.querySelectorAll('[data-sidebar] [data-history-oid]')).toHaveLength(1))
-  expect(element.querySelector('[data-sidebar]')?.textContent).not.toContain('New repository history')
+  expect(element.querySelector('[data-sidebar]')?.textContent).toContain('New repository history')
+  expect(element.querySelector('[data-sidebar] [role="alert"]')?.textContent).toContain('original repository could not be confirmed')
 })
 
 it.each([{ path: _hygiene_fixturePath("other") }, { hostId: 'another-host' }])('retains the original surface instead of reading a rebound workspace %j', async change => {
@@ -173,7 +174,8 @@ it('keeps the actual Space history window beside repository review without an ex
   await act(async () => useAppStore.getState().setWorkspaceGitView('history'))
   await vi.waitFor(() => expect(element.querySelector('[data-sidebar] [data-history-oid]')).not.toBeNull())
   expect(element.querySelectorAll('.git-history-panel')).toHaveLength(1)
-  expect(history).toHaveBeenCalledTimes(1)
+  expect(history).toHaveBeenCalledTimes(2)
+  expect(history).toHaveBeenLastCalledWith('repo', { ref: null, limit: 1 })
 })
 it('keeps the selected sidebar range when a commit detail explicitly opens repository history', async () => {
   const first = await history.getMockImplementation()!(), reference = 'refs/heads/topic'

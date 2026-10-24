@@ -238,7 +238,7 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     expect(host.querySelector(`[data-commit-oid="${e}"]`)?.hasAttribute('data-branch-ref')).toBe(false)
     expect([...host.querySelectorAll('[data-unloaded-parent]')].map(edge => edge.getAttribute('data-unloaded-parent'))).toEqual([d])
     await click('History reference')
-    expect(document.querySelector('[role="status"]')?.textContent).toBe('222 / 222 references')
+    expect(document.querySelector('[role="status"]')?.textContent).toBe('222 / 222 snapshot references')
     expect(document.querySelectorAll('[role="option"]').length).toBeLessThan(30)
     await act(async () => document.querySelector('[aria-label="Search history references"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
     expect(host.querySelector<HTMLElement>('[aria-label="History reference"]')?.title).toBe('~/project')
@@ -253,13 +253,15 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
   it('appends one explicit page, preserves it across tab hiding, and refresh creates a new snapshot', async () => {
     const first = page([commit(a, 'Merge', [b, c])], true)
     history.mockResolvedValueOnce(first).mockResolvedValueOnce(page([commit(b, 'Topic B', []), commit(c, 'Topic C', [])]))
+      .mockResolvedValueOnce(page([commit(e, 'Observed new tip', [])], false, { ...snapshot, roots: [e] }))
       .mockResolvedValueOnce(page([commit(e, 'New snapshot', [])], false, { ...snapshot, roots: [e], checkedAt: _tailFixtureEpoch(0, 0, 2) }))
     await render(); await click('Load more')
     expect(rows()).toEqual([a, b, c]); expect(history.mock.calls[1]).toEqual(['repo', { ref: null, cursor: first.kind === 'ready' ? first.nextCursor : null }])
     await render(false); await render(true)
-    expect(rows()).toEqual([a, b, c]); expect(history).toHaveBeenCalledTimes(2)
+    expect(rows()).toEqual([a, b, c]); expect(history).toHaveBeenCalledTimes(3)
+    expect(history).toHaveBeenLastCalledWith(workspace.id, { ref: null, limit: 1 })
     await click('Refresh history')
-    expect(rows()).toEqual([e]); expect(history).toHaveBeenCalledTimes(3)
+    expect(rows()).toEqual([e]); expect(history).toHaveBeenCalledTimes(4)
   })
 
   it('keeps real branch guides across pages, shifting lanes and ref order, including both coloured merge routes', async () => {
@@ -434,25 +436,27 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     expect(controls.refs).toEqual(foreignRefs)
     expect(controls.repository).toEqual({ hostId: other.hostId, repoPath: other.path })
     await click('Refresh history')
-    expect(controls.result?.kind).toBe('not-a-git-repository')
-    expect(controls.refs).toEqual([])
-    expect(controls.repository).toBeNull()
+    expect(controls.result?.kind).toBe('ready')
+    expect(controls.error).toContain('previous snapshot is retained')
+    expect(controls.refs).toEqual(foreignRefs)
+    expect(controls.repository).toEqual({ hostId: other.hostId, repoPath: other.path })
   })
 
   it('invalidates pending pages while a tab or document is hidden, retains completed pages and allows a bounded retry', async () => {
     const late = deferred<GitHistoryResult>(), background = deferred<GitHistoryResult>()
     history.mockResolvedValueOnce(page([commit(a, 'Loaded merge', [b, c])], true)).mockReturnValueOnce(late.promise)
-      .mockReturnValueOnce(background.promise).mockResolvedValueOnce(page([commit(b, 'Visible page', [])]))
+      .mockResolvedValueOnce(page([commit(a, 'Observed tip', [])])).mockReturnValueOnce(background.promise)
+      .mockResolvedValueOnce(page([commit(a, 'Observed tip', [])])).mockResolvedValueOnce(page([commit(b, 'Visible page', [])]))
     await render(); await click('Load more'); await render(false)
     await act(async () => late.resolve(page([commit(b, 'Late hidden page', [])])))
-    await render(true); expect(rows()).toEqual([a]); expect(history).toHaveBeenCalledTimes(2)
+    await render(true); expect(rows()).toEqual([a]); expect(history).toHaveBeenCalledTimes(3)
     await click('Load more')
     await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')) })
     await act(async () => background.resolve(page([commit(c, 'Late background page', [])])))
     expect(rows()).toEqual([a])
     await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')) })
-    expect(history).toHaveBeenCalledTimes(3)
-    await click('Load more'); expect(rows()).toEqual([a, b]); expect(history).toHaveBeenCalledTimes(4)
+    expect(history).toHaveBeenCalledTimes(5)
+    await click('Load more'); expect(rows()).toEqual([a, b]); expect(history).toHaveBeenCalledTimes(6)
   })
 
   it('invalidates a rebound path or host even when the Workspace id stays the same', async () => {
@@ -474,7 +478,7 @@ describe('mounted GitHistoryPanel with production hook and bridge', () => {
     await act(async () => pending.resolve(page([])))
     expect(host.textContent).toContain('No commits yet'); expect(host.querySelector('svg[role="img"]')).toBeNull()
     history.mockResolvedValueOnce({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: workspace.path })
-    await click('Refresh history'); expect(host.textContent).toContain('Not a Git repository')
+    await click('Refresh history'); expect(host.textContent).toContain('previous snapshot is retained')
     history.mockRejectedValueOnce(new Error('History objects unreadable'))
     await click('Refresh history'); expect(host.querySelector('[role="alert"] > span')?.textContent).toBe('History objects unreadable')
     history.mockResolvedValueOnce(page([commit(a, 'Keep loaded commit', [b])], true)).mockRejectedValueOnce(new Error('Page failed'))
@@ -551,7 +555,8 @@ describe('History viewport work and controlled boundary', () => {
     expect(controls.result).toBe(before.result)
     expect(controls.repository).toEqual({ hostId: confirmed.hostId, repoPath: confirmed.repoPath })
     expect(controls.repository).toBe(before.repository)
-    expect(history).toHaveBeenCalledTimes(1)
+    expect(history).toHaveBeenCalledTimes(2)
+    expect(history).toHaveBeenLastCalledWith(workspace.id, { ref: null, limit: 1 })
   })
 
   it('reaches offscreen rows with keyboard and reveals an explicit target without jumping to ordinary selection', async () => {
@@ -664,4 +669,100 @@ describe('History viewport work and controlled boundary', () => {
     expect(rows()).toEqual([b])
   })
 
+})
+
+describe('fixed snapshot reference observation', () => {
+  const original = () => page([commit(a, 'Original selection', [b])], true)
+  const moved = () => page([commit(e, 'Current tip', [])], false, { ...snapshot, roots: [e],
+    refs: snapshot.refs.map(ref => ref.name === 'refs/heads/main' ? { ...ref, oid: e } : ref) })
+
+  it('coalesces focus checks, preserves the original cursor and only refreshes on explicit intent', async () => {
+    const pending = deferred<GitHistoryResult>(), first = original()
+    history.mockResolvedValueOnce(first).mockReturnValueOnce(pending.promise)
+    await render()
+    await act(async () => { window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('focus')) })
+    expect(history).toHaveBeenCalledTimes(2)
+    expect(history).toHaveBeenLastCalledWith(workspace.id, { ref: null, limit: 1 })
+    await act(async () => pending.resolve(moved()))
+    expect(host.textContent).toContain('References have changed.')
+    expect(rows()).toEqual([a]); expect(controls.result).toBe(first)
+    expect(controls.refs).toEqual(snapshot.refs)
+    expect(fixture.state.openGitWorkbench).not.toHaveBeenCalled()
+    history.mockResolvedValueOnce(page([commit(b, 'Original parent', [])]))
+    await click('Load more')
+    expect(history).toHaveBeenLastCalledWith(workspace.id, { ref: null, cursor: first.kind === 'ready' ? first.nextCursor : null })
+    expect(rows()).toEqual([a, b]); expect(host.textContent).toContain('References have changed.')
+    history.mockResolvedValueOnce(moved())
+    await click('Refresh')
+    expect(rows()).toEqual([e]); expect(host.textContent).not.toContain('References have changed.')
+    expect(fixture.state.openGitWorkbench).not.toHaveBeenCalled()
+  })
+
+  it('releases a superseded check after pagination of the same snapshot and keeps manual checks usable during reads', async () => {
+    const oldCheck = deferred<GitHistoryResult>(), nextPage = deferred<GitHistoryResult>()
+    history.mockResolvedValueOnce(original()).mockReturnValueOnce(oldCheck.promise).mockReturnValueOnce(nextPage.promise)
+      .mockResolvedValueOnce(moved())
+    await render(); await click('Check references'); await click('Load more')
+    expect([...host.querySelectorAll('button')].find(button => button.textContent === 'Check references')?.disabled).toBe(false)
+    await click('Check references')
+    expect(history).toHaveBeenCalledTimes(4)
+    expect(host.textContent).toContain('References have changed.')
+    await act(async () => nextPage.resolve(page([commit(b, 'Original parent', [])])))
+    expect(rows()).toEqual([a, b])
+    await act(async () => oldCheck.resolve(original()))
+    expect(host.textContent).toContain('References have changed.')
+    expect(controls.referenceCheck?.checking).toBe(false)
+  })
+
+  it('ignores ref enumeration order and observation time, including unchanged detached HEAD', async () => {
+    history.mockResolvedValueOnce(original()).mockResolvedValueOnce(page([], false, {
+      ...snapshot, refs: [...snapshot.refs].reverse(), checkedAt: snapshot.checkedAt + 1
+    }))
+    await render(); await click('Check references')
+    expect(controls.referenceCheck?.changed).toBe(false)
+    expect(host.querySelector('.git-history-notice')).toBeNull()
+    expect(rows()).toEqual([a])
+  })
+
+  it.each(['failure', 'nonrepository', 'different resource'])('keeps usable history and retry when current references are unknown: %s', async cause => {
+    history.mockResolvedValueOnce(original())
+    if (cause === 'failure') history.mockRejectedValueOnce(new Error('Reference observation unavailable'))
+    else history.mockResolvedValueOnce(cause === 'nonrepository'
+      ? { kind: 'not-a-git-repository', hostId: 'local', workspacePath: workspace.path }
+      : page([], false, { ...snapshot, repoPath: workspace.path + '/elsewhere' }))
+    await render(); await click('Check references')
+    expect(host.textContent).toContain('Current references unknown.')
+    expect(host.textContent).not.toContain('References have changed.')
+    expect(rows()).toEqual([a]); expect(controls.error).toBeNull()
+    expect(host.querySelector<HTMLButtonElement>('[aria-label="Refresh history"]')!.disabled).toBe(false)
+    history.mockResolvedValueOnce(moved()); await click('Retry check')
+    expect(host.textContent).toContain('References have changed.')
+    expect(rows()).toEqual([a])
+  })
+
+  it('discards a late check after an explicit refresh and does not replace the new snapshot', async () => {
+    const pending = deferred<GitHistoryResult>()
+    history.mockResolvedValueOnce(original()).mockReturnValueOnce(pending.promise).mockResolvedValueOnce(moved())
+    await render(); await click('Check references'); await click('Refresh history')
+    await act(async () => pending.resolve(original()))
+    expect(rows()).toEqual([e]); expect(controls.referenceCheck).toBeNull()
+    expect(host.textContent).not.toContain('References have changed.')
+  })
+
+  it('retains the full old window through failed refresh and stops refilling when hidden', async () => {
+    const first = page([commit(a, 'First page', [b])], true)
+    const pending = deferred<GitHistoryResult>()
+    history.mockResolvedValueOnce(first).mockResolvedValueOnce(page([commit(b, 'Second page', [c]), commit(c, 'Third row', [])]))
+    await render(); await click('Load more')
+    const saved = controls.result
+    history.mockResolvedValueOnce(page([commit(d, 'Replacement first page', [e])], true))
+      .mockRejectedValueOnce(new Error('Refill failed'))
+    await click('Refresh history')
+    expect(controls.result).toBe(saved); expect(rows()).toEqual([a, b, c]); expect(host.textContent).toContain('Refill failed')
+    history.mockReturnValueOnce(pending.promise)
+    await click('Refresh history'); await render(false)
+    const count = history.mock.calls.length
+    await act(async () => pending.resolve(page([commit(d, 'Late refresh', [e])], true)))
+    expect(history).toHaveBeenCalledTimes(count); expect(controls.result).toBe(saved)
+  })
 })
