@@ -8,6 +8,7 @@ import { connectorJourneyFixture } from './fixtures/connector-journey'
 import { openConnectedGroup } from './helpers/connector-header-navigation'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
+import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import type { RoomReadWire } from '../../../packages/connectors/test/fixtures/room-discovery'
 import { invalidateConnectorTarget } from '../src/renderer/src/lib/connector-room-intent'
 import { composerSession } from './helpers/composer-dom-fixture'
@@ -21,7 +22,6 @@ beforeEach(() => { native = async request => {
   return { code: 0, data: { name: 'Team group', chat_status: 'normal', chat_mode: 'group', membership_approval: 'approval_required' } }
 } })
 async function ready(text: string) { await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.textContent).toContain(text) }, { timeout: 6000 }) }
-async function disclose(name: string) { if (document.querySelector('section[aria-label="' + name + '"]')) return; const details = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === name)!; expect(details, name).toBeDefined(); if (!details.open) await act(async () => details.querySelector('summary')!.click()); expect(details.open).toBe(true) }
 async function chooseGroup(id: string) {
   await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.some(call => call.method === 'connection.room.ls' && call.result)).toBe(true) })
   const trigger = document.querySelector<HTMLElement>('[aria-label="Agent and group conversation"] [aria-label="Existing group"]')!
@@ -32,21 +32,86 @@ async function chooseGroup(id: string) {
 }
 async function consent() { await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click()) }
 
+it('an exact platform off policy remains visible while the global service read is pending or unavailable', async () => {
+  expect((await api.connections.call('connection.bind', { ...f.original.input, connectionId: f.config.connectionId, externalConversationId: 'oc_other' })).state).toBe('applied')
+  await api.connections.call('connection.service.configure', { operationId: 'visible-platform-off', adapterId: 'feishu', expectedRevision: 0, service: { enabled: false } }, f.hostingTarget)
+  let reject!: (reason: Error) => void
+  const pending = new Promise<never>((_resolve, fail) => { reject = fail })
+  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], owner): Promise<ConnectionResultMap[M]> => {
+    if (method === 'connection.service.get' && !('adapterId' in params)) return pending
+    return f.forward(method, params, owner)
+  })
+  await f.mount()
+  const offVisible = async () => vi.waitFor(async () => {
+    await act(async () => {})
+    const notices = document.querySelectorAll('.conversation-sharing-notice')
+    expect(notices).toHaveLength(2)
+    for (const notice of notices) {
+      expect(notice.textContent).toContain('Lark off')
+      expect(notice.textContent).not.toMatch(/Checking sync|Automatic sync check unavailable/u)
+      expect(notice.querySelectorAll('.conversation-sharing-notice__status')).toHaveLength(1)
+    }
+  })
+  try { await offVisible() }
+  finally { await act(async () => reject(Error('Original global policy unavailable'))) }
+  await offVisible()
+  expect(document.querySelector('[role="menu"], [role="dialog"]')).toBeNull()
+  await f.original.unchanged()
+}, 25_000)
+
+it('a TTL-expired observed group name stays readable without claiming a failed refresh or forcing another native request', async () => {
+  const bind = await api.connections.call('connection.bind', { ...f.original.input, connectionId: f.config.connectionId, externalConversationId: 'oc_other' })
+  expect(bind.state).toBe('applied')
+  const subject = { kind: 'conversation' as const, externalConversationId: 'oc_other' }
+  const fresh = await api.connections.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject })
+  expect(fresh.entry.observation).toMatchObject({ state: 'observed', freshness: 'current', profile: { name: 'Team group' } })
+  const realNow = Date.now, clock = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 6 * 60_000)
+  try {
+    expect((await api.connections.call('connection.metadata.get', { connectionId: f.config.connectionId, subject })).entry.observation).toMatchObject({ state: 'observed', freshness: 'stale' })
+    const reads = f.platformCalls.length, refreshes = f.calls.filter(call => call.method === 'connection.metadata.refresh').length
+    await f.mount()
+    await vi.waitFor(async () => {
+      await act(async () => {})
+      const audiences = document.querySelectorAll<HTMLElement>('.conversation-sharing-notice__audience')
+      expect(audiences).toHaveLength(2)
+      for (const audience of audiences) {
+        expect(audience.textContent).toContain('Team group')
+        expect(audience.title).not.toMatch(/name.*unconfirmed|name.*unavailable|refresh unconfirmed/u)
+      }
+    })
+    expect(f.platformCalls).toHaveLength(reads)
+    expect(f.calls.filter(call => call.method === 'connection.metadata.refresh')).toHaveLength(refreshes)
+    native = async () => { throw Error('Original metadata source unavailable') }
+    const failed = await api.connections.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject })
+    expect(failed.entry.observation).toMatchObject({ state: 'unavailable', freshness: 'stale', profile: { name: 'Team group' } })
+    await vi.waitFor(async () => {
+      await act(async () => {})
+      for (const audience of document.querySelectorAll<HTMLElement>('.conversation-sharing-notice__audience')) {
+        expect(audience.title).toContain('Group name update unavailable')
+        expect(audience.textContent).toContain('Team group')
+        expect(audience.textContent).not.toContain('Group name update unavailable')
+      }
+    })
+    await f.original.unchanged()
+  } finally { clock.mockRestore() }
+}, 25_000)
+
 it('the original Agent menu selects an actual default-Host SDK room, confirms the exact audience and grants only an explicitly chosen real member', async () => {
   await f.mount(); await f.journey('existing')
   await chooseGroup('oc_other'); await ready('Original person')
   expect(document.querySelector('[aria-label="Agent and group conversation"] [aria-label="Existing group"]')?.getAttribute('data-value')).toBe('oc_other')
   expect(f.calls.filter(call => call.method === 'connection.bind' || call.method === 'connection.grant')).toHaveLength(0)
   expect(f.platformCalls.some(call => call.url?.endsWith('/chats/oc_other/members'))).toBe(true)
-  await consent(); await f.button('Connect group'); await ready('Group saved')
+  await consent(); await f.button('Connect group'); await ready('Connection saved')
   const binding = (await f.services.connections.bindings!.list({})).bindings[0]!
-  expect(binding).toMatchObject({ connectionId: f.config.connectionId, externalConversationId: 'oc_other', scope: { publication: 'future-native-user-facing' } })
-  await disclose('People in this group'); await f.button('Choose')
-  expect(document.querySelector<HTMLInputElement>('[aria-label="Member access ID"]')?.value).toBe('ou_original')
-  expect(document.querySelector<HTMLInputElement>('[aria-label="Member access ID type"]')?.value).toBe('open_id')
+  expect(binding).toMatchObject({ connectionId: f.config.connectionId, externalConversationId: 'oc_other', scope: { publication: 'future-shared-conversation' } })
+  const row = document.querySelector<HTMLElement>(`[data-member-row='["open_id","ou_original"]']`)!
+  expect(row?.textContent).toContain('Original person')
   expect(f.calls.filter(call => call.method === 'connection.grant')).toHaveLength(0)
-  await act(async () => [...document.querySelectorAll<HTMLInputElement>('input[type=checkbox]')].find(node => node.closest('label')?.textContent === 'Send requests')!.click())
-  await f.button('Approve this member'); await ready('1 member approved')
+  await act(async () => { const source = row.querySelector('select')!; source.value = 'room'; source.dispatchEvent(new Event('change', { bubbles: true })) })
+  await act(async () => row.querySelector<HTMLInputElement>('[aria-label="Send requests for Original person"]')!.click())
+  await f.button('Save for this group')
+  await vi.waitFor(async () => { await act(async () => {}); expect(row.dataset.memberState).toBe('saved'); expect(f.calls.some(call => call.method === 'connection.grant' && call.result)).toBe(true) })
   const receipt = await f.cli(['binding', 'inspect', '--binding', binding.bindingId])
   expect(receipt.grants).toMatchObject([{ actor: { application: f.config.application, idType: 'open_id', userId: 'ou_original' }, capabilities: ['input'] }])
   expect(f.platformCalls.some(call => call.method === 'POST')).toBe(false)
@@ -65,15 +130,16 @@ it('the Composer names its exact default-Host audience and keeps that audience a
     return await originalNative(request)
   }
   await f.mount(); const editor = document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')!
-  await f.journey('existing'); await chooseGroup('oc_other'); await consent(); await f.button('Connect group'); await ready('Group saved'); await f.button('Close')
+  await f.journey('existing'); await chooseGroup('oc_other'); await consent(); await f.button('Connect group'); await ready('Connection saved'); await f.button('Close')
   await vi.waitFor(async () => { await act(async () => {}); expect([...document.querySelectorAll('.conversation-sharing-notice__audience')].every(node => node.textContent?.includes('Design review'))).toBe(true); expect(document.querySelectorAll('.conversation-sharing-notice__audience')).toHaveLength(2) })
   const binding = (await f.services.connections.bindings!.list({})).bindings[0]!, counts = f.calls.length
   await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, ...Array.from({ length: 250 }, (_, index) => composerSession('unrelated-name-' + index))] })))
   await act(async () => {}); expect(f.calls).toHaveLength(counts)
   failed = true
+  await api.connections.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: { kind: 'conversation', externalConversationId: 'oc_other' } })
   await api.connections.call('connection.binding.pause', { operationId: 'pause-named-audience', bindingId: binding.bindingId, expectedRevision: binding.revision })
   await act(async () => { editor.focus(); invalidateConnectorTarget(binding) })
-  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Sharing paused'); expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Group name unconfirmed') })
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Sharing paused'); expect(document.querySelector('.conversation-sharing-notice__audience')?.getAttribute('title')).toContain('Group name update unavailable') })
   expect(document.querySelector('[data-workbench-region-id="original-region"] [role="textbox"]')).toBe(editor); expect(document.activeElement).toBe(editor)
   expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
   expect(f.calls.filter(call => call.method === 'connection.room.get').every(call => (call.input as { externalConversationId: string }).externalConversationId === 'oc_other')).toBe(true)
@@ -108,7 +174,7 @@ it('an unavailable directory preserves the explicit exact-ID path and healthy or
   await f.fill('Existing group ID', 'oc_exact'); await ready('Group members are not confirmed')
   expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Original person')
   expect(f.calls.some(call => call.method === 'connection.grant' || call.method === 'connection.room.link.create')).toBe(false)
-  await consent(); await f.button('Connect group'); await ready('Group saved')
+  await consent(); await f.button('Connect group'); await ready('Connection saved')
   expect((await f.services.connections.bindings!.list({})).bindings[0]?.externalConversationId).toBe('oc_exact')
   await f.original.unchanged()
 }, 25_000)

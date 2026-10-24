@@ -18,6 +18,28 @@ import { observeConnectorService, connectorServiceScope } from '../src/renderer/
 const f = connectorJourneyFixture(), target = { executionHostId: 'local', agentSessionId: 'original-agent', regionAnchor: { regionId: 'original-region' } }
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 6000 }) }
 const input = () => document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')! as HTMLElement & { editor: Editor }
+
+it('the visible workface reads its original global sync policy without opening a management menu', async () => {
+  expect((await api.connections.call('connection.bind', f.original.input)).state).toBe('applied')
+  const configured = await api.connections.call('connection.service.configure', { operationId: 'visible-sharing-sync-off', expectedRevision: 0, service: { enabled: false } }, f.hostingTarget)
+  expect(configured.service.enabled).toBe(false)
+  const before = f.calls.length
+  await f.mount()
+  await wait(() => {
+    expect(document.querySelectorAll('.conversation-sharing-notice')).toHaveLength(2)
+    for (const notice of document.querySelectorAll('.conversation-sharing-notice')) {
+      expect(notice.textContent).toContain('Automatic sync off')
+      expect(notice.textContent).not.toMatch(/unconfirmed|Checking sync/u)
+      expect(notice.querySelectorAll('.conversation-sharing-notice__status')).toHaveLength(1)
+    }
+  })
+  expect(f.calls.slice(before).some(call => call.method === 'connection.service.get' && Object.keys(call.input as object).length === 0 && call.result)).toBe(true)
+  expect(document.querySelector('[role="menu"], [role="dialog"]')).toBeNull()
+  expect(f.calls.slice(before).some(call => ['connection.service.configure', 'connection.bind', 'connection.grant', 'connection.delivery.retry'].includes(call.method))).toBe(false)
+  expect(input().getAttribute('contenteditable')).toBe('true')
+  await f.original.unchanged()
+}, 25_000)
+
 async function bindExisting(waitForNotice = true) {
   await f.journey('existing'); await f.fill('Existing group ID', 'existing-exact-group')
   const content = document.querySelector<HTMLButtonElement>('[aria-label="Group sharing content"]')!
@@ -28,9 +50,9 @@ async function bindExisting(waitForNotice = true) {
   await moteClick(replyOnly)
   const box = document.querySelector<HTMLInputElement>('.agent-connector-check input')!
   await act(async () => box.click()); await f.button('Connect group')
-  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Group saved'))
+  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Connection saved'))
   await f.button('Close')
-  if (waitForNotice) await wait(() => expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Agent replies and questions → existing-exact-group'))
+  if (waitForNotice) await wait(() => expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Agent replies → existing-exact-group'))
   return (await f.services.connections.bindings!.list({})).bindings[0]!
 }
 
@@ -41,9 +63,10 @@ it('the actual SessionPane injects read-only sharing scope while all connection 
   const binding = await bindExisting(false)
   await wait(() => expect(document.querySelectorAll('.conversation-sharing-notice__audience')).toHaveLength(2))
   const notice = document.querySelector('.conversation-sharing-notice')!
-  expect(notice.textContent).toContain('Sharing scope')
-  expect(notice.textContent).toContain('Agent replies and questions → existing-exact-group')
-  expect(notice.textContent).not.toContain('New conversation content')
+  expect(notice.querySelector('.conversation-sharing-notice__label')).toBeNull()
+  expect(notice.querySelector('img, svg')).not.toBeNull()
+  expect(notice.textContent).toContain('Agent replies → existing-exact-group')
+  expect(notice.querySelector('.conversation-sharing-notice__audience')?.getAttribute('aria-label')).toContain('Only Agent replies and questions')
   expect(notice.querySelectorAll('button, a, input, select, [role="button"]')).toHaveLength(0)
   const audience = notice.querySelector<HTMLElement>('.conversation-sharing-notice__audience')!
   expect(audience.tagName).toBe('SPAN')
@@ -59,15 +82,15 @@ it('input sharing context distinguishes reply-only and new-content scope from co
   const off = await api.connections.call('connection.service.configure', { operationId: 'input-context-sync-off', expectedRevision: 0, service: { enabled: false } })
   await act(async () => observeConnectorService(off.service, api.connections.call, f.hostingTarget))
   expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Automatic sync off')
-  expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Agent replies and questions → existing-exact-group')
+  expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Agent replies → existing-exact-group')
   const broader = await api.connections.call('connection.binding.relink', { ...f.original.input, operationId: 'input-context-broader-scope', bindingId: binding.bindingId, expectedRevision: binding.revision,
     connectionId: binding.connectionId, externalConversationId: binding.externalConversationId, scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' } })
   expect(broader.state).toBe('applied')
   await act(async () => invalidateConnectorTarget(target))
-  await wait(() => expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('New conversation content → existing-exact-group'))
+  await wait(() => expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Conversation → existing-exact-group'))
   await act(async () => useAppStore.setState({ connectorServiceObservation: { [connectorServiceScope(f.hostingTarget)]: { source: (async () => { throw Error('Other endpoint') }) as typeof api.connections.call,
     generation: 1, state: { enabled: true, revision: 5 }, issue: '' } } }))
-  expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Automatic sync unconfirmed')
+  expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Checking sync…')
   await api.connections.call('connection.binding.pause', { operationId: 'input-context-pause', bindingId: binding.bindingId, expectedRevision: 2 })
   await act(async () => invalidateConnectorTarget(target))
   await wait(() => expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Sharing paused'))
@@ -110,8 +133,8 @@ it('unrelated Sessions do not expand sharing reads and a failed exact read retai
   expect(vi.mocked(api.sessions.historyPage)).toHaveBeenCalledTimes(history)
   vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => { if (method === 'connection.binding.ls') throw new Error('Exact read unavailable'); return f.forward<M>(method, params) })
   await act(async () => { editor.focus(); invalidateConnectorTarget(target) })
-  await wait(() => expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Audience unconfirmed'))
-  expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Agent replies and questions → existing-exact-group')
+  await wait(() => expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Group check unavailable'))
+  expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Agent replies → existing-exact-group')
   expect(input()).toBe(editor); expect(document.activeElement).toBe(editor); expect(editor.getAttribute('contenteditable')).toBe('true')
   expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe(originalDraft)
   expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()
@@ -134,8 +157,8 @@ it('the exact header refresh converges all input notices for the same target whi
   })
   await act(async () => { editor.focus(); invalidateConnectorTarget(target) })
   await wait(() => {
-    expect(region.querySelector('.conversation-sharing-notice')?.textContent).toContain('Audience unconfirmed')
-    expect(neighbor.querySelector('.conversation-sharing-notice')?.textContent).toContain('Audience unconfirmed')
+    expect(region.querySelector('.conversation-sharing-notice')?.textContent).toContain('Group check unavailable')
+    expect(neighbor.querySelector('.conversation-sharing-notice')?.textContent).toContain('Group check unavailable')
   })
   expect(document.querySelectorAll('.conversation-sharing-notice :is(button, a, input, select)')).toHaveLength(0)
   targets.length = 0; failed = false
@@ -144,13 +167,13 @@ it('the exact header refresh converges all input notices for the same target whi
     await wait(() => expect(pending.length).toBeGreaterThan(0))
     expect(targets.length).toBeGreaterThan(0)
     expect(targets).toEqual(targets.map(() => ({ executionHostId: 'local', agentSessionId: 'original-agent' })))
-    expect(region.querySelector('.conversation-sharing-notice')?.textContent).toContain('Audience unconfirmed')
+    expect(region.querySelector('.conversation-sharing-notice')?.textContent).toContain('Group check unavailable')
     await act(async () => pending.forEach(release => release()))
     await wait(() => {
-      expect(region.querySelector('.conversation-sharing-notice')?.textContent).not.toContain('Audience unconfirmed')
-      expect(neighbor.querySelector('.conversation-sharing-notice')?.textContent).not.toContain('Audience unconfirmed')
+      expect(region.querySelector('.conversation-sharing-notice')?.textContent).not.toContain('Group check unavailable')
+      expect(neighbor.querySelector('.conversation-sharing-notice')?.textContent).not.toContain('Group check unavailable')
     })
-    expect(region.querySelector('.conversation-sharing-notice')?.textContent).toContain('Agent replies and questions → existing-exact-group')
+    expect(region.querySelector('.conversation-sharing-notice')?.textContent).toContain('Agent replies → existing-exact-group')
     expect(input()).toBe(editor); expect(editor.getAttribute('contenteditable')).toBe('true')
     expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe(draft)
     expect(f.calls.some(call => call.method === 'connection.delivery.retry')).toBe(false)
@@ -162,10 +185,10 @@ it('the Agent header opens original details while the input sharing notice stays
   await f.mount(); const binding = await bindExisting()
   const before = f.calls.filter(call => ['connection.room.create', 'connection.bind', 'connection.grant'].includes(call.method)).length
   expect(document.querySelectorAll('.conversation-sharing-notice :is(button, a, input, select)')).toHaveLength(0)
-  await openConnectedGroup(binding.externalConversationId)
+  await openConnectedGroup(binding.externalConversationId, 'original-region', 'other')
   await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Join this group'))
   await f.button('Check group activity')
-  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Delivery not confirmed'))
+  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Could not check recent sends'))
   expect(vi.mocked(api.connections.call).mock.calls.filter(([method]) => method === 'connection.diagnose').at(-1)?.[1]).toEqual({ executionHostId: binding.executionHostId, agentSessionId: binding.agentSessionId, bindingId: binding.bindingId, bindingRevision: binding.revision })
   const diagnosis = await api.connections.call('connection.diagnose', { executionHostId: binding.executionHostId, agentSessionId: binding.agentSessionId, bindingId: binding.bindingId, bindingRevision: binding.revision })
   expect(diagnosis).toMatchObject({ groups: { value: { items: [{ target: { bindingId: binding.bindingId, bindingRevision: binding.revision, externalConversationId: binding.externalConversationId }, limit: 5, outgoing: { value: null, issue: 'read-unavailable' } }] } } })
@@ -188,10 +211,11 @@ it('the read-only input audiences keep exact application identity and the header
   expect(selected.title).toContain('another-app')
   expect(selected.tagName).toBe('SPAN')
   expect(document.querySelectorAll('.conversation-sharing-notice :is(button, a, input, select)')).toHaveLength(0)
-  await openConnectedGroup('another-exact-group')
+  await openConnectedGroup('another-exact-group', 'original-region', 'other')
   await wait(() => expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value).toBe('another-connection'))
-  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Group saved'))
+  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Connection saved'))
   const inspected = f.calls.filter(call => call.method === 'connection.binding.inspect').at(-1)!
-  expect(inspected.input).toEqual({ bindingId: 'another-binding', revision: 1 })
+  expect(inspected.input).toEqual({ bindingId: 'another-binding' })
+  expect(inspected.result).toMatchObject({ binding: { bindingId: 'another-binding', revision: 1, externalConversationId: 'another-exact-group', application: { appId: 'another-app' } } })
   expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()
 }, 25_000)
