@@ -93,8 +93,11 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const surfaceVisible = useAppStore(state => state.mainSurface === 'agents' && state.focusView === 'list')
   const visible = hostVisible && surfaceVisible
   const [query, setQuery] = useState('')
+  const [filters, setFilters] = useState<FocusFilterSelection>(EMPTY_FOCUS_FILTERS)
+  const [inspectingFilters, setInspectingFilters] = useState(false)
+  const filtering = Boolean(query.trim() || filters.projects.length || filters.states.length || filters.types.length)
   const contextSelector = useMemo(createFocusProjectionSelector, [])
-  const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(state => contextSelector(state, visible, query.trim() ? 'full' : 'metadata')))
+  const {contexts: executionRows, laneContexts, coordinationContexts, pmoAttention} = useAppStore(useShallow(state => contextSelector(state, visible, query.trim() ? 'full' : 'metadata', filtering || inspectingFilters)))
   const goalLinksSelector = useMemo(createFocusGoalLinksSelector, [])
   const goalLinks = useAppStore(state => goalLinksSelector(state, visible))
   const moteIdentity = useAppStore(useShallow(state => {
@@ -112,6 +115,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const tabs = useAppStore((state) => state.tabs)
   const layouts = useAppStore(state => state.layouts)
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
+  const selectedMoteId = useAppStore(state => state.agentFocus.pmo.sessionId)
   const agentReveal = useAppStore(state => state.focusAgentReveal)
   const revealSessions = useAppStore(useShallow(state => !agentReveal ? [] :
     (agentSessionPresentationIndex(state.sessions).get(agentReveal.agentSessionId) ?? []).filter(session =>
@@ -189,7 +193,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }, [visible])
   useEffect(() => () => { useAppStore.getState().conversationRevealIntent?.complete({ kind: 'cancelled' }) }, [])
   const historySearch = useFocusHistorySearch(query, visible)
-  const [filters, setFilters] = useState<FocusFilterSelection>(EMPTY_FOCUS_FILTERS)
   const [requestId, setRequestId] = useState<string | null>(null)
   const [historyWindowRequest, setHistoryWindowRequest] = useState<{ at: number; sequence: number }>()
   const [workspaceRatio, setWorkspaceRatio] = useState(0.618)
@@ -222,17 +225,20 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots])
   const boardRowsRef = useRef<HTMLDivElement>(null)
   const separateRevealRef = useRef<HTMLDivElement>(null)
+  const coordinationLanes = useMemo(() => deriveFocusProjectLanes(coordinationContexts, config, undefined, tabs, Date.now(), topicSnapshots), [coordinationContexts, config, tabs, topicSnapshots])
+  const filterContexts = useMemo(() => [...executionRows, ...coordinationContexts], [executionRows, coordinationContexts])
+  const filterLanes = useMemo(() => [...allLanes, ...coordinationLanes], [allLanes, coordinationLanes])
   const orderedLanes = useFocusProjectOrder(allLanes, visible, boardRowsRef)
   const navigationCatalog = useAppStore(workbenchSelectionCatalog)
   const identityTabs = workbenchNavigationTabs(tabs)
   const identitySelector = useMemo(createFocusContextIdentitySelector, [])
-  const contextIdentities = useMemo(() => identitySelector(navigationCatalog, identityTabs, executionRows, config, layouts, agentRegionExecution),
-    [identitySelector, navigationCatalog, identityTabs, executionRows, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts])
+  const contextIdentities = useMemo(() => identitySelector(navigationCatalog, identityTabs, filterContexts, config, layouts, agentRegionExecution),
+    [identitySelector, navigationCatalog, identityTabs, filterContexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts])
   const survey = useAppStore(useShallow(state => ({ surveyCollectedZones: state.surveyCollectedZones, surveyOrganization: state.surveyOrganization, surveyExplorationNames: state.surveyExplorationNames })))
   const originContent = useAppStore(useShallow(state => ({ bindings: state.spaceZoneBindings, categories: state.topicCategories })))
   const surveyItems = useMemo(() => readSurveyPresentation({ ...survey, surveyZoneSelection: null, tabs }, navigationCatalog).items, [survey, tabs, navigationCatalog])
-  const laneMembership = JSON.stringify(allLanes.map(lane => [lane.id, lane.hostId, lane.workspaceId, lane.projectWorkspaceId, lane.topicId, lane.objectKind, lane.contextIds]))
-  const laneOrigins = useMemo(() => focusLaneOrigins(allLanes, navigationCatalog, tabs, surveyItems, originContent), [laneMembership, navigationCatalog, tabs, surveyItems, originContent])
+  const laneMembership = JSON.stringify(filterLanes.map(lane => [lane.id, lane.hostId, lane.workspaceId, lane.projectWorkspaceId, lane.topicId, lane.objectKind, lane.contextIds]))
+  const laneOrigins = useMemo(() => focusLaneOrigins(filterLanes, navigationCatalog, tabs, surveyItems, originContent), [laneMembership, navigationCatalog, tabs, surveyItems, originContent])
   const retainedProjects = useMemo(() => deriveRetainedFocusProjects(executionHistory, allLanes, {
     timelines, sources: catalogue.sources, sourcesAvailable: catalogue.available
   }), [executionHistory, allLanes, timelines, catalogue.sources, catalogue.available])
@@ -240,8 +246,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const searchingMetadata = Boolean(trimmedQuery)
   const searchCatalog = useMemo(() => searchingMetadata ? focusSearchCatalog(navigationCatalog, agentRegionExecution) : navigationCatalog,
     [searchingMetadata, navigationCatalog, executionRows])
-  const searchResult = useMemo(() => searchFocus(query, { rows: executionRows, lanes: allLanes, catalog: searchCatalog, sources: catalogue.sources, history: executionHistory, retained: retainedProjects }), [query, executionRows, allLanes, searchCatalog, catalogue.sources, executionHistory, retainedProjects])
-  const laneByContext = new Map(allLanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
+  const searchResult = useMemo(() => searchFocus(query, { rows: filterContexts, lanes: filterLanes, catalog: searchCatalog, sources: catalogue.sources, history: executionHistory, retained: retainedProjects }), [query, filterContexts, filterLanes, searchCatalog, catalogue.sources, executionHistory, retainedProjects])
+  const laneByContext = new Map(filterLanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
   // The common Region choice is independent of both the project filter and Agent MRU.
   const resourceLaneIds = new Set(currentSurface && currentSurface.kind !== 'agent' && currentSurface.kind !== 'terminal'
     ? laneContexts.filter(context => context.workspace?.id === currentSurface.workspaceId
@@ -255,11 +261,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     const lane = laneByContext.get(row.id)
     return lane ? laneOrigins.get(lane.id)?.contextTypes?.get(row.id) ?? ['unknown'] : ['unknown']
   }
-  const searched = executionRows.filter(row => searchResult.contextKeys.has(focusSearchContextKey(row.hostId, row.id, row.kind)))
+  const searched = filterContexts.filter(row => searchResult.contextKeys.has(focusSearchContextKey(row.hostId, row.id, row.kind)))
   const matching = searched.filter(row => focusMatchesProject(projectForRow(row), filters.projects) && focusMatchesTypes(typesForRow(row), filters.types))
   const matched = matching.filter(row => focusMatchesState(row, filters.states))
   const revealRow = revealedContext?.lane === 'execution' ? revealedContext.context : null
-  const filtered = revealRow && !matched.includes(revealRow) ? [...matched, revealRow] : matched
+  const executionIds = new Set(executionRows.map(row => row.id))
+  const matchedExecution = matched.filter(row => executionIds.has(row.id))
+  const coordinationResults = filtering ? matched.filter(row => !executionIds.has(row.id)) : []
+  const filtered = revealRow && !matchedExecution.includes(revealRow) ? [...matchedExecution, revealRow] : matchedExecution
   const revealOutsideFilters = Boolean(revealedContext && !matched.includes(revealedContext.context))
   const selected = executionRows.find(row => row.id === shownSessionId)
   const mapContext = revealedContext?.context ?? selected
@@ -316,17 +325,17 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     measure([], observer)
     return () => { active = false; observer.disconnect() }
   }, [visible, documentActive, hasBoardCards])
-  const matchingGroups = groupFocusContexts(matching)
+  const matchingGroups = groupFocusContexts(matching.filter(row => executionIds.has(row.id)))
   const neutralSummary = focusNeutralGroupSummary(matchingGroups.idle)
   const bucketMeta = { ...FOCUS_BUCKET_PRESENTATION, idle: { ...FOCUS_BUCKET_PRESENTATION.idle, label: neutralSummary.label } }
   const buckets = FOCUS_BUCKETS
   const projectOptions = useMemo(() => {
-    const options = [...new Map([...allLanes.map(lane => ({ id: focusProjectKey(lane.hostId, lane.projectId), name: lane.labels[0]!, hostId: lane.hostId })),
+    const options = [...new Map([...filterLanes.map(lane => ({ id: focusProjectKey(lane.hostId, lane.projectId), name: lane.labels[0]!, hostId: lane.hostId })),
       ...retainedProjects.map(item => ({ id: item.key, name: item.name, hostId: item.hostId }))].map(item => [item.id, item])).values()]
     const names = new Map<string, number>(), hosts = new Map(config?.hosts.map(host => [host.id, host.label]))
     for (const item of options) names.set(item.name, (names.get(item.name) ?? 0) + 1)
     return options.map(item => ({ ...item, name: names.get(item.name)! > 1 ? `${item.name} · ${hosts.get(item.hostId) || item.hostId}` : item.name }))
-  }, [allLanes, retainedProjects, config?.hosts])
+  }, [filterLanes, retainedProjects, config?.hosts])
   // Facets reuse the same supplied observations, with only their own dimension
   // excluded. No history reads, owner writes or unrelated-session queries.
   const projectCounts = new Map<string, number>(), stateCounts = new Map<import('../lib/focus-filters').FocusStateFilter, number>(), typeCounts = new Map<FocusSourceType, number>()
@@ -336,6 +345,61 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     if (key && typeMatch && stateMatch) projectCounts.set(key, (projectCounts.get(key) ?? 0) + 1)
     if (projectMatch && typeMatch) for (const state of FOCUS_FILTER_STATES) if (focusMatchesState(row, [state.id])) stateCounts.set(state.id, (stateCounts.get(state.id) ?? 0) + 1)
     if (projectMatch && stateMatch) for (const type of types) typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1)
+  }
+  const [moteChoices, setMoteChoices] = useState<{ id: string; references: WorkbenchProjectionSelection[] } | null>(null)
+  const moteChoicesRef = useRef<HTMLDivElement>(null)
+  const choiceFocusOrigin = useRef<Element | null>(null)
+  const restoreChoiceFocus = useRef(false)
+  const dismissMoteChoices = () => {
+    restoreChoiceFocus.current = Boolean(moteChoicesRef.current?.contains(document.activeElement))
+    setMoteChoices(null)
+  }
+  useLayoutEffect(() => {
+    if (!moteChoices) {
+      if (!restoreChoiceFocus.current) return
+      restoreChoiceFocus.current = false
+      if (document.activeElement !== document.body && document.activeElement?.isConnected) return
+      const origin = choiceFocusOrigin.current
+      if (origin instanceof HTMLElement && origin !== document.body && origin.isConnected && origin.getClientRects().length && !origin.closest('[hidden], [inert]')) origin.focus({ preventScroll: true })
+      else searchRef.current?.focus({ preventScroll: true })
+      return
+    }
+    moteChoicesRef.current?.scrollIntoView({ block: 'nearest' })
+    if (document.activeElement === choiceFocusOrigin.current) moteChoicesRef.current?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
+  }, [moteChoices])
+  useEffect(() => { setMoteChoices(null) }, [query, filters, visible])
+  const openMoteContext = (id: string, exactReference?: WorkbenchProjectionSelection) => {
+    const current = useAppStore.getState()
+    const session = sessionPresentationById(current.sessions).get(id)
+    const topicSnapshots = scratchTopicsForConfig(current.config, current.scratchTopicSnapshots)
+    const workspace = session && workspaceForSession(current.config, session, topicSnapshots)
+    const topicId = session ? topicIdForSession(current.config, session, topicSnapshots) : null
+    if (!topicId || focusLaneForSession(topicId, scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)) !== 'pmo') {
+      current.reportError(new Error('This context is no longer confirmed as Mote. The original work and locations remain available.'))
+      return
+    }
+    const locations = [...new Map(workbenchSelectionCatalog(current).locations.filter(location => {
+      const tab = current.tabs[location.tabId], surface = tab?.regions[location.regionId]
+      return tab?.topicId === topicId && surface?.kind === 'agent' && surface.sessionId === id
+    }).map(location => [JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]), location])).values()]
+    const held = readPmoTeamsTopicFloatingState()?.reference
+    if (exactReference && !locations.some(location => sameWorkbenchProjectionSelection(location, exactReference))) {
+      current.reportError(new Error('The selected original Mote location is no longer confirmed. The original work is kept.'), { kind: 'indeterminate' })
+      return
+    }
+    const reference = exactReference ?? (held && locations.some(location => sameWorkbenchProjectionSelection(location, held))
+      ? held : locations.length === 1 ? locations[0] : undefined)
+    if (!reference) {
+      choiceFocusOrigin.current = document.activeElement
+      setMoteChoices({ id, references: locations })
+      return
+    }
+    const tab = current.tabs[reference.tabId]!
+    setMoteChoices(null)
+    focusPmoSession(id)
+    requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, ...(tab ? { targetTabId: tab.id } : {}), ...(reference ? { reference } : {}), onReturnFocus: () => {
+      if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus({ preventScroll: true })
+    } })
   }
   const laneRows = (lane: typeof focusProjectLanes[number], heading: ReactNode) => {
     const rows = rowsByLane.get(lane.id) ?? []
@@ -370,13 +434,34 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       })
     }</FocusLaneGroups> : null}</>
   }
+  const leadingResults = coordinationResults.length || moteChoices ? <>
+      {coordinationResults.length ? <section className="focus-coordination-results" aria-label="Matching Mote coordination contexts">
+        <header><strong>Mote coordination</strong><span>{coordinationResults.length}</span><small>Independent coordination focus</small></header>
+        <WorkbenchPresentationContext.Provider value={cardPresentation}><div>
+          <FocusContextCards contexts={coordinationResults} columns={1} scrollRef={boardRowsRef} visible={visible && documentActive}
+            selectedId={selectedMoteId} goalLinks={goalLinks} identities={contextIdentities} onSelect={openMoteContext} />
+        </div></WorkbenchPresentationContext.Provider>
+      </section> : null}
+      {moteChoices ? <div ref={moteChoicesRef} className="focus-location-choices" role="group" aria-label="Choose original Mote location">
+        <p>{moteChoices.references.length ? 'Choose the exact original Mote location.' : 'No original Mote location is confirmed. The context and current work are kept.'}</p>
+        {moteChoices.references.map(reference => {
+          const layout = layouts[reference.displayWorkspaceId], tab = tabs[reference.tabId]
+          return <FocusLocationChoice key={JSON.stringify(reference)} reference={reference} tab={tab}
+            workspaceName={config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? reference.displayWorkspaceId}
+            groupIndex={layout ? groupIds(layout.root).indexOf(reference.groupId) : -1}
+            regionIndex={tab ? regionIds(tab.layout.root).indexOf(reference.regionId) : -1}
+            onSelect={() => openMoteContext(moteChoices.id, reference)} />
+        })}
+        <button type="button" className="small-button" onClick={dismissMoteChoices}>Dismiss location choices</button>
+      </div> : null}
+  </> : undefined
   return <section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" data-desktop-focus-view="list" data-focus-reply-lines={replyLines} hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)`, '--focus-reply-lines': replyLines, '--focus-card-track-height': `${focusCardTrackHeight(replyLines)}px` } as CSSProperties}>
     <FocusToolbar onOpenCollaboration={mapContext?.kind === 'agent' ? () => useAppStore.getState().openCollaborationMap({ kind: 'focus', subject: { hostId: mapContext.control?.hostId ?? mapContext.hostId, agentSessionId: mapContext.control?.agentSessionId ?? mapContext.id }, name: mapContext.name }) : undefined} active={visible} selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className="focus-filters">
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search text, IDs or amux links" title="Filter names, activity, paths and original object IDs or links. Enter searches case-sensitive text in retained conversations." onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); historySearch.start() } }} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <button type="button" className="small-button focus-search-history-trigger" aria-label="Search retained conversation text" title="Search retained conversation text · Enter" disabled={!query.trim()} onClick={() => historySearch.start()}><ThemeActionSearchIcon size={13} /><span>History</span></button>
-          <FocusFilters value={filters} onChange={setFilters} visible={visible} onClear={clearLocalFilters} onHistory={() => historySearch.start()} historyAvailable={Boolean(trimmedQuery)}
+          <FocusFilters value={filters} onChange={setFilters} onInspectChange={setInspectingFilters} visible={visible} onClear={clearLocalFilters} onHistory={() => historySearch.start()} historyAvailable={Boolean(trimmedQuery)}
             options={{ projects: projectOptions.map(option => ({ ...option, count: projectCounts.get(option.id) ?? 0 })), states: stateCounts, types: typeCounts }} />
           <FocusSourceStatus sourceError={catalogue.error} loading={catalogue.loading} laneErrors={hierarchyErrors}
             onRetrySources={catalogue.refresh} onRetryLanes={refreshHierarchy} visible={visible} />
@@ -402,37 +487,12 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         return `${config?.workspaces.find(workspace => workspace.id === ref.displayWorkspaceId)?.name ?? ref.displayWorkspaceId} · ${index >= 0 ? `Group ${index + 1}` : ref.groupId}`
       }} onSelect={location => onSelectLocation ? onSelectLocation(location.reference) : location.sessionId ? focusExecutionSession(location.sessionId, location.reference) : useAppStore.getState().reportError(new Error('The original location is kept. Its navigation is not confirmed in this view.'))} />
       <FocusHistorySearch search={historySearch} active={visible} />
-      {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => {
-        const id = pmoAttention[0]!
-        const current = useAppStore.getState()
-        const session = sessionPresentationById(current.sessions).get(id)
-        const topicId = session ? topicIdForSession(current.config, session, scratchTopicsForConfig(current.config, current.scratchTopicSnapshots)) : null
-        if (!topicId) {
-          current.reportError(new Error('Mote context identity is not confirmed. The original work surface is retained.'))
-          return
-        }
-        const locations = [...new Map(workbenchSelectionCatalog(current).locations.filter(location => {
-          const tab = current.tabs[location.tabId], surface = tab?.regions[location.regionId]
-          return tab?.topicId === topicId && surface?.kind === 'agent' && surface.sessionId === id
-        }).map(location => [JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]), location])).values()]
-        const held = readPmoTeamsTopicFloatingState()?.reference
-        const reference = held && locations.some(location => sameWorkbenchProjectionSelection(location, held))
-          ? held : locations.length === 1 ? locations[0] : undefined
-        if (!reference) {
-          current.reportError(new Error('This Mote Agent has no unique confirmed location. The original work and Mote selections are kept; choose its exact discussion location.'), { kind: 'indeterminate' })
-          return
-        }
-        const tab = current.tabs[reference.tabId]!
-        focusPmoSession(id)
-        requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, ...(tab ? { targetTabId: tab.id } : {}), ...(reference ? { reference } : {}), onReturnFocus: () => {
-          if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus({ preventScroll: true })
-        } })
-      }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><span>Mote</span><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context <ThemeActionOpenExternalIcon size={12} /></span></button> : null}
-      {executionRows.length === 0 && retainedProjects.length === 0 ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
+      {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => openMoteContext(pmoAttention[0]!)}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><span>Mote</span><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context <ThemeActionOpenExternalIcon size={12} /></span></button> : null}
+      {executionRows.length === 0 && retainedProjects.length === 0 && coordinationContexts.length === 0 && !moteChoices ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Filtered Focus contexts">
         <div className="focus-project-board">
-          <WorkbenchPresentationContext.Provider value={cardPresentation}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined}>
-            {hasBoardLanes ? <FocusProjectLanes visible={visible} origins={laneOrigins} lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={currentLaneId} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
-            {filtered.length === 0 && filteredRetainedProjects.length === 0 ? <p className="focus-project-lanes__empty">
+          <WorkbenchPresentationContext.Provider value={cardPresentation}><div className="focus-project-board__live" data-empty={!hasBoardLanes && !leadingResults || undefined}>
+            {hasBoardLanes || leadingResults ? <FocusProjectLanes leading={leadingResults} visible={visible} origins={laneOrigins} lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={currentLaneId} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
+            {filtered.length === 0 && filteredRetainedProjects.length === 0 && coordinationResults.length === 0 ? <p className="focus-project-lanes__empty">
               <span>No contexts match these local filters.</span>
               {query || filters.projects.length || filters.states.length || filters.types.length ? <button type="button" className="focus-project-lanes__clear" onClick={clearLocalFilters}>Clear filters</button> : null}
             </p> : null}

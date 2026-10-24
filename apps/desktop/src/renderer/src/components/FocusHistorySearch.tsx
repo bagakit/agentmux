@@ -72,10 +72,10 @@ export function FocusHistorySearch({ search, active = true }: { active?: boolean
  const { result } = search
  if (!result) return null
  return <section className="focus-history-search" aria-label="History search results" aria-busy={result.loading}>
-  <header><strong>History · {result.label} · Independent of execution filters</strong>{result.loading ? <button type="button" className="small-button" onClick={search.cancel}>Cancel search</button> : result.nextCursor ? <button type="button" className="small-button" onClick={search.more}>Continue history search</button> : null}</header>
+  <header><strong>History · {result.label} · Independent of context filters</strong>{result.loading ? <button type="button" className="small-button" onClick={search.cancel}>Cancel search</button> : result.nextCursor ? <button type="button" className="small-button" onClick={search.more}>Continue history search</button> : null}</header>
   <details className="focus-history-coverage"><summary><small role="status">{result.hits.length} matches · {result.examined} records · {!result.confirmed ? 'source coverage unconfirmed' : result.remaining ? `${result.remaining} source streams remaining` : `${result.completed} / ${result.total} source streams checked`}{result.issues.length ? ` · ${result.issues.length} unavailable` : ''}</small></summary>
    {result.trimmed ? <p>{result.hits.length} of {result.matched} matching records read remain in this bounded window; {result.trimmed} earlier results are outside it. The expanded record is kept. Search again to read earlier results.</p> : null}
-   <p>{result.confirmed ? `${result.completed} / ${result.total} source streams checked.` : 'Original source coverage is unconfirmed.'} Retained captured and native text; independent of execution project, state and type filters. Literal text is case-sensitive.</p>
+   <p>{result.confirmed ? `${result.completed} / ${result.total} source streams checked.` : 'Original source coverage is unconfirmed.'} Retained captured and native text; independent of project, state and type card filters. Literal text is case-sensitive.</p>
    {result.issues.length ? <><strong>Unavailable search coverage</strong>{result.issues.map((issue, index) => <p key={index}>{issue}</p>)}<p>Search again to retry unavailable sources.</p></> : null}
   </details>
   {!result.hits.length && !result.loading ? <p>{!result.confirmed || result.remaining || result.issues.length ? 'No matches in the checked records. Search coverage is incomplete.' : 'No matches in the retained text of the checked sources.'}</p> : null}

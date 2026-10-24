@@ -11,7 +11,7 @@ export function FocusContextCardBody(props: ComponentProps<typeof FocusContextRo
   const { context } = props
   const summary = !props.disclosure || props.disclosure.summary > 0
   const facts = useAppStore(useShallow(state => {
-    if (!summary) return { session: undefined, timeline: undefined, name: undefined }
+    if (!summary || context.recap !== undefined) return { session: undefined, timeline: undefined, name: undefined }
     const timeline = state.timelines[context.id]
     return { session: sessionPresentationById(state.sessions).get(context.id), timeline,
       name: state.agentNames[context.id], ...focusTimelineStamp(timeline) }
