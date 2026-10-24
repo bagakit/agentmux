@@ -2110,7 +2110,7 @@ export function TerminalView({
       // 走 pasteIntoTerminal 而不是 terminal.paste：ESC 怎么办由 Core 那一个函数说了算，
       // 与原生 Cmd+V 那条路（installTerminalPasteSanitizer）以及 provider 投递 prompt 同源。
       if (pasteTargetRef.current === target && text) pasteIntoTerminal(target, text)
-    })
+    }).catch(reportError)
   }
 
   function pathMenuActions(link: TerminalPathLink | null) {

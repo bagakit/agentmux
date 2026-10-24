@@ -18,7 +18,7 @@ import {
   type BookmarkFileKind
 } from '../shared/bookmark-file.js'
 
-/** macOS 自带，固定绝对路径（同 `composer-screenshot.ts` 用 `/usr/sbin/screencapture` 的形状）。 */
+/** macOS 自带的 plist 工具，以固定绝对路径运行。 */
 const PLUTIL = '/usr/bin/plutil'
 
 /**

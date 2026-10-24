@@ -142,6 +142,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'continuousProgress:pauseForInput': 'continuous progress',
   'ui:requestStorageFlush': 'storage flush',
   'ui:writeClipboardImage': 'clipboard image',
+  'ui:readClipboardText': 'clipboard text',
+  'ui:writeClipboardText': 'clipboard text',
   'ui:rendererUpdateReady': 'renderer update',
   'ui:workbenchWindowsReady': 'original workbench window readiness',
   'ui:workbenchWindowsCall': 'original workbench window action',
