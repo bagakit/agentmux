@@ -2068,22 +2068,24 @@ export class AgentMuxRpcService {
           taskId: rpcString(p.taskId, 'Task ID') }); break
       }
       case 'message.notify': case 'message.notify.inspect': {
-        if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError(
-          'Notification operations require a trusted user/device. Managed senders keep the ordinary Inbox path.', 'CONTROL_PERMISSION_DENIED')
+        if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
+          'Notification operations require an authenticated Agent participant or trusted user/device.', 'CONTROL_PERMISSION_DENIED')
         const hostId = rpcString(p.hostId, 'Original message Host ID')
-        const scopes = (await this.clients()).filter(scope => scope.hostId === hostId)
+        if (caller && caller.hostId !== hostId) throw new AgentMuxError('Agent authority cannot notify another semantic Host journal.', 'CONTROL_PERMISSION_DENIED')
+        const scopes = caller ? [caller] : (await this.clients()).filter(scope => scope.hostId === hostId)
         if (scopes.length !== 1) throw new AgentMuxError('The original message Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
         const owner = scopes[0]!
+        const auth = caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}
         if (method === 'message.notify.inspect') {
           result = { ...await (owner.client.forwardRpc
             ? owner.client.forwardRpc('message.notify.inspect', { operationId: rpcString(p.operationId, 'Notification operation ID'), hostId: 'local' }, context)
-            : owner.client.inspectMessageNotification({ operationId: rpcString(p.operationId, 'Notification operation ID') })), hostId }
+            : owner.client.inspectMessageNotification({ operationId: rpcString(p.operationId, 'Notification operation ID'), ...auth })), hostId }
           break
         }
         if (owner.client.forwardRpc) { result = { ...await owner.client.forwardRpc('message.notify', { ...p, hostId: 'local' } as AgentMuxRpcParams<'message.notify'>, await this.inputForwardContext(context)), hostId }; break }
         if (!Array.isArray(p.messageIds)) throw new AgentMuxError('Select original Inbox message IDs.', 'INVALID_A2A_NOTIFICATION')
         result = { ...await owner.client.notifyMessages({ operationId: rpcString(p.operationId, 'Notification operation ID'),
-          messageIds: p.messageIds.map(id => rpcString(id, 'Original message ID')) }, this.inputCallContext(context)), hostId }
+          messageIds: p.messageIds.map(id => rpcString(id, 'Original message ID')), ...auth }, this.inputCallContext(context)), hostId }
         break
       }
       case 'agent.broadcast.inspect': case 'message.read': case 'message.ls': case 'message.events': case 'message.dispatch.read': case 'message.dispatch.ls': {
@@ -2541,10 +2543,10 @@ export class AgentMuxRpcService {
     if (expectedRun && !original && durable.run.runId !== expectedRun.runId) throw new AgentMuxError(
       'Expected Run does not match the current retained recipient Run. No new message was saved or submitted.', 'MESSAGE_RECIPIENT_MISMATCH')
     const terminalManual = p.execution === 'immediate'
-    const referenceIntake = Boolean(caller && (!original || original.deliveryMode === 'reference'))
+    const referenceIntake = Boolean(caller && (original ? original.deliveryMode === 'reference' : !terminalManual))
     if (referenceIntake && terminalManual) throw new AgentMuxError(
-      'A managed sender cannot authorize steer. Send the original body to the Inbox normally; explicit user notification is a separate action.',
-      'CONTROL_PERMISSION_DENIED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+      'The original Inbox intake cannot be changed into direct input. Use message.notify for its retained references.',
+      'AGENT_PROMPT_OPERATION_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
     const directIntent = addressed ?? { kind: 'manual-actor' as const, expectedRun: { ...durable.run } }
     if (original?.admissionIntent && addressed && !isDeepStrictEqual(original.admissionIntent, addressed)) throw new AgentMuxError('The original native target cannot be changed by a retry.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     // A new direct producer saves its exact durable target before requiring a
