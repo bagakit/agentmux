@@ -8,21 +8,52 @@ import { WorkspaceWorkbench } from '../../../src/renderer/src/components/Workspa
 import { SettingsNavigation } from '../../../src/renderer/src/components/SettingsNavigation'
 import { settingsCatalog } from '../../../src/renderer/src/components/settings/settings-modules'
 import { invalidateConnectorTarget } from '../../../src/renderer/src/lib/connector-room-intent'
+import { groupTarget, type ConnectionDiagnosis, type RoomBinding } from '@agentmux/core/connections'
+import { readConnectorService } from '../../../src/renderer/src/lib/connector-service-observation'
 
 const connectorGeometry = new URLSearchParams(location.search).has('connector-geometry')
 const connectorReads: string[] = []
 let hostingUnavailable = false
+let connectorMode: 'unbound' | 'linked' | 'paused' | 'off' = 'unbound'
+let routeReady: Promise<void> | null = null, releaseRoute: (() => void) | null = null
+function connectorBindings(): RoomBinding[] {
+  if (connectorMode === 'unbound') return []
+  const session = useAppStore.getState().sessions.find(item => item.id === original.sessionId)!
+  return ['feishu', 'discord'].map(adapter => ({ bindingId: 'preview-original-' + adapter, revision: 1, connectionId: 'preview-' + adapter,
+    application: adapter === 'feishu' ? { domain: 'open.feishu.cn', appId: 'cli_original_geometry' } : { domain: 'discord.com', appId: '123456789012345678' },
+    externalConversationId: adapter === 'feishu' ? 'oc_original_geometry' : '345678901234567890',
+    executionHostId: session.control.hostId, agentSessionId: session.id, regionAnchor: { regionId: original.regionId },
+    state: connectorMode === 'paused' ? 'paused' : 'active', scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' },
+    sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } }))
+}
 if (connectorGeometry) {
   api.connections.hostingTarget = async () => {
+    await routeReady
     if (hostingUnavailable) throw Error('Controlled original bot hosting observation is unavailable')
     return { hostId: 'preview-bot-host', runtimeId: 'preview-original-runtime' }
   }
   api.connections.onMetadataChanged = (_listener, observation) => { observation?.('ready'); return () => {} }
-  api.connections.call = (async (method: string) => {
+  api.connections.call = (async (method: string, input: any) => {
     connectorReads.push(method)
-    if (method === 'connection.binding.ls') return { bindings: [] }
-    if (method === 'connection.ls') return { connections: [] }
-    if (method === 'connection.service.get') return { enabled: true, revision: 1 }
+    if (method === 'connection.binding.ls') return { bindings: connectorBindings().filter(binding => binding.executionHostId === input.executionHostId && binding.agentSessionId === input.agentSessionId) }
+    if (method === 'connection.ls') return { connections: connectorBindings().map(binding => ({ revision: 1,
+      config: { connectionId: binding.connectionId, adapterId: binding.application.domain === 'discord.com' ? 'discord' : 'feishu', application: binding.application, label: 'Original geometry bot', enabled: true, credentialRef: 'preview-private-reference' },
+      observation: { authentication: { state: 'unknown', reason: 'not-started' }, transport: { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } } })) }
+    if (method === 'connection.service.get') return input.adapterId ? { adapterId: input.adapterId, enabled: true, revision: 0 } : { enabled: connectorMode !== 'off', revision: 1 }
+    const binding = connectorBindings().find(item => item.bindingId === input.bindingId || item.connectionId === input.connectionId)
+    if (method === 'connection.metadata.get' && binding) {
+      const subject = { kind: 'conversation', externalConversationId: binding.externalConversationId }
+      return { connectionId: binding.connectionId, connectionRevision: 1, application: binding.application, entry: { subject, cacheRevision: 'preview-original-profile',
+        observation: { subject, state: 'observed', freshness: 'current', profile: { name: 'Research discussion', observedAt: Date.now() }, checkedAt: Date.now() } } }
+    }
+    if (method === 'connection.diagnose') return { target: input, service: { value: { enabled: connectorMode !== 'off', revision: 1 }, issue: null }, groups: { issue: null,
+      value: { nextBindingId: null, items: binding ? [{ target: groupTarget(binding), window: {}, limit: 5,
+        adapterService: { value: { adapterId: binding.application.domain === 'discord.com' ? 'discord' : 'feishu', enabled: true, revision: 0 }, issue: null },
+        connection: { value: { revision: 1, enabled: true, authentication: { state: 'unknown', reason: 'not-started' }, transport: { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }, issue: null },
+        binding: { value: { state: binding.state, currentRevision: binding.revision, scope: binding.scope, activeInputGrants: 1, activeAnswerGrants: 0, activePermissionGrants: 0 }, issue: null },
+        outgoing: { issue: null, value: { after: null, afterContent: null, next: null, observation: { state: 'ready' }, sourceObservation: { state: 'ready', code: null, codeRecorded: false, checkpointKey: null }, effectObservation: null, deliveries: [], coverage: { state: 'complete', nextContent: null, originCount: 0, omittedGapCount: 0, gaps: [] } } },
+        incoming: { issue: null, value: { beforeIngressId: null, next: null, rows: [] } }
+      }] : [] } } } satisfies ConnectionDiagnosis
     throw Error('The geometry scene does not execute ' + method)
   }) as typeof api.connections.call
 }
@@ -35,14 +66,23 @@ document.body.append(element)
 const root = createRoot(element)
 const original = (window as any).resultReady
 Object.assign(window, { terminalChrome: {
-  connectors() {
+  connectors(pending = false) {
     hostingUnavailable = false
+    connectorMode = 'unbound'
+    routeReady = pending ? new Promise<void>(resolve => { releaseRoute = resolve }) : null
     flushSync(() => workbenchRoot.render(<SettingsNavigation.Provider value={{
       open() {}, openToolkit() {}, openHost() {}, openChannel() {}, chooseAgent() {}, openMoteLark() {},
       channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries
     }}><WorkspaceWorkbench workspaceId={original.workspaceId} /></SettingsNavigation.Provider>))
   },
   connectorReads: () => connectorReads,
+  releaseConnectorRead() { releaseRoute?.(); releaseRoute = null; routeReady = null },
+  async connectorMode(value: typeof connectorMode) {
+    connectorMode = value; hostingUnavailable = false
+    await readConnectorService(() => true, { hostId: 'preview-bot-host', runtimeId: 'preview-original-runtime' })
+    const session = useAppStore.getState().sessions.find(item => item.id === original.sessionId)!
+    invalidateConnectorTarget({ executionHostId: session.control.hostId, agentSessionId: session.id })
+  },
   hostingUnavailable() {
     hostingUnavailable = true
     const session = useAppStore.getState().sessions.find(item => item.id === original.sessionId)!

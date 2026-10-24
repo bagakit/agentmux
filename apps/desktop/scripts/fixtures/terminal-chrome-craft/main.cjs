@@ -83,7 +83,7 @@ async function terminalScene(width) {
 }
 async function connectorFacts() {
   const facts = await terminalFacts()
-  return { ...facts, ...await evaluate(`(()=>{const s=${surface},b=s.querySelector('.agent-body'),v=s.querySelector('.terminal-view'),screen=s.querySelector('.xterm-screen'),header=s.querySelector('.agent-region-header');const rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom}};return{devicePixelRatio,viewport:{width:innerWidth,height:innerHeight},canvases:[...screen.querySelectorAll('canvas')].map(e=>({box:rect(e),pixels:{width:e.width,height:e.height}})),surface:rect(s),body:rect(b),view:rect(v),screen:rect(screen),header:rect(header),name:rect(header.querySelector('.agent-region-header__name')),headerPaint:getComputedStyle(header,'::before').height,reading:terminalChrome.reading(),connectors:[...s.querySelectorAll('[data-channel-entry]')].map(e=>{const style=getComputedStyle(e),pseudo=getComputedStyle(e,'::before');return{channel:e.dataset.channelEntry,state:e.dataset.channelState,box:rect(e),glyph:rect(e.querySelector('img,svg')),marker:e.querySelector('.agent-region-header__connector-marker')?rect(e.querySelector('.agent-region-header__connector-marker')):null,background:style.backgroundColor,focused:e===document.activeElement,focusVisible:e.matches(':focus-visible'),outline:style.outlineStyle,outlineWidth:style.outlineWidth,paint:{content:pseudo.content,background:pseudo.backgroundColor,height:pseudo.height}}}),reads:terminalChrome.connectorReads()}})()`) }
+  return { ...facts, ...await evaluate(`(()=>{const s=${surface},b=s.querySelector('.agent-body'),v=s.querySelector('.terminal-view'),screen=s.querySelector('.xterm-screen'),header=s.querySelector('.agent-region-header');const rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom}};return{devicePixelRatio,viewport:{width:innerWidth,height:innerHeight},canvases:[...screen.querySelectorAll('canvas')].map(e=>({box:rect(e),pixels:{width:e.width,height:e.height}})),surface:rect(s),body:rect(b),view:rect(v),screen:rect(screen),header:rect(header),name:rect(header.querySelector('.agent-region-header__name')),headerPaint:getComputedStyle(header,'::before').height,reading:terminalChrome.reading(),connectors:[...s.querySelectorAll('[data-channel-entry]')].map(e=>{const style=getComputedStyle(e),pseudo=getComputedStyle(e,'::before');return{channel:e.dataset.channelEntry,state:e.dataset.channelState,box:rect(e),glyph:rect(e.querySelector('img,svg')),glyphFilter:getComputedStyle(e.querySelector('img,svg')).filter,glyphOpacity:getComputedStyle(e.querySelector('img,svg')).opacity,imageLoaded:e.querySelector('img')?.complete&&e.querySelector('img').naturalWidth>0,marker:e.querySelector('.agent-region-header__connector-marker')?rect(e.querySelector('.agent-region-header__connector-marker')):null,background:style.backgroundColor,focused:e===document.activeElement,focusVisible:e.matches(':focus-visible'),outline:style.outlineStyle,outlineWidth:style.outlineWidth,paint:{content:pseudo.content,background:pseudo.backgroundColor,height:pseudo.height}}}),reads:terminalChrome.connectorReads()}})()`) }
 }
 function connectorGeometry(facts) {
   const bandBottom=facts.header.y+parseFloat(facts.headerPaint)
@@ -165,6 +165,65 @@ async function connectorScene(width) {
   assert.ok(after.reads.length>0&&after.reads.every(method=>['connection.ls','connection.binding.ls','connection.service.get'].includes(method)),'The fixture executed only the original bounded connection reads')
   Object.assign(scenario,{hovered,opened,closed,passed:true})
 }
+async function neutralFacts() {
+  return { ...await connectorFacts(), ...await evaluate(`(()=>{const s=${surface},group=s.querySelector('.agent-region-header__channels'),menu=document.querySelector('.connector-header-menu');return{channelGroup:{gap:getComputedStyle(group).gap,width:group.getBoundingClientRect().width},popover:menu?{text:menu.innerText,padding:getComputedStyle(menu).padding,actions:[...menu.querySelectorAll('[role="menuitem"]')].map(node=>node.textContent.trim())}:null}})()`) }
+}
+function neutralPresentation(facts) {
+  connectorGeometry(facts)
+  assert.equal(facts.connectors.length,2,'Both real compiled platform contributions remain reachable')
+  for(const entry of facts.connectors){assert.equal(entry.imageLoaded,true,'The original platform artwork is loaded');assert.equal(entry.glyphFilter,'grayscale(1)','Platform glyph stays grayscale through original observation and interaction states')}
+  assert.equal(facts.channelGroup.gap,'0px','Adjacent channel entries have no redundant group gap')
+  assert.equal(facts.channelGroup.width,44,'Two original 22px hit targets remain separate and compact')
+  assert.equal(facts.connectors[1].box.x-facts.connectors[0].box.x,22)
+  if(facts.popover)assert.equal(facts.popover.padding,'4px','The original popover has one compact outer inset')
+}
+async function neutralScene(width) {
+  report.stage={proof:'connector-neutral',width}
+  await viewport(width*2+1,740);await evaluate(`terminalChrome.workbench();terminalNotice.seed('healthy');terminalChrome.connectors(true)`)
+  await wait(`${surface}.querySelectorAll('[data-channel-entry]').length===2 && !${surface}.querySelector('.terminal-view__xterm--hydrating')`)
+  await pointer(`${surface}.querySelector('.terminal-view__xterm')`)
+  const loading=await neutralFacts(),scenario={width,states:[{name:'loading',facts:loading}],passed:false};report.scenarios.push(scenario)
+  neutralPresentation(loading);assert.ok(loading.connectors.every(entry=>entry.state==='unknown'),'An original pending read remains unknown')
+  await evaluate('terminalChrome.releaseConnectorRead()');await wait(`${surface}.querySelectorAll('[data-channel-state="unbound"]').length===2`)
+  const unbound=await neutralFacts();neutralPresentation(unbound);stable(loading,unbound);scenario.states.push({name:'unbound',facts:unbound})
+  async function close() {
+    await pointer(`${surface}.querySelector('[data-channel-entry="feishu"]')`)
+    await wait('Boolean(document.activeElement?.closest(".connector-header-menu"))');await escape()
+    await wait('!document.querySelector(".connector-header-menu")')
+  }
+  async function observe(name,state) {
+    await evaluate('terminalChrome.connectorMode('+JSON.stringify(name)+')')
+    await wait(`${surface}.querySelectorAll('[data-channel-state="${state}"]').length===2`)
+    await wait(`${surface}.querySelectorAll('.conversation-sharing-notice__audience strong').length===2 && [...${surface}.querySelectorAll('.conversation-sharing-notice__audience strong')].every(node=>node.textContent==='Research discussion')`)
+    await paint()
+    const facts=await neutralFacts();neutralPresentation(facts)
+    assert.equal(facts.terminal.id,unbound.terminal.id,'New observed sharing facts keep the original Terminal')
+    for(const key of ['sessions','tab','layout','drafts'])assert.deepEqual(facts.state[key],unbound.state[key],'Original '+key+' remains across observed policies')
+    scenario.states.push({name,facts});return facts
+  }
+  for(const [name,state]of [['linked','linked'],['paused','paused'],['off','off']])await observe(name,state)
+  const linked=await observe('linked','linked')
+  await pointer(`${surface}.querySelector('[data-channel-entry="feishu"]')`,'left',true);await wait('Boolean(document.querySelector(".connector-header-menu"))')
+  const linkedHover=await neutralFacts();neutralPresentation(linkedHover);stable(linked,linkedHover)
+  assert.ok(linkedHover.popover.text.includes('Research discussion'),'The original named group is preserved in its popover')
+  assert.ok(linkedHover.popover.actions.some(text=>text.includes('Manage group')),'The exact original group action remains reachable')
+  await frame('neutral-'+width+'-linked',width);await close()
+  const focused=await neutralFacts();neutralPresentation(focused);assert.equal(focused.connectors[0].focusVisible,true)
+  scenario.states.push({name:'linked-hover',facts:linkedHover},{name:'focused',facts:focused})
+  await evaluate('terminalChrome.hostingUnavailable()');await wait(`${surface}.querySelectorAll('[data-channel-state="unknown"]').length===2`)
+  await paint()
+  const unavailable=await neutralFacts();neutralPresentation(unavailable)
+  // Escape suppressed the just-closed hover menu until the real pointer leaves.
+  await pointer(`${surface}.querySelector('.terminal-view__xterm')`,'left',true)
+  await pointer(`${surface}.querySelector('[data-channel-entry="feishu"]')`,'left',true);await wait('Boolean(document.querySelector(".connector-header-menu"))')
+  const issueHover=await neutralFacts();neutralPresentation(issueHover);stable(unavailable,issueHover)
+  assert.ok(issueHover.popover.text.includes('Research discussion'),'A failed observation keeps the exact original group')
+  await frame('neutral-'+width+'-issue',width);await close()
+  const after=await neutralFacts();stable(unavailable,after);assert.deepEqual(after.state.writes,unbound.state.writes,'Presentation and observation do not submit input bytes')
+  const reads=['connection.ls','connection.binding.ls','connection.service.get','connection.metadata.get','connection.diagnose']
+  assert.ok(after.reads.length>0&&after.reads.every(method=>reads.includes(method)),'No configuration, authority or delivery effect is dispatched')
+  scenario.states.push({name:'unavailable',facts:unavailable},{name:'issue-hover',facts:issueHover});scenario.after=after;scenario.passed=true
+}
 async function loadingFacts() {
   return evaluate("(()=>{const s=document.querySelector('#loading-root .full-page-loading'),stage=s.querySelector('.full-page-loading__stage'),art=s.querySelector('img'),r=s.getBoundingClientRect(),b=stage.getBoundingClientRect(),nodes=[stage,art,s.querySelector('.full-page-loading__light'),...s.querySelectorAll('.full-page-loading__activity i')].filter(Boolean);return{appearance:document.documentElement.dataset.appearance,colorScheme:getComputedStyle(document.documentElement).colorScheme,phase:s.dataset.loadingPhase,busy:s.getAttribute('aria-busy'),role:s.getAttribute('role'),artLoaded:art?art.complete&&art.naturalWidth>0:null,artWidth:art?.getBoundingClientRect().width??null,artTransform:art?getComputedStyle(art).transform:null,hero:!!s.querySelector('.full-page-loading__atmosphere'),stage:{left:b.left,right:b.right,top:b.top,bottom:b.bottom},clientWidth:stage.clientWidth,scrollWidth:stage.scrollWidth,clientHeight:stage.clientHeight,scrollHeight:stage.scrollHeight,animations:nodes.map(e=>({name:getComputedStyle(e).animationName,iterations:getComputedStyle(e).animationIterationCount})),activity:s.querySelectorAll('.full-page-loading__activity').length,text:stage.innerText}})()")
 }
@@ -241,7 +300,7 @@ app.whenReady().then(async()=>{
     win.webContents.on('console-message', details => { if(details.level==='error') report.console.push({message:details.message,sourceId:details.sourceId,lineNumber:details.lineNumber}) })
     await win.loadFile(html,{query:proof.startsWith('connector-')?{'connector-geometry':'true'}:{}});win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     await wait('Boolean(window.terminalChrome)')
-    if(proof==='recovery') await recoveryScenes();else if(proof.startsWith('connector-'))for(const width of [640,320])await connectorScene(width);else for(const width of [640,320])await terminalScene(width)
+    if(proof==='recovery') await recoveryScenes();else if(proof==='connector-neutral')for(const width of [640,320])await neutralScene(width);else if(proof.startsWith('connector-'))for(const width of [640,320])await connectorScene(width);else for(const width of [640,320])await terminalScene(width)
     assert.ok(report.scenarios.length>0);report.passed=true
   } catch(error) {report.failure={name:error.name,message:error.message,stack:error.stack,stage:report.stage}}
   finally {await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(report,null,2));win?.destroy();app.exit(report.passed?0:1)}
