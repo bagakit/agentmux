@@ -6,9 +6,12 @@ import { FilePicker } from '@capawesome/capacitor-file-picker'
 import { Capacitor } from '@capacitor/core'
 import { FILE_UPLOAD_MAX_BYTES, fileUploadRevision, parseFileUploadIdentity } from '@agentmux/core/files'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
+import { pickWebFiles } from './web-file-picker'
 
 /** Only public OS capabilities. There is deliberately no credential/secret read method. */
-export const nativeDevicePorts = { app: App, clipboard: Clipboard, keyboard: Keyboard, filePicker: FilePicker }
+export const nativeDevicePorts = { app: App, clipboard: Clipboard, keyboard: Keyboard,
+  filePicker: { pickFiles: (options: Parameters<typeof FilePicker.pickFiles>[0]) =>
+    Capacitor.isNativePlatform() ? FilePicker.pickFiles(options) : pickWebFiles(options) } }
 export type NativeDevicePorts = typeof nativeDevicePorts
 
 export function createNativePlatform(base: ClientUiPlatform, ports: Pick<NativeDevicePorts, 'clipboard'> = nativeDevicePorts) {
@@ -36,6 +39,7 @@ export function createNativePlatform(base: ClientUiPlatform, ports: Pick<NativeD
 }
 
 export type LocalAttachment = { id: string; name: string; mimeType: string; size: number; revision: string; dataBase64: string }
+export type LocalAttachmentFile = { name: string; type?: string; mimeType?: string; size: number; stream(): ReadableStream<Uint8Array> }
 
 async function boundedBytes(stream: ReadableStream<Uint8Array>, size: number): Promise<Uint8Array> {
   const reader = stream.getReader(), chunks: Uint8Array[] = []
@@ -68,7 +72,7 @@ function normalizeAttachmentMimeType(name: string, rawMimeType?: string | null):
   return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif' } as const)[ext ?? ''] ?? 'application/octet-stream'
 }
 
-export async function localAttachmentFromBlob(file: { name: string; type?: string; mimeType?: string; size: number; stream(): ReadableStream<Uint8Array> }): Promise<LocalAttachment> {
+export async function localAttachmentFromBlob(file: LocalAttachmentFile): Promise<LocalAttachment> {
   const name = file.name || `image-${randomClientRequestId()}.png`
   if (!Number.isSafeInteger(file.size) || file.size < 1) {
     throw new Error('系统尚未确认附件的名称、类型或大小；这次附件尚未采用。')
@@ -88,7 +92,9 @@ export async function pickLocalAttachment(ports: Pick<NativeDevicePorts, 'filePi
   try {
     result = await ports.filePicker.pickFiles({ limit: 1, readData: false })
   } catch (error) {
-    if (/cancel(?:ed|led)?/iu.test(error instanceof Error ? error.message : String(error))) return null
+    // The native plugin's Android/iOS cancellation contract has this exact message.
+    // Browser cancellation is the input's cancel event, never a focus heuristic.
+    if (error && typeof error === 'object' && 'message' in error && error.message === 'pickFiles canceled.') return null
     throw error
   }
   if (result.files.length === 0) return null

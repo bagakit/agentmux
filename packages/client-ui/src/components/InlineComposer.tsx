@@ -297,6 +297,12 @@ function PresentedInlineComposer(props: InlineComposerProps) {
       const editor = editorRef.current
       if (!editor || latest.current.disabled) return false
       const insert: ComposerInsertionHandle['insert'] = (resolve, options) => insertComposerContent(editor, resolve, draftDocument, options)
+      const files = [...(event.clipboardData?.items ?? [])].filter(item => item.kind === 'file').map(item => item.getAsFile()).filter((file): file is File => file !== null)
+      if (files.length > 1 && latest.current.onDropFiles) {
+        event.preventDefault()
+        latest.current.onDropFiles(files, insert)
+        return true
+      }
       const callback = latest.current.onPasteImage
       const file = [...(event.clipboardData?.items ?? [])].find((item) => item.kind === 'file' && item.type.startsWith('image/'))?.getAsFile()
       if (file && callback) {
@@ -416,7 +422,7 @@ function PresentedInlineComposer(props: InlineComposerProps) {
   // 是配置：不推这一下，用户新加的 keyword 要等到下次打字才划线，看起来就是"加了没用"。
   // 依赖用 join 出来的字符串而不是数组本身：取值层每次筛选都产出新数组，挂数组等于每次渲染都重算。
   // 分隔符取 `\n` 而不是 NUL：keyword 只允许 [A-Za-z0-9_-]，两者都不可能出现在词里，但本仓有一条
-  // 守卫按「含 NUL 即视为二进制」跳过文件，源码里放一个 NUL 会让这个文件被参考项目名扫描静默豁免。
+  // 守卫按「含 NUL 即视为二进制」跳过文件，源码里放一个 NUL 会让这个文件被受保护内容扫描静默豁免。
   const keywordKey = (props.keywords ?? []).join('\n')
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
