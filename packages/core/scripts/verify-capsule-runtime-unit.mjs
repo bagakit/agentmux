@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createRequire } from 'node:module'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const tests = ['packages/core/test/capsule-runtime.test.ts', 'packages/core/test/capsule-terminal-preparation.test.ts', 'packages/core/test/prepared-creation-observation.test.ts']
@@ -129,7 +128,7 @@ async function run(name, mutation) {
 }
 
 try {
-  const sdk = resolve(process.env.CTXMUX_TEST_SDK_SOURCE ?? createRequire(import.meta.url).resolve('@ctxmux/sdk'))
+  const sdk = resolve(process.env.CTXMUX_TEST_SDK_SOURCE ?? fileURLToPath(import.meta.resolve('@ctxmux/sdk')))
   for (const name of await readdir(dirname(sdk), { recursive: true })) {
     if (name.endsWith('.js')) { const path = join(dirname(sdk), name); receipt.sdkInputs[path] = sha(await readFile(path)) }
   }
