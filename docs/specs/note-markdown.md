@@ -182,8 +182,18 @@ $$
 
 ## 元数据与公共消费
 
-原 [NotebookStore](../../packages/core/src/notebook-store.ts) 的 `notebooks.sqlite` 持有目录、关注、操作指纹／轨迹、块归因与不可变正文历史，
-不保存第二份可写当前正文。Canvas 布局仍由原 client owner 持有。普通目录读取不扫描全部作者历史；graph／resolve 从原文件派生关系。
+原 [NotebookStore](../../packages/core/src/notebook-store.ts) 通过[本地文件后端](../../packages/core/src/notebook-files.ts)持有目录、关注、操作指纹／轨迹、块归因与不可变正文历史。
+笔记库中的 `notebooks.root.json` 发布当前文件引用与库身份；相邻的 `notebooks.root.json.files/` 按摘要保存
+`catalog/` 目录 JSON、`metadata/` 准确 Note／资源的归因与事件 JSON、`operations/` 原事件定位 JSON，以及 `bodies/` 历史 Markdown。
+当前正文仍由原 `.note.md` 文件持有，不保存第二份可写当前正文。Canvas 布局仍由原 client owner 持有。
+普通目录读取只取当前目录文件；准确归因与历史查询不读取无关 Note 的元数据或全部历史正文。graph／resolve 从原文件派生关系。
+
+文件后端先持久保存不可变依赖，再原子发布根文件，并以相邻 `.identity` 文件确认库身份。
+首次遇到旧 SQLite／目录 JSON 时，由[只读导入器](../../packages/core/src/notebook-sqlite-import.ts)与原 owner 保全输入原字节，
+核对完整目录、归因、操作及历史正文后切换；正常读写不再使用数据库。中断的导入保留绑定原目标及输入的 `.importing.json`，
+源发生变化时保原件与同次导出，不用旧导出覆盖新输入。已确认的根或依赖文件缺失、损坏时保持未确认，不回退旧数据库或空目录。
+库复制到新目录后，原 owner 核对受管正文身份并更新属于原库的本地资源地址；外部引用与历史 `originalResource` 保留原地址。
+文件自足与内容保全要求归[Note 基础原则](../design/behavior/knowledge-workflows.md#recallnotebook-与块知识)。
 
 `file.read/write/create` 复用原 Files 的准确资源与 revision CAS；`notebook.content`／`inspect --content` 观察同一已保存正文。
 `noteProvenance` 绑定 Note ID、完整 resource、正文 revision 和稳定 block ID。可信 actor 来自原调用权限边界，不能从正文声明作者。
@@ -201,7 +211,7 @@ block inline PM UTF16 offset，不是 Markdown 字节位置。它不是跨文件
 
 ## 仅从原 Markdown 重建索引
 
-`amux notebook scan --workspace ID --path DIR [--query TEXT]` 经原 Files 读取指定物理目录，不要求原 Notebook 数据库。
+`amux notebook scan --workspace ID --path DIR [--query TEXT]` 经原 Files 读取指定物理目录，不要求 Notebook 的目录与元数据文件。
 结果包含每个准确文件的 Note ID、可用标题、revision、大纲、显式前向关系和全文命中；反链可由同一前向关系派生。
 同名页保候选，重复 Note ID 保不同资源行，不选首或合并。无锚点的新正文也可命中，`blockId:null` 明确它没有稳定跳转目标；
 读取不分配身份。未读／无效文件、缺标题、未锚定内容和预算耗尽保 partial／unknown，不能用已见单个候选确认全范围唯一。
@@ -223,8 +233,9 @@ block inline PM UTF16 offset，不是 Markdown 字节位置。它不是跨文件
 可确认的 parent、可信 actor、时间及操作类型。`resource` 随已确认的文件／目录搬迁更新查询归属，`originalResource` 保原事件地址。
 连续同一操作者的活动可归为同一 `batchId`，聚合不删除底层事件。
 
-原 SQLite 数据库以压缩、按摘要去重的内容保存历史，以事件序列索引准确 Note／资源；时间线查询只读取请求窗口的元数据。
-历史内容与原目录、关注和归因一同备份、校验和搬迁。已确认历史 schema 的表缺失或内容损坏是未确认，不能重建空表冒充没有历史；
+文件后端在 `bodies/<sha256>.md` 保存按摘要去重的历史原文；准确 Note／资源的元数据文件保留事件序列，原操作索引随同一根文件发布。
+时间线查询读取该 Note／资源的事件元数据并返回请求窗口；选取具体内容时才读取相应历史正文。
+历史内容与原目录、关注和归因一同备份、校验和搬迁。已确认的历史文件缺失或内容损坏是未确认，不能重建空记录冒充没有历史；
 原目录和健康正文读写仍可用。历史准备或结果记账失败不否定已写成的正文，回执分别返回正文结果与 `noteHistory`。
 `prepared`／`unconfirmed` 保原事件地址，不能凭匹配字节追认本次提交或自动重写正文。
 
