@@ -17,7 +17,7 @@ import { deliverContinuousProgress } from '../src/main/continuous-progress-deliv
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
-import { goalPmoOperation } from '../src/shared/goal-pmo-origin'
+import { goalPmoOperation } from '@agentmux/host/goal-pmo-origin'
 import { MOTE_COORDINATION_ROLE, SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
 import { sessionAgentLaunchResult } from '../src/shared/session-agent-launch-result'
 import { api } from '../src/renderer/src/lib/api'

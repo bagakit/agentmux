@@ -9,7 +9,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
 import { ConfigOwner } from '../src/main/config-owner.js'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import { BrowserTaskAssets, type BrowserTaskAssetStore } from '../src/main/browser-task-assets.js'
-import { desktopNameHistory } from '../src/main/name-history.js'
+import { hostNameHistory } from '@agentmux/host/name-history'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { openDemandStore } from '@agentmux/demand'
 import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge.js'
@@ -213,19 +213,19 @@ describe('names owned by existing Desktop objects', () => {
     const renamed = await demands.update('goal', { title: 'New goal' }, { context, operationId: 'goal-operation' })
     await demands.delete('goal')
     expect(await demands.get('goal')).toBeNull()
-    const first = await desktopNameHistory(spatial, demands, { limit: 1 })
+    const first = await hostNameHistory(spatial, demands, { limit: 1 })
     expect(first.nextCursor).toEqual(expect.any(String))
-    const second = await desktopNameHistory(spatial, demands, { afterId: first.nextCursor!, limit: 1 })
+    const second = await hostNameHistory(spatial, demands, { afterId: first.nextCursor!, limit: 1 })
     expect(first.coverage).toBe('host'); expect(first.records).toHaveLength(1)
     expect(first.diskAcknowledgement).toBe('not-observed')
     expect(second.nextCursor).toBeNull(); expect(second.records).toHaveLength(1)
     const all = [...first.records, ...second.records]
     expect(all.map(record => record.target.kind).sort()).toEqual(['demand', 'host'])
     expect(all.every(record => record.context.actor.id === context.actor.id)).toBe(true)
-    const exact = await desktopNameHistory(spatial, demands, { target: { kind: 'demand', id: 'goal' } })
+    const exact = await hostNameHistory(spatial, demands, { target: { kind: 'demand', id: 'goal' } })
     expect(exact.records).toEqual([renamed.nameChange])
-    await expect(desktopNameHistory(spatial, demands, { limit: 101 })).rejects.toThrow('limit')
-    await expect(desktopNameHistory(spatial, demands, { afterId: 'missing' })).rejects.toThrow('cursor')
+    await expect(hostNameHistory(spatial, demands, { limit: 101 })).rejects.toThrow('limit')
+    await expect(hostNameHistory(spatial, demands, { afterId: 'missing' })).rejects.toThrow('cursor')
   })
   it('distinguishes a trusted local UI principal from a human claim and an unrelated IPC sender', () => {
     const sender = { id: 3 }; const known = desktopNameContext('config:save', sender, sender, 7)
