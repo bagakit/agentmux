@@ -53,7 +53,7 @@ import {
   terminalScrollbackText,
   terminalViewportText
 } from '../lib/terminal-buffer-copy'
-import { TERMINAL_HTTP_URL_REGEX } from '../lib/terminal-http-link'
+import { TERMINAL_LINK_URL_REGEX } from '../lib/terminal-http-link'
 import { terminalOptions, terminalTheme, activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '../lib/terminal-theme'
 import {
   terminalKeyEventHandler,
@@ -149,6 +149,7 @@ const SEARCH_TOGGLES: ReadonlyArray<{
 type TerminalLinkRequest = OpenDestinationRequest & { terminalGeneration: number; origin: OpenHttpLinkOrigin; presentation: Pick<WorkbenchPresentation, 'surface' | 'onSelectRegion'> }
 type TerminalLinkPreviewContent =
   | { kind: 'http'; url: string }
+  | { kind: 'object'; url: string }
   | { kind: 'file'; label: string; system: boolean }
 type TerminalLinkPreview = TerminalLinkPreviewContent & { placement: 'top' | 'bottom' }
 
@@ -269,7 +270,7 @@ export function TerminalView({
   const presentationRef = useRef(presentation)
   presentationRef.current = presentation
   /** Where the current press began, so a drag that ends over a link is not mistaken for a click. */
-  const linkPressRef = useRef<{ x: number; y: number } | null>(null)
+  const linkPressRef = useRef<{ x: number; y: number; altKey: boolean } | null>(null)
   const linkPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const linkPreviewElementRef = useRef<HTMLDivElement>(null)
   const linkPreviewShownRef = useRef(false)
@@ -636,25 +637,11 @@ export function TerminalView({
     // highlightLimit 显式传入而不是吃 addon 的默认值：计数文案要在命中上限时说「1000+」而不是
     // 「1000」，那个判据和这个数必须是同一个来源。不传就得靠"库的默认恰好是 1000"这条无人守的假设。
     const search = new SearchAddon({ highlightLimit: TERMINAL_SEARCH_HIGHLIGHT_LIMIT })
-    /**
-     * 一个 http 链接被点开时该发生什么。**两条 provider 共用这一个出口。**
-     *
-     * 终端里的 http 链接有两个来源，xterm 用两条互不相干的 provider 处理它们：
-     *  - 裸文本 URL（终端只是吐了字符串）→ `WebLinksAddon`，activate 由我们传入；
-     *  - OSC 8 超链接（终端用转义序列声明"这段文字是个链接"，Claude Code 就这么输出）→
-     *    xterm 内建的 `OscLinkProvider`，它的 activate 取自**构造选项 `linkHandler`**，
-     *    没设就落到自己的 `defaultActivate`：一个原生 `confirm("…could potentially be dangerous")`
-     *    加 `window.open`（见 @xterm/xterm OscLinkProvider.ts）。
-     *
-     * 这一族缺陷极难自查：裸 URL 那条路一直好的，所以"点链接出选择器"在开发中天天验证通过，
-     * 而 OSC 8 那条路从未接线，用户看到的是浏览器厂商的告警框，界面上没有任何我们的痕迹。
-     * 判据要按**出口个数**而不是"点击这个动作有没有被处理"——同一个概念有两个入口时，
-     * 少接一个不会让另一个变红。
-     */
-    const activateHttpLink = (event: MouseEvent, uri: string): void => {
+    // xterm has separate providers for bare URIs and OSC 8 declarations. Both
+    // reach this handler: target protocol, never representation, selects the owner.
+    // An explicit OSC 8 handler also avoids xterm's confirm/window.open default.
+    const activateLink = (event: MouseEvent, uri: string): void => {
       clearLinkPreview()
-      const url = parseHttpLinkUrl(uri)
-      if (!url) return
       // Both providers activate on a mouse-up over the link, so a drag that selects text across one
       // would otherwise raise the picker instead of selecting. Only a gesture that stayed put and
       // left no selection is a click on the link.
@@ -667,6 +654,19 @@ export function TerminalView({
         release: { x: event.clientX, y: event.clientY },
         hasSelection: terminal.hasSelection()
       })) return
+      // Scheme selection is not identity parsing. Main's original ingress owns
+      // exact Core parsing, target discovery and visible navigation failures.
+      if (/^amux:/iu.test(uri)) {
+        // Alt+primary belongs to xterm's TUI mouse passthrough, not local navigation.
+        if (origin?.altKey || event.altKey) return
+        void api.ui.openObjectLink(uri).catch(reportError)
+        return
+      }
+      const url = parseHttpLinkUrl(uri)
+      if (!url) {
+        reportError(new Error('This terminal link uses an unsupported protocol. Copy its original address to open it in the appropriate application.'))
+        return
+      }
       if (!displayOriginRef.current) {
         void api.ui.openExternal(url).catch(reportError)
         return
@@ -689,22 +689,27 @@ export function TerminalView({
       linkRequestRef.current = request
       setLinkRequest(request)
     }
-    const hoverHttpLink = (event: MouseEvent, text: string): void => {
+    const hoverLink = (event: MouseEvent, text: string): void => {
+      if (/^amux:/iu.test(text)) {
+        showLinkPreview(event, { kind: 'object', url: text })
+        return
+      }
       const url = parseHttpLinkUrl(text)
       if (!url) return
       showLinkPreview(event, { kind: 'http', url })
     }
-    // OSC 8 链接的出口。`allowNonHttpProtocols` 保持默认（假）：xterm 会在 provideLinks 里就把
-    // 非 http(s) 的 URI 丢掉，于是这个 handler 只会收到我们的选择器能处理的东西。
+    // xterm otherwise drops declared amux links before activation. The shared
+    // handler accepts only amux and HTTP(S), never xterm's window.open default.
     terminal.options.linkHandler = {
-      activate: (event, text) => activateHttpLink(event, text),
-      hover: (event, text) => hoverHttpLink(event, text),
+      allowNonHttpProtocols: true,
+      activate: (event, text) => activateLink(event, text),
+      hover: (event, text) => hoverLink(event, text),
       leave: clearLinkPreview
     }
-    const webLinks = new WebLinksAddon(activateHttpLink, {
-      hover: hoverHttpLink,
+    const webLinks = new WebLinksAddon(activateLink, {
+      hover: hoverLink,
       leave: clearLinkPreview,
-      urlRegex: TERMINAL_HTTP_URL_REGEX
+      urlRegex: TERMINAL_LINK_URL_REGEX
     })
     // Like a browser status readout, stay at the opposite edge of this pane instead of covering
     // the lines around the pointer. One timer belongs to this retained TerminalView, not the Run.
@@ -2284,7 +2289,7 @@ export function TerminalView({
               } else {
                 setPathActions(null)
               }
-              linkPressRef.current = { x: event.clientX, y: event.clientY }
+              linkPressRef.current = { x: event.clientX, y: event.clientY, altKey: event.altKey }
               terminalRef.current?.focus()
             }}
           />
@@ -2297,10 +2302,10 @@ export function TerminalView({
               role="tooltip"
             >
               <span className="terminal-link-preview__url">
-                {linkPreview.kind === 'http' ? linkPreview.url : linkPreview.label}
+                {linkPreview.kind === 'file' ? linkPreview.label : linkPreview.url}
               </span>
               <span className="terminal-link-preview__hint">
-                {linkPreview.kind === 'http'
+                {linkPreview.kind === 'object' ? 'Click to open in AgentMux' : linkPreview.kind === 'http'
                   ? `Click to choose · ${isMac ? '⌘' : 'Ctrl'}+click: system`
                   : linkPreview.system ? 'Click to open with system' : 'Click to open file'}
               </span>

@@ -12,3 +12,11 @@
  */
 export const TERMINAL_HTTP_URL_REGEX =
   /(https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\\^<>`\u2e80-\u2eff\u3000-\u303f\u3040-\u30ff\u3100-\u312f\u3130-\u318f\u31a0-\u31bf\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]*[^\s"':,.!?{}|\\\^~\[\]`()<>\u2e80-\u2eff\u3000-\u303f\u3040-\u30ff\u3100-\u312f\u3130-\u318f\u31a0-\u31bf\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]/
+
+/** Only find a URI span here. Core's object-link parser alone interprets its identity.
+ * Keep punctuation in an amux identity, as in the shared Markdown reader; never trim
+ * a printed reference into another object. The native addon owns wrapped cell ranges. */
+export const TERMINAL_LINK_URL_REGEX = new RegExp(
+  `${TERMINAL_HTTP_URL_REGEX.source}|(?<![A-Za-z0-9_:/?&=%#.@-])amux:\\/\\/[^\\s<>"\x60\\[\\]{}\\u0080-\\uffff]+`,
+  'u'
+)
