@@ -68,11 +68,13 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     expect(await readFile(receipt.path, 'utf8')).toBe('file')
     expect(f.writes).toEqual([]); expect(f.submit).not.toHaveBeenCalled()
     await click(button(ui.element, 'Send'))
-    await act(async () => { await f.submit.mock.results[0]!.value })
+    await act(async () => {
+      await vi.waitFor(() => expect(f.core.agentSession('session-original').promptCompletionAdmission).toMatchObject({
+        acknowledged: true, intent: { run: { runId: 'run-original' }, message: { authorHuman: true } }
+      }))
+    })
     expect(f.writes).toEqual([expect.stringContaining('@' + receipt.path)])
     expect(f.writes[0]).toContain('阅读附件')
-    expect(f.core.agentSession('session-original').promptCompletionAdmission).toMatchObject({ acknowledged: true,
-      intent: { run: { runId: 'run-original' }, message: { authorHuman: true } } })
   })
   it('selects local bytes, explicitly persists to original Host and adds the confirmed path to the original draft before ordinary send', async () => {
     const f = boundFixture(), content = 'original phone file bytes'
@@ -201,5 +203,31 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     await expect(pickLocalAttachment({ filePicker }, readNative)).rejects.toThrow('4 MiB'); expect(readNative).toHaveBeenCalledTimes(1)
     vi.mocked(filePicker.pickFiles).mockResolvedValue({ files: [{ name: 'grows.bin', mimeType: 'application/octet-stream', size: 1, path: 'content://grows' }] })
     await expect(pickLocalAttachment({ filePicker }, readNative)).rejects.toThrow('变大')
+  })
+  it('stages a pasted image with thumbnail preview, uploads to Host on confirmation, and ignores picker cancellation without error banners', async () => {
+    const f = boundFixture()
+    nativeDevicePorts.filePicker = { pickFiles: vi.fn().mockRejectedValue(new Error('pickFiles canceled.')) } as unknown as NativeDevicePorts['filePicker']
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, '查看这张截图')
+    await click(button(ui.element, 'Reference files for the Agent to read'))
+    expect(ui.element.querySelector('.mobile-attachment-notice')).toBeNull()
+    expect(editor(ui.element).textContent).toBe('查看这张截图')
+    const pngBytes = Buffer.from('fake-png-bytes')
+    const imageFile = Object.assign(new NodeBlob([pngBytes], { type: 'image/png' }), { name: 'screenshot.png' })
+    await act(async () => {
+      const event = new Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'clipboardData', {
+        value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => imageFile }], getData: () => '' }
+      })
+      editor(ui.element).dispatchEvent(event)
+    })
+    await act(async () => { await vi.waitFor(() => expect(ui.element.querySelector('.mobile-attachment[data-phase="selected"]')).not.toBeNull()) })
+    expect(ui.element.querySelector('img.mobile-attachment-preview')).not.toBeNull()
+    expect(f.calls).toHaveLength(0)
+    await click(button(ui.element, '上传并加入 screenshot.png'))
+    await settled('inserted')
+    expect(f.calls.filter(call => call.method === 'file.upload')).toHaveLength(1)
+    expect(editor(ui.element).textContent).toContain('screenshot.png')
+    expect(f.submit).not.toHaveBeenCalled()
   })
 })

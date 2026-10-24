@@ -26,6 +26,10 @@ export default defineConfig({
       return changed
     }
   } }],
-  resolve: { ...owning.resolve, alias: [{ find: '@agentmux/relay/offer', replacement: resolve(repository, 'packages/relay/src/connection-offer.ts') }, ...owning.resolve!.alias as Array<{ find: RegExp; replacement: string }>], conditions: ['browser', 'module', 'import'], dedupe: ['react', 'react-dom'] },
-  test: { environment: 'happy-dom', include: ['test/mobile-attachments.test.tsx', 'test/file-upload-public.test.ts', 'test/native-device.test.ts', 'test/device-workface.test.tsx', 'test/mobile-original-retry.test.tsx', 'test/mobile-send-capability.test.tsx', '../desktop/test/composer-file-reference.test.ts', '../desktop/test/composer-semantic-reference.test.tsx', '../desktop/test/inline-composer.test.tsx'], restoreMocks: true, passWithNoTests: false, maxWorkers: 1 }
+  resolve: { ...owning.resolve, alias: [
+    { find: /^@agentmux\/identity\/runtime-source$/, replacement: resolve(repository, 'packages/identity/dist/runtime-source.js') },
+    { find: '@agentmux/relay/offer', replacement: resolve(repository, 'packages/relay/src/connection-offer.ts') },
+    ...owning.resolve!.alias as Array<{ find: RegExp; replacement: string }>
+  ], conditions: ['browser', 'module', 'import'], dedupe: ['react', 'react-dom'] },
+  test: { setupFiles: ['test/device-locks.ts'], environment: 'happy-dom', include: ['test/mobile-attachments.test.tsx', 'test/file-upload-public.test.ts', 'test/native-device.test.ts', 'test/device-workface.test.tsx', 'test/mobile-original-retry.test.tsx', 'test/mobile-send-capability.test.tsx', '../desktop/test/composer-file-reference.test.ts', '../desktop/test/composer-semantic-reference.test.tsx', '../desktop/test/inline-composer.test.tsx'], restoreMocks: true, passWithNoTests: false, maxWorkers: 1 }
 })

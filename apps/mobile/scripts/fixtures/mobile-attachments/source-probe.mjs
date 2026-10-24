@@ -35,6 +35,8 @@ const mutations = [
     tests: ['apps/mobile/test/file-upload-public.test.ts', '-t', 'rejects content mismatch'] },
   { name: 'public-original-run', file: 'packages/core/src/public-rpc-service.ts', before: 'original.session.run.runId !== input.expectedRun.runId', after: 'false',
     tests: ['apps/mobile/test/file-upload-public.test.ts', '-t', 'checks the authoritative original'] },
+  { name: 'public-forward-bridge', file: 'packages/core/src/public-rpc-service.ts', before: 'if (!this.ports.fileUploads && !this.ports.forwardControl)', after: 'if (!this.ports.fileUploads)',
+    tests: ['apps/mobile/test/file-upload-public.test.ts', '-t', 'supports forwardControl bridging'] },
   { name: 'mobile-original-run', file: 'apps/mobile/src/conversation/attachments.ts', before: 'upload.identity.expectedRun.runId === scope.runId', after: 'true',
     tests: ['apps/mobile/test/mobile-attachments.test.tsx', '-t', 'same exact target/content guard'] },
   { name: 'unknown-inspect-only', file: 'apps/mobile/src/conversation/MobileAttachments.tsx', before: "await originalClient.forwardRpc!('file.upload.inspect', upload.identity)", after: "await originalClient.forwardRpc!('file.upload', upload.identity as never)",
@@ -49,6 +51,7 @@ try {
   receipt.tests.push(run('restored'))
   const callers = [
     ['apps/desktop/src/main/ipc.ts', 'fileUploads: new FileUploadOwner'],
+    ['apps/host/src/host.ts', 'options.fileUploads'],
     ['packages/core/src/public-rpc-service.ts', 'this.ports.fileUploads.upload'],
     ['packages/core/src/agentmux-cli-commands.ts', "command('file.upload'"],
     ['packages/core/src/rpc-native-codec.ts', 'parseFileUploadResult'],
@@ -57,8 +60,9 @@ try {
     ['apps/mobile/src/conversation/MobileAttachments.tsx', "forwardRpc!('file.upload'"],
     ['apps/mobile/src/platform/native/device.ts', 'file.blob.stream()'],
     ['apps/mobile/src/conversation/MobileConversationSurface.tsx', 'appendNamedFileReference'],
-    ['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', '@agentmux/client-ui/composer-file-reference'],
-    ['apps/desktop/src/renderer/src/components/NewTabSurface.tsx', '@agentmux/client-ui/composer-file-reference']
+    ['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'useComposerAttachments'],
+    ['apps/desktop/src/renderer/src/lib/use-composer-attachments.ts', '@agentmux/client-ui/composer-file-reference'],
+    ['apps/desktop/src/renderer/src/components/NewTabSurface.tsx', 'useComposerAttachments']
   ]
   assert.ok(callers.length > 0)
   for (const [file, anchor] of callers) {

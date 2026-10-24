@@ -112,13 +112,23 @@ describe('original Host file upload owner and public transport', () => {
     expect((await original.inspect(identity(input))).status).toBe('unknown')
     expect((await original.upload(input))).toMatchObject({ status: 'unknown' })
   })
-  it('checks the authoritative original Session and exact Host/Run before Host persistence', async () => {
+  it('checks the authoritative original Session and exact Host/Run before Host persistence, and supports forwardControl bridging', async () => {
     const service = new AgentMuxRpcService({ fileUploads: owner, coreClients: clients })
     for (const input of [{ ...upload('wrong-host'), hostId: 'foreign' }, { ...upload('wrong-run'), expectedRun: { runId: 'foreign' } },
       { ...upload('prefix'), agentSessionId: 'session' }]) {
       await expect(service.call('file.upload', input, { principal: { kind: 'user', id: 'test' } })).rejects.toMatchObject({ code: 'FILE_UPLOAD_TARGET_MISMATCH' })
       expect((await owner.inspect(identity(input))).status).toBe('missing')
     }
+    const bridged = new AgentMuxRpcService({
+      coreClients: clients,
+      forwardControl: (method, params, context) => service.call(method, params, context)
+    })
+    const heicInput = upload('bridged-heic', 'heic image bytes', 'image/heic', 'photo.HEIC')
+    const uploaded = await bridged.call('file.upload', heicInput, { principal: { kind: 'device', id: 'phone-1' } }).catch(error => error)
+    expect(uploaded).toMatchObject({ status: 'uploaded' })
+    if (uploaded.status === 'uploaded') expect(uploaded.path.endsWith('.heic')).toBe(true)
+    expect(await bridged.call('file.upload.inspect', identity(heicInput), { principal: { kind: 'device', id: 'phone-1' } })).toEqual(uploaded)
+    await bridged.dispose()
     await service.dispose()
   })
   it('preserves public codec identity and rejects paths, oversize, invalid MIME and foreign receipts', () => {
@@ -163,9 +173,9 @@ describe('original Host file upload owner and public transport', () => {
       expect(await readFile(written.result.path, 'utf8')).toBe('CLI original bytes')
       const inspected = JSON.parse((await run(process.execPath, [cli, 'file', 'upload', 'inspect', '--input', check], { env })).stdout)
       expect(inspected.result).toEqual(written.result)
-      for (const args of [['--help'], ['file', 'upload', '--help'], ['file', 'upload', 'inspect', '--help'], ['--skill']]) {
+      for (const args of [['file', '--help'], ['file', 'upload', '--help'], ['file', 'upload', 'inspect', '--help'], ['file', '--skill']]) {
         const help = (await run(process.execPath, [cli, ...args], { env })).stdout
-        expect(help).toContain(args.includes('inspect') ? 'original upload' : args[0] === '--help' || args[0] === '--skill' ? 'file upload' : '4 MiB')
+        expect(help).toContain(args.includes('inspect') ? 'original upload' : args[1] === '--skill' ? 'amux file --help' : args[1] === '--help' ? 'file upload' : '4 MiB')
       }
     } finally { await client.dispose(); await server.stop() }
   }, 20000)

@@ -56,7 +56,7 @@ try {
   await fs.copyFile(path.join(fixture, 'attachments-preload.cjs'), path.join(compiled, 'preload.cjs'))
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'attachments-entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [clientSources, workers],
-    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
+    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('(disabled):'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   receipt.virtualInputs = Object.fromEntries(Object.entries(built.metafile.inputs).filter(([name]) => name.startsWith('(disabled):')))
   for (const name of ['capture-ui.mjs', 'attachments-main.cjs', 'attachments-preload.cjs']) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))

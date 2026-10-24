@@ -27,6 +27,7 @@ app.whenReady().then(async () => {
   const capture = async name => { await pause(120); const facts = await read(`(()=>{const n=document.querySelector('.mobile-app');return {text:n.textContent,overflow:n.scrollWidth>n.clientWidth,rootTop:n.getBoundingClientRect().top,windowScrollY:scrollY,appScroll:n.scrollTop,header:document.querySelector(".mobile-header").getBoundingClientRect().toJSON(),viewport:{height:innerHeight,visualHeight:visualViewport.height,top:visualViewport.offsetTop},...attachmentScene.facts()}})()`); assert.equal(facts.overflow, false); await fs.writeFile(path.join(evidence, name+'.png'), (await win.webContents.capturePage()).toPNG()); result.images.push(name+'.png'); result.operations.push({ name, ...facts }) }
   await click('.mobile-spatial-panel details > summary'); await click('.mobile-session-list button')
   await click('[contenteditable="true"]'); win.webContents.insertText('先看附件，再比较两种方案。')
+  assert.equal(await read('!!document.querySelector("[aria-label=\\"Reference files for the Agent to read\\"]")?.getClientRects().length'), true, 'Attachment button is directly reachable in default collapsed toolbar')
   await named('Show the message tool row')
   await named('Reference files for the Agent to read'); await until('!!document.querySelector(".mobile-attachment")')
   await capture('image-selected-phone')
