@@ -294,7 +294,7 @@ app.whenReady().then(async () => {
     })
     if (scenario === 'perception' || scenario === 'perception-scale') {
       await require('./perception.cjs')({ win, result, read, click, key, frame, check, facts, activity, motionFrame, intact, matrix, mapReady, closeReader, locate, pause, until, settle, fullMap, measure, pan, overview, observeDenseRelations, denseOnly: scenario === 'perception-scale' })
-      if (scenario === 'perception-scale') await require('./terrain.cjs')({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, closeDetails, locate, pause, until, settle, matrix, measure })
+      if (scenario === 'perception-scale') await require('./terrain.cjs')({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, closeDetails, locate, pause, until, settle, matrix, measure, dragCanvas })
       if (scenario === 'perception-scale') await require('./adaptive.cjs')({ win, result, read, click, key, move, frame, check, intact, mapReady, closeDetails, locate, pause, until, matrix, dragCanvas })
       if (scenario === 'perception-scale') await require('./settings.cjs')({ win, result, read, click, key, move, frame, check, intact, closeDetails, locate, pause, until, matrix })
     } else {

@@ -1211,6 +1211,76 @@ function regionLabelBounds(id: string) {
   expect(label).not.toBeNull()
   return { element: label, x: Number.parseFloat(label.style.left), y: Number.parseFloat(label.style.top), width: Number(label.dataset.labelWidth), height: Number(label.dataset.labelHeight) }
 }
+it.each(['top-clamped', 'natural', 'bottom-clamped'] as const)('keeps a %s summary and its actual fold action fixed while internal connections disclose around it', async placement => {
+  const scene = scenario(12); scene.areas = [{ id: 'area-0', name: 'Original terrain', kind: 'project', members: [...scene.agents.keys()] }]
+  const nativeBounds = HTMLElement.prototype.getBoundingClientRect
+  const originalHeight = vi.mocked(Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!.get!).getMockImplementation()!
+  const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return originalHeight.call(this) + (this.classList.contains('collaboration-area__overview-label') && this.querySelector('.collaboration-area__internal') ? 26 : 0)
+  })
+  const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const label = this.classList.contains('collaboration-area__overview-label') ? this : this.classList.contains('collaboration-area__summary') ? this.parentElement : null
+    if (!label) return nativeBounds.call(this)
+    const y = Number.parseFloat(label.style.top), x = Number.parseFloat(label.style.left)
+    const rowHeight = originalHeight.call(label), rowTop = label.dataset.internalAbove === 'true' ? label.offsetHeight - rowHeight : 0
+    return new DOMRect(x, y + (this === label ? 0 : rowTop), label.offsetWidth, this === label ? label.offsetHeight : rowHeight)
+  })
+  const Resize = globalThis.ResizeObserver, observers: { callback: ResizeObserverCallback; targets: Set<Element>; observer: ResizeObserver }[] = []
+  vi.stubGlobal('ResizeObserver', class extends Resize {
+    owned: typeof observers[number]
+    constructor(callback: ResizeObserverCallback) { super(callback); this.owned = { callback, targets: new Set(), observer: this }; observers.push(this.owned) }
+    observe(target: Element) { this.owned.targets.add(target); super.observe(target) }
+    disconnect() { this.owned.targets.clear(); super.disconnect() }
+  })
+  const notifyLabelSize = async () => act(async () => {
+    for (const { callback, targets, observer } of observers) for (const target of targets) if ((target as HTMLElement).dataset.regionId === 'area-0') callback([
+      { target, borderBoxSize: [{ inlineSize: (target as HTMLElement).offsetWidth, blockSize: (target as HTMLElement).offsetHeight }] } as unknown as ResizeObserverEntry
+    ], observer)
+  })
+  try {
+    await loaded(scene)
+    const area = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+    const member = scene.areas[0]!.members.map(id => renderedBox(collaborationAgentNode('area-0', id))).sort((a, b) => b.y - a.y)[0]!
+    await viewport(placement === 'top-clamped' ? -member.x + 20 : 120 - area.x - area.heading.x,
+      placement === 'top-clamped' ? -member.y + 90 : placement === 'natural' ? 120 - area.y - area.heading.y : 392 - area.y - area.heading.y - area.heading.height, 600, 400)
+    await notifyLabelSize()
+    const before = regionLabelBounds('area-0'), summaryAt = () => {
+      const label = regionLabelBounds('area-0')
+      return { x: label.x, y: label.y + Number.parseFloat(label.element.style.getPropertyValue('--collaboration-summary-bottom')) }
+    }
+    if (placement === 'top-clamped') {
+      expect((area.y + area.heading.y + area.heading.height) + captured.store!.getState().transform[1]).toBeLessThan(0)
+      expect(before.y).toBe(8)
+    } else expect(before.y).toBeGreaterThan(8)
+    const anchor = summaryAt(), scale = captured.store!.getState().transform[2]
+    expect(before.element.querySelector('.collaboration-area__internal')).toBeNull()
+    const folded = () => renderedBox(area.id).folded
+    await act(async () => before.element.querySelector<HTMLButtonElement>('.collaboration-area__fold')!.click())
+    await settleCollaborationCanvas(() => { expect(folded()).toBe(true); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
+    await notifyLabelSize()
+    const after = regionLabelBounds('area-0')
+    expect(after.element.querySelector('.collaboration-area__internal')?.textContent).toContain('1 internal connections')
+    expect(after.height).toBe(before.height + 26)
+    expect(summaryAt()).toEqual(anchor)
+    expect(after.y).toBe(before.y - (placement === 'bottom-clamped' ? 26 : 0))
+    expect(after.element.dataset.internalAbove).toBe(placement === 'bottom-clamped' ? 'true' : undefined)
+    expect(after.y + after.height).toBeLessThan(400)
+    const rule = collaborationCSS.slice(collaborationCSS.indexOf('.collaboration-area__fold {')).split('}')[0]!
+    expect(rule).toContain('top: calc(var(--collaboration-summary-bottom, 44px) - 28px)')
+    expect(rule).not.toMatch(/bottom\s*:/)
+    const activityRule = collaborationCSS.slice(collaborationCSS.indexOf('.collaboration-area__overview-label .collaboration-area__activity {')).split('}')[0]!
+    expect(activityRule).toContain('top: calc(var(--collaboration-summary-top, 0px) + 10px)')
+    const internalRule = collaborationCSS.slice(collaborationCSS.indexOf('.collaboration-area__internal {')).split('}')[0]!
+    expect(internalRule).toContain('contain: inline-size')
+    expect(internalRule).toContain('overflow-wrap: anywhere')
+    await act(async () => after.element.querySelector<HTMLButtonElement>('.collaboration-area__fold')!.click())
+    await settleCollaborationCanvas(() => { expect(folded()).toBe(false); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
+    await notifyLabelSize()
+    expect(summaryAt()).toEqual(anchor)
+    expect(regionLabelBounds('area-0').height).toBe(before.height)
+    expect(captured.store!.getState().transform[2]).toBe(scale)
+  } finally { bounds.mockRestore(); height.mockImplementation(originalHeight); vi.stubGlobal('ResizeObserver', Resize) }
+})
 async function readDistantRegion(scene: Scene) {
   const area = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
   const member = scene.areas[0]!.members.map(id => renderedBox(collaborationAgentNode('area-0', id))).sort((a, b) => b.y - a.y)[0]!
