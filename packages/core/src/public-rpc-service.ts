@@ -128,7 +128,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
-  'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
+  'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
     handOff(...args: Parameters<AgentMuxClient['handOff']>):
@@ -1633,6 +1633,7 @@ export class AgentMuxRpcService {
         // an original local journal, authority or reader for an already-owned domain.
         const local = await inspectDiagnosticEvidence(this.diagnosticQuery, {}, this.ports, caller, context.signal)
         const ownsTarget = local.capabilities.some(capability => capability.domain === input.target?.domain &&
+          (input.target?.domain !== 'agent.startup' || capability.target === ('recent' in input.target ? 'recent' : 'log-id')) &&
           (input.target?.domain !== 'client.incident' || capability.target === ('recent' in input.target ? 'recent' : 'log-id')) &&
           (input.target?.domain !== 'client.notifications' || capability.target === ('list' in input.target ? 'notification-list' : 'notification-id')))
         if ((!input.target || !ownsTarget) && this.ports.forwardControl) {

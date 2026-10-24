@@ -6,6 +6,8 @@ import { parseExternalConversationReference, parseExternalConversationAuthority,
 import { mintObjectId } from './object-id.js'
 import type { ReadingDiagnosticRecord, ReadingDiagnosticReason } from './reading-diagnostic.js'
 import { CoreReadingDiagnosticSource } from './reading-diagnostic-source.js'
+import { CoreStartupDiagnosticJournal } from './startup-diagnostic-journal.js'
+import { parseStartupDiagnosticTarget, type AgentStartupDiagnosticOwner, type AgentStartupDiagnosticExactTarget, type AgentStartupDiagnosticRecentTarget } from './startup-diagnostic.js'
 import { unavailableDiagnosticEvidence } from '@agentmux/diagnostic-evidence'
 import type { ReadingDiagnosticExactTarget, ReadingDiagnosticFindParams, ReadingDiagnosticFindResult } from './reading-diagnostic-query.js'
 import { runAgentMessageBroadcast, type AgentMuxMessageBroadcastInput, type AgentMuxMessageBroadcastReceipt } from './agent-message-broadcast.js'
@@ -409,6 +411,8 @@ function rawInputCancellationDetail(session: AgentMuxAgentSession, data: AgentMu
 }
 
 export type AgentMuxClientOptions = {
+  /** Original semantic owner identity, supplied by the Host; never inferred from a path or Run. */
+  diagnosticOwner?: AgentStartupDiagnosticOwner
   externalConversationAuthority?: AgentExternalConversationAuthorityPort
   hostExecutorOwner?: AgentMuxHostExecutorOwner
   creationAuthority?: AgentMuxCreationAuthority
@@ -755,6 +759,7 @@ export class AgentMuxClient {
   private readonly providerReads = new Set<AbortController>()
   private readonly conversationReadState = new ConversationReaderState()
   private readingDiagnosticSource: CoreReadingDiagnosticSource | undefined
+  private readonly startupDiagnostics: CoreStartupDiagnosticJournal
   private originalReadingDiagnosticSource(): CoreReadingDiagnosticSource | undefined {
     try { return this.readingDiagnosticSource ??= new CoreReadingDiagnosticSource() } catch { return undefined }
   }
@@ -843,6 +848,11 @@ export class AgentMuxClient {
       ? new AgentProviderRegistry(options.providers)
       : createDefaultAgentMuxPluginRegistry(options.plugins).providers
     this.store = options.store ?? new AgentMuxFileAgentSessionStore()
+    const diagnosticInstance = mintObjectId()
+    const diagnosticOwner = options.diagnosticOwner ?? { authority: { kind: 'core-startup-observer', id: diagnosticInstance, lifetime: 'instance' as const }, ownerInstanceId: diagnosticInstance }
+    this.startupDiagnostics = new CoreStartupDiagnosticJournal(diagnosticOwner,
+      diagnosticOwner.authority.lifetime === 'durable' && this.store instanceof AgentMuxFileAgentSessionStore
+        ? join(dirname(this.store.path), 'startup-diagnostics') : undefined)
     this.deliveryAttempts = new DeliveryAttemptStore(join(this.store instanceof AgentMuxFileAgentSessionStore
       ? dirname(this.store.path) : defaultAgentMuxStateDirectory(), 'delivery-attempts'))
     // An implicit Session store is Runtime-local, not the durable message queue authority.
@@ -1807,6 +1817,9 @@ export class AgentMuxClient {
   }
 
   async dispose(): Promise<void> {
+    // Diagnostic IO keeps its own writer lock until settlement. It must not delay
+    // healthy business ownership transfer or acquiring the new Core lease.
+    void this.startupDiagnostics.dispose()
     this.messageNotificationsUnsubscribe()
     await this.messageNotifications.dispose()
     this.messageObservationDisposed = true; this.messageObservation?.dispose(); this.messageObservation = undefined
@@ -2379,7 +2392,19 @@ export class AgentMuxClient {
     return descriptor ? { ...page, hostId: input.hostId } : page
   }
 
-  /** Only this Core instance is covered; inspection never creates a Reader or connects Runtime. */
+  /** Read this owner's retained startup facts without probing or connecting Runtime. */
+  async readAgentStartupDiagnostic(input: { target: AgentStartupDiagnosticExactTarget; includeRaw?: boolean }) {
+    if (!input || Object.keys(input).some(key => !['target', 'includeRaw'].includes(key)) || input.includeRaw !== undefined && typeof input.includeRaw !== 'boolean')
+      throw new AgentMuxError('Startup diagnostic reading accepts one exact target and explicit material choice.', 'INVALID_CONTROL_REQUEST')
+    const target = parseStartupDiagnosticTarget(input.target)
+    if (!('logId' in target)) throw new AgentMuxError('An exact startup record is required.', 'INVALID_CONTROL_REQUEST')
+    return this.startupDiagnostics.read(target, input.includeRaw === true)
+  }
+  async findAgentStartupDiagnostics(input: AgentStartupDiagnosticRecentTarget) {
+    const target = parseStartupDiagnosticTarget(input)
+    if (!('recent' in target)) throw new AgentMuxError('A bounded startup discovery query is required.', 'INVALID_CONTROL_REQUEST')
+    return this.startupDiagnostics.read(target)
+  }
   async readReadingDiagnostic(target: ReadingDiagnosticExactTarget) {
     const source = this.originalReadingDiagnosticSource()
     return source ? source.read(target) : unavailableDiagnosticEvidence<ReadingDiagnosticExactTarget, ReadingDiagnosticRecord>(target, 'DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE')
@@ -8035,6 +8060,9 @@ export class AgentMuxClient {
             const observation = parseTerminalFrontendObservation(value)
             if (watch.frontend && watch.frontend.state !== 'unknown' && observation.observedAt < watch.frontend.observedAt) return
             watch.frontend = { ...observation, run: { ...session.run } }
+            // Record only this accepted original observation, never status projection
+            // or a new probe. Journal failure cannot change the live business state.
+            this.startupDiagnostics.observe(this.registry.get(session.agentSessionId), observation)
             if (observation.state !== 'unknown') { watch.failures = 0; for (const ready of watch.ready) ready() }
             if (observation.state === 'detached') this.promptSubmission.cancelReadiness(session.agentSessionId)
             this.publishSession(current)

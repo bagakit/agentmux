@@ -1,4 +1,5 @@
 import { parseReadingDiagnosticSourceRead, parseReadingDiagnosticSourceFind, type ReadingDiagnosticExactTarget, type ReadingDiagnosticFindParams } from './reading-diagnostic-query.js'
+import { parseStartupDiagnosticRead, type AgentStartupDiagnosticExactTarget, type AgentStartupDiagnosticRecentTarget } from './startup-diagnostic.js'
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-recovery/control-contract.js'
 import { parseConversationViewReleaseResult, parseConversationCheckpointPage, parseConversationReadPage, parseConversationChangesPage, parseConversationWatchOpening, parseConversationObservation, type ConversationRef } from './conversation.js'
@@ -230,6 +231,11 @@ export async function connectHostedAgentMux(options: {
       invocation: encodeHostedValue({ method, args: wireArgs }) as AgentMuxHostedInvocation }, { signal: observationSignal(signal) })
     if (method === 'connectRuntime') await connectControl(true)
     const decoded = decodeHostedValue(response.value)
+    if (method === 'findAgentStartupDiagnostics') return parseStartupDiagnosticRead(decoded, wireArgs[0] as AgentStartupDiagnosticRecentTarget)
+    if (method === 'readAgentStartupDiagnostic') {
+      const input = wireArgs[0] as { target: AgentStartupDiagnosticExactTarget; includeRaw?: boolean }
+      return parseStartupDiagnosticRead(decoded, input.target, input.includeRaw === true)
+    }
     if (method === 'findReadingDiagnostics') return parseReadingDiagnosticSourceFind(decoded, wireArgs[0] as ReadingDiagnosticFindParams)
     if (method === 'readReadingDiagnostic') return parseReadingDiagnosticSourceRead(decoded, wireArgs[0] as ReadingDiagnosticExactTarget)
     if (method === 'readAgentSession') return parseHostedAgentSessionRead(decoded, wireArgs[0] as string)

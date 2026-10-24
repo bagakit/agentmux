@@ -90,6 +90,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     // Both namespace leases are already held. One Client owns metadata and Native observation;
     // a caller's unconfirmed Native startup must not dispose this semantic authority.
     client = new AgentMuxClient({ ...options, store, controlSocketPath: socketPath,
+      diagnosticOwner: { authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, ownerInstanceId },
       ...(options.externalInputAuthority?.resolveConversationMessage ? { externalConversationAuthority: { resolveConversationMessage: ref => options.externalInputAuthority!.resolveConversationMessage!(ref) } } : {}),
       hostExecutorOwner: options.hostExecutorOwner ?? new AgentMuxHostExecutorOwner({
         path: join(stateDirectory, 'host-executors.json'), runtimeId, catalog: () => client!.catalog()

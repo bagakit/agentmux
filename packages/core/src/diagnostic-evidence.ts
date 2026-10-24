@@ -1,4 +1,6 @@
 import type { ReadingDiagnosticRecord } from './reading-diagnostic.js'
+import type { AgentStartupDiagnosticTarget, AgentStartupDiagnosticData } from './startup-diagnostic.js'
+export type * from './startup-diagnostic.js'
 import type { ReadingDiagnosticTarget, ReadingDiagnosticFindResult } from './reading-diagnostic-query.js'
 import type { PerformanceSceneEvidenceTarget, PerformanceSceneEvidence } from './performance-scene-evidence.js'
 /** Public domain contracts. The portable mechanism owns no Core business payload. */
@@ -28,7 +30,7 @@ export type AgentMuxNativeEvidenceTarget = {
   runId: string
 }
 export type AgentMuxToolkitFailureEvidenceTarget = { domain: 'toolkit.performance-failure'; hostId: string; executionId: string }
-export type AgentMuxDiagnosticEvidenceTarget = ReadingDiagnosticTarget | PerformanceSceneEvidenceTarget | AgentMuxDeliveryEvidenceTarget | AgentMuxNativeEvidenceTarget | AgentMuxToolkitFailureEvidenceTarget | AgentMuxMoteContextEvidenceTarget | AgentMuxClientIncidentTarget | AgentMuxClientNotificationsTarget
+export type AgentMuxDiagnosticEvidenceTarget = AgentStartupDiagnosticTarget | ReadingDiagnosticTarget | PerformanceSceneEvidenceTarget | AgentMuxDeliveryEvidenceTarget | AgentMuxNativeEvidenceTarget | AgentMuxToolkitFailureEvidenceTarget | AgentMuxMoteContextEvidenceTarget | AgentMuxClientIncidentTarget | AgentMuxClientNotificationsTarget
 export type AgentMuxDeliveryEvidence = {
   kind: 'delivery'
   source: 'client' | 'core'
@@ -64,7 +66,7 @@ export type AgentMuxToolkitFailureEvidence = {
   coverage: 'latest-only'
   omissions: Array<'raw-query-budget'>
 }
-export type AgentMuxDiagnosticEvidenceData = ReadingDiagnosticRecord | ReadingDiagnosticFindResult | PerformanceSceneEvidence | AgentMuxDeliveryEvidence | AgentMuxToolkitFailureEvidence | AgentMuxMoteContextEvidence | AgentMuxClientIncidentEvidence | AgentMuxClientNotificationsEvidence
+export type AgentMuxDiagnosticEvidenceData = AgentStartupDiagnosticData | ReadingDiagnosticRecord | ReadingDiagnosticFindResult | PerformanceSceneEvidence | AgentMuxDeliveryEvidence | AgentMuxToolkitFailureEvidence | AgentMuxMoteContextEvidence | AgentMuxClientIncidentEvidence | AgentMuxClientNotificationsEvidence
 /** An existing client owner, injected by the host. Core owns no UI or source state. */
 export type AgentMuxMoteContextEvidencePort = {
   hostId: string

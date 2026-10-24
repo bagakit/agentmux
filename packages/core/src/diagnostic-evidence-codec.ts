@@ -1,4 +1,5 @@
 import { parseReadingDiagnosticRecord } from './reading-diagnostic.js'
+import { parseStartupDiagnosticRead, parseStartupDiagnosticTarget } from './startup-diagnostic.js'
 import { parseReadingDiagnosticTarget, parseReadingDiagnosticFindResult, parseReadingDiagnosticSourceRead } from './reading-diagnostic-query.js'
 import { parsePerformanceSceneEvidence } from './performance-scene-evidence.js'
 import { parseClientIncidentTarget, parseClientIncidentRecord, parseClientIncidentPage } from './client-incident.js'
@@ -65,6 +66,7 @@ export function parseDiagnosticEvidenceParams(value: unknown): AgentMuxDiagnosti
 }
 function parseTarget(v: unknown): AgentMuxDiagnosticEvidenceTarget {
   const p = rpcRecord(v)
+  if (p.domain === 'agent.startup') return parseStartupDiagnosticTarget(p)
   if (p.domain === 'reading.lifecycle') { const target = parseReadingDiagnosticTarget(p); if (Buffer.byteLength(JSON.stringify(target)) > 1024) bad(); return target }
   if (p.domain === 'delivery.client' || p.domain === 'delivery.core') {
     rpcRecord(p, ['domain', 'hostId', 'logId', 'authority']); text(p.hostId); validateDeliveryLogId(p.logId)
@@ -148,7 +150,9 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
       member(raw.returned, ['included', 'withheld', 'unavailable']); member(raw.truncated, [true, false, null])
       if (!params.includeRaw && raw.returned === 'included') bad()
       if (r.availability === 'found') {
-        if (target.domain === 'reading.lifecycle') {
+        if (target.domain === 'agent.startup') {
+          parseStartupDiagnosticRead(r, target, params.includeRaw === true)
+        } else if (target.domain === 'reading.lifecycle') {
           if ('logId' in target) {
             const data = parseReadingDiagnosticRecord(r.data)
             if (data.logId !== target.logId || data.scope.owner !== 'core' || r.recordRef === null || r.scope !== 'record' || raw.returned !== 'withheld') bad()
@@ -227,9 +231,10 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
     for (const key of Object.keys(limits)) if (b[key] !== limits[key as keyof typeof limits]) bad()
     for (const key of ['usedReads', 'usedBytes', 'elapsedMs']) number(b[key])
     if (b.usedReads !== reads.length || b.usedBytes !== Buffer.byteLength(JSON.stringify(p))) bad()
-    array(p.capabilities, 12, item => { const c = object(item, ['domain', 'target', 'raw', 'read']); member(c.domain, ['delivery.client', 'delivery.core', 'native-recorder-failure', 'toolkit.performance-failure', 'mote.context.client', 'performance.scene', 'reading.lifecycle', 'client.incident', 'client.notifications']); member(c.target, ['log-id', 'recent', 'session-run', 'execution-id', 'mote-context', 'capture-id', 'reading-lifecycle', 'notification-list', 'notification-id']); member(c.raw, [true, false]); member(c.read, ['supported', 'not-exposed'])
+    array(p.capabilities, 14, item => { const c = object(item, ['domain', 'target', 'raw', 'read']); member(c.domain, ['agent.startup', 'delivery.client', 'delivery.core', 'native-recorder-failure', 'toolkit.performance-failure', 'mote.context.client', 'performance.scene', 'reading.lifecycle', 'client.incident', 'client.notifications']); member(c.target, ['log-id', 'recent', 'session-run', 'execution-id', 'mote-context', 'capture-id', 'reading-lifecycle', 'notification-list', 'notification-id']); member(c.raw, [true, false]); member(c.read, ['supported', 'not-exposed'])
       if ((c.domain === 'reading.lifecycle') !== (c.target === 'reading-lifecycle') || c.domain === 'reading.lifecycle' && c.raw !== false || (c.domain === 'mote.context.client') !== (c.target === 'mote-context') || (c.domain === 'performance.scene') !== (c.target === 'capture-id') || c.domain === 'performance.scene' && c.raw !== false) bad()
-      if (c.target === 'recent' && c.domain !== 'client.incident' || c.domain === 'client.incident' && (c.raw !== false || !['log-id', 'recent'].includes(c.target as string))) bad()
+      if (c.target === 'recent' && !['client.incident', 'agent.startup'].includes(c.domain as string) || c.domain === 'client.incident' && (c.raw !== false || !['log-id', 'recent'].includes(c.target as string))) bad()
+      if (c.domain === 'agent.startup' && (!['log-id', 'recent'].includes(c.target as string) || c.raw !== (c.target === 'log-id'))) bad()
       if ((c.domain === 'client.notifications') !== ['notification-list', 'notification-id'].includes(c.target as string) || c.domain === 'client.notifications' && c.raw !== true) bad()
     })
     return p as AgentMuxDiagnosticEvidenceResult
