@@ -27,7 +27,7 @@ import { cancelFileRegionFormat, formatFileRegion, type FileFormatResult } from 
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
 const ThemeObjectSourceCodeIcon = semanticIconComponent('object.source-code')
-const ThemeActionRevealIcon = semanticIconComponent('action.reveal')
+const ThemeActionPreviewIcon = semanticIconComponent('action.preview')
 const ThemeActionSaveIcon = semanticIconComponent('action.save')
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeActionWrapTextIcon = semanticIconComponent('action.wrap-text')
@@ -251,7 +251,7 @@ export function EditorPane({
         <div className="editor-header__actions">
           {note ? <div className="note-view-controls" ref={noteToolbarRef} /> : null}
           {note ? <button type="button" className="small-button" aria-label="Open versions and recovery" aria-expanded={drawerOpen} onClick={event => drawerOpen ? setDrawer(null) : openActivity('versions', event.currentTarget)}>History{keptCount ? ` · ${keptCount} kept` : ''}</button> : null}
-          {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <ThemeObjectSourceCodeIcon size={13} /> : <ThemeActionRevealIcon size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
+          {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <ThemeObjectSourceCodeIcon size={13} /> : <ThemeActionPreviewIcon size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
           {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>
             : conflict ? note ? <button type="button" className="small-button" onClick={event => openActivity('drafts', event.currentTarget)}>Review changes</button> : <button className="small-button small-button--warning" disabled={saving} title="Overwrite file with this draft" aria-label="Overwrite file with this draft" onClick={() => void overwrite(tabId, surface.regionId)}><ThemeActionSaveIcon size={13} /><span className="editor-header__label">{saving ? 'Overwriting…' : 'Overwrite'}</span></button>
               : issue?.kind === 'write-unknown' ? <button className="small-button" disabled={saving} title="Check saved file before retrying" aria-label="Check saved file" onClick={() => void reload(tabId, surface.regionId)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{saving ? 'Checking…' : 'Check saved file'}</span></button>

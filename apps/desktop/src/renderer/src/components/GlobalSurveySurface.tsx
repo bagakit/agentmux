@@ -44,7 +44,7 @@ const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
-const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
+const ThemeObjectNoteIcon = semanticIconComponent('object.note')
 const ThemeFileTextIcon = semanticIconComponent('file.text')
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 const ThemeLayoutOpenLeftIcon = semanticIconComponent('layout.open-left')
@@ -232,7 +232,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const browsers = surfaces.filter(surface => surface.kind === 'browser')
     if (surfaces.length === 1 && browsers.length === 1 && browsers[0]!.faviconDataUrl) return <span className="survey-page-favicon" aria-hidden="true"><ThemeObjectBrowserIcon size={16} /><img key={browsers[0]!.faviconDataUrl} src={browsers[0]!.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /></span>
     const Icon = surfaces.length && surfaces.every(surface => surface.kind === 'browser') ? ThemeObjectBrowserIcon
-      : surfaces.length && surfaces.every(surface => surface.kind === 'file' && surface.path.endsWith(NOTE_FILE_EXTENSION)) ? ThemeActionEditNoteIcon
+      : surfaces.length && surfaces.every(surface => surface.kind === 'file' && surface.path.endsWith(NOTE_FILE_EXTENSION)) ? ThemeObjectNoteIcon
         : surfaces.length && surfaces.every(surface => surface.kind === 'file') ? ThemeFileTextIcon : ThemeObjectLauncherIcon
     return <Icon size={16} />
   }

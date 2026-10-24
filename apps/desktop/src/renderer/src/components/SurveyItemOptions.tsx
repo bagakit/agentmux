@@ -8,7 +8,7 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
-const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
+const ThemeActionCreateNoteIcon = semanticIconComponent('action.create-note')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
@@ -88,7 +88,7 @@ function SurveyItemMenuItems({ primitives: M, run = action => action(), title, z
   const displayPath = usePathDisplay()
   return <>
       <M.Label className="survey-topic-menu__label">{title}</M.Label>
-      {onNewNote ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewNote)}><ThemeActionEditNoteIcon size={14} /><span>New Note</span></M.Item> : null}
+      {onNewNote ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewNote)}><ThemeActionCreateNoteIcon size={14} /><span>New Note</span></M.Item> : null}
       {onNewAgent ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewAgent)}><ThemeObjectAgentIcon size={14} /><span>New Agent</span></M.Item> : null}
       {onNewNote || onNewAgent ? <M.Separator className="tab-context-menu__separator" /> : null}
       {zone && onRename ? <M.Item className="tab-context-menu__item" onSelect={() => run(onRename)}><ThemeActionEditIcon size={14} /><span>Rename exploration</span></M.Item> : null}

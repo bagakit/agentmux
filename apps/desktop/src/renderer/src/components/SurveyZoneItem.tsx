@@ -7,7 +7,7 @@ import { currentDisplayNameRevision } from '../store'
 
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
 const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
-const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
+const ThemeActionCreateNoteIcon = semanticIconComponent('action.create-note')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 
 
@@ -52,7 +52,7 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
       <button type="button" aria-label="Cancel rename" onClick={() => { ++editGeneration.current; onEdit?.(false) }}><ThemeActionCancelIcon size={12} /></button>
     </form> : onContextMenu ? <ContextMenu.Trigger asChild onContextMenu={event => { event.currentTarget.focus(); onContextMenu(event.currentTarget) }}>{item}</ContextMenu.Trigger> : item}
     {!editing ? <div className="survey-item-shortcuts" aria-label={`Create from ${title}`}>
-      {onNewNote ? <button type="button" aria-label={`New note in Recall from ${title}`} title="New note in Recall" onClick={() => onNewNote(zone.zoneId)}><ThemeActionEditNoteIcon size={14} /></button> : null}
+      {onNewNote ? <button type="button" aria-label={`New note in Recall from ${title}`} title="New note in Recall" onClick={() => onNewNote(zone.zoneId)}><ThemeActionCreateNoteIcon size={14} /></button> : null}
       {onNewAgent ? <button type="button" aria-label={`New agent in ${title}`} title="New agent" onClick={() => onNewAgent(zone.zoneId)}><ThemeObjectAgentIcon size={14} /></button> : null}
     </div> : null}
   </div>

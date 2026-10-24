@@ -13,7 +13,7 @@ import { ServiceWindowNotice } from './ServiceWindowNotice'
 
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
-const ThemeActionEditNoteIcon = semanticIconComponent('action.edit-note')
+const ThemeObjectNoteIcon = semanticIconComponent('object.note')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionCollapseIcon = semanticIconComponent('action.collapse')
@@ -140,7 +140,7 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
     })
   }
   const labels = { terminal: 'Terminal', browser: 'Browser', note: 'Note' }
-  const icons = { terminal: ThemeObjectTerminalIcon, browser: ThemeObjectBrowserIcon, note: ThemeActionEditNoteIcon }
+  const icons = { terminal: ThemeObjectTerminalIcon, browser: ThemeObjectBrowserIcon, note: ThemeObjectNoteIcon }
   const hasNoteDraft = Boolean(draft.note)
   const actions = { terminal: openTerminal, note: () => openNote(hasNoteDraft ? draft.note : undefined) }
   function header(kind: UtilityKind) {
