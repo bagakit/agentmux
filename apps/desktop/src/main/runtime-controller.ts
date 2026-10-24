@@ -5,11 +5,9 @@ import { readInputObservation, type InputObservationReference, type InputPerform
 import { MainPerformanceDiagnostics } from './performance-diagnostics.js'
 import { profileAgentContext } from '../shared/user-profile.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
-import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE, type AgentScheduleCheckInPolicy } from '@agentmux/core/schedule'
-import { checkInHumanObservation, type CheckInObservation } from '@agentmux/host/agent-schedule-check-in'
 
 import { isAbsolute } from 'node:path'
-import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, AGENTMUX_AGENT_MESSAGING_ENTRY, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryDescriptor, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
+import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryDescriptor, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
 import { type AgentMuxAgentResumeInput } from '@agentmux/core/agent-session-recovery'
 import { callOriginalDesktopHost, subscribeOriginalDesktopHost } from './desktop-host.js'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from '@agentmux/core'
@@ -1261,18 +1259,6 @@ export class RuntimeController {
     return await (await this.connectedClient(hostId)).statusAgent(agentSessionId)
   }
 
-  /** Exact Session lookup across original Core owners. A worker Host is not management provenance. */
-  async resolveGoalAgent(agentSessionId: string) {
-    // These are exact retained identities at the original Core owners, not remote
-    // status probes. An unrelated unresponsive Host cannot delay this known Agent.
-    const matches = this.rpcClients().filter(({ client }) => {
-      try { return client.agentSession(agentSessionId).agentSessionId === agentSessionId } catch { return false }
-    })
-    if (matches.length === 1) return { hostId: matches[0]!.hostId, status: await matches[0]!.client.statusAgent(agentSessionId) }
-    if (matches.length > 1) throw new AgentMuxError('This exact management Session is observed at multiple Host owners. Choose its original authority explicitly.', 'CONTROL_REQUEST_CONFLICT')
-    throw new AgentMuxError('The exact management Session has no retained original Host binding yet. Keep its identity, reconnect the original owner or explicitly select management; no unrelated Host was probed.', 'CONTROL_UNAVAILABLE')
-  }
-
   async resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string> {
     return (await this.connectedClient(hostId)).resolveAgentCreationSessionId(createOperationId)
   }
@@ -1916,94 +1902,6 @@ export class RuntimeController {
     return await this.trackHostLifecycleOperation(control.hostId, async () => await this.configuredClient(control.hostId).rejoinAgentInputWaiting({ ref }))
   }
 
-  private progressInputObserver: ((control: AgentSessionControl, signal?: AbortSignal) => Promise<boolean>) | undefined
-  async authorizeFutureIntent(target: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string }, context?: AgentMuxRpcCallContext): Promise<void> {
-    if (!context?.caller) return
-    const client = await this.connectedClient(target.hostId), recipient = await client.statusAgent(target.agentSessionId)
-    if (recipient.session.hostId !== target.hostId || recipient.session.providerId !== target.providerId || recipient.session.workspacePath !== target.workspacePath) {
-      throw new AgentMuxError('The original future-message target is unconfirmed. The arrangement and manual input are retained.', 'STALE_AGENT_SESSION')
-    }
-    const sender = await client.authorizeAgentCaller(context.caller.capability, context.caller.agentSessionId)
-    await client.authorizeAgentMessage({ capability: context.caller.capability, callerAgentSessionId: sender.agentSessionId,
-      senderAgentSessionId: sender.agentSessionId, senderSessionId: sender.agentSessionId, senderRunId: sender.run.runId,
-      recipientSessionId: recipient.session.agentSessionId, recipientRunId: recipient.session.run.runId })
-  }
-  async saveFutureIntent(loop: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string; futureIntentId?: string; creationOperationId?: string; prompt: string; checkIn?: AgentScheduleCheckInPolicy }, active: boolean, context?: AgentMuxRpcCallContext): Promise<void> {
-    const client = await this.connectedClient(loop.hostId)
-    const status = await client.statusAgent(loop.agentSessionId)
-    if (status.session.hostId !== loop.hostId || status.session.providerId !== loop.providerId || status.session.workspacePath !== loop.workspacePath || !loop.futureIntentId || !loop.creationOperationId) {
-      throw new AgentMuxError('The original future-message target or intent is unconfirmed. Manual input remains available.', 'STALE_AGENT_SESSION')
-    }
-    const original = await client.readAgentFuturePromptIntent(loop.agentSessionId, loop.futureIntentId)
-    if (original && (original.operationId !== loop.creationOperationId || original.message?.userContent !== loop.prompt)) {
-      throw new AgentMuxError('The original future-message operation or content is unconfirmed. Inspect the saved arrangement before retrying; manual input remains available.', 'AGENT_FUTURE_INTENT_CHANGED')
-    }
-    // Changing an arrangement's active state does not create a new message or adopt new guidance.
-    const agentMuxNote = original ? original.message.systemContext : AGENTMUX_AGENT_MESSAGING_ENTRY + (loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '')
-    await client.saveAgentFuturePromptIntent({ agentSessionId: loop.agentSessionId, intentId: loop.futureIntentId, operationId: loop.creationOperationId,
-      prompt: loop.prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }), active, ...(context?.caller ? { caller: context.caller } : {}) })
-  }
-  async observeCheckIn(target: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string }, now: number, signal: AbortSignal, config: AppConfig): Promise<CheckInObservation> {
-    signal.throwIfAborted()
-    const client = await observeProgressRead(signal, () => this.connectedClient(target.hostId))
-    const before = await observeProgressRead(signal, () => client.statusAgent(target.agentSessionId))
-    const matches = (session: typeof before.session) => session.agentSessionId === target.agentSessionId && session.hostId === target.hostId && session.providerId === target.providerId && session.workspacePath === target.workspacePath
-    if (!matches(before.session)) return { known: false, reason: 'The original quiet follow-up target is unconfirmed.' }
-    const timeline = await observeProgressRead(signal, () => client.sessionTimeline(target.agentSessionId))
-    const executor = this.sessionExecutorOptions(target.hostId, client, config, before.session)
-    const page = await client.sessionHistoryPage(target.agentSessionId, { limit: 100, refreshNativeSource: true, requireCurrentSource: true, signal, ...executor })
-    signal.throwIfAborted()
-    const after = await observeProgressRead(signal, () => client.statusAgent(target.agentSessionId))
-    signal.throwIfAborted()
-    const handle = after.session.nativeHandle
-    if (!matches(after.session) || before.session.run.runId !== after.session.run.runId || JSON.stringify(before.session.nativeHandle) !== JSON.stringify(handle) ||
-        handle?.kind !== 'provider' || handle.providerId !== page.source.providerId || handle.sessionId !== page.source.nativeSessionId) return { known: false, reason: 'The original Run or current conversation source changed while reading; this occurrence remains due.' }
-    return checkInHumanObservation(target.agentSessionId, timeline, page, now)
-  }
-  setContinuousProgressInputObserver(observer: (control: AgentSessionControl, signal?: AbortSignal) => Promise<boolean>): () => void {
-    this.progressInputObserver = observer
-    return () => { if (this.progressInputObserver === observer) this.progressInputObserver = undefined }
-  }
-
-  /** Read the authoritative session facts used by the durable progress loop immediately before delivery. */
-  async observeContinuousProgress(loop: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string; futureIntentId?: string }, tickId: string, now: number, signal?: AbortSignal) {
-    const host = this.hosts.get(loop.hostId)
-    if (!host) throw new AgentMuxError('Continuous progress target host is unavailable.', 'UNKNOWN_AGENT_SESSION')
-    const status = await observeProgressRead(signal, () => host.client.statusAgent(loop.agentSessionId))
-    if (status.session.agentSessionId !== loop.agentSessionId || status.session.providerId !== loop.providerId ||
-        status.session.workspacePath !== loop.workspacePath) {
-      throw new AgentMuxError('Continuous progress target identity changed. Review this loop before resuming.', 'STALE_AGENT_SESSION')
-    }
-    if (status.run.acceptedInputBytes === null) throw new AgentMuxError('The original Native input cursor is unconfirmed. Automatic progress is paused; manual input and your Agent remain available.', 'CONTROL_UNAVAILABLE')
-    const observer = this.progressInputObserver
-    if (!observer) throw new Error('User input observation is unavailable. Automatic progress is paused; manual input remains available.')
-    const inputOccupied = await observeProgressRead(signal, () => observer({ kind: 'agent', hostId: loop.hostId, agentSessionId: loop.agentSessionId, run: status.session.run }, signal))
-    const saved = loop.futureIntentId ? await observeProgressRead(signal, () => host.client.readAgentFuturePromptIntent(loop.agentSessionId, loop.futureIntentId!)) : null
-    const session = loop.futureIntentId ? { ...status.session, futurePromptIntents: saved ? { [loop.futureIntentId]: saved } : {} } : status.session
-    return { session, observation: status.observation, inputByte: status.run.acceptedInputBytes, inputOccupied, tickId, now }
-  }
-
-  /** Read the original Core input transaction; absence is never a replacement admission. */
-  async inspectContinuousProgressInitial(loop: import('@agentmux/core').ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'> {
-    const initial = loop.initialDelivery
-    if (!initial) return 'unconfirmed'
-    const client = this.configuredClient(loop.hostId)
-    const session = await client.agentSession(loop.agentSessionId)
-    if (session.hostId !== loop.hostId || session.agentSessionId !== loop.agentSessionId || session.providerId !== loop.providerId || session.workspacePath !== loop.workspacePath ||
-        session.kind !== 'agent') return 'unconfirmed'
-    const original = await client.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: loop.agentSessionId,
-      expectedRun: initial.condition.expectedRun, submissionId: initial.operationId })
-    const admission = original?.admission, inputKey = admission?.inputKey
-    if (original?.agentSessionId !== loop.agentSessionId || original.run.runId !== initial.condition.expectedRun.runId ||
-        inputKey?.kind !== 'prompt' || inputKey.agentSessionId !== loop.agentSessionId || inputKey.expectedRun.runId !== initial.condition.expectedRun.runId || inputKey.submissionId !== initial.operationId ||
-        admission?.submissionId !== initial.operationId || admission.intent?.run.runId !== initial.condition.expectedRun.runId ||
-        admission.intent.message?.userContent !== initial.prompt) return 'unconfirmed'
-    // Core owns the original authored system segment and wire encoding. Neither display text
-    // nor the presence of platform guidance changes this exact user's input receipt.
-    if (admission.acknowledged === true || original.terminalPromptSubmission?.submissionId === initial.operationId && original.terminalPromptSubmission.submit.acknowledged === true) return 'confirmed'
-    return 'pending'
-  }
-
   async respondInteraction(
     control: Extract<SessionControl, { kind: 'agent' }>,
     response: AgentMuxInteractionResponse,
@@ -2471,6 +2369,10 @@ export class RuntimeController {
     return (method === 'message.read' || method === 'message.dispatch.read') ? { ...result, hostId } as AgentMuxRpcResult<M> : result
   }
 
+  async watchGoalChanges(handlers: AgentMuxRpcSubscriptionOptions<'goal.watch'>): Promise<AgentMuxRpcSubscription> {
+    return await subscribeOriginalDesktopHost(this.configuredClient('local'), 'goal.watch', {}, handlers)
+  }
+
   /** Capture only the selected configured endpoint, never a Binding's execution Host. */
   private async connectionHost(target: { hostId: string; runtimeId?: string }, context: AgentMuxRpcCallContext) {
     if (context.principal?.kind === 'device') throw new AgentMuxError('The original Host transport cannot preserve this device operator identity.', 'CONTROL_UNAVAILABLE')
@@ -2586,28 +2488,6 @@ export class RuntimeController {
     return { ...result, hostId: reference.hostId }
   }
 
-  async observeOriginalRun(hostId: string, runId: string): Promise<Pick<AgentMuxRun, 'runId' | 'state'>> {
-    const subject = await (await this.connectedClient(hostId, 'runtime')).runtimeSubject({ kind: 'terminal-run', runId })
-    return { runId: subject.run.runId, state: subject.run.state }
-  }
-
-  private readonly inputOccupationObservers = new Set<(control: AgentSessionControl) => void>()
-
-  observeInputOccupation(listener: (control: AgentSessionControl) => void): () => void {
-    this.inputOccupationObservers.add(listener)
-    return () => { this.inputOccupationObservers.delete(listener) }
-  }
-
-  notifyInputOccupation(control: AgentSessionControl): void {
-    if (control?.kind !== 'agent' || typeof control.hostId !== 'string' || !control.hostId ||
-      typeof control.agentSessionId !== 'string' || !control.agentSessionId ||
-      typeof control.run?.runId !== 'string' || !control.run.runId)
-      throw new AgentMuxError('Input occupation requires its original Agent control.', 'INVALID_CONTROL_REQUEST')
-    // Cancel-only signal from the existing GUI input owner. It grants no native
-    // eligibility and never stores draft text or changes an Agent/Run capability.
-    for (const listener of this.inputOccupationObservers) listener(control)
-  }
-
   observeCoreEvents(types: readonly AgentMuxClientEvent['type'][],
     listener: (hostId: string, event: AgentMuxClientEvent) => void): () => void {
     for (const type of types) {
@@ -2619,35 +2499,6 @@ export class RuntimeController {
       const listeners = this.coreEventObservers.get(type); listeners?.delete(listener)
       if (!listeners?.size) this.coreEventObservers.delete(type)
     } }
-  }
-
-  async saveGoalAttention(input: { hostId: string; supervisorAgentSessionId: string; supervisorRunId: string;
-    intentId: string; operationId: string; agentMuxNote: string }): Promise<void> {
-    const client = await this.connectedClient(input.hostId)
-    const session = await client.inspectAgentCreation(input.supervisorAgentSessionId)
-    if (session.kind === 'retired-agent') throw new AgentMuxError('The original reminder target is closed. Its Goal and request are retained; explicitly recover the Session before scheduling input.', 'AGENT_SESSION_RETIRED')
-    if (session.run.runId !== input.supervisorRunId) throw new AgentMuxError('The original reminder target Run changed. Keep its Goal responsibility and inspect the original reminder.', 'STALE_AGENT_SESSION')
-    await client.saveAgentFuturePromptIntent({ agentSessionId: input.supervisorAgentSessionId, intentId: input.intentId,
-      operationId: input.operationId, prompt: '', agentMuxNote: input.agentMuxNote, active: true })
-  }
-
-  /** Cancel only the old same-Session intent after explicit continuation; a new Run is expected here. */
-  async disableGoalAttention(input: { hostId: string; supervisorAgentSessionId: string; intentId: string; operationId: string; agentMuxNote: string }): Promise<void> {
-    const client = await this.connectedClient(input.hostId)
-    const status = await client.statusAgent(input.supervisorAgentSessionId)
-    if (status.session.agentSessionId !== input.supervisorAgentSessionId)
-      throw new AgentMuxError('The original PMO identity is unconfirmed. Its request and native input are retained.', 'STALE_AGENT_SESSION')
-    const original = await client.readAgentFuturePromptIntent(input.supervisorAgentSessionId, input.intentId)
-    if (original && (original.operationId !== input.operationId || original.message.systemContext !== input.agentMuxNote))
-      throw new AgentMuxError('The original PMO intent differs from this retained request. Inspect it without replacing input.', 'CONTROL_REQUEST_CONFLICT')
-    if (!original) return
-    await client.saveAgentFuturePromptIntent({ agentSessionId: input.supervisorAgentSessionId, intentId: input.intentId,
-      operationId: input.operationId, prompt: '', agentMuxNote: input.agentMuxNote, active: false })
-  }
-
-  async inspectGoalStart(input: import('@agentmux/demand').DemandDispatch) {
-    return await this.configuredClient(input.hostId).inspectAgentPromptSubmission({ kind: 'prompt',
-      agentSessionId: input.agentSessionId, expectedRun: { runId: input.runId }, submissionId: input.operationId })
   }
 
   async inspectGoalAttention(input: { hostId: string; supervisorAgentSessionId: string; supervisorRunId: string; operationId: string }) {

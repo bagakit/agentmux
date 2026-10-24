@@ -499,39 +499,16 @@ const mockApi: AgentMuxDesktopApi = {
     ls: async () => { throw new Error('Device state requires the original desktop Host. This preview cannot read authorization.') },
     revoke: async () => { throw new Error('Revoking a device requires confirmation on the original desktop.') }
   },
+  goals: { execute: async () => { throw new Error('Goal operations require the original background Host.') } },
   demands: {
     delegation: async () => { throw new Error('Original delegation facts and collection require the Desktop Goal and Core owners.') },
+    onObservationIssue: () => () => {},
     onChanged: () => () => {},
-    prepareGoalStart: async () => { throw new Error('Goal Start provenance requires the original Desktop and Core owners.') },
-    inspectDispatch: async () => { throw new Error('Original Goal Start inspection requires the Desktop owner.') },
-    reconcileDispatch: async () => { throw new Error('Original Goal input reconciliation requires the Desktop and Core owners.') },
-    reconcilePmoCreation: async () => { throw new Error('PMO creation reconciliation requires the original Desktop and Core owners.') },
-    reconcilePmoInput: async () => { throw new Error('PMO input reconciliation requires the original Desktop and Core owners.') },
-    list: async () => [...mockDemands.values()].map((demand) => structuredClone(demand)),
-    confirmAlignment: async () => { throw new Error('Goal confirmation requires the Desktop durable owner. This preview does not record acknowledgement.') },
-    acceptGrounding: async () => { throw new Error('Result acceptance requires the Desktop durable owner. This preview does not record acknowledgement.') },
-    create: async (input) => {
-      const now = Date.now()
-      const demand: Demand = { id: input.id ?? mintObjectId(), title: input.title, description: input.description ?? '', status: input.status ?? 'backlog', priority: input.priority ?? 'normal', projectId: input.projectId ?? null, projectName: input.projectName ?? null, executorId: null, tags: [...(input.tags ?? [])], plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, phaseIndex: input.phaseIndex ?? null, sessionIds: [...new Set([...(input.sessionIds ?? []), ...(input.assigneeSessionIds ?? [])])], assigneeSessionIds: [...(input.assigneeSessionIds ?? [])], supervisorSessionId: input.supervisorSessionId ?? null, participations: [], activities: [], decisions: [], createdAt: now, updatedAt: now }
-      if (demand.supervisorSessionId && !demand.assigneeSessionIds.includes(demand.supervisorSessionId)) throw new Error('Supervisor must be an assignee.')
-      mockDemands.set(demand.id, demand)
-      return { schema: 'agentmux.demand-receipt.v1', operation: 'create', operationId: `mock-${mintObjectId()}`, revision: mockDemands.size, demand: structuredClone(demand) }
-    },
-    update: async (id, patch) => {
-      const now = Date.now()
-      const previous = mockDemands.get(id)
-      const demand: Demand = { id, title: patch.title ?? previous?.title ?? 'Demand', description: patch.description ?? previous?.description ?? '', status: patch.status ?? previous?.status ?? 'backlog', priority: patch.priority ?? previous?.priority ?? 'normal', projectId: patch.projectId === undefined ? previous?.projectId ?? null : patch.projectId, projectName: patch.projectName === undefined ? previous?.projectName ?? null : patch.projectName, executorId: previous?.executorId ?? null, tags: patch.tags === undefined ? [...(previous?.tags ?? [])] : [...patch.tags], plannedStartAt: patch.plannedStartAt === undefined ? previous?.plannedStartAt ?? null : patch.plannedStartAt, targetAt: patch.targetAt === undefined ? previous?.targetAt ?? null : patch.targetAt, parentDemandId: patch.parentDemandId === undefined ? previous?.parentDemandId ?? null : patch.parentDemandId, phaseIndex: patch.phaseIndex === undefined ? previous?.phaseIndex ?? null : patch.phaseIndex, sessionIds: [...new Set([...(patch.sessionIds ?? previous?.sessionIds ?? []), ...(patch.assigneeSessionIds ?? previous?.assigneeSessionIds ?? [])])], assigneeSessionIds: [...(patch.assigneeSessionIds ?? previous?.assigneeSessionIds ?? [])], supervisorSessionId: Object.hasOwn(patch, 'supervisorSessionId') ? patch.supervisorSessionId ?? null : previous?.supervisorSessionId ?? null, participations: [...(previous?.participations ?? [])], dispatches: [...(previous?.dispatches ?? [])], ...(previous?.creationOrigin ? { creationOrigin: { ...previous.creationOrigin, ...(Object.hasOwn(patch, 'supervisorSessionId') ? { supervisorDefaultPending: false } : {}) } } : {}), activities: [...(previous?.activities ?? [])], decisions: [...(previous?.decisions ?? [])], createdAt: previous?.createdAt ?? now, updatedAt: now }
-      if (demand.supervisorSessionId && !demand.assigneeSessionIds.includes(demand.supervisorSessionId)) throw new Error('Supervisor must be an assignee.')
-      mockDemands.set(id, demand)
-      return { schema: 'agentmux.demand-receipt.v1', operation: 'update', operationId: `mock-${mintObjectId()}`, revision: mockDemands.size, demand: structuredClone(demand) }
-    },
-    delete: async (id) => { const demand = mockDemands.get(id) ?? { id, title: 'Demand', description: '', status: 'backlog' as const, priority: 'normal' as const, projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null, participations: [], activities: [], decisions: [], createdAt: Date.now(), updatedAt: Date.now() }; mockDemands.delete(id); return { schema: 'agentmux.demand-receipt.v1', operation: 'remove', operationId: `mock-${mintObjectId()}`, revision: mockDemands.size, demand: structuredClone(demand) } },
-    linkSession: async (id, sessionId) => mockApi.demands.update(id, { description: `${id}:${sessionId}` }),
-    unlinkSession: async (id) => mockApi.demands.update(id, {}),
-    activity: async () => { throw new Error('Activity append requires the original Desktop Demand owner.') },
-    inspectActivity: async () => { throw new Error('Activity inspection requires the original Desktop Demand owner.') },
-    readActivities: async () => { throw new Error('Activity reading requires the original Desktop Demand owner.') },
-    decision: async (id, input: Omit<DemandDecision, 'id' | 'createdAt'>) => mockApi.demands.update(id, { description: input.decision })
+    inspectDispatch: async () => { throw new Error('Original Goal Start inspection requires its original background Host.') },
+    reconcileDispatch: async () => { throw new Error('Original Goal reconciliation requires its original background Host.') },
+    reconcilePmoCreation: async () => { throw new Error('PMO creation reconciliation requires its original background Host.') },
+    reconcilePmoInput: async () => { throw new Error('PMO input reconciliation requires its original background Host.') },
+    list: async () => [...mockDemands.values()].map(demand => structuredClone(demand))
   },
   workspaces: {
     createZoneResource: async () => { throw new Error('Zone resource creation requires the Desktop host.') },
@@ -970,24 +947,20 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   continuousProgress: {
-    goals: async () => { throw new Error('Goal continuation facts require the original Desktop host.') },
-    prepareGoal: async () => { throw new Error('Goal continuation requires the original Desktop host.') },
-    initialGoalInput: async () => { throw new Error('Original Goal input inspection requires the Desktop host.') },
-    goalAction: async () => { throw new Error('Goal continuation actions require the original Desktop host.') },
+    goals: async () => { throw new Error('Goal continuation facts require the original background Host.') },
+    goalAction: async () => { throw new Error('Goal continuation actions require the original background Host.') },
     list: async () => [],
-    create: async () => { throw new Error('Continuous progress requires the Desktop host.') },
-    action: async () => { throw new Error('Continuous progress requires the Desktop host.') },
+    create: async () => { throw new Error('Continuous progress requires the background Host.') },
+    action: async () => { throw new Error('Continuous progress requires the background Host.') },
     pauseForInput: async () => {},
-    onChanged: () => () => {}
   },
   schedule: {
-    onChanged: () => () => {},
-    list: async () => { throw new Error('Arrangement discovery requires the connected desktop Host. Existing work is retained.') },
-    inspect: async () => { throw new Error('Arrangement inspection requires the connected desktop Host. The original reference is retained.') },
-    create: async () => { throw new Error('Saving an arrangement requires the connected desktop Host. The message is retained.') },
-    pause: async () => { throw new Error('Pausing an arrangement requires the connected desktop Host. Its state is unconfirmed.') },
-    resume: async () => { throw new Error('Resuming an arrangement requires the connected desktop Host. Its state is unconfirmed.') },
-    cancel: async () => { throw new Error('Cancelling an arrangement requires the connected desktop Host. Its state is unconfirmed.') }
+    list: async () => { throw new Error('Arrangement discovery requires the connected background Host. Existing work is retained.') },
+    inspect: async () => { throw new Error('Arrangement inspection requires the connected background Host. The original reference is retained.') },
+    create: async () => { throw new Error('Saving an arrangement requires the connected background Host. The message is retained.') },
+    pause: async () => { throw new Error('Pausing an arrangement requires the connected background Host. Its state is unconfirmed.') },
+    resume: async () => { throw new Error('Resuming an arrangement requires the connected background Host. Its state is unconfirmed.') },
+    cancel: async () => { throw new Error('Cancelling an arrangement requires the connected background Host. Its state is unconfirmed.') }
   },
   sessions: {
     dispatches: async () => { throw new Error('Original supervised collaboration records require the connected desktop Host. The Session and existing records remain available.') },

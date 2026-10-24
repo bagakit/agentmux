@@ -6,7 +6,6 @@ import { RendererHeapSnapshotOwner } from './renderer-heap-snapshot.js'
 import { createDesktopApplicationAccessOwner } from './application-access-owner.js'
 import { WorkbenchWindows } from './workbench-windows.js'
 import { WorkbenchWindowStore } from './workbench-window-store.js'
-import { openDemandStore } from '@agentmux/demand'
 import { readLoadedPackageIdentity } from './client-observation.js'
 
 import { RendererUpdates } from './renderer-updates.js'
@@ -48,9 +47,6 @@ import { SpatialLinkIngress } from './spatial-link-ingress.js'
 import { WebUrlIngress, receiveDesktopUrl, receiveDesktopUrlArguments } from './web-url-ingress.js'
 import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
 import { windowSecurityWebPreferences } from './window-security.js'
-import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
-import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
-import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { installRecoverySeedBeforeLoad, summarizeRecoverySessionStore, summarizeRecoveryStorage } from './recovery-probe.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')
@@ -116,18 +112,6 @@ function startPrimaryInstance(): void {
     scratchTopics
   )
   const applicationAccess = createDesktopApplicationAccessOwner(runtime, join(app.getPath('userData'), 'application-access.sqlite'))
-  const demands = openDemandStore({ root: join(app.getPath('userData'), 'demands') })
-  const progressLoops = new ContinuousProgressLoopManager(
-    ContinuousProgressLoopStore.forUserData(app.getPath('userData')),
-    (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
-    undefined,
-    (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal),
-    { saveFutureIntent: (loop, active, context) => runtime.saveFutureIntent(loop, active, context),
-      authorizeFutureIntent: (target, context) => runtime.authorizeFutureIntent(target, context),
-      observeCheckIn: async (target, now, signal) => runtime.observeCheckIn(target, now, signal, await configStore.get()) },
-    { read: goalId => demands.get(goalId), subscribe: listener => demands.subscribe(snapshot => listener(snapshot.demands)), inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop) }
-  )
-  void progressLoops.start().catch((error) => process.stderr.write(`Continuous progress startup failed: ${String(error)}\n`))
   const windowGeometryStore = new WindowGeometryStore()
   let disposeIpc: (() => Promise<void>) | null = null
   let ownerDisposal: Promise<void> | null = null
@@ -148,7 +132,6 @@ function startPrimaryInstance(): void {
       const disposeRegisteredIpc = disposeIpc
       disposeIpc = null
       ownerDisposal = runOwnerDisposals([
-        { owner: 'continuous-progress', dispose: () => progressLoops.stop() },
         { owner: 'renderer-updates', dispose: () => rendererUpdates?.dispose() },
         { owner: 'workbench-windows', dispose: () => workbenchWindows?.dispose() },
         { owner: 'desktop-ipc', dispose: () => disposeRegisteredIpc?.() },
@@ -282,7 +265,7 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks, webLinks,
+    disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, scratchTopics, workspaceFiles, spatialLinks, webLinks,
       performanceScene, appMemory, performanceHeap, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, ...(environmentWarning ? { environmentWarning } : {}) })

@@ -1,3 +1,5 @@
+import { desktopGoalControl, desktopGoalChanges, observeDesktopGoalChanges, readDesktopGoals, confirmDesktopGoalParticipation, reconcileDesktopGoalDispatch } from './desktop-goals.js'
+import { hostGoalRecord } from '@agentmux/host/goal-projection'
 import { sessionRecoveryOperationResult } from './session-recovery-operation'
 import { registerMoteChatIpc } from './mote-chat-ipc.js'
 import { callCapsuleFromApp } from './capsule-ipc.js'
@@ -38,13 +40,8 @@ import { NativeOverlayWindows } from './native-overlay-windows.js'
 import type { WorkbenchWindows } from './workbench-windows.js'
 import { WORKBENCH_WINDOW_RESPONSE } from '../shared/workbench-windows.js'
 import { goalRoleInputNote } from '@agentmux/host/goal-role-input'
-import { GoalPatrolOwner } from '@agentmux/host/goal-patrol-owner'
 import { registerConnectorIpc } from './connector-ipc.js'
-import { GoalStartResponsibilityOwner } from '@agentmux/host/goal-start-responsibility'
-import { GoalResponsibilityOwner } from '@agentmux/host/goal-responsibility-owner'
 import { parseGoalDelegationParams, parseGoalDelegationResult, type GoalDelegationParamsMap } from '@agentmux/core/goal-delegation'
-import { GoalDelegationAttentionOwner } from '@agentmux/host/goal-delegation-attention'
-import { GoalDelegationOwner } from '@agentmux/host/goal-delegation-owner'
 import { observeTerminalBrightness, terminalPaletteChanged, terminalPaletteForAppearance } from './terminal-theme.js'
 import { exportThemeFile, writeThemeFile } from './theme-file-export.js'
 import { themeObservation } from '@agentmux/host/theme-observation'
@@ -54,10 +51,8 @@ import { createMoteAvatarWriter } from './mote-avatar-writer.js'
 import type { MoteAvatarWriteParameterMap } from '@agentmux/core/mote-avatar-write'
 import type { MoteAvatarSeriesParameterMap } from '@agentmux/core/mote-avatar-series'
 import { readInputObservation, resolveToolkitWorkspacePath } from '@agentmux/core/control'
-import { GoalDispatchInputOwner } from '@agentmux/host/goal-dispatch-input'
 import { assertGoalDispatchReference, type GoalDispatchReference } from '../shared/goal-dispatch.js'
 import { isDemandStoreError, parseDemandDispatchIntent, sameDemandDispatchIntent, type DemandDispatchIntent } from '@agentmux/demand'
-import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from '@agentmux/host/demand-participation'
 import { resolveGoalsPreferences } from '@agentmux/host/goals-preferences'
 import { assertGoalPmoIntent, goalPmoOperation, type GoalPmoIntent } from '@agentmux/host/goal-pmo-origin'
 import { NotesStorageOwner } from './notes-storage-owner.js'
@@ -86,7 +81,6 @@ import { AgentMuxNotebookStore, AgentMuxNotesStorage, type NotebookWrite } from 
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
 import { displayLabel } from '@agentmux/core/spatial-graph'
 import { NameChangeAudit, nameChangeRequests, desktopNameContext, unknownNameContext } from './name-change-audit.js'
-import { hostNameHistory } from '@agentmux/host/name-history'
 import type { AgentMuxNameContext } from '@agentmux/core/control'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
@@ -94,9 +88,8 @@ import { sessionLaunchResult } from '../shared/session-launch-result.js'
 import { sessionInputWriteResult, sessionInputOperationResult } from '../shared/session-input-result.js'
 import { sessionObservationResult } from '../shared/session-observation-result.js'
 import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result.js'
-import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
+import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
-import type { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { inspectDesktopClient, registerLoadedIdentityIpc } from './client-observation.js'
 import { inspectNotifications, clientNotificationsPort } from './notification-observation.js'
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
@@ -150,7 +143,7 @@ import {
   defaultAgentMuxControlSocketPath,
   agentMuxRpcHttpOptions,
   AgentMuxError,
-  AGENTMUX_CONTROL_SCHEMA_VERSION,
+  AGENTMUX_CONTROL_SCHEMA_VERSION, parseAgentMuxControlRequest,
   type AgentPromptCondition,
   type AgentExecutorId,
   type AgentMuxControlRequest,
@@ -267,7 +260,6 @@ import { rebindLocalFolder } from './workspace-rebind.js'
 import { executeSettingsWorkspaceAddControl, registerWorkspace } from './settings-workspace-add-control.js'
 import { GitService } from './git-service.js'
 import { GhService } from './gh-service.js'
-import { openDemandStore, type DemandStore } from '@agentmux/demand'
 
 function workspace(config: AppConfig, id: string): WorkspaceRecord {
   const item = config.workspaces.find((entry) => entry.id === id)
@@ -291,8 +283,6 @@ export async function registerIpc(args: {
   initialConfig: AppConfig
   runtime: RuntimeController
   applicationAccess: AgentMuxApplicationAccessOwner
-  demands?: DemandStore
-  progressLoops: ContinuousProgressLoopManager
 
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
@@ -409,7 +399,6 @@ export async function registerIpc(args: {
     }
   }
   const deliveryAttempts = { hostId: 'local', store: new DeliveryAttemptStore(join(app.getPath('userData'), 'client-delivery-attempts'), { clientJournal: true }) }
-  const demands = args.demands ?? openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), { save: (next, expected) => configOwner.edit(expected, next) })
   const worktreeCloseout = new WorktreeCloseoutOwner({ config: configOwner, spatial: spatialState, worktrees,
     prepare: async () => {
@@ -608,20 +597,6 @@ export async function registerIpc(args: {
       package: args.loadedPackage ?? null, renderer: contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null }) } } : {}) })
   const closeMetrics = () => metrics.dispose()
   contents.once('destroyed', closeMetrics)
-  const disposeProgressInput = args.runtime.setContinuousProgressInputObserver(async (control, signal) => {
-    const result = await controlBridge.execute({ operation: 'continuous-progress.observeInput', requestId: mintObjectId(), control }, signal)
-    if (result.operation !== 'continuous-progress.observeInput' || result.control.kind !== 'agent' ||
-        result.control.hostId !== control.hostId || result.control.agentSessionId !== control.agentSessionId ||
-        result.control.run.runId !== control.run.runId || typeof result.occupied !== 'boolean') {
-      throw new Error('User input observation did not match this Session and Run. Automatic progress is paused.')
-    }
-    return result.occupied
-  })
-  const disposeProgressChanges = args.progressLoops.subscribe((loop) => {
-    if (!args.window.isDestroyed() && !contents.isDestroyed()) {
-      contents.send(isAgentSchedule(loop) ? SCHEDULE_CHANGED : CONTINUOUS_PROGRESS_CHANGED, loop)
-    }
-  })
   const acceptControl = (event: IpcMainEvent, response: DesktopControlResponse): void => {
     // 发送者判据走 senderTrust（被行为测试直接质询）；这个频道的处置是**静默返回**而非抛，所以那半件
     // 留在这里。requestId 的形状检查不是发送者关切，也留在 shell——不塞进纯判据里。
@@ -1209,189 +1184,49 @@ export async function registerIpc(args: {
   handle('scratch:resetWiki', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.resetWiki(workspace(config, workspaceId), topicId)
   )
-  let goalAttention: GoalDelegationAttentionOwner | undefined
-  let goalStartResponsibility: GoalStartResponsibilityOwner | undefined
-  let goalResponsibility: GoalResponsibilityOwner | undefined
-  let goalPatrol: GoalPatrolOwner | undefined
-  const goalDelegations = new GoalDelegationOwner(demands, args.runtime, input => publicFiles.read(input), {
-    call: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),
-    readDispatch: (hostId, sourceMessageId) => args.runtime.readOriginalDispatch(hostId, sourceMessageId),
-    observeRun: (hostId, runId) => args.runtime.observeOriginalRun(hostId, runId)
-  }, async (goalId, delegation) => goalAttention?.observe(goalId, delegation),
-    async (goal, start) => {
-      if (!goalStartResponsibility) throw new AgentMuxError('The original Goal Start responsibility reader is unavailable; keep its input and worker.', 'CONTROL_UNAVAILABLE')
-      return goalStartResponsibility.observe(goal, start)
-    }, {
-      observe: (goal, work) => {
-        if (!goalResponsibility) throw new AgentMuxError('The original Goal responsibility reader is not ready. Original work remains available.', 'CONTROL_UNAVAILABLE')
-        return goalResponsibility.observe(goal, work)
-      },
-      progress: (goalId, input, context, authority) => {
-        if (!goalResponsibility) throw new AgentMuxError('The original Goal responsibility owner is not ready. Original work remains available.', 'CONTROL_UNAVAILABLE')
-        return goalResponsibility.progress(goalId, input, context, authority)
-      }
-    }, {
-      request: (goalId, operationId, context, authority) => {
-        if (!goalPatrol) throw new AgentMuxError('Original patrol owner is not ready; retain work.', 'CONTROL_UNAVAILABLE')
-        return goalPatrol.request(goalId, operationId, context, authority)
-      },
-      continue: (goalId, patrolId, operationId, runId, context, authority) => {
-        if (!goalPatrol) throw new AgentMuxError('Original patrol owner is not ready; retain request.', 'CONTROL_UNAVAILABLE')
-        return goalPatrol.continue(goalId, patrolId, operationId, runId, context, authority)
-      },
-      report: (goalId, patrolId, report, authority) => {
-        if (!goalPatrol) throw new AgentMuxError('Original patrol owner is not ready; retain report.', 'CONTROL_UNAVAILABLE')
-        return goalPatrol.report(goalId, patrolId, report, authority)
-      },
-      observe: goal => goalPatrol ? goalPatrol.observe(goal) : Promise.resolve([])
-    })
-  const goalVersions = new Map<string, string>()
-  const disposeDemandChanges = demands.subscribe(snapshot => {
-    const changed: string[] = [], retained = new Set<string>()
-    for (const goal of snapshot.demands) {
-      retained.add(goal.id)
-      const version = JSON.stringify(goal)
-      if (goalVersions.get(goal.id) !== version) changed.push(goal.id)
-      goalVersions.set(goal.id, version)
-    }
-    for (const id of goalVersions.keys()) if (!retained.has(id)) { changed.push(id); goalVersions.delete(id) }
-    if (changed.length && !args.window.isDestroyed() && !contents.isDestroyed()) contents.send('demands:changed', changed)
+  const disposeGoalChanges = observeDesktopGoalChanges(args.runtime, (ids, snapshot) => { if (!contents.isDestroyed()) contents.send('demands:changed', ids, snapshot) }, message => { if (!contents.isDestroyed()) contents.send('demands:observationIssue', message) })
+  const executeGoal = desktopGoalControl(args.runtime)
+  handleWithEvent('goals:execute', async (event, request: AgentMuxControlRequest) => {
+    requireTrustedSender('goals:execute', event)
+    return executeGoal(parseAgentMuxControlRequest(request))
   })
-  goalAttention = new GoalDelegationAttentionOwner(demands, args.runtime, goalDelegations, goalIds => {
-    if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('demands:changed', goalIds)
-  })
-  void goalAttention.start()
-  goalStartResponsibility = new GoalStartResponsibilityOwner(demands, args.runtime, goalIds => {
-    if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('demands:changed', goalIds)
-  })
-  void goalStartResponsibility.start()
-  goalResponsibility = new GoalResponsibilityOwner(demands, args.runtime,
-    (goalId, context) => goalDelegations.call('goal.delegations', { goalId }, context, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'current') } }), goalIds => {
-      if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('demands:changed', goalIds)
-    })
-  void goalResponsibility.start()
-  goalPatrol = new GoalPatrolOwner(demands, args.runtime,
-    (goalId, context) => goalDelegations.call('goal.delegations', { goalId }, context, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'current') } }),
-    goalIds => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('demands:changed', goalIds) })
-  void goalPatrol.start()
   handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue', input: GoalDelegationParamsMap['goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue']) => {
     requireTrustedSender('demands:delegation', event)
-    if (!['goal.delegations', 'goal.collect', 'goal.patrol', 'goal.patrol.continue'].includes(method)) throw new AgentMuxError('This UI action requires the original Goal read or explicit report collection.', 'INVALID_CONTROL_REQUEST')
-    const parsed = parseGoalDelegationParams(method, input)
-    const actor = { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'current') }
-    return parseGoalDelegationResult(await goalDelegations.call(method, parsed, { principal: actor }, { actor }), parsed)
+    if (!['goal.delegations', 'goal.collect', 'goal.patrol', 'goal.patrol.continue'].includes(method)) throw new AgentMuxError('This action requires its exact public Goal operation.', 'INVALID_CONTROL_REQUEST')
+    return callUserRpc(method, parseGoalDelegationParams(method, input))
   })
-  handle('demands:list', async () => await demands.list())
-  const goalDispatchInputs = new GoalDispatchInputOwner(demands, args.runtime)
+  handle('demands:list', async () => readDesktopGoals(args.runtime))
   handleWithEvent('demands:inspectDispatch', async (event, reference: GoalDispatchReference) => {
     requireTrustedSender('demands:inspectDispatch', event); assertGoalDispatchReference(reference)
-    return demands.inspectDispatch(reference.goalId, reference.operationId)
+    return (await callUserRpc('goal.inspect', { goalId: reference.goalId })).goal?.dispatches?.find(item => item.operationId === reference.operationId) ?? null
   })
   handleWithEvent('demands:reconcileDispatch', async (event, reference: GoalDispatchReference) => {
     requireTrustedSender('demands:reconcileDispatch', event); assertGoalDispatchReference(reference)
-    return goalDispatchInputs.reconcile(reference)
-  })
-  handleWithEvent('demands:prepareGoalStart', async (event, goalId: string, input: DemandDispatchIntent, controlRequestId?: string, expectedUpdatedAt?: number) => {
-    requireTrustedSender('demands:prepareGoalStart', event)
-    const intent = parseDemandDispatchIntent(input)
-    if (controlRequestId !== undefined) controlBridge.nameRequest(controlRequestId, request =>
-      (request.operation === 'demand.start' || request.operation === 'demand.assign' && request.start === true) &&
-      request.demandId === goalId && request.requestId === intent.operationId &&
-      (request.sessionId === undefined || request.sessionId === intent.agentSessionId) &&
-      (request.operation !== 'demand.start' || Boolean(request.continuation) === (intent.execution === 'continue') && (request.expectedUpdatedAt === undefined || request.expectedUpdatedAt === expectedUpdatedAt)))
-    const original = await demands.inspectDispatch(goalId, intent.operationId)
-    if (original) {
-      if (!sameDemandDispatchIntent(original, intent)) throw new AgentMuxError('The original Goal Start input or target changed.', 'CONTROL_REQUEST_CONFLICT')
-      return demands.prepareDispatch(goalId, intent)
-    }
-    const goal = await demands.get(goalId)
-    if (!goal) throw new AgentMuxError('The original Goal is unavailable. Its Agent and input remain available.', 'CONTROL_UNAVAILABLE')
-    if (intent.execution === 'continue') {
-      const loops = await args.progressLoops.listGoals(goalId), loop = loops.find(loop => loop.loopId === intent.loopId)
-      if (!loop || loop.creationOperationId !== intent.operationId || loop.agentSessionId !== intent.agentSessionId || loop.hostId !== intent.hostId ||
-          loop.initialDelivery?.condition.expectedRun.runId !== intent.runId || loop.initialDelivery.prompt !== intent.prompt || (loop.taskSource?.kind !== 'goal' || loop.taskSource.alignmentRevision !== intent.alignmentRevision))
-        throw new AgentMuxError('The original prepared Goal Loop does not match this input. Keep its exact target and operation.', 'CONTROL_REQUEST_CONFLICT')
-    } else if (!goal.assigneeSessionIds.includes(intent.agentSessionId)) throw new AgentMuxError('This Start must target an exact responsible Agent Session. Its manual input remains available.', 'CONTROL_REQUEST_CONFLICT')
-    const native = await args.runtime.agentCreation(intent.hostId, intent.agentSessionId)
-    if (native.kind === 'retired-agent') throw new AgentMuxError('The original Goal target is closed. Keep its request and explicitly recover the Session before preparing input.', 'AGENT_SESSION_RETIRED')
-    if (native.agentSessionId !== intent.agentSessionId || native.run.runId !== intent.runId) throw new AgentMuxError('The original Goal Run changed before preparation. Keep the original Agent and inspect this operation.', 'CONTROL_REQUEST_CONFLICT')
-    try { return await demands.prepareDispatch(goalId, intent, expectedUpdatedAt) }
-    catch (error) {
-      const cause = isDemandStoreError(error) ? error.cause as { kind?: string; goalId?: string; operationId?: string; currentUpdatedAt?: number } | undefined : undefined
-      if (cause?.kind === 'goal-start-version-conflict' && cause.goalId === goalId && cause.operationId === intent.operationId && typeof cause.currentUpdatedAt === 'number')
-        return { conflict: 'goal-version' as const, goalId, operationId: intent.operationId, currentUpdatedAt: cause.currentUpdatedAt }
-      throw error
-    }
+    return reconcileDesktopGoalDispatch(args.runtime, reference)
   })
   const pmoGoal = async (intent: GoalPmoIntent) => {
     assertGoalPmoIntent(intent)
-    const goal = await demands.get(intent.goalId)
+    const result = await executeGoal({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.show', requestId: mintObjectId(), demandId: intent.goalId })
+    const goal = result.operation === 'demand.show' && result.demand ? hostGoalRecord(result.demand) : null
     if (!goal || intent.creationOperationId !== undefined && goal.creationOrigin?.operationId !== intent.creationOperationId)
       throw new AgentMuxError('The exact original PMO Goal creation is unconfirmed. Keep the Goal and original request.', 'CONTROL_REQUEST_CONFLICT')
     return goal
   }
-  const confirmedPmoSource = async (intent: GoalPmoIntent, session: import('@agentmux/core').AgentMuxAgentCreationInspection, operationId: string) => {
-    if (session.kind === 'retired-agent') throw new AgentMuxError('The original PMO Session is closed. Its Goal and request are retained; explicitly recover the Session before linking current participation.', 'AGENT_SESSION_RETIRED')
-    const goal = await pmoGoal(intent)
-    const context = unknownNameContext('desktop.goal-pmo')
-    context.actor = { kind: 'agent', id: session.agentSessionId, verified: true }
-    context.location = { ...context.location, hostId: session.hostId, callerSessionId: session.agentSessionId, callerCwd: session.workspacePath }
-    const source = (await admittedDemandParticipation(context, 'discussion', config, args.scratchTopics))!
-    if (intent.creationOperationId === undefined) return demands.recordParticipation(goal.id, source, { operationId })
-    const loops = args.progressLoops ? await args.progressLoops.listGoals(goal.id) : []
-    return demands.resolveCreationOrigin(goal.id, { creationOperationId: intent.creationOperationId, source, sourceOperationId: operationId },
-      { expectedUpdatedAt: goal.updatedAt, allowSupervisorDefault: !loops.some(loop => loop.status !== 'stopped') })
+  const confirmPmoParticipation = async (intent: GoalPmoIntent, control: AgentSessionControl, operationId: string, evidence: 'creation-input' | 'prompt-input') => {
+    return confirmDesktopGoalParticipation(args.runtime, { goalId: intent.goalId,
+      ...(intent.creationOperationId === undefined ? {} : { creationOperationId: intent.creationOperationId }),
+      hostId: control.hostId, agentSessionId: control.agentSessionId, expectedRun: control.run, operationId, evidence })
   }
-  handle('demands:create', async (input: import('@agentmux/demand').CreateDemandInput, controlRequestId?: string) => {
-    const requesterAsSupervisor = resolveGoalsPreferences(config.goals).requesterAsSupervisor
-    const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
-      request => request.operation === 'demand.create' && admittedDemandCreateMatches(request, input))
-    const participation = await admittedDemandParticipation(admitted.context, 'create', config, args.scratchTopics)
-    return demands.create(input, { context: admitted.context, operationId: admitted.operationId,
-      creationOrigin: { requesterAsSupervisor }, ...(participation ? { participation } : {}) })
-  })
   handleWithEvent('demands:reconcilePmoCreation', async (event, intent: GoalPmoIntent, hostId: string, agentSessionId: string, createOperationId: string) => {
     assertManualPromptSenderTrusted(event.sender, contents)
-    await pmoGoal(intent)
-    if (intent.creationOperationId === undefined || createOperationId !== await goalPmoOperation(intent, 'create')) throw new AgentMuxError('The original PMO creation operation is unconfirmed.', 'CONTROL_REQUEST_CONFLICT')
     const created = await args.runtime.agentCreation(hostId, agentSessionId)
-    if (created.kind === 'retired-agent') throw new AgentMuxError('The original PMO was created and subsequently closed. Its original operation and history are retained.', 'AGENT_SESSION_RETIRED')
-    if (created.agentSessionId !== agentSessionId || created.creation?.createOperationId !== createOperationId || created.creation.initialPrompt !== 'confirmed')
-      throw new AgentMuxError('The original PMO creation or its initial request is still unconfirmed. Inspect the same operation without starting or sending again.', 'CONTROL_UNAVAILABLE')
-    return confirmedPmoSource(intent, created, createOperationId)
+    if (created.kind === 'retired-agent' || !created.creation?.createdRun) throw new AgentMuxError('The original PMO creation Run is unconfirmed. Its Goal and source operation are retained.', 'CONTROL_UNAVAILABLE')
+    return confirmPmoParticipation(intent, { kind: 'agent', hostId, agentSessionId, run: created.creation.createdRun }, createOperationId, 'creation-input')
   })
   handleWithEvent('demands:reconcilePmoInput', async (event, intent: GoalPmoIntent, session: AgentSessionControl, operationId: string) => {
     assertManualPromptSenderTrusted(event.sender, contents)
-    await pmoGoal(intent)
-    if (intent.creationOperationId === undefined || operationId !== await goalPmoOperation(intent, 'discussion')) throw new AgentMuxError('The original PMO discussion operation is unconfirmed.', 'CONTROL_REQUEST_CONFLICT')
-    const timeline = await args.runtime.sessionTimeline(session)
-    if (timeline.agentSessionId !== session.agentSessionId || !timeline.items.some(item => item.agentSessionId === session.agentSessionId && item.kind === 'user_message' && item.status === 'complete' && item.id === `prompt:${operationId}`))
-      throw new AgentMuxError('The original PMO request remains unconfirmed. Inspect the same operation without sending again.', 'CONTROL_UNAVAILABLE')
-    return confirmedPmoSource(intent, await args.runtime.agentCreation(session.hostId, session.agentSessionId), operationId)
+    return confirmPmoParticipation(intent, session, operationId, 'prompt-input')
   })
-  handle('demands:update', async (id: string, patch: import('@agentmux/demand').UpdateDemandInput, controlRequestId?: string, expectedUpdatedAt?: number) => {
-    const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
-      request => (request.operation === 'demand.update' || request.operation === 'demand.assign' || request.operation === 'demand.handoff') && admittedDemandUpdateMatches(request, id, patch, expectedUpdatedAt))
-    const requirements = patch.description !== undefined || patch.alignment !== undefined
-    const participation = requirements ? await admittedDemandParticipation(admitted.context, 'requirements', config, args.scratchTopics) : undefined
-    return await demands.update(id, patch, { context: admitted.context, operationId: admitted.operationId, ...(participation ? { participation } : {}), ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }) })
-  })
-  handle('demands:confirmAlignment', async (id: string, expectedRevision: number) => await demands.confirmAlignment(id, expectedRevision))
-  handle('demands:acceptGrounding', async (id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean, finish?: boolean) => await demands.acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps, finish))
-  handle('demands:delete', async (id: string) => await demands.delete(id))
-  handle('demands:linkSession', async (id: string, sessionId: string) => await demands.linkSession(id, sessionId))
-  handle('demands:unlinkSession', async (id: string, sessionId: string) => await demands.unlinkSession(id, sessionId))
-  handle('demands:activity', async (id: string, input: Omit<import('@agentmux/demand').DemandActivity, 'id' | 'createdAt'>, controlRequestId?: string) => {
-    const admitted = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
-      request => request.operation === 'demand.activity.append' && request.demandId === id && request.kind === input.kind && request.message === input.message && request.requestId === input.operationId)
-    if (!admitted.context.actor.verified) throw Object.assign(new Error('Activity author is unconfirmed. Original Goal and Agent remain available; authenticate and inspect the original operation.'), { code: 'CONTROL_PERMISSION_DENIED' })
-    const participation = input.kind === 'requirements' ? await admittedDemandParticipation(admitted.context, 'requirements', config, args.scratchTopics) : undefined
-    return await demands.addActivity(id, { kind: input.kind, message: input.message, actorId: admitted.context.actor.id,
-      ...(input.operationId === undefined ? {} : { operationId: input.operationId }) }, participation ? { participation } : {})
-  })
-  handle('demands:inspectActivity', async (id: string, operationId: string) => await demands.inspectActivity(id, operationId))
-  handle('demands:readActivities', async (id: string) => await demands.readActivities(id))
-  handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
   const disposeToolkitIpc = registerToolkitIpc(toolkit, (channel, handler) => handleWithEvent(channel, (event, ...values) => {
     assertToolkitSenderTrusted(event.sender, event.senderFrame, contents, contents.mainFrame)
     return handler(event, ...values)
@@ -1690,7 +1525,10 @@ export async function registerIpc(args: {
     const result = await args.runtime.launchAgent(input, config)
     const creation = result.creation
     if (goalPmo && creation && result.created.agentSessionId === input.agentSessionId && creation.createOperationId === input.createOperationId && creation.initialPrompt === 'confirmed') {
-      try { await confirmedPmoSource(goalPmo, result.created, creation.createOperationId) }
+      try {
+        if (!creation.createdRun) throw new AgentMuxError('The original PMO creation Run is unconfirmed. Its Goal and source operation are retained.', 'CONTROL_UNAVAILABLE')
+        await confirmPmoParticipation(goalPmo, { ...result.created, run: creation.createdRun }, creation.createOperationId, 'creation-input')
+      }
       catch (error) { throw Object.assign(error instanceof Error ? error : new Error(String(error)), { agentSessionId: result.created.agentSessionId, createOperationId: creation.createOperationId, controlFailure: { disposition: 'unknown', confirmedInputBytes: null } }) }
     }
     if (!event.sender.isDestroyed()) return result
@@ -1813,60 +1651,42 @@ export async function registerIpc(args: {
   })
   handleWithEvent('continuousProgress:list', async (event, target: ContinuousProgressTarget) => {
     requireTrustedSender('continuousProgress:list', event)
-    await args.progressLoops.start()
-    return args.progressLoops.list().filter(loop => !isAgentSchedule(loop) && progressTargetMatches(loop, target))
+    return (await callUserRpc('agent.progress.list', { target })).loops
   })
   handleWithEvent('continuousProgress:goals', async (event, goalId: string) => {
     requireTrustedSender('continuousProgress:goals', event)
-    return args.progressLoops.listGoals(goalId)
+    return (await callUserRpc('goal.inspect', { goalId })).goalContinuations
   })
-  handleWithEvent('continuousProgress:prepareGoal', async (event, input: import('@agentmux/host/continuous-progress-loop-manager').GoalProgressStart, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
-    requireTrustedSender('continuousProgress:prepareGoal', event)
-    if (caller && !caller.capability) throw new Error('Original managed caller capability is unavailable.')
-    return args.progressLoops.prepareGoal(input, caller?.capability ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : undefined)
-  })
-  handleWithEvent('continuousProgress:initialGoalInput', async (event, target: ContinuousProgressTarget, loopId: string, operationId: string, phase: 'begin' | 'confirm') => {
-    requireTrustedSender('continuousProgress:initialGoalInput', event)
-    if (phase !== 'begin' && phase !== 'confirm') throw new Error('Unknown original Goal input phase.')
-    return args.progressLoops.initialGoalInput(target, loopId, operationId, phase)
-  })
-  handleWithEvent('continuousProgress:goalAction', async (event, goalId: string, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', revision: number, operationId: string, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
+  handleWithEvent('continuousProgress:goalAction', async (event, goalId: string, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', expectedRevision: number, operationId: string) => {
     requireTrustedSender('continuousProgress:goalAction', event)
-    if (caller && !caller.capability) throw new Error('Original managed caller capability is unavailable.')
-    return args.progressLoops.goalAction(goalId, loopId, action, revision, operationId, caller?.capability ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : undefined)
+    return (await callUserRpc('goal.continuation-action', { goalId, loopId, action, expectedRevision, operationId })).continuation
   })
-
-
-
-
   handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => {
     requireTrustedSender('continuousProgress:create', event)
-    const observed = await args.runtime.observeContinuousProgress(target, mintObjectId(), Date.now())
-    if (observed.inputOccupied) throw new Error('Keep your draft and queued messages. Clear them before enabling automatic progress.')
-    return await args.progressLoops.create({ ...target, intervalMs, prompt, ...(taskSource !== undefined ? { taskSource } : {}) })
+    if (taskSource?.kind === 'goal') throw new AgentMuxError('Goal continuation requires its original explicit Goal Start.', 'INVALID_CONTROL_REQUEST')
+    return (await callUserRpc('agent.progress.create', { target, intervalMs, prompt, ...(taskSource ? { taskSource } : {}), operationId: mintObjectId() })).loop
   })
-  handleWithEvent('continuousProgress:action', async (event, target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check') => {
+  handleWithEvent('continuousProgress:action', async (event, target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', expectedLoop: import('@agentmux/core').ContinuousProgressLoop, operationId: string) => {
     requireTrustedSender('continuousProgress:action', event)
-    await args.progressLoops.start()
-    const loop = args.progressLoops.list().find(loop => !isAgentSchedule(loop) && loop.loopId === loopId && progressTargetMatches(loop, target))
-    if (!loop) throw new Error('This loop does not belong to the requested target.')
-    if (action === 'pause') return await args.progressLoops.pause(loopId)
-    if (action === 'stop') return await args.progressLoops.stopLoop(loopId)
-    if (action !== 'resume' && action !== 'check') throw new Error('Unknown continuous progress action.')
-    const observed = await args.runtime.observeContinuousProgress(target, mintObjectId(), Date.now())
-    if (observed.inputOccupied) throw new Error('Keep your draft and queued messages. Automatic progress remains paused.')
-    return action === 'resume' ? await args.progressLoops.resume(loopId) : await args.progressLoops.checkNow(loopId)
+    return (await callUserRpc('agent.progress.action', { target, loopId, action, expectedLoop, operationId })).loop
   })
-  const pauseUserProgress = (session: SessionControl, reason: string): void => {
-    if (session.kind === 'agent') void args.progressLoops.pauseTarget(session, reason).catch(error => console.error('Continuous progress pause could not be saved:', error))
+  const pauseAutomaticInput = async (control: AgentSessionControl) => {
+    const context = { principal: { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'current') } }
+    const owner = (await args.runtime.callOriginalCore(control.hostId, 'runtime.owner.identity', {}, context)).owner
+    const target = { agentSessionId: control.agentSessionId, expectedRun: control.run, ownerInstanceId: owner.ownerInstanceId, operationId: mintObjectId() }
+    const outcome = await args.runtime.callOriginalCore(control.hostId, 'agent.automation.pause', target, context)
+    if (outcome.receipt?.status !== 'confirmed') throw new AgentMuxError('The original automatic pause is unconfirmed. Keep operation ' + target.operationId + ' on owner ' + target.ownerInstanceId + '; manual input remains available.', 'CONTROL_UNAVAILABLE')
+  }
+  const pauseUserProgress = (session: SessionControl, _reason: string): void => {
+    if (session.kind === 'agent') void pauseAutomaticInput(session).catch(error => console.warn('Original automatic pause is unconfirmed; manual input remains available:', error))
   }
   handleWithEvent('continuousProgress:pauseForInput', async (event, control: AgentSessionControl) => {
     requireTrustedSender('continuousProgress:pauseForInput', event)
-    await args.progressLoops.pauseTarget(control, 'Paused for your draft or queued message. Resume explicitly after sending or clearing it.')
+    await pauseAutomaticInput(control)
   })
   handleWithEvent('sessions:inputOccupation', async (event, control: AgentSessionControl) => {
     requireTrustedSender('sessions:inputOccupation', event)
-    args.runtime.notifyInputOccupation(control)
+    await pauseAutomaticInput(control)
   })
   handleWithEvent('sessions:write', async (event, session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source'], observation?: import('@agentmux/core/control').InputObservationReference): Promise<SessionInputWriteResult> => {
     if (source === 'user' && data.length > 0) pauseUserProgress(session, 'Paused for your terminal input.')
@@ -1928,26 +1748,23 @@ export async function registerIpc(args: {
       agentMuxNote = goalRoleInputNote(agentMuxNote, { role: goalPmo ? 'manager' : 'executor', goalId,
         agentSessionId: session.agentSessionId, runId: session.run.runId, source: { kind: goalPmo ? 'goal-discussion' : goalContinuation ? 'goal-native-continuation' : 'goal-start', operationId } }, original)
     }
-    const submitOriginal = async () => {
-      if (goalContinuation) {
-        assertManualPromptSenderTrusted(event.sender, contents)
-        if (!args.progressLoops || typeof goalContinuation.goalId !== 'string' || typeof goalContinuation.loopId !== 'string') throw new AgentMuxError('The original Goal input owner is unavailable.', 'CONTROL_UNAVAILABLE')
-        await args.progressLoops.submitGoalInitial({ hostId: session.hostId, agentSessionId: session.agentSessionId }, goalContinuation.goalId, goalContinuation.loopId, operationId, prompt, condition,
-          async (isCurrent, signal) => { await args.runtime.submitPrompt(session, prompt, operationId, condition, { isCurrent, signal }, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture) })
-      } else {
-        pauseUserProgress(session, 'Paused for your message.')
-        await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture)
-      }
+    if (goalDispatch || goalContinuation) {
+      assertManualPromptSenderTrusted(event.sender, contents)
+      const goalId = goalDispatch?.goalId ?? goalContinuation!.goalId
+      if (goalPmo || goalDispatch && goalDispatch.operationId !== operationId) throw new AgentMuxError('The original Goal Start operation changed.', 'CONTROL_REQUEST_CONFLICT')
+      const goal = await callUserRpc('goal.inspect', { goalId })
+      const loop = goalContinuation ? goal.goalContinuations.find(loop => loop.loopId === goalContinuation.loopId) : undefined
+      if (goalContinuation && (!loop || loop.creationOperationId !== operationId || loop.initialDelivery?.prompt !== prompt || loop.hostId !== session.hostId || loop.agentSessionId !== session.agentSessionId || loop.initialDelivery.condition.expectedRun.runId !== session.run.runId)) throw new AgentMuxError('The original Goal input or target is unconfirmed. Inspect its retained Host request.', 'CONTROL_REQUEST_CONFLICT')
+      await executeGoal({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.start', requestId: operationId, demandId: goalId, sessionId: session.agentSessionId,
+        ...(loop?.taskSource?.kind === 'goal' ? { continuation: { intervalMs: loop.intervalMs, alignmentRevision: loop.taskSource.alignmentRevision } } : {}) })
+    } else {
+      pauseUserProgress(session, 'Paused for your message.')
+      await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture)
     }
-    if (goalDispatch) {
-      assertManualPromptSenderTrusted(event.sender, contents); assertGoalDispatchReference(goalDispatch)
-      if (goalPmo) throw new AgentMuxError('A PMO discussion cannot impersonate an explicit Goal Start.', 'CONTROL_REQUEST_CONFLICT')
-      await goalDispatchInputs.submit(goalDispatch, session, operationId, prompt, submitOriginal, goalContinuation)
-    } else await submitOriginal()
     if (goalPmo) {
       const original = await args.runtime.agentCreation(session.hostId, session.agentSessionId)
       if (original.agentSessionId !== session.agentSessionId) throw new AgentMuxError('The confirmed PMO recipient changed.', 'CONTROL_REQUEST_CONFLICT')
-      await confirmedPmoSource(goalPmo, original, operationId)
+      await confirmPmoParticipation(goalPmo, session, operationId, 'prompt-input')
     }
   }))
   handleWithEvent('sessions:replyQuestion', async (event, session: AgentSessionControl,
@@ -2456,8 +2273,8 @@ export async function registerIpc(args: {
     ...(args.clientIncidents ? { clientIncidents: () => args.clientIncidents! } : {}),
     clientNotifications: clientNotificationsPort(deliveryAttempts.hostId, (request, signal) => executeControl(request, undefined, signal)),
     moteContext: moteContextEvidencePort(deliveryAttempts.hostId, request => executeControl(request)),
-    execute: executeControl,
-    nameHistory: query => hostNameHistory(spatialState, demands, query),
+    execute: (request, nameContext, originalContext) => executeControl(request, nameContext, originalContext?.signal),
+    nameHistory: query => args.runtime.callOriginalCore('local', 'name.history', query, { principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` } }),
     spatialState,
     files: publicFiles,
     git: publicGit,
@@ -2465,11 +2282,12 @@ export async function registerIpc(args: {
     topics: { call: (method, params, context) => args.runtime.callOriginalCore('local', method, params as never, context ?? { transport: 'unix' }) as Promise<import('@agentmux/core').TopicResult<typeof method>> },
     moteAvatars,
 
-    schedules: args.progressLoops,
+
     conversationLandmarks,
     notebookStore,
     notebookObservation: notebookObservation.owner,
-    goalDelegations,
+    goalChanges: desktopGoalChanges(args.runtime),
+    goalControl: (request, _name, originalContext) => executeGoal(request, originalContext),
     applicationAccess: args.applicationAccess,
     hostConfiguration: hostId => structuredClone(configOwner.current.hosts.find(host => host.id === hostId) ?? null),
     coreClients: () => args.runtime.rpcClients(),
@@ -2532,11 +2350,7 @@ export async function registerIpc(args: {
       { owner: 'client-incident-runtime', dispose: () => runtimeIncidents?.dispose() },
       { owner: 'terminal-brightness', dispose: disposeTerminalBrightness },
       { owner: 'spatial', dispose: () => disposeSpatial() },
-      { owner: 'goal-attention', dispose: () => goalAttention?.dispose() },
-      { owner: 'goal-start-responsibility', dispose: () => goalStartResponsibility?.dispose() },
-      { owner: 'goal-responsibility', dispose: () => goalResponsibility?.dispose() },
-      { owner: 'goal-patrol', dispose: () => goalPatrol?.dispose() },
-      { owner: 'demand-changes', dispose: () => disposeDemandChanges() },
+      { owner: 'goal-change-reader', dispose: disposeGoalChanges },
       { owner: 'notebook', dispose: () => { notebookObservation.requests.dispose(); disposeNotebook() } },
       { owner: 'toolkit-ipc', dispose: () => disposeToolkitIpc() },
       { owner: 'toolkit', dispose: () => toolkit.dispose() },
@@ -2547,8 +2361,6 @@ export async function registerIpc(args: {
       { owner: 'theme-bootstrap', dispose: disposeThemeBootstrap },
       { owner: 'workbench-window-listener', dispose: () => { ipcMain.removeListener(WORKBENCH_WINDOW_RESPONSE, acceptWorkbenchWindow) } },
       { owner: 'control-listener', dispose: () => { ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl) } },
-      { owner: 'progress-input', dispose: () => disposeProgressInput() },
-      { owner: 'progress-changes', dispose: () => disposeProgressChanges() },
       { owner: 'control-bridge', dispose: () => controlBridge.dispose() },
       { owner: 'control-server', dispose: () => control.stop() },
       { owner: 'channel-metadata', dispose: () => channelMetadata?.dispose() },

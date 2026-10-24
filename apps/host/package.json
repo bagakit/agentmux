@@ -268,6 +268,10 @@
     "./goal-projection": {
       "types": "./dist/goal-projection.d.ts",
       "import": "./dist/goal-projection.js"
+    },
+    "./goals": {
+      "types": "./dist/goals.d.ts",
+      "import": "./dist/goals.js"
     }
   }
 }

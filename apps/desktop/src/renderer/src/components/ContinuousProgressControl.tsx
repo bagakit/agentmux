@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { isAgentSchedule, type ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
@@ -12,7 +13,7 @@ import { resolveAutomationPreferences } from '../../../shared/automation-prefere
 
 export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 
-/** Existing Main loop owner is observed only for this Session, even while its mailbox page is hidden. */
+/** Read the original Host only for this visible Session consumer; retained forms stay mounted. */
 export function ContinuousProgressControl({ session, onStatusChange, presented = true, visible = presented }: {
   session: Extract<SessionSnapshot, { kind: 'agent' }>
   onStatusChange?: (status: ContinuousProgressStatus) => void
@@ -25,6 +26,7 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
   const target = useMemo(() => ({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId,
     providerId: session.providerId, workspacePath: session.workspacePath }),
   [session.control.hostId, session.control.agentSessionId, session.providerId, session.workspacePath])
+  const targetKey = JSON.stringify([target.hostId, target.agentSessionId, target.providerId, target.workspacePath])
   const [initialDefaults] = useState(() => resolveAutomationPreferences(useAppStore.getState().config?.automation))
   const form = useRef({ target, defaults: initialDefaults })
   if (form.current.target !== target) form.current = { target, defaults: resolveAutomationPreferences(useAppStore.getState().config?.automation) }
@@ -42,34 +44,53 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
   const hadLoop = useRef(false)
   const current = useRef(target); current.current = target
   const updates = useRef(0)
+  const reads = useRef(new Map<string, Promise<ContinuousProgressLoop[]>>())
   useEffect(() => {
-    let alive = true
+    updates.current++
     hadLoop.current = false
     setLoops([]); setError(undefined); setBusy(false); setPrompt(form.current.defaults.progressPrompt); setInterval(String(form.current.defaults.progressIntervalMs / 60_000)); setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
-    const before = updates.current
-    const dispose = api.continuousProgress.onChanged(loop => {
-      if (!alive || isAgentSchedule(loop) || loop.hostId !== target.hostId || loop.agentSessionId !== target.agentSessionId ||
-          loop.providerId !== target.providerId || loop.workspacePath !== target.workspacePath) return
-      updates.current++
-      setLoops(previous => [...previous.filter(value => value.loopId !== loop.loopId), loop])
-      setObservedTarget(target)
-    })
-    void api.continuousProgress.list(target).then(result => {
-      if (alive && updates.current === before) { setLoops(result.filter(loop => !isAgentSchedule(loop))); setObservedTarget(target) }
-    }, failure => { if (alive) setError(failure instanceof Error ? failure.message : String(failure)) })
-    return () => { alive = false; dispose() }
   }, [target])
+  useEffect(() => {
+    if (!visible) return
+    let alive = true, reading = false, reread = false
+    const refresh = async () => {
+      if (!alive || document.hidden) return
+      if (reading) { reread = true; return }
+      reading = true
+      let readCut = updates.current
+      try {
+        const pending = reads.current.get(targetKey)
+        if (pending) await pending.catch(() => {})
+        if (!alive || document.hidden) return
+        const before = updates.current, request = api.continuousProgress.list(target); readCut = before
+        reads.current.set(targetKey, request)
+        try {
+          const result = await request
+          if (alive && !document.hidden && current.current === target && updates.current === before) {
+            setLoops(result.filter(loop => !isAgentSchedule(loop))); setObservedTarget(target); setError(undefined)
+          }
+        } finally { if (reads.current.get(targetKey) === request) reads.current.delete(targetKey) }
+      } catch (failure) { if (alive && !document.hidden && updates.current === readCut) setError(failure instanceof Error ? failure.message : String(failure)) }
+      finally { reading = false; if (reread) { reread = false; void refresh() } }
+    }
+    void refresh()
+    const timer = window.setInterval(() => { void refresh() }, 5000)
+    const visibility = () => { void refresh() }
+    document.addEventListener('visibilitychange', visibility)
+    return () => { alive = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', visibility) }
+  }, [target, targetKey, visible])
   async function run(action: () => Promise<ContinuousProgressLoop>) {
     if (busy) return
-    const captured = target, before = updates.current
+    const captured = target, before = ++updates.current
     setBusy(true)
     try {
       const result = await action()
       if (current.current === captured && updates.current === before) {
+        updates.current++
         setLoops(previous => [...previous.filter(loop => loop.loopId !== result.loopId), result]); setObservedTarget(target)
       }
       if (current.current === captured) setError(undefined)
-    } catch (failure) { if (current.current === captured) setError(failure instanceof Error ? failure.message : String(failure)) }
+    } catch (failure) { if (current.current === captured) { updates.current++; setError(failure instanceof Error ? failure.message : String(failure)) } }
     finally { if (current.current === captured) setBusy(false) }
   }
   const loop = observedTarget === target ? loops.find(loop => loop.status !== 'stopped') : undefined
@@ -87,7 +108,7 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
     ? 'unconfirmed' : loop?.status === 'active' ? 'active' : loop?.status === 'paused' ? 'paused' : 'inactive'
   const combinedStatus = [status, calendarStatus].includes('unconfirmed') ? 'unconfirmed' : [status, calendarStatus].includes('active') ? 'active' : [status, calendarStatus].includes('paused') ? 'paused' : 'inactive'
   useEffect(() => { onStatusChange?.(combinedStatus) }, [onStatusChange, combinedStatus])
-  const action = (kind: 'pause' | 'resume' | 'stop' | 'check') => loop && void run(() => api.continuousProgress.action(target, loop.loopId, kind))
+  const action = (kind: 'pause' | 'resume' | 'stop' | 'check') => loop && void run(() => api.continuousProgress.action(target, loop.loopId, kind, loop, mintObjectId()))
   return <div className="continuous-progress-control" data-progress-state={status}>
     <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={visible} />
     {presented ? <>

@@ -112,7 +112,32 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
   const draft = drafts.current.get(draftKey) ?? ''
   const attempt = attempts.current.get(draftKey)
   const available = Boolean(client && agentSessionId && session && connection.state === 'connected' && !disconnected)
-  const setDraft = (value: string, key = draftKey) => { drafts.current.set(key, value); void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1) }
+  const automaticPause = useRef<{ target: import('@agentmux/core/agent-automation').AgentAutomationTarget; client: AgentMuxHostedClient } | null>(null)
+  const pauseForExplicitInput = () => {
+    if (!client || !session || session.agentSessionId !== agentSessionId) return
+    const owner = client.runtimeOwnerIdentity()
+    if (!owner || owner.availability !== 'connected') {
+      setPreparationIssue({ client, sessionId: agentSessionId, message: '原 Host 身份尚未确认，自动活动暂停未提交；手工输入与草稿仍可使用。' }); return
+    }
+    const prior = automaticPause.current
+    if (prior?.client === client && prior.target.agentSessionId === session.agentSessionId && prior.target.expectedRun.runId === session.run.runId && prior.target.ownerInstanceId === owner.ownerInstanceId) return
+    const target = { agentSessionId: session.agentSessionId, expectedRun: { runId: session.run.runId }, ownerInstanceId: owner.ownerInstanceId, operationId: randomClientRequestId() }
+    automaticPause.current = { target, client }
+    void Promise.resolve().then(() => {
+      if (!client.forwardRpc) throw new Error('原 Host 公共暂停能力暂不可用。')
+      return client.forwardRpc('agent.automation.pause', target)
+    }).then(result => {
+      if (result.receipt?.status !== 'confirmed') throw new Error('原自动活动暂停回执未知。')
+    }).catch(error => { if (mounted.current) setPreparationIssue({ client, sessionId: target.agentSessionId,
+      message: `自动活动暂停尚未确认：${errorMessage(error)}。保留原操作 ${target.operationId}、Host ${target.ownerInstanceId}；可用 agent automation inspect 核对，不会自动重投。手工输入仍可使用。` }) })
+  }
+  const setDraft = (value: string, key = draftKey) => {
+    const occupied = Boolean(drafts.current.get(key)?.trim())
+    drafts.current.set(key, value)
+    if (key === draftKey && value.trim() && !occupied) pauseForExplicitInput()
+    if (key === draftKey && !value.trim()) automaticPause.current = null
+    void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1)
+  }
   const cancelPreparation = (key = draftKey) => {
     const original = preparingKeys.current.get(key)
     if (!original) return
@@ -381,6 +406,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
       if (previous) { previous.cancelled = true; previous.cancel?.() }
       preparingKeys.current.delete(selectedKey)
     }
+    if (!originalBody && selectedKey === draftKey) pauseForExplicitInput()
     const preparing = { cancelled: false, retaining: false, cancel: preparation?.cancel }
     const endPreparation = () => {
       if (preparingKeys.current.get(selectedKey) !== preparing) return

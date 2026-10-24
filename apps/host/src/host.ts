@@ -1,8 +1,12 @@
-import { createHostSpatialAgentControl } from './spatial-agent-control.js'
-import { createHostMobileIncidents } from './mobile-incidents.js'
+import { createHostContent } from './content-owner.js'
 import { createHostSettingsResourceRead } from './settings-resource-read.js'
 import { createHostAppearanceObservation } from './host-appearance.js'
-import { createHostContent } from './content-owner.js'
+import { createHostMobileIncidents } from './mobile-incidents.js'
+import { createHostSpatialAgentControl } from './spatial-agent-control.js'
+import { createHostGoals } from './goals.js'
+import { projectWorkspaces } from './workspace-projects.js'
+import { readPresentationConfiguration } from './presentation-configuration.js'
+import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { createHostSnapshotObservation } from './snapshot-observation.js'
 import { createHostSpatialPresentation } from './spatial-presentation.js'
 import { createDesktopInputContextCaptureReader } from './input-context-capture-reader.js'
@@ -54,11 +58,12 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   let authority: DeviceAuthority | undefined
   let relay: RelayTransportController | undefined
   let local: Awaited<ReturnType<typeof startLocalRelay>> | undefined
+  let goals: ReturnType<typeof createHostGoals> | undefined
   let mobileIncidents: ReturnType<typeof createHostMobileIncidents> | undefined
   const closeResources = async () => {
     const errors: unknown[] = []
     for (const close of [() => relay?.stop(), () => local?.stop(), () => authority?.flush(),
-      () => mobileIncidents?.flush(), () => connectionOwner?.close(), () => runtime?.stop()]) {
+      () => mobileIncidents?.flush(), () => goals?.dispose(), () => connectionOwner?.close(), () => runtime?.stop()]) {
       try { await close() } catch (error) { errors.push(error) }
     }
     if (errors.length === 1) throw errors[0]
@@ -99,12 +104,26 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     if (!runtime) throw new AgentMuxError('The original Host is not yet available. Original operations and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
     return runtime
   }
+  if (configurationPath) goals = createHostGoals({ configurationPath, spatial: spatialState, runtime: originalRuntime,
+    ...(options.connections?.clients ? { clients: options.connections.clients } : {}),
+    ...(options.connections?.subscribeClients ? { subscribeClients: options.connections.subscribeClients } : {}),
+    ...(content?.files ? { files: input => content.files!.read(input) } : {}),
+    projects: async () => projectWorkspaces((await readPresentationConfiguration(configurationPath)).workspaces.filter(workspace => workspace.id !== SCRATCH_WORKSPACE_ID))
+      .map(project => ({ projectId: project.id, name: project.name })),
+    coreCall: async (hostId, method, params, context) => {
+      if (hostId === 'local') return await originalRuntime().server.callRpc(method, params, context)
+      const matches = options.connections?.clients?.().filter(value => value.hostId === hostId) ?? []
+      const client = matches.length === 1 ? matches[0]!.client : undefined
+      if (!client || !('forwardRpc' in client) || !client.forwardRpc) throw new AgentMuxError('The exact original Goal message Host is unavailable or ambiguous. Original messages and Agents are retained.', 'CONTROL_UNAVAILABLE')
+      return await client.forwardRpc(method, params, context)
+    } })
   const service = {
     spatialState,
-    ...(configurationPath ? { spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial: spatialState, runtime: originalRuntime }) } : {}),
+    ...(configurationPath ? { spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial: spatialState, runtime: originalRuntime, agentMuxContext: async request => await goals?.contextForSpatialOpen(request) }) } : {}),
     ...(mobileIncidents ? { clientIncidents: mobileIncidents.clientIncidents, mobileWebReports: mobileIncidents.mobileWebReports } : {}),
-    ...content,
     ...(configurationPath ? { settingsResources: createHostSettingsResourceRead(configurationPath), appearance: createHostAppearanceObservation(configurationPath) } : {}),
+    ...content,
+    ...(goals ? { goalControl: goals.execute, goalParticipation: goals.participation, nameHistory: goals.nameHistory, goalChanges: goals.goalChanges, progress: goals.progress, schedules: goals.schedules, goalDelegations: goals.goalDelegations, automaticInput: goals.automaticInput } : {}),
     snapshot: createHostSnapshotObservation(configurationPath, spatialState),
     spatialPresentation: createHostSpatialPresentation({ ...(configurationPath ? { configurationPath } : {}), clients: () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])] }),
     mobileAssets,
@@ -125,6 +144,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       return offerUrl()
     }),
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {
+      if (method.startsWith('goal.') && method !== 'goal.focus' || method.startsWith('schedule.') || method.startsWith('agent.progress.') || method.startsWith('agent.automation.')) throw new AgentMuxError('The original background automation owner is unavailable. Retain the exact Goal, Session and operation; healthy manual input remains available.', 'CONTROL_UNAVAILABLE')
       if (method === 'space.mote.avatar.read') {
         if (!moteAvatars) throw new AgentMuxError('The original Mote configuration is unavailable on this Host. Saved appearances and healthy Agents are retained.', 'MOTE_AVATAR_SOURCE_UNCONFIRMED')
         const input = params as AgentMuxRpcParams<'space.mote.avatar.read'>
@@ -140,6 +160,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       finally { await desktop.dispose() }
     },
     forwardSubscription: async <M extends AgentMuxRpcStreamMethod>(method: M, params: AgentMuxRpcStreamParams<M>, handlers: AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext) => {
+      if (method === 'goal.watch') throw new AgentMuxError('The original Goal change owner is unavailable. Keep its last confirmed records and reconnect this reader.', 'CONTROL_UNAVAILABLE')
       if (method === 'connection.metadata.watch') throw new AgentMuxError('The original Channel metadata owner is not registered on this Host. Saved profiles and healthy Agents remain available.', 'CONTROL_UNAVAILABLE')
       const desktop = await desktopClient(context)
       try {
@@ -218,6 +239,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
       ...(externalInputAuthority ? { externalInputAuthority } : {}) })
     await connectionOwner?.start(runtime)
+    if (goals) void goals.start().catch(error => process.emitWarning(`Starting original Goal automation is unconfirmed: ${error instanceof Error ? error.message : String(error)}. Goal records and manual Agent input remain available.`, { code: 'GOAL_AUTOMATION_UNCONFIRMED' }))
     if (options.store instanceof AgentMuxFileAgentSessionStore) {
       try {
         authority = await DeviceAuthority.open(join(dirname(options.store.path), 'agentmux-devices.json'))

@@ -16,8 +16,8 @@ export function CalendarScheduleControl({ target, onStatusChange, initialMessage
   initialMessage?: string; initialMessageContext?: string; onMessageChange?: (message: string) => void
   presented?: boolean
 }) {
-  // Preserve the existing mailbox status observation; the hidden detail starts no display clock.
-  const source = useScheduleRecords([{ target }], presented || !!onStatusChange)
+  // Retained hidden forms/status use the last observation without starting another reader.
+  const source = useScheduleRecords([{ target }], presented)
   const now = useScheduleClock(presented)
   const draftKey = useMemo(() => 'schedule-create:' + (initialMessageContext ? 'source:' : '') + JSON.stringify(target), [target, !!initialMessageContext])
   const status: CalendarScheduleStatus = source.error || !source.observed || source.records.some(record => record.lastOutcome === 'unknown')
