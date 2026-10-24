@@ -47,7 +47,7 @@ it('diagnoses the original Core wait and preparation reason through the default 
   await f.services.ingress!.rejoin(record.ingressId)
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   await vi.waitFor(async () => expect((await f.sdk.call('space.mote.chat.diagnose', { target: f.target })).incoming!.rows[0]!.input)
-    .toEqual({ status: 'terminal-confirmed', observation: 'observed', controlState: 'dispatch-authorized', receiptObservation: 'closed', waiting: null, preparationReason: null, failureCode: null, runtime: null }))
+    .toEqual({ status: 'terminal-confirmed', observation: 'observed', controlState: 'dispatch-authorized', receiptObservation: 'closed', waiting: null, preparationReason: null, failureCode: null, runtime: { target: 'original', state: 'running', exitCode: null } }))
   expect((await f.records())[0]!.input).toEqual(record.input)
   expect(f.start).toHaveBeenCalledOnce(); expect(f.submission).toHaveBeenCalledOnce(); expect(rejoin).toHaveBeenCalledTimes(2)
   expect(f.wire.effects).toHaveLength(0)

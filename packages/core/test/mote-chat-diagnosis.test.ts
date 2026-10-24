@@ -4,7 +4,7 @@ import { expect, it } from 'vitest'
 import { AGENTMUX_CLI_COMMANDS } from '../src/agentmux-cli-commands.js'
 import { parseConnectionIngressRecord } from '../src/ingress-codec.js'
 import { isMoteChatMethod, moteChatDiagnosisCode, moteChatDiagnosisKey, parseMoteChatParams, parseMoteChatResult,
-  moteChatPreparationReason, moteChatInputFailureCode, moteChatInputFailureCodes,
+  moteChatPreparationReason, moteChatInputFailureCode, moteChatInputFailureCodes, moteChatDiagnosisGenerationKey,
   type MoteChatDiagnosis, type MoteChatDiagnosisInput, type MoteChatDiagnosisIntake } from '../src/mote-chat.js'
 import { parseConnectionDiagnosisWaiting } from '../src/connection-diagnosis-codec.js'
 import type { AgentInputSubmissionReceipt, AgentInputWaitReason } from '../src/agent-input-wait.js'
@@ -25,7 +25,7 @@ const diagnosis = (): MoteChatDiagnosis => ({
   connection: { enabled: true, revision: 3, authentication: stage, transport: stage, intake: stage, delivery: stage },
   incoming: { rows: [{ key: moteChatDiagnosisKey(input.target, 'private-ingress'), state: 'received',
     code: 'MOTE_CHAT_SOURCE_UNCONFIRMED', codeRecorded: true, preparation: 'creation-dispatched',
-    input: inputObservation() }], more: true }, issues: []
+    input: inputObservation() }], more: true }, publications: [], issues: []
 })
 
 it('accepts only the complete exact target and hashes its canonical identity without exposing it', () => {
@@ -84,6 +84,36 @@ it('rejects private fields, foreign targets, arbitrary causes and inconsistent o
   expect(moteChatDiagnosisCode('INGRESS_PREPARATION_UNAVAILABLE')).toBe('INGRESS_PREPARATION_UNAVAILABLE')
   expect(moteChatDiagnosisCode('PRIVATE_EXCEPTION_CODE')).toBeNull()
   expect(moteChatDiagnosisCode({ code: 'MOTE_CHAT_EXECUTOR_UNAVAILABLE', message: 'private error' })).toBeNull()
+})
+
+it('keeps generation publication windows bounded, redacted and separate from terminal receipt and runtime', () => {
+  const report = diagnosis(), row = report.incoming!.rows[0]!
+  row.preparation = 'ready'
+  for (const status of ['terminal-confirmed', 'admitted'] as const) {
+    row.input = inputObservation({ status, observation: 'observed', controlState: 'dispatch-authorized', receiptObservation: 'closed', runtime: { target: 'original', state: 'running', exitCode: null } })
+    expect(parseMoteChatResult(method, report, input).incoming!.rows[0]!.input).toEqual(row.input)
+  }
+  const generationKey = moteChatDiagnosisGenerationKey(input.target, 'private-generation')
+  expect(generationKey).not.toBe(moteChatDiagnosisKey(input.target, 'private-generation'))
+  const publication = { generationKey, intakeKeys: [row.key], reading: 'observed' as const,
+    observation: { state: 'ready' as const }, sourceObservation: { state: 'ready' as const, code: null, codeRecorded: false, checkpointKey: 'a'.repeat(64) },
+    effectObservation: { state: 'unknown' as const, reason: 'effect-unconfirmed' as const }, coverage: { state: 'complete' as const, gaps: [], more: false, originCount: 0 },
+    effects: [{ kind: 'conversation' as const, effect: 'upsert' as const, state: 'unknown' as const, receipt: { state: 'unknown' as const, reason: 'platform-unavailable' as const }, resourceUpload: null }], more: false }
+  report.publications = [publication]
+  expect(parseMoteChatResult(method, report, input)).toEqual(report)
+  for (const fields of [
+    { generationKey: 'private-generation' }, { intakeKeys: ['f'.repeat(64)] }, { intakeKeys: [row.key, row.key] },
+    { reading: 'unavailable' }, { bindingId: 'private-binding' }, { sourceObservation: { ...publication.sourceObservation, nativeSessionId: 'private-native' } },
+    { sourceObservation: { ...publication.sourceObservation, code: 'RAW_EXCEPTION' } },
+    { effects: [{ ...publication.effects[0], operationId: 'private-operation' }] },
+    { effects: [{ ...publication.effects[0], receipt: { state: 'confirmed', reason: null, mapping: { messageId: 'private-platform-message' } } }] },
+    { effects: [{ ...publication.effects[0], receipt: { state: 'unknown', reason: null } }] }, { effects: Array(6).fill(publication.effects[0]) },
+    { coverage: { ...publication.coverage, gaps: [{ reason: 'source-gap', code: null, codeRecorded: true, record: 'private-record' }] } }
+  ]) expect(() => parseMoteChatResult(method, { ...report, publications: [{ ...publication, ...fields }] }, input)).toThrow()
+  expect(() => parseMoteChatResult(method, { ...report, publications: [publication, publication] }, input)).toThrow()
+  expect(() => parseMoteChatResult(method, { ...report, incoming: null }, input)).toThrow()
+  row.preparation = 'other-route'; row.input = inputObservation({ observation: 'unavailable' })
+  expect(() => parseMoteChatResult(method, report, input)).toThrow()
 })
 
 it('reuses exact safe waiting combinations while separating receipt ownership from inspection availability', () => {
