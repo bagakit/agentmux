@@ -1,6 +1,6 @@
 import { Blob as NodeBlob } from 'node:buffer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { bindMobileViewport, bindNativeDevice, createNativePlatform, pickLocalAttachment, type NativeDevicePorts } from '../src/platform/native/device'
+import { bindMobileViewport, bindNativeDevice, createNativePlatform, nativeDevicePorts, pickLocalAttachment, type NativeDevicePorts } from '../src/platform/native/device'
 import { createBrowserPlatform } from '../src/platform/browser'
 
 function deferred<T>() {
@@ -25,7 +25,7 @@ function device(late = false) {
       admission.resolve({ async remove() { removed.push(name); callbacks.delete(name) } })
     } } }
 }
-afterEach(() => { vi.restoreAllMocks(); document.body.replaceChildren(); delete document.documentElement.dataset.mobileKeyboard })
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); document.body.replaceChildren(); delete document.documentElement.dataset.mobileKeyboard })
 
 describe('public OS ports used by the mobile shell', () => {
   it('confirms clipboard only after the native receipt, reports failure and keeps all visual ports', async () => {
@@ -73,6 +73,8 @@ describe('public OS ports used by the mobile shell', () => {
     expect(selected!.id.length).toBeGreaterThan(0)
     pickFiles.mockResolvedValueOnce({ files: [] }); expect(await pickLocalAttachment(ports)).toBeNull()
     pickFiles.mockRejectedValueOnce(new Error('pickFiles canceled.')); expect(await pickLocalAttachment(ports)).toBeNull()
+    pickFiles.mockRejectedValueOnce(new Error('transfer canceled by unreadable source'))
+    await expect(pickLocalAttachment(ports)).rejects.toThrow('unreadable source')
     pickFiles.mockResolvedValueOnce({ files: [{ name: 'photo.JPG', mimeType: 'image/jpg', size: 4, blob: new NodeBlob(['jpeg']) }] })
     expect((await pickLocalAttachment(ports))?.mimeType).toBe('image/jpeg')
     pickFiles.mockResolvedValueOnce({ files: [{ name: 'capture.HEIC', mimeType: '', size: 4, blob: new NodeBlob(['heic']) }] })
@@ -81,6 +83,27 @@ describe('public OS ports used by the mobile shell', () => {
     await expect(pickLocalAttachment(ports)).rejects.toThrow('尚未确认')
     pickFiles.mockResolvedValueOnce({ files: [{ name: 'a' }, { name: 'b' }] })
     await expect(pickLocalAttachment(ports)).rejects.toThrow('多个文件')
+  })
+
+  it('keeps the real browser chooser pending after focus and adopts a later change, while an actual cancel is empty', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {})
+    const completed = vi.fn()
+    const pending = pickLocalAttachment().then(value => { completed(value); return value })
+    const input = document.querySelector<HTMLInputElement>('input[type=file]')!
+    expect(input).not.toBeNull()
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(completed).not.toHaveBeenCalled()
+    const blob = Object.assign(new NodeBlob(['late-image'], { type: 'image/png' }), { name: 'late.png', lastModified: 1 })
+    Object.defineProperty(input, 'files', { value: [blob] })
+    input.dispatchEvent(new Event('change'))
+    expect(await pending).toMatchObject({ name: 'late.png', dataBase64: Buffer.from('late-image').toString('base64') })
+    expect(document.querySelector('input[type=file]')).toBeNull()
+    const cancelled = nativeDevicePorts.filePicker.pickFiles({ limit: 1, readData: false })
+    document.querySelector('input[type=file]')!.dispatchEvent(new Event('cancel'))
+    expect(await cancelled).toEqual({ files: [] })
+    expect(document.querySelector('input[type=file]')).toBeNull()
   })
 
   it('observes foreground edges, Android Back and native keyboard without duplicate focus or viewport arithmetic', async () => {

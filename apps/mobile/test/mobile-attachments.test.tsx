@@ -4,7 +4,7 @@ import { Blob as NodeBlob } from 'node:buffer'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { FileUploadOwner } from '../../desktop/src/main/file-upload-owner'
+import { FileUploadOwner } from '../../host/src/file-upload-owner'
 import { AgentMuxRpcService, type AgentMuxRpcCorePort } from '../../../packages/core/src/public-rpc-service'
 import { fileUploadRevision, FILE_UPLOAD_MAX_BYTES, type FileUploadParams } from '../../../packages/core/src/public-rpc-files'
 import { MobileAttachments, type MobileAttachmentControls } from '../src/conversation/MobileAttachments'
@@ -25,7 +25,7 @@ function pickFiles(files: unknown[]) {
   return pick
 }
 async function settled(phase: MobileFileUpload['phase']) {
-  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe(phase)) })
+  await act(async () => { await vi.waitFor(() => { const upload = getDeviceWorkface().snapshot().record.fileUploads?.[0]; expect(upload?.phase, upload?.issue).toBe(phase) }) })
 }
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()); root = await mkdtemp(join(tmpdir(), 'amx-mobile-file-')) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; for (const dispose of disposers.splice(0)) await dispose(); await rm(root, { recursive: true, force: true }); nativeDevicePorts.filePicker = originalFilePicker; vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -43,12 +43,13 @@ function local(id = 'upload-original', text = 'pinned local bytes'): LocalAttach
 function boundFixture() {
   const f = fixture(), owner = new FileUploadOwner(join(root, 'uploads'))
   for (const [id, value] of f.sessions) f.sessions.set(id, { ...value, hostId: 'local' })
-  const core = { agentSessions: () => [...f.sessions.values()], readAgentSessions: async () => [...f.sessions.values()], sessionHistorySources: async () => [] } as unknown as AgentMuxRpcCorePort
+  const core = { agentSessions: () => [...f.sessions.values()], readAgentSession: async (id: string) => f.sessions.get(id) ?? null,
+    readAgentSessions: async () => [...f.sessions.values()], sessionHistorySources: async () => [] } as unknown as AgentMuxRpcCorePort
   const service = new AgentMuxRpcService({ fileUploads: owner, coreClients: () => [{ hostId: 'local', client: core }] })
   const calls: Array<{ method: string; params: any }> = []
   const forward = vi.fn(async (method: any, params: any) => {
     calls.push({ method, params: structuredClone(params) })
-    return await service.call(method, JSON.parse(JSON.stringify(params)), { principal: { kind: 'device', id: 'private-phone' } })
+    return await service.call(method, JSON.parse(JSON.stringify(params)), { principal: { kind: 'device', id: 'private-phone' }, assertCurrent: () => {} })
   })
   Object.assign(f.client, { runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', availability: 'connected' }), forwardRpc: forward })
   return { ...f, owner, calls, forward }
@@ -57,6 +58,86 @@ function identity(file: LocalAttachment) { return { hostId: 'local', agentSessio
   name: file.name, mimeType: file.mimeType, byteLength: file.size, revision: file.revision } }
 
 describe('actual Mobile picker, attachment chip, shared Composer and original send', () => {
+  it.each(['session', 'host', 'runtime', 'run', 'record'] as const)('keeps a late chooser result on its captured %s target and never writes the later selection', async change => {
+    const f = boundFixture(), file = local(), originalSession = f.sessions.get('session-original')!, gate = deferred<LocalAttachment | null>()
+    const controls = createRef<MobileAttachmentControls>(), { insert, added } = insertionSpy()
+    const render = (id = 'session-original') => <MobileAttachments client={f.client} session={f.sessions.get(id)!} connected promptOperationId={null} promptConfirmed={false} controls={controls} insert={insert} pickFile={() => gate.promise} />
+    const ui = await mount(render())
+    let pending!: Promise<void>
+    await act(async () => { pending = controls.current!.choose() })
+    if (change === 'host') f.sessions.set('session-original', { ...originalSession, hostId: 'foreign-host' })
+    if (change === 'run') f.sessions.set('session-original', { ...originalSession, run: { runId: 'later-run' } })
+    if (change === 'runtime') Object.assign(f.client, { runtimeOwnerIdentity: () => ({ runtimeId: 'later-runtime' }) })
+    if (change === 'record') await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
+    await ui.render(render(change === 'session' ? 'other' : 'session-original'))
+    await act(async () => { gate.resolve(file); await pending })
+    expect(f.calls).toEqual([]); expect(added).toEqual([])
+    expect(ui.element.textContent).toContain('原选择')
+    f.sessions.set('session-original', originalSession)
+    Object.assign(f.client, { runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original' }) })
+    await ui.render(render())
+    await click(button(ui.element, '上传并加入 notes.md'))
+    if (change === 'record') {
+      expect(f.calls).toEqual([]); expect(ui.element.textContent).toContain('设备工作面已被替换')
+      expect(getDeviceWorkface().snapshot().record.fileUploads ?? []).toEqual([])
+      await click(button(ui.element, '移除 notes.md 本地引用'))
+      expect(ui.element.querySelector('.mobile-attachment')).toBeNull()
+    } else {
+      await settled('inserted')
+      expect(f.calls[0]!.params).toMatchObject(identity(file)); expect(added).toHaveLength(1)
+    }
+  })
+
+  it.each(['session', 'run', 'record'] as const)('pins a pending Blob read before the %s changes and keeps the original bytes', async change => {
+    const f = boundFixture(), originalSession = f.sessions.get('session-original')!, gate = deferred<void>()
+    const controls = createRef<MobileAttachmentControls>(), { insert, added } = insertionSpy()
+    const file = { name: 'slow.png', type: 'image/png', size: 4, stream: () => new ReadableStream<Uint8Array>({
+      async start(controller) { await gate.promise; controller.enqueue(new Uint8Array([1, 2, 3, 4])); controller.close() }
+    }) }
+    const render = (id = 'session-original') => <MobileAttachments client={f.client} session={f.sessions.get(id)!} connected promptOperationId={null} promptConfirmed={false} controls={controls} insert={insert} />
+    const ui = await mount(render()); let pending!: Promise<void>
+    await act(async () => { pending = controls.current!.stageFile(file) })
+    if (change === 'run') f.sessions.set('session-original', { ...originalSession, run: { runId: 'later-run' } })
+    if (change === 'record') await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
+    await ui.render(render(change === 'session' ? 'other' : 'session-original'))
+    await act(async () => { gate.resolve(); await pending })
+    expect(f.calls).toEqual([]); expect(added).toEqual([])
+    f.sessions.set('session-original', originalSession); await ui.render(render())
+    expect(ui.element.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AQIDBA==')
+    await click(button(ui.element, '上传并加入 slow.png'))
+    if (change === 'record') { expect(f.calls).toEqual([]); expect(ui.element.textContent).toContain('设备工作面已被替换') }
+    else { await settled('inserted'); expect(f.calls[0]!.params).toMatchObject({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, dataBase64: 'AQIDBA==' }) }
+  })
+
+  it.each(['paste', 'drop'] as const)('adopts every %s file through the actual shared Composer in order and names a rejected item without losing later files', async kind => {
+    const f = boundFixture(), gate = deferred<void>()
+    const first = { name: 'first.png', type: 'image/png', size: 4, stream: () => new ReadableStream<Uint8Array>({
+      async start(controller) { await gate.promise; controller.enqueue(new Uint8Array([1, 2, 3, 4])); controller.close() }
+    }) }
+    const files = [first, Object.assign(new NodeBlob(['second']), { name: 'second.txt' }),
+      Object.assign(new NodeBlob(['unsupported'], { type: 'image/svg+xml' }), { name: 'rejected.svg' }),
+      Object.assign(new NodeBlob(['last']), { name: 'last.txt' })]
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, '原草稿')
+    await act(async () => {
+      const event = new MouseEvent(kind, { bubbles: true, cancelable: true, clientX: 0, clientY: 0 })
+      Object.defineProperty(event, kind === 'paste' ? 'clipboardData' : 'dataTransfer', { value: kind === 'paste'
+        ? { items: files.map(file => ({ kind: 'file', type: file.type ?? '', getAsFile: () => file })), getData: () => '' }
+        : { files, types: ['Files'], getData: () => '' } })
+      editor(ui.element).dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(true)
+    })
+    expect(f.calls).toEqual([])
+    await act(async () => { gate.resolve() })
+    await vi.waitFor(async () => { await act(async () => {}); expect(ui.element.querySelectorAll('.mobile-attachment'), ui.element.textContent).toHaveLength(3) })
+    expect([...ui.element.querySelectorAll('.mobile-attachment-copy strong')].map(node => node.textContent)).toEqual(['first.png', 'second.txt', 'last.txt'])
+    expect(ui.element.textContent).toContain('rejected.svg：')
+    expect(editor(ui.element).textContent).toBe('原草稿'); expect(f.calls).toEqual([]); expect(f.submit).not.toHaveBeenCalled()
+    await click(button(ui.element, '上传并加入 first.png')); await settled('inserted')
+    expect(f.calls[0]!.params).toMatchObject({ name: 'first.png', agentSessionId: 'session-original' })
+    expect(editor(ui.element).textContent).toContain('原草稿'); expect(f.submit).not.toHaveBeenCalled()
+  })
+
   it('delivers a confirmed phone attachment through the actual public socket, Hosted SDK, Core admission and original Run byte producer', async () => {
     const f = await attachmentHostedFixture(root); disposers.push(f.dispose)
     pickFiles([{ name: '资料.md', mimeType: 'text/markdown', size: 4, blob: new NodeBlob(['file']) as Blob }])
