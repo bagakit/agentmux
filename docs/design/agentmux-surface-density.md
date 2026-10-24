@@ -6,6 +6,8 @@
 
 [文档导航](../README.md) · [文档事实与维护规范](../guides/document-truth-and-maintenance.md) · [交互合同](agentmux-desktop-interaction.md)
 
+手机端复用专题及其具体差异见 [Mobile 对齐索引](agentmux-mobile-alignment.md)，视觉与密度要求仍由下列原专题持有。
+
 ## 按主题阅读
 
 | 读者问题 | 唯一正文 |

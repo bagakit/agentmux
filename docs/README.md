@@ -27,6 +27,7 @@
 | Agent 发现、A2A 广播、双向事件、spawn、协作图与通信责任 | [A2A 协作业务 SSOT](design/behavior/a2a-collaboration.md) |
 | Composer、邮箱、草稿、队列与持续推进 | [输入与邮箱](design/behavior/conversation-input.md) |
 | 共享对话组件、Composer 与客户端平台适配 | [Client UI](../packages/client-ui/README.md) |
+| 手机 Web 与既有行为／呈现要求的共用范围、差异和未核实项 | [Mobile 对齐索引](design/agentmux-mobile-alignment.md) |
 
 ## 按改动定位规则
 
