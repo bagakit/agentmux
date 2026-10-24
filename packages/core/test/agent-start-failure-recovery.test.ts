@@ -2,7 +2,6 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AgentHookServer } from '../src/hook-server.js'
 import * as SourceCore from '../src/index.js'
 const core: typeof SourceCore = process.env.AGENTMUX_POST_START_ENTRY
   ? await import(/* @vite-ignore */ process.env.AGENTMUX_POST_START_ENTRY) : SourceCore
@@ -39,7 +38,8 @@ beforeEach(async () => {
   store = new AgentMuxMemoryAgentSessionStore(); await store.compareAndSwap(null, old)
   client = new AgentMuxClient({ store, providers: [provider] }); inner = client as any
   await inner.registry.load('local'); inner.connected = true
-  inner.hookServer = new AgentHookServer((event, signal) => inner.acceptHookEvent(event, signal), 0)
+  Object.defineProperty(inner.hookServer, 'port', { value: 0 })
+  await inner.hookServer.start()
   inner.kernel.isConnected = () => true
   inner.kernel.identity = () => ({ daemonInstanceId: 'private-startup', protocolVersion: 18, buildIdentity: 'fixture' })
   inner.kernel.start = vi.fn(async () => ({ ...newRun, state: { type: 'running' } }))
