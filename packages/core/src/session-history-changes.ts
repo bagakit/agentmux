@@ -18,7 +18,12 @@ export type NativeConversationChangesPage = ConversationRef & {
   checkpoint: NativeConversationCheckpoint
   more: boolean
 }
-export type ProviderConversationChangesContext = Omit<AgentProviderSessionHistoryContext, 'cursor'> & { after?: string; tail?: true }
+export type ProviderConversationChangesContext = Omit<AgentProviderSessionHistoryContext, 'cursor'> & {
+  after?: string
+  tail?: true
+  /** Cut-only at the original source beginning, without consuming its first record. Not combined with after/tail. */
+  head?: true
+}
 export type ProviderConversationChangesPage = { source: AgentSessionHistorySource; items: AgentSessionHistoryItem[]; cursor: string; more: boolean }
 
 function rpcString(value: unknown, label: string): string {

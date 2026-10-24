@@ -1,5 +1,6 @@
 import { mintObjectId } from './object-id.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
+import { parseConversationCheckpointInput } from './conversation-changes.js'
 import { sanitizeHostedInputInvocation } from './performance-diagnostics.js'
 import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import type { AgentMuxClient } from './client.js'
@@ -285,6 +286,7 @@ export class AgentMuxHostedRuntimeService {
     if (invocation.method === 'readAgentConversation' || invocation.method === 'conversationCheckpoint' || invocation.method === 'readConversationChanges') {
       if (invocation.args.length > 2) throw new AgentMuxError('Conversation reading accepts one original request and cancellation options.', 'INVALID_CONTROL_REQUEST')
       record(invocation.args[1] ?? {}, []) // A wire caller cannot supply a source Host alias.
+      if (invocation.method === 'conversationCheckpoint') invocation.args[0] = parseConversationCheckpointInput(invocation.args[0])
     }
     if (context.signal && invocation.method === 'replySessionQuestion') invocation.args[0] = { ...invocation.args[0], signal: context.signal }
     if (context.signal && (invocation.method === 'sessionHistoryPage' || invocation.method === 'sessionHistoryResource' || invocation.method === 'sessionHistoryCheckpoint' || invocation.method === 'readSessionHistoryChanges' || invocation.method === 'conversationCheckpoint' || invocation.method === 'readConversationChanges' || invocation.method === 'readAgentConversation')) invocation.args[1] = { ...invocation.args[1], signal: context.signal }

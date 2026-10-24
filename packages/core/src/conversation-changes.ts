@@ -38,6 +38,8 @@ export type ConversationReadWindow = { id: string; revision: number; itemCount: 
 export type AgentConversationReadPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; coverage: readonly ConversationSourceCoverage[];
   order: ConversationTimeline['order'] & { direction: 'newest-first' }; items: readonly ConversationUnitEntry[]; nextCursor: string | null; budgetBytes: number; window: ConversationReadWindow }
 export type ConversationCheckpointPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; checkpoint: ConversationCheckpoint; coverage: readonly ConversationSourceCoverage[] }
+/** Native position only; captured sources retain their current independent cut. Reading grants no sharing authority. */
+export type ConversationCheckpointInput = ConversationRef & { nativePosition?: 'beginning' }
 export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string }
 export type ConversationChangesPage = AgentConversationReadPage & { checkpoint: ConversationCheckpoint; more: boolean }
 export type ConversationWatchInput = ConversationRef & { view?: string }
@@ -153,6 +155,12 @@ function scope(value: unknown): ConversationScope {
   const sources = p.sources.map(parseConversationSource)
   if (new Set(sources.map(conversationSourceKey)).size !== sources.length) return bad()
   return { sources }
+}
+export function parseConversationCheckpointInput(value: unknown): ConversationCheckpointInput {
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'nativePosition'])
+  const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
+  if (p.nativePosition !== undefined && p.nativePosition !== 'beginning') return bad('Native checkpoint position must be beginning when supplied.', 'INVALID_CONTROL_REQUEST')
+  return { ...ref, ...(p.nativePosition === undefined ? {} : { nativePosition: 'beginning' as const }) }
 }
 export function parseConversationFrontier(value: unknown, expected?: ConversationRef): ConversationFrontier {
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'scope', 'cuts'], 'CONTROL_PROTOCOL_ERROR')

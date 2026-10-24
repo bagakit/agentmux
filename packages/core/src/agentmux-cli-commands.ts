@@ -16,7 +16,7 @@ import { parseRendererAnimationsInput } from './renderer-animations.js'
 import { parseRendererTraceInput } from './renderer-trace.js'
 import { parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { parseMoteConnectionParams } from './mote-connection-codec.js'
-import { parseConversationChangesInput, parseConversationTimelineReadInput } from './conversation-changes.js'
+import { parseConversationChangesInput, parseConversationTimelineReadInput, parseConversationCheckpointInput } from './conversation-changes.js'
 import { parseAgentMuxSearchInput } from './search-codec.js'
 import { parseConnectionParams } from './connections-codec.js'
 import { parseNoteCorpusParams } from './note-corpus.js'
@@ -319,8 +319,9 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.conversation.landmark.apply', '--input FILE|-', 'Create, rename or remove one original named reading point with a durable metadata receipt.',
     { '--input': 'data' }, async f => parseConversationLandmarkWrite(await readControlJsonInput(value(f, '--input', true)!, 'Reading point')),
     'JSON requires hostId, agentSessionId, expectedRevision, operationId and change. create supplies point {id,name,reference}; rename supplies id/name; remove supplies id. The reference carries the exact original Host/Session and native provider/nativeSession/record or captured record source. Keep the original operationId and intent after an unknown receipt; list with that operationId before retrying. A revision conflict requires a refreshed list and an explicit new intent. This changes navigation metadata only and never sends input, starts a Run or guesses a chapter.'),
-  command('agent.conversation.checkpoint', '--host ID --session ID', 'Cut the unified original source vector without exporting previous records.',
-    { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) })),
+  command('agent.conversation.checkpoint', '--host ID --session ID [--native-position beginning]', 'Cut the unified original source vector without exporting records.',
+    { '--host': 'data', '--session': 'data', '--native-position': 'data' }, f => ({ ...parseConversationCheckpointInput({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true), ...fields(f, { '--native-position': 'nativePosition' }) }) }),
+    'The default native cut is the current tail. --native-position beginning returns a real original Provider beginning cursor without consuming the first record; captured sources retain their independent current cut. Missing source remains unavailable. This read does not authorize sharing earlier history or retrying an input; keep the original accepted Binding boundary.'),
   command('agent.conversation.changes', '--input FILE|-', 'Resume bounded original changes from a saved source checkpoint.',
     { '--input': 'data' }, async f => ({ ...parseConversationChangesInput(await readControlJsonInput(value(f, '--input', true)!, 'Conversation changes')) }), 'JSON requires hostId, agentSessionId, the original route-scoped checkpoint envelope (including its unchanged source frontier) and optional limit/maxBytes/cursor/view. view resumes the original backend accepted window; each complete window replaces the displayed snapshot. Complete fragments before consuming units; retain the old checkpoint until the frozen batch finishes. Keep the returned checkpoint with the effects derived from its records. A source Gap retains the original boundary and requires explicit sharing review.'),
   command('agent.conversation.record', '--host ID --session ID --ingress ID [--hosting-runtime ID --execution-runtime ID]', 'Record one authenticated original group message without submitting Agent input.',
