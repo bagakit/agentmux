@@ -16,18 +16,33 @@ export type TerminalReplayChunk = {
  */
 export const TERMINAL_REPLAY_BATCH_BYTES = 128 * 1024
 
+// Private to this module/document, just like the parser's task channel. A completed
+// continuation leaves the queue; idle terminals retain no callback or posted work.
+let workChannel: MessageChannel | undefined
+let workPosted = false
+const pendingWork: Array<() => void> = []
+
 /** Let the host process input, navigation, and close actions between parser batches. */
 export function yieldTerminalWork(): Promise<void> {
   return new Promise((resolve) => {
-    // This is a task boundary, not a timed wait: hidden pages throttle timers even when the
-    // inner parser has its own task scheduler. Each continuation owns and releases its ports.
-    const channel = new MessageChannel()
-    channel.port1.onmessage = () => {
-      channel.port1.close()
-      channel.port2.close()
-      resolve()
+    if (!workChannel) {
+      const channel = new MessageChannel()
+      workChannel = channel
+      channel.port1.onmessage = () => {
+        const continuation = pendingWork.shift()
+        // One continuation per task preserves input opportunities and FIFO fairness.
+        if (pendingWork.length) channel.port2.postMessage(null)
+        else workPosted = false
+        continuation?.()
+      }
     }
-    channel.port2.postMessage(null)
+    pendingWork.push(resolve)
+    // A message task avoids background timer throttling; reusing its ports avoids
+    // repeated native port allocation/closure for every small live-output write.
+    if (!workPosted) {
+      workPosted = true
+      workChannel.port2.postMessage(null)
+    }
   })
 }
 
