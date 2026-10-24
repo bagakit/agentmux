@@ -5,6 +5,7 @@ import { defineConfig } from 'vitest/config'
 import original from '../../../vitest.config.ts'
 const root = resolve(import.meta.dirname, '../../..'), mutant = process.env.AGENTMUX_HEADER_STATUS_MUTANT
 const mutations = {
+  'refusal-cause': { path: 'apps/desktop/src/renderer/src/lib/connector-group-status.ts', before: "if (code === 'INGRESS_CONTENT_UNSUPPORTED')", after: 'if (false)' },
   'resume-retarget': { path: 'apps/desktop/src/renderer/src/components/AgentConnectorDialog.tsx', before: 'resumeBinding={opened?.identity === identity ? undefined : props.resumeBinding}', after: 'resumeBinding={props.resumeBinding}' },
   'close-reads': { path: 'apps/desktop/src/renderer/src/lib/use-connector-group-diagnosis.ts', before: 'const readKey = JSON.stringify([bindings.map(groupTarget), hostingTarget, version, request, syncEnabled])', after: 'const readKey = JSON.stringify([identity, version, request, syncEnabled])' },
 
