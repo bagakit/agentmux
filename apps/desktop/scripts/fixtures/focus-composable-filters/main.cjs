@@ -72,6 +72,11 @@ app.whenReady().then(async () => { try {
   result.menu = await read(`(()=>{const menu=document.querySelector('.focus-filter-menu'),r=menu.getBoundingClientRect(),original=[...menu.querySelectorAll('[data-focus-project]')].find(e=>e.getAttribute('data-focus-project')===window.filterProof.alphaKey),name=original.querySelector('.focus-filter-menu__name'),range=document.createRange();range.selectNodeContents(name);return{longText:name.textContent,lines:[...range.getClientRects()].map(r=>({left:r.left,right:r.right,top:r.top,bottom:r.bottom})),bounds:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},checked:[...menu.querySelectorAll('[aria-checked=true]')].map(e=>e.textContent)}})()`)
   assert.equal(result.menu.longText, await read('window.filterProof.longProject')); assert.ok(result.menu.lines.length > 0)
   result.menu.longNameFits = result.menu.lines.every(line => line.left >= result.menu.bounds.left && line.right <= result.menu.bounds.right)
+  result.singleStateMenu = await read(`({ states: [...document.querySelectorAll('.focus-filter-menu [data-focus-state]')].map(e=>e.getAttribute('data-focus-state')), actions: [...document.querySelectorAll('.focus-filter-menu [role="menuitem"]')].map(e=>e.textContent) })`)
+  assert.deepEqual(result.singleStateMenu.states, ['all', 'attention', 'working', 'results', 'idle', 'unknown', 'recovery'])
+  assert.deepEqual(result.singleStateMenu.actions, ['Clear filters', 'Search all retained conversation text', 'Done'], 'States are offered once in the original group, without duplicate shortcuts')
+  await rect('.focus-filter-menu [data-focus-state="recovery"]')
+  for (const theme of ['dark', 'light']) { await read(`window.filterProof.theme(${JSON.stringify(theme)})`); for (const width of [1440, 320]) { win.setContentSize(width, 900); await settle(); await frame(`${theme}-state-menu-${width}.png`, `${theme} single State group without duplicate shortcut actions at ${width}`, true) } }
   await close(); assert.equal(await read('document.activeElement?.getAttribute("aria-label")'), 'Focus filters', 'Escape returns to original trigger')
   // The original Workbench stays open. Widen Focus with its real resize handle
   // so the wide-container chip presentation is exercised at a 1440px window.

@@ -102,7 +102,7 @@ async function tests(label, mutant) {
 }
 try {
   receipt.baseline=await tests('baseline')
-  const mutants=['drop-types','drop-state','drop-project','remove-survey','close-multi-select','forget-unavailable','drop-coordination','read-coordination-body','recap-read','wrong-mote-scope']
+  const mutants=['drop-types','drop-state','drop-project','remove-survey','close-multi-select','forget-unavailable','drop-coordination','read-coordination-body','recap-read','wrong-mote-scope','duplicate-state-actions']
   for(let i=0;i<mutants.length;i+=2) receipt.mutations.push(...await Promise.all(mutants.slice(i,i+2).map(mutant=>tests(mutant,mutant))))
   receipt.restored=await tests('restored')
   const types=await run('types',process.execPath,['apps/desktop/scripts/typecheck-focus-composable-filters.mjs']);assert.equal(types.code,0,types.output)
