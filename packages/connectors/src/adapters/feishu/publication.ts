@@ -14,9 +14,9 @@ import type { PublicationSpeaker } from '../../publication-speaker.js'
 import { feishuQueryReaction, readFeishuQueryReaction, feishuReactionMapping, feishuReactionReceipt } from './reaction.js'
 
 const path = '/open-apis/im/v1/messages'
-const currentCardRenderVersion = 'feishu-conversation-v7'
+const currentCardRenderVersion = 'feishu-conversation-v8'
 // Retained frozen cards use their original wire; this never prepares or replays an older effect.
-const nativeCardRenderVersions = ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', 'feishu-conversation-v6', currentCardRenderVersion]
+const nativeCardRenderVersions = ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', 'feishu-conversation-v6', 'feishu-conversation-v7', currentCardRenderVersion]
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 const unknown = (): PublicationReceipt => ({ state: 'unknown', reason: 'effect-unconfirmed' })
 const key = (operationId: string) => createHash('sha256').update(operationId).digest('base64url')
