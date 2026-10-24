@@ -16,6 +16,11 @@ const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 const input = { expectedRun: { runId: 'old-run' }, runtimeId: 'original-runtime', workspacePath: '/private/original-cwd', operationId: 'original-operation' }
 const runtime = { runtimeId: input.runtimeId, instanceId: 'native-instance', buildIdentity: 'native-build', protocolVersion: 23 }
+function barrier() {
+  let release!: () => void
+  const waiting = new Promise<void>(resolve => { release = resolve })
+  return { waiting, release }
+}
 export const run = (runId = 'replacement-run', state: AgentMuxRun['state'] = 'running'): AgentMuxRun => ({ runId, state, kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
   workspacePath: input.workspacePath, pid: 123, cols: 80, rows: 24, observedAt: 1, latestOutputBytes: 0, acceptedInputBytes: 0, nativeService: null })
 async function fixture() {
@@ -69,6 +74,87 @@ it('[terminal recovery] concurrent Core admissions dispatch once without a file 
   const other = await f.owner().recover({ ...input, operationId: 'other-Core' })
   expect(other).toMatchObject({ kind: 'pending', phase: 'dispatched' })
   release(); expect(await first).toMatchObject({ kind: 'recovered' }); expect(f.port.start).toHaveBeenCalledOnce()
+})
+it('[terminal recovery] concurrent same continuation only observes its one successor and never retires it', async () => {
+  const f = await fixture(), inspected = barrier(), inspectReply = barrier(), started = barrier(), startReply = barrier()
+  f.port.start.mockRejectedValueOnce(Error('unknown original Start'))
+  await f.owner().recover(input)
+  f.port.inspect.mockImplementationOnce(async () => { inspected.release(); await inspectReply.waiting; return null })
+  f.port.start.mockImplementationOnce(async () => { started.release(); await startReply.waiting; return run() })
+  const continuation = { ...input, operationId: 'same-manual-continue', action: 'continue' as const }
+  const late = f.owner().recover(continuation)
+  await inspected.waiting
+  const first = f.owner().recover(continuation)
+  try {
+    await started.waiting
+    inspectReply.release()
+    expect(await late).toMatchObject({ kind: 'pending', phase: 'dispatched', operationId: input.operationId })
+    expect(f.port.retire).toHaveBeenCalledOnce()
+    expect(f.port.retire).toHaveBeenCalledWith(f.port.start.mock.calls[0]![0], runtime)
+    expect(f.port.start).toHaveBeenCalledTimes(2)
+    const record = JSON.parse(await readFile(join(f.root, (await readdir(f.root)).find(path => path.endsWith('.json'))!), 'utf8'))
+    expect(record.continuedBy).toEqual([continuation.operationId]); expect(record.retiredAttempts).toHaveLength(1)
+    expect(record.prepared).toEqual(f.port.start.mock.calls[1]![0]); expect(record.retirement).toBeNull()
+  } finally { inspectReply.release(); startReply.release(); await first }
+  expect(await first).toMatchObject({ kind: 'recovered', run: { runId: 'replacement-run' } })
+})
+it.each(['inspect', 'retire', 'observeRetirement', 'start'] as const)('[terminal recovery] late %s authority reply cannot confirm or rewrite a newer attempt', async boundary => {
+  const f = await fixture(), entered = barrier(), reply = barrier(), started = barrier(), startReply = barrier()
+  const continuation = { ...input, operationId: 'one-continuation', action: 'continue' as const }
+  let late: ReturnType<TerminalRecoveryOwner['recover']>
+  if (boundary === 'start') {
+    f.port.start.mockImplementationOnce(async () => { entered.release(); await reply.waiting; return run('previous-attempt-run') })
+    late = f.owner().recover(input)
+  } else {
+    f.port.start.mockRejectedValueOnce(Error('unknown original Start')); await f.owner().recover(input)
+    if (boundary === 'inspect') f.port.inspect.mockImplementationOnce(async () => { entered.release(); await reply.waiting; return run('previous-attempt-run') })
+    if (boundary === 'retire') f.port.retire.mockImplementationOnce(async () => { entered.release(); await reply.waiting; return { outcome: 'retained', runtime, run: run('previous-attempt-run') } })
+    if (boundary === 'observeRetirement') {
+      f.port.retire.mockRejectedValueOnce(Error('fence reply lost'))
+      await expect(f.owner().recover(continuation)).rejects.toThrow('fence reply lost')
+      f.port.observeRetirement.mockImplementationOnce(async () => { entered.release(); await reply.waiting; return { outcome: 'retired', runtime } })
+    }
+    late = f.owner().recover(continuation)
+  }
+  await entered.waiting
+  f.port.start.mockImplementationOnce(async () => { started.release(); await startReply.waiting; return run() })
+  const current = f.owner().recover(continuation)
+  try {
+    await started.waiting; reply.release()
+    expect(await late).toMatchObject({ kind: 'pending', phase: 'dispatched', operationId: input.operationId })
+    const record = JSON.parse(await readFile(join(f.root, (await readdir(f.root)).find(path => path.endsWith('.json'))!), 'utf8'))
+    expect(record.phase).toBe('dispatched'); expect(record.run).toBeNull(); expect(record.retirement).toBeNull()
+    expect(record.prepared).toEqual(f.port.start.mock.calls[1]![0]); expect(record.continuedBy).toEqual([continuation.operationId])
+    expect(record.retiredAttempts).toHaveLength(1); expect(f.port.start).toHaveBeenCalledTimes(2)
+  } finally { reply.release(); startReply.release(); await current }
+  expect(await current).toMatchObject({ kind: 'recovered', run: { runId: 'replacement-run' } })
+})
+it.each(['inspect', 'retire', 'start'] as const)('[terminal recovery] late %s retained reply cannot undo a confirmed fence before a successor is prepared', async boundary => {
+  const f = await fixture(), entered = barrier(), reply = barrier(), preparing = barrier(), prepareReply = barrier()
+  const prepare = f.port.prepare.getMockImplementation()!
+  const continuation = { ...input, operationId: 'one-continuation', action: 'continue' as const }
+  let late: ReturnType<TerminalRecoveryOwner['recover']>
+  if (boundary === 'start') {
+    f.port.start.mockImplementationOnce(async () => { entered.release(); await reply.waiting; return run('previous-attempt-run') })
+    late = f.owner().recover(input)
+  } else {
+    f.port.start.mockRejectedValueOnce(Error('unknown original Start')); await f.owner().recover(input)
+    if (boundary === 'inspect') f.port.inspect.mockImplementationOnce(async () => { entered.release(); await reply.waiting; return run('previous-attempt-run') })
+    if (boundary === 'retire') f.port.retire.mockImplementationOnce(async () => { entered.release(); await reply.waiting; return { outcome: 'retained', runtime, run: run('previous-attempt-run') } })
+    late = f.owner().recover(continuation)
+  }
+  await entered.waiting
+  f.port.prepare.mockImplementationOnce(async (...args) => { preparing.release(); await prepareReply.waiting; return prepare(...args) })
+  const current = f.owner().recover(continuation)
+  try {
+    await preparing.waiting; reply.release()
+    expect(await late).toMatchObject({ kind: 'pending', phase: 'not_applied', operationId: input.operationId })
+    const record = JSON.parse(await readFile(join(f.root, (await readdir(f.root)).find(path => path.endsWith('.json'))!), 'utf8'))
+    expect(record.phase).toBe('not_applied'); expect(record.run).toBeNull(); expect(record.retirement).toEqual(runtime)
+    expect(record.prepared).toEqual(f.port.start.mock.calls[0]![0]); expect(record.retiredAttempts).toHaveLength(0)
+  } finally { reply.release(); prepareReply.release(); await current }
+  expect(await current).toMatchObject({ kind: 'recovered', run: { runId: 'replacement-run' } })
+  expect(f.port.start).toHaveBeenCalledTimes(2)
 })
 it('[terminal recovery] the same caller operation on different original Runs cannot alias one Native creation key', async () => {
   const f = await fixture()

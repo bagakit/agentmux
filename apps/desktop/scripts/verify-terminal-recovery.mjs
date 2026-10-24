@@ -48,6 +48,9 @@ try {
   await tests('baseline')
   if (process.argv.includes('--mutations')) for (const [mutation, pattern, file] of [
     ['replay-unknown', 'NOT_RETAINED stays unknown', 'packages/core/test/terminal-recovery.test.ts'],
+    ['follow-replacement-attempt', 'late .* authority reply', 'packages/core/test/terminal-recovery.test.ts'],
+    ['follow-retirement-successor', 'concurrent same continuation', 'packages/core/test/terminal-recovery.test.ts'],
+    ['resurrect-retired-attempt', 'cannot undo a confirmed fence', 'packages/core/test/terminal-recovery.test.ts'],
     ['forget-durable-intent', 'lost Start reentry', 'packages/core/test/terminal-recovery.test.ts'],
     ['ignore-original-cwd', 'Core rejects wrong cwd', 'packages/core/test/terminal-recovery.test.ts'],
     ['desktop-new-terminal', 'actual Desktop recovery', 'apps/desktop/test/terminal-recovery-consumer.test.ts'],
