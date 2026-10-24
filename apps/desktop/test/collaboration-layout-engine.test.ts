@@ -178,7 +178,8 @@ describe('finite collaboration Worker engine', () => {
     const compact = { ...box('empty', 0, 0, 184, 32), kind: 'area' as const, areaId: 'empty', heading: { x: 0, y: 0, width: 184, height: 32 } }
     const paths = await successfulRoutes([compact, box('target', 320, 0)], [edge('compact-target', 'empty', 'target')])
     expect(paths).toHaveLength(1)
-    expect(paths[0]!.points[0]).toEqual({ x: 184, y: 32 / 12 })
+    expect(paths[0]!.points[0]!.x).toBe(184)
+    expect(paths[0]!.points[0]!.y).toBeCloseTo((.5 + Math.atan2(31, 353) / Math.PI * .8 + .1 * (1 - Math.exp(-Math.hypot(353, 31) / 512))) / 6 * 32, 10)
     expect(measurements).toEqual([])
     expect(paths[0]!.points).toHaveLength(4)
   })
@@ -230,7 +231,7 @@ describe('finite collaboration Worker engine', () => {
     expect(members.map(box => box.id).sort()).toEqual(nodes.map(node => node.id).sort())
     for (const [index, member] of members.entries()) {
       expect(contains(area, member)).toBe(true); expect(intersects(heading, member)).toBe(false)
-      expect([member.width, member.height]).toEqual([nodes[index]!.width, nodes[index]!.height])
+      expect([member.width, member.height]).toEqual([nodes.find(node => node.id === member.id)!.width, nodes.find(node => node.id === member.id)!.height])
       for (const other of members.slice(index + 1)) expect(intersects(member, other), `${member.id}/${other.id}`).toBe(false)
     }
     console.info(JSON.stringify({ candidate: 'original-local-relations', members: members.length, connections: connections.length,
@@ -275,7 +276,8 @@ describe('finite collaboration Worker engine', () => {
     const area = { ...box('region', 0, 0, 1200, 900), kind: 'area' as const, heading: { x: 24, y: 24, width: 184, height: 40 } }
     const paths = await successfulRoutes([area, box('target', 650, 24)], [edge('title-target', 'region', 'target')])
     expect(paths).toHaveLength(1)
-    expect(paths[0]!.points[0]).toEqual({ x: 208, y: 24 + 40 / 12 })
+    expect(paths[0]!.points[0]!.x).toBe(208)
+    expect(paths[0]!.points[0]!.y).toBeCloseTo(24 + (.5 + Math.atan2(27, 659) / Math.PI * .8 + .1 * (1 - Math.exp(-Math.hypot(659, 27) / 512))) / 6 * 40, 10)
     expect(paths[0]!.points.at(-1)!.x).toBe(650)
   })
 
@@ -288,8 +290,8 @@ describe('finite collaboration Worker engine', () => {
     for (const route of routes) {
       const connection = connections.find(edge => edge.id === route.id)!, kind = ['communication', 'creation', 'supervision'].indexOf(connection.kind)
       const reverse = connection.source === 'c', source = boxes.find(box => box.id === connection.source)!, target = boxes.find(box => box.id === connection.target)!
-      expect(route.points[0]).toEqual({ x: source.x + (reverse ? 0 : source.width), y: source.y + (kind * 2 + (reverse ? 1.5 : .5)) / 6 * source.height })
-      expect(route.points.at(-1)).toEqual({ x: target.x + (reverse ? target.width : 0), y: target.y + (kind * 2 + (reverse ? 1.5 : .5)) / 6 * target.height })
+      expect(route.points[0]).toEqual({ x: source.x + (reverse ? 0 : source.width), y: source.y + (kind * 2 + (reverse ? 1.5 : .5) + .1 * (1 - Math.exp(-620 / 512))) / 6 * source.height })
+      expect(route.points.at(-1)).toEqual({ x: target.x + (reverse ? target.width : 0), y: target.y + (kind * 2 + (reverse ? 1.5 : .5) + .1 * (1 - Math.exp(-620 / 512))) / 6 * target.height })
       expect(route.path.replace(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/giu, '').replace(/[MC\s]/gu, '')).toBe('')
       const numbers = route.path.match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/giu)!.map(Number)
       const controls = numbers.flatMap((number, index) => index % 2 ? [] : [{ x: number, y: numbers[index + 1]! }])
@@ -423,6 +425,156 @@ describe('finite collaboration Worker engine', () => {
       expect(responses.filter(response => response.id === 'replacement')).toEqual([{ id: 'replacement', type: 'complete' }])
       expect(measurements).toHaveLength(8)
     } finally { vi.unstubAllGlobals() }
+  })
+
+  it('keeps three real containment levels including an ancestor with no direct members and folds the exact subtree', async () => {
+    const input: CollaborationLayoutInput = {
+      areas: [
+        { id: 'root', name: 'Root', members: [], folded: false },
+        { id: 'middle', name: 'Middle', members: ['m'], parentId: 'root', folded: false },
+        { id: 'leaf', name: 'Leaf', members: ['a', 'b', 'isolated'], parentId: 'middle', folded: false },
+        { id: 'peer', name: 'Peer', members: ['p'], folded: false }
+      ],
+      nodes: [['m', 'middle'], ['a', 'leaf'], ['b', 'leaf'], ['isolated', 'leaf'], ['p', 'peer']].map(([id, areaId]) => ({ id: id!, areaId: areaId!, width: 154, height: 38 })),
+      connections: [edge('local', 'a', 'b'), edge('inside-parent', 'm', 'a'), edge('external', 'a', 'p')]
+    }
+    const previousProbe = process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE
+    process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE = 'capture-in-memory'
+    let result: CollaborationLayoutBox[]
+    try { result = await arrangeCollaboration(input) } finally {
+      if (previousProbe === undefined) delete process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE
+      else process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE = previousProbe
+    }
+    const byId = new Map(result!.map(box => [box.id, box]))
+    expect(contains(byId.get('root')!, byId.get('middle')!)).toBe(true)
+    expect(contains(byId.get('middle')!, byId.get('leaf')!)).toBe(true)
+    expect(byId.get('root')!.height).toBeGreaterThan(byId.get('middle')!.height)
+    for (const node of input.nodes) expect(contains(byId.get(node.areaId)!, byId.get(node.id)!)).toBe(true)
+    const graph = (captures[0] as { input: Graph }).input
+    const root = graph.subgraphs!.find(value => value.name === 'cluster_root')!
+    const middle = root.subgraphs!.find(value => value.name === 'cluster_middle')!
+    const leaf = middle.subgraphs!.find(value => value.name === 'cluster_leaf')!
+    expect(leaf.edges).toHaveLength(1); expect(middle.edges).toHaveLength(1); expect(graph.edges).toHaveLength(1)
+    expect(await arrangeCollaboration({ ...input, areas: [...input.areas].reverse(), nodes: [...input.nodes].reverse(), connections: [...input.connections].reverse() })).toEqual(result!)
+    const folded = { ...input, areas: input.areas.map(area => area.id === 'middle' ? { ...area, folded: true } : area) }
+    const fold = await arrangeCollaboration(folded), ids = fold.map(box => box.id)
+    expect(ids.toSorted()).toEqual(['root', 'middle', 'peer', 'p'].toSorted())
+    expect(contains(fold.find(box => box.id === 'root')!, fold.find(box => box.id === 'middle')!)).toBe(true)
+    const restore = reconcileCollaborationLayout(input, [...result!, ...reconcileCollaborationLayout(folded, result!, 'middle')], 'a')
+    const restored = new Map(restore.map(box => [box.id, box]))
+    expect(restored.get('a')).toEqual(byId.get('a'))
+    expect(contains(restored.get('root')!, restored.get('middle')!)).toBe(true)
+    expect(contains(restored.get('middle')!, restored.get('leaf')!)).toBe(true)
+    expect(restored.get('p')).toEqual(byId.get('p'))
+  })
+
+  it('reduces the final distance of a strong communication pair without counting its dispatch overlay twice', async () => {
+    const nodes = Array.from({ length: 24 }, (_, index) => ({ id: 'n' + String(index).padStart(2, '0'), areaId: 'work', width: 154, height: 38 }))
+    const ring = nodes.flatMap((node, index) => nodes.slice(index + 1).filter(peer => node.id !== 'n00' || peer.id !== 'n12').map(peer => edge('local-' + node.id + '-' + peer.id, node.id, peer.id)))
+    const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Work', members: nodes.map(node => node.id), folded: false }], nodes,
+      connections: [...ring, { ...edge('heavy', 'n00', 'n12'), strength: 1 }] }
+    const weak = await arrangeCollaboration(input)
+    const strongInput = { ...input, connections: [...ring, { ...edge('heavy', 'n00', 'n12'), strength: 32 }] }
+    process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE = 'capture-in-memory'
+    const strong = await arrangeCollaboration(strongInput)
+    const distance = (boxes: CollaborationLayoutBox[]) => { const a = boxes.find(box => box.id === 'n00')!, b = boxes.find(box => box.id === 'n12')!; return Math.hypot(a.x - b.x, a.y - b.y) }
+    expect(distance(strong)).toBeLessThan(distance(weak) * .8)
+    const overlay = await arrangeCollaboration({ ...strongInput, connections: [...strongInput.connections,
+      { ...edge('dispatch-overlay', 'n00', 'n12', 'supervision'), strength: 32 }, edge('creation-overlay', 'n00', 'n12', 'creation')] })
+    delete process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE
+    expect((captures.at(-1) as { input: Graph }).input).toEqual((captures.at(-2) as { input: Graph }).input)
+    expect(overlay).toEqual(strong)
+    console.info(JSON.stringify({ candidate: 'weighted-compound-final-packing', weakDistance: distance(weak), strongDistance: distance(strong) }))
+  })
+
+  it('keeps an expanded nested subtree inside all original ancestors without moving the reading occurrence or an unrelated peer', async () => {
+    const input: CollaborationLayoutInput = { areas: [
+      { id: 'root', name: 'Root', members: [], folded: false }, { id: 'child', name: 'Child', parentId: 'root', members: ['a', 'b'], folded: false },
+      { id: 'other', name: 'Other', members: ['p'], folded: false }
+    ], nodes: [{ id: 'a', areaId: 'child', width: 154, height: 38 }, { id: 'b', areaId: 'child', width: 154, height: 38 }, { id: 'p', areaId: 'other', width: 154, height: 38 }], connections: [edge('a-b', 'a', 'b')] }
+    const original = await arrangeCollaboration(input), before = new Map(original.map(box => [box.id, box]))
+    const changed: CollaborationLayoutInput = { ...input, areas: input.areas.map(area => area.id === 'child' ? { ...area, members: [...area.members, 'new'] } : area),
+      nodes: [...input.nodes.map(node => node.id === 'a' ? { ...node, width: 250, height: 94 } : node), { id: 'new', areaId: 'child', width: 154, height: 38 }] }
+    const after = new Map(reconcileCollaborationLayout(changed, original, 'a').map(box => [box.id, box]))
+    const a = after.get('a')!, old = before.get('a')!
+    expect([a.x + a.width / 2, a.y + a.height / 2]).toEqual([old.x + old.width / 2, old.y + old.height / 2])
+    expect(after.get('p')).toEqual(before.get('p'))
+    expect(contains(after.get('root')!, after.get('child')!)).toBe(true)
+    for (const id of ['a', 'b', 'new']) expect(contains(after.get('child')!, after.get(id)!)).toBe(true)
+  })
+
+  it('fans out one communication role in opposite bearing order and keeps existing ports independent of new batches', async () => {
+    const hub = box('hub', 0, 0), peers = [-240, -120, 0, 120, 240].map((y, index) => box('peer-' + index, 600, y))
+    const connections = peers.map(peer => edge('to-' + peer.id, hub.id, peer.id))
+    const paths = await successfulRoutes([hub, ...peers], connections)
+    const starts = paths.map(path => path.points[0]!)
+    expect(new Set(starts.map(point => point.y)).size).toBe(peers.length)
+    for (let index = 1; index < starts.length; index++) expect(starts[index]!.y).toBeGreaterThan(starts[index - 1]!.y)
+    for (const connection of connections) {
+      const [separate] = await successfulRoutes([hub, ...peers], [connection])
+      expect(separate!.points[0]).toEqual(paths.find(path => path.id === connection.id)!.points[0])
+    }
+  })
+
+  it('chooses a clear facing corridor before asking the library for an avoidable detour', async () => {
+    const boxes = [box('source', 0, 0), box('target', 600, 100), box('barrier', 290, -160, 240, 240)]
+    const paths = await successfulRoutes(boxes, [edge('corridor', 'source', 'target')])
+    expect(paths).toHaveLength(1); expect(paths[0]!.points).toHaveLength(4)
+    expect(paths[0]!.sourceHandle).toBe('communication-out-bottom')
+    expect(paths[0]!.targetHandle).toBe('communication-in-top')
+    expect(measurements).toEqual([])
+  })
+
+  it('refines completed rectangle packing without changing any original footprint or containment', async () => {
+    const nodes = Array.from({ length: 18 }, (_, index) => ({ id: 'member-' + String(index).padStart(2, '0'), areaId: 'work', width: 154, height: 38 }))
+    const order = nodes.flatMap((_, index) => index < nodes.length / 2 ? [nodes[index]!, nodes[nodes.length - 1 - index]!] : [])
+    const connections = order.slice(1).map((node, index) => edge('link-' + index, order[index]!.id, node.id))
+    const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Work', members: nodes.map(node => node.id), folded: false }], nodes, connections }
+    const previousProbe = process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE
+    process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE = 'capture-in-memory'
+    let final: CollaborationLayoutBox[]
+    try { final = await arrangeCollaboration(input) } finally {
+      if (previousProbe === undefined) delete process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE
+      else process.env.AGENTMUX_COLLABORATION_LAYOUT_PROBE = previousProbe
+    }
+    const result = (captures.at(-1) as { result: { objects: { name: string; pos?: string }[] } }).result
+    const raw = new Map(result.objects.filter(object => object.pos).map(object => [object.name, object.pos!.split(',').map(Number)]))
+    const current = new Map(final!.filter(box => box.kind === 'agent').map(box => [box.id, [box.x + box.width / 2, box.y + box.height / 2]]))
+    const length = (positions: Map<string, number[]>) => connections.reduce((sum, edge) => {
+      const a = positions.get(edge.source)!, b = positions.get(edge.target)!
+      return sum + Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!)
+    }, 0)
+    expect(length(current)).toBeLessThan(length(raw) * .95)
+    expect([...current.values()].map(value => JSON.stringify(value.map(number => Number(number.toFixed(6))))).sort()).toEqual([...raw.values()].map(value => JSON.stringify(value.map(number => Number(number.toFixed(6))))).sort())
+    const area = final!.find(box => box.id === 'work')!
+    for (const box of final!.filter(box => box.kind === 'agent')) expect(contains(area, box)).toBe(true)
+    console.info(JSON.stringify({ candidate: 'same-footprint-communication-refinement', rawLength: length(raw), finalLength: length(current) }))
+  })
+
+  it('keeps collinear neighbors in distinct stable slots without requiring their whole world or arrival batch', async () => {
+    const hub = box('hub', 0, 0), starts: number[] = []
+    for (const x of [350, 650, 1200]) {
+      const peer = box('peer-' + x, x, 0)
+      const [path] = await successfulRoutes([hub, peer], [edge('to-' + x, hub.id, peer.id)])
+      expect(path!.sourceHandle).toBe('communication-out-right')
+      starts.push(path!.points[0]!.y)
+    }
+    expect(starts[1]).toBeGreaterThan(starts[0]!)
+    expect(starts[2]).toBeGreaterThan(starts[1]!)
+  })
+
+  it('does not choose a visually clear corridor through an original endpoint body', async () => {
+    const source = box('source', 0, 0), target = box('target', 500, 50)
+    const [path] = await successfulRoutes([source, target, box('barrier', 300, -265, 180, 300)], [edge('overlapping-axis', source.id, target.id)])
+    for (let segment = 0; segment < path!.points.length - 1; segment += 3) {
+      const [a, b, c, d] = path!.points.slice(segment, segment + 4)
+      for (let index = 1; index < 100; index++) {
+        const t = index / 100, u = 1 - t
+        const x = u ** 3 * a!.x + 3 * u * u * t * b!.x + 3 * u * t * t * c!.x + t ** 3 * d!.x
+        const y = u ** 3 * a!.y + 3 * u * u * t * b!.y + 3 * u * t * t * c!.y + t ** 3 * d!.y
+        for (const endpoint of [source, target]) expect(x > endpoint.x + .25 && x < endpoint.x + endpoint.width - .25 && y > endpoint.y + .25 && y < endpoint.y + endpoint.height - .25).toBe(false)
+      }
+    }
   })
 
 })
