@@ -1,4 +1,5 @@
 import { copyBrowserExtension } from './prepare-browser-extension-identity.mjs'
+import { materializeStaticAvatarRuntime } from './static-avatar-runtime.mjs'
 import { resolvePackageRoot } from '../../../scripts/package-dependencies.mjs'
 import { writeEmbeddedCoreCli } from './embedded-core-cli.mjs'
 import { privatePackageSmokeEnvironment, preservePackageSmokeFailure } from './package-smoke-context.mjs'
@@ -282,6 +283,7 @@ export async function copyRuntimeApplication(appPath, source) {
   await materializeDependency(desktopRoot, '@noble/hashes', join(appResources, 'node_modules', '@noble', 'hashes'))
   await materializeDependency(desktopRoot, 'react', join(appResources, 'node_modules', 'react'))
   await materializeDependency(desktopRoot, 'react-dom', join(appResources, 'node_modules', 'react-dom'))
+  await materializeStaticAvatarRuntime(repositoryRoot, appResources)
   await materializeDependency(desktopRoot, 'tldts', join(appResources, 'node_modules', 'tldts'))
   await materializeDependency(desktopRoot, 'luxon', join(appResources, 'node_modules', 'luxon'))
   await materializeDependency(desktopRoot, 'zod', join(appResources, 'node_modules', 'zod'))
