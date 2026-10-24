@@ -113,7 +113,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   }
   async function close() { await sdk?.dispose(); await server?.stop(); services?.close() }
   await open(); cleanup.push(close)
-  const cli = async (command: 'configure' | 'history', input: unknown, credentials?: core.AgentMuxRpcCredentials) => {
+  const cli = async (command: 'configure' | 'history' | 'diagnose', input: unknown, credentials?: core.AgentMuxRpcCredentials) => {
     const overrides = credentials ? { AGENTMUX_AGENT_SESSION_ID: credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: credentials.capability } : {}
     const result = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'space', 'mote', 'chat', command, '--input', '-'], objectCliEnvironment(original.root, overrides), JSON.stringify(input))
     expect(result.code, result.stdout + result.stderr).toBe(0)
