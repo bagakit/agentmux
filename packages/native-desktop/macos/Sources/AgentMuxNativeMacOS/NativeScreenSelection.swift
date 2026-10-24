@@ -16,23 +16,27 @@ final class NativeScreenSelection: NSView {
     private var primaryTop: CGFloat = 0
     private var globalOrigin = NSPoint.zero
     private var screenFrames: [NSRect] = []
-    private var completion: ((Result<CGRect?, Error>) -> Void)?
+    private var completion: ((Result<NativeSelectionChoice?, Error>) -> Void)?
+    private let allowEditing: Bool
     private let toolbar = NativeSelectionPanel(frame: .zero)
     private let dimensions = NativeSelectionPanel(frame: .zero)
     private let sizeLabel = NSTextField(labelWithString: "")
     private let hint = NSTextField(labelWithString: "")
-    private let confirmButton = NSButton(title: "截图 ↵", target: nil, action: nil)
-    private let cancelButton = NSButton(title: "取消 Esc", target: nil, action: nil)
+    private let confirmButton = NativeSelectionButton(title: "完成", shortcut: "↵", primary: true)
+    private let cancelButton = NativeSelectionButton(title: "取消", shortcut: "esc")
+    private let editButton = NativeSelectionButton(title: "标注…", shortcut: "E", symbol: "pencil.tip.crop.circle")
     override var acceptsFirstResponder: Bool { true }
 
-    override init(frame: NSRect) {
+    init(frame: NSRect, allowEditing: Bool = false) {
         selection = NativeSelectionState(bounds: NSRect(origin: .zero, size: frame.size))
+        self.allowEditing = allowEditing
         super.init(frame: frame)
         buildControls()
+        refresh()
     }
     required init?(coder: NSCoder) { nil }
 
-    static func begin(completion: @escaping (Result<CGRect?, Error>) -> Void) throws {
+    static func begin(allowEditing: Bool = false, completion: @escaping (Result<NativeSelectionChoice?, Error>) -> Void) throws {
         guard active == nil else { throw NativeScreenSelectionError(code: "capture_busy", message: "the original native selection is still active") }
         guard let primary = NSScreen.screens.first else {
             throw NativeScreenSelectionError(code: "display_unavailable", message: "macOS did not provide an active selection display")
@@ -45,7 +49,7 @@ final class NativeScreenSelection: NSView {
         window.hasShadow = false
         window.level = .screenSaver
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let view = NativeScreenSelection(frame: NSRect(origin: .zero, size: allScreens.size))
+        let view = NativeScreenSelection(frame: NSRect(origin: .zero, size: allScreens.size), allowEditing: allowEditing)
         view.previousApp = NSWorkspace.shared.frontmostApplication
         view.primaryTop = primary.frame.maxY
         view.globalOrigin = allScreens.origin
@@ -66,23 +70,29 @@ final class NativeScreenSelection: NSView {
         dimensions.identifier = NSUserInterfaceItemIdentifier("native-selection-dimensions")
         confirmButton.identifier = NSUserInterfaceItemIdentifier("native-selection-confirm")
         cancelButton.identifier = NSUserInterfaceItemIdentifier("native-selection-cancel")
+        editButton.identifier = NSUserInterfaceItemIdentifier("native-selection-edit")
         confirmButton.setAccessibilityIdentifier("native-selection-confirm")
         cancelButton.setAccessibilityIdentifier("native-selection-cancel")
-        for button in [cancelButton, confirmButton] {
+        editButton.setAccessibilityIdentifier("native-selection-edit")
+        for button in [cancelButton, editButton, confirmButton] {
             button.target = self
-            button.bezelStyle = .rounded
-            button.controlSize = .regular
-            toolbar.addSubview(button)
+            if button !== editButton || allowEditing { toolbar.addSubview(button) }
         }
         confirmButton.action = #selector(confirm)
         cancelButton.action = #selector(cancel)
+        editButton.action = #selector(edit)
         confirmButton.keyEquivalent = "\r"
         cancelButton.keyEquivalent = "\u{1b}"
-        confirmButton.toolTip = "确认截图 (Enter)"
+        editButton.keyEquivalent = "e"
+        editButton.keyEquivalentModifierMask = []
+        confirmButton.toolTip = "完成截图 (Enter)"
         cancelButton.toolTip = "取消截图 (Esc)"
+        editButton.toolTip = "标注截图 (E)"
+        setAccessibilityHelp("拖动选择区域，拖动选区移动，拖动边角调整，方向键微调，Enter 完成，Esc 取消")
         hint.font = .systemFont(ofSize: 12)
-        hint.textColor = .white
-        toolbar.addSubview(hint)
+        hint.textColor = NSColor.white.withAlphaComponent(0.85)
+        hint.alignment = .center
+        addSubview(hint)
         sizeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         sizeLabel.textColor = .white
         dimensions.addSubview(sizeLabel)
@@ -92,16 +102,23 @@ final class NativeScreenSelection: NSView {
     }
 
     @objc private func confirm() {
+        complete(action: .capture)
+    }
+    @objc private func edit() {
+        guard allowEditing else { return }
+        complete(action: .edit)
+    }
+    private func complete(action: NativeSelectionCompletionAction) {
         guard selection.canConfirm, let rect = selection.rectangle else { return }
         let global = rect.offsetBy(dx: globalOrigin.x, dy: globalOrigin.y)
-        finish(.success(NativeCaptureGeometry.quartzRect(appKitRect: global, primaryDisplayTop: primaryTop)))
+        finish(.success(NativeSelectionChoice(rectangle: NativeCaptureGeometry.quartzRect(appKitRect: global, primaryDisplayTop: primaryTop), completionAction: action)))
     }
     @objc private func cancel() { finish(.success(nil)) }
     @objc private func displayConfigurationChanged() {
         finish(.failure(NativeScreenSelectionError(code: "display_configuration_changed", message: "display geometry changed during the original selection; choose the region again")))
     }
 
-    private func finish(_ result: Result<CGRect?, Error>) {
+    private func finish(_ result: Result<NativeSelectionChoice?, Error>) {
         guard let callback = completion else { return }
         completion = nil
         NotificationCenter.default.removeObserver(self)
@@ -117,11 +134,15 @@ final class NativeScreenSelection: NSView {
 
     private func refresh() {
         confirmButton.isEnabled = selection.canConfirm
-        hint.stringValue = selection.rectangle == nil ? "拖动选择区域 · Esc 取消" : "拖动移动 · 边角调整 · 方向键微调"
+        editButton.isEnabled = selection.canConfirm
+        hint.stringValue = "拖动选择截图区域"
+        hint.isHidden = selection.rectangle != nil
         let screen = currentScreen()
-        let width = min(480, max(0, screen.width - 24))
-        let stacked = width < 240
-        let height: CGFloat = stacked ? 76 : 40
+        let buttons = allowEditing ? [cancelButton, editButton, confirmButton] : [cancelButton, confirmButton]
+        let idealWidth: CGFloat = allowEditing ? 300 : 194
+        let width = min(idealWidth, max(0, screen.width - 24))
+        let stacked = width < idealWidth
+        let height: CGFloat = stacked ? CGFloat(buttons.count) * 38 + 10 : 48
         var origin = NSPoint(x: screen.midX - width / 2, y: screen.minY + 28)
         if let rect = selection.rectangle {
             origin = NSPoint(x: rect.midX - width / 2, y: rect.minY - height - 12)
@@ -129,15 +150,16 @@ final class NativeScreenSelection: NSView {
         }
         toolbar.frame = NativeSelectionState.panelFrame(size: CGSize(width: width, height: height), preferredOrigin: origin, screen: screen)
         let actualWidth = toolbar.bounds.width, actualHeight = toolbar.bounds.height
-        hint.isHidden = actualWidth < 430
-        hint.frame = NSRect(x: 12, y: 12, width: max(0, actualWidth - 210), height: 17)
+        hint.frame = NativeSelectionState.panelFrame(size: CGSize(width: 220, height: 18), preferredOrigin: NSPoint(x: toolbar.frame.midX - 110, y: toolbar.frame.maxY + 12), screen: screen)
         if stacked {
-            let buttonHeight = min(28, max(0, (actualHeight - 18) / 2))
-            cancelButton.frame = NSRect(x: 8, y: 6, width: max(0, actualWidth - 16), height: buttonHeight)
-            confirmButton.frame = NSRect(x: 8, y: actualHeight - buttonHeight - 6, width: max(0, actualWidth - 16), height: buttonHeight)
+            let buttonHeight = max(0, (actualHeight - 16 - CGFloat(buttons.count - 1) * 6) / CGFloat(buttons.count))
+            for (index, button) in buttons.enumerated() {
+                button.frame = NSRect(x: 8, y: 8 + CGFloat(buttons.count - index - 1) * (buttonHeight + 6), width: max(0, actualWidth - 16), height: buttonHeight)
+            }
         } else {
-            cancelButton.frame = NSRect(x: actualWidth - 190, y: 7, width: 90, height: 28)
-            confirmButton.frame = NSRect(x: actualWidth - 94, y: 7, width: 82, height: 28)
+            cancelButton.frame = NSRect(x: 8, y: 8, width: 84, height: 32)
+            if allowEditing { editButton.frame = NSRect(x: 98, y: 8, width: 104, height: 32) }
+            confirmButton.frame = NSRect(x: actualWidth - 94, y: 8, width: 86, height: 32)
         }
         dimensions.isHidden = selection.rectangle == nil
         if let rect = selection.rectangle {
@@ -213,6 +235,7 @@ final class NativeScreenSelection: NSView {
         switch event.keyCode {
         case 53: cancel()
         case 36, 76: confirm()
+        case 14 where event.modifierFlags.intersection([.command, .control, .option]).isEmpty: edit()
         case 123: selection.nudge(dx: -step, dy: 0); refresh()
         case 124: selection.nudge(dx: step, dy: 0); refresh()
         case 125: selection.nudge(dx: 0, dy: -step); refresh()
@@ -221,6 +244,69 @@ final class NativeScreenSelection: NSView {
         }
     }
     override func cancelOperation(_ sender: Any?) { cancel() }
+}
+
+/// Presentation only: keep AppKit's button action, keyboard and accessibility
+/// contracts while sharing one quiet toolbar treatment for all three actions.
+private final class NativeSelectionButton: NSButton {
+    private let shortcut: String
+    private let primary: Bool
+    private let symbol: String?
+    private var hovered = false
+    private var hoverTracking: NSTrackingArea?
+    override var acceptsFirstResponder: Bool { true }
+
+    init(title: String, shortcut: String, primary: Bool = false, symbol: String? = nil) {
+        self.shortcut = shortcut
+        self.primary = primary
+        self.symbol = symbol
+        super.init(frame: .zero)
+        self.title = title
+        isBordered = false
+        focusRingType = .none
+        setAccessibilityLabel(title)
+    }
+    required init?(coder: NSCoder) { nil }
+    override var isEnabled: Bool { didSet { needsDisplay = true } }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let tracking = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(tracking)
+        hoverTracking = tracking
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+    override func becomeFirstResponder() -> Bool { let accepted = super.becomeFirstResponder(); needsDisplay = true; return accepted }
+    override func resignFirstResponder() -> Bool { let accepted = super.resignFirstResponder(); needsDisplay = true; return accepted }
+    override func draw(_ dirtyRect: NSRect) {
+        let active = isEnabled && (hovered || isHighlighted)
+        let mint = NSColor(calibratedRed: 0.66, green: 0.88, blue: 0.79, alpha: 1)
+        let surface = primary ? (isEnabled ? mint.withAlphaComponent(active ? 0.82 : 1) : NSColor.white.withAlphaComponent(0.08)) : NSColor.white.withAlphaComponent(active ? 0.10 : 0)
+        surface.setFill()
+        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+        shape.fill()
+        if window?.firstResponder === self {
+            mint.setStroke()
+            shape.lineWidth = 1.5
+            shape.stroke()
+        }
+        let color = isEnabled ? (primary ? NSColor(calibratedWhite: 0.10, alpha: 1) : .white) : NSColor.white.withAlphaComponent(0.36)
+        let font = NSFont.systemFont(ofSize: 12, weight: primary ? .semibold : .medium)
+        let keyFont = NSFont.systemFont(ofSize: 10, weight: .medium)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        let keyAttributes: [NSAttributedString.Key: Any] = [.font: keyFont, .foregroundColor: color.withAlphaComponent(isEnabled ? 0.65 : 0.36)]
+        let label = title as NSString, key = shortcut as NSString
+        let labelSize = label.size(withAttributes: attributes), keySize = key.size(withAttributes: keyAttributes)
+        let imageWidth: CGFloat = symbol == nil ? 0 : 18
+        let start = max(7, (bounds.width - labelSize.width - keySize.width - 9 - imageWidth) / 2)
+        if let symbol, let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) {
+            let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium).applying(.init(paletteColors: [color]))
+            image.withSymbolConfiguration(configuration)?.draw(in: NSRect(x: start, y: (bounds.height - 14) / 2, width: 14, height: 14))
+        }
+        label.draw(at: NSPoint(x: start + imageWidth, y: (bounds.height - labelSize.height) / 2), withAttributes: attributes)
+        key.draw(at: NSPoint(x: start + imageWidth + labelSize.width + 9, y: (bounds.height - keySize.height) / 2), withAttributes: keyAttributes)
+    }
 }
 
 private final class NativeSelectionPanel: NSView {
