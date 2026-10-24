@@ -21,7 +21,9 @@ import { createFocusContextIdentitySelector } from '../lib/focus-context-identit
 import { createFocusGoalLinksSelector } from '../lib/focus-goal-links'
 import { WorkbenchPresentationContext, useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { api } from '../lib/api'
-import { AgentCollaborationGraph, COLLABORATION_LABELS, type CollaborationSelection } from './AgentCollaborationGraph'
+import { AgentCollaborationGraph, type CollaborationSelection } from './AgentCollaborationGraph'
+import { collaborationRelationSummary } from '../lib/collaboration-relation-presentation'
+import { CollaborationRelationKey } from './CollaborationRelationMark'
 import { MailboxA2A } from './MailboxA2A'
 import type { CollaborationMapTarget } from '../lib/collaboration-map-navigation'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
@@ -232,7 +234,7 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
             })}</dl> : <p>{selectedAgent.subject ? 'Area unconfirmed. No original binding or matching work resource is confirmed.' : 'Original identity is unresolved. Area association is unconfirmed.'}</p>}</section>
             <h4>Relations <span>{agentRelations.length}</span></h4>{agentRelations.length ? agentRelations.map(relation => <RelationButton key={relation.id} relation={relation} agents={projection.agents} subjectId={selectedAgent.id} onSelect={select} />) : <p>No recorded relations in the loaded window.</p>}
           </> : selectedRelation ? <>
-            <div className="collaboration-inspector__heading"><span className="collaboration-inspector__eyebrow">Relation</span><h3>{COLLABORATION_LABELS[selectedRelation.kind]}</h3></div>
+            <div className="collaboration-inspector__heading"><span className="collaboration-inspector__eyebrow">Relation</span><h3>{collaborationRelationSummary(selectedRelation.kind, selectedRelation.evidence).title}</h3></div>
             <div className="collaboration-endpoints">{[selectedRelation.source, selectedRelation.target].map((id, index) => <button key={`${id}-${index}`} type="button" onClick={() => locateAgent(id)} title="Locate Agent in map"><small>{index ? 'To' : 'From'}</small><span>{collaborationAgentName(projection.agents.get(id))}</span><SemanticIcon name="action.locate" size={13} /></button>)}</div>
             <p>{selectedRelation.evidence.length} recorded {selectedRelation.kind === 'communication' ? 'message' : selectedRelation.kind === 'creation' ? 'creation' : 'request'}{selectedRelation.evidence.length === 1 ? '' : 's'}</p>
             {selection?.relatedIds && selection.relatedIds.length > 1 ? <div aria-label="Grouped connections">{selection.relatedIds.map(id => projection.relations.find(relation => relation.id === id)).filter((relation): relation is CollaborationRelation => Boolean(relation)).map(relation => <RelationButton key={relation.id} relation={relation} agents={projection.agents} onSelect={select} />)}</div> : null}
@@ -246,9 +248,10 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
 
 function RelationButton({ relation, agents, subjectId, onSelect }: { relation: CollaborationRelation; agents: ReturnType<typeof collaborationAgents>; subjectId?: string; onSelect(selection: CollaborationSelection): void }) {
   const from = agents.get(relation.source), to = agents.get(relation.target), outgoing = relation.source === subjectId
+  const summary = collaborationRelationSummary(relation.kind, relation.evidence)
   const title = subjectId ? collaborationAgentName(outgoing ? to : from) : `${collaborationAgentName(from)} → ${collaborationAgentName(to)}`
-  return <button type="button" className="collaboration-relation" data-kind={relation.kind} aria-label={`${collaborationAgentName(from)} → ${collaborationAgentName(to)} · ${COLLABORATION_LABELS[relation.kind]}`} onClick={() => onSelect({ kind: 'relation', id: relation.id })}>
-    <span className="collaboration-relation-key" data-kind={relation.kind} aria-hidden="true" /><span className="collaboration-relation__body"><span>{title}</span><small>{subjectId ? `${outgoing ? 'Outgoing' : 'Incoming'} · ` : ''}{COLLABORATION_LABELS[relation.kind]} · {relation.evidence.length}</small></span><SemanticIcon name="navigation.next" size={13} />
+  return <button type="button" className="collaboration-relation" data-kind={relation.kind} aria-label={`${collaborationAgentName(from)} → ${collaborationAgentName(to)} · ${summary.title}`} onClick={() => onSelect({ kind: 'relation', id: relation.id })}>
+    <CollaborationRelationKey kind={relation.kind} /><span className="collaboration-relation__body"><span>{title}</span><small>{subjectId ? `${outgoing ? 'Outgoing' : 'Incoming'} · ` : ''}{summary.title} · {relation.evidence.length}</small></span><SemanticIcon name="navigation.next" size={13} />
   </button>
 }
 function Source({ source, onAction }: { source: CollaborationSource; onAction(action: 'refresh' | 'earlier' | 'updates' | 'created'): void }) {
@@ -276,7 +279,7 @@ function Evidence({ evidence, active }: { evidence: CollaborationEvidence; activ
     if (result.hostId !== hostId || result.message && (result.message.envelope.senderSessionId !== sender || result.message.envelope.recipientSessionId !== recipient || result.message.envelope.threadId !== threadId)) throw Error('The original message source did not match.')
     return result.message
   }, [bodyOwner, hostId, agentSessionId, incarnation, sender, recipient, threadId])
-  if (evidence.kind === 'creation') return <article><strong>{evidence.record.agentSessionId}</strong><p>Created by {evidence.record.creation.createdBy.agentSessionId}</p><small>Recorded {evidence.record.phase} · {new Date(evidence.record.createdAt).toLocaleString()}</small><p>Creation provenance · task ownership is separate.</p></article>
+  if (evidence.kind === 'creation') return <article><strong>{evidence.record.agentSessionId}</strong><p>{collaborationRelationSummary('creation', [evidence]).title} · Source: {evidence.record.creation.createdBy.agentSessionId}</p><small>Recorded {evidence.record.phase} · {new Date(evidence.record.createdAt).toLocaleString()}</small><p>Creation provenance · task ownership is separate.</p></article>
   const mid = evidence.kind === 'communication' ? evidence.message.messageId : evidence.events[0]?.messages[0]?.messageId
   return <article><code>{mid}</code>{evidence.kind === 'supervision' ? <p>{'Supervision recorded'}</p> : null}
     <ol>{evidence.events.map(event => <li key={event.sequence}><span>{event.kind}{event.state ? ` · ${event.state}` : ''}{event.eventKind ? ` · ${event.eventKind}` : ''}</span>{event.at ? <time>{new Date(event.at).toLocaleTimeString()}</time> : null}{event.reason ? <p>{event.reason}</p> : null}</li>)}</ol>

@@ -4,7 +4,8 @@ import { InputGroup, TextInput } from '@agentmux/client-ui/input'
 import * as Menu from './HoverDropdownMenu'
 import { FocusViewSwitch } from './FocusViewSwitch'
 import { TopRowLeadingChrome } from './TopRowChrome'
-import { COLLABORATION_LABELS } from './AgentCollaborationGraph'
+import { COLLABORATION_LABELS } from '../lib/collaboration-relation-presentation'
+import { CollaborationRelationKey } from './CollaborationRelationMark'
 import type { CollaborationAgent, CollaborationRelation } from '../lib/agent-collaboration'
 import { collaborationAgentName } from '../lib/collaboration-map-presentation'
 
@@ -29,7 +30,7 @@ export function CollaborationMapToolbar({ active, agents, selectedKinds, onToggl
           <Menu.Label className="tab-context-menu__hint">Show relations</Menu.Label>
           {kinds.map(kind => <Menu.CheckboxItem key={kind} className="tab-context-menu__item" data-kind={kind} checked={selectedKinds.has(kind)} onCheckedChange={() => onToggleKind(kind)} onSelect={event => event.preventDefault()}>
             <span className="collaboration-filter-menu__check"><Menu.ItemIndicator><SemanticIcon name="status.selected" size={13} /></Menu.ItemIndicator></span>
-            <span className="collaboration-relation-key" data-kind={kind} aria-hidden="true" />{COLLABORATION_LABELS[kind]}
+            <CollaborationRelationKey kind={kind} />{COLLABORATION_LABELS[kind]}
           </Menu.CheckboxItem>)}
         </Menu.Content></Menu.Portal>
       </Menu.Root>
