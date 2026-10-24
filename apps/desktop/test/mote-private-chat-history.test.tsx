@@ -2,7 +2,8 @@
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
-import { MOTE_CHAT_DEFAULT_VALUES, parseMoteChatDiagnosis, type MoteChatGeneration } from '@agentmux/core/mote-chat'
+import { MOTE_CHAT_DEFAULT_VALUES, parseMoteChatDiagnosis, type MoteChatDiagnosis, type MoteChatGeneration, type MoteChatTarget } from '@agentmux/core/mote-chat'
+import type { ConnectionHostingTarget } from '../src/shared/contracts'
 import { MoteChatStore } from '../../../packages/connectors/src/mote-chat-store'
 import { ingressFixture } from '../../../packages/connectors/test/fixtures/ingress'
 import { moteBotUi } from './fixtures/mote-bot-ui'
@@ -56,6 +57,58 @@ function seed(id: string, actor = alice, hostId = 'local'): MoteChatGeneration {
     authorizedBy: { kind: 'user', id: 'original-user' }, generation, prepared: null, dispatched: true, binding: null, grant: null })
   return generation
 }
+
+it('preserves in-flight diagnosis across unrelated Profile renders while reading true scope and refresh changes', async () => {
+  const originalCall = f.runtime.callConnectionHost, nextOwner = { hostId: 'next-host', runtimeId: 'next-runtime' }
+  const reads: Array<{ target: MoteChatTarget; owner: ConnectionHostingTarget; release(issue: MoteChatDiagnosis['issues'][number]): Promise<void> }> = []
+  f.runtime.callConnectionHost = async (owner, method, params) => {
+    if (method !== 'space.mote.chat.diagnose') return originalCall(JSON.stringify(owner) === JSON.stringify(nextOwner) ? f.hostingTarget : owner, method, params)
+    const input = params as { target: MoteChatTarget }
+    return new Promise(resolve => reads.push({ target: input.target, owner, release: async issue => {
+      const original = await originalCall(f.hostingTarget, method, params)
+      resolve(parseMoteChatDiagnosis({ ...original, issues: [issue] }, input) as never)
+    } }))
+  }
+  const activity = () => panel().querySelector<HTMLElement>('[aria-label="Private chat message activity"]')!
+  const release = async (index: number, issue: MoteChatDiagnosis['issues'][number]) => {
+    await act(async () => reads[index]!.release(issue)); await settle(() => expect(activity().getAttribute('aria-busy')).toBe('false'))
+    expect(activity().textContent).toContain(issue)
+  }
+  await f.renderMotePanel(); await settle(() => expect(reads).toHaveLength(1))
+  const originalPanel = panel(), originalActivity = activity()
+  await f.renderMotePanel(); await f.renderMotePanel()
+  expect(panel()).toBe(originalPanel); expect(activity()).toBe(originalActivity)
+  expect(reads, 'Same target/Host parent renders must retain the original pending diagnosis').toHaveLength(1)
+  expect(reads[0]).toMatchObject({ target: f.target(), owner: f.hostingTarget })
+  await release(0, 'intake-unavailable')
+
+  await click('Refresh private chat activity'); expect(reads).toHaveLength(2)
+  await release(1, 'connection-unavailable')
+  await f.renderMotePanel(0, false); expect(reads).toHaveLength(2)
+  await f.renderMotePanel(); await settle(() => expect(reads).toHaveLength(3))
+  await release(2, 'service-unavailable')
+  const minutes = panel().querySelector<HTMLInputElement>('[aria-label="Conversation update interval in minutes"]')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(minutes, '47'); minutes.dispatchEvent(new Event('input', { bubbles: true })) })
+  await click('Save chat settings'); await settle(() => expect(reads).toHaveLength(4))
+  expect((await f.client.call('space.mote.chat.inspect', { target: f.target() })).configuration?.revision).toBe(2)
+  await release(3, 'configuration-unavailable')
+
+  await click('Refresh private chat activity'); expect(reads).toHaveLength(5)
+  await f.renderMotePanel(1); await settle(() => expect(reads).toHaveLength(6))
+  expect(reads[5]).toMatchObject({ target: f.target(1), owner: f.hostingTarget })
+  await release(5, 'intake-unavailable')
+  await act(async () => reads[4]!.release('target-changed')); await f.settle()
+  expect(activity().textContent).toContain('intake-unavailable'); expect(activity().textContent).not.toContain('target-changed')
+  await click('Refresh private chat activity'); expect(reads).toHaveLength(7)
+  await act(async () => useAppStore.setState({ manualConnectionSelections: { lark: nextOwner } }))
+  await click('Refresh'); await settle(() => expect(reads).toHaveLength(8))
+  expect(reads[7]).toMatchObject({ target: f.target(1), owner: nextOwner })
+  await release(7, 'service-unavailable')
+  await act(async () => reads[6]!.release('target-changed')); await f.settle()
+  expect(activity().textContent).toContain('service-unavailable'); expect(activity().textContent).not.toContain('target-changed')
+  await f.renderMotePanel(1); expect(reads).toHaveLength(8)
+  expect(f.chatAgentCalls).toEqual({ prepare: 0, create: 0, inspect: 0, prepareInput: 0, activity: 0 })
+})
 
 it('reads exact-person generations through Profile IPC/Host and real Core inputs without a presentation or lifecycle', async () => {
   seed('earliest'); seed('middle'); seed('recent'); const selected = seed('original-agent'); seed('foreign-agent', other)
