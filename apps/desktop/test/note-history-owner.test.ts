@@ -1,7 +1,8 @@
-import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -13,10 +14,28 @@ import { WorkspaceFiles } from '../src/main/workspace-files'
 import { NoteFileWriter } from '../src/main/note-file-writer'
 import { FileReadOwner } from '../src/main/file-read-owner'
 import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { buildNoteFileLibraryRecovery } from './helpers/note-file-library-recovery-build.mjs'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 
 const close: Array<() => Promise<unknown> | unknown> = []
 const agent = { kind: 'agent' as const, id: 'original-agent' }, person = { kind: 'user' as const, id: 'original-person' }
+let compiled: Awaited<ReturnType<typeof buildNoteFileLibraryRecovery>>, compiledDirectory: string
+const inheritedCli = process.env.AGENTMUX_TEST_OBJECT_CLI
+beforeAll(async () => {
+  compiledDirectory = await mkdtemp(join(tmpdir(), 'note-history-source-'))
+  compiled = await buildNoteFileLibraryRecovery(compiledDirectory)
+  if (process.env.AGENTMUX_NOTE_HISTORY_EVIDENCE) {
+    await mkdir(process.env.AGENTMUX_NOTE_HISTORY_EVIDENCE, { recursive: true })
+    await writeFile(join(process.env.AGENTMUX_NOTE_HISTORY_EVIDENCE, 'compiled-inputs.json'), JSON.stringify(compiled.manifest, null, 2) + '\n')
+  }
+  process.env.AGENTMUX_TEST_OBJECT_CLI = compiled.cli
+}, 60000)
+afterAll(async () => {
+  if (inheritedCli === undefined) delete process.env.AGENTMUX_TEST_OBJECT_CLI
+  else process.env.AGENTMUX_TEST_OBJECT_CLI = inheritedCli
+  if (compiledDirectory) await rm(compiledDirectory, { recursive: true, force: true })
+  if (process.env.AGENTMUX_NOTE_HISTORY_EVIDENCE) await writeFile(join(process.env.AGENTMUX_NOTE_HISTORY_EVIDENCE, 'cleanup.json'), JSON.stringify({ compiledDirectory, removed: true, perTestFixturesRemovedByAfterEach: true }) + '\n')
+})
 afterEach(async () => { vi.restoreAllMocks(); for (const dispose of close.splice(0).reverse()) await dispose() })
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'note-history-')))
@@ -24,12 +43,22 @@ async function fixture() {
   const workspace: WorkspaceRecord = { id: 'original-workspace', hostId: 'local', path: root, name: 'History', kind: 'folder' }
   const files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local' }) as never)
   close.push(() => files.dispose())
-  const metadata = new AgentMuxNotebookStore(join(root, 'notebooks.sqlite'))
+  const metadata = new AgentMuxNotebookStore(join(root, 'notebooks.root.json'))
   const writer = new NoteFileWriter(files, undefined, metadata), path = 'original.note.md'
   const resource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: root, path }
   const query = { noteId: 'original-note', resource }
   const body = (text: string) => serializeNoteDocument(newNoteDocument(text, query.noteId, 'original-block'))
   return { root, workspace, path, files, writer, metadata, query, body }
+}
+async function storedMetadata(f: Awaited<ReturnType<typeof fixture>>) {
+  const root = JSON.parse(await readFile(f.metadata.path, 'utf8'))
+  expect(root.schema).toBe('agentmux.notebook.files.v1')
+  const originals = Object.values(root.originals) as Array<{ noteId: string; resource: unknown; metadata: string }>
+  expect(originals).toHaveLength(1)
+  const original = originals[0]!
+  expect(original).toMatchObject({ noteId: f.query.noteId, resource: f.query.resource })
+  const path = join(f.metadata.path + '.files', 'metadata', original.metadata + '.json')
+  return { root, original, path, value: JSON.parse(await readFile(path, 'utf8')) }
 }
 it('records distinct immutable ABA events and current trusted author even when old bytes return', async () => {
   const f = await fixture(), first = await f.writer.write(f.workspace, { path: f.path, content: f.body('Alpha'), expectedRevision: null }, { actor: person })
@@ -69,8 +98,9 @@ it('groups continuous same-author activity, paginates metadata and never returns
   expect(page.entries).toHaveLength(1); expect(page.hasMore).toBe(true)
   const next = await f.metadata.readHistory({ ...f.query, limit: 1, before: page.entries[0]!.sequence })
   expect(next.entries[0]!.eventId).toBe(all.entries[1]!.eventId)
-  const { DatabaseSync } = await import('node:sqlite'), db = new DatabaseSync(f.metadata.path, { readOnly: true })
-  try { expect(db.prepare('SELECT count(*) AS total FROM note_history_content').get()?.total).toBe(3) } finally { db.close() }
+  const bodies = await readdir(join(f.metadata.path + '.files', 'bodies'))
+  expect(bodies.sort()).toEqual([...new Set(all.entries.map(entry => entry.revision!.slice(7) + '.md'))].sort())
+  expect(bodies).toHaveLength(3)
 })
 it('keeps a successful body save usable when history preparation is unavailable', async () => {
   const f = await fixture(); vi.spyOn(f.metadata, 'recordHistory').mockRejectedValueOnce(new Error('History storage unavailable'))
@@ -101,28 +131,29 @@ it('retains the exact prepared event address when its reply is lost after durabl
 it('keeps acknowledged missing history unknown without resetting it or blocking ordinary body saves', async () => {
   const f = await fixture(), result = await f.writer.write(f.workspace, { path: f.path, content: f.body('Retain original'), expectedRevision: null }, { actor: person })
   expect(result.status).toBe('written'); if (result.status !== 'written') throw Error('Seed must publish')
-  const before = await f.metadata.read(), { DatabaseSync } = await import('node:sqlite')
-  const db = new DatabaseSync(f.metadata.path)
-  try { expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(2); db.exec('DROP TABLE note_history_event') } finally { db.close() }
+  const before = await f.metadata.read(), stored = await storedMetadata(f), rootBefore = await readFile(f.metadata.path)
+  await rm(stored.path)
   const reopened = new AgentMuxNotebookStore(f.metadata.path)
   await expect(reopened.readHistory(f.query)).rejects.toMatchObject({ code: 'NOTEBOOK_READ_UNCONFIRMED' })
   expect(await reopened.read()).toEqual(before)
   expect(await f.writer.read(f.workspace, f.path)).toMatchObject({ status: 'read', document: { content: expect.stringContaining('Retain original'), noteProvenance: { status: 'unconfirmed' } } })
   const edited = await f.writer.write(f.workspace, { path: f.path, content: f.body('Healthy body still saves'), expectedRevision: result.revision }, { actor: person })
   expect(edited).toMatchObject({ status: 'written', noteHistory: { status: 'unconfirmed' } })
-  const checked = new DatabaseSync(f.metadata.path, { readOnly: true })
-  try { expect(checked.prepare("SELECT name FROM sqlite_schema WHERE name='note_history_event'").get()).toBeUndefined() } finally { checked.close() }
+  await expect(readFile(stored.path)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await readFile(f.metadata.path)).toEqual(rootBefore)
 })
 it('keeps foreign historical attribution out of an otherwise readable original Note', async () => {
   const f = await fixture(), result = await f.writer.write(f.workspace, { path: f.path, content: f.body('Original identity'), expectedRevision: null }, { actor: person })
   expect(result).toMatchObject({ status: 'written', noteHistory: { status: 'committed' } })
-  const { DatabaseSync } = await import('node:sqlite'), db = new DatabaseSync(f.metadata.path)
-  try {
-    const row = db.prepare('SELECT sequence,json FROM note_history_event').get()!, entry = JSON.parse(String(row.json))
-    entry.provenance.noteId = 'foreign-note'; entry.provenance.resource.path = 'foreign.note.md'
-    entry.provenance.blocks['original-block'].lastEdited.actor = { kind: 'agent', id: 'foreign-forged-author' }
-    db.prepare('UPDATE note_history_event SET json=? WHERE sequence=?').run(JSON.stringify(entry), row.sequence as number)
-  } finally { db.close() }
+  const stored = await storedMetadata(f), entry = stored.value.history[0]
+  entry.provenance.noteId = 'foreign-note'; entry.provenance.resource.path = 'foreign.note.md'
+  entry.provenance.blocks['original-block'].lastEdited.actor = { kind: 'agent', id: 'foreign-forged-author' }
+  // Publish a checksum-valid foreign history. A checksum rejection alone would
+  // not prove the identity fence, nor preserve independent trusted creators.
+  const bytes = JSON.stringify(stored.value) + '\n'
+  stored.original.metadata = createHash('sha256').update(bytes).digest('hex')
+  await writeFile(join(f.metadata.path + '.files', 'metadata', stored.original.metadata + '.json'), bytes)
+  await writeFile(f.metadata.path, JSON.stringify(stored.root) + '\n')
   const read = await f.writer.read(f.workspace, f.path)
   expect(read).toMatchObject({ status: 'read', document: { content: expect.stringContaining('Original identity'), noteProvenance: { status: 'unconfirmed', blocks: { 'original-block': { created: { actor: person }, lastEdited: null } } } } })
   expect(JSON.stringify(read)).not.toContain('foreign-forged-author')
@@ -131,7 +162,7 @@ it('reads the same committed historical content in an independent process withou
   const f = await fixture(), result = await f.writer.write(f.workspace, { path: f.path, content: f.body('Survives process exit'), expectedRevision: null }, { actor: agent })
   expect(result).toMatchObject({ status: 'written', noteHistory: { status: 'committed' } })
   const source = 'const {AgentMuxNotebookStore}=await import(process.argv[1]); const store=new AgentMuxNotebookStore(process.argv[2]); console.log(JSON.stringify(await store.readHistory(JSON.parse(process.argv[3]))));'
-  const child = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', source, pathToFileURL(resolve('packages/core/dist/notebook-store.js')).href, f.metadata.path, JSON.stringify({ ...f.query, eventId: result.noteHistory?.eventId, includeContent: true })])
+  const child = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', source, pathToFileURL(compiled.notebookStore).href, f.metadata.path, JSON.stringify({ ...f.query, eventId: result.noteHistory?.eventId, includeContent: true })])
   const restored = JSON.parse(child.stdout)
   expect(restored.entries).toHaveLength(1); expect(restored.entries[0]).toMatchObject({ eventId: result.noteHistory?.eventId, actor: agent, status: 'committed' })
   expect(restored.entries[0].content).toContain('Survives process exit')
