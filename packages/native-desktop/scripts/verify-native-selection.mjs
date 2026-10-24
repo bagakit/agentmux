@@ -11,7 +11,7 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const macos = join(repository, 'packages/native-desktop/macos')
 const args = process.argv.slice(2)
 if (args.includes('--help')) {
-  console.log('verify-native-selection.mjs --source | --preview [--output DIRECTORY]\nCompiles only the real selection/Core sources and bare AppKit host; no App assembly/signing/install. --source drives real AppKit events and buttons, exports explicitly scoped AppKit view-layout frames and kills nonempty behavioral mutants. --preview opens the same production picker for manual interaction. No screen capture or permission request is used by the view-layout export; WindowServer layering and system focus remain unverified.')
+  console.log('verify-native-selection.mjs --source | --preview [--output DIRECTORY]\nCompiles only the real selection/Core sources and bare AppKit host; no App assembly/signing/install. --source requires two distinct active displays, drives real AppKit events and buttons, exports explicitly scoped AppKit view-layout frames and kills nonempty behavioral mutants. --preview opens the same production picker for manual interaction. No screen capture or permission request is used by the view-layout export; WindowServer layering and system focus remain unverified.')
   process.exit(0)
 }
 const preview = args.includes('--preview')
@@ -138,13 +138,15 @@ class Host {
   }
   async completion(count) {
     for (let i = 0; i < 100; i++) { if (this.completions.length >= count) return this.completions[count - 1]; await delay(20) }
-    throw Object.assign(new Error('Expected real picker completion did not arrive'), { assertion: true })
+    throw new Error('Expected real picker completion did not arrive; observation timed out')
   }
   async stop() {
     this.child.stdin.end()
     let closed = await Promise.race([this.closed, delay(2000).then(() => null)])
     if (!closed) { this.child.kill('SIGTERM'); closed = await Promise.race([this.closed, delay(2000).then(() => null)]) }
     assert(closed, `Exact preview process ${this.child.pid} closure is unknown`)
+    assert.equal(closed.code, 0, `Exact preview process ${this.child.pid} did not exit normally`)
+    assert.equal(closed.signal, null, `Exact preview process ${this.child.pid} was terminated`)
     return { pid: this.child.pid, ...closed }
   }
 }
@@ -152,17 +154,27 @@ const behavioral = (condition, message) => { if (!condition) throw Object.assign
 async function exercise(directory, capture) {
   const host = new Host(join(directory, 'selection-preview'))
   let primary
+  let receipt
+  const cases = []
   try {
-    const cases = []
     const verify = (condition, message) => { cases.push(message); behavioral(condition, message) }
     const ready = await host.ready()
     const screen = ready.screen
     const begin = await host.request('begin', { allowEditing: true })
+    verify(Array.isArray(ready.screens) && ready.screens.length >= 2, 'Multidisplay proof requires at least two actual displays')
+    verify(new Set(ready.screens.map(display => display.displayId)).size === ready.screens.length, 'Actual display identities are distinct')
+    verify(begin.surfaces.length === ready.screens.length, 'Every actual display owns a distinct production overlay')
+    verify(begin.surfaces.length > 0 && begin.surfaces.every(surface => surface.acceptsFirstMouse), 'Every display accepts the first selection click without losing it to window activation')
+    for (const display of ready.screens) {
+      const surface = begin.surfaces.find(surface => surface.displayId === display.displayId)
+      verify(surface && JSON.stringify(surface.frame) === JSON.stringify(display.frame), 'Each overlay occupies its exact actual display frame')
+    }
     const offset = { x: screen.x - begin.window.x, y: screen.y - begin.window.y }
     let rectangle = { x: offset.x + screen.width * 0.22, y: offset.y + screen.height * 0.28,
       width: screen.width * 0.38, height: screen.height * 0.35 }
+    const sameRect = (actual, expected) => actual && Object.keys(expected).every(key => Math.abs(actual[key] - expected[key]) < 0.01)
     const point = (x, y) => ({ x, y })
-    const drag = (from, to) => host.request('drag', { from, to })
+    const drag = (from, to) => host.request('drag', { from, to, displayId: ready.displayId })
     const images = []
     const image = async (name, viewport = {}) => {
       if (!capture) return
@@ -175,11 +187,14 @@ async function exercise(directory, capture) {
       assert(bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && bytes.readUInt32BE(16) === value.width && bytes.readUInt32BE(20) === value.height, 'Actual AppKit layout PNG metadata mismatch')
       images.push({ name, state: 'captured', path, width: value.width, height: value.height, source: value.source,
         windowServerFrame: false, rasterization: value.rasterization, compositing: value.compositing, scale: value.scale,
-        constrainedViewport: value.constrainedViewport,
+        constrainedViewport: value.constrainedViewport, displayId: value.displayId, viewport: value.viewport,
         sha256: createHash('sha256').update(bytes).digest('hex') })
     }
-    await image('initial')
-    await drag(point(rectangle.x, rectangle.y), point(rectangle.x + rectangle.width, rectangle.y + rectangle.height))
+    for (const display of ready.screens) await image('initial-display-' + display.displayId, { displayId: display.displayId })
+    await host.request('useDisplay', { displayId: ready.displayId })
+    const firstReleased = await drag(point(rectangle.x, rectangle.y), point(rectangle.x + rectangle.width, rectangle.y + rectangle.height))
+    const firstGlobal = { ...rectangle, x: rectangle.x + begin.window.x, y: rectangle.y + begin.window.y }
+    verify(firstReleased.surfaces.length > 0 && firstReleased.surfaces.every(surface => sameRect(surface.selection, firstGlobal)), 'Every display reads the same original selection immediately after a gesture')
     await delay(40)
     verify(host.completions.length === 0, 'Mouse release must wait for explicit confirmation')
     await image('selected')
@@ -201,6 +216,7 @@ async function exercise(directory, capture) {
     verify(controls.some(button => button.identifier === 'native-selection-confirm' && button.enabled), 'Real confirm button is enabled for a valid released selection')
     await host.request('button', { identifier: 'native-selection-confirm' })
     const confirmed = await host.completion(1)
+    verify(confirmed.visiblePickerWindows === 0, 'Confirmation retires every display overlay before completion')
     verify(confirmed.state === 'confirmed' && confirmed.completionAction === 'capture', 'Confirm button must preserve direct capture intent rather than cancel or edit')
     const expected = { x: rectangle.x + begin.window.x, y: screen.y + screen.height - (rectangle.y + begin.window.y + rectangle.height), width: rectangle.width, height: rectangle.height }
     for (const key of Object.keys(expected)) verify(Math.abs(confirmed.rect[key] - expected[key]) < 0.01, `Actual moved/resized/nudged ${key} must preserve Quartz geometry`)
@@ -259,13 +275,62 @@ async function exercise(directory, capture) {
     verify(host.completions.length === 7, 'No opt-in means E cannot open an editor or complete selection')
     await host.request('key', { keyCode: 53 })
     verify((await host.completion(8)).state === 'cancelled', 'Pure capture retains cancellation after an unused edit shortcut')
-    return { tests: cases.length, cases, completions: host.completions, images, events: host.events }
+    let count = 8
+    const globalDrag = async (display, from, to) => host.request('drag', { displayId: display.displayId,
+      from: point(from.x - display.frame.x, from.y - display.frame.y), to: point(to.x - display.frame.x, to.y - display.frame.y) })
+    const confirmGlobal = async expected => {
+      await host.request('key', { keyCode: 36 })
+      const completion = await host.completion(++count)
+      const quartz = { x: expected.x, y: screen.y + screen.height - expected.y - expected.height, width: expected.width, height: expected.height }
+      verify(completion.state === 'confirmed' && sameRect(completion.rect, quartz), 'Original shared selection completes with exact global Quartz coordinates')
+      verify(completion.visiblePickerWindows === 0, 'All production display overlays close before the original request completes')
+    }
+    for (const display of ready.screens) {
+      await host.request('begin', { allowEditing: true })
+      const frame = display.frame
+      const from = point(frame.x + frame.width * 0.20, frame.y + frame.height * 0.26)
+      const to = point(frame.x + frame.width * 0.57, frame.y + frame.height * 0.62)
+      const empty = await globalDrag(display, from, from)
+      verify(empty.surfaces.filter(surface => surface.toolbarVisible).length === 1 && empty.surfaces.find(surface => surface.toolbarVisible).displayId === display.displayId, 'An empty click on another display moves the original toolbar to that event display')
+      const result = await globalDrag(display, from, to)
+      const expected = { x: from.x, y: from.y, width: to.x - from.x, height: to.y - from.y }
+      verify(result.surfaces.length > 0 && result.surfaces.every(surface => sameRect(surface.selection, expected)), 'Main and secondary views consume one identical global selection state')
+      verify(result.surfaces.filter(surface => surface.toolbarVisible).length === 1, 'Exactly one toolbar belongs to the released global selection')
+      await image('display-' + display.displayId)
+      await confirmGlobal(expected)
+    }
+    if (ready.screens.length > 1) {
+      const primaryDisplay = ready.screens[0], secondary = ready.screens[1]
+      for (const [source, destination] of [[primaryDisplay, secondary], [secondary, primaryDisplay]]) {
+        await host.request('begin', { allowEditing: true })
+        const from = point(source.frame.x + source.frame.width * 0.31, source.frame.y + source.frame.height * 0.38)
+        const to = point(destination.frame.x + destination.frame.width * 0.63, destination.frame.y + destination.frame.height * 0.55)
+        const expected = { x: Math.min(from.x, to.x), y: Math.min(from.y, to.y), width: Math.abs(to.x - from.x), height: Math.abs(to.y - from.y) }
+        const result = await globalDrag(source, from, to)
+        verify(result.surfaces.length > 1 && result.surfaces.every(surface => sameRect(surface.selection, expected)), 'A gesture continues outside its original display using the actual source window')
+        await host.request('useDisplay', { displayId: destination.displayId })
+        await host.request('key', { keyCode: 124 })
+        expected.x += 1
+        const adjusted = await host.request('inspect')
+        verify(adjusted.surfaces.length > 1 && adjusted.surfaces.every(surface => sameRect(surface.selection, expected)), 'A key from another display adjusts the original shared selection')
+        for (const display of ready.screens) await image('cross-from-' + source.displayId + '-display-' + display.displayId, { displayId: display.displayId })
+        await confirmGlobal(expected)
+      }
+    }
+    await host.request('begin')
+    await host.request('displayChange')
+    const configurationChange = await host.completion(++count)
+    verify(configurationChange.state === 'failed' && configurationChange.code === 'display_configuration_changed', 'A display-change notification fails the original request explicitly')
+    verify(host.completions.length > 0 && host.completions.every(value => value.visiblePickerWindows === 0), 'Capture, edit and cancellation each retire every original overlay')
+    receipt = { tests: cases.length, cases, displays: ready.screens, separateSpaces: ready.separateSpaces, multidisplayExercised: ready.screens.length > 1,
+      completions: host.completions, images, events: host.events }
+    return receipt
   } catch (error) {
-    error.diagnostics = { events: host.events, completions: host.completions, stderr: host.errors }
+    error.diagnostics = { cases, events: host.events, completions: host.completions, stderr: host.errors }
     primary = error
     throw error
   } finally {
-    try { const cleanup = await host.stop(); if (primary) primary.diagnostics.cleanup = cleanup } catch (cleanup) { if (primary) throw new AggregateError([primary, cleanup], 'Picker test and exact-host cleanup failed'); throw cleanup }
+    try { const cleanup = await host.stop(); if (primary) primary.diagnostics.cleanup = cleanup; else if (receipt) receipt.cleanup = cleanup } catch (cleanup) { if (primary) throw new AggregateError([primary, cleanup], 'Picker test and exact-host cleanup failed'); throw cleanup }
   }
 }
 
@@ -283,16 +348,22 @@ try {
     report.appKit = await exercise(baseline, true)
     report.nativeFrames = 'not-verified'
     report.viewLayoutFrames = report.appKit.images.length > 0 && report.appKit.images.every(image => image.source === 'AppKit-view-layout-only') ? 'exported-awaiting-independent-review' : 'incomplete'
-    report.unverified = ['WindowServer fullscreen/layering', 'system foreground/focus and physical event delivery', 'screen capture permissions and installed application']
+    report.unverified = ['WindowServer fullscreen/layering', 'system foreground/focus and physical event delivery', 'screen capture permissions and installed application', 'physical mixed-scale displays and final system PNG']
     const state = core[1], view = picker[0]
     const mutations = [
+      { name: 'display-enumeration', path: view, before: 'for screen in screens {', after: 'for screen in screens.prefix(1) {' },
+      { name: 'global-event-coordinates', path: view, before: 'event.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow', after: 'event.locationInWindow' },
+      { name: 'shared-selection-owner', path: view, before: 'window.contentView = NativeScreenSelection(viewport: screen.frame, coordinator: coordinator)',
+        after: 'window.contentView = NativeScreenSelection(viewport: screen.frame, coordinator: NativeSelectionCoordinator(screenFrames: screens.map(\\.frame), primaryTop: primary.frame.maxY, initialPoint: coordinator.initialPoint, allowEditing: allowEditing))' },
+      { name: 'close-all-displays', path: view, before: 'for window in presentation.windows {', after: 'for window in presentation.windows.prefix(1) {' },
+      { name: 'first-display-click', path: view, before: 'override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }', after: 'override func acceptsFirstMouse(for event: NSEvent?) -> Bool { false }' },
       { name: 'move', path: state, before: 'rectangle = translated(original, dx: location.x - anchor.x, dy: location.y - anchor.y)', after: 'rectangle = original' },
       { name: 'nudge', path: state, before: 'self.rectangle = translated(rectangle, dx: dx, dy: dy)', after: 'self.rectangle = rectangle' },
       { name: 'resize', path: state, before: 'right = min(bounds.maxX, max(location.x, left + minimumWidth))', after: 'right = original.maxX' },
       { name: 'panel-bounds', path: state, before: 'x: min(max(preferredOrigin.x, available.minX), available.maxX - width)', after: 'x: preferredOrigin.x' },
       { name: 'capture-lease', path: core[3], before: '        guard !occupied else { lock.unlock(); throw Failure.busy }', after: '        // Test mutant: concurrent ownership is admitted.' },
       { name: 'consumer-lease', path: operationsSource, before: 'return try NativeSelectionCaptureLease.shared.withCapture {', after: 'return try unleasedCapture {' },
-      { name: 'release', path: view, before: 'selection.pointerUp(convert(event.locationInWindow, from: nil)); refresh()', after: 'selection.pointerUp(convert(event.locationInWindow, from: nil)); refresh(); confirm()' },
+      { name: 'release', path: view, before: 'func pointerUp(_ point: NSPoint) { selection.pointerUp(point); refresh() }', after: 'func pointerUp(_ point: NSPoint) { selection.pointerUp(point); refresh(); complete(action: .capture) }' },
       { name: 'escape', path: view, before: 'case 53: cancel()', after: 'case 53: confirm()' },
       { name: 'toolbar', path: view, before: 'confirmButton.action = #selector(confirm)', after: 'confirmButton.action = #selector(cancel)' },
       { name: 'edit-action', path: view, before: 'editButton.action = #selector(edit)', after: 'editButton.action = #selector(confirm)' },
@@ -307,10 +378,14 @@ try {
       const result = checks(directory)
       if (result.failures.length > 0 && result.exitCode !== 0) { report.mutations.push({ name: mutation.name, state: 'killed-by-state-assertion', tests: result.tests, failures: result.failures }); continue }
       assert.equal(result.exitCode, 0, 'Mutation failed outside state assertions')
-      let killed = false
-      try { await exercise(directory, false) } catch (error) { if (!error.assertion) throw error; killed = true }
-      assert(killed, `Surviving behavior mutation: ${mutation.name}`)
-      report.mutations.push({ name: mutation.name, state: 'killed-by-AppKit-assertion' })
+      let failure
+      try { await exercise(directory, false) } catch (error) {
+        if (!error.assertion) throw error
+        assert(error.diagnostics.cases.length > 0, 'AppKit mutant must execute a nonempty behavior assertion set')
+        failure = { assertion: error.message, cases: error.diagnostics.cases, cleanup: error.diagnostics.cleanup }
+      }
+      assert(failure, `Surviving behavior mutation: ${mutation.name}`)
+      report.mutations.push({ name: mutation.name, state: 'killed-by-AppKit-assertion', ...failure })
     }
     report.state = 'behavior-passed-awaiting-independent-image-review'
     report.aestheticReview = 'not-performed-by-runner'
