@@ -218,7 +218,7 @@ export function AgentSessionComposer({
   useEffect(() => { setFileReferencesOpen(false) }, [attachmentScope, visible])
   const attachments = useComposerAttachments({ scope: attachmentScope, hostId: session?.hostId,
     workspacePath: session?.workspacePath, disabled: !submitMode.canType, insertion: insertionRef, feedback,
-    document: dialogDocument, ...(workspace ? { onRemoteFiles: () => setFileReferencesOpen(true) } : {}) })
+    document: dialogDocument, shortcutActive: visible && !readOnly, ...(workspace ? { onRemoteFiles: () => setFileReferencesOpen(true) } : {}) })
 
   const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId,
     nativeService).map(notice => notice.id === 'timeline-observation'
@@ -288,7 +288,7 @@ export function AgentSessionComposer({
         onCopyQueued={async (text) => { feedback.dismiss(); return copyTextToClipboard(text, feedback.report) }}
     >
     {(mailbox, pending, composerRef) => (
-    <div style={{ display: 'contents' }} onFocusCapture={() => inputHistory.setFocused(true)}
+    <div style={{ display: 'contents' }} onFocusCapture={event => { inputHistory.setFocused(true); attachments.claimScreenshotTarget(event) }}
       onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
     {fileReferencesOpen && workspace && visible ? <ComposerFileReferences key={attachmentScope} workspace={workspace}
       onClose={() => setFileReferencesOpen(false)} onSelect={path => { void attachments.referencePaths([path]) }} /> : null}

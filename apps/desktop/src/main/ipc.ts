@@ -120,6 +120,7 @@ import { projectAppearance } from './project-appearance.js'
 import { executeBrowserTaskControl } from './browser-task-control.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
 import { registerNativeDesktopIpc } from './native-desktop-ipc.js'
+import { registerScreenshotShortcut } from './screenshot-shortcut.js'
 import { getDesktopNativeUiOwner, getNativeDesktopOwner } from './native-desktop-owner.js'
 import { createNativeDesktopPublicOwner } from './native-desktop-public.js'
 import { readBookmark } from './bookmark-file.js'
@@ -131,6 +132,7 @@ import { dirname, join } from 'node:path'
 import {
   app,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   nativeTheme,
@@ -2497,9 +2499,19 @@ export async function registerIpc(args: {
   await control.start()
   const disposeThemeBootstrap = registerThemeBootstrap(ipcMain, args.window, () => config.appearance, () => nativeTheme.shouldUseDarkColors)
   const disposeTerminalBrightness = observeTerminalBrightness(nativeTheme, updateTerminalBrightness)
+  const screenshotShortcut = registerScreenshotShortcut({ platform: process.platform, shortcuts: globalShortcut,
+    request: () => {
+      try { if (!contents.isDestroyed()) contents.send('ui:screenshotShortcut') }
+      catch (error) { console.warn('Screenshot shortcut delivery is unconfirmed; the original work remains:', error) }
+    } })
+  handleWithEvent('ui:screenshotShortcutStatus', event => {
+    requireTrustedSender('ui:screenshotShortcutStatus', event)
+    return screenshotShortcut.status
+  })
   return async () => {
     acceptingControl = false
     await runOwnerDisposals([
+      { owner: 'screenshot-shortcut', dispose: () => screenshotShortcut.dispose() },
       { owner: 'client-incident-runtime', dispose: () => runtimeIncidents?.dispose() },
       { owner: 'terminal-brightness', dispose: disposeTerminalBrightness },
       { owner: 'spatial', dispose: () => disposeSpatial() },

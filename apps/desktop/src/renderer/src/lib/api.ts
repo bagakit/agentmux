@@ -1,4 +1,5 @@
 import { createRendererSessionRecovery } from './session-recovery-api'
+import { SCREENSHOT_SHORTCUT_ACCELERATOR } from '../../../shared/screenshot-shortcut'
 import { createConversationReadApi } from './conversation-read-api'
 import { unwrapSessionObservationResult } from '../../../shared/session-observation-result'
 import { createToolkitConfigurationApi } from './toolkit-configuration-api'
@@ -899,6 +900,8 @@ const mockApi: AgentMuxDesktopApi = {
     openObjectLink: async () => { throw new Error('Object link navigation requires the desktop app. Open its original work surface in Desktop and retry.') },
     onSpatialLinkIssue: () => () => {},
     captureScreenshot: async () => { throw new Error('Screen selection requires the desktop app.') },
+    screenshotShortcutStatus: async () => ({ state: 'unavailable', accelerator: SCREENSHOT_SHORTCUT_ACCELERATOR, message: 'System shortcuts require the desktop app.' }),
+    onScreenshotShortcut: () => () => {},
     listAgentSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },
     listWorkspaceSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },
     readClipboardText: async () => '',

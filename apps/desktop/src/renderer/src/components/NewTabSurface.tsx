@@ -358,7 +358,7 @@ export function NewTabSurface({
 
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   const attachments = useComposerAttachments({ scope: toolsScope, hostId: workspace?.hostId, workspacePath: workspace?.path,
-    disabled: false, insertion: insertionRef, feedback, document: dialogDocument,
+    disabled: false, insertion: insertionRef, feedback, document: dialogDocument, shortcutActive: visible && presentationActive && sections.agents === 'expanded',
     onRemoteFiles: () => setFileReferencesOpen(true) })
 
   return (
@@ -399,14 +399,14 @@ export function NewTabSurface({
         {moteId && displayedExecutorId && !executors.some(item => item.id === displayedExecutorId) ? <div className="launcher-error" role="status">Saved Agent {displayedExecutorId} is unavailable. Choose another Agent or edit this Mote’s quick mode.</div> : null}
         <AgentExecutorPicker executors={executors} selected={displayedExecutorId || null}
           active={visible && presentationActive} onSelect={chooseExecutor} />
-        <div className="launcher-composer composer"><ComposerCompletionEditor completionConfig={completion.completionConfig} commands={completion.commands} skills={completion.skills}
+        <div className="launcher-composer composer" onFocusCapture={attachments.claimScreenshotTarget}><ComposerCompletionEditor completionConfig={completion.completionConfig} commands={completion.commands} skills={completion.skills}
           references={completion.references} promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
           completionFeedback={completion.completionFeedback} active={visible && presentationActive} aria-label="Agent prompt" disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
           onPasteImage={attachments.pasteImage} onDropFiles={attachments.dropFiles}
           autoFocus={visible && presentationActive && inputRegionActive && !controlNavigation} value={prompt} onValueChange={setPrompt}
           onKeyDown={event => { if (!launcherKeydownLaunches(event, isMacPlatform(), readiness)) return; event.preventDefault(); launchFromLauncher() }}
           placeholder="What would you like to work on?" /></div>
-        <div className="composer__toolbar launcher-tools"><div>
+        <div className="composer__toolbar launcher-tools" onFocusCapture={attachments.claimScreenshotTarget}><div>
           <AgentComposerTools key={completion.scope} layoutControl={false} disabled={busy !== null || !workspace}
             commands={completion.commands} loadSkills={completion.loadSkills}
             onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}

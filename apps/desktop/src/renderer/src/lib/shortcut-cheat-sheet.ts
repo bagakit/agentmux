@@ -19,7 +19,7 @@
 import { SHORTCUT_BINDINGS, chordForPlatform, type Chord, type ShortcutBinding } from './shortcut-registry'
 
 /** A cheat-sheet group id, derived from (scope, gate). Not a new taxonomy — a projection of existing fields. */
-export type CheatSheetGroupId = 'global' | 'workbench' | 'terminal' | 'editor' | 'launcher' | 'message-tool'
+export type CheatSheetGroupId = 'system' | 'global' | 'workbench' | 'terminal' | 'editor' | 'launcher' | 'message-tool'
 
 export interface CheatSheetRow {
   /** The registry binding id — the anchor that ties a rendered row back to its SSOT entry. */
@@ -47,6 +47,7 @@ export interface CheatSheetGroup {
  */
 export function groupIdForBinding(binding: ShortcutBinding): CheatSheetGroupId {
   switch (binding.scope) {
+    case 'system': return 'system'
     case 'terminal': return 'terminal'
     case 'editor': return 'editor'
     case 'launcher': return 'launcher'
@@ -70,6 +71,7 @@ export function groupIdForBinding(binding: ShortcutBinding): CheatSheetGroupId {
 // array never mentions, and `buildCheatSheet` iterates THIS array — so those rows would silently vanish
 // from the sheet while grouping looked total. The hole is runtime-only; tsc cannot see a missing entry.
 export const CHEAT_SHEET_GROUPS: readonly { id: CheatSheetGroupId; title: string }[] = [
+  { id: 'system', title: 'System-wide' },
   { id: 'global', title: 'Global' },
   { id: 'workbench', title: 'Workbench' },
   { id: 'launcher', title: 'Start page' },
@@ -120,6 +122,7 @@ export function buildCheatSheet(isMac: boolean): CheatSheetGroup[] {
     id,
     title,
     rows: SHORTCUT_BINDINGS
+      .filter(binding => isMac || !binding.macOnly)
       .filter((binding) => groupIdForBinding(binding) === id)
       .map((binding) => ({
         id: binding.id,
