@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
-import { tmpdir } from 'node:os'
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
@@ -13,6 +12,12 @@ const continuityReceipt = "error.creationFailure?.operationId === agentLifecycle
 const negativeReceipt = 'retains direct resume preparation for a foreign-operation negative receipt'
 const restartRejected = 'an authoritative not-applied Start remains explicitly retryable'
 const mutations = [
+  { id: 'resume-claims-foreign-original', from: 'if (!prepared || !run || run.lifecycleOperationId !== reservation.operationId) return null',
+    to: 'if (!prepared || !run) return null', assertion: 'does not claim a foreign lifecycle' },
+  { id: 'reopen-claims-foreign-original', from: '!prepared || !run || run.lifecycleOperationId !== reservation.operationId || run.workspacePath !== prepared.workspacePath ||',
+    to: '!prepared || !run || run.workspacePath !== prepared.workspacePath ||', assertion: 'keeps foreign-operation actual prepared result unknown' },
+  { id: 'restart-inspection-ignores-original-launch', from: "frozen.argsDigest === createHash('sha256').update(JSON.stringify(run.args)).digest('base64url')",
+    to: 'true', assertion: 'keeps an original Start with mismatching launch evidence' },
   { id: 'foreign-start-authorizes-retry', from: 'error.creationFailure?.operationId === lifecycleOperationId &&',
     to: 'error.creationFailure !== undefined &&', assertion: negativeReceipt },
   { id: 'input-receipt-authorizes-start-retry',
@@ -42,11 +47,12 @@ const mutationIndex = process.argv.indexOf('--mutation')
 const selected = mutationIndex < 0 ? mutations : mutations.filter(value => value.id === process.argv[mutationIndex + 1])
 if (mutationIndex >= 0) assert.equal(selected.length, 1, '--mutation requires a known mutation ID')
 const sha = value => createHash('sha256').update(value).digest('hex')
-const directory = await mkdtemp(join(tmpdir(), 'amux-recovery-creation-'))
+await mkdir(join(root, '.tmp'), { recursive: true })
+const directory = await mkdtemp(join(root, '.tmp', 'amux-recovery-creation-'))
 await symlink(join(root, 'node_modules'), join(directory, 'node_modules'), 'dir')
 const receipt = { schema: 'agentmux.recovery-creation-failure-proof.v1', passed: false,
   boundary: 'Actual source Core resume/reopen/restart and FileStore consumers. Direct resume/restart use private pinned Native processes; typed negative Start receipts are controlled at the adapter boundary. New Native/SDK artifact qualification belongs to the full integration gate. No user Runtime touched.',
-  inputs: {}, baseline: null, mutations: [] }
+  evidenceDirectory: directory, inputs: {}, sdkInputs: {}, baseline: null, mutations: [] }
 
 async function run(name, mutation) {
   const report = join(directory, name + '.json'), config = join(directory, name + '.config.mts')
@@ -85,7 +91,7 @@ async function run(name, mutation) {
       name + ': designated business assertion must fail, not collection or preparation. ' + JSON.stringify(failures) + result.output.slice(-4000))
   } else {
     assert.equal(result.code, 0, JSON.stringify(failures) + result.output.slice(-4000))
-    assert.equal(data.numFailedTests, 0); assert.equal(data.numPassedTests, 22, 'All four recovery consumers must execute')
+    assert.equal(data.numFailedTests, 0); assert.equal(data.numPassedTests, 34, 'All four recovery consumers and exact-query near misses must execute')
   }
   return { name, exitCode: result.code, passed: data.numPassedTests, failed: data.numFailedTests,
     reportSha256: sha(await readFile(report)), ...(mutation ? { source: mutation.source ?? sourcePath, loadedSha256: loaded.loaded,
@@ -93,17 +99,24 @@ async function run(name, mutation) {
 }
 
 try {
-  for (const path of [sourcePath, continuitySourcePath, 'packages/core/test/session-continuity-launch-input.test.ts',
+  const sdk = dirname(resolve(process.env.CTXMUX_TEST_SDK_SOURCE ?? join(root, 'packages/core/node_modules/@ctxmux/sdk/dist/index.js')))
+  for (const name of await readdir(sdk, { recursive: true })) if (name.endsWith('.js')) { const path = join(sdk, name); receipt.sdkInputs[path] = sha(await readFile(path)) }
+  const daemon = process.env.AGENTMUX_TEST_CTXMUXD ?? join(root, 'packages/core/vendor/ctxmux', process.platform + '-' + process.arch, 'bin/ctxmuxd')
+  receipt.inputs[daemon] = sha(await readFile(daemon))
+  if (process.env.AGENTMUX_TEST_RESTART_CHILD_ENTRY) { const path = fileURLToPath(process.env.AGENTMUX_TEST_RESTART_CHILD_ENTRY); receipt.inputs[path] = sha(await readFile(path)) }
+  for (const path of [sourcePath, continuitySourcePath, 'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/client.ts',
+    'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/ports.ts',
+    'packages/core/test/fixtures/retired-reopen.ts', 'packages/core/test/hook-postcommit-observation.vitest.config.mts', 'packages/core/test/session-continuity-launch-input.test.ts',
     'packages/core/test/durable-direct-resume.test.ts', 'packages/core/test/agent-session-restart.test.ts',
     'packages/core/test/retired-session-reopen.test.ts', 'packages/core/test/recovery-creation-failure.config.mts',
-    'packages/core/scripts/verify-recovery-creation-failure.mjs']) receipt.inputs[path] = sha(await readFile(join(root, path)))
+    'packages/core/scripts/verify-recovery-creation-failure.mjs']) receipt.inputs[path] = sha(await readFile(resolve(root, path)))
   receipt.baseline = await run('baseline')
   if (process.argv.includes('--mutations') || mutationIndex >= 0) for (const mutation of selected) receipt.mutations.push(await run(mutation.id, mutation))
-  for (const [path, digest] of Object.entries(receipt.inputs)) assert.equal(sha(await readFile(join(root, path))), digest, 'Owned source changed; rerun proof: ' + path)
+  for (const [path, digest] of Object.entries(receipt.inputs)) assert.equal(sha(await readFile(resolve(root, path))), digest, 'Owned source changed; rerun proof: ' + path)
+  for (const [path, digest] of Object.entries(receipt.sdkInputs)) assert.equal(sha(await readFile(path)), digest, 'SDK output changed: ' + path)
   receipt.passed = true
 } finally {
   const at = process.argv.indexOf('--output')
   if (at >= 0) { assert.ok(process.argv[at + 1], '--output requires a path'); await writeFile(resolve(process.argv[at + 1]), JSON.stringify(receipt, null, 2) + '\n') }
-  await rm(directory, { recursive: true, force: true })
 }
 process.stdout.write(JSON.stringify(receipt) + '\n')

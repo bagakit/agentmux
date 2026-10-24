@@ -57,7 +57,7 @@ async function fixture() {
   })
   const stop = vi.fn()
   Object.assign(inner.kernel, { isConnected: () => true, identity: () => ({ daemonInstanceId: 'fixture', protocolVersion: 21, buildIdentity: 'fixture' }),
-    start, stop, list: async () => runs, status: async () => runs[0] })
+    start, stop, list: async () => runs, inspectCreation: async (key: string) => runs.find(run => run.lifecycleOperationId === key) ?? null, status: async () => runs[0] })
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   inner.ensureManagedHooks = async () => {}
@@ -162,7 +162,8 @@ describe('remote initial creation admission', () => {
     let connected = false
     vi.spyOn(inner.kernel, 'isConnected').mockImplementation(() => connected)
     const native = vi.spyOn(inner.kernel, 'connect').mockRejectedValue(new AgentMuxError('Private original Native temporarily unavailable', 'CTXMUX_io'))
-    const list = vi.spyOn(inner.kernel, 'list')
+    const list = vi.spyOn(inner.kernel, 'list').mockRejectedValue(new Error('Unrelated inventory is unavailable'))
+    const observation = vi.spyOn(inner.kernel, 'inspectCreation')
     const input = vi.spyOn(inner.kernel, 'input').mockRejectedValue(new Error('Inspection must not input'))
     const global = vi.spyOn(f.target, 'connect').mockRejectedValue(new Error('Unrelated private recovery is unavailable'))
     const h = await hostedTestClient(f.target)
@@ -174,7 +175,7 @@ describe('remote initial creation admission', () => {
       native.mockImplementation(async () => { connected = true })
       const recovered = await h.sdk.inspectAgentCreation(request.agentSessionId!)
       expect(recovered).toMatchObject({ agentSessionId: request.agentSessionId, run: { runId: 'target-run' }, creation: { initialPrompt: 'unknown' } })
-      expect(native).toHaveBeenCalledTimes(2); expect(list).toHaveBeenCalledOnce()
+      expect(native).toHaveBeenCalledTimes(2); expect(list).not.toHaveBeenCalled(); expect(observation).toHaveBeenCalledExactlyOnceWith(seed!.operationId)
       expect(f.start).toHaveBeenCalledOnce(); expect(input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled(); expect(global).not.toHaveBeenCalled()
     } finally { await h.dispose() }
   })
@@ -274,7 +275,7 @@ describe('remote initial creation admission', () => {
     const core = resolve('packages/core/src'), modulePath = join(f.root, 'recover.mjs')
     await build({ stdin: { contents: `import {AgentMuxClient} from ${JSON.stringify(join(core, 'client.ts'))};import {AgentMuxFileAgentSessionStore} from ${JSON.stringify(join(core, 'agent-session-store.ts'))};
 const client=new AgentMuxClient({store:new AgentMuxFileAgentSessionStore(process.argv[2])}),runs=JSON.parse(process.argv[3]);await client.registry.load('local');client.connected=true;
-client.kernel.list=async()=>runs;client.kernel.isConnected=()=>true;for(const action of ['start','stop','input'])client.kernel[action]=async()=>{throw Error('recovery must not '+action)};
+client.kernel.inspectCreation=async key=>runs.find(run=>run.lifecycleOperationId===key)??null;client.kernel.list=async()=>{throw Error('recovery must not list')};client.kernel.isConnected=()=>true;for(const action of ['start','stop','input'])client.kernel[action]=async()=>{throw Error('recovery must not '+action)};
 client.hookServer.isRunning=()=>true;client.hookServer.createBinding=(sid,provider,bindingId,token)=>({bindingId,endpoint:{url:'http://127.0.0.1:0',token},bindRun:async()=>{},close:async()=>{}});
 const session=await client.inspectAgentCreation('target-session');console.log(JSON.stringify({pid:process.pid,session}));await client.dispose();`, resolveDir: core, loader: 'ts' },
       outfile: modulePath, bundle: true, platform: 'node', format: 'esm', packages: 'external' })

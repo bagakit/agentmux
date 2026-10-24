@@ -15,12 +15,12 @@ const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'adc-')))
-  for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
+  for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   const runtime = join(root, 'r'), state = join(root, 's')
   await mkdir(runtime); await mkdir(state)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', runtime); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', state)
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
-  const daemon = spawn(resolve(import.meta.dirname, '../vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
+  const daemon = spawn(process.env.AGENTMUX_TEST_CTXMUXD ?? resolve(import.meta.dirname, '../vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
     ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'],
     { stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
   let daemonError = ''; daemon.stderr!.on('data', bytes => { daemonError += String(bytes) })
@@ -120,11 +120,14 @@ it('reconciles an applied Start with lost ACK by original lifecycle after dispos
   await expect(f.create()).rejects.toMatchObject({ code: 'AGENT_CREATION_UNCONFIRMED' })
   expect(await f.store.readMetadata(f.sid)).toBeNull()
   expect((await f.store.loadCreationCorrelation(f.sid))?.preparedCreation?.creation?.intentDigest).toEqual(expect.stringMatching(/^[a-f0-9]{64}$/u))
-  const list = vi.spyOn(f.inner.kernel, 'list').mockResolvedValueOnce([])
+  const observation = vi.spyOn(f.inner.kernel, 'inspectCreation').mockResolvedValueOnce(null)
   await expect(f.create()).rejects.toMatchObject({ code: 'AGENT_CREATION_UNCONFIRMED' })
-  list.mockRestore(); f.noReplay()
+  observation.mockRestore(); f.noReplay()
   await f.client.dispose()
-  const reader = await f.reader(), recovered = await f.create({}, reader)
+  const reader = await f.reader()
+  const inventory = vi.spyOn(reader.inner.kernel, 'list').mockRejectedValue(new Error('Unrelated inventory unavailable'))
+  const recovered = await f.create({}, reader)
+  expect(inventory).not.toHaveBeenCalled()
   expect(recovered.session.agentSessionId).toBe(f.sid); expect(recovered.session.run.runId).toBe(run.runId)
   expect((await reader.store.readMetadata(f.sid))?.run).toEqual(recovered.session.run)
   f.noReplay(); await f.write(recovered.session, reader)
@@ -137,8 +140,10 @@ it('does not replace or claim foreign lifecycle work while the original Start re
   const foreign = await f.nativeStart({ operationKey: 'foreign-operation', program: process.execPath,
     args: [...f.request.args!, f.request.prompt!], cwd: f.root, env: { AGENTMUX_LIFECYCLE_OPERATION_ID: 'foreign-operation' } })
   expect(foreign.lifecycleOperationId).toBe('foreign-operation')
+  const inventory = vi.spyOn(f.inner.kernel, 'list').mockRejectedValue(new Error('Unrelated inventory unavailable'))
+  vi.spyOn(f.inner.kernel, 'inspectCreation').mockResolvedValueOnce(foreign)
   await expect(f.create()).rejects.toMatchObject({ code: 'AGENT_CREATION_UNCONFIRMED' })
-  expect(await f.store.readMetadata(f.sid)).toBeNull(); expect(await f.store.loadCreationCorrelation(f.sid)).not.toBeNull(); f.noReplay()
+  expect(await f.store.readMetadata(f.sid)).toBeNull(); expect(await f.store.loadCreationCorrelation(f.sid)).not.toBeNull(); f.noReplay(); expect(inventory).not.toHaveBeenCalled()
 })
 
 it('rejects a changed body for the same prepared ordinary operation without overwriting its original digest', async () => {

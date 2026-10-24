@@ -17,6 +17,7 @@ export default defineConfig({
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   esbuild: { jsx: 'automatic' },
   resolve: { alias: [
+    ...(process.env.CTXMUX_TEST_SDK_SOURCE ? [{ find: /^@ctxmux\/sdk$/, replacement: process.env.CTXMUX_TEST_SDK_SOURCE }] : []),
     ...workspaceAliases.sort((a, b) => b.find.length - a.find.length)
   ] },
   test: { include: ['packages/core/test/hook-postcommit-observation.test.ts'], maxWorkers: 1, testTimeout: 12_000 }

@@ -38,6 +38,7 @@ async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; lo
   core.kernel.status = vi.fn(async (id: string) => id === previousRun.runId
     ? { ...h.run(id), state: { type: 'exited', code: 0, signal: null } } : currentRun())
   core.kernel.list = vi.fn(async () => options.noRun ? [] : started.length ? [currentRun()] : [])
+  core.kernel.inspectCreation = vi.fn(async (operationKey: string) => options.noRun || started[0]?.operationKey !== operationKey ? null : currentRun())
   core.kernel.start = vi.fn(async (spec: any) => {
     if (options.failedStart) throw new AgentMuxError('Start rejected before creating a Run', 'CTXMUX_START_REJECTED', undefined, undefined, undefined,
       { operationId: spec.operationKey, disposition: 'not_applied' })
@@ -121,7 +122,7 @@ it('reconciles an applied Start with lost ACK from the original reservation and 
     expect(prepared?.preparedSession?.continuity?.launchInput?.input).toEqual(fresh)
     next = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(h.store.path) })
     const core = next as any; await core.registry.load('local'); core.connected = true
-    core.kernel.isConnected = () => true; core.kernel.list = h.core.kernel.list; core.kernel.status = h.core.kernel.status
+    core.kernel.isConnected = () => true; core.kernel.list = h.core.kernel.list; core.kernel.inspectCreation = h.core.kernel.inspectCreation; core.kernel.status = h.core.kernel.status
     core.kernel.start = vi.fn(() => { throw new Error('An unknown Start must not repeat') }); core.kernel.input = vi.fn(() => { throw new Error('A launch must not repeat via PTY') })
     core.recovery.lifecycle.restoreReopenObservation = async () => {}; core.ensureTerminalHandshakeOrDegrade = h.core.ensureTerminalHandshakeOrDegrade
     const restored = await next.ensureAgentContinuity(h.request)
@@ -218,14 +219,14 @@ it('does not adopt different Runtime arguments while reconciling an unknown orig
   const h = await fixture({ lostStart: true })
   try {
     await h.client.ensureAgentContinuity(h.request)
-    h.core.kernel.list = vi.fn(async () => [{ ...h.currentRun(), args: ['resume', 'foreign-native', 'Another body'] }])
+    h.core.kernel.inspectCreation = vi.fn(async () => ({ ...h.currentRun(), args: ['resume', 'foreign-native', 'Another body'] }))
     expect((await h.client.ensureAgentContinuity(h.request)).kind).toBe('pending')
     expect(h.op()!.launchInput?.key).toBeUndefined(); expect(h.started).toHaveLength(1)
     expect(h.core.kernel.input).not.toHaveBeenCalled(); expect(h.core.kernel.stop).not.toHaveBeenCalled()
   } finally { await h.close() }
 })
 
-it('does not interpret a missing list result as permission to repeat an unknown original Start', async () => {
+it('does not interpret a missing retained creation as permission to repeat an unknown original Start', async () => {
   const h = await fixture({ lostStart: true, noRun: true })
   try {
     await h.client.ensureAgentContinuity(h.request); await h.client.ensureAgentContinuity(h.request)
@@ -238,7 +239,7 @@ it('does not reconcile an unknown original launch to another lifecycle operation
   try {
     await h.client.ensureAgentContinuity(h.request)
     const foreignRun = { ...h.currentRun(), runId: 'foreign-run', lifecycleOperationId: 'foreign-lifecycle-operation' }
-    h.core.kernel.list = vi.fn(async () => [foreignRun])
+    h.core.kernel.inspectCreation = vi.fn(async () => foreignRun)
     const result = await h.client.ensureAgentContinuity(h.request)
     expect(result).toMatchObject({ kind: 'pending', reason: 'operation-unconfirmed' })
     expect(h.client.agentSession('recipient').run).toEqual(h.request.expectedRun)

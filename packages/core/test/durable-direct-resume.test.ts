@@ -32,7 +32,7 @@ async function fixture(delivery: 'positional-argv' | 'post-launch-only' = 'posit
   await mkdir(runtime); await mkdir(state)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', runtime); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', state)
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
-  const daemon = spawn(resolve(import.meta.dirname, '../vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
+  const daemon = spawn(process.env.AGENTMUX_TEST_CTXMUXD ?? resolve(import.meta.dirname, '../vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
     ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
   let daemonError = ''; daemon.stderr!.on('data', bytes => { daemonError += String(bytes) })
   cleanups.push(async () => {
@@ -137,8 +137,8 @@ it('reconciles an applied direct Start with lost ACK after dispose without anoth
   f.start.mockImplementationOnce(async (input: any) => { actual = await f.nativeStart(input); throw new core.AgentMuxError('Lost original Start ACK', 'CONTROL_UNAVAILABLE', undefined, { disposition: 'unknown', confirmedInputBytes: null }) })
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
   expect((await f.correlation())?.preparedSession?.continuity?.launchInput?.state).toBe('prepared')
-  const list = vi.spyOn(f.inner.kernel, 'list').mockResolvedValueOnce([])
-  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' }); list.mockRestore()
+  const observation = vi.spyOn(f.inner.kernel, 'inspectCreation').mockResolvedValueOnce(null)
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' }); observation.mockRestore()
   await f.client.dispose(); const second = await f.reader(), recovery = f.resume({}, second)
   await expect(recovery).resolves.toMatchObject({ agentSessionId: f.previous.agentSessionId, run: { runId: actual.runId } })
   const recovered = await recovery
@@ -153,8 +153,10 @@ it('does not claim a foreign lifecycle or repeat an unknown Start without a matc
   const originalStart: any = f.start.mock.calls[0]![0]
   const foreign = await f.nativeStart({ ...originalStart, operationKey: 'foreign-operation', env: { ...originalStart.env, AGENTMUX_LIFECYCLE_OPERATION_ID: 'foreign-operation' } })
   expect(foreign.lifecycleOperationId).toBe('foreign-operation')
+  const inventory = vi.spyOn(f.inner.kernel, 'list').mockRejectedValue(new Error('Unrelated inventory unavailable'))
+  vi.spyOn(f.inner.kernel, 'inspectCreation').mockResolvedValueOnce(foreign)
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
-  expect((await f.store.readMetadata(f.previous.agentSessionId))?.run).toEqual(f.previous.run); expect(await f.correlation()).toBeDefined(); f.noReplacement()
+  expect((await f.store.readMetadata(f.previous.agentSessionId))?.run).toEqual(f.previous.run); expect(await f.correlation()).toBeDefined(); f.noReplacement(); expect(inventory).not.toHaveBeenCalled()
 })
 
 it.each([{ prompt: 'changed task' }, { agentMuxNote: 'changed context' }, { args: ['-e', 'process.exit(1)'] },
@@ -269,7 +271,7 @@ it('rejects a mismatching actual RunSpec without claiming or replacing the origi
   const f = await fixture(); let actual: any
   f.start.mockImplementationOnce(async (input: any) => { actual = await f.nativeStart(input); throw new core.AgentMuxError('Original Start ACK lost', 'CONTROL_UNAVAILABLE') })
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
-  vi.spyOn(f.inner.kernel, 'list').mockResolvedValueOnce([{ ...actual, program: 'foreign-program' }])
+  vi.spyOn(f.inner.kernel, 'inspectCreation').mockResolvedValueOnce({ ...actual, program: 'foreign-program' })
   await expect(f.resume()).rejects.toMatchObject({ code: 'CONTINUITY_OPERATION_MISMATCH' })
   expect((await f.store.readMetadata(f.previous.agentSessionId))?.run).toEqual(f.previous.run); f.noReplacement()
 })

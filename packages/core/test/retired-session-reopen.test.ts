@@ -289,12 +289,15 @@ it('durably prepares original identity and fresh credentials before starting, th
   expect(f.starts).toHaveLength(1); expect(f.binds).toEqual(['new-run-1'])
 })
 
-it.each(['missing', 'wrong-cwd', 'ambiguous'] as const)('keeps %s actual prepared result unknown without releasing or retrying the operation', async shape => {
+it.each(['missing', 'wrong-cwd', 'foreign-operation', 'ambiguous'] as const)('keeps %s actual prepared result unknown without releasing or retrying the operation', async shape => {
   const f = await fixture()
   f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => { f.starts.push(input); throw new Error('private start ACK missing') })
   await expect(f.client.reopenAgent(f.input)).rejects.toMatchObject({ controlFailure: { disposition: 'unknown' } })
   const matching = { ...f.run('new-run-1'), lifecycleOperationId: f.starts[0]!.operationKey }
-  f.inner.kernel.list.mockResolvedValue(shape === 'missing' ? [] : shape === 'wrong-cwd' ? [{ ...matching, workspacePath: 'another-workspace' }] : [matching, { ...matching, runId: 'another-run' }])
+  f.inner.kernel.list.mockRejectedValue(new Error('Unrelated inventory must not affect original reopen'))
+  if (shape === 'ambiguous') f.inner.kernel.inspectCreation.mockRejectedValue(new AgentMuxError('Original mapping is unconfirmed', 'CTXMUX_backend_unavailable'))
+  else f.inner.kernel.inspectCreation.mockResolvedValue(shape === 'missing' ? null : shape === 'wrong-cwd'
+    ? { ...matching, workspacePath: 'another-workspace' } : { ...matching, lifecycleOperationId: 'foreign-operation' })
   await expect(f.client.reconcileAgentReopen(f.input)).rejects.toMatchObject({ controlFailure: { disposition: 'unknown' } })
   expect(f.starts).toHaveLength(1); expect(f.stops).toEqual([]); expect(f.inner.kernel.input).not.toHaveBeenCalled()
   expect(await f.store.loadRetiredAgentSessions()).toEqual([f.retired]); expect(await loadAgentSessions(f.store)).toEqual([])
@@ -391,10 +394,10 @@ it('disposal waits for an executing explicit confirmation before releasing its o
   const f = await fixture()
   f.inner.kernel.start.mockImplementationOnce(async (input: Record<string, any>) => { f.starts.push(input); throw new Error('private native start ACK lost') })
   await expect(f.client.reopenAgent(f.input)).rejects.toThrow()
-  const list = f.inner.kernel.list.getMockImplementation()!
+  const observe = f.inner.kernel.inspectCreation.getMockImplementation()!
   let finish!: () => void, entered!: () => void
   const barrier = new Promise<void>(resolve => { finish = resolve }), started = new Promise<void>(resolve => { entered = resolve })
-  f.inner.kernel.list.mockImplementationOnce(async () => { entered(); await barrier; return await list() })
+  f.inner.kernel.inspectCreation.mockImplementationOnce(async (key: string) => { entered(); await barrier; return await observe(key) })
   const confirmation = f.client.reconcileAgentReopen(f.input)
   await started
   const stopObserving = vi.spyOn(f.inner.hookServer, 'stop')
