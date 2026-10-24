@@ -140,10 +140,9 @@ async function capture(window: BrowserWindow, label: string) {
     assert.ok(composed, 'The exact private window requires a real independent compositor image in capture-hold mode')
   }
 }
-async function childFromSource(sourceId: string) {
+async function childFromSource(sourceId: string, contents: Electron.WebContents) {
   const before = new Set(browsers.targets().map(row => row.id))
-  const owner = await until('source native owner', () => browsers.nativeOwner(sourceId))
-  const contents = owner.view.webContents
+  assert.equal(contents.isDestroyed(), false, 'The original source page is retained before its actual Agent program')
   const opening = await browsers.runScript(sourceId, 'const page = await snapshot();const target = page.nodes.find(node => node.name === "Open related task");if(!target)throw new Error("The original link button was not observed");await click(target.ref)', { id: 'private-browser-operator', name: 'Research Agent' }, undefined, 'private-open-child-' + receipt.assertions.length)
   receipt.assertions.push({ label: 'actual-browser-program-opened-child', sourceId, originalContentsId: contents.id, opening })
   const child = await until('native child registered', () => browsers.targets().find(row => !before.has(row.id)))
@@ -228,7 +227,7 @@ async function run() {
     assert.equal(sourceFocusBefore.mainFocused, true, 'The actual original native window is focused before the Agent opens the related page')
     assert.equal(sourceFocusBefore.input?.active, true, 'The original address input owns actual DOM focus')
     assert.equal(sourceFocusBefore.input?.value, 'Private source draft 42', 'The original input has a nonempty unsubmitted draft')
-    const { child, nativeWindow } = await childFromSource(source.id)
+    const { child, nativeWindow } = await childFromSource(source.id, sourceContents)
     const sourceFocusAfter = await sourceInputFacts()
     assert.deepEqual(sourceFocusAfter, sourceFocusBefore, 'Automatic native child presentation preserves the original native focus, input draft and selection')
     assert.equal(nativeWindow.isVisible(), true, 'Automatic native child is visible')
@@ -243,8 +242,8 @@ async function run() {
     await js('window.childrenUi.theme("light")')
     await until('actual child light theme mirrored', () => nativeWindow.webContents.executeJavaScript('document.documentElement.dataset.appearance === "light"'))
     const activeLayer = await nativeWindow.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })
-    const activeFilename = phase + '-normal-light-agent-renderer.png'; await writeFile(join(output, activeFilename), activeLayer.toPNG())
-    receipt.images.push({ label: 'normal-light-agent', kind: 'original-renderer-layer', filename: activeFilename, size: activeLayer.getSize(), windowId: nativeWindow.id, webContentsId: nativeWindow.webContents.id })
+    const activeFilename = phase + '-agent-active-renderer.png'; await writeFile(join(output, activeFilename), activeLayer.toPNG())
+    receipt.images.push({ label: 'agent-active', kind: 'original-renderer-layer', filename: activeFilename, size: activeLayer.getSize(), windowId: nativeWindow.id, webContentsId: nativeWindow.webContents.id })
     assert.equal(browsers.target(child.id)?.control?.activeOperationId, 'private-ui-child-operation', 'Take control acts on the actual in-flight operation')
     await click(nativeWindow, 'button[aria-label="Take control of Browser"]')
     await until('actual Take control handoff', () => browsers.target(child.id)?.control?.owner === 'human')
@@ -273,7 +272,7 @@ async function run() {
     receipt.assertions.push({ label: 'return-preserves-native-page', childId: child.id, contentsId: originalChildContents.id, facts: await facts() })
     const sourceEntry = Object.values((await facts()).tabs).find((tab: any) => Object.values(tab.regions).some((region: any) => region.browserId === source.id)) as any
     await js(`window.childrenUi.select(${JSON.stringify(sourceEntry.id)},${JSON.stringify(source.id)})`)
-    const another = await childFromSource(source.id)
+    const another = await childFromSource(source.id, sourceContents)
     another.nativeWindow.close()
     await until('native Close retires original child', () => !browsers.target(another.child.id) && another.nativeWindow.isDestroyed())
     await until('native Close removes only its original Region projection', async () => !Object.values((await facts()).tabs).some((tab: any) => Object.values(tab.regions).some((region: any) => region.browserId === another.child.id)))
