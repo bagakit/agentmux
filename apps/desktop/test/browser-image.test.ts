@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  browserPngFromNativeImage,
+  browserPagePixels,
+  browserPngFromBytes,
   nativeImageFromBrowserPng
 } from '../src/main/browser-image.js'
 
@@ -26,7 +27,7 @@ function image(bytes = png(), width = 4, height = 3) {
 
 describe('Browser PNG boundary', () => {
   it('encodes a captured NativeImage into the bounded public contract', () => {
-    expect(browserPngFromNativeImage(image() as never)).toEqual({
+    expect(browserPngFromBytes(browserPagePixels(image() as never).png)).toEqual({
       mimeType: 'image/png',
       dataUrl: `data:image/png;base64,${png().toString('base64')}`,
       width: 4,
@@ -36,7 +37,7 @@ describe('Browser PNG boundary', () => {
   })
 
   it('decodes only a matching PNG payload for clipboard delivery', () => {
-    const input = browserPngFromNativeImage(image() as never)
+    const input = browserPngFromBytes(png())
     const create = vi.fn(() => image())
 
     expect(nativeImageFromBrowserPng(input, create as never)).toBe(create.mock.results[0]?.value)
@@ -44,7 +45,7 @@ describe('Browser PNG boundary', () => {
   })
 
   it('rejects malformed, mismatched, and oversized image claims', () => {
-    const input = browserPngFromNativeImage(image() as never)
+    const input = browserPngFromBytes(png())
     const create = vi.fn(() => image())
 
     expect(() => nativeImageFromBrowserPng({ ...input, dataUrl: 'data:image/jpeg;base64,eA==' }, create as never))
@@ -53,14 +54,20 @@ describe('Browser PNG boundary', () => {
       ...input,
       dataUrl: `data:image/png;base64,${Buffer.from('not a png').toString('base64')}`,
       byteLength: Buffer.byteLength('not a png')
-    }, create as never)).toThrow('not a PNG')
+    }, create as never)).toThrow('bounded PNG')
     expect(() => nativeImageFromBrowserPng({ ...input, byteLength: input.byteLength + 1 }, create as never))
       .toThrow('byte length')
     expect(() => nativeImageFromBrowserPng(input, (() => image(png(), 5, 3)) as never))
       .toThrow('dimensions do not match')
-    expect(() => browserPngFromNativeImage(image(png(16_385, 1), 16_385, 1) as never))
+    expect(() => browserPagePixels(image(png(16_385, 1), 16_385, 1) as never))
       .toThrow('dimensions exceed')
     expect(create).not.toHaveBeenCalledWith(Buffer.from('not a png'))
+  })
+
+  it('refuses an oversized original render surface before PNG encoding allocates output', () => {
+    const toPNG = vi.fn(() => png())
+    expect(() => browserPagePixels({ isEmpty: () => false, getSize: () => ({ width: 16_385, height: 1 }), toPNG } as never)).toThrow('dimensions exceed')
+    expect(toPNG).not.toHaveBeenCalled()
   })
 
   it('validates IHDR claims before calling the native decoder', () => {

@@ -19,7 +19,7 @@ function png(width: number, height: number): Buffer {
 // input, BrowserPane consumption and identity restoration have separate Electron proof.
 function captureOwner() {
   const bytes = png(1200, 800)
-  const nativeImage = { isEmpty: () => false, getSize: () => ({ width: 1200, height: 800 }), toPNG: () => bytes }
+  const nativeImage = { isEmpty: () => false, getSize: () => ({ width: 1200, height: 800 }), toPNG: vi.fn(() => bytes) }
   const contents = {
     url: 'https://example.invalid/captured', title: 'Title at capture',
     getURL() { return this.url }, getTitle() { return this.title }, isDestroyed: () => false,
@@ -28,10 +28,11 @@ function captureOwner() {
   }
   const bounds = { x: 0, y: 0, width: 1200, height: 800 }
   const entry = { id: 'original-browser', view: { webContents: contents, getBounds: () => bounds, getVisible: () => true },
-    navigationId: 'original-navigation', visible: true, bounds, inputLeaseId: null, initialDocument: null }
+    navigationId: 'original-navigation', visible: true, bounds, inputLeaseId: null, initialDocument: null, resourceReads: 0 }
   const entries = new Map([['original-browser', entry]])
-  const owner = Object.assign(Object.create(BrowserViewManager.prototype), { entries, require: vi.fn(() => entry) }) as BrowserViewManager
-  return { contents, entry, entries, nativeImage, capture: () => BrowserViewManager.prototype.captureScreenshot.call(owner, 'original-browser') }
+  const owner = Object.assign(Object.create(BrowserViewManager.prototype), { entries, require: vi.fn(() => entry), emit: vi.fn() }) as BrowserViewManager
+  return { contents, entry, entries, nativeImage, owner,
+    capture: (transport?: Parameters<BrowserViewManager['captureScreenshot']>[1]) => BrowserViewManager.prototype.captureScreenshot.call(owner, 'original-browser', transport) }
 }
 
 afterEach(() => vi.useRealTimers())
@@ -56,6 +57,39 @@ describe('Screenshot capture source', () => {
       expect(call).toEqual([expect.any(Number), [{ code: SCREENSHOT_VIEWPORT_SCRIPT }]])
     }
     expect(result.image.width).not.toBe(result.source.viewport!.width * result.source.viewport!.deviceScaleFactor!)
+    expect(fixture.nativeImage.toPNG).toHaveBeenCalledTimes(1)
+    expect(fixture.entry.resourceReads).toBe(0)
+  })
+
+  it('uses the original CDP session through the same page image seam without a GUI or OS capture', async () => {
+    const fixture = captureOwner(), data = png(320, 480).toString('base64')
+    const sendCommand = vi.fn(async () => ({ data }))
+    const result = await fixture.capture({ view: fixture.entry.view as never, sendCommand })
+    expect(sendCommand).toHaveBeenCalledExactlyOnceWith('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false })
+    expect(result).toMatchObject({ browserId: 'original-browser', navigationId: 'original-navigation',
+      image: { dataUrl: 'data:image/png;base64,' + data, width: 320, height: 480 } })
+    expect(fixture.contents.capturePage).not.toHaveBeenCalled()
+    expect(fixture.nativeImage.toPNG).not.toHaveBeenCalled()
+    expect(fixture.entry.resourceReads).toBe(0)
+  })
+
+  it('keeps hidden mobile page pixels available without a system screenshot or screen permission read', async () => {
+    const fixture = captureOwner()
+    fixture.entry.visible = false
+    fixture.contents.executeJavaScriptInIsolatedWorld.mockResolvedValue({ width: 390, height: 844, deviceScaleFactor: 3 })
+    const result = await fixture.capture()
+    expect(fixture.contents.capturePage).toHaveBeenCalledOnce()
+    expect(result.source.viewport).toEqual({ width: 390, height: 844, deviceScaleFactor: 3 })
+    expect(result.image.dataUrl).toBe('data:image/png;base64,' + png(1200, 800).toString('base64'))
+    expect(fixture.entry.resourceReads).toBe(0)
+  })
+
+  it('rejects original page pixel dimensions mismatching their PNG and releases its exact read lease', async () => {
+    const fixture = captureOwner()
+    fixture.nativeImage.getSize = () => ({ width: 1201, height: 800 })
+    await expect(fixture.capture()).rejects.toThrow(/dimensions changed/)
+    expect(fixture.nativeImage.toPNG).toHaveBeenCalledTimes(1)
+    expect(fixture.entry.resourceReads).toBe(0)
   })
 
   it('retains PNG when optional viewport reads reject', async () => {

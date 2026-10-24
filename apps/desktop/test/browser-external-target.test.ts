@@ -479,7 +479,8 @@ describe('person-shared external Browser transport', () => {
 
 // The actual page program child process, dispatch, operation journal and retained evidence
 // consume this transport. Native Chrome is certified by the separate private-profile probe.
-async function programOwner(f: Awaited<ReturnType<typeof fixture>>, uploads: import('../src/main/browser-uploads.js').BrowserUploads = { upload: vi.fn() } as any) {
+async function programOwner(f: Awaited<ReturnType<typeof fixture>>, uploads: import('../src/main/browser-uploads.js').BrowserUploads = { upload: vi.fn() } as any,
+  validateScreenshot: (image: import('../src/shared/contracts').BrowserPng) => void = () => { throw new Error('This Source fixture does not certify PNG decoding.') }) {
   const { dirname } = await import('node:path')
   const { ExternalBrowserOwner } = await import('../src/main/browser-external-owner.js')
   const { BrowserOperationJournal, BrowserOperationFileStore } = await import('../src/main/browser-operation-journal.js')
@@ -494,9 +495,36 @@ async function programOwner(f: Awaited<ReturnType<typeof fixture>>, uploads: imp
   const refs = { read: vi.fn(async id => ledger.get(id) ?? null), write: vi.fn(async (id, value) => { ledger.set(id, value) }) }
   const page = new ExternalBrowserOwner(f.bridge, { journal, refs, evidence, uploads,
     results: new BrowserResultArtifactStore(join(directory, 'results')),
-    decodeScreenshot: () => { throw new Error('This Source fixture does not certify PNG decoding.') } })
+    validateScreenshot })
   return { page, journal, evidence, refs, journalFile, journalSaves }
 }
+
+describe('native image seam for the actual shared-page program', () => {
+  it('retains the original CDP pixels, target, navigation and viewport without an OS capture', async () => {
+    const f = await fixture(), binding = await f.share()
+    const original = f.api.debugger.sendCommand.getMockImplementation()!
+    const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6V8AAAAASUVORK5CYII='
+    f.api.debugger.sendCommand.mockImplementation(async (target, method, params) => {
+      if (method === 'Page.getLayoutMetrics') return { cssLayoutViewport: { clientWidth: 390, clientHeight: 844 } }
+      if (method === 'Page.captureScreenshot') return { data }
+      if (method === 'Runtime.evaluate' && params?.expression?.includes('url:location.href')) return { result: { value: { value: { url: binding.url, title: 'Exact shared page' }, revision: 0 } } }
+      return await original(target, method, params)
+    })
+    const validate = vi.fn(), o = await programOwner(f, undefined, validate)
+    const report = await o.page.runScript(binding.id, 'return await captureScreenshot()', { id: owner.callerId, name: 'Fixture Agent' }, 'native-image-external')
+    expect(report.outcome).toEqual({ kind: 'completed' })
+    expect(report.result).toMatchObject({ browserId: binding.id, navigationId: binding.navigationId,
+      source: { url: binding.url, title: 'Exact shared page', viewport: { width: 390, height: 844, deviceScaleFactor: null } },
+      image: { dataUrl: 'data:image/png;base64,' + data, width: 1, height: 1 } })
+    expect(validate).toHaveBeenCalledOnce()
+    expect(f.api.debugger.sendCommand.mock.calls.filter(call => call[1] === 'Page.captureScreenshot')).toEqual([[{ tabId: 1 }, 'Page.captureScreenshot', { format: 'png' }]])
+    const record = await o.journal.get('native-image-external')
+    expect(record?.steps).toMatchObject([{ method: 'captureScreenshot', status: 'completed' }])
+    expect(record?.steps[0]?.evidence).toHaveLength(1)
+    expect(f.api.tabs.update).not.toHaveBeenCalled()
+    expect(f.api.windows.update).not.toHaveBeenCalled()
+  })
+})
 
 // The original shared-tab transport executes the actual feedback declarations in a
 // document double. This checks owner consumption, not Native Chrome or OS pixels.

@@ -11,6 +11,8 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
+import { registerNativeDesktopIpc } from '../src/main/native-desktop-ipc'
+import { copyTextToClipboard } from '../src/renderer/src/lib/clipboard-copy'
 
 // The real public xterm parser, paste encoder, onData and DOM paste listeners run here.
 // Canvas text measurement/addons and IPC transport are fixtures; there is no PTY/model call.
@@ -51,6 +53,9 @@ let attach: MockInstance<typeof api.sessions.attach>
 let paste: MockInstance<typeof api.sessions.paste>
 let raw: MockInstance<typeof api.sessions.write>
 let recover: MockInstance<typeof api.sessions.recover>
+let nativeRead: ReturnType<typeof vi.fn>
+let nativeWrite: ReturnType<typeof vi.fn>
+const inputParent = (source: string) => ({ observerId: expect.any(String), source, sequence: expect.any(Number) })
 
 function state(current: SessionSnapshot) {
   const tab = createWorkbenchTab(origin.tabId, { regionId: origin.regionId, kind: current.kind,
@@ -116,7 +121,14 @@ beforeEach(async () => {
   raw = vi.spyOn(api.sessions, 'write').mockResolvedValue(undefined)
   recover = vi.spyOn(api.sessions, 'recover')
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
-  vi.spyOn(api.ui, 'readClipboardText').mockResolvedValue(originalText)
+  nativeRead = vi.fn(async () => originalText)
+  nativeWrite = vi.fn(async () => {})
+  const handlers = new Map<string, (...args: any[]) => any>()
+  registerNativeDesktopIpc({ home: _hygiene_fixturePath('unused-native-home'), native: () => ({ readClipboardText: nativeRead,
+    captureScreenshot: vi.fn(), writeClipboardText: nativeWrite, writeClipboardImage: vi.fn() }),
+    handle: (channel, handler) => { handlers.set(channel, handler) }, trust: () => {} })
+  vi.spyOn(api.ui, 'readClipboardText').mockImplementation(() => handlers.get('ui:readClipboardText')!({}))
+  vi.spyOn(api.ui, 'writeClipboardText').mockImplementation(text => handlers.get('ui:writeClipboardText')!({}, text))
   config = await api.config.get()
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
@@ -132,17 +144,44 @@ it.each([false, true])('routes DOM and menu paste exactly once with real xterm b
   expect(terminal.modes.bracketedPasteMode).toBe(bracketed)
   const encoded = bracketed ? `${ESC}[200~${normalizedText}${ESC}[201~` : normalizedText
   await domPaste(terminal)
-  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, encoded]])
+  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, encoded, inputParent('paste')]])
   expect(raw).not.toHaveBeenCalled()
   paste.mockClear()
   await menuPaste()
   expect(api.ui.readClipboardText).toHaveBeenCalledOnce()
-  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, encoded]])
+  expect(nativeRead).toHaveBeenCalledOnce()
+  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, encoded, inputParent('paste')]])
   expect(raw).not.toHaveBeenCalled()
   expect(recover).not.toHaveBeenCalled()
   await act(async () => terminal.input('z'))
-  expect(raw.mock.calls).toEqual([[session.control, 'z', 'user']])
-  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, encoded]])
+  expect(raw.mock.calls).toEqual([[session.control, 'z', 'user', inputParent('user')]])
+  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, encoded, inputParent('paste')]])
+})
+
+it('a native clipboard failure is reported while the same live terminal keeps accepting user input', async () => {
+  const report = vi.spyOn(useAppStore.getState(), 'reportError')
+  const terminal = await ready(), failure = new Error('Original native clipboard unavailable')
+  nativeRead.mockRejectedValueOnce(failure)
+  await menuPaste()
+  expect(report).toHaveBeenCalledWith(failure)
+  expect(paste).not.toHaveBeenCalled()
+  await act(async () => terminal.input('z'))
+  expect(raw.mock.calls).toEqual([[session.control, 'z', 'user', inputParent('user')]])
+  expect(fixture.terminals).toEqual([terminal])
+  expect(recover).not.toHaveBeenCalled()
+})
+
+it('ordinary copy and real xterm OSC 52 write through the same native clipboard owner', async () => {
+  const terminal = await ready(), report = vi.fn()
+  const text = 'Original text\r\n  中文 😀'
+  expect(await copyTextToClipboard(text, report)).toBe(true)
+  expect(nativeWrite).toHaveBeenCalledExactlyOnceWith(text)
+  nativeWrite.mockClear()
+  await act(async () => { await new Promise<void>(resolve => terminal.write('\x1b]52;c;' + Buffer.from(text).toString('base64') + '\x07', resolve)) })
+  expect(nativeWrite).toHaveBeenCalledExactlyOnceWith(text)
+  expect(report).not.toHaveBeenCalled()
+  expect(nativeRead).not.toHaveBeenCalled()
+  expect(paste).not.toHaveBeenCalled()
 })
 
 it('consumes the paste source before a synchronous callback reenters with an ordinary key', async () => {
@@ -152,11 +191,11 @@ it('consumes the paste source before a synchronous callback reenters with an ord
   // second paste call and a real assertion failure, rather than recursion/stack overflow.
   paste.mockImplementationOnce(async () => { terminal.input('z') })
   await domPaste(terminal)
-  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, normalizedText]])
-  expect(raw.mock.calls).toEqual([[session.control, 'z', 'user']])
+  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, normalizedText, inputParent('paste')]])
+  expect(raw.mock.calls).toEqual([[session.control, 'z', 'user', inputParent('user')]])
   await act(async () => terminal.input('q'))
-  expect(raw.mock.calls).toEqual([[session.control, 'z', 'user'], [session.control, 'q', 'user']])
-  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, normalizedText]])
+  expect(raw.mock.calls).toEqual([[session.control, 'z', 'user', inputParent('user')], [session.control, 'q', 'user', inputParent('user')]])
+  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, normalizedText, inputParent('paste')]])
 })
 
 it.each(['read-only', 'permission'] as const)('keeps read-only input closed and a %s terminal request usable', async guard => {
@@ -168,17 +207,17 @@ it.each(['read-only', 'permission'] as const)('keeps read-only input closed and 
     expect(paste).not.toHaveBeenCalled(); expect(raw).not.toHaveBeenCalled()
   } else {
     expect(paste.mock.calls).toEqual([
-      [session.control, sanitizedText, normalizedText],
-      [session.control, sanitizedText, normalizedText]
+      [session.control, sanitizedText, normalizedText, inputParent('paste')],
+      [session.control, sanitizedText, normalizedText, inputParent('paste')]
     ])
-    expect(raw.mock.calls).toEqual([[session.control, 'z', 'user']])
+    expect(raw.mock.calls).toEqual([[session.control, 'z', 'user', inputParent('user')]])
   }
   expect(recover).not.toHaveBeenCalled()
   paste.mockClear(); raw.mockClear()
   state(session); await render(session)
   await domPaste(terminal)
   expect(fixture.terminals).toEqual([terminal])
-  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, normalizedText]])
+  expect(paste.mock.calls).toEqual([[session.control, sanitizedText, normalizedText, inputParent('paste')]])
   expect(raw).not.toHaveBeenCalled()
 })
 
@@ -188,10 +227,10 @@ it('attributes real xterm protocol replies, keyboard and delayed IME bytes by th
     agentSessionId: session.id, title: 'Private request', options: [], evidence: { source: 'native-hook', observedAt: 1, run: session.control.run } } }
   const terminal = await ready(pending)
   await act(async () => await new Promise<void>(resolve => terminal.write('\x1b[5n', resolve)))
-  expect(raw.mock.calls).toEqual([[session.control, '\x1b[0n', 'terminal-protocol']])
+  expect(raw.mock.calls).toEqual([[session.control, '\x1b[0n', 'terminal-protocol', inputParent('protocol')]])
   raw.mockClear()
   await act(async () => terminal.textarea!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true, cancelable: true })))
-  expect(raw.mock.calls).toEqual([[session.control, '\x1b', 'user']])
+  expect(raw.mock.calls).toEqual([[session.control, '\x1b', 'user', inputParent('user')]])
   raw.mockClear()
   await act(async () => {
     terminal.textarea!.value = ''
@@ -201,7 +240,7 @@ it('attributes real xterm protocol replies, keyboard and delayed IME bytes by th
     terminal.textarea!.dispatchEvent(new CompositionEvent('compositionend', { data: '测试', bubbles: true }))
     await new Promise(resolve => setTimeout(resolve, 10))
   })
-  expect(raw.mock.calls).toEqual([[session.control, '测试', 'user']])
+  expect(raw.mock.calls).toEqual([[session.control, '测试', 'user', inputParent('user')]])
   expect(paste).not.toHaveBeenCalled()
   expect(recover).not.toHaveBeenCalled()
 })
