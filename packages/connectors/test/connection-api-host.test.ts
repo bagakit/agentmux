@@ -73,10 +73,10 @@ it('removes original and derived credentials, native secret fields and encoded r
   const nativeSecret = 'native-webhook-secret/a?b'
   const f = await fixture(async (_config, _credential, _request, context) => {
     context.protect(token)
-    return { status: 200, body: { format: 'json', value: { code: 0, id: 'kept-message', token: nativeSecret, encryption_key: 'native-encryption-secret', repeatedEncryption: 'native-encryption-secret', data: { access_token: token, note: credential, url: 'https://chat.example/webhooks/' + nativeSecret, mixed: 'https://chat.example/' + encodeURIComponent(nativeSecret).replace('%2F', '%2f'), double: encodeURIComponent(encodeURIComponent(nativeSecret)).replace('252F', '252f'), encoded: encodeURIComponent(credential), b64: Buffer.from(token).toString('base64') } } } }
+    return { status: 200, body: { format: 'json', value: { code: 0, id: 'kept-message', app_token: 'public-resource-identifier', token: nativeSecret, encryption_key: 'native-encryption-secret', repeatedEncryption: 'native-encryption-secret', data: { access_token: token, note: credential, url: 'https://chat.example/webhooks/' + nativeSecret, mixed: 'https://chat.example/' + encodeURIComponent(nativeSecret).replace('%2F', '%2f'), double: encodeURIComponent(encodeURIComponent(nativeSecret)).replace('252F', '252f'), encoded: encodeURIComponent(credential), b64: Buffer.from(token).toString('base64') } } } }
   })
   const operation = await f.api.request(request, actor)
-  expect(operation).toMatchObject({ state: 'responded', response: { redacted: true, body: { value: { code: 0, id: 'kept-message', token: '[redacted]' } } } })
+  expect(operation).toMatchObject({ state: 'responded', response: { redacted: true, body: { value: { code: 0, id: 'kept-message', app_token: 'public-resource-identifier', token: '[redacted]' } } } })
   const serialized = JSON.stringify([operation, await f.api.inspect({ operationId: request.operationId }, actor), f.connections.database.prepare('SELECT * FROM connection_api_operation').all()])
   for (const secret of [credential, token, nativeSecret, 'native-encryption-secret', Buffer.from(token).toString('base64'), encodeURIComponent(nativeSecret).replace('%2F', '%2f'), encodeURIComponent(encodeURIComponent(nativeSecret)).replace('252F', '252f')]) expect(serialized).not.toContain(secret)
 })
