@@ -542,11 +542,16 @@ export class AgentSessionRunLifecycle {
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
       }).catch(async error => {
-        if (!(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {
+        if (!(error instanceof AgentMuxError && error.creationFailure?.operationId === lifecycleOperationId &&
+          error.creationFailure.disposition === 'not_applied')) {
           // A lost start ACK may already own a Run. Keep the one reservation until authoritative reconciliation.
           preserveUnconfirmedRun = true
-          throw new AgentMuxError(`Continue start is unconfirmed. Read the original Session; no operation was resent. ${error instanceof Error ? error.message : String(error)}`,
-            reopening ? 'AGENT_REOPEN_UNCONFIRMED' : 'AGENT_RESUME_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+          const failure = new AgentMuxError(`Continue start is unconfirmed. Read the original Session; no operation was resent. ${error instanceof Error ? error.message : String(error)}`,
+            reopening ? 'AGENT_REOPEN_UNCONFIRMED' : 'AGENT_RESUME_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null },
+            error instanceof AgentMuxError ? error.logId : undefined, { operationId: lifecycleOperationId, disposition: 'unknown' },
+            error instanceof AgentMuxError ? error.storageFailure : undefined)
+          Object.defineProperty(failure, 'cause', { value: error })
+          throw failure
         }
         if (restartReservation && reservation.kind === 'resume') {
           const failure = { code: error.code, message: error.message, observedAt: Date.now() }
@@ -558,8 +563,11 @@ export class AgentSessionRunLifecycle {
             return { ...value, continuity: retained, continuityOperations: { ...value.continuityOperations, [input.operationId]: retained } }
           })
           this.ports.events.publishSession(pending)
-          throw new AgentMuxError('The original Run stopped; replacement Start was confirmed not applied. Check or explicitly retry the same original restart.',
-            'AGENT_RESTART_START_NOT_APPLIED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+          const rejected = new AgentMuxError('The original Run stopped; replacement Start was confirmed not applied. Check or explicitly retry the same original restart.',
+            'AGENT_RESTART_START_NOT_APPLIED', undefined, { disposition: 'unknown', confirmedInputBytes: null },
+            error.logId, error.creationFailure, error.storageFailure)
+          Object.defineProperty(rejected, 'cause', { value: error })
+          throw rejected
         }
         throw error
       })
