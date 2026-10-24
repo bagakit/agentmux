@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { projectMonogram } from '../src/renderer/src/lib/project-monogram.js'
+import { projectMonogram } from '@agentmux/client-ui/project-monogram'
 
 // 这枚牌子存在的唯一理由是「Rail 上十个项目不再是十枚一模一样的灰图标」。所以判据必须是
 // **互不相同**与**同一输入恒等**，而不是「返回了个非空串」——后者对「全都返回 A」也成立。

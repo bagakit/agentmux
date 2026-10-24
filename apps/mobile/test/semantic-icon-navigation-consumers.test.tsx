@@ -1,3 +1,5 @@
+import { renderToStaticMarkup } from 'react-dom/server'
+import { SpaceAppearanceIcon } from '@agentmux/client-ui/components/SpaceAppearanceIcon'
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -54,3 +56,5 @@ it('actual spatial resource rows draw the exact typed content kind while leaving
   expect(openSession).not.toHaveBeenCalled()
   expect(rpc).toHaveBeenCalledExactlyOnceWith('space.ls', { target: {}, presentation: true })
 })
+
+it('shares the original App monogram grapheme in the actual project icon', () => { expect(renderToStaticMarkup(<SpaceAppearanceIcon name="👨‍👩‍👧 Project" preset="directory" />)).toContain("👨‍👩‍👧") })

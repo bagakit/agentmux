@@ -66,3 +66,36 @@ describe('original spatial Agent remains readable before SDK inventory hydration
     expect(f.rpc.mock.calls.map(([method]) => method)).toEqual(['space.ls'])
   })
 })
+
+
+it('groups by original Host/Project identity with shared completed and working shapes, never by the same display name', async () => {
+  const f = original()
+  const row = f.catalog.agentPresentation![0]!
+  f.catalog.agentPresentation = [{ ...row, stateMark: 'results', projectGroup: { key: 'local-project', projectId: 'project-local', hostId: 'local', name: 'Same name', spaceId: null } },
+    { ...row, agentSessionId: 'sid-second', name: 'Another original Agent', state: 'working', group: 'working', stateMark: 'working', projectGroup: { key: 'remote-project', projectId: 'project-remote', hostId: 'remote', name: 'Same name', spaceId: null } }]
+  const element = await mount(<MobileSpatialNavigation client={f.client} connected home="focus" sessions={[]} openSession={f.open} />)
+  const groups = element.querySelectorAll<HTMLElement>('.mobile-focus-project')
+  expect(groups).toHaveLength(2)
+  expect(groups[0]!.dataset.projectKey).toBe('local-project'); expect(groups[1]!.dataset.projectKey).toBe('remote-project')
+  expect(groups[0]!.querySelector('[data-focus-state-icon="results"]')).not.toBeNull()
+  expect(groups[1]!.querySelector('[data-focus-state-icon="working"]')).not.toBeNull()
+  await click(groups[1]!, 'Another original Agent')
+  expect(f.open).toHaveBeenLastCalledWith('sid-second', expect.objectContaining({ name: 'Another original Agent' }))
+})
+
+it('refreshes a failed original project icon through the actual directory action with the same source marker', async () => {
+  const previous = globalThis.IntersectionObserver
+  Object.defineProperty(globalThis, 'IntersectionObserver', { value: undefined, configurable: true, writable: true })
+  try {
+    const f = original(), spaceId = f.catalog.spaces[0]!.spaceId
+    f.catalog.appearance = [{ spaceId, preset: 'project' }]
+    const source = f.client.forwardRpc, inspect = vi.fn().mockRejectedValueOnce(new Error('image owner unavailable')).mockResolvedValue({ catalog: { appearance: [{ spaceId, preset: 'directory', image: { dataUrl: null } }] } })
+    f.client.forwardRpc = (method: string, params: unknown) => method === 'space.inspect' ? inspect(params) : source(method, params)
+    const element = await mount(<MobileSpatialNavigation client={f.client} connected home="space" sessions={[]} openSession={f.open} />)
+    expect(inspect).toHaveBeenCalledTimes(1)
+    const refresh = element.querySelector<HTMLButtonElement>('[aria-label="刷新空间目录"]')!
+    await act(async () => refresh.click())
+    expect(inspect).toHaveBeenCalledTimes(2)
+    expect(element.querySelector('.mobile-space-icon')?.getAttribute('title')).not.toContain('unavailable')
+  } finally { Object.defineProperty(globalThis, 'IntersectionObserver', { value: previous, configurable: true, writable: true }) }
+})
