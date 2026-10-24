@@ -9,7 +9,7 @@ import { act, createElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, vi } from 'vitest'
 import { AgentMuxClient, AgentMuxControlServer, AgentMuxError, AgentMuxFileAgentSessionStore, AgentMuxRpcService,
-  connectAgentMuxRpc, hashAgentCapability, issueAgentCapability, observeAgent, type AgentMuxAgentRuntimeStatus,
+  callPublicGoalControl, connectAgentMuxRpc, hashAgentCapability, issueAgentCapability, observeAgent, type AgentMuxAgentRuntimeStatus,
   type AgentMuxClientEvent, type AgentMuxRun, type AgentMuxStoredAgentSession, type AgentStatus } from '@agentmux/core'
 import { demandExecutionReferences, demandResponsibilityScope, openDemandStore, type Demand, type DemandDispatch,
   type DemandProgressInput } from '@agentmux/demand'
@@ -19,7 +19,7 @@ import { GoalDelegationOwner, type GoalDelegationCorePort } from '@agentmux/host
 import { GoalResponsibilityOwner } from '@agentmux/host/goal-responsibility-owner'
 import { GoalPatrolOwner } from '@agentmux/host/goal-patrol-owner'
 import { GoalStartResponsibilityOwner, type GoalStartRuntimePort } from '@agentmux/host/goal-start-responsibility'
-import { RuntimeController } from '../../src/main/runtime-controller'
+import { createHostGoals } from '../../../host/src/goals.js'
 import { api } from '../../src/renderer/src/lib/api'
 import { applyGoalDelegationResult, initializeGoalResponsibilityObservation, refreshGoalDelegations } from '../../src/renderer/src/lib/goal-delegation-work'
 import type { DemandRecord } from '../../src/renderer/src/lib/global-demand-board'
@@ -27,7 +27,7 @@ import type { AppConfig, SessionSnapshot } from '../../src/shared/contracts'
 import { useAppStore } from '../../src/renderer/src/store'
 
 // Node owner verification must never load or download the Electron executable.
-// The Runtime method below only consumes its retained Core host lookup.
+// Native operations below retain the exact original Core identities.
 vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
 
 const execute = promisify(execFile), initial = useAppStore.getState()
@@ -83,7 +83,7 @@ async function evidence(scenario: string, proof: unknown, slice: 'responsibility
     'apps/desktop/test/helpers/goal-responsibility-product.tsx'] : sources
   const source = await Promise.all(selected.map(async file => ({ file, sha256: createHash('sha256').update(await fs.readFile(resolve(file))).digest('hex') })))
   const cli = await fs.readFile(resolve('packages/core/dist/agentmux.js'))
-  const boundary = 'Actual compiled CLI and Unix RPC, persisted Core message/dispatch and Demand owners, Main responsibility/start owners, and mounted production Renderer consumers. Native input, native Run/status observations and IPC transport are isolated fixtures. This is not live Native, installed product, Chromium visual or process-restart acceptance.'
+  const boundary = 'Actual compiled CLI and Unix RPC, persisted Core message/dispatch and Demand owners, Host responsibility/start owners, and mounted production Renderer consumers. Native input, native Run/status observations and IPC transport are isolated fixtures. This is not live Native, installed product, Chromium visual or process-restart acceptance.'
   const cliSha256 = createHash('sha256').update(cli).digest('hex'), receiptPath = resolve(directory, `${scenario}.json`)
   const bytes = JSON.stringify({ schema: `agentmux.goal-${slice}-product.v1`, scenario, proofBoundary: boundary, source, cliSha256, proof }, null, 2) + '\n'
   await fs.writeFile(receiptPath, bytes)
@@ -91,7 +91,7 @@ async function evidence(scenario: string, proof: unknown, slice: 'responsibility
 }
 
 async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty' } = {}) {
-  const directory = await fs.mkdtemp(join(tmpdir(), 'goal-responsibility-product-'))
+  const directory = await fs.mkdtemp(join(await fs.realpath(tmpdir()), 'gr-'))
   cleanup.push(() => fs.rm(directory, { recursive: true, force: true }))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !['AGENTMUX_GOAL_RESPONSIBILITY_RECEIPT_DIR', 'AGENTMUX_GOAL_PATROL_RECEIPT_DIR'].includes(key)) vi.stubEnv(key, undefined)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'runtime')); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'state'))
@@ -120,16 +120,24 @@ async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty
     nativeInputs.push({ operationId: input.envelope.operationId, messageId: input.envelope.messageId,
       recipient: input.agentSessionId, body: input.envelope.body })
   })
-  const demands = openDemandStore({ root: join(directory, 'goals') })
+  const configurationPath = join(directory, 'configuration.json')
+  await fs.writeFile(configurationPath, JSON.stringify(config))
+  // The exact CRUD owner shares its original Store with the controlled original
+  // responsibility owners below. It is not started as another scheduler.
+  const hostGoals = createHostGoals({ configurationPath, projects: async () => [],
+    runtime: () => ({ client, ownerIdentity: () => ({ ownerInstanceId: 'original-responsibility-owner' }) }) as never,
+    coreCall: (hostId, method, params, context) => { expect(hostId).toBe('local'); return core.call(method, params, context) } })
+  cleanup.push(() => hostGoals.dispose())
+  const demands = hostGoals.demands
   await demands.create({ id: 'goal', title: 'Original responsibility', description: 'Original human task\nkept verbatim', status: 'in_progress',
     assigneeSessionIds: ['owner', 'worker-a', 'worker-b', 'worker-c', 'finite-worker'], supervisorSessionId: 'owner' })
   if (options.alignment !== false) await demands.proposeAlignment('goal', { summary: 'Original useful result',
     criteria: options.alignment === 'empty' ? [] : [{ id: 'AC', text: 'Original evidence' }], openQuestions: [] })
   const runStates = new Map<string, AgentMuxRun['state']>([...metadata.values()].map(item => [item.run.runId, 'running']))
-  const changes = new Set<(ids: string[]) => void>(), nativeEvents = new Set<(hostId: string, event: AgentMuxClientEvent) => void>()
-  const changed = (ids: string[]) => { for (const listener of changes) listener(ids) }
+  const changes = new Set<(ids: string[], snapshot: boolean) => void>(), nativeEvents = new Set<(hostId: string, event: AgentMuxClientEvent) => void>()
+  const changed = (ids: string[]) => { for (const listener of changes) listener(ids, false) }
   // IPC's event delivery is the isolated transport; subscribers consume exact IDs.
-  const domainRelease = demands.subscribe(snapshot => changed(snapshot.demands.map(item => item.id))); cleanup.push(domainRelease)
+  const domainRelease = demands.subscribe((_snapshot, ids) => changed([...ids])); cleanup.push(domainRelease)
   const core = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client }] })
   const trace: Array<{ method: string; operationId?: string }> = []
   const port: GoalDelegationCorePort = {
@@ -190,7 +198,7 @@ async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty
       const original = (await sessions.readMetadata(note.supervisorAgentSessionId))!
       if (original.run.runId !== note.supervisorRunId) throw new AgentMuxError('Original target Run changed.', 'STALE_AGENT_SESSION')
       await client.saveAgentFuturePromptIntent({ agentSessionId: original.agentSessionId, intentId: note.intentId, operationId: note.operationId,
-        prompt: '', agentMuxNote: note.agentMuxNote, active: true })
+        prompt: '', agentMuxNote: note.agentMuxNote, active: true, expectedRun: { runId: note.supervisorRunId } })
     },
     disableGoalAttention: async note => {
       await client.saveAgentFuturePromptIntent({ agentSessionId: note.supervisorAgentSessionId, intentId: note.intentId, operationId: note.operationId,
@@ -250,10 +258,10 @@ async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty
   } : undefined
   owner = new GoalDelegationOwner(demands, { agentCreation: async (_hostId, id) => (await sessions.readMetadata(id))! }, undefined,
     port, undefined, (goal, start) => starts.observe(goal, start), responsibility, patrolPort)
-  const server = new AgentMuxControlServer({ socketPath: join(directory, 'rpc.sock'), coreClients: () => [{ hostId: 'local', client }], goalDelegations: owner,
-    ...(options.patrol ? { execute: (request: AgentMuxControlRequest) => useAppStore.getState().executeControl(request) } : {}) })
+  const server = new AgentMuxControlServer({ socketPath: join(directory, 'rpc.sock'), coreClients: () => [{ hostId: 'local', client }], goalDelegations: owner, goalControl: hostGoals.execute })
   await server.start(); cleanup.push(() => server.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
+  vi.spyOn(api.goals, 'execute').mockImplementation(request => callPublicGoalControl(request, (method, params) => rpc.call(method, params as never)))
   const cliReceipts: unknown[] = [], commandInputs: Array<{ file: string; sha256: string; input: unknown }> = []
   const exchanges: Array<{ method: string; params: unknown; response: GoalDelegationResult }> = []
   const snapshots: Array<{ id: string; inspect: unknown; delegations: unknown; sessions: SessionSnapshot[] }> = []
@@ -332,7 +340,7 @@ async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty
   }
   async function restartPatrol() {
     patrol!.dispose(); await Promise.allSettled([...(patrol as unknown as { flights: Map<string, Promise<void>> }).flights.values()])
-    patrol = new GoalPatrolOwner(openDemandStore({ root: join(directory, 'goals') }), patrolRuntime, readAsPerson, changed); await patrol.start()
+    patrol = new GoalPatrolOwner(openDemandStore({ root: join(directory, 'demands') }), patrolRuntime, readAsPerson, changed); await patrol.start()
   }
   async function flushPatrol() {
     if (!patrol) return

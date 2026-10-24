@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import './helpers/current-demand-product'
-import { bridge, demands, directory, client, runtime, session, writes, sourceCli, root, container, manager } from './helpers/current-demand-product'
+import { bridge, demands, directory, client, runtime, session, writes, sourceCli, root, container, manager, hostGoals } from './helpers/current-demand-product'
 import { act, Profiler } from 'react'
 import { expect, it, vi } from 'vitest'
 import { join } from 'node:path'
@@ -10,6 +10,7 @@ import { promises as fs } from 'node:fs'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { isAgentMuxRpcMethod, AGENTMUX_RPC_NATIVE_METHODS } from '../../../packages/core/src/public-rpc'
+import { DemandStoreError } from '@agentmux/demand'
 import { api } from '../src/renderer/src/lib/api'
 import { GoalStartResponsibilityOwner } from '@agentmux/host/goal-start-responsibility'
 import { GoalFiniteStartControl } from '../src/renderer/src/components/GoalFiniteStartControl'
@@ -54,6 +55,16 @@ it('finite task uses the observed Goal version at the real owner and a stale cli
   expect((await client.agentSession(session.agentSessionId)).run).toEqual(session.run)
 })
 
+it('an uncertain original Store error retains the exact Start intent without claiming it was not applied', async () => {
+  vi.spyOn(demands, 'prepareDispatch').mockRejectedValueOnce(new DemandStoreError('WRITE_FAILED', 'write', join(directory, 'demands'), 'The original Goal write outcome is unknown.'))
+  await act(async () => root.render(<FiniteTask goalId="goal" />))
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent?.startsWith('Start with'))!.click())
+  await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).toContain('The original Goal write outcome is unknown.') })
+  expect(useAppStore.getState().goalFiniteStartIntents.goal).toMatchObject({ goalId: 'goal', sessionId: session.agentSessionId, phase: 'may-have-dispatched' })
+  expect((await demands.get('goal'))!.dispatches ?? []).toEqual([])
+  expect(writes).toEqual([])
+})
+
 it('restored unknown operation only reads its original owner; missing owner record does not permit a second input', async () => {
   const before = (await demands.get('goal'))!, original = { goalId: 'goal', operationId: 'retained-unknown-operation', sessionId: session.agentSessionId, expectedUpdatedAt: before.updatedAt, phase: 'may-have-dispatched' as const }
   const accepted = [...writes]
@@ -88,29 +99,32 @@ it('multiple assignees require an explicit recipient; selection sends nothing an
   expect(renders).not.toHaveBeenCalled()
 })
 
-it('a fresh finite task rejected before preparation releases its intent so the restored original Agent can receive the next explicit click', async () => {
+it('an absent Desktop projection preserves explicit finite input to the healthy original Core Session', async () => {
   await act(async () => root.render(null))
-  const originalSessions = useAppStore.getState().sessions, goal = useAppStore.getState().demands.goal!, accepted = [...writes]
+  const originalSessions = useAppStore.getState().sessions, goal = useAppStore.getState().demands.goal!
   await act(async () => { useAppStore.setState({ sessions: [] }); root.render(<GoalFiniteStartControl demand={goal} />) })
   await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent?.startsWith('Start with'))!.click())
-  await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).toContain('unconfirmed presentation'); expect(useAppStore.getState().goalFiniteStartIntents.goal).toBeUndefined() })
-  expect((await demands.get('goal'))!.dispatches ?? []).toEqual([])
-  expect(writes).toEqual(accepted)
-  expect((await client.agentSession(session.agentSessionId)).run).toEqual(session.run)
-  await act(async () => useAppStore.setState({ sessions: originalSessions }))
-  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent?.startsWith('Start with'))!.click())
   await vi.waitFor(async () => { await act(async () => {}); expect((await demands.get('goal'))!.dispatches?.[0]?.stage).toBe('confirmed') })
+  const original = (await demands.get('goal'))!.dispatches![0]!
+  expect(original).toMatchObject({ agentSessionId: session.agentSessionId, runId: session.run.runId })
+  expect((await client.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: session.agentSessionId,
+    expectedRun: session.run, submissionId: original.operationId }))?.admission?.acknowledged).toBe(true)
+  expect(writes.length).toBeGreaterThan(0)
+  expect((await client.agentSession(session.agentSessionId)).run).toEqual(session.run)
+  const accepted = [...writes]
+  await act(async () => useAppStore.setState({ sessions: originalSessions }))
   expect((await demands.get('goal'))!.dispatches).toHaveLength(1)
+  expect(writes).toEqual(accepted)
 })
 
 it('original Source CLI finite Start → actual Core prompt receipt → ended original Run → public Goal responsibility → existing Goal proposal remains pending human review', async () => {
   await act(async () => root.render(null))
   expect(isAgentMuxRpcMethod('goal.delegations'), JSON.stringify(Object.keys(AGENTMUX_RPC_NATIVE_METHODS))).toBe(true)
   const server = new AgentMuxControlServer({ socketPath: join(directory, 'start-responsibility.sock'), coreClients: () => [{ hostId: 'local', client }],
-    execute: (...args) => bridge.controlOptions.execute(...args), goalDelegations: bridge.controlOptions.goalDelegations })
+    execute: (...args) => bridge.controlOptions.execute(...args), callOriginalCore: bridge.controlOptions.callOriginalCore })
   await server.start()
   const service = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
-  const owner = new GoalStartResponsibilityOwner(demands, runtime, vi.fn())
+  const owner = new GoalStartResponsibilityOwner(demands, hostGoals.runtime, vi.fn())
   try {
     const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
     const cli = async (args: string[]) => {
@@ -124,7 +138,7 @@ it('original Source CLI finite Start → actual Core prompt receipt → ended or
     const input = await client.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: start.agentSessionId, expectedRun: { runId: start.runId }, submissionId: start.operationId })
     expect(input!.admission).toMatchObject({ acknowledged: true, submissionId: start.operationId })
     const accepted = [...writes]
-    vi.spyOn(runtime, 'observeOriginalRun').mockResolvedValue({ runId: start.runId, state: 'exited' })
+    vi.spyOn(hostGoals.runtime, 'observeOriginalRun').mockResolvedValue({ runId: start.runId, state: 'exited' })
     const observed = await owner.observe((await demands.get('goal'))!, start)
     if (process.env.AGENTMUX_GOAL_START_RECEIPT_DIR) {
       await fs.mkdir(process.env.AGENTMUX_GOAL_START_RECEIPT_DIR, { recursive: true })
