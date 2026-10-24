@@ -7,7 +7,7 @@ import AgentMuxNativeMacOSCore
 // scope, cancellation and error handling remain the production source.
 private enum NativeDesktopOperations {
     /* PRODUCTION_CAPTURE_METHODS */
-    static func captureRect(_ rectangle: CGRect) throws -> (image: String, scale: Double, engine: String) {
+    static func captureRect(_ rectangle: CGRect, ownership: NativeSelectionCaptureLease.Ownership? = nil) throws -> (image: String, scale: Double, engine: String) {
         let number = ControlledIO.shared.pixelCall()
         if number == 1 {
             ControlledIO.shared.pixelsStarted.signal()
@@ -31,7 +31,11 @@ private func nativeErrorPayload(_ error: Error) -> [String: String] {
     if case let ProviderError.coded(code, message) = error { return ["code": code, "message": message] }
     return ["code": "fixture_unexpected", "message": String(describing: error)]
 }
-private func unleasedCapture<T>(_ operation: () throws -> T) rethrows -> T { try operation() }
+private func unleasedCapture<T>(_ operation: (NativeSelectionCaptureLease.Ownership) throws -> T) throws -> T {
+    // A separate lease for each call deliberately bypasses the shared owner in
+    // the production-wiring mutant without constructing or copying its token.
+    try NativeSelectionCaptureLease().withCapture(operation)
+}
 private enum NativeSelectionRequest {
     static func run() throws -> CGRect? { ControlledIO.shared.selectorCall(); return CGRect(x: 10, y: 20, width: 100, height: 80) }
 }
