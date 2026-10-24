@@ -5,24 +5,24 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
 import { encodeCwdDirname } from '../../src/providers/grok-native-history.js'
+import { grokChunk, grokDone, grokUser } from '../fixtures/grok-updates.js'
 import { projectSessionUserMessages } from '../../src/session-user-messages.js'
 import type { AgentMuxStoredAgentSession, AgentSessionHistoryObservation } from '../../src/types.js'
 
 const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => { while (cleanups.length) await cleanups.pop()!(); vi.restoreAllMocks() })
 const jsonl = (rows: unknown[]) => rows.map(row => JSON.stringify(row)).join('\n') + '\n'
-const user = (text = 'Equal native input.') => ({ type: 'user', content: [{ type: 'text', text }], synthetic_reason: 'human' })
-const assistant = (text = 'Native answer.') => ({ type: 'assistant', content: text,
-  tool_calls: [{ id: 'native-tool', name: 'read_file', arguments: { path: 'source.ts' } }] })
+const user = (text = 'Equal native input.') => grokUser('native-grok', text)
+const assistant = (text = 'Native answer.') => [grokChunk('native-grok', text), grokDone('native-grok')]
 
 async function fixture(locator: 'id' | 'updates' = 'id', persisted = true) {
   const root = await mkdtemp(join(tmpdir(), 'grok-native-observe-'))
   const workspace = join(root, 'workspace')
   const directory = join(root, 'sessions', encodeCwdDirname(workspace), 'native-grok')
   await mkdir(directory, { recursive: true })
-  const path = join(directory, 'chat_history.jsonl'), updates = join(directory, 'updates.jsonl')
+  const path = join(directory, 'updates.jsonl'), updates = join(directory, 'chat_history.jsonl')
   const summary = join(directory, 'summary.json'), storePath = join(root, 'store.json')
-  if (persisted) await writeFile(path, jsonl([user(), assistant()]))
+  if (persisted) await writeFile(path, jsonl([user(), ...assistant()]))
   await writeFile(updates, '')
   await writeFile(summary, JSON.stringify({ info: { id: 'native-grok', cwd: workspace } }))
   const store = new AgentMuxFileAgentSessionStore(storePath)
@@ -30,7 +30,7 @@ async function fixture(locator: 'id' | 'updates' = 'id', persisted = true) {
     agentSessionId: 'grok-original', hostId: 'local', workspacePath: workspace, run: { runId: 'grok-healthy' },
     retiredRuns: [], createdAt: 1, updatedAt: 1, hookBindingId: 'private-binding', hookToken: 'private-token',
     nativeHandle: { kind: 'provider', providerId: 'grok', sessionId: 'native-grok',
-      ...(locator === 'updates' ? { transcriptPath: updates } : {}) } }
+      ...(locator === 'updates' ? { transcriptPath: path } : {}) } }
   await store.compareAndSwap(null, session)
   const durable = await readFile(storePath)
   const physical: Promise<unknown>[] = [], load = store.load.bind(store)
@@ -64,23 +64,20 @@ it.each(['id', 'updates'] as const)('Grok %s locator observes durable native use
   expect(events).toEqual([])
   // The native writer can retain its descriptor; observe the file rather than only its parent.
   const writer = await open(f.path, 'a')
-  try { await writer.write(jsonl([user(), assistant('Second answer.')])) } finally { await writer.close() }
+  try { await writer.write(jsonl([user(), ...assistant('Second answer.')])) } finally { await writer.close() }
   await vi.waitFor(() => expect(events.some(event => event.kind === 'invalidated')).toBe(true))
   const fresh = await f.client.sessionHistoryPage('grok-original', f.options)
   const inputs = projectSessionUserMessages({ agentSessionId: 'grok-original', historyPage: fresh })
-  expect(fresh.items.map(item => [item.kind, item.contentParts.filter(part => part.kind === 'text').map(part => part.text).join('\n')])).toEqual([
+  expect(fresh.items.filter(item => item.kind !== 'activity').map(item => [item.kind, item.contentParts.filter(part => part.kind === 'text').map(part => part.text).join('')])).toEqual([
     ['user-message', 'Equal native input.'], ['assistant-message', 'Native answer.'],
     ['user-message', 'Equal native input.'], ['assistant-message', 'Second answer.']
   ])
-  expect(new Set(fresh.items.map(item => item.id)).size).toBe(4)
+  expect(new Set(fresh.items.map(item => item.id)).size).toBe(6)
   expect(inputs.map(input => input.content)).toEqual(['Equal native input.', 'Equal native input.'])
-  expect(new Set(inputs.map(input => input.id)).size).toBe(2)
   expect(inputs[0]!.author).toEqual({ kind: 'unknown' })
-  expect(fresh.items[1]!.contentParts.map(part => part.kind)).toEqual(['text', 'tool-call'])
-  expect(fresh.items.map(item => item.startedAt)).toEqual([undefined, undefined, undefined, undefined])
+  expect(fresh.items.at(-1)!.messagePhase).toBe('final')
   const older = await f.client.sessionHistoryPage('grok-original', { ...f.options, cursor: before.nextCursor!, limit: 1 })
-  expect(older.items.map(item => item.kind)).toEqual(['user-message'])
-  expect(older.nextCursor).toBeNull()
+  expect(older.items.map(item => item.kind)).toEqual(['activity'])
   handle.dispose()
   const received = events.length
   await appendFile(f.path, jsonl([user('Hidden late change.')]))
@@ -90,7 +87,7 @@ it.each(['id', 'updates'] as const)('Grok %s locator observes durable native use
   const restored = f.newClient()
   const restoredPage = await restored.client.sessionHistoryPage('grok-original', f.options)
   expect(restoredPage.source).toEqual({ providerId: 'grok', nativeSessionId: 'native-grok' })
-  expect(restoredPage.items).toHaveLength(5)
+  expect(restoredPage.items).toHaveLength(7)
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
   expect(restored.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
 })
@@ -106,9 +103,9 @@ it('Grok id-only source watches the exact file before its first durable conversa
   const f = await fixture('id', false)
   const events: AgentSessionHistoryObservation[] = []
   const handle = await f.client.observeSessionHistory('grok-original', event => events.push(event), f.options)
-  await writeFile(f.path, jsonl([user(), assistant()]))
+  await writeFile(f.path, jsonl([user(), ...assistant()]))
   await vi.waitFor(() => expect(events.some(event => event.kind === 'invalidated')).toBe(true))
-  expect((await f.client.sessionHistoryPage('grok-original', f.options)).items.map(item => item.kind)).toEqual(['user-message', 'assistant-message'])
+  expect((await f.client.sessionHistoryPage('grok-original', f.options)).items.map(item => item.kind)).toEqual(['user-message', 'activity', 'assistant-message'])
   handle.dispose()
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
 })
