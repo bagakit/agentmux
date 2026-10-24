@@ -1,0 +1,70 @@
+/* Platform settings: one bot library, with Host policy kept subordinate. */
+.channel-settings { width: 100%; max-width: 960px; gap: var(--sp-7); container: channel-settings / inline-size; }
+.channel-environment { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: var(--sp-6); padding: var(--sp-5); border-radius: var(--radius-lg); background: var(--surface-1); }
+.channel-hosting { min-width: 0; display: grid; align-content: start; gap: var(--sp-2); }
+.channel-hosting__selection { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.channel-hosting__selection > span { flex: none; display: flex; align-items: center; gap: var(--sp-2); font-weight: 550; }
+.channel-hosting__selection select { flex: 1; width: 0; min-width: 0; min-height: 32px; padding: 5px 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); font: inherit; text-overflow: ellipsis; }
+.channel-hosting__selection select:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.channel-hosting > p { margin: 0; font-size: var(--fs-meta); line-height: 1.5; }
+.channel-hosting .connector-diagnostics { padding: 0; margin: 0; border: 0; font-size: var(--fs-meta); }
+.channel-hosting .connector-diagnostics > summary { font-size: var(--fs-micro); min-height: 0; padding-block: var(--sp-1); color: var(--text-3); }
+.channel-hosting .connector-diagnostics code { font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.channel-environment .connector-service-control { align-content: start; min-width: 0; padding: 0 0 0 var(--sp-6); margin: 0; border: 0; border-left: 1px solid var(--line-soft); gap: var(--sp-2); }
+.channel-environment .connector-service-control__heading { align-items: start; gap: var(--sp-3); }
+.channel-environment .connector-service-control__heading > div:first-child { flex-basis: 160px; }
+.channel-environment .connector-service-control__heading h3 { font-size: var(--fs-meta); }
+.channel-environment .connector-service-control__heading p { font-size: var(--fs-meta); max-width: 42ch; line-height: 1.5; }
+.channel-environment .connector-service-control__setting { gap: var(--sp-3); }
+.channel-environment .connector-service-control__setting > [role='status'] { padding: 2px 7px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); }
+.channel-environment .connector-service-control__refresh { padding: 4px 0; border: 0; min-height: 28px; font-size: var(--fs-meta); }
+.channel-environment .connector-service-requests > summary { font-size: var(--fs-micro); padding-block: var(--sp-1); cursor: pointer; }
+.connector-identities-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-4); }
+.connector-identities-heading > div { min-width: 0; }
+.connector-identities-heading__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.channel-settings .connector-identities-heading h3 { margin: 0; color: var(--text); font-size: 22px; font-weight: 600; letter-spacing: -.025em; }
+.channel-settings .connector-identities-heading p { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; max-width: 48ch; }
+.channel-settings .connector-saved-identities { border: 0; margin: 0; padding: 0; }
+.channel-settings .connector-saved-identities > header > button { border: 0; padding: 3px 0; min-height: 24px; }
+.connector-bot-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr)); gap: var(--sp-4); }
+.channel-settings .connector-record { min-width: 0; border: 0; }
+.channel-settings .connector-record__open { width: 100%; min-width: 0; color: var(--text); text-align: left; cursor: pointer; display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-5); height: 100%; padding: var(--sp-5); border: 1px solid transparent; background: var(--surface-1); border-radius: var(--radius-lg); transition: background 120ms ease, border-color 120ms ease; }
+.channel-settings .connector-record__open:hover { background: var(--surface-2); border-color: var(--line-soft); }
+.channel-settings .connector-record__open:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.connector-record__heading { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.connector-record__heading > span:nth-child(2) { display: grid; min-width: 0; gap: var(--sp-1); flex: 1; }
+.connector-record__heading > svg { color: var(--text-3); flex: none; }
+.channel-settings .connector-record__mark { display: grid; place-items: center; flex: none; color: var(--text-2); width: 38px; height: 38px; background: var(--surface-3); border: 0; border-radius: var(--radius); }
+.channel-settings .connector-record__name { overflow-wrap: anywhere; font-size: var(--fs-title); font-weight: 550; }
+.channel-settings .connector-record__open small { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.channel-settings .connector-record__facts { flex: 1; gap: var(--sp-4); }
+.channel-settings .connector-record__facts > span { display: grid; align-content: start; gap: var(--sp-1); color: var(--text-2); line-height: 1.5; }
+.channel-settings .connector-record__facts small { font-size: var(--fs-micro); color: var(--text-3); }
+.channel-settings .connector-record__facts .connector-record__app { padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line-soft); }
+.channel-settings .connector-record__app code { font-size: var(--fs-micro); color: var(--text-3); }
+.channel-settings .connector-record__facts [data-identity-setup='incomplete'] { color: var(--amber-text); }
+.channel-settings .connector-record__facts [data-identity-motes] { padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.channel-settings .connector-record__action { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); font-size: var(--fs-meta); color: var(--text-2); }
+.connector-library-empty { display: grid; justify-items: center; gap: var(--sp-3); padding: var(--sp-8) var(--sp-5); text-align: center; border-radius: var(--radius-lg); background: var(--surface-1); color: var(--text-3); }
+.connector-library-empty > svg { color: var(--green); margin-bottom: var(--sp-2); }
+.connector-library-empty > strong { color: var(--text); font-size: var(--fs-title); font-weight: 550; }
+.connector-library-empty > p { max-width: 44ch; margin: 0; font-size: var(--fs-body); line-height: 1.6; }
+.connector-mote-entry { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-5) 0; border: 0; border-top: 1px solid var(--line-soft); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
+.connector-mote-entry > span:nth-child(2) { min-width: 0; flex: 1; display: grid; gap: var(--sp-1); }
+.connector-mote-entry strong { font-size: var(--fs-body); font-weight: 500; }
+.connector-mote-entry small { font-size: var(--fs-meta); line-height: 1.6; color: var(--text-3); }
+.connector-mote-entry__mark { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: var(--radius); background: var(--surface-1); color: var(--text-3); }
+.connector-mote-entry__action { display: flex; align-items: center; flex: none; gap: var(--sp-2); font-size: var(--fs-meta); }
+.connector-mote-entry:hover .connector-mote-entry__action { color: var(--green); }
+.connector-mote-entry:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius); }
+.connector-mote-directory { display: grid; gap: var(--sp-5); }
+@container channel-settings (width < 620px) {
+  .channel-environment { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); padding: var(--sp-4); }
+  .channel-environment .connector-service-control { border-left: 0; border-top: 1px solid var(--line-soft); padding: var(--sp-4) 0 0; }
+  .connector-mote-entry { flex-wrap: wrap; }
+  .connector-mote-entry > span:nth-child(2) { flex-basis: calc(100% - 64px); }
+  .connector-mote-entry__action { margin-left: calc(36px + var(--sp-4)); }
+}
+@media (prefers-reduced-motion: reduce) { .channel-settings .connector-record__open { transition: none; } }
+
+@container channel-settings (width < 380px) { .channel-hosting__selection { display: grid; } .channel-hosting__selection select { width: 100%; } }

@@ -62,14 +62,6 @@
 .connector-mote-detail .mote-identity-options > summary { color: var(--text-3); font-size: var(--fs-meta); }
 .connector-mote-detail .mote-identity-management { padding-top: var(--sp-3); }
 .connector-mote-detail .mote-identity-management > p { font-size: var(--fs-meta); color: var(--text-3); line-height: 1.6; }
-.connector-identities-heading { align-items: flex-start; padding-block: var(--sp-2) var(--sp-4); }
-.connector-identities-heading h3 { font-size: var(--fs-heading, 20px); letter-spacing: -.025em; }
-.connector-mote-card { padding: var(--sp-5); gap: var(--sp-4); background: var(--surface-1); }
-.connector-mote-card:hover { border-color: var(--line); }
-.connector-mote-card__avatar { width: 48px; height: 48px; }
-.connector-mote-card__identity { gap: var(--sp-4); }
-.connector-mote-card__identity strong { font-size: var(--fs-title); }
-.connector-saved-identities { padding-top: var(--sp-5); }
 .connector-service-control__heading h3 { font-size: var(--fs-body); font-weight: 550; }
 .connector-service-control__heading .settings-group-note, .connector-service-control__setting { font-size: var(--fs-meta); }
 .connector-service-requests { font-size: var(--fs-meta); color: var(--text-3); }

@@ -15,7 +15,7 @@ import { api } from '../../lib/api'
 import { BotEnrollmentPane, useBotEnrollment } from './BotEnrollmentPane'
 import { ChannelMetadataPanel } from './ChannelMetadataPanel'
 import { ConnectionProfilePanel } from './ConnectionProfilePanel'
-import { ConnectionSetupResult, connectionSummary } from './ConnectionSetupResult'
+import { ConnectionSetupResult } from './ConnectionSetupResult'
 import { ConnectionIdentityFacts } from './ConnectionIdentityFacts'
 import { ConnectionIdentityRemoval, RetainedIdentityRemovals } from './ConnectionIdentityRemoval'
 import { ConnectionRequestTrace } from './ConnectionRequestTrace'
@@ -23,12 +23,15 @@ import { ConnectionManagementSetup } from './ConnectionManagementSetup'
 import { MoteConnectionPanel } from '../MoteConnectionIdentity'
 import { botTaskSelectionKey, managementTaskScope, readBotTaskLocator, restoredManagementTask } from '../../lib/bot-task-selection'
 import { MoteIdentityCards, useMoteIdentityReadings } from './MoteIdentityCards'
+import { ConnectionBotList } from './ConnectionBotList'
 import '../../styles/connector-identity-cards.css'
 import '../../styles/connector-experience.css'
 import { useConnectionManagementSetup } from './useConnectionManagementSetup'
 
 const LinkIcon = semanticIconComponent('action.open-external')
 const LoadingIcon = semanticIconComponent('status.loading')
+const MoteIcon = semanticIconComponent('object.mote')
+const ForwardIcon = semanticIconComponent('navigation.forward')
 const GroupIcon = semanticIconComponent('object.conversations')
 const BackIcon = semanticIconComponent('navigation.back')
 const RefreshIcon = semanticIconComponent('action.refresh')
@@ -38,7 +41,7 @@ const platform = (domain: string) => domain === 'open.feishu.cn' ? 'Feishu' : do
 export function ExternalConnectionsSettings({ active, onClose, navigationRequest, channel = 'lark', connections: suppliedConnections, hostingTarget, onOpenOriginalHost }: { active: boolean; onClose?: (() => void) | undefined; navigationRequest?: SettingsNavigationRequest | undefined; channel?: 'lark' | 'discord'; connections?: ConnectionSettingsPort; hostingTarget: ConnectionHostingTarget | null; onOpenOriginalHost?: ((target: ConnectionHostingTarget) => void) | undefined }) {
   const discord = channel === 'discord', ownerKey = JSON.stringify(hostingTarget)
   const connections = useMemo(() => suppliedConnections ?? connectionSettingsPort(hostingTarget), [suppliedConnections, ownerKey])
-  const manualOnly = discord, localMoteCatalog = !discord && hostingTarget?.hostId === 'local', intentKey = manualConnectionScope(channel, hostingTarget)
+  const manualOnly = discord, localMoteCatalog = hostingTarget?.hostId === 'local', intentKey = manualConnectionScope(channel, hostingTarget)
   const state = useAppStore.getState(), savedManagement = restoredManagementTask(state.botTaskSelections)
   const ownManagement = savedManagement && JSON.stringify(savedManagement.hostingTarget) === ownerKey ? savedManagement : null
   const savedEnrollment = readBotTaskLocator(state.botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })])
@@ -69,7 +72,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   const [listIssue, setListIssue] = useState('')
   const [restoration, setRestoration] = useState(() => !manualOnly && !navigationRequest?.moteLarkOrigin && !origin ? ownManagement : null)
   const [restoreReading, setRestoreReading] = useState({ pending: !!restoration, issue: '' }), [restoreAttempt, setRestoreAttempt] = useState(0)
-  const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit' | 'management' | 'mote'>(() =>
+  const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit' | 'management' | 'mote' | 'motes'>(() =>
     initial.current?.view ?? (restoration ? 'management' : !manualOnly && !navigationRequest?.moteLarkOrigin && !origin && ownEnrollment ? 'enrollment' : 'loading'))
   const [moteSelection, setMoteSelection] = useState<{ origin: MoteLarkSettingsOrigin; create: boolean } | null>(null)
   useEffect(() => { if (!active) setMoteSelection(current => current?.create ? { ...current, create: false } : current) }, [active])
@@ -192,16 +195,16 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   const existing = () => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; if (selected && !pending) edit(null); else setView('new') }
   const startEnrollment = () => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection(null); enrollment.startAnother(); setView('enrollment') }
   const openMote = (origin: MoteLarkSettingsOrigin, create = false) => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection({ origin, create }); setView('mote'); setIssue('') }
-  const library = () => { clearManagementRoute(); setContinuation(null); returnMote.current = moteSelection?.origin.topicId ?? null; appliedRoute.current = navigationRequest; setRouteIssue(''); setView('library'); setMoteSelection(null); setIssue(''); setLibraryRevision(value => value + 1) }
+  const library = () => { clearManagementRoute(); setContinuation(null); returnMote.current = moteSelection?.origin.topicId ?? null; appliedRoute.current = navigationRequest; setRouteIssue(''); setView(moteSelection ? 'motes' : 'library'); setMoteSelection(null); setIssue(''); setLibraryRevision(value => value + 1) }
   useLayoutEffect(() => {
     const scroll = pane.current?.closest<HTMLElement>('.settings-content__scroll')
     if (!scroll) return
-    const card = view === 'library' && returnMote.current
+    const card = view === 'motes' && returnMote.current
       ? [...scroll.querySelectorAll<HTMLElement>('[data-mote-identity]')].find(card => card.dataset.moteIdentity === returnMote.current) : null
     scroll.scrollTop = card ? scroll.scrollTop + card.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 16 : 0
   }, [active, view])
   useEffect(() => {
-    if (view !== 'library' || !returnMote.current || !pane.current) return
+    if (view !== 'motes' || !returnMote.current || !pane.current) return
     const topicId = returnMote.current; returnMote.current = null
     const document = pane.current.ownerDocument, focused = document.activeElement
     if (focused && focused !== document.body && focused.isConnected) return
@@ -285,7 +288,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
       <div className="connector-editor-actions"><button type="button" className="primary-button" onClick={manualOnly ? existing : startEnrollment}>{discord ? 'Connect a bot' : 'Set up a bot'}</button><button type="button" className="small-button" onClick={existing}>Connect an existing bot</button></div>
     </section> : null}
     {view === 'mote' && moteSelection ? <section className="connector-mote-detail" data-connector-mote-detail>
-      <button type="button" className="connector-back small-button" onClick={library}><BackIcon size={14} />Back to bots</button>
+      <button type="button" className="connector-back small-button" onClick={library}><BackIcon size={14} />Back to Motes</button>
       <header><h3>Bot for {moteSelection.origin.moteName}</h3><p>This bot represents your Mote in group conversations.</p></header>
       <MoteConnectionPanel key={JSON.stringify([moteSelection.origin.target, moteSelection.origin.topicId])} {...moteSelection.origin} createOnOpen={moteSelection.create} hostingTarget={hostingTarget} inSettings onContinueSetup={continueMoteSetup}
         onRead={() => {}} onCreateIntentConsumed={() => setMoteSelection(current => current?.origin === moteSelection.origin ? { ...current, create: false } : current)} onManageConnection={(record, original) => { if (JSON.stringify(original) === ownerKey) { edit(record); setView('saved') } else void manageOriginal(record, original) }} />
@@ -299,17 +302,22 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     } : undefined} /></> : null}
     {view === 'library' ? <section className="connector-library" aria-label="Bots">
       <header className="connector-identities-heading"><div><h3>Your bots</h3><p>{discord ? 'Connect a bot you already manage.' : 'Connect Agents and Motes to Feishu or Lark conversations.'}</p></div><div className="connector-identities-heading__actions">{manualOnly ? <><button data-enrollment-existing className="primary-button" onClick={existing}>Connect a bot</button><button className="small-button" onClick={() => void openConsole()}>Developer Portal <LinkIcon size={12} /></button></> : <><button data-enrollment-new className="primary-button" onClick={startEnrollment}>Create bot</button><button data-enrollment-existing className="small-button" onClick={existing}>Connect existing bot</button></>}</div></header>
-      {localMoteCatalog ? <MoteIdentityCards readings={identities} records={records} recordsIssue={listIssue} onOpen={openMote} /> : null}
-      <section className="connector-saved-identities" aria-label="Saved bots"><header><h3>Saved bots</h3><button className="small-button" onClick={() => { void read(); setLibraryRevision(value => value + 1) }}><RefreshIcon size={14} />Refresh</button></header>
+      <section className="connector-saved-identities" aria-label="Saved bots">
+        <header><span className="connector-identity-count">{records.length} saved {records.length === 1 ? 'bot' : 'bots'}</span><button className="small-button" onClick={() => { void read(); setLibraryRevision(value => value + 1) }}><RefreshIcon size={14} />Refresh</button></header>
         {saveNotice ? <p className="settings-group-note" role="status">{saveNotice}</p> : null}
-        {records.length ? records.map(record => <article className="connector-record" key={record.config.connectionId} data-connection={record.config.connectionId}>
-          <button className="connector-record__open" onClick={() => { setMoteSelection(null); edit(record); setView('saved') }}><span className="connector-record__mark"><GroupIcon size={18} /></span><span><strong className="connector-record__name">{record.config.label}</strong><small>{platform(record.config.application.domain)}</small>{!localMoteCatalog ? <span className="connector-record__facts"><span className="connector-record__app"><code>{record.config.application.appId}</code></span><span>{connectionSummary(record)}</span></span> : <ConnectionIdentityFacts record={record} readings={identities} compact />}</span><span className="connector-record__action">Manage</span></button>
-        </article>) : !listIssue ? <p className="settings-group-note">{discord ? 'No Discord bots saved. Connect a bot above to get started.' : 'No saved bots. Create one or connect an existing bot above.'}</p> : null}
+        <ConnectionBotList records={records} readings={localMoteCatalog ? identities : null} listIssue={listIssue} onManage={record => { setMoteSelection(null); edit(record); setView('saved') }} />
         {listFeedback}
       </section>
+      {localMoteCatalog && !manualOnly ? <button type="button" className="connector-mote-entry" data-mote-directory onClick={() => { returnMote.current = null; setView('motes') }}>
+        <span className="connector-mote-entry__mark"><MoteIcon size={20} /></span><span><strong>Use a bot with a Mote</strong><small>Choose a default for new groups, or create a bot with its name and avatar.</small></span><span className="connector-mote-entry__action">Choose Mote <ForwardIcon size={13} /></span>
+      </button> : null}
       {!manualOnly ? <RetainedIdentityRemovals hostingTarget={hostingTarget} readings={identities} active={active} onDeleted={receipt => {
         setRecords(records => records.filter(record => record.config.connectionId !== receipt.connectionId)); setSaveNotice('The original identity removal is confirmed. The remote application and original history are kept.'); setLibraryRevision(value => value + 1)
       }} /> : null}
+    </section> : null}
+    {view === 'motes' ? <section className="connector-mote-directory">
+      <button type="button" className="connector-back small-button" onClick={library}><BackIcon size={14} />Back to bots</button>
+      <MoteIdentityCards readings={identities} records={records} recordsIssue={listIssue} onOpen={openMote} />
     </section> : null}
     {view === 'management' && !current && restoration ? <section className="connector-setup" data-management-restoring>
       <button type="button" className="connector-back small-button" onClick={library}><BackIcon size={14} />Back to bots</button>

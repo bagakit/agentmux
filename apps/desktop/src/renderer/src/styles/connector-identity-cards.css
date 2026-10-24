@@ -1,29 +1,24 @@
-.connector-identities-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); }
-.connector-identities-heading > div { min-width: 0; }
-.connector-identities-heading h3, .connector-mote-identities h3 { margin: 0; font-size: var(--fs-title); font-weight: 550; color: var(--text); }
-.connector-identities-heading p, .connector-mote-identities header p { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.6; }
-.connector-identities-heading__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.connector-mote-identities h3 { margin: 0; font-size: var(--fs-title); font-weight: 550; color: var(--text); }
+.connector-mote-identities header p { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.6; }
 .connector-mote-identities { min-width: 0; display: grid; gap: var(--sp-4); }
 .connector-mote-identities > header { display: flex; align-items: baseline; gap: var(--sp-3); }
 .connector-identity-count { color: var(--text-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
-.connector-mote-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: var(--sp-4); }
-.connector-mote-card { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-5); background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); }
-.connector-mote-card__identity { min-width: 0; display: flex; align-items: center; gap: var(--sp-3); padding: 0; border: 0; background: transparent; text-align: left; color: var(--text); font: inherit; cursor: pointer; }
-.connector-mote-card__identity > span:last-child { min-width: 0; display: grid; gap: var(--sp-1); }
+.connector-mote-grid { display: grid; gap: var(--sp-1); }
+.connector-mote-card { min-width: 0; border-bottom: 1px solid var(--line-soft); }
+.connector-mote-card__identity { width: 100%; min-width: 0; display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4); border: 0; border-radius: var(--radius); background: transparent; text-align: left; color: var(--text); font: inherit; cursor: pointer; }
+.connector-mote-card__identity:hover { background: var(--surface-1); }
+.connector-mote-card__identity > span:nth-child(2) { min-width: 0; flex: 1; display: grid; gap: var(--sp-1); }
+.connector-mote-card__identity > svg { flex: none; color: var(--text-3); }
 .connector-mote-card__identity strong { font-weight: 550; font-size: var(--fs-body); overflow-wrap: anywhere; }
-.connector-mote-card__identity small { color: var(--text-2); font-size: var(--fs-meta); overflow-wrap: anywhere; }
-.connector-mote-card__avatar { width: 40px; height: 40px; flex: none; display: grid; place-items: center; }
-.connector-mote-card__avatar .space-object-icon, .connector-mote-card__avatar .project-rail-row__icon { width: 40px; height: 40px; margin: 0; flex: none; }
-.connector-mote-card__avatar svg { width: 30px; height: 30px; }
-.connector-mote-card__avatar img { width: 40px; height: 40px; object-fit: cover; border-radius: var(--radius); }
-.connector-mote-card__caption, .connector-mote-card__issue { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
-.connector-mote-card__issue { color: var(--red-text); }
-.connector-mote-card__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); margin-top: auto; padding-top: var(--sp-2); }
-.connector-mote-card__actions > button { max-width: 100%; white-space: normal; }
-.connector-mote-card__identity:focus-visible { outline: none; border-radius: var(--radius-sm); box-shadow: var(--focus-ring); }
-.connector-saved-identities { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); padding-top: var(--sp-5); border-top: 1px solid var(--line-soft); }
-.connector-saved-identities > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); }
-.connector-saved-identities h3 { margin: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 550; }
+.connector-mote-card__identity small { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; line-height: 1.5; }
+.connector-mote-card__avatar { width: 36px; height: 36px; flex: none; display: grid; place-items: center; }
+.connector-mote-card__avatar .space-object-icon, .connector-mote-card__avatar .project-rail-row__icon { width: 36px; height: 36px; margin: 0; flex: none; }
+.connector-mote-card__avatar svg { width: 28px; height: 28px; }
+.connector-mote-card__avatar img { width: 36px; height: 36px; object-fit: cover; border-radius: var(--radius); }
+.connector-mote-card__issue { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-3); padding: 0 var(--sp-4) var(--sp-3); color: var(--amber-text); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.connector-mote-card__identity:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.connector-saved-identities { display: grid; gap: var(--sp-3); }
+.connector-saved-identities > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .connector-mote-detail { display: grid; gap: var(--sp-4); min-width: 0; }
 .connector-mote-detail > header { display: grid; gap: var(--sp-2); }
 .connector-mote-detail > header h3 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 550; overflow-wrap: anywhere; }
@@ -33,7 +28,6 @@
 .mote-bot-replacement { color: var(--text-2); font-size: var(--fs-body); }
 .mote-bot-replacement summary { cursor: pointer; padding-block: var(--sp-2); }
 .mote-bot-avatar-needed { display: grid; justify-items: start; gap: var(--sp-2); }
-@media (max-width: 480px) { .connector-mote-card { padding: var(--sp-4); } }
 
 .mote-identity-options { min-width: 0; color: var(--text-2); }
 .mote-identity-options > summary { cursor: pointer; padding-block: var(--sp-2); font-size: var(--fs-body); }
