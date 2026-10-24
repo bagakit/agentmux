@@ -32,7 +32,7 @@ try {
 const { build, loadConfigFromFile } = await import(pathToFileURL(require.resolve('vite')))
 const { config } = await loadConfigFromFile({ command: 'build', mode: 'production' }, path.join(desktop, 'scripts/fixtures/settings-overview/vitest.config.mts'), root)
 const aliases = []
-for (const relative of ['packages/client-ui', 'apps/host']) {
+for (const relative of ['packages/client-ui', 'apps/host', 'packages/identity', 'packages/capsule']) {
   const directory = path.join(root, relative), manifest = JSON.parse(await fs.readFile(path.join(directory, 'package.json'), 'utf8'))
   for (const [key, value] of Object.entries(manifest.exports).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)) {
     const target = typeof value === 'string' ? value : value.browser ?? value.import
