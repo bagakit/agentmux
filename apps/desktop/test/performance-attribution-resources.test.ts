@@ -19,6 +19,14 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/co
 import { createRendererControlApi } from '../src/renderer/src/lib/control-api'
 import { createRendererHistoryObservation } from '../src/renderer/src/lib/history-observation'
 import { createRendererSessionEvents } from '../src/renderer/src/lib/session-events'
+import { createToolkitConfigurationApi } from '../src/renderer/src/lib/toolkit-configuration-api'
+import { createConversationReadApi } from '../src/renderer/src/lib/conversation-read-api'
+import { createRendererHostObservation } from '../src/renderer/src/lib/host-observation'
+import { createConversationLandmarksApi } from '../src/renderer/src/lib/conversation-landmarks-api'
+import { createRendererNotebookObservation } from '../src/renderer/src/lib/notebook-observation-api'
+import { createRendererSearchRead } from '../src/renderer/src/lib/search-read'
+import { createRendererSessionRecovery } from '../src/renderer/src/lib/session-recovery-api'
+import { createRendererHistoryRead } from '../src/renderer/src/lib/history-read'
 import { unwrapSessionInputWriteResult } from '../src/shared/session-input-result'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts'
 
@@ -179,8 +187,11 @@ async function actualRenderer() {
   const factories = apiFile.statements.filter(node => ts.isFunctionDeclaration(node) && node.name?.text === 'requireDesktopApi')
   expect(factories).toHaveLength(1)
   const factory = factories[0]!, factoryCode = ts.transpileModule(factory.getText(apiFile), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-  const api = new Function('window', 'createRendererControlApi', 'createRendererHistoryObservation', 'createRendererSessionEvents', 'unwrapSessionInputWriteResult', factoryCode + ';return requireDesktopApi()')(
-    window, createRendererControlApi, createRendererHistoryObservation, createRendererSessionEvents, unwrapSessionInputWriteResult)
+  const factoriesInScope = { window, createRendererControlApi, createRendererHistoryObservation, createRendererSessionEvents,
+    unwrapSessionInputWriteResult, createToolkitConfigurationApi, createConversationReadApi, createRendererHostObservation,
+    createConversationLandmarksApi, createRendererNotebookObservation, createRendererSearchRead, createRendererSessionRecovery,
+    createRendererHistoryRead }
+  const api = new Function(...Object.keys(factoriesInScope), factoryCode + ';return requireDesktopApi()')(...Object.values(factoriesInScope))
   if (process.env.AGENTMUX_TERMINAL_INPUT_LOADED) appendFileSync(process.env.AGENTMUX_TERMINAL_INPUT_LOADED + '.resources', JSON.stringify({
     path: resolve('apps/desktop/src/renderer/src/lib/api.ts'), sourceSHA256: createHash('sha256').update(apiCode).digest('hex'),
     callbackSHA256: createHash('sha256').update(factory.getText(apiFile)).digest('hex'), operation: 'desktop-api', invoked: true, threw: false }) + '\n')
@@ -197,8 +208,8 @@ async function actualRenderer() {
   }
   visit(source); expect(callbacks).toHaveLength(1)
   const callback = callbacks[0]!, transpiled = ts.transpileModule('const invoke = ' + callback.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-  const invoke = new Function('api', 'get', 'readContinuousProgressInput', 'readRendererResourceOwnerCounts', 'rendererPerformance', transpiled + ';return invoke')(
-    api, useAppStore.getState, () => { throw new Error('wrong branch') }, readRendererResourceOwnerCounts, rendererPerformance)
+  const invoke = new Function('api', 'get', 'readRendererResourceOwnerCounts', 'rendererPerformance', transpiled + ';return invoke')(
+    api, useAppStore.getState, readRendererResourceOwnerCounts, rendererPerformance)
   rendererPerformance.sessionEvent('status', rendererPerformance.start())
   const execute = (request: any) => {
     let threw = true
