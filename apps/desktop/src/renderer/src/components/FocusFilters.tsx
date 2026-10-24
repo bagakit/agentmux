@@ -106,7 +106,6 @@ export function FocusFilters({ value, onChange, onInspectChange, options, visibl
         </div>
         <Menu.Separator className="tab-context-menu__separator" />
         <Menu.Label className="focus-filter-menu__scope">Match all groups · Any value within a group. Types may overlap.</Menu.Label>
-        <div className="focus-filter-menu__actions"><Menu.Item className="tab-context-menu__item" onSelect={() => onChange({ ...value, states: ['attention'] })}>Needs you</Menu.Item><Menu.Item className="tab-context-menu__item" onSelect={() => onChange({ ...value, states: ['results'] })}>Results</Menu.Item></div>
         <Menu.Item className="tab-context-menu__item" onSelect={() => { onChange(EMPTY_FOCUS_FILTERS); onClear() }}>Clear filters</Menu.Item>
         <Menu.Item className="tab-context-menu__item" disabled={!historyAvailable} onSelect={onHistory}>Search all retained conversation text</Menu.Item>
         <Menu.Item className="tab-context-menu__item" onSelect={() => {}}>Done</Menu.Item>
