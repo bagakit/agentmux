@@ -22,7 +22,7 @@ const receipt = { schema: 'agentmux.survey-list-public.v1', passed: false,
   sharedSourceMutations: 0, baseline: null, mutations: [], restart: [],
   boundary: 'Actual compiled Source CLI, Unix public RPC and original Renderer Store/preferences save/read. Two test processes consume the same persisted Core spatial file and saved client workbench bytes through original restore owners, retaining original IDs/Run facts/drafts. Runtime snapshots and Session paint are fixtures, no live CLI semantic resume or user Runtime control.' }
 const mutations = [
-  { label: 'apply-original-organization', file: owner, before: 'ports.set(applied)', after: 'ports.set(before)' },
+  { label: 'apply-original-organization', file: owner, before: 'ports.set({ surveyOrganization: applied, surveyCollectedZones: appliedMembers })', after: 'ports.set({ surveyOrganization: before, surveyCollectedZones: appliedMembers })' },
   { label: 'expected-original-organization', file: owner, before: 'if (JSON.stringify(expected) !== JSON.stringify(before))', after: 'if (false && JSON.stringify(expected) !== JSON.stringify(before))' },
   { label: 'restore-saved-organization', file: store, before: 'surveyOrganization: restoreSurveyOrganization(persisted.surveyOrganization),', after: 'surveyOrganization: restoreSurveyOrganization(undefined),' }
 ]
