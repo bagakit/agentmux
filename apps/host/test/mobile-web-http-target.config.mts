@@ -8,7 +8,7 @@ if (mutant && mutant !== 'remove-target-catch') throw Error('Unknown HTTP target
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 export default defineConfig({ ...original, plugins: [{ name: 'mobile-http-target-proof', enforce: 'pre', transform(before, id) {
   if (id.split('?')[0] !== resolve(root, owner)) return
-  const anchor = "catch { response.writeHead(400, { 'Cache-Control': 'no-store' }); response.end(); return }"
+  const anchor = 'catch { mobileResourceUnavailable(request, response, 400); return }'
   if (before.split(anchor).length !== 2) throw Error('One actual owner URL catch must be loaded')
   const source = mutant ? before.replace(anchor, 'catch (error) { throw error }') : before
   const path = process.env.MOBILE_WEB_HTTP_TARGET_LOADED
