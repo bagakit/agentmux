@@ -666,22 +666,27 @@ it('preserves the clicked area heading through folding and unfolding without res
   const headingAt = () => { const box = renderedBox(areaId) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>; return { x: box.x + box.heading.x, y: box.y + box.heading.y } }
   const heading = headingAt(); await viewport(-heading.x + 12, -heading.y + 12)
   const camera = captured.store!.getState().transform
+  const clicked = regionLabelBounds('area-0')
   holdResponses = true
   await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-area-id='${areaId}'] .collaboration-area__fold`)!.click())
   await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
   await releasePlacement()
   expect(captured.nodes.some(node => node.id === reading)).toBe(false)
   expect(headingAt().x).toBeCloseTo(heading.x, 8); expect(headingAt().y).toBeCloseTo(heading.y, 8)
-  expect(captured.store!.getState().transform).toBe(camera)
+  expect(captured.store!.getState().transform[2]).toBe(camera[2])
+  const collapsedLabel = regionLabelBounds('area-0')
+  expect(collapsedLabel.x).toBeCloseTo(clicked.x, 6)
+  expect(collapsedLabel.y + collapsedLabel.height).toBeCloseTo(clicked.y + clicked.height, 6)
   expect(dom.container.querySelector(`[data-area-id='${areaId}'] .collaboration-area__fold`)).not.toBeNull()
   await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-area-id='${areaId}'] .collaboration-area__fold`)!.click())
   await settleCollaborationCanvas(() => { expect(captured.nodes.some(node => node.id === reading)).toBe(true); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
+  const expandedCamera = captured.store!.getState().transform
   const resized = new Map(changed); resized.set(subject('canvas-8'), { ...resized.get(subject('canvas-8'))!, tier: 'closed' })
   await dom.render(graph(scene, null, scene.relations, [], resized, { ready: true, locate }))
   await settleCollaborationCanvas(() => { expect(requests).toHaveLength(5); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
   // The explicitly read heading remains the anchor; a reappearing Agent is not a new reading intent.
   expect(headingAt().x).toBeCloseTo(heading.x, 8); expect(headingAt().y).toBeCloseTo(heading.y, 8)
-  expect(captured.store!.getState().transform).toBe(camera)
+  expect(captured.store!.getState().transform).toBe(expandedCamera)
 })
 
 function regionLabelBounds(id: string) {
@@ -723,6 +728,69 @@ it('keeps a clamped region label and its Expand action visible after the origina
   await settleCollaborationCanvas(() => { expect(renderedBox(area.id).folded).toBe(false); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
   expect(regionLabelBounds('area-0').element.querySelector('[aria-label="Collapse Original area 0"]')).not.toBeNull()
   expect(captured.store!.getState().transform[2]).toBe(camera[2])
+})
+
+it('keeps a natural nested heading and its Expand action at the actual clicked screen position', async () => {
+  const scene = scenario(12), members = [...scene.agents.keys()]
+  scene.areas = [{ id: 'root', name: 'Original project', kind: 'project', members: [] },
+    { id: 'nested', name: 'Collaboration terrain', kind: 'project', parentId: 'root', members: [] },
+    { id: 'messages', name: 'Message tools', kind: 'project', parentId: 'nested', members: members.slice(0, 6) },
+    { id: 'rendering', name: 'Rendering', kind: 'project', parentId: 'nested', members: members.slice(6) }]
+  await loaded(scene)
+  const id = JSON.stringify(['area', 'nested']), original = renderedBox(id) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  const zoom = .85
+  await viewport(100 - (original.x + original.heading.x) * zoom, 100 - (original.y + original.heading.y) * zoom, 900, 600, zoom)
+  const before = regionLabelBounds('nested')
+  expect(before.element.dataset.context).toBeUndefined()
+  expect(before.x).toBeGreaterThanOrEqual(0); expect(before.y).toBeGreaterThanOrEqual(0)
+  expect(before.element.querySelector('[aria-label="Collapse Collaboration terrain"]')).not.toBeNull()
+  holdResponses = true
+  await act(async () => before.element.querySelector<HTMLButtonElement>('.collaboration-area__fold')!.click())
+  await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
+  await releasePlacement()
+  const folded = renderedBox(id) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  expect(folded.folded).toBe(true)
+  expect(captured.nodes.some(node => node.type === 'agent')).toBe(false)
+  const after = regionLabelBounds('nested'), expand = after.element.querySelector<HTMLButtonElement>('[aria-label="Expand Collaboration terrain"]')!
+  expect(expand).not.toBeNull()
+  expect(after.x).toBeCloseTo(before.x, 5)
+  expect(after.y + after.height).toBeCloseTo(before.y + before.height, 5)
+  expect(captured.store!.getState().transform[2]).toBe(zoom)
+  await act(async () => expand.click())
+  await settleCollaborationCanvas(() => { expect(renderedBox(id).folded).toBe(false); expect(captured.nodes.filter(node => node.type === 'agent')).toHaveLength(12) })
+  const restored = regionLabelBounds('nested')
+  expect(restored.element.querySelector('[aria-label="Collapse Collaboration terrain"]')).not.toBeNull()
+  expect(restored.x).toBeCloseTo(before.x, 5)
+  expect(restored.y + restored.height).toBeCloseTo(before.y + before.height, 5)
+  expect(captured.store!.getState().transform[2]).toBe(zoom)
+})
+
+it('retains the original empty subtree and its Expand action while its children are folded away', async () => {
+  const scene = scenario(0); scene.relations = []
+  scene.areas = [{ id: 'empty-parent', name: 'Original empty parent', kind: 'project', members: [] },
+    { id: 'empty-child', name: 'Original empty child', kind: 'topic', parentId: 'empty-parent', members: [] }]
+  await loaded(scene)
+  const parentId = JSON.stringify(['area', 'empty-parent']), childId = JSON.stringify(['area', 'empty-child'])
+  const parent = renderedBox(parentId) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  await viewport(100 - parent.x - parent.heading.x, 100 - parent.y - parent.heading.y, 700, 400)
+  const original = regionLabelBounds('empty-parent')
+  expect(original.element.textContent).toContain('0 Agents incl. subspaces')
+  expect(original.element.dataset.empty).toBeUndefined()
+  const collapse = original.element.querySelector<HTMLButtonElement>('[aria-label="Collapse Original empty parent"]')!
+  expect(collapse).not.toBeNull()
+  await act(async () => collapse.click())
+  await settleCollaborationCanvas(() => { expect(renderedBox(parentId).folded).toBe(true); expect(captured.nodes).toHaveLength(1) })
+  expect(captured.nodes.some(node => node.id === childId)).toBe(false)
+  const folded = regionLabelBounds('empty-parent')
+  expect(folded.element.textContent).toContain('0 Agents incl. subspaces')
+  expect(captured.nodes[0]!.data.childCount).toBe(1)
+  const expand = folded.element.querySelector<HTMLButtonElement>('[aria-label="Expand Original empty parent"]')!
+  expect(expand).not.toBeNull()
+  await act(async () => expand.click())
+  await settleCollaborationCanvas(() => { expect(renderedBox(parentId).folded).toBe(false); expect(captured.nodes).toHaveLength(2) })
+  expect(captured.nodes.some(node => node.id === childId)).toBe(true)
+  expect(regionLabelBounds('empty-parent').element.querySelector('[aria-label="Collapse Original empty parent"]')).not.toBeNull()
+  expect(captured.nodes.some(node => node.type === 'agent')).toBe(false)
 })
 
 it.each(['pan', 'locate'] as const)('a newer %s cancels the pending screen anchor of an earlier region fold', async intent => {
