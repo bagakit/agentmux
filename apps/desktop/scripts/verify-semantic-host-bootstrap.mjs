@@ -16,6 +16,7 @@ const inputs = [owner, 'apps/desktop/scripts/package-macos.mjs', 'apps/desktop/s
   'packages/core/test/helpers/headless-runtime-fixture.ts', 'packages/core/src/public-rpc-client.ts',
   'packages/core/src/hosted-client.ts', 'packages/core/dist/public-rpc-client.js', 'packages/core/dist/runtime-paths.js',
   'packages/core/dist/object-id.js', 'packages/core/dist/headless-runtime-cli.js', 'packages/core/dist/headless-runtime.js',
+  'packages/diagnostic-evidence/dist/index.js',
   'apps/host/dist/macos-service.js', 'packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd']
 const sourceSHA256 = Object.fromEntries(await Promise.all(inputs.map(async file => [file, digest(await readFile(join(root, file)))])))
 const original = await readFile(join(root, owner), 'utf8')
@@ -26,6 +27,7 @@ const directory = join(root, '.local/state/semantic-host-bootstrap'); await mkdi
 const attempt = await mkdtemp(join(directory, 'attempt-'))
 const receipt = { schema: 'agentmux.semantic-host-bootstrap.v1', passed: false, sourceStable: false,
   sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), sourceSHA256,
+  loadedRawSHA256: {},
   userRuntimeTouched: false, appBuiltOrInstalled: false,
   boundary: 'Actual prepareSemanticHostReload default operations -> real execFile child -> original helper -> actual private Headless/Core fenced RPC/Native and one original Run. Only App OS observation ports are fixture facts; private Core entry delays module load with a real timer.',
   results: [] }
@@ -64,8 +66,16 @@ try {
     assert.ok(loads.length > 0)
     for (const row of loads) {
       const current = await readFile(join(root, row.path), 'utf8')
-      assert.equal(row.originalSHA256, digest(current), 'Exact original loaded input: ' + row.path)
-      assert.equal(row.effectiveSHA256, digest(row.path === owner ? source : current), 'Exact effective loaded input: ' + row.path)
+      assert.equal(row.rawSHA256, digest(current), 'Exact disk input behind the loaded module: ' + row.path)
+      if (Object.hasOwn(receipt.loadedRawSHA256, row.path)) assert.equal(row.rawSHA256, receipt.loadedRawSHA256[row.path],
+        'The same raw module is retained across all source variants: ' + row.path)
+      else receipt.loadedRawSHA256[row.path] = row.rawSHA256
+      // Vite may blank a sourceMappingURL comment before even a pre transform.
+      // Its received representation and disk bytes are distinct proof objects.
+      if (row.path === owner) {
+        assert.equal(row.receivedSHA256, row.rawSHA256, 'The actual wrapper enters mutation from its exact raw source')
+        assert.equal(row.effectiveSHA256, digest(source), 'The actual wrapper consumes its exact source variant')
+      } else assert.equal(row.effectiveSHA256, row.receivedSHA256, 'Other received modules were not mutated: ' + row.path)
     }
     assert.ok(loads.some(row => row.path === owner), 'Actual default wrapper consumed its source variant')
     const mutant = name === 'restore-ten-second-timeout'
@@ -74,7 +84,7 @@ try {
       failures[0].failureMessages.some(message => /The default wrapper must accept the actual child reply after ten seconds/u.test(message)) &&
       execution.signal === 'SIGTERM' && execution.killed === true && execution.exitCode === null
     receipt.results.push({ name, code: result.code, signal: result.signal, cases: cases.length, semanticRed,
-      child: execution, facts, loaded: Object.fromEntries(loads.map(row => [row.path, row.effectiveSHA256])),
+      child: execution, facts, loaded: loads,
       failures: failures.map(test => ({ name: test.fullName, messages: test.failureMessages })) })
     await save()
     if (mutant) assert.ok(semanticRed, 'Old timeout must really SIGTERM the delayed child and fail only its actual default consumer')
@@ -86,6 +96,7 @@ try {
     }
   }
   for (const [file, hash] of Object.entries(sourceSHA256)) assert.equal(digest(await readFile(join(root, file))), hash, 'Stable exact input: ' + file)
+  for (const [file, hash] of Object.entries(receipt.loadedRawSHA256)) assert.equal(digest(await readFile(join(root, file))), hash, 'Stable actual module input: ' + file)
   receipt.sourceStable = true; receipt.passed = true
 } finally { await save() }
 console.log(JSON.stringify({ passed: true, receipt: join(attempt, 'receipt.json') }))
