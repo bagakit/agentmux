@@ -90,7 +90,7 @@ export class AgentSessionRunLifecycle {
         reservation = await this.ports.sessions.registry.claimRestart(input.agentSessionId, operation)
         if (!reservation) throw new AgentMuxError('The original restart reservation is unconfirmed.', 'AGENT_RESTART_UNCONFIRMED')
         if (reservation.preparedSession) {
-          const restored = await this.completePreparedResume(reservation, await this.ports.runtime.kernel.list())
+          const restored = await this.completePreparedResume(reservation, await this.ports.runtime.kernel.inspectCreation(reservation.operationId))
           if (restored) return this.ports.events.projectSession(restored)
           throw new AgentMuxError('The original restart Start has no single confirmed Run. Inspect the same operation; no Start was repeated.',
             'AGENT_RESTART_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
@@ -149,11 +149,11 @@ export class AgentSessionRunLifecycle {
     if (canonical) result.session = this.ports.events.projectSession(canonical)
     if (reservation.restart.startNotApplied) return { ...result, phase: 'starting', canRetry: true, detail: 'The original Run stopped. Its replacement Start was confirmed not applied; explicitly retry this same operation and frozen plan.' }
     if (reservation.preparedSession) {
-      const candidates = (await this.ports.runtime.kernel.list()).filter(run => run.lifecycleOperationId === operation)
+      const run = await this.ports.runtime.kernel.inspectCreation(operation)
       const frozen = reservation.preparedSession.continuity?.restartLaunch
-      if (candidates.length === 1 && candidates[0]!.workspacePath === reservation.preparedSession.workspacePath && frozen &&
-        frozen.program === candidates[0]!.program && frozen.argsDigest === createHash('sha256').update(JSON.stringify(candidates[0]!.args)).digest('base64url')) {
-        return { ...result, phase: 'starting', canRetry: true, newRun: runRef(candidates[0]!.runId), detail: 'Original Start found; repeat the same restart request to confirm its Session commit.' }
+      if (run?.lifecycleOperationId === operation && run.workspacePath === reservation.preparedSession.workspacePath && frozen &&
+        frozen.program === run.program && frozen.argsDigest === createHash('sha256').update(JSON.stringify(run.args)).digest('base64url')) {
+        return { ...result, phase: 'starting', canRetry: true, newRun: runRef(run.runId), detail: 'Original Start found; repeat the same restart request to confirm its Session commit.' }
       }
       return { ...result, phase: 'unconfirmed', canRetry: false, detail: 'The original Start is unconfirmed. No Start or input was repeated.' }
     }
@@ -189,7 +189,7 @@ export class AgentSessionRunLifecycle {
           return this.ports.events.projectSession(restored)
         }
         if (reservation?.preparedSession && sameRun(reservation.expectedRun, canonical.run)) {
-          const restored = await this.completePreparedResume(reservation, await this.ports.runtime.kernel.list())
+          const restored = await this.completePreparedResume(reservation, await this.ports.runtime.kernel.inspectCreation(reservation.operationId))
           if (restored) return this.ports.events.projectSession(restored)
         }
         throw new AgentMuxError('The original resume result is unconfirmed. Inspect the same operation; no Start or input was repeated.',
@@ -251,7 +251,7 @@ export class AgentSessionRunLifecycle {
       }
       const reservation = await this.ports.sessions.registry.claimReopen(input.agentSessionId, operationId, input.expectedRetiredAt)
       if (!reservation) throw this.reopenUnconfirmed('The original continue result has not been confirmed.')
-      return this.ports.events.projectSession(await this.completePreparedReopen(reservation, await this.ports.runtime.kernel.list()))
+      return this.ports.events.projectSession(await this.completePreparedReopen(reservation, await this.ports.runtime.kernel.inspectCreation(reservation.operationId)))
     } catch (error) {
       if (error instanceof AgentMuxError && error.controlFailure) throw error
       throw this.reopenUnconfirmed(error instanceof Error ? error.message : String(error))
@@ -263,15 +263,14 @@ export class AgentSessionRunLifecycle {
   }
 
   async completePreparedReopen(
-    reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, runs: readonly CtxmuxAdapterRun[]
+    reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, run: CtxmuxAdapterRun | null
   ): Promise<AgentMuxStoredAgentSession> {
     const prepared = reservation.preparedSession
-    const candidates = runs.filter(run => run.lifecycleOperationId === reservation.operationId)
-    if (!prepared || candidates.length !== 1 || candidates[0]!.workspacePath !== prepared.workspacePath ||
-      candidates[0]!.runId === reservation.expectedRetirement.run.runId) {
+    if (!prepared || !run || run.lifecycleOperationId !== reservation.operationId || run.workspacePath !== prepared.workspacePath ||
+      run.runId === reservation.expectedRetirement.run.runId) {
       throw this.reopenUnconfirmed('The original continue has no single confirmed matching Run. Keep its history and check again.')
     }
-    const run = candidates[0]!, retirement = reservation.expectedRetirement
+    const retirement = reservation.expectedRetirement
     const nativeBindingObservedAt = Date.now()
     const next: AgentMuxStoredAgentSession = { ...structuredClone(prepared), run: runRef(run.runId), retiredRuns: [retirement.run],
       reopenedFrom: { run: retirement.run, source: retirement.source, observedAt: retirement.observedAt }, updatedAt: Math.max(prepared.updatedAt + 1, nativeBindingObservedAt),
@@ -818,11 +817,9 @@ export class AgentSessionRunLifecycle {
   }
 
   async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>,
-    runs: readonly CtxmuxAdapterRun[]): Promise<AgentMuxStoredAgentSession | null> {
+    run: CtxmuxAdapterRun | null): Promise<AgentMuxStoredAgentSession | null> {
     const prepared = reservation.preparedSession
-    const candidates = runs.filter(run => run.lifecycleOperationId === reservation.operationId)
-    if (!prepared || candidates.length !== 1) return null
-    const run = candidates[0]!
+    if (!prepared || !run || run.lifecycleOperationId !== reservation.operationId) return null
     if (reservation.restart && (!prepared.continuity?.restartLaunch || prepared.continuity.restartLaunch.program !== run.program ||
       prepared.continuity.restartLaunch.argsDigest !== createHash('sha256').update(JSON.stringify(run.args)).digest('base64url'))) {
       throw new AgentMuxError('The original restart Run does not match its frozen no-input launch.', 'AGENT_RESTART_CONFLICT')

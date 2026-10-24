@@ -655,7 +655,7 @@ export class AgentMuxClient {
     }
     const pending = await this.registry.claimCreate(input.agentSessionId, agentLifecycleOperationIdentity('create', input.agentSessionId, input.createOperationId), intentDigest)
     if (pending) {
-      const session = await this.completePreparedCreate(pending, await this.kernel.list())
+      const session = await this.completePreparedCreate(pending, await this.kernel.inspectCreation(pending.operationId))
       return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: creationPromptConfirmed(session.creation!) }
     }
     const { config, descriptor } = await this.hostExecutorOwner.resolve(input.executorId)
@@ -2088,7 +2088,7 @@ export class AgentMuxClient {
     await this.connectRuntime()
     const pending = await this.registry.claimCreate(agentSessionId, correlation.operationId, correlation.preparedCreation.creation.intentDigest)
     if (!pending) throw new AgentMuxError('The original creation changed while inspecting. Read the same operation again without replaying.', 'AGENT_CREATION_UNCONFIRMED')
-    return this.projectSession(await this.completePreparedCreate(pending, await this.kernel.list()))
+    return this.projectSession(await this.completePreparedCreate(pending, await this.kernel.inspectCreation(pending.operationId)))
   }
 
   /** Original creation metadata only; never connects, adopts, resumes or starts a Run. */
@@ -4446,7 +4446,7 @@ export class AgentMuxClient {
     }
     const pending = await this.registry.claimCreate(agentSessionId, lifecycleOperationId, intentDigest)
     if (pending) {
-      const session = await this.completePreparedCreate(pending, await this.kernel.list())
+      const session = await this.completePreparedCreate(pending, await this.kernel.inspectCreation(pending.operationId))
       return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: creationPromptConfirmed(session.creation!, contextRequested) }
     }
     if (forkSource) {
@@ -4867,12 +4867,12 @@ export class AgentMuxClient {
 
   /** Reconcile only a real matching started Run; never repeats start, reminder or user input. */
   private async completePreparedCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>,
-    runs: readonly CtxmuxAdapterRun[]): Promise<AgentMuxStoredAgentSession> {
-    const seed = reservation.preparedCreation, candidates = runs.filter(run => run.lifecycleOperationId === reservation.operationId)
-    if (!seed || candidates.length !== 1 || candidates[0]!.workspacePath !== seed.workspacePath) throw new AgentMuxError(
+    run: CtxmuxAdapterRun | null): Promise<AgentMuxStoredAgentSession> {
+    const seed = reservation.preparedCreation
+    if (!seed || !run || run.lifecycleOperationId !== reservation.operationId || run.workspacePath !== seed.workspacePath) throw new AgentMuxError(
       'The original creation has no single confirmed matching Run. Its prepared identity is retained; inspect the same operation without resending.',
       'AGENT_CREATION_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
-    const run = candidates[0]!, initialInput = bindInitialInput(seed.initialInput, seed.agentSessionId, runRef(run.runId))
+    const initialInput = bindInitialInput(seed.initialInput, seed.agentSessionId, runRef(run.runId))
     const session: AgentMuxStoredAgentSession = { ...structuredClone(seed), run: runRef(run.runId), retiredRuns: [],
       ...(initialInput ? { initialInput } : {}), creation: { ...seed.creation!, ...(initialInput?.key ? { initialInputKey: initialInput.key } : {}),
         ...(seed.creation?.createdBy ? { createdRun: runRef(run.runId) } : {}) } }
@@ -6681,10 +6681,10 @@ export class AgentMuxClient {
   private async recoverStaleLifecycles(): Promise<void> {
     const reservations = await this.registry.claimStaleLifecycles()
     if (reservations.length === 0) return
-    const runs = await this.kernel.list()
+    let unpreparedRuns: readonly CtxmuxAdapterRun[] | undefined
     for (const reservation of reservations) {
       if (reservation.kind === 'create' && reservation.preparedCreation) {
-        try { await this.completePreparedCreate(reservation, runs) }
+        try { await this.completePreparedCreate(reservation, await this.kernel.inspectCreation(reservation.operationId)) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
           code: 'AGENT_CREATION_UNCONFIRMED', message: error instanceof Error ? error.message : String(error),
           evidence: { source: 'agentmux', observedAt: Date.now() } }) }
@@ -6692,7 +6692,7 @@ export class AgentMuxClient {
         continue
       }
       if (reservation.kind === 'reopen') {
-        try { await this.recovery.completePreparedReopen(reservation, runs) }
+        try { await this.recovery.completePreparedReopen(reservation, await this.kernel.inspectCreation(reservation.operationId)) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
           code: 'AGENT_REOPEN_UNCONFIRMED', message: error instanceof Error ? error.message : String(error),
           evidence: { source: 'agentmux', observedAt: Date.now() } }) }
@@ -6700,7 +6700,7 @@ export class AgentMuxClient {
       }
       if (reservation.kind === 'resume' && reservation.restart && !reservation.preparedSession) continue
       if (reservation.kind === 'resume' && reservation.preparedSession) {
-        try { await this.recovery.completePreparedResume(reservation, runs) }
+        try { await this.recovery.completePreparedResume(reservation, await this.kernel.inspectCreation(reservation.operationId)) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
           code: 'AGENT_CONTINUITY_UNCONFIRMED', message: String(error), evidence: { source: 'agentmux', observedAt: Date.now() } }) }
         continue
@@ -6717,7 +6717,8 @@ export class AgentMuxClient {
         continue
       }
       let retiredRuns: AgentMuxRunRef[] = []
-      const candidates = runs.filter(
+      unpreparedRuns ??= await this.kernel.list()
+      const candidates = unpreparedRuns.filter(
         (run) => run.lifecycleOperationId === reservation.operationId
       )
       for (const run of candidates) await this.retireUncommittedRun(run.runId)

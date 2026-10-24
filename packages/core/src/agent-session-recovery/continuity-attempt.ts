@@ -287,7 +287,7 @@ export async function performAgentContinuity(
       try {
         const reservation = await ports.sessions.store.loadResumeCorrelation(input.agentSessionId, lifecycleId)
         if (reservation?.preparedSession) {
-          const recovered = await lifecycle.completePreparedResume(reservation, await ports.runtime.kernel.list())
+          const recovered = await lifecycle.completePreparedResume(reservation, await ports.runtime.kernel.inspectCreation(reservation.operationId))
           if (recovered) { current = ports.sessions.registry.get(input.agentSessionId); return record({ kind: 'resumed', session: ports.events.projectSession(current),
             previousRun: { ...input.expectedRun }, run: { ...current.run }, evidence: { kind: 'provider-native', providerId: current.providerId,
               nativeSessionId: current.nativeHandle!.sessionId, previousRun: evidence } }, recovered.continuity?.reason ?? prior.reason) }

@@ -1200,6 +1200,19 @@ export class CtxmuxRunAdapter {
     }
   }
 
+  /** A missing retained mapping is unknown, never proof that Start was not applied. */
+  async inspectCreation(operationKey: string): Promise<CtxmuxAdapterRun | null> {
+    const run = await this.originalCreationRun(operationKey)
+    return run === null ? null : this.projectRun(run)
+  }
+
+  private async originalCreationRun(operationKey: string): Promise<RunInfo | null> {
+    try {
+      const { observation } = await this.requireClient().observeCreation(createOperationKey(operationKey))
+      return observation.outcome === 'retained' ? observation.run : null
+    } catch (error) { throw translateCtxmuxError(error) }
+  }
+
   /** Observe one frozen creation without ever submitting Start again. */
   async inspectPreparedStart(request: RunSpec, operationKey: string, runId?: string): Promise<CtxmuxAdapterRun | null> {
     if (request.env.AGENTMUX_LIFECYCLE_OPERATION_ID !== operationKey) throw new AgentMuxError(
@@ -1213,12 +1226,12 @@ export class CtxmuxRunAdapter {
           throw new AgentMuxError('The exact Run does not match the original complete prepared launch. The Run was preserved.', 'TERMINAL_PREPARATION_RUN_MISMATCH')
         return this.projectRun(run)
       }
-      const { observation } = await this.requireClient().observeCreation(createOperationKey(operationKey))
-      if (observation.outcome === 'not_retained') return null
-      if (!isDeepStrictEqual(observation.run.spec, request)) throw new AgentMuxError(
+      const observed = await this.originalCreationRun(operationKey)
+      if (observed === null) return null
+      if (!isDeepStrictEqual(observed.spec, request)) throw new AgentMuxError(
         'The original creation does not match its complete frozen launch. Preserve the operation without resending.',
         'TERMINAL_CREATION_UNCONFIRMED')
-      return this.projectRun(observation.run)
+      return this.projectRun(observed)
     } catch (error) { throw translateCtxmuxError(error) }
   }
 
