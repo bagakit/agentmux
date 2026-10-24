@@ -16,7 +16,8 @@ beforeEach(()=>{cleanup=mountThemeRuntime(window)})
 afterEach(async()=>{await act(async()=>{for(const view of mounted.splice(0)){view.root.unmount();view.element.remove()}});cleanup();document.body.replaceChildren();vi.restoreAllMocks()})
 it('the original phone mailbox applies distinct semantic controls and state masks without changing observations or actions',async()=>{
  const original=session(),refresh=vi.fn(),terminal=vi.fn(),overlay=document.createElement('div');document.body.append(overlay)
- const platform=createBrowserPlatform({overlayContainer:()=>overlay}),props={session:original,connected:true,messages:[],platform,describeSpeaker:()=>undefined,refresh,terminal}
+ const platform=createBrowserPlatform({overlayContainer:()=>overlay}),props={session:original,connected:true,messages:[],platform,describeSpeaker:()=>undefined,refresh,terminal,historyScope:JSON.stringify([original.hostId,original.agentSessionId]),
+ readHistory:vi.fn(async()=>({messages:[],nextCursor:null,sourceHostId:original.hostId})),onHistoryFill:vi.fn(async()=>undefined),onHistoryCopy:vi.fn(async()=>true)}
  const view=await mount(<MobileMailbox {...props}/>),trigger=view.element.querySelector<HTMLButtonElement>('.mobile-message-tools__trigger')!,state=trigger.querySelector('i')!
  expect(trigger.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('object.mailbox'));expect(trigger.getAttribute('aria-label')).toBe('通信记录 · 状态未知');expect(state.dataset.state).toBe('unknown')
  expect(declaration('.mobile-message-tools__trigger i','width')).toBe('5px');expect(declaration('.mobile-message-tools__trigger i','height')).toBe('5px');expect(declaration('.mobile-message-tools__trigger i','mask')).toBe('var(--native-presence-unknown-mask) center / contain no-repeat');expect(declaration('.mobile-message-tools__trigger i','border-radius')).toBeUndefined()
@@ -34,7 +35,7 @@ it('the original phone mailbox applies distinct semantic controls and state mask
  expect(close.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('action.close'))
  const refreshButton=buttons.find(n=>n.textContent?.includes('刷新消息'))!,terminalButton=buttons.find(n=>n.textContent?.includes('查看 Terminal'))!
  expect(refreshButton.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('action.refresh'));expect(terminalButton.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('object.terminal'))
- await click(refreshButton);expect(refresh).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({type:'click',target:refreshButton}));expect(overlay.querySelector('[role=dialog]')).not.toBeNull()
+ await click(refreshButton);expect(refresh).toHaveBeenCalledExactlyOnceWith();expect(overlay.querySelector('[role=dialog]')).not.toBeNull()
  await click(close);expect(overlay.querySelector('[role=dialog]')).toBeNull();await click(trigger);await click([...overlay.querySelectorAll('button')].find(n=>n.textContent?.includes('查看 Terminal'))!);expect(terminal).toHaveBeenCalledExactlyOnceWith();expect(overlay.querySelector('[role=dialog]')).toBeNull();expect(original.semanticStatus).toBe(originalStatus)
  await view.render(<MobileMailbox {...props} connected={false}/>);expect(trigger.getAttribute('aria-label')).toBe('通信记录 · 连接中断 · 最近状态保留');expect(state.dataset.state).toBe('waiting')
 })

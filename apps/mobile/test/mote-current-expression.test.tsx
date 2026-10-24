@@ -1,5 +1,6 @@
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import type { AgentMuxAgentSession } from '@agentmux/core'
 import { parseRpcControlResult, rpcControlResult } from '../../../packages/core/src/rpc-business-codec'
 import { currentMote, moteAppearanceSource } from '../../desktop/test/fixtures/mote-current-expression'

@@ -124,7 +124,7 @@ describe('actual Mote Profile editor → public Files → original native owner'
     expect(await readFile(join(f.path, 'first/SOUL.md'), 'utf8')).toBe('# 第一 Mote 不得改写')
     expect(f.writes).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ hostId, id: workspaceId, path: f.path }), {
       path: 'second/SOUL.md', content: body, expectedRevision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/)
-    })
+    }, { actor: { kind: 'device', id: 'private-original-device' } })
     expect(f.mutations()).toEqual(['file.write'])
     const { moteFileDrafts: _drafts, ...other } = getDeviceWorkface().snapshot().record
     expect(other).toEqual(before)
