@@ -132,6 +132,16 @@ Terminal 的间歇空白、输出观察中断及刷新后恢复，须能沿原 o
 
 该记录是当时的诊断观察，不是第二份 Session／Runtime 健康真值。默认安全投影不得包含 Prompt、终端正文、凭据或任意原始错误文本；原材料若实际留存，沿既有权限与显式读取合同取得。留证异步、有界、去重，慢盘、写失败、截断与保留范围可见；诊断自身失败不阻断原启动、恢复或输入，也不重试业务副作用。公共查询应能从有限最近记录定位原异常，再按原引用读取详情，覆盖独立 Core 与第一方 client，不以仅存在于 Renderer 内存的告示代签历史可查。
 
+### 手机网页的有限观察
+
+手机网页的诊断沿原认证 Relay／forwarding 进入 Main 既有 `client.incident` 档案，不另建手机错误 Store。原 device principal 由认证 owner 提供，documentId、编译 buildId、原文档内容 namespaceDigest、occurrence 与来源时间保真；缺证为未知，不能从当前 HTTP 版本、设备名称或错误文案回填。原 Desktop producer、档案 authority 和记录仍按原合同读取。
+
+首批覆盖原 `space.ls` 成功但 Space 存在 `issue` 字段的 partial，以及原 typed connection-state 的 boundary／state。原调用失败若报送，只接受有限 typed 失败码，不读取任意错误正文。partial 只保存字段存在、数量和有限完整 opaque Space 引用，不保存或分析 issue 文本；完整原因仍沿原 Space CLI 读取。连接观察不升级为 Session 终局或手机输入资格，Native 与手机消费连接分别保其原边界。
+
+Agent 沿既有 `system diagnostics inspect` 的 `client.incident` recent 索引发现原 producer，再以准确 device principal／document／可选 build 和 namespace 过滤，或按返回的原 logId／authority 读取；查询不授予设备管理。报送接纳与档案耐久性分别表达，未报过、暂不可达、保留外与真实空结果不得互相代签。
+
+页面只保有限待报和去重元数据，不复制草稿、图片、消息、堆栈或任意错误正文。实际在途报送和原档案写入分别守各自预算；超界只影响本次诊断，并保可见的覆盖缺口与原 occurrence 重试入口。Main 档案缺失或诊断失败不改变健康手机连接、原业务或 Agent；重试诊断不重发上传、输入或恢复。独立无 Desktop 的 Host 不据此宣称已有历史档案。
+
 ### 对话读取的连续留证
 
 对话延迟须在自然运行中留下有界的元数据阶段，便于用户报告症状后直接回查，不要求用户重开页面、滚动、刷新、重发输入或事前打开采样。正式对话、Focus 预览、输入摘要、移动对话与问题上下文各保自己的消费目的和生命周期；同 Session 的一个 reader 成功不能代签另一个 reader 已更新。

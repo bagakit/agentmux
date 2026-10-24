@@ -117,6 +117,8 @@ typed Metrics 由 [metrics.ts](../../packages/core/src/metrics.ts) 校验，Sett
 
 手机连接的来源为 [Relay framing](../../packages/core/src/public-rpc-relay.ts)、[有限浏览器 Hosted adapter](../../packages/core/src/relay-hosted.ts)、[设备领域类型及严格解析](../../packages/core/src/public-rpc-device.ts)和 [Host 原 Authority 组合](../../apps/host/src/host.ts)。`amux device link` 返回当前完整公有 offer 链接，`device ls` 回读连接与设备事实，`device revoke --device ID` 撤销精确设备；设备命名只沿已认证的 `device hello --name NAME`。GUI 复用原服务，Relay 与手机页面由本机 Host 提供。接入、身份、重连与权限约束唯一沿[《手机版 Relay 连接》](../design/behavior/public-control.md#手机版-relay-连接)，构建成功不代替真机验收。
 
+手机 Web 资源版本与原页面观察由[中立 DTO](../../packages/core/src/mobile-web.ts)、[严格 codec](../../packages/core/src/mobile-web-codec.ts)和 [Host 资产 owner](../../apps/host/src/mobile-assets-owner.ts)持有，`app mobile assets inspect/activate` 经公共服务与 Main 原 Host 反向路由消费同一 owner；真实页面经 [mobile-web producer](../../apps/mobile/src/mobile-web/use-mobile-web-observation.ts)报告编译与原 URL namespace 身份。手机有限诊断经 [Main adapter](../../apps/desktop/src/main/mobile-web-report-owner.ts)进入原 `client.incident` 档案，查询复用 `system diagnostics inspect`；报送只供原认证页面，Agent 不代报。行为分别沿[手机网页诊断](../design/diagnostic-evidence.md#手机网页的有限观察)与原公共控制合同，激活、页面 loaded、用户看到和耐久性不互相代签。
+
 核对能力按同一对象寻找业务类型、实际 owner、服务接线、CLI／Client 消费及验证证据；查看事实、修改状态与执行 Agent 的副作用须各自明确。CLI 与 GUI 是同一业务 owner 的消费面，不成为事实镜像。运行中的 help 只说明该执行版本公开什么；源码、构建、安装与当前实例的身份需分别核对。
 
 ## 维护这张地图
