@@ -30,7 +30,7 @@ async function ready(child: ChildProcess) {
     child.once('exit', code => { clearTimeout(timeout); reject(Error('Private Main exited ' + code + ': ' + errors)) })
   })
 }
-export async function mobileWebFixture() {
+export async function mobileWebFixture(options: { nativeRecord?: boolean } = {}) {
   const ownerKey = 'AGENTMUX_TEST_OWNER_ENTRY', previous = process.env[ownerKey]
   process.env[ownerKey] = resolve(import.meta.dirname, '../fixtures/mobile-web-host.mjs')
   const loader = resolve(import.meta.dirname, '../mobile-web-node-loader.mjs')
@@ -51,6 +51,7 @@ export async function mobileWebFixture() {
     const stopped = once(main, 'exit'); main.kill('SIGTERM'); await stopped; main = undefined
   }
   const relay = async () => {
+    const info = JSON.parse(await readFile(join(native.env.AGENTMUX_STATE_DIRECTORY!, 'mobile-test-owner.json'), 'utf8'))
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'relay', offer: info.offer }, relayKeyPair: generateKeyPair() })
     clients.push(client); await client.call('runtime.owner.identity', {}); return client
   }
@@ -62,10 +63,10 @@ export async function mobileWebFixture() {
       'import {writeFileSync} from "node:fs"; if (!process.argv.includes("--version")) writeFileSync(' + JSON.stringify(capture) + ',JSON.stringify(Object.fromEntries(Object.entries(process.env).filter(([key])=>key.startsWith("AGENTMUX_")))),{mode:0o600}); await import(' + JSON.stringify(original) + ');\n', { mode: 0o700 })
     const session = await client.createAgent({ providerId: 'codex', executorId: 'codex', workspacePath: native.root,
       injectAgentMuxGuide: false, createOperationId: 'mobile-web-private-author', commandOverride: command,
-      env: { AGENTMUX_FAKE_READY_MODE: 'before' } })
+      env: { AGENTMUX_FAKE_READY_MODE: 'before', ...(options.nativeRecord ? { AGENTMUX_FAKE_NATIVE_RECORD: '1', AGENTMUX_FAKE_NATIVE_CONTEXT: 'Original mobile conversation context' } : {}) } })
     const managedEnv = await until(async () => JSON.parse(await readFile(capture, 'utf8').catch(() => '{}')), value => Boolean(value.AGENTMUX_AGENT_CAPABILITY), 'actual managed CLI environment')
     return { native, info, session, managedEnv, client, startMain, stopMain, relay,
       async close() { for (const client of clients) await client.dispose(); await stopMain()
-        try { await client.stopAgent(session.agentSessionId, session.run) } finally { await native.cleanup() } } }
+        try { const current = await native.client(); await current.stopAgent(session.agentSessionId, session.run) } finally { await native.cleanup() } } }
   } catch (error) { for (const client of clients) await client.dispose(); await stopMain(); await native.cleanup(); throw error }
 }

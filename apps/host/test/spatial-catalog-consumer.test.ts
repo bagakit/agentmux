@@ -80,16 +80,18 @@ it('the original selector parser and retained capability still qualify a Headles
   expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
-it('presentation, self resolution and operation inspection retain the original Desktop path', async () => {
+it('domain presentation remains with the Host while self screen and mutation inspection retain their exact owner', async () => {
   const f = await fixture(), client = await f.client()
-  await expect(client.call('space.inspect', { target: { spaceId: 'original-mote' }, presentation: true })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+  const presentation = await client.call('space.inspect', { target: { spaceId: 'original-mote' }, presentation: true })
+  expect(presentation.catalog.spaces).toEqual(f.graph.spaces)
+  expect(presentation.catalog.agentPresentation).toMatchObject([{ agentSessionId: 'original-catalog-agent' }])
   await expect(client.call('space.inspect', { target: { operationId: 'original-mutation' } })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
   await expect(client.call('space.inspect', { target: { regionId: 'self' } })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
   expect((await client.call('space.ls', { target: {} })).catalog).toEqual(core.spatialCatalog(f.graph))
   expect(await readFile(f.spatial.path, 'utf8')).toBe(f.before)
 })
 
-it('an execute owner or an unregistered spatial owner keeps its original public forwarding semantics', async () => {
+it('registered spatial reads keep the Core owner while an unregistered endpoint preserves its declared forwarding', async () => {
   const f = await fixture(), catalog = core.spatialCatalog(f.graph)
   const execute = vi.fn<NonNullable<core.AgentMuxControlServerOptions['execute']>>(async () => ({ operation: 'space.ls', catalog }))
   const rich = new core.AgentMuxControlServer({ socketPath: join(f.original.root, 'rich.sock'), coreClients: () => [], spatialState: f.spatial, execute })
@@ -97,7 +99,7 @@ it('an execute owner or an unregistered spatial owner keeps its original public 
   const richClient = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: rich.path } })
   cleanup.push(() => richClient.dispose())
   expect((await richClient.call('space.ls', { target: {} })).catalog).toEqual(catalog)
-  expect(execute).toHaveBeenCalledTimes(1)
+  expect(execute).not.toHaveBeenCalled()
   const forward = vi.fn(async () => ({ catalog }))
   const bare = new core.AgentMuxControlServer({ socketPath: join(f.original.root, 'bare.sock'), coreClients: () => [],
     forwardControl: forward as NonNullable<core.AgentMuxControlServerOptions['forwardControl']> })

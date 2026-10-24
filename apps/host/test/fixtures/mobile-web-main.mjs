@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { AgentMuxControlServer, AgentMuxFileAgentSessionStore, defaultAgentMuxControlSocketPath } from '../../../../packages/core/src/index.ts'
+import { AgentMuxControlServer, AgentMuxSpatialStateStore, AgentMuxFileAgentSessionStore, defaultAgentMuxControlSocketPath } from '../../../../packages/core/src/index.ts'
 import { RuntimeController } from '../../../desktop/src/main/runtime-controller.ts'
 import { connectDesktopAgentMuxHost, desktopBusinessSocketPath } from '../../../desktop/src/main/desktop-host.ts'
 import { ClientIncidentArchive } from '../../../desktop/src/main/client-incident-archive.ts'
@@ -11,6 +11,7 @@ for (const { client } of runtime.rpcClients()) await client.readAgentSessions()
 const archive = new ClientIncidentArchive(join(process.env.AGENTMUX_STATE_DIRECTORY, 'mobile-incidents'))
 await archive.flush()
 const server = new AgentMuxControlServer({ socketPath: desktopBusinessSocketPath(),
+  spatialState: new AgentMuxSpatialStateStore(),
   forwardingPeer: { authoritySocketPath: defaultAgentMuxControlSocketPath() },
   coreClients: () => runtime.rpcClients(), clientIncidents: archive, mobileWebReports: mobileWebReportOwner(archive),
   callOriginalCore: (hostId, method, params, context) => runtime.callOriginalCore(hostId, method, params, context) })
