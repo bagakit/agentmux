@@ -120,7 +120,7 @@ export function surveyZoneTopicFacts(catalog: AgentMuxSpaceCatalog, zoneId: stri
 
 /** Stable member preferences are saved verbatim; display coordinates are temporary surface state. */
 export type PersistedSurveyZoneSelection = SurveyZoneSelection
-export function persistedSurveyZoneSelection(selected: SurveyZoneSelection | null): SurveyZoneSelection | null {
+export function persistedSurveyZoneSelection(selected: SurveyZoneSelection | null) {
   const member = ({ tabId, regionId }: SurveyZoneSelection['selection'][number]) => ({ tabId, regionId })
   return selected ? { zoneId: selected.zoneId, selection: selected.selection.map(member), active: selected.active ? member(selected.active) : null } : null
 }
