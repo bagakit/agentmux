@@ -1,3 +1,4 @@
+import { instrumentWorkspaceSource } from './mobile-workspace-mutations.mjs'
 import { instrumentContentSource } from './mobile-content-mutations.mjs'
 import { instrumentDiscoverySource } from './mobile-discovery-mutations.mjs'
 import { registerHooks } from 'node:module'
@@ -46,7 +47,7 @@ registerHooks({
     const result = next(url, context)
     if (!url.startsWith('file:')) return result
     const path = relative(root, fileURLToPath(url))
-    const discoverySource = instrumentDiscoverySource(instrumentContentSource(String(result.source), path), path)
+    const discoverySource = instrumentWorkspaceSource(instrumentDiscoverySource(instrumentContentSource(String(result.source), path), path), path)
     if (!observed.test(path)) return discoverySource === String(result.source) ? result : { ...result, source: discoverySource }
     const original = String(result.source); let source = discoverySource
     if (mutant && mutants[mutant][0] === path) {

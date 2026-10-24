@@ -8,7 +8,7 @@ vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 import { GRAPHITE_THEME, themeValue } from '@agentmux/client-ui/theme'
 import type { AgentMuxAppearanceObservation } from '@agentmux/core'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/core/src/control-host.js'
-import { themeObservation } from '../src/main/theme-observation.js'
+import { themeObservation } from '@agentmux/host/theme-observation'
 import { configOwnerFixture, deferred } from './helpers/config-owner-fixture.js'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 
