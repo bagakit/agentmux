@@ -54,7 +54,8 @@ function Scene({ surface, generation }: { surface: 'desktop' | 'mobile' | 'focus
   </main></DesktopClientUiProvider>
 }
 const anchorHost = document.createElement('section'); anchorHost.className = 'recent-focus primary-reading-probe__focus-anchor'
-anchorHost.innerHTML = '<header class="recent-focus__header"></header><button id="focus-anchor" class="recent-focus__message">原协作记录</button>'
+anchorHost.style.width = 'calc(100vw - 32px)'; anchorHost.style.bottom = '200px'
+anchorHost.innerHTML = '<header class="recent-focus__header"><span>原协作记录</span></header><button id="focus-anchor" class="recent-focus__message" aria-label="原协作记录" style="left:50%;width:16px;height:16px"></button>'
 document.body.append(anchorHost)
 Object.assign(window, { a2aPrimaryReading: {
   ready: true,
@@ -62,6 +63,8 @@ Object.assign(window, { a2aPrimaryReading: {
     if (pending.length) throw Error('Do not discard an unsettled private original read')
     calls.length = 0; copied.length = 0; updateThemeSelection({ appAppearance: theme })
     anchorHost.hidden = surface !== 'focus'
+    // Product chrome explicitly sets display:flex; the private anchor must not cover another reader's input.
+    anchorHost.style.display = surface === 'focus' ? 'flex' : 'none'
     flushSync(() => root.render(<Scene key={generation} surface={surface} generation={generation} />))
     return { messageId: scene.messageId, notificationId: scene.notificationId, messages: scene.originals.map(({ envelope }) => ({ messageId: envelope.messageId, senderSessionId: envelope.senderSessionId, body: envelope.body })), body: scene.body, wire: scene.wire, draft, reference: scene.reference }
   },

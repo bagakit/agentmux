@@ -2,7 +2,7 @@ const { app, BrowserWindow } = require('electron')
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path'), crypto = require('node:crypto')
 const [html, privateRoot, evidence] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
-const receipt = { schema: 'agentmux.a2a-primary-reading-render.v1', passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], scenarios: [], userRunTouched: false, consoleErrors: [] }
+const receipt = { schema: 'agentmux.a2a-primary-reading-render.v1', passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], scenarios: [], operations: [], userRunTouched: false, consoleErrors: [] }
 let win
 const evaluate = expression => win.webContents.executeJavaScript(expression)
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -16,7 +16,9 @@ async function waitFor(expression) {
 }
 async function painted() { await evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await delay(40) }
 async function click(expression) {
-  const point = await evaluate(`(()=>{const e=${expression};if(!e)throw Error('Missing original input target');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+  const target = await evaluate(`(()=>{const e=${expression};if(!e)throw Error('Missing original input target');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect(),point={x:r.x+r.width/2,y:r.y+r.height/2},hit=document.elementFromPoint(point.x,point.y);if(hit!==e&&!e.contains(hit))throw Error('Original input target is covered by '+(hit?.tagName??'outside viewport')+'#'+(hit?.id??''));return{point,hit:{tag:hit.tagName,id:hit.id}}})()`)
+  const point = target.point
+  receipt.operations.push({ kind: 'native-pointer-click', target: expression, ...target })
   for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
   await painted()
 }
@@ -32,13 +34,17 @@ async function scenario(surface, theme, width, generation) {
   await waitFor('a2aPrimaryReading.facts().pending===2')
   const edge = theme === 'dark' && width === 360
   if (edge) {
+    receipt.stage.action = 'focus-existing-draft'
     await click(`document.querySelector('[aria-label="Unsent draft"]')`)
+    assert.equal(await evaluate('a2aPrimaryReading.facts().draftFocused'), true, 'The original draft received native pointer focus before settling the failed read')
     receipt.stage.action = 'failed-read'; await evaluate(`a2aPrimaryReading.settle('failure');a2aPrimaryReading.settle('original')`); await waitFor(retry)
     assert.equal(await evaluate(`document.querySelectorAll('[data-a2a-original-message-id]').length`), 1, 'Another sender remains readable during one failed read')
     assert.equal(await evaluate('a2aPrimaryReading.facts().draftFocused'), true, 'Read failure preserves existing draft focus')
     await frame(`${surface}-${theme}-${width}-failure`)
     await click(retry); await waitFor('a2aPrimaryReading.facts().pending===1')
+    receipt.stage.action = 'refocus-existing-draft'
     await click(`document.querySelector('[aria-label="Unsent draft"]')`)
+    assert.equal(await evaluate('a2aPrimaryReading.facts().draftFocused'), true, 'The original draft received native pointer focus before settling the successful retry')
   }
   receipt.stage.action = 'read-original'; await evaluate(`a2aPrimaryReading.settle('original')${edge ? '' : ";a2aPrimaryReading.settle('original')"}`)
   await waitFor(`document.querySelectorAll('[data-a2a-original-message-id]').length===2`); await painted()
