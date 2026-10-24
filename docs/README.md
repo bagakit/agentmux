@@ -44,6 +44,7 @@
 | Renderer 更新、应用安装与 Native 保全 | [Desktop 更新架构](architecture/desktop-updates.md) |
 | 并行开发中快速打包、安装、续做和清理 | [macOS 打包指南](guides/macos-packaging.md) |
 | 防止流程失败阻断健康能力 | [红线判定](../RED-LINES.md) |
+| 原生系统能力的需求与模块边界 | [AgentMux 原生层](design/behavior/native-desktop.md) · [目标架构](design/native-desktop-architecture.md) |
 | 新功能需要哪些 JSON-RPC／CLI、如何接线交付 | [公共能力贡献约定](guides/public-capability-contributions.md) |
 | 跨模块观测诊断、证据与错误码、历史/采样接入边界 | [Diagnostic Evidence 设计](design/diagnostic-evidence.md) |
 | 模块接入统一证据查询 | [Diagnostic Evidence 协议](specs/diagnostic-evidence-protocol.md) · [接入指南](guides/diagnostic-evidence-integration.md) |
