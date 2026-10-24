@@ -64,7 +64,7 @@ const image = browserPngFromBytes(bytes)
 async function clipboardHandlers() {
   const { getDesktopNativeUiOwner } = await import('../src/main/native-desktop-owner')
   const handlers = new Map<string, (...args: any[]) => any>(), trust = vi.fn()
-  registerNativeDesktopIpc({ home: '/unused-platform-clipboard', native: getDesktopNativeUiOwner,
+  registerNativeDesktopIpc({ capture: vi.fn(async () => null), native: getDesktopNativeUiOwner,
     handle: (channel, handler) => { handlers.set(channel, handler) }, trust })
   expect(host.create).not.toHaveBeenCalled()
   return { call: (channel: string, ...args: unknown[]) => handlers.get(channel)!({}, ...args), trust }

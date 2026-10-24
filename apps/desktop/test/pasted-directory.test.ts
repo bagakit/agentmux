@@ -12,7 +12,7 @@ import { pastedDirectory } from '../src/main/pasted-directory.js'
 // through the constant rather than re-authoring the literal.
 
 const IPC = fileURLToPath(new URL('../src/main/ipc.ts', import.meta.url))
-const SCREENSHOT = fileURLToPath(new URL('../src/main/composer-screenshot.ts', import.meta.url))
+const SCREENSHOT = fileURLToPath(new URL('../src/main/pasted-image-write.ts', import.meta.url))
 
 describe('pastedDirectory — one derivation, target frozen', () => {
   it('derives exactly <home>/.agentmux/pasted — the落盘目标 verbatim', () => {

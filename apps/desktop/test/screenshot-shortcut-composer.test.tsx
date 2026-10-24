@@ -14,7 +14,9 @@ import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
-import { runScreenshotShortcut } from '../src/renderer/src/lib/screenshot-shortcut-target'
+import { installScreenshotAttachmentReceiver } from '../src/renderer/src/lib/screenshot-attachment'
+import { GlobalScreenshot } from '../src/main/global-screenshot'
+import { ScreenCapture } from '../src/main/screen-capture'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { registerNativeDesktopIpc } from '../src/main/native-desktop-ipc'
 import { readPastedImage } from '../src/main/pasted-image-read'
@@ -31,20 +33,32 @@ beforeEach(async () => {
 })
 afterEach(async () => { for (const control of externalControls.splice(0)) control.remove(); await rm(home, { recursive: true, force: true }) })
 
-function connect(captureScreenshot: ReturnType<typeof vi.fn>, focusState: 'confirmed' | 'unknown' = 'confirmed') {
+let globalCapture: GlobalScreenshot
+let focused = true
+let disposeReceiver: (() => void) | undefined
+function connect(captureScreenshot: ReturnType<typeof vi.fn>) {
+  focused = true
+  vi.spyOn(document, 'hasFocus').mockImplementation(() => focused)
   const handlers = new Map<string, (...args: any[]) => any>()
-  registerNativeDesktopIpc({ home, native: () => ({ captureScreenshot, readClipboardText: vi.fn(), writeClipboardText: vi.fn(), writeClipboardImage: vi.fn() }),
+  const clipboard = vi.fn(async () => {}), reportIssue = vi.fn()
+  const native = { captureScreenshot, readClipboardText: vi.fn(), writeClipboardText: vi.fn(), writeClipboardImage: clipboard }
+  const capture = new ScreenCapture({ home, native: () => native, edit: vi.fn(), reportIssue })
+  registerNativeDesktopIpc({ capture: () => capture.capture(true), native: () => native,
     handle: (channel, handler) => { handlers.set(channel, handler) }, trust: () => {} })
   const saved = vi.spyOn(api.ui, 'captureScreenshot').mockImplementation(() => handlers.get('ui:captureScreenshot')!({}))
   vi.spyOn(api.ui, 'readPastedImage').mockImplementation(path => readPastedImage(home, path))
-  const focus = vi.spyOn(api.ui.workbenchWindows, 'call').mockImplementation(async (method, params) => ({
-    windows: [], recordedOperation: { ...params, method, state: focusState, message: focusState === 'unknown' ? 'Original focus unconfirmed' : null }
-  }) as never)
-  return { saved, focus }
+  const frame = { executeJavaScript: vi.fn(async (code: string) => new Function('window', 'return ' + code)(window)) }
+  const nativeWindow = { isDestroyed: () => false, isFocused: () => focused, isMinimized: () => !focused }
+  globalCapture = new GlobalScreenshot({ contents: { isDestroyed: () => false, mainFrame: frame } as never,
+    focusedWindow: () => focused ? nativeWindow as never : null, windowForDocument: () => nativeWindow as never,
+    capture: attach => capture.capture(attach), reportIssue })
+  disposeReceiver?.(); disposeReceiver = installScreenshotAttachmentReceiver(window)
+  return { saved, clipboard, reportIssue, frame }
 }
+afterEach(() => { disposeReceiver?.(); disposeReceiver = undefined })
 
-async function renderComposer(launcher: boolean, sessionId = 'agent-1', visible = true) {
-  await dom.render(<WorkbenchDocumentContext.Provider value={{ document, window: originalDocument }}>
+async function renderComposer(launcher: boolean, sessionId = 'agent-1', visible = true, generation = originalDocument.documentGeneration) {
+  await dom.render(<WorkbenchDocumentContext.Provider value={{ document, window: { ...originalDocument, documentGeneration: generation } }}>
     {launcher ? <NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={visible} /> : <AgentSessionComposer sessionId={sessionId} visible={visible} />}
   </WorkbenchDocumentContext.Provider>)
   const node = dom.container.querySelector<HTMLElement & { editor: Editor }>('.tiptap')
@@ -68,222 +82,122 @@ async function mount(launcher: boolean) {
 }
 async function begin() {
   let pending!: Promise<void>
-  await act(async () => { pending = runScreenshotShortcut(); void pending.catch(() => {}) })
+  await act(async () => { pending = globalCapture.run(); void pending.catch(() => {}) })
   return { pending }
 }
 async function settlePreview() {
   await act(async () => { await Promise.all(vi.mocked(api.ui.readPastedImage).mock.results.map(result => result.value)) })
 }
 
-it.each([false, true])('the real %s Composer focus claims the shortcut, saves original PNG, maps its bookmark and preserves Undo', async launcher => {
+it.each([false, true])('the real %s focused message input pins its bookmark and receives the same clipboard PNG with Undo', async launcher => {
   let finish!: (value: typeof captured) => void
   const native = vi.fn(() => new Promise<typeof captured>(resolve => { finish = resolve }))
-  const { saved, focus } = connect(native)
-  const { node, editor, id } = await mount(launcher)
+  const { clipboard, reportIssue } = connect(native)
+  const { editor, id } = await mount(launcher)
   const { pending } = await begin()
-  expect(native).toHaveBeenCalledExactlyOnceWith({ mode: 'selection' })
-  expect(focus).not.toHaveBeenCalled()
+  expect(native).toHaveBeenCalledExactlyOnceWith({ mode: 'selection', allowEditing: true })
   await act(async () => { editor.commands.insertContentAt(1, 'new '); editor.commands.setTextSelection(editor.state.doc.content.size - 1) })
-  const external = document.createElement('button'); external.textContent = 'Private external focus fixture'
-  externalControls.push(external); document.body.append(external)
-  await act(async () => external.focus())
-  expect(document.activeElement).toBe(external)
-  await act(async () => { finish(captured); await expect(pending).resolves.toBeUndefined() })
+  const outside = document.createElement('button'); document.body.append(outside); externalControls.push(outside)
+  await act(async () => outside.focus())
+  await act(async () => { finish(captured); await pending })
   await settlePreview()
-  const path = await saved.mock.results[0]!.value
+  const draft = dom.draft(id)!, path = draft.match(/@([^ ]+\.png)/)?.[1]
   expect(path).toBeTruthy()
   expect(await readFile(path!)).toEqual(bytes)
-  const draft = dom.draft(id)!
   expect(draft).toContain('new alpha')
-  expect(draft).toContain(path)
   expect(draft.indexOf(path!)).toBeLessThan(draft.indexOf('omega'))
-  expect(focus).toHaveBeenCalledExactlyOnceWith('app.window.focus', expect.objectContaining(originalDocument))
-  expect(document.activeElement).toBe(node)
+  expect(clipboard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ dataUrl: 'data:image/png;base64,' + bytes.toString('base64') }))
+  expect(document.activeElement).toBe(outside)
+  expect(reportIssue).not.toHaveBeenCalled()
   await act(async () => editor.commands.undo())
   expect(dom.draft(id)).toBe('new alpha omega')
   expect(useAppStore.getState().sessions[0]?.control).toEqual(composerSession().control)
-  expect(useAppStore.getState().error).toBeNull()
 })
 
-it.each([false, true])('a cancelled native selection does not focus Desktop or change the original %s draft', async launcher => {
-  const native = vi.fn(async () => ({ state: 'cancelled' as const }))
-  const { focus } = connect(native)
+it.each([false, true])('without current input focus the real %s Composer is not an implicit destination', async launcher => {
+  const native = vi.fn(async () => captured), { clipboard } = connect(native)
   const { id } = await mount(launcher)
-  await act(async () => { await runScreenshotShortcut() })
-  expect(native).toHaveBeenCalledExactlyOnceWith({ mode: 'selection' })
+  const outside = document.createElement('button'); document.body.append(outside); externalControls.push(outside)
+  await act(async () => outside.focus())
+  await act(async () => { await globalCapture.run() })
+  expect(clipboard).toHaveBeenCalledOnce()
   expect(dom.draft(id)).toBe('alpha omega')
-  expect(focus).not.toHaveBeenCalled()
-  expect(useAppStore.getState().sessions[0]?.control).toEqual(composerSession().control)
+  await expect(readFile(join(home, '.agentmux', 'pasted'))).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
-it('explicit focus in a remote Composer supersedes the earlier eligible local draft without capturing or inserting there', async () => {
-  const native = vi.fn(async () => ({ state: 'cancelled' as const }))
-  const { saved, focus } = connect(native)
-  const remote = { ...composerSession('remote-draft'), hostId: 'remote',
-    control: { ...composerSession('remote-draft').control, hostId: 'remote' } }
-  useAppStore.setState({ sessions: [composerSession(), remote],
-    agentComposerDrafts: { 'agent-1': 'Local original draft', 'remote-draft': 'Remote original draft' } })
-  await dom.render(<WorkbenchDocumentContext.Provider value={{ document, window: originalDocument }}>
-    <section data-draft="local"><AgentSessionComposer sessionId="agent-1" visible /></section>
-    <section data-draft="remote"><AgentSessionComposer sessionId="remote-draft" visible /></section>
-  </WorkbenchDocumentContext.Provider>)
-  const localNode = dom.container.querySelector<HTMLElement>('[data-draft="local"] .tiptap')!
-  const remoteNode = dom.container.querySelector<HTMLElement>('[data-draft="remote"] .tiptap')!
-  expect(localNode).toBeTruthy(); expect(remoteNode).toBeTruthy()
-  await act(async () => {
-    localNode.focus()
-    localNode.dispatchEvent(new FocusEvent('focusin', { bubbles: true, relatedTarget: document.body }))
-    // Establish that A was an actual usable target before the later B focus.
-    await runScreenshotShortcut()
-  })
-  expect(native).toHaveBeenCalledExactlyOnceWith({ mode: 'selection' })
-  native.mockClear(); saved.mockClear()
-  await act(async () => {
-    remoteNode.focus()
-    remoteNode.dispatchEvent(new FocusEvent('focusin', { bubbles: true, relatedTarget: localNode }))
-  })
-  expect(document.activeElement).toBe(remoteNode)
-  await act(async () => { await expect(runScreenshotShortcut()).rejects.toThrow(/Message Tool|draft|Composer/i) })
-  expect(native).not.toHaveBeenCalled()
-  expect(saved).not.toHaveBeenCalled()
-  expect(focus).not.toHaveBeenCalled()
-  expect(dom.draft('agent-1')).toBe('Local original draft')
-  expect(dom.draft('remote-draft')).toBe('Remote original draft')
-  expect(useAppStore.getState().sessions.map(session => session.control)).toEqual([composerSession().control, remote.control])
-})
-
-it('a late selection cannot attach or focus after the Launcher execution scope changes', async () => {
-  let finish!: (value: typeof captured) => void
-  const { saved, focus } = connect(vi.fn(() => new Promise<typeof captured>(resolve => { finish = resolve })))
-  const { node } = await mount(true)
-  const { pending } = await begin()
-  await act(async () => {
-    useLauncherState.setState(state => ({ sections: { ...state.sections, other: { agents: 'expanded', terminal: 'hidden', browser: 'hidden', note: 'hidden' } } }))
-    useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces,
-      { ...state.config!.workspaces[0]!, id: 'other', name: 'Other Workspace', path: join(home, 'other-workspace') }] },
-      tabs: { ...state.tabs, launcher: { ...state.tabs.launcher!, regions: { ...state.tabs.launcher!.regions,
-        region: { ...state.tabs.launcher!.regions.region!, workspaceId: 'other' } } } } }))
-  })
-  expect(dom.container.querySelector('.tiptap')).toBe(node)
-  let outcome: unknown
-  await act(async () => { finish(captured); try { await pending } catch (error) { outcome = error } })
-  const path = await saved.mock.results[0]!.value
-  expect(await readFile(path!)).toEqual(bytes)
-  expect(dom.draft('region')).toBe('alpha omega')
-  expect(focus).not.toHaveBeenCalled()
-  expect(outcome).toBeInstanceOf(Error)
-  expect(String(outcome)).toContain(path!)
-})
-
-it('a late selection cannot attach to a replacement Session editor or steal its focus', async () => {
-  let finish!: (value: typeof captured) => void
-  const { saved, focus } = connect(vi.fn(() => new Promise<typeof captured>(resolve => { finish = resolve })))
-  const { node } = await mount(false)
-  const { pending } = await begin()
-  await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, composerSession('agent-2')],
-    agentComposerDrafts: { ...state.agentComposerDrafts, 'agent-2': 'Second original draft' } })))
-  const replacement = await renderComposer(false, 'agent-2')
-  expect(replacement).not.toBe(node)
-  let outcome: unknown
-  await act(async () => { finish(captured); try { await pending } catch (error) { outcome = error } })
-  const path = await saved.mock.results[0]!.value
-  expect(await readFile(path!)).toEqual(bytes)
-  expect(dom.draft('agent-1')).toBe('alpha omega')
-  expect(dom.draft('agent-2')).toBe('Second original draft')
-  expect(focus).not.toHaveBeenCalled()
-  expect(outcome).toBeInstanceOf(Error)
-  expect(String(outcome)).toContain(path!)
-})
-
-it('a now-hidden original draft keeps its attachment but never claims a return to the later workface', async () => {
-  let finish!: (value: typeof captured) => void
-  const { saved, focus } = connect(vi.fn(() => new Promise<typeof captured>(resolve => { finish = resolve })))
-  const { node, id } = await mount(false)
-  const { pending } = await begin()
-  const hidden = await renderComposer(false, 'agent-1', false)
-  expect(hidden).toBe(node)
-  let outcome: unknown
-  await act(async () => { finish(captured); try { await pending } catch (error) { outcome = error } })
-  await settlePreview()
-  const path = await saved.mock.results[0]!.value
-  expect(await readFile(path!)).toEqual(bytes)
-  expect(dom.draft(id)).toContain(path!)
-  expect(focus).not.toHaveBeenCalled()
-  expect(outcome).toBeInstanceOf(Error)
-  expect(String(outcome)).toContain(path!)
-  expect(String(outcome)).toMatch(/return|workface|visible|surface/i)
-})
-
-it('a failed native capture preserves the original draft and does not perform a focus action or retry', async () => {
-  const native = vi.fn(async () => ({ state: 'failed' as const, error: { code: 'permission_denied', message: 'Original permission refused' } }))
-  const { focus } = connect(native)
-  const { id } = await mount(false)
-  await act(async () => { await expect(runScreenshotShortcut()).rejects.toThrow('Original permission refused') })
+it.each([false, true])('minimized or external-app focus copies without attaching to the previously focused %s input', async launcher => {
+  const native = vi.fn(async () => captured), { clipboard, frame } = connect(native)
+  const { id } = await mount(launcher)
+  focused = false
+  await act(async () => { await globalCapture.run() })
+  expect(clipboard).toHaveBeenCalledOnce()
+  expect(frame.executeJavaScript).not.toHaveBeenCalled()
   expect(dom.draft(id)).toBe('alpha omega')
-  expect(native).toHaveBeenCalledOnce()
-  expect(focus).not.toHaveBeenCalled()
 })
 
-it.each([[false, 'composing'], [false, 'readOnly'], [true, 'composing'], [true, 'readOnly']] as const)(
-  'the real %s Composer retains saved recovery when late %s rejects insertion', async (launcher, rejection) => {
-    let finish!: (value: typeof captured) => void
-    const native = vi.fn(() => new Promise<typeof captured>(resolve => { finish = resolve }))
-    const { saved, focus } = connect(native)
-    const { node, editor, id } = await mount(launcher)
-    await act(async () => editor.commands.insertContentAt(1, 'new '))
-    expect(dom.draft(id)).toBe('new alpha omega')
-    const { pending } = await begin()
-    await act(async () => {
-      if (rejection === 'composing') node.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '组' }))
-      else editor.setEditable(false, false)
-    })
-    if (rejection === 'composing') expect(editor.view.composing).toBe(true)
-    else expect(editor.isEditable).toBe(false)
-    let outcome: unknown
-    await act(async () => { finish(captured); try { await pending } catch (error) { outcome = error } })
-    const path = await saved.mock.results[0]!.value
-    expect(await readFile(path!)).toEqual(bytes)
-    expect(outcome).toBeInstanceOf(Error)
-    expect(String(outcome)).toContain(path!)
-    expect(String(outcome)).toMatch(/check the original draft.*reference this image/iu)
-    expect((outcome as Error).cause).toBeInstanceOf(Error)
-    expect(String((outcome as Error).cause)).toContain('not accepting this attachment')
-    expect(dom.draft(id)).toBe('new alpha omega')
-    expect(native).toHaveBeenCalledExactlyOnceWith({ mode: 'selection' })
-    expect(focus).not.toHaveBeenCalled()
-    expect(useAppStore.getState().sessions[0]?.control).toEqual(composerSession().control)
-    await act(async () => {
-      if (rejection === 'composing') node.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }))
-      else editor.setEditable(true, false)
-    })
-    await vi.waitFor(() => expect(editor.view.composing).toBe(false))
-    await act(async () => editor.commands.undo())
-    expect(dom.draft(id)).toBe('alpha omega')
-  }
-)
-
-it('a failure before image saving keeps the original error without inventing saved recovery', async () => {
-  const original = new Error('Original native connection ended before a PNG receipt')
-  const native = vi.fn(async () => { throw original })
-  const { focus } = connect(native)
-  const { id } = await mount(false)
-  await act(async () => { await expect(runScreenshotShortcut()).rejects.toBe(original) })
+it.each([false, true])('a cancelled capture makes no attachment or clipboard write in the real %s Composer', async launcher => {
+  const native = vi.fn(async () => ({ state: 'cancelled' as const })), { clipboard } = connect(native)
+  const { id } = await mount(launcher)
+  await act(async () => { await globalCapture.run() })
   expect(dom.draft(id)).toBe('alpha omega')
-  expect(focus).not.toHaveBeenCalled()
-  expect(native).toHaveBeenCalledOnce()
+  expect(clipboard).not.toHaveBeenCalled()
 })
 
-it('an unconfirmed exact document focus does not claim that the saved attachment returned to the draft', async () => {
-  const native = vi.fn(async () => captured)
-  const { saved, focus } = connect(native, 'unknown')
-  const { id } = await mount(false)
-  let outcome: unknown
-  await act(async () => { try { await runScreenshotShortcut() } catch (error) { outcome = error } })
-  await settlePreview()
-  const path = await saved.mock.results[0]!.value
-  expect(dom.draft(id)).toContain(path!)
-  expect(focus).toHaveBeenCalledExactlyOnceWith('app.window.focus', expect.objectContaining(originalDocument))
-  expect(outcome).toBeInstanceOf(Error)
-  expect(String(outcome)).toMatch(/focus|return|window/i)
+it('Survey with no mounted Composer still captures and copies through Main', async () => {
+  const native = vi.fn(async () => captured), { clipboard } = connect(native)
+  await dom.render(<div>Survey workface</div>)
+  await act(async () => { await globalCapture.run() })
   expect(native).toHaveBeenCalledOnce()
+  expect(clipboard).toHaveBeenCalledOnce()
+})
+
+it('a late screenshot never changes the new input after the original scope is replaced', async () => {
+  let finish!: (value: typeof captured) => void
+  const native = vi.fn(() => new Promise<typeof captured>(resolve => { finish = resolve })), { clipboard, reportIssue } = connect(native)
+  await mount(false)
+  const { pending } = await begin()
+  useAppStore.setState({ agentComposerDrafts: { 'agent-1': 'alpha omega', 'agent-2': 'New draft' } })
+  await renderComposer(false, 'agent-2')
+  await act(async () => { finish(captured); await pending })
+  expect(clipboard).toHaveBeenCalledOnce()
+  expect(dom.draft('agent-2')).toBe('New draft')
+  expect(reportIssue).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('saved at') }))
+})
+
+it('native unknown preserves the exact failure and clears only this optional attachment without replay', async () => {
+  const error = new Error('Original native operation outcome unknown')
+  const native = vi.fn(async () => { throw error }), { clipboard } = connect(native)
+  const { id } = await mount(false)
+  await act(async () => { await expect(globalCapture.run()).rejects.toBe(error) })
+  expect(native).toHaveBeenCalledOnce()
+  expect(clipboard).not.toHaveBeenCalled()
+  expect(dom.draft(id)).toBe('alpha omega')
+})
+
+it('same editor in a new document generation never receives the old screenshot', async () => {
+  let finish!: (value: typeof captured) => void
+  const native = vi.fn(() => new Promise<typeof captured>(resolve => { finish = resolve })), { clipboard, reportIssue } = connect(native)
+  const { editor, id } = await mount(false)
+  const { pending } = await begin()
+  const updated = await renderComposer(false, 'agent-1', true, 'replacement-generation')
+  expect(updated.editor).toBe(editor)
+  await act(async () => { finish(captured); await pending })
+  expect(clipboard).toHaveBeenCalledOnce()
+  expect(dom.draft(id)).toBe('alpha omega')
+  expect(reportIssue).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('saved at') }))
+})
+
+it('the explicit Capture button also preserves its original document generation', async () => {
+  let finish!: (value: typeof captured) => void
+  const native = vi.fn(() => new Promise<typeof captured>(resolve => { finish = resolve })), { clipboard, saved } = connect(native)
+  const { editor, id } = await mount(false)
+  await dom.click('.composer-tool--mode')
+  await dom.click('[aria-label="Capture a screen region"]')
+  expect(native).toHaveBeenCalledOnce()
+  const updated = await renderComposer(false, 'agent-1', true, 'replacement-generation')
+  expect(updated.editor).toBe(editor)
+  await act(async () => { finish(captured); await saved.mock.results[0]!.value })
+  expect(clipboard).toHaveBeenCalledOnce()
+  expect(dom.draft(id)).toBe('alpha omega')
+  expect(await readFile((await saved.mock.results[0]!.value)!)).toEqual(bytes)
 })

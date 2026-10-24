@@ -10,12 +10,12 @@ await mkdir(outputRoot, { recursive: true })
 const output = await mkdtemp(join(outputRoot, "run-"))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const desktop = 'apps/desktop/', source = desktop + 'src/', tests = desktop + 'test/'
-const baseline = ['native-desktop-owner.test.ts', 'native-desktop-consumers.test.ts', 'native-composer-consumers.test.tsx', 'composer-screenshot.test.ts',
+const baseline = ['native-desktop-owner.test.ts', 'native-desktop-consumers.test.ts', 'native-composer-consumers.test.tsx', 'screen-capture.test.ts',
   'browser-image.test.ts', 'browser-screenshot-source.test.ts', 'browser-screenshot-workface.test.tsx', 'terminal-multiline-paste.test.tsx',
   'terminal-osc-clipboard.test.ts', 'browser-input-selection-ipc.test.ts'].map(file => tests + file)
 const cases = [
   { id: 'original-main-native-owner', file: source + 'main/ipc.ts',
-    from: "native: getDesktopNativeUiOwner,", to: "native: () => ({ ...getDesktopNativeUiOwner(), writeClipboardText: async () => {} }),",
+    from: "capture: () => screenCapture.capture(true), native: getDesktopNativeUiOwner,", to: "capture: () => screenCapture.capture(true), native: () => ({ ...getDesktopNativeUiOwner(), writeClipboardText: async () => {} }),",
     files: [tests + 'native-desktop-consumers.test.ts'], expected: 'shares one lazy exact application owner' },
   { id: 'ui-macos-native-owner', file: source + 'main/native-desktop-owner.ts',
     from: "process.platform === 'darwin'", to: 'false',
@@ -23,9 +23,9 @@ const cases = [
   { id: 'ui-nonmac-existing-owner', file: source + 'main/native-desktop-owner.ts',
     from: "process.platform === 'darwin'", to: 'true',
     files: [tests + 'native-desktop-owner.test.ts'], expected: 'win32 retains its original Electron clipboard' },
-  { id: 'cancel-is-not-an-attachment', file: source + 'main/composer-screenshot.ts',
+  { id: 'cancel-is-not-an-attachment', file: source + 'main/screen-capture.ts',
     from: "if (result.state === 'cancelled') return null", to: "if (result.state === 'cancelled') return '/fabricated-cancel.png'",
-    files: [tests + 'composer-screenshot.test.ts'], expected: 'treats only the native cancellation receipt as cancellation' },
+    files: [tests + 'screen-capture.test.ts'], expected: 'treats only the native cancellation receipt as cancellation' },
   { id: 'clipboard-image-actual-write', file: source + 'main/native-desktop-ipc.ts',
     from: 'return ports.native().writeClipboardImage(image)', to: 'return Promise.resolve()',
     files: [tests + 'native-desktop-consumers.test.ts'], expected: 'copies the same processed Browser PNG' },

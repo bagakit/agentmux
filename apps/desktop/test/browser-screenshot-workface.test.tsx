@@ -104,7 +104,7 @@ beforeEach(() => {
   bounds = vi.spyOn(api.browser, 'setBounds').mockResolvedValue(undefined)
   nativeImageWrite = vi.fn(async () => {})
   const handlers = new Map<string, (...args: any[]) => any>()
-  registerNativeDesktopIpc({ home: '/unused-browser-image-fixture', native: () => ({ writeClipboardImage: nativeImageWrite,
+  registerNativeDesktopIpc({ capture: vi.fn(async () => null), native: () => ({ writeClipboardImage: nativeImageWrite,
     captureScreenshot: vi.fn(), readClipboardText: vi.fn(), writeClipboardText: vi.fn() }),
     handle: (channel, handler) => { handlers.set(channel, handler) }, trust: () => {} })
   clipboard = vi.spyOn(api.ui, 'writeClipboardImage').mockImplementation(image => handlers.get('ui:writeClipboardImage')!({}, image))

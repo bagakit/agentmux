@@ -124,7 +124,7 @@ beforeEach(async () => {
   nativeRead = vi.fn(async () => originalText)
   nativeWrite = vi.fn(async () => {})
   const handlers = new Map<string, (...args: any[]) => any>()
-  registerNativeDesktopIpc({ home: _hygiene_fixturePath('unused-native-home'), native: () => ({ readClipboardText: nativeRead,
+  registerNativeDesktopIpc({ capture: vi.fn(async () => null), native: () => ({ readClipboardText: nativeRead,
     captureScreenshot: vi.fn(), writeClipboardText: nativeWrite, writeClipboardImage: vi.fn() }),
     handle: (channel, handler) => { handlers.set(channel, handler) }, trust: () => {} })
   vi.spyOn(api.ui, 'readClipboardText').mockImplementation(() => handlers.get('ui:readClipboardText')!({}))
