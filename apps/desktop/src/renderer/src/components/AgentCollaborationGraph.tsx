@@ -9,7 +9,7 @@ import type { CollaborationPulse } from '../lib/use-collaboration-reading'
 import type { CollaborationLayoutBox as CollaborationBox, CollaborationLayoutInput, CollaborationPath } from '../lib/collaboration-layout-engine'
 import { useCollaborationLayout } from '../lib/use-collaboration-layout'
 import { collaborationEnvelope, collaborationVisiblePath } from '../lib/collaboration-map-geometry'
-import { COLLABORATION_DETAIL_START, COLLABORATION_OVERVIEW_MARK_SIZE, collaborationCameraDuration, collaborationMapLod, collaborationOverviewScale, collaborationVisibleHull } from '../lib/collaboration-map-lod'
+import { COLLABORATION_DETAIL_START, COLLABORATION_OVERVIEW_MARK_SIZE, collaborationCameraDuration, collaborationIdentityInk, collaborationMapContentInk, collaborationMapLod, collaborationOverviewScale, collaborationVisibleHull } from '../lib/collaboration-map-lod'
 import { collaborationCameraTarget, COLLABORATION_OVERVIEW_ZOOM, type CollaborationLocate } from '../lib/collaboration-map-camera'
 import { COLLABORATION_ACTIVITY_MS, collaborationNodeSize, collaborationRecency, collaborationAgentName, collaborationAgentGlyph } from '../lib/collaboration-map-presentation'
 import { useAgentInformationPreview } from './AgentInformationPreview'
@@ -49,19 +49,22 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
   const recency = collaborationRecency(agent.lastActivityAt), label = collaborationAgentName(agent)
   const tier = agent.tier ?? (agent.context ? 'active' : 'unknown')
   const detail = agent.context && tier === 'active' ? lod.detail : 0
-  const projectedLayer = detail >= .5 ? 'detail' : 'identity', heldLayer = readingLayer ?? focusedLayer, owner = heldLayer ?? projectedLayer
-  const identityOpacity = heldLayer ? Number(owner === 'identity') : 1 - detail
-  const detailOpacity = heldLayer ? Number(owner === 'detail') : detail
-  const focusProxy = owner === 'detail' && detail < .5
+  const contentInk = collaborationMapContentInk(detail)
+  const projectedLayer = contentInk.detail > 0 ? 'detail' : 'identity', heldLayer = readingLayer ?? focusedLayer, owner = heldLayer ?? projectedLayer
+  const identityOpacity = heldLayer ? Number(owner === 'identity') : contentInk.identity
+  const detailOpacity = heldLayer ? Number(owner === 'detail') : contentInk.detail
+  const focusProxy = Boolean(heldLayer) && owner === 'detail' && detail < .5
   const glyph = collaborationAgentGlyph(agent)
   const hull = collaborationVisibleHull(data.box, zoom, glyph.overviewRadius, glyph.pointRadius), markScale = collaborationOverviewScale(data.box, zoom)
+  const identityInk = collaborationIdentityInk(hull.width, zoom, lod.identity, markScale,
+    glyph.identity ? (22 - 2 * lod.identity) / 2 : 6 + (recency.radius - 6) * lod.identity)
   return <div ref={root} className={`collaboration-agent collaboration-agent--${tier}${detail < 1 ? ' collaboration-agent--overview' : ''} nodrag nopan`} data-collaboration-agent={agent.id} data-overview={overview || undefined} data-reading={Boolean(readingLayer) || undefined}
-    style={{ '--collaboration-mark-scale': markScale, '--collaboration-identity': lod.identity, '--collaboration-detail': detail } as CSSProperties}
+    style={{ '--collaboration-mark-scale': markScale, '--collaboration-identity': lod.identity, '--collaboration-detail': detail, '--collaboration-avatar-center': `${identityInk.avatarCenter}px` } as CSSProperties}
     onPointerEnter={() => data.onPreview(true)} onPointerLeave={() => data.onPreview(false)} onFocusCapture={event => { data.onPreview(true); setFocusedLayer((event.target as HTMLElement).closest<HTMLElement>('[data-map-layer]')?.dataset.mapLayer as 'identity' | 'detail' ?? null) }}
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) { setFocusedLayer(null); data.onPreview(false) } }}>
     <div className="collaboration-agent__body" data-selected={data.selected || undefined} style={{ left: hull.x - data.box.x, top: hull.y - data.box.y, width: hull.width, height: hull.height, borderRadius: hull.radius }}>
       <div className="collaboration-agent__identity-layer" data-map-layer="identity" inert={owner !== 'identity'} aria-hidden={owner !== 'identity'} style={{ opacity: identityOpacity, '--collaboration-mark-scale': markScale } as CSSProperties}>
-        <AgentMark data={data} label={label} tier={tier} recency={recency} overview={overview} identityProgress={lod.identity} markScale={markScale} />
+        <AgentMark data={data} label={label} tier={tier} recency={recency} overview={overview} identityProgress={lod.identity} markScale={markScale} identityInk={identityInk} />
       </div>
       {agent.context && (tier === 'active' && detail > 0 || owner === 'detail') ? <div className="collaboration-agent__detail-layer" data-map-layer="detail" data-focus-proxy={focusProxy || undefined} inert={owner !== 'detail'} aria-hidden={owner !== 'detail'} style={{ opacity: detailOpacity }}>
         <FocusContextCardBody context={agent.context} identity={data.identity} goalLinks={data.goals} selected={data.selected} onSelect={data.onSelect} onOpenWorkface={data.onOpen} />
@@ -78,7 +81,7 @@ function ActivityMark({ activity }: { activity: NodeActivity }) {
   return <span key={pulse.id} className="collaboration-activity" data-kind={pulse.kind} aria-label={label} title={label}
     style={{ animationDelay: `${delay}ms` }}><span>{pulse.kind === 'communication' ? direction === 'sent' ? 'Sent ↗' : 'Received ↙' : 'Updated'}</span></span>
 }
-function AgentMark({ data, label, tier, recency, overview = false, identityProgress = 1, markScale = 1 }: { data: AgentData; label: string; tier: string; recency: ReturnType<typeof collaborationRecency>; overview?: boolean; identityProgress?: number; markScale?: number }) {
+function AgentMark({ data, label, tier, recency, overview = false, identityProgress = 1, markScale = 1, identityInk }: { data: AgentData; label: string; tier: string; recency: ReturnType<typeof collaborationRecency>; overview?: boolean; identityProgress?: number; markScale?: number; identityInk: ReturnType<typeof collaborationIdentityInk> }) {
   const context = data.agent.context, { config } = useContext(ExecutorIdentityContext)
   const providerId = data.agent.providerId ?? context?.providerId, executorId = data.agent.executorId ?? context?.executorId
   const appearance = executorId ? config?.executors[executorId]?.avatar ?? config?.appearance.agentAvatars?.[executorId] : undefined
@@ -89,7 +92,7 @@ function AgentMark({ data, label, tier, recency, overview = false, identityProgr
     <span className="collaboration-agent__avatar" style={{ '--collaboration-avatar-scale': markScale + (1 - markScale) * identityProgress } as CSSProperties}>
       {showIdentity ? <ResolvedAgentAvatar label={label} providerId={providerId!} executorId={executorId} appearance={appearance} size={22 - 2 * identityProgress} /> : null}
       <span className="collaboration-agent__point" data-identity={showIdentity || undefined} style={{ width: (6 + (recency.radius - 6) * identityProgress) * 2, height: (6 + (recency.radius - 6) * identityProgress) * 2, opacity: recency.depth }} />
-    </span>{!overview && tier !== 'closed' ? <strong style={{ opacity: identityProgress }}>{label}</strong> : null}
+    </span>{!overview && tier !== 'closed' ? <strong style={{ left: identityInk.nameLeft, opacity: identityInk.opacity, fontSize: identityInk.fontSize }}>{label}</strong> : null}
   </button>
 }
 const AreaNodeView = memo(function AreaNodeView({ data }: NodeProps<AreaNode>) {
