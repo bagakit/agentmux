@@ -1,3 +1,4 @@
+declare const __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: { kind: string; icon: string | null }
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { fixturePath } from '../../../../../test/fixture-values.mjs'
 import { createRoot } from 'react-dom/client'
@@ -44,9 +45,9 @@ const catalog = {
     { spaceId: 'mote-original', zoneId: 'zone-mote', workspaceId: 'workspace-original', displayWorkspaceId: 'display-original', groupId: 'group-mote', tabId: 'tab-mote', regionId: 'region-mote' },
     { spaceId: 'mote-original', zoneId: 'zone-mote', workspaceId: 'workspace-original', displayWorkspaceId: 'display-original', groupId: 'group-mote', tabId: 'tab-mote', regionId: 'region-waiting' },
     { spaceId: 'other-space', zoneId: 'zone-other', workspaceId: 'workspace-original', displayWorkspaceId: 'display-original', groupId: 'group-other', tabId: 'tab-result', regionId: 'region-result' }],
-  agentPresentation: [{ agentSessionId: main.agentSessionId, name: '日常协作', project: '我的 Mote', group: 'working', state: 'working', detail: '正在整理你的想法', providerId: 'codex', recap: { text: '先保留原始材料，再比较两个方案。', source: 'native-hook' } },
+  agentPresentation: [{ agentSessionId: main.agentSessionId, name: '日常协作', project: '我的 Mote', group: 'working', state: 'working', stateMark: 'working', stateLabel: '执行中', projectGroup: { key: 'original-mote-project', projectId: 'mote-project', hostId: 'local', name: '我的 Mote', spaceId: 'mote-original' }, detail: '正在整理你的想法', providerId: 'codex', recap: { text: '先保留原始材料，再比较两个方案。', source: 'native-hook' } },
     { agentSessionId: waiting.agentSessionId, name: '资料整理', project: '我的 Mote', group: 'attention', state: 'waiting', detail: '等待本次权限回应', providerId: 'codex', recap: { text: '请确认这次资料读取；其他工作继续。', source: 'native-hook' } },
-    { agentSessionId: result.agentSessionId, name: '实验建议', project: '并行项目', group: 'results', state: 'done', detail: '有新结果', providerId: 'codex', recap: { text: '已形成一份可直接阅读的建议，等待你决定下一步。', source: 'native-hook' } }],
+    { agentSessionId: result.agentSessionId, name: '实验建议', project: '并行项目', group: 'results', state: 'done', stateMark: 'results', stateLabel: '已完成', projectGroup: { key: 'original-parallel-project', projectId: 'parallel-project', hostId: 'local', name: '并行项目', spaceId: 'space-original' }, detail: '有新结果', providerId: 'codex', recap: { text: '已形成一份可直接阅读的建议，等待你决定下一步。', source: 'native-hook' } }],
   appearance: [{ spaceId: 'mote-original', preset: 'primary-mote', expression: 'thinking' }],
   motePresentation: [{ spaceId: 'mote-original', content: { zoneId: 'zone-mote', hostId: 'host-original', workspaceId: 'workspace-original', workspacePath: fixturePath("mote-original") },
     quickMode: { status: 'saved', version: 'sha256:' + 'b'.repeat(64), defaults: { executorId: 'fixture-original', recovery: 'on-open', conversation: {
@@ -163,6 +164,8 @@ const client = {
       return { hostId: 'local', sourceHostId: original.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId,
         workspacePath: original.workspacePath, skills: [{ name: 'review-evidence', description: '核对原始资料与实验依据', path: fixturePath('skills/review-evidence/SKILL.md'), source: 'project' }] }
     }
+    if (method === 'settings.executors.ls') return { items: [{ id: 'fixture-original', value: { name: 'Codex' } }], partial: true }
+    if (method === 'space.inspect' && (params.target as { spaceId?: string }).spaceId === 'space-original') return { catalog: { ...catalog, appearance: [...catalog.appearance!, { spaceId: 'space-original', preset: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.kind, image: { dataUrl: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.icon } }] } }
     if (method === 'space.ls' || method === 'space.inspect') return { catalog }
     if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: [], unavailable: [] }
     if (method === 'agent.inspect') return { session: sessions.find(session => session.agentSessionId === (params.target as { agentSessionId: string }).agentSessionId), displayName: { override: '原 Agent', availability: 'observed' } }

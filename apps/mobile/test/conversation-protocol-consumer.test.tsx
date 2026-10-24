@@ -87,7 +87,7 @@ async function authenticatedConsumer(core: AgentMuxClient, root: string, agentSe
  * This is neither vendor Native qualification nor a physical mobile-device assertion. */
 async function authenticatedFixture(request?: AgentMuxInteractionRequest, retainedResponse?: AgentMuxInteractionResponse) {
   const root = await mkdtemp(join(tmpdir(), 'mobile-conversation-protocol-'))
-  closes.push(() => rm(root, { recursive: true, force: true }))
+  closes.push(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
@@ -391,7 +391,7 @@ it('keeps original older-window text and selection while another entry records a
   await vi.waitFor(() => expect(view.element.textContent).toContain('Original asynchronous question'))
   await vi.waitFor(() => expect(button(view.element, '更早消息').disabled).toBe(false))
   await click(button(view.element, '更早消息'))
-  await vi.waitFor(() => expect(view.element.textContent).toContain('Current reading window'))
+  await vi.waitFor(() => expect(view.element.textContent).toContain('阅读范围与来源'))
   const row = view.element.querySelector<HTMLElement>('[data-native-record-id="exact-async-record"]')!
   const originalText = row.querySelector('.conversation-message__body') ?? row.querySelector('p')!
   const selection = window.getSelection()!, range = document.createRange(); range.selectNodeContents(originalText); selection.removeAllRanges(); selection.addRange(range)
@@ -682,13 +682,15 @@ it('authenticated Mobile reads confirmed source labels from the original Core ev
   await f.store.applyTimelineMutation({type:'append',agentSessionId:sid,item})
   const history=vi.mocked(f.core.providers.get('codex').readSessionHistoryPage!),raw=vi.spyOn(f.store,'readCapturedHistory')
   const view=await mount(f.surface())
-  await vi.waitFor(()=>expect(view.element.querySelectorAll('.log-turn__meta [data-conversation-source]')).toHaveLength(2))
-  expect(view.element.querySelectorAll('[data-conversation-event-id]')).toHaveLength(1)
-  expect([...view.element.querySelectorAll<HTMLElement>('.log-turn__meta [data-conversation-source]')].map(n=>n.dataset.conversationSource).sort()).toEqual(['native','native-hook'])
-  expect(view.element.textContent).toContain('原生对话');expect(view.element.textContent).not.toContain('Authenticated Terminal')
+  await vi.waitFor(()=>expect(view.element.querySelectorAll('[data-conversation-event-id]')).toHaveLength(1))
+  expect(view.element.querySelectorAll('.log-turn__meta [data-conversation-source]')).toHaveLength(0)
   const counts=[history.mock.calls.length,raw.mock.calls.length]
-  expect(counts[0]).toBeGreaterThan(0); expect(counts[1]).toBeGreaterThan(0)
   await click(view.element.querySelector<HTMLButtonElement>('.conversation-input-details__toggle')!)
+  await vi.waitFor(()=>expect(view.element.querySelectorAll('.conversation-input-details__body [data-conversation-source]')).toHaveLength(2))
+  expect(view.element.querySelectorAll('[data-conversation-event-id]')).toHaveLength(1)
+  expect([...view.element.querySelectorAll<HTMLElement>('.conversation-input-details__body [data-conversation-source]')].map(n=>n.dataset.conversationSource).sort()).toEqual(['native','native-hook'])
+  expect(view.element.textContent).toContain('原生对话');expect(view.element.textContent).not.toContain('Authenticated Terminal')
+  expect(counts[0]).toBeGreaterThan(0); expect(counts[1]).toBeGreaterThan(0)
   expect([history.mock.calls.length,raw.mock.calls.length]).toEqual(counts)
   expect(view.element.querySelector('[aria-label="Native asynchronous question"]')).not.toBeNull()
   expect(f.writes).toHaveLength(0);expect(f.submit).not.toHaveBeenCalled();expect(f.reply).not.toHaveBeenCalled()
