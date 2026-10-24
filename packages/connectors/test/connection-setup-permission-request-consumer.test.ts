@@ -109,7 +109,8 @@ it('SDK and compiled CLI review exact App rows then request only missing origina
   expect(current.applicationConfiguration!.capability).toBe('enabled')
   expect(current.applicationConfiguration!.actions).toEqual([])
   expect(current.applicationConfiguration).not.toHaveProperty('granted')
-  expect((await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).connection).toEqual(f.saved.connection)
+  expect((await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).connection).toEqual({ ...f.saved.connection,
+    capabilities: { roomCreation: true, roomDiscovery: true, roomLink: true } })
 }, 30_000)
 
 it('offers only conversation permissions and keeps retired Mote permission selection read-only', async () => {
