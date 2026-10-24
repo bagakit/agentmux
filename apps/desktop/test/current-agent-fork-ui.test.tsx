@@ -11,7 +11,8 @@ import { useAgentCurrentForkControls } from '../src/renderer/src/components/Agen
 import { OpenDestinationBar } from '../src/renderer/src/components/OpenDestinationBar'
 import * as DropdownMenu from '../src/renderer/src/components/HoverDropdownMenu'
 import { currentForkRequest, currentForkUnavailableReason, reviewCurrentFork, type CurrentForkSession } from '../src/renderer/src/lib/agent-current-fork'
-vi.mock('../src/renderer/src/store', async () => ({ useAppStore: (await import('zustand')).create(() => ({})) }))
+import { parseSpaceControlRequest } from '../../../packages/core/src/space-control-parser'
+vi.mock('../src/renderer/src/store', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/store')>(), useAppStore: (await import('zustand')).create(() => ({})) }))
 const origin = { workspaceId: 'display-workspace', tabGroupId: 'original-group', tabId: 'original-tab', regionId: 'original-region', sessionId: 'original-session' }
 const handle = { kind: 'provider' as const, providerId: 'protocol-provider', sessionId: 'original-native', transcriptPath: _hygiene_fixturePath("private/current.jsonl") }
 function session(extra = {}): CurrentForkSession { return { id:'original-session',kind:'agent',hostId:'local',providerId:'protocol-provider',executorId:'private',workspacePath:_hygiene_fixturePath("private"),control:{kind:'agent',hostId:'local',agentSessionId:'original-session',run:{runId:'original-run'}},nativeHandle:handle,capabilities:{providerFork:{current:true}},...extra } as any }
@@ -135,4 +136,31 @@ it('keeps an inspected opened receipt when the older creation reply later report
   expect(document.body.textContent).toContain('Fork opened')
   expect(document.body.textContent).toContain('new-session')
   expect(execute.mock.calls.filter(([request]) => request.operation === 'agent.open')).toHaveLength(1)
+})
+
+it('the actual fork controls keep the renderer alias in its Region and send the canonical original Core source', async () => {
+  const canonical = session({ control: { ...session().control, agentSessionId: 'canonical-original-session' } })
+  useAppStore.setState({ sessions: [canonical] })
+  execute.mockImplementation(async request => request.operation === 'space.inspect'
+    ? { operation: 'space.inspect', catalog: catalog({ regions: [{ ...catalog().regions[0], agentSessionId: canonical.control.agentSessionId }] }) }
+    : { ...opened, ...parseSpaceControlRequest(request) })
+  await render(canonical); await click('Fork current conversation…'); await choose('right')
+  expect(execute).toHaveBeenCalledTimes(2)
+  expect(execute.mock.calls[1]?.[0]).toMatchObject({ operation: 'agent.open', content: { kind: 'fork-agent', source: {
+    agentSessionId: canonical.control.agentSessionId, expectedRun: canonical.control.run, expectedNativeHandle: handle
+  } }, destination: { tabId: origin.tabId, regionId: origin.regionId, split: 'right' } })
+  expect(useAppStore.getState().tabs[origin.tabId]!.regions[origin.regionId]).toMatchObject({ sessionId: origin.sessionId })
+})
+
+it('only inspects the exact retained alias-source fork operation without rewriting or replaying its original input', async () => {
+  const canonical = session({ control: { ...session().control, agentSessionId: 'canonical-original-session' } })
+  const source = { agentSessionId: canonical.id, expectedRun: canonical.control.run, expectedNativeHandle: handle }
+  const admitted = { requestId: 'original-alias-fork', operation: 'agent.open', createAgent: true, agentSessionId: 'child-original', executionHostId: 'local', forkSource: source }
+  useAppStore.setState({ sessions: [canonical], spatialRequests: { [admitted.requestId]: admitted } })
+  const original = structuredClone(useAppStore.getState().spatialRequests)
+  execute.mockResolvedValue({ operation: 'space.inspect', catalog: catalog(), request: { requestId: admitted.requestId, known: true, report: null } })
+  await render(canonical)
+  await click('Check fork operation')
+  expect(execute).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ operation: 'space.inspect', target: { requestId: admitted.requestId } }))
+  expect(useAppStore.getState().spatialRequests).toEqual(original)
 })
