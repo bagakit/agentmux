@@ -113,7 +113,7 @@ it.runIf(process.platform === 'darwin').each(['plain', 'git'] as const)(
     expect(delivered.admission.inputKey).toEqual(key)
     expect(delivered.admission.intent.prompt).toBe(saved.initialInput.prompt)
     expect(delivered.admission.intent.message).toEqual(saved.initialInput.message)
-    await expect.poll(() => inputs.length, { timeout: 10_000 }).toBe(1)
+    await expect.poll(() => inputs.length, { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
     expect(inputs[0]).toContain(prompt)
     expect(inputs[0]).toContain(context)
     await until(async () => (await connection.request('thread/read', { threadId: id, includeTurns: true })).thread.turns,
@@ -142,7 +142,7 @@ it.runIf(process.platform === 'darwin').each(['plain', 'git'] as const)(
     const originalReceipt = structuredClone(delivered)
     await rpc.call('agent.resume', { target: { kind: 'agent-session', agentSessionId: original.agentSessionId }, operationId: 'repeat-original-' + mode, text: '' })
     expect(await reader.inspectAgentPromptSubmission(key)).toEqual(originalReceipt)
-    expect(inputs).toHaveLength(1)
+    expect((await connection.request('thread/read', { threadId: id, includeTurns: true })).thread.turns).toHaveLength(1)
     // Prove the actual rejoined remote TUI has completed its native bootstrap,
     // rather than treating a spawned frontend projection as successful rejoin.
     const replay = async () => (await reader.readRunReplay(original.run)).replay.map(chunk => chunk.data).join('')
@@ -154,17 +154,25 @@ it.runIf(process.platform === 'darwin').each(['plain', 'git'] as const)(
     const followup = 'PRIVATE_QUEUE_REJOINED_TUI_INPUT_' + mode
     await reader.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, source: 'user', data: '\x1b[200~' + followup + '\x1b[201~' })
     await reader.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, source: 'user', data: '\r' })
-    await expect.poll(() => inputs.filter(text => text.includes(followup)).length, { timeout: 10_000 }).toBe(1)
-    expect(inputs.filter(text => text.includes(prompt))).toHaveLength(1)
+    // Native may make several model requests within one user turn. HTTP proves
+    // receipt only; exact user-input counts belong to Native's original turns.
+    await expect.poll(() => inputs.filter(text => text.includes(followup)).length, { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
+    expect(inputs.some(text => text.includes(prompt))).toBe(true)
     const final = await reader.statusAgent(original.agentSessionId)
     expect(final.run).toMatchObject({ runId: before.run.runId, pid: before.run.pid, state: 'running' })
     const finalTurns = (await connection.request('thread/read', { threadId: id, includeTurns: true })).thread.turns
     expect(finalTurns).toHaveLength(2)
+    const nativeUserInputs = finalTurns.flatMap((turn: any) => turn.items.filter((item: any) => item.type === 'userMessage'))
+      .map((item: any) => item.content.filter((part: any) => part.type === 'text').map((part: any) => part.text).join(''))
+    expect(nativeUserInputs).toHaveLength(2)
+    expect(nativeUserInputs.filter((text: string) => text.includes(prompt))).toHaveLength(1)
+    expect(nativeUserInputs.filter((text: string) => text === followup)).toHaveLength(1)
+    expect(await reader.inspectAgentPromptSubmission(key)).toEqual(originalReceipt)
     if (process.env.AGENTMUX_NATIVE_INITIAL_EVIDENCE) await appendFile(process.env.AGENTMUX_NATIVE_INITIAL_EVIDENCE,
       JSON.stringify({ mode, native, original: { agentSessionId: original.agentSessionId, run: original.run, pid: before.run.pid,
         actorId: originalActor.actorId, nativeId: id, nativeRuntime }, coreOwners: [firstOwnerPid, scope.ownerProcess.pid],
         oldTuiExit: 1, originalPreparedClaim: null, originalObservation: saved.nativeSourceObservation.state,
-        firstInputCount: inputs.filter(text => text.includes(prompt)).length, actualTuiInputCount: finalTurns.length - nativeAfter.thread.turns.length,
+        firstInputCount: nativeUserInputs.filter((text: string) => text.includes(prompt)).length, actualTuiInputCount: finalTurns.length - nativeAfter.thread.turns.length,
         tuiFollowupModelRequestCount: inputs.filter(text => text.includes(followup)).length,
         nativeTurnCountBeforeTuiFollowup: nativeAfter.thread.turns.length, sourceExists: true, gitShaPreserved: sha ?? null }) + '\n')
   })
