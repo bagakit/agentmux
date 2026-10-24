@@ -7,7 +7,7 @@ import { TextInput, Textarea } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SelectionField } from './SelectionField'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { ConnectionActor, ConnectionGrant, ConnectionRecord, RoomBinding, RoomBindingOperation, RoomBindingScope, RoomBindingTarget, RoomLinkOperation, RoomProvisioningOperation } from '@agentmux/core/connections'
+import type { ConnectionActor, ConnectionGrant, ConnectionMemberAccess, ConnectionRecord, RoomBinding, RoomBindingInspection, RoomBindingOperation, RoomBindingScope, RoomBindingTarget, RoomLinkOperation, RoomProvisioningOperation } from '@agentmux/core/connections'
 import type { AgentNativeSourceReference } from './AgentNativeSourceControls'
 import { api } from '../lib/api'
 import { clearConnectorRoomIntent, retainConnectorRoomIntent, useAppStore } from '../store'
@@ -114,7 +114,8 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
   const [actorId, setActorId] = useState(savedDraft?.actorId ?? ''), [actorType, setActorType] = useState(savedDraft?.actorType ?? '')
   const [memberDrafts, setMemberDrafts] = useState<ConnectorMemberDrafts>(savedDraft?.memberDrafts ?? {})
   const [facts, setFacts] = useState<Record<string, Fact>>({}), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
-  const [actors, setActors] = useState<{ bindingId: string; revision: number; grants: ConnectionGrant[] } | null>(null)
+  const [actors, setActors] = useState<{ bindingId: string; revision: number; grants: ConnectionGrant[]; access: ConnectionMemberAccess[] | null } | null>(null)
+  const memberReadOrder = useRef(0)
   const [memberFlights, setMemberFlights] = useState<Map<string, 'checking' | 'saving'>>(() => new Map())
   const memberFlight = useRef(new Map<string, 'checking' | 'saving'>())
   const intents = useAppStore(state => state.connectorRoomIntents)
@@ -168,11 +169,11 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
     const close = content.current?.querySelector('[aria-label="Close group setup"]')
     if (ownerDocument.activeElement === close) content.current?.querySelector<HTMLElement>('[aria-label="Existing group"]')?.focus({ preventScroll: true })
   }, [connection, mode])
-  const approvedMembers = binding && actors?.bindingId === binding.bindingId && actors.revision === binding.revision
-    ? new Set(currentGrants.filter(grant => grant.state === 'active' && grant.capabilities.includes('input')).map(grant => JSON.stringify([grant.actor.application.domain, grant.actor.application.appId, grant.actor.idType, grant.actor.userId]))).size : null
-  const currentMemberIntents = relevant.filter((intent): intent is Extract<ConnectorRoomIntent, { method: 'connection.grant' }> => intent.method === 'connection.grant' && currentGrantIntent(intent))
+  const approvedMembers = binding && actors?.bindingId === binding.bindingId && actors.revision === binding.revision && actors.access !== null
+    ? actors.access.filter(item => item.effective?.state === 'active' && item.effective.capabilities.includes('input')).length : null
+  const currentMemberIntents = relevant.filter((intent): intent is Extract<ConnectorRoomIntent, { method: 'connection.grant' | 'connection.binding.member.inherit' }> => currentGrantIntent(intent))
   const unconfirmedMembers = currentMemberIntents.some(intent => memberReceiptState(intent) === 'unconfirmed')
-  function memberReceiptState(intent: Extract<ConnectorRoomIntent, { method: 'connection.grant' }>) {
+  function memberReceiptState(intent: Extract<ConnectorRoomIntent, { method: 'connection.grant' | 'connection.binding.member.inherit' }>) {
     const fact = facts[intent.input.operationId]
     if (fact && 'state' in fact && (fact.state === 'applied' || fact.state === 'refused')) return fact.state
     return !fact && intent.phase === 'not-dispatched' ? 'not-dispatched' : 'unconfirmed'
@@ -198,7 +199,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
     useAppStore.setState(state => ({ connectorRoomDrafts: { ...state.connectorRoomDrafts, [draftKey]: draft } }))
   }, [loaded, connectionId, binding?.bindingId, binding?.revision, mode, name, group, members, memberType, scope, publication, actorId, actorType, memberDrafts, draftKey])
   const frozenRoom = roomIntent?.method === 'connection.room.create' ? roomIntent.input : null
-  const creatorInvitation = useConnectorCreatorInvitation(connection, !!connection && !creationUnsupported && availableForNewGroup(connection), hostingTarget)
+  const creatorInvitation = useConnectorCreatorInvitation(connection, !!connection, hostingTarget)
   const awaitingCreator = creatorInvitation.pending && creatorInvitation.included
   function observeBinding(bindingId: string, current: RoomBinding | null) {
     setBindings(previous => {
@@ -210,9 +211,10 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
   }
   function acceptGrant(grant: ConnectionGrant, source: RoomBinding) {
     if (activeAudience.current !== JSON.stringify([source.bindingId, source.revision])) return
+    memberReadOrder.current++
     setActors(previous => {
       const grants = previous?.bindingId === source.bindingId && previous.revision === source.revision ? previous.grants : [], old = grants.find(value => value.grantId === grant.grantId)
-      return old && old.revision > grant.revision ? previous : { bindingId: source.bindingId, revision: source.revision, grants: [...grants.filter(value => value.grantId !== grant.grantId), grant] }
+      return old && old.revision > grant.revision ? previous : { bindingId: source.bindingId, revision: source.revision, grants: [...grants.filter(value => value.grantId !== grant.grantId), grant], access: null }
     })
   }
   async function memberWork(key: string, action: () => Promise<void>, activity: 'checking' | 'saving' = 'checking') {
@@ -233,9 +235,12 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
       if (epoch.current !== token) return read.operation
       value = read.operation
       if (value?.state === 'applied') {
-        observeBinding(value.binding.bindingId, read.current); for (const grant of read.grants) acceptGrant(grant, value.binding)
+        observeBinding(value.binding.bindingId, read.current)
+        memberReadOrder.current++
         const source = value.binding
         if (intent.method === 'connection.grant') setMemberDrafts(current => acknowledgeConnectorMemberDraft(current, source, intent.input.actor, intent.input.capabilities))
+        if (intent.method === 'connection.binding.member.inherit') setMemberDrafts(current => acknowledgeConnectorMemberDraft(current, source, intent.input.actor, null, 'application'))
+        if (currentGrantIntent(intent)) void readMemberGrants(source).catch(error => { if (epoch.current === token) setIssue(presentError(error)) })
       }
     }
     if (epoch.current !== token) return value
@@ -292,21 +297,15 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
     initialized.current = true
     if (selected) setConnectionId(selected)
   }, [loaded, connections, bindings, moteDefault, intents])
-  async function readMemberGrants(source: RoomBinding, accepts = () => true): Promise<ConnectionGrant[] | null> {
-    const token = epoch.current
-    const inspected = await api.connections.call('connection.binding.inspect', { bindingId: source.bindingId, revision: source.revision }, hostingTarget)
-    if (!accepts() || epoch.current !== token || activeAudience.current !== JSON.stringify([source.bindingId, source.revision])) return null
+  async function readMemberGrants(source: RoomBinding, accepts = () => true): Promise<RoomBindingInspection | null> {
+    const token = epoch.current, order = ++memberReadOrder.current
+    const inspected = await api.connections.call('connection.binding.inspect', { bindingId: source.bindingId }, hostingTarget)
+    if (!accepts() || epoch.current !== token || order !== memberReadOrder.current || activeAudience.current !== JSON.stringify([source.bindingId, source.revision])) return null
     observeBinding(source.bindingId, inspected.current)
-    setActors(previous => {
-        const grants = inspected.grants.slice()
-        if (previous?.bindingId === source.bindingId && previous.revision === source.revision) for (const grant of previous.grants) {
-          const index = grants.findIndex(value => value.grantId === grant.grantId)
-          if (index < 0) grants.push(grant)
-          else if (grants[index]!.revision < grant.revision) grants[index] = grant
-        }
-        return { bindingId: source.bindingId, revision: source.revision, grants }
-    })
-    return inspected.grants
+    if (!inspected.binding || inspected.binding.bindingId !== source.bindingId || inspected.binding.revision !== source.revision || inspected.current?.revision !== source.revision || !sameConnectorTarget(inspected.binding, source) || inspected.binding.application.domain !== source.application.domain || inspected.binding.application.appId !== source.application.appId) return null
+    // This is a complete current projection. Old immutable grant history must not recreate an inherited head.
+    setActors({ bindingId: source.bindingId, revision: source.revision, grants: inspected.grants, access: inspected.access ?? null })
+    return inspected
   }
   useEffect(() => {
     if (!binding) return
@@ -341,12 +340,18 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
     if (epoch.current !== token) return
     setFacts(previous => ({ ...previous, [intent.input.operationId]: value }))
     if ('state' in value && value.state === 'applied') {
-      if (value.grant) acceptGrant(value.grant, value.binding); else setSelectedBindingId(value.binding.bindingId)
+      if (value.grant) acceptGrant(value.grant, value.binding); else if (intent.method !== 'connection.binding.member.inherit') setSelectedBindingId(value.binding.bindingId)
       if (intent.method === 'connection.grant') setMemberDrafts(current => acknowledgeConnectorMemberDraft(current, value.binding, intent.input.actor, intent.input.capabilities))
+      if (intent.method === 'connection.binding.member.inherit') {
+        memberReadOrder.current++
+        setMemberDrafts(current => acknowledgeConnectorMemberDraft(current, value.binding, intent.input.actor, null, 'application'))
+        setActors(previous => previous && previous.bindingId === value.binding.bindingId ? { ...previous, access: null } : previous)
+      }
       observeBinding(value.binding.bindingId, value.binding); invalidateConnectorTarget(target); await clearConnectorRoomIntent(intent.input.operationId)
+      if (currentGrantIntent(intent)) void readMemberGrants(value.binding).catch(error => { if (epoch.current === token) setIssue(presentError(error)) })
     }
     // An exact grant receipt already updates its member. Other original queries cannot hold that write open.
-    if (intent.method !== 'connection.grant') await refresh()
+    if (intent.method !== 'connection.grant' && intent.method !== 'connection.binding.member.inherit') await refresh()
     if (epoch.current === token && 'creation' in value && value.creation.state === 'not-applied' && ['connection-unavailable', 'connection-revised'].includes(value.creation.reason))
       setIssue('The bot configuration changed before this request. No group was created. Review the current bot settings and keep this original receipt.')
   }
@@ -380,28 +385,36 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
     void work(() => execute({ method, target, phase: 'not-dispatched', input: { operationId: mintObjectId(), bindingId: binding.bindingId, expectedRevision: binding.revision } }))
   }
   function currentGrantIntent(intent: ConnectorRoomIntent): boolean {
-    return intent.method === 'connection.grant' && !!binding && intent.input.bindingId === binding.bindingId &&
+    return (intent.method === 'connection.grant' || intent.method === 'connection.binding.member.inherit') && !!binding && intent.input.bindingId === binding.bindingId &&
       intent.input.expectedBindingRevision === binding.revision && intent.input.actor.application.domain === binding.application.domain && intent.input.actor.application.appId === binding.application.appId
   }
-  function grant(actor: ConnectionActor, capabilities: ConnectionGrant['capabilities'], baseline: ConnectionGrant | null) {
+  function grant(actor: ConnectionActor, capabilities: ConnectionGrant['capabilities'], baseline: ConnectionGrant | null, source: 'room' | 'application') {
     if (!binding || binding.state !== 'active') return
     const previous = currentMemberIntents.find(intent => intent.input.actor.idType === actor.idType && intent.input.actor.userId === actor.userId && !['applied', 'refused'].includes(memberReceiptState(intent)))
     const key = memberKey(actor)
     if (previous) { void memberWork(key, async () => { await inspect(previous) }); return }
+    if (source === 'application') {
+      if (!baseline) return
+      void memberWork(key, () => execute({ method: 'connection.binding.member.inherit', target, phase: 'not-dispatched', input: { operationId: mintObjectId(), bindingId: binding.bindingId, expectedBindingRevision: binding.revision, actor, expectedGrant: { grantId: baseline.grantId, revision: baseline.revision } } }), 'saving')
+      return
+    }
     void memberWork(key, () => execute({ method: 'connection.grant', target, phase: 'not-dispatched', input: {
       operationId: mintObjectId(), bindingId: binding.bindingId, expectedBindingRevision: binding.revision,
       grantId: baseline?.grantId ?? mintObjectId(), expectedRevision: baseline?.revision ?? null, actor,
       capabilities, state: capabilities.length ? 'active' : 'revoked'
     } }), 'saving')
   }
-  function reviewMember(actor: ConnectionActor, draftKey: string, refused?: Extract<ConnectorRoomIntent, { method: 'connection.grant' }>) {
+  function reviewMember(actor: ConnectionActor, draftKey: string, refused?: Extract<ConnectorRoomIntent, { method: 'connection.grant' | 'connection.binding.member.inherit' }>) {
     if (!binding) return
     const source = binding
     void memberWork(memberKey(actor), async () => {
-      const grants = await readMemberGrants(source)
-      if (!grants) return
+      const inspected = await readMemberGrants(source)
+      if (!inspected) return
+      const local = inspected.access?.find(value => JSON.stringify(value.actor) === JSON.stringify(actor))?.local
+      const baseline = local ? local.kind === 'none' ? null : local.grant : inspected.grants.find(grant => JSON.stringify(grant.actor) === JSON.stringify(actor))
+      if (baseline === undefined && inspected.access === undefined) throw new Error('The original local decision is not confirmed. Your draft and original request are kept.')
       const reviewed = currentMemberIntents.filter(intent => intent.input.actor.idType === actor.idType && intent.input.actor.userId === actor.userId && memberReceiptState(intent) === 'refused').map(intent => intent.input.operationId)
-      setMemberDrafts(current => reviewConnectorMemberDraft(current, source, actor, grants.find(grant => JSON.stringify(grant.actor) === JSON.stringify(actor)) ?? null, draftKey, reviewed, refused?.input.capabilities))
+      setMemberDrafts(current => reviewConnectorMemberDraft(current, source, actor, baseline ?? null, draftKey, reviewed, refused?.method === 'connection.grant' ? refused.input.capabilities : refused ? [] : undefined, refused?.method === 'connection.binding.member.inherit' ? 'application' : 'room'))
     })
   }
   function newContext() {
@@ -487,6 +500,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
 
   const memberAccess = showingCurrentBinding && binding ? <ConnectorMemberAccess binding={binding} facts={roomFacts}
     grants={actors?.bindingId === binding.bindingId && actors.revision === binding.revision ? currentGrants : null}
+    access={actors?.bindingId === binding.bindingId && actors.revision === binding.revision ? actors.access : null}
     creator={creatorInvitation.creator} drafts={memberDrafts} changeDrafts={setMemberDrafts}
     account={{ idType: actorType, userId: actorId, change: (idType, userId) => { setActorType(idType); setActorId(userId) } }}
     requests={currentMemberIntents.map(intent => ({ intent, state: memberReceiptState(intent) }))} flights={memberFlights}
@@ -567,13 +581,13 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
             </div></details>
           </fieldset> : null}
           {relevant.map(intent => { const fact = facts[intent.input.operationId], isRoom = fact && 'creation' in fact
-            if (intent.method === 'connection.grant' && currentGrantIntent(intent) && showingCurrentBinding) return null
+            if (currentGrantIntent(intent) && showingCurrentBinding) return null
             if (intent.method === 'connection.room.link.create') {
               if (intent === linkIntent) return null
               const previous = fact && 'state' in fact && 'input' in fact && 'externalConversationId' in fact.input ? fact as RoomLinkOperation : null
               return <details className="agent-connector-disclosure" key={intent.input.operationId}><summary>Previous join link receipt</summary><div className="agent-connector-fields"><ConnectorRoomJoinReceipt operation={previous} />{!previous ? <><span>Group · {intent.input.externalConversationId}</span><code>{intent.input.operationId}</code></> : null}<button className="small-button" disabled={busy} onClick={() => void work(async () => { await inspect(intent) })}>Check link status</button></div></details>
             }
-            const memberIntent = intent.method === 'connection.grant' ? intent : null
+            const memberIntent = intent.method === 'connection.grant' || intent.method === 'connection.binding.member.inherit' ? intent : null
             const receipt = <>
               {isRoom ? <><strong>{fact.creation.state === 'created' ? 'Group created' : fact.creation.state === 'not-applied' ? 'Group not created' : fact.creation.state === 'pending' ? 'Group setup pending' : 'Creation not confirmed'}</strong><span>{fact.membership.state === 'not-requested' ? 'No invitations requested.' : fact.membership.state === 'settled' ? fact.membership.results.filter(item => item.state === 'joined').length + ' of ' + fact.membership.results.length + ' invitations confirmed.' : fact.membership.state === 'not-applied' ? 'Invitations were not sent.' : fact.membership.state === 'pending' ? 'Invitations not started.' : 'Invitations not confirmed.'}</span></> : <strong>{fact && 'state' in fact && fact.state === 'refused' ? memberIntent ? 'Member access could not be saved' : 'Setup could not finish' : memberIntent ? memberReceiptState(memberIntent) === 'not-dispatched' ? 'Member access not sent' : memberReceiptState(memberIntent) === 'applied' ? 'Member access saved' : 'Member access not confirmed' : 'Setup not confirmed'}</strong>}
               {memberIntent ? <><span>Member · {currentGrantIntent(memberIntent) ? roomFacts.people?.members.find(member => member.idType === memberIntent.input.actor.idType && member.userId === memberIntent.input.actor.userId)?.name ?? memberIntent.input.actor.userId : memberIntent.input.actor.userId}</span><span>{currentGrantIntent(memberIntent) ? 'This group connection' : 'Original group connection'} · revision {memberIntent.input.expectedBindingRevision}</span></> : null}
