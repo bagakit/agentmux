@@ -536,7 +536,7 @@ export function reduceAgentMembershipSnapshot(
   for (const session of canonicalAgents) {
     const incoming = snapshot.timelines[session.id]
     if (!incoming && session.timelineObservation && sameRun(session.timelineObservation.run, session.control.run)) continue
-    if (!incoming || incoming.agentSessionId !== session.id) {
+    if (!incoming || incoming.agentSessionId !== session.control.agentSessionId) {
       canonicalById.set(session.id, { ...session, timelineObservation: {
         run: { ...session.control.run }, code: incoming ? 'TIMELINE_IDENTITY_MISMATCH' : 'TIMELINE_OBSERVATION_FAILED',
         message: `Runtime snapshot is missing the matching Timeline for Agent Session: ${session.id}`
