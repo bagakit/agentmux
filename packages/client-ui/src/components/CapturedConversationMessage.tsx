@@ -77,8 +77,10 @@ function ReplyObservation({ item, active, observation, compact, reveal, children
     document.addEventListener('selectionchange', update)
     return () => document.removeEventListener('selectionchange', update)
   }, [selected, document])
-  const heldPreview = useRef('')
-  const preview = useMemo(() => active && observation ? conversationReplyPreview(item.content ?? '') : heldPreview.current, [active, observation, item.content])
+  const heldPreview = useRef({ text: '', hasOriginal: false })
+  const preview = useMemo(() => active && observation ? {
+    text: conversationReplyPreview(item.content ?? ''), hasOriginal: /\S/u.test(item.content ?? '')
+  } : heldPreview.current, [active, observation, item.content])
   useEffect(() => { if (active) heldPreview.current = preview }, [active, preview])
   return <div className={observation ? 'conversation-reply-observation' : undefined} data-captured-reply-observation={observation ? item.id : undefined} tabIndex={-1}
     data-message-source-key={observation ? conversationMessageSourceKey(item.agentSessionId, { kind: 'captured', recordId: item.id }) : undefined}>
@@ -88,7 +90,8 @@ function ReplyObservation({ item, active, observation, compact, reveal, children
         <span className="conversation-reply-observation__node"><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" /></span>
         <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply ?? COLLECTED_REPLY_TITLE} />
         <time>{formatClock(item.createdAt)}</time>
-        {!expanded && preview ? <span className="conversation-reply-observation__preview">{preview}</span> : null}
+        {!expanded && preview.text ? <span className="conversation-reply-observation__preview">{preview.text}</span> : null}
+        {!expanded && preview.hasOriginal ? <span className="conversation-reply-observation__expand">展开原文</span> : null}
       </button>
       {!expanded && item.status !== 'complete' ? <span role="status" data-status={item.status}>{item.status === 'failed' ? '记录失败' : '记录中'}</span> : null}
     </div> : null}
