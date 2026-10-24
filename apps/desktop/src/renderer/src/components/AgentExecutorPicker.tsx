@@ -13,7 +13,6 @@ const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
-const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
 
 
 type ExecutorPickerProps = {
@@ -30,20 +29,14 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
   const settings = useContext(SettingsNavigation)
   const [showUnavailable, setShowUnavailable] = useState(false)
   const catalogRef = useRef<HTMLDivElement>(null)
-  const scrollButtonRef = useRef<HTMLButtonElement>(null)
-  const [scroll, setScroll] = useState({ overflow: false, atEnd: false })
+  const [scroll, setScroll] = useState({ before: false, after: false })
   useLayoutEffect(() => {
     const catalog = catalogRef.current
     if (!active || !catalog) return
     const measure = () => {
-      const overflow = catalog.scrollHeight > catalog.clientHeight + 1
-      const atEnd = catalog.scrollTop + catalog.clientHeight >= catalog.scrollHeight - 1
-      if (!overflow && catalog.ownerDocument.activeElement === scrollButtonRef.current) {
-        const target = catalog.querySelector<HTMLButtonElement>('.agent-pick[aria-pressed="true"]:not(:disabled)')
-          ?? catalog.querySelector<HTMLButtonElement>('button:not(:disabled)')
-        target?.focus({ preventScroll: true })
-      }
-      setScroll(current => current.overflow === overflow && current.atEnd === atEnd ? current : { overflow, atEnd })
+      const before = catalog.scrollTop > 1
+      const after = catalog.scrollTop + catalog.clientHeight < catalog.scrollHeight - 1
+      setScroll(current => current.before === before && current.after === after ? current : { before, after })
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -66,7 +59,8 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
     .sort((a, b) => Number(b.detection?.state === 'ready') - Number(a.detection?.state === 'ready'))
   const unavailable = executors.filter(item => item.detection?.state === 'missing')
   return <div className="agent-catalog-wrapper">
-    <div ref={catalogRef} className="agent-catalog" aria-label="Agent executors">
+    <div ref={catalogRef} className="agent-catalog" aria-label="Agent executors"
+      data-overflow-before={scroll.before} data-overflow-after={scroll.after}>
     <div className="agent-picks">
       <LiquidSelectionSurface selected={selected} active={active} targetAttribute="data-executor-id" />
       {available.map(executor => <button type="button" key={executor.id} data-executor-id={executor.id}
@@ -95,12 +89,5 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
       <strong>{executor.label}</strong><small>{executorDetectionLabel(executor.detection)}</small>
     </span>)}</div> : null}
     </div>
-    {scroll.overflow ? <button ref={scrollButtonRef} type="button" className="agent-catalog__scroll" onClick={() => {
-      const catalog = catalogRef.current
-      if (catalog) catalog.scrollTop = scroll.atEnd ? 0 : catalog.scrollTop + catalog.clientHeight
-    }}>
-      <span>{scroll.atEnd ? 'Back to top' : 'More agents'}</span>
-      {scroll.atEnd ? <ThemeNavigationUpIcon size={12} /> : <ThemeNavigationDownIcon size={12} />}
-    </button> : null}
   </div>
 }

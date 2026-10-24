@@ -55,9 +55,12 @@
 .launcher-section-actions { flex: none; display: inline-flex; gap: var(--sp-1); align-items: center; }
 .launcher-section-actions .icon-button { width: 26px; height: 26px; color: var(--text-3); }
 .agent-catalog-wrapper { min-width: 0; margin-top: calc(-1 * var(--sp-2)); margin-bottom: var(--sp-5); }
-.agent-catalog { max-height: 116px; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-2); scrollbar-width: thin; scrollbar-color: var(--text-3) var(--surface-1); }
-.agent-catalog__scroll { width: 100%; min-height: 24px; display: flex; align-items: center; justify-content: center; gap: var(--sp-2); margin-top: var(--sp-2); padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font: var(--fs-meta)/1.4 var(--font-sans); cursor: pointer; }
-.agent-catalog__scroll:hover { color: var(--text); background: var(--surface-2); border-color: var(--line); }
+.agent-catalog { --catalog-fade-top: 0px; --catalog-fade-bottom: 0px; max-height: 132px; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-2); scrollbar-width: auto; scrollbar-color: auto; mask-image: linear-gradient(to bottom, transparent, #000 var(--catalog-fade-top), #000 calc(100% - var(--catalog-fade-bottom)), transparent); }
+.agent-catalog::-webkit-scrollbar { width: 4px; }
+.agent-catalog::-webkit-scrollbar-thumb { border: 0; background: color-mix(in srgb, var(--text-3) 65%, transparent); }
+.agent-catalog::-webkit-scrollbar-thumb:hover { background: var(--text-2); }
+.agent-catalog[data-overflow-before='true'] { --catalog-fade-top: 8px; }
+.agent-catalog[data-overflow-after='true'] { --catalog-fade-bottom: 6px; }
 .agent-picks { position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 108px), 1fr)); gap: var(--sp-2); }
 .agent-picks > :is(.launcher-other-agents, .agent-catalog__empty) { grid-column: 1 / -1; }
 .agent-picks > button, .agent-picks > .agent-catalog__empty { position: relative; z-index: 1; }
@@ -148,7 +151,7 @@
 .launcher-restore { display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-meta); cursor: pointer; }
 .launcher-restore:hover { color: var(--text); background: var(--surface-2); }
 .launcher-persistence-notice { margin: var(--sp-3) 0 0; color: var(--amber-text); font-size: var(--fs-meta); line-height: 1.5; }
-.launcher-mote { min-width: 0; max-width: 360px; }
+.launcher-mote { min-width: 0; max-width: 360px; margin-inline-end: auto; }
 .launcher-mote__actions { min-height: 36px; min-width: 0; display: flex; align-items: stretch; width: fit-content; max-width: 100%; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
 .launcher-mote__create, .launcher-mote__target { min-height: 34px; min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border: 0; color: var(--text-2); background: transparent; font: var(--fs-meta)/1.4 var(--font-sans); white-space: nowrap; }
 .launcher-mote__create { flex: none; cursor: pointer; border-radius: var(--radius) 0 0 var(--radius); font-weight: 550; }
@@ -172,7 +175,7 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
 .launch-surface[data-density='compact'] .launcher-environment__project { flex-basis: auto; gap: var(--sp-3); }
 .launch-surface[data-density='compact'] .launcher-environment__host { max-width: 40%; padding-inline: var(--sp-3); }
 .launch-surface[data-density='compact'] .launcher-agents-head { margin-bottom: var(--sp-2); }
-.launch-surface[data-density='compact'] .agent-catalog { max-height: 40px; }
+.launch-surface[data-density='compact'] .agent-catalog { max-height: 60px; }
 .launch-surface[data-density='compact'] .agent-catalog-wrapper { margin-bottom: var(--sp-4); }
 .launch-surface[data-density='compact'] .launcher-composer { --composer-input-height: clamp(3rem, calc(var(--launcher-region-height, 400px) * .16), 4rem); --composer-input-max: var(--composer-input-height); }
 .launch-surface[data-density='compact'] .launcher-tools { padding-top: var(--sp-2); }
@@ -185,7 +188,6 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
   .launcher-environment__host { max-width: 38%; padding-inline: var(--sp-4); }
   .launch-surface__footer { gap: var(--sp-3) var(--sp-4); }
   .launch-surface__footer > .launcher-mote { flex: 1 1 100%; max-width: none; }
-  .launcher-mote__actions { margin-left: auto; }
   .launcher-primary-actions { justify-content: flex-end; }
   .launcher-mote__target { max-width: 180px; }
   .launch-refine__summary { max-width: 120px; }
