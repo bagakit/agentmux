@@ -82,8 +82,11 @@
 .mobile-spatial-panel .mobile-focus-project .mobile-session-list button > .mobile-session-copy { display: flex; flex-direction: column; gap: 2px; }
 .mobile-focus-project[data-project-confirmed='false'] .mobile-session-project { order: -1; max-width: none; }
 .mobile-session-state .focus-state-mark { display: inline-flex; grid-column: 1; grid-row: 1 / 3; align-self: center; margin-right: 5px; }
-.mobile-session-state:has(.focus-state-mark) { grid-template-columns: auto auto; column-gap: 2px; }
+.mobile-session-state { max-width: min(28vw, 112px); min-width: 0; }
+.mobile-session-state:has(.focus-state-mark) { grid-template-columns: auto minmax(0, 1fr); column-gap: 2px; }
 .mobile-session-state:has(.focus-state-mark) > :not(.focus-state-mark) { grid-column: 2; }
+.mobile-session-state > span:not(.focus-state-mark) { min-width: 0; overflow: hidden; overflow-wrap: anywhere; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.mobile-session-state > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-session-state[data-state='done'] { color: var(--status-success-text, var(--green)); }
 
 .mobile-section-actions, .mobile-zone-tools { display: flex; align-items: center; gap: 2px; }
