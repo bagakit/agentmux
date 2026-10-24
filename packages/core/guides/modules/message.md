@@ -24,12 +24,13 @@ Use --latest for a bounded recent window. Preserve its exact scope, journal inca
 throughSequence when paging older with --before-sequence nextBeforeSequence; forward reads use
 --after-sequence and nextAfterSequence. For new changes start after the prior throughSequence.
 Returned events always keep original ascending order; another journal cannot inherit the old cursor.
-Trusted users/devices may explicitly use message notify for original MIDs in one durable recipient
-Session. The new notification freezes that Session's current Run once; historical envelope Runs
+Authenticated Agent participants and trusted users/devices may explicitly use message notify
+for original MIDs in one durable recipient Session. The new notification freezes that Session's current Run once; historical envelope Runs
 stay unchanged. After an unknown reply use message notify inspect --host ID --operation-id ID:
 it reads the original notification and its own input receipt without preparing or sending.
 null only means this read did not find the original notice, never permission to replay unknown input.
-Managed Agents cannot self-authorize this steer or inspect arbitrary notification operations.
+Managed Agents notify and inspect only references in which they are original participants,
+at their authenticated Host; every selected MID must satisfy this same boundary.
 These observations are not
 model adoption, task acceptance or business completion.
 Use message inbox check only for explicit batch consumption, and read the exact original message or
