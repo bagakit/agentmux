@@ -149,6 +149,9 @@ it('the actual Focus preview forwards the qualified notification and exact sourc
     hierarchy={undefined} interactive anchor={anchor} autoFocus={false} describeSpeaker={speaker => ({ name: speaker.id })}
     onSelect={() => {}} onClose={() => {}} />)
   await assertPrimary(); expect(read).toHaveBeenCalledExactlyOnceWith(f.reference, messageId)
+  const caption = document.querySelector('.recent-focus__message-caption')!
+  expect(caption.textContent).toContain('System message')
+  expect(caption.textContent).not.toContain('Sender not recorded')
 })
 
 it('unknown original Host remains passive in Focus despite a known execution route', async () => {
