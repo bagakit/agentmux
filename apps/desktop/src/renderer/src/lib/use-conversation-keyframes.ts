@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { RulerRecord } from './conversation-ruler'
 
 type Media = HTMLImageElement | HTMLVideoElement | HTMLCanvasElement
-type Frame = { version: unknown; src: string }
+type Frame = { version: unknown; src: string; observation: object }
 const EMPTY = new Map<string, Frame>()
 // Only authored visual content, never avatars or a second rendering of an unloaded page.
 const selector = '.md-diagram-image__thumb, .md-conversation-image__thumb, [data-conversation-keyframe] video, [data-conversation-keyframe] canvas'
@@ -12,12 +12,14 @@ export function useConversationKeyframes(feed: HTMLElement | null, sessionId: st
   const scope = useMemo(() => ({}), [feed, sessionId])
   // Weak keys preserve paint admission across a record refresh or visibility handoff without
   // retaining the original media/DOM. A new record array is not evidence of a new video frame.
-  const paints = useMemo(() => new WeakMap<Media, { token: string; ready: boolean }>(), [scope])
+  const paints = useMemo(() => new WeakMap<Media, { token: string; ready: boolean; recordId?: string; observation?: object }>(), [scope])
   const sources = useMemo(() => new Map(records.flatMap(record => record.sourceKey ? [[record.sourceKey, {
     id: record.id, version: record.revision ?? ('contentParts' in record.record ? record.record.contentParts : record.record.content)
   }] as const] : [])), [records])
   const [state, setState] = useState<{ scope: object; frames: Map<string, Frame> }>({ scope, frames: EMPTY })
   const frames = state.scope === scope ? state.frames : EMPTY
+  const retainedFrames = useRef(frames)
+  useLayoutEffect(() => { retainedFrames.current = frames }, [frames])
   const versions = new Map([...sources.values()].map(record => [record.id, record.version]))
   const current = new Map([...frames].flatMap(([id, frame]) => versions.has(id) && versions.get(id) === frame.version ? [[id, frame.src] as const] : []))
 
@@ -41,13 +43,18 @@ export function useConversationKeyframes(feed: HTMLElement | null, sessionId: st
         return { scope, frames: next }
       })
     }
-    const capture = (media: Media) => {
+    const capture = (media: Media, force = false) => {
       if (!alive || !feed.contains(media) || feed.ownerDocument.hidden || !media.getClientRects().length ||
           media.closest('[hidden], [inert], details:not([open])')) return
       const paint = paints.get(media)
       if (!paint?.ready || paint.token !== token(media)) return
       const record = source(media)
       if (!record) return
+      // A new observer's initial callback is not a new paint. Skip only while this exact
+      // observation remains in the current cache; eviction must allow a later capture.
+      const cached = retainedFrames.current.get(record.id)
+      if (!force && cached && paint.recordId === record.id && cached.version === record.version &&
+          cached.observation === paint.observation) return
       // Retained workfaces can belong to another Window document with different DOM constructors.
       const image = media.tagName === 'IMG' ? media as HTMLImageElement : null
       const video = media.tagName === 'VIDEO' ? media as HTMLVideoElement : null
@@ -63,9 +70,11 @@ export function useConversationKeyframes(feed: HTMLElement | null, sessionId: st
         context.drawImage(media, 0, 0, canvas.width, canvas.height)
         const src = canvas.toDataURL('image/webp', .65)
         if (!src.startsWith('data:image/')) return
+        const frame = { version: record.version, src, observation: {} }
+        paint.recordId = record.id; paint.observation = frame.observation
         setState(previous => {
           const next = new Map(previous.scope === scope ? previous.frames : EMPTY)
-          next.set(record.id, { version: record.version, src })
+          next.set(record.id, frame)
           return { scope, frames: next }
         })
       } catch { /* A missing or tainted visual observation never affects the original message. */ }
@@ -74,7 +83,7 @@ export function useConversationKeyframes(feed: HTMLElement | null, sessionId: st
       for (const entry of entries) {
         const media = entry.target as Media
         if (entry.isIntersecting) { visible.add(media); capture(media) }
-        else if (visible.delete(media)) capture(media)
+        else if (visible.delete(media)) capture(media, media.tagName === 'VIDEO' || media.tagName === 'CANVAS')
       }
     }, { root: feed, threshold: 0 })
     const observe = (media: Media) => {
@@ -94,7 +103,7 @@ export function useConversationKeyframes(feed: HTMLElement | null, sessionId: st
       const media = event.target as Media
       if (registered.has(media)) {
         paints.set(media, { token: token(media), ready: true })
-        if (visible.has(media)) capture(media)
+        if (visible.has(media)) capture(media, true)
       }
     }
     feed.addEventListener('load', loaded, true); feed.addEventListener('loadeddata', loaded, true)
