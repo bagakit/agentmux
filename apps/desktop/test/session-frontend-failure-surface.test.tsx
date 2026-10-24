@@ -89,7 +89,15 @@ it.each(['codex', 'claude'])('the actual Workbench gives an exact failed %s fron
   const recover = vi.spyOn(api.sessions, 'recover')
   await dom.render(<WorkspaceWorkbench workspaceId="workspace" />)
   await until(() => expect(surface()).not.toBeNull())
-  expect(surface()?.querySelector('h1')?.textContent).toBe('Terminal process exited')
+  expect(surface()?.querySelector('h2')?.textContent).toBe('Terminal process exited')
+  const summary = surface()!.querySelector('.surface-state__description')!
+  const actions = surface()!.querySelector('.surface-state__actions')!
+  expect(summary.textContent).toContain('exited with code 1')
+  expect(summary.textContent).toContain('The backend is still running.')
+  expect(summary.textContent).toContain('native conversation identity is not yet confirmed')
+  expect(summary.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(actions.querySelector('.primary-button')?.textContent).toContain('Resume')
+  expect(actions.querySelector('.small-button')?.textContent).toContain('Read original output')
   expect(surface()?.textContent).toContain('exited with code 1')
   expect(surface()?.textContent).toContain('The backend is still running.')
   expect(surface()?.textContent).toContain('native conversation identity is not yet confirmed')
@@ -104,6 +112,9 @@ it.each(['codex', 'claude'])('the actual Workbench gives an exact failed %s fron
   await click('Read original output')
   const raw = terminal()!
   expect(raw?.textContent).toContain('Raw CLI stack trace'); expect(raw?.dataset.run).toBe(original.session.control.run.runId)
+  const outputActions = region().querySelector('.session-frontend-exit__actions')!
+  expect(outputActions.querySelector('.primary-button')?.textContent).toContain('Resume')
+  expect(outputActions.querySelector('.small-button')?.textContent).toContain('Back to recovery')
   expect(raw?.dataset.readOnly).toBe('true'); expect(raw?.dataset.visible).toBe('true')
   expect(surface()).toBeNull()
   await click('Back to recovery')
@@ -125,7 +136,7 @@ it.each([
   await until(() => expect(surface()).not.toBeNull())
   const cause = surface()!.querySelector('.session-frontend-diagnostic pre')!
   expect(cause.textContent).toBe(diagnostic)
-  expect(cause.closest('details')).toBeNull()
+  expect(cause.closest('details')).not.toBeNull()
   expect(surface()?.textContent).toContain('The backend is still running.')
   expect(surface()?.textContent).toContain('Check the CLI startup environment, then choose Resume or restart AgentMux.')
   expect(button('Resume').disabled).toBe(false)
@@ -202,7 +213,7 @@ it('Resume consumes and retains the original Core unknown recovery result withou
   expect(operation).toEqual(expect.any(String))
   expect(recover.mock.calls[0]).toEqual([original.session.control, original.session.workspacePath, operation, { trigger: 'manual' }])
   expect(surface()?.textContent).toContain('pending · operation-unconfirmed')
-  expect(surface()?.textContent).toContain('Native conversationUnconfirmed')
+  expect(surface()?.textContent).toContain('Native conversationUnknown')
   await click('Resume')
   expect(recover).toHaveBeenCalledTimes(2); expect(recover.mock.calls[1]![2]).toBe(operation)
   expect(surface()?.textContent).toContain(message); expect(refresh).not.toHaveBeenCalled()
