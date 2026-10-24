@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
-const output = join(root, '.local/state/native-desktop/consumers')
-await mkdir(output, { recursive: true })
+const outputRoot = join(root, ".local/state/native-desktop/consumers")
+await mkdir(outputRoot, { recursive: true })
+const output = await mkdtemp(join(outputRoot, "run-"))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const desktop = 'apps/desktop/', source = desktop + 'src/', tests = desktop + 'test/'
 const baseline = ['native-desktop-owner.test.ts', 'native-desktop-consumers.test.ts', 'native-composer-consumers.test.tsx', 'composer-screenshot.test.ts',
@@ -14,8 +15,14 @@ const baseline = ['native-desktop-owner.test.ts', 'native-desktop-consumers.test
   'terminal-osc-clipboard.test.ts', 'browser-input-selection-ipc.test.ts'].map(file => tests + file)
 const cases = [
   { id: 'original-main-native-owner', file: source + 'main/ipc.ts',
-    from: "native: getNativeDesktopOwner,", to: "native: () => ({ ...getNativeDesktopOwner(), writeClipboardText: async () => {} }),",
+    from: "native: getDesktopNativeUiOwner,", to: "native: () => ({ ...getDesktopNativeUiOwner(), writeClipboardText: async () => {} }),",
     files: [tests + 'native-desktop-consumers.test.ts'], expected: 'shares one lazy exact application owner' },
+  { id: 'ui-macos-native-owner', file: source + 'main/native-desktop-owner.ts',
+    from: "process.platform === 'darwin'", to: 'false',
+    files: [tests + 'native-desktop-owner.test.ts'], expected: 'macOS clipboard handlers consume the same native owner' },
+  { id: 'ui-nonmac-existing-owner', file: source + 'main/native-desktop-owner.ts',
+    from: "process.platform === 'darwin'", to: 'true',
+    files: [tests + 'native-desktop-owner.test.ts'], expected: 'win32 retains its original Electron clipboard' },
   { id: 'cancel-is-not-an-attachment', file: source + 'main/composer-screenshot.ts',
     from: "if (result.state === 'cancelled') return null", to: "if (result.state === 'cancelled') return '/fabricated-cancel.png'",
     files: [tests + 'composer-screenshot.test.ts'], expected: 'treats only the native cancellation receipt as cancellation' },
