@@ -25,7 +25,7 @@ export function resolveMoteDefaultConversation(state: State, topic: ScratchTopic
   const agent = catalog.regions.find(item => item.tabId === conversation.tabId && item.regionId === conversation.regionId)
   const session = region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
   const actualSessionId = session?.control.kind === 'agent' ? session.control.agentSessionId : region?.kind === 'agent' ? region.sessionId : undefined
-  if (!workspace || region?.kind !== 'agent' || actualSessionId !== conversation.sessionId || agent?.agentSessionId !== region.sessionId ||
+  if (!workspace || region?.kind !== 'agent' || actualSessionId !== conversation.sessionId || agent?.agentSessionId !== actualSessionId ||
       agent.execution && agent.execution.hostId !== conversation.hostId || session?.control.hostId && session.control.hostId !== conversation.hostId || tab?.workspaceId !== workspaceId ||
       !group?.tabOrder.includes(conversation.tabId) || !catalog.locations.some(location => location.spaceId === spaceId && location.workspaceId === workspaceId && sameWorkbenchProjectionSelection(location, conversation)))
     return { issue: 'The saved default conversation is not confirmed at its original location. Its reference and existing work are kept; choose its exact conversation in Profile or inspect MOTE.md.' }

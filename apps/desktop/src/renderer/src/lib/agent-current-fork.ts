@@ -21,7 +21,7 @@ export function retainedCurrentForkOperation(session: CurrentForkSession | null,
   const admitted = Object.entries(requests).filter(([key, binding]) => {
     const source = binding.forkSource, expected = source?.expectedNativeHandle
     return key === binding.requestId && binding.operation === 'agent.open' && binding.createAgent &&
-      binding.executionHostId === session.control.hostId && source?.agentSessionId === session.id &&
+      binding.executionHostId === session.control.hostId && (source?.agentSessionId === session.control.agentSessionId || source?.agentSessionId === session.id) &&
       source.expectedRun.runId === session.control.run.runId && expected?.providerId === handle.providerId &&
       expected.sessionId === handle.sessionId && expected.transcriptPath === handle.transcriptPath
   })
@@ -46,13 +46,13 @@ export function reviewCurrentFork(session: CurrentForkSession, origin: OpenHttpL
   const reason = currentForkUnavailableReason(session, origin, false)
   if (reason) throw new Error(reason)
   return { operationId, hostId: session.control.hostId,
-    source: { agentSessionId: session.id, expectedRun: { ...session.control.run }, expectedNativeHandle: structuredClone(session.nativeHandle!) as AgentMuxAgentForkSource['expectedNativeHandle'] },
-    origin: { ...origin, tabId: origin.tabId!, regionId: origin.regionId!, tabGroupId: origin.tabGroupId! } }
+    source: { agentSessionId: session.control.agentSessionId, expectedRun: { ...session.control.run }, expectedNativeHandle: structuredClone(session.nativeHandle!) as AgentMuxAgentForkSource['expectedNativeHandle'] },
+    origin: { ...origin, sessionId: session.id, tabId: origin.tabId!, regionId: origin.regionId!, tabGroupId: origin.tabGroupId! } }
 }
 
 export function currentForkSourceMatches(review: CurrentForkReview, session: CurrentForkSession | null): boolean {
   const handle = session?.nativeHandle, expected = review.source.expectedNativeHandle
-  return Boolean(session && session.id === review.source.agentSessionId && session.control.hostId === review.hostId &&
+  return Boolean(session && session.id === review.origin.sessionId && session.control.agentSessionId === review.source.agentSessionId && session.control.hostId === review.hostId &&
     session.control.run.runId === review.source.expectedRun.runId && !session.nativeSourceObservation &&
     session.capabilities.providerFork?.current && handle?.kind === 'provider' && handle.providerId === expected.providerId &&
     handle.sessionId === expected.sessionId && handle.transcriptPath === expected.transcriptPath)

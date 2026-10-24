@@ -37,11 +37,11 @@ export function createFocusContextIdentitySelector() {
     for (const location of catalog.locations) {
       const key = JSON.stringify([location.tabId, location.regionId])
       const fact = regions.get(key), surface = tabs[location.tabId]?.regions[location.regionId]
-      if (fact?.kind !== 'agent' || surface?.kind !== 'agent' || fact.agentSessionId !== surface.sessionId) continue
-      const execution = executionFor({ tabId: location.tabId, regionId: location.regionId, agentSessionId: surface.sessionId })
+      if (fact?.kind !== 'agent' || !fact.agentSessionId || surface?.kind !== 'agent') continue
+      const execution = executionFor({ tabId: location.tabId, regionId: location.regionId, agentSessionId: fact.agentSessionId })
       if (!execution) continue
       const subject = focusContextIdentityKey(execution.hostId, surface.sessionId), context = contextsByKey.get(subject)
-      if (!context) continue
+      if (!context || (context.control?.agentSessionId ?? context.id) !== fact.agentSessionId) continue
       const originalOccurrences = occurrences.get(subject) ?? new Set<string>()
       originalOccurrences.add(JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]))
       occurrences.set(subject, originalOccurrences)

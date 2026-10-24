@@ -73,6 +73,7 @@ import type { AgentMuxProjectGroupFact, TopicCategory } from '@agentmux/core/con
 import { refreshTopicSpatial } from './lib/topic-knowledge-actions'
 import { categoriesFromSpatial } from '../../shared/topic-categories'
 import {DesktopSpatialPersistence,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
+import { desktopAgentPresentationFromSpatial } from './lib/desktop-agent-presentation'
 import { acknowledgedNameProjection, projectedNameRevision } from './lib/name-authority'
 import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResult } from '@agentmux/core/spatial-graph'
 import { displayLabel, nameTargetKey } from '@agentmux/core/spatial-graph'
@@ -3072,30 +3073,51 @@ function runtimeEndpointWarningsAfterObservation(
   return warning === null ? retained : [...retained, warning]
 }
 
-function originalSavedSessionExecutions(tabs: PersistedWorkbench['tabs'], config: AppConfig | null): Map<string, { kind: SessionSnapshot['kind']; hostId: string } | null> {
+type SavedSessionExecution = { kind: SessionSnapshot['kind']; hostId: string; agentSessionId: string | null }
+function originalSavedSessionExecutions(tabs: PersistedWorkbench['tabs'], config: AppConfig | null): Map<string, SavedSessionExecution | null> {
   // These indexes live only for this observation. Read original Core occurrences
   // once, rather than rescan every saved Region for each Runtime fact.
-  const regions = new Map((coreSpatialPersistence?.current?.graph.regions ?? []).map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
+  const graph = coreSpatialPersistence?.current?.graph
+  const regions = new Map((graph?.regions ?? []).map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
   const hosts = new Set(config?.hosts.map(host => host.id))
-  const references = new Map<string, { kind: SessionSnapshot['kind']; hostId: string } | null>()
+  const references = new Map<string, SavedSessionExecution | null>()
   for (const tab of Object.values(tabs)) for (const surface of workbenchSurfaces(tab)) {
     if (surface.kind !== 'agent' && surface.kind !== 'terminal') continue
     const original = regions.get(JSON.stringify([tab.id, surface.regionId]))
+    const presentation = graph && original ? desktopAgentPresentationFromSpatial(graph, original) : null
     const matches = original?.kind === surface.kind && (surface.kind === 'agent'
-      ? original.agentSessionId === surface.sessionId : original.runId === surface.sessionId)
-    const hostId = matches ? original.execution?.hostId : undefined
-    let execution = hostId && hosts.has(hostId) ? { kind: surface.kind, hostId } : null
+      ? original.agentSessionId === surface.sessionId || presentation?.sessionId === surface.sessionId : original.runId === surface.sessionId)
+    const hostId = matches ? original.execution?.hostId ?? presentation?.hostId : undefined
+    let execution: SavedSessionExecution | null = hostId && hosts.has(hostId) ? { kind: surface.kind, hostId, agentSessionId: surface.kind === 'agent' ? original!.agentSessionId : null } : null
     const prior = references.get(surface.sessionId)
     // Every saved occurrence must agree; a missing fact or another Host cannot
     // borrow the first occurrence's execution identity.
-    if (references.has(surface.sessionId) && (!prior || !execution || prior.kind !== execution.kind || prior.hostId !== execution.hostId)) execution = null
+    if (references.has(surface.sessionId) && (!prior || !execution || prior.kind !== execution.kind || prior.hostId !== execution.hostId || prior.agentSessionId !== execution.agentSessionId)) execution = null
     references.set(surface.sessionId, execution)
   }
   return references
 }
 
+const savedAgentExecutionKey = (hostId: string, agentSessionId: string) => JSON.stringify([hostId, agentSessionId])
+function savedAgentPresentationIndex(references: ReadonlyMap<string, SavedSessionExecution | null>): Map<string, string | null> {
+  const index = new Map<string, string | null>()
+  for (const [id, execution] of references) if (execution?.kind === 'agent' && execution.agentSessionId !== null) {
+    const key = savedAgentExecutionKey(execution.hostId, execution.agentSessionId)
+    index.set(key, index.has(key) && index.get(key) !== id ? null : id)
+  }
+  return index
+}
+function savedAgentPresentationId(references: ReadonlyMap<string, SavedSessionExecution | null>, index: ReadonlyMap<string, string | null>, hostId: string, agentSessionId: string, id = agentSessionId): string | null {
+  const original = references.get(id)
+  if (references.has(id)) return original?.kind === 'agent' && original.hostId === hostId && original.agentSessionId === agentSessionId ? id : null
+  // Ambiguous aliases do not select a first occurrence. The unrelated canonical
+  // observation remains usable while those original surfaces stay unconfirmed.
+  return index.get(savedAgentExecutionKey(hostId, agentSessionId)) ?? id
+}
+
 function startupSnapshotForSavedReferences(snapshot: RuntimeSnapshot, tabs: PersistedWorkbench['tabs'], config: AppConfig | null): { snapshot: RuntimeSnapshot; rejectedSavedIds: Set<string> } {
   const references = originalSavedSessionExecutions(tabs, config)
+  const presentations = savedAgentPresentationIndex(references)
   const rejectedSavedIds = new Set<string>()
   if (!references.size) return { snapshot, rejectedSavedIds }
   // Keep unrelated new Sessions. A same-ID fact can bind a saved Region only if
@@ -3106,27 +3128,60 @@ function startupSnapshotForSavedReferences(snapshot: RuntimeSnapshot, tabs: Pers
     if (!keep) rejectedSavedIds.add(id)
     return keep
   }
-  const sessions = snapshot.sessions.filter(session => accepts(session.kind, session.hostId, session.id))
-  const recoveryCandidates = snapshot.recoveryCandidates.filter(candidate => accepts('agent', candidate.hostId, candidate.agentSessionId))
+  const timelines = { ...snapshot.timelines }
+  const timelineHosts = new Map<string, Set<string>>()
+  for (const session of snapshot.sessions) if (session.kind === 'agent') {
+    const hosts = timelineHosts.get(session.control.agentSessionId) ?? new Set<string>()
+    hosts.add(session.hostId); hosts.add(session.control.hostId)
+    timelineHosts.set(session.control.agentSessionId, hosts)
+  }
+  const ambiguousTimelines = new Set([...timelineHosts].flatMap(([id, hosts]) => hosts.size > 1 ? [id] : []))
+  const unconfirmedTimelineKeys = new Set(ambiguousTimelines)
+  const sessions = snapshot.sessions.flatMap<SessionSnapshot>(session => {
+    if (session.kind !== 'agent') return accepts(session.kind, session.hostId, session.id) ? [session] : []
+    const id = session.control.hostId === session.hostId
+      ? savedAgentPresentationId(references, presentations, session.hostId, session.control.agentSessionId, session.id) : null
+    if (id === null) { rejectedSavedIds.add(session.id); return [] }
+    if (ambiguousTimelines.has(session.control.agentSessionId)) {
+      // A SID-only timeline slot cannot select between Host-qualified facts.
+      // Keep each healthy Session and the prior history, with an observation notice.
+      unconfirmedTimelineKeys.add(session.id); unconfirmedTimelineKeys.add(id)
+      return [{ ...session, id, timelineObservation: { run: { ...session.control.run }, code: 'TIMELINE_HOST_UNCONFIRMED',
+        message: 'This observation contains the same Agent Session ID on multiple Hosts. Its incoming Timeline cannot be attributed; original history and Agent control remain available.' } }]
+    }
+    if (id === session.id) return [session]
+    const timeline = snapshot.timelines[session.id]
+    if (timeline) timelines[id] = timeline
+    return [{ ...session, id }]
+  })
+  const recoveryCandidates = snapshot.recoveryCandidates.filter(candidate => {
+    const id = savedAgentPresentationId(references, presentations, candidate.hostId, candidate.agentSessionId)
+    if (id !== null) return true
+    rejectedSavedIds.add(candidate.agentSessionId); return false
+  })
   // Timelines are keyed only by SID. If another Host supplied the same SID in
   // this cut, its timeline cannot be attributed to the original execution.
   return { snapshot: { ...snapshot,
-    sessions: sessions.filter(session => !rejectedSavedIds.has(session.id)),
-    recoveryCandidates: recoveryCandidates.filter(candidate => !rejectedSavedIds.has(candidate.agentSessionId)),
-    timelines: Object.fromEntries(Object.entries(snapshot.timelines).filter(([id]) => !rejectedSavedIds.has(id))) }, rejectedSavedIds }
+    sessions,
+    recoveryCandidates,
+    timelines: Object.fromEntries(Object.entries(timelines).filter(([id]) => !rejectedSavedIds.has(id) && !unconfirmedTimelineKeys.has(id))) }, rejectedSavedIds }
 }
 
 function startupSnapshotConfirmedSessionIds(snapshot: RuntimeSnapshot, tabs: PersistedWorkbench['tabs'], config: AppConfig | null): Set<string> {
   const references = originalSavedSessionExecutions(tabs, config), confirmed = new Set<string>()
   for (const session of snapshot.sessions) {
     const original = references.get(session.id)
-    if (original?.kind === session.kind && original.hostId === session.hostId && !runtimeSnapshotHostUnavailable(snapshot, session.hostId)) confirmed.add(session.id)
+    if (original?.kind === session.kind && original.hostId === session.hostId &&
+      (session.kind !== 'agent' || session.control.hostId === original.hostId && session.control.agentSessionId === original.agentSessionId) &&
+      !runtimeSnapshotHostUnavailable(snapshot, session.hostId)) confirmed.add(session.id)
   }
+  const presentations = savedAgentPresentationIndex(references)
   for (const candidate of snapshot.recoveryCandidates) {
-    const original = references.get(candidate.agentSessionId)
+    const id = savedAgentPresentationId(references, presentations, candidate.hostId, candidate.agentSessionId)
+    const original = id === null ? null : references.get(id)
     // A trusted exact candidate confirms a durable Agent waiting for recovery,
     // never a live Run or permission to execute. Terminal identity is separate.
-    if (original?.kind === 'agent' && original.hostId === candidate.hostId && !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId)) confirmed.add(candidate.agentSessionId)
+    if (id !== null && original?.kind === 'agent' && original.hostId === candidate.hostId && original.agentSessionId === candidate.agentSessionId && !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId)) confirmed.add(id)
   }
   return confirmed
 }
@@ -3138,9 +3193,11 @@ function startupSnapshotConfirmsSessions(snapshot: RuntimeSnapshot, sessionIds: 
 
 function retiredHistoryReferenceIds(sources: readonly AgentSessionHistoryDescriptor[], tabs: AppState['tabs'], config: AppConfig | null): Set<string> {
   const references = originalSavedSessionExecutions(tabs, config)
+  const presentations = savedAgentPresentationIndex(references)
   return new Set(sources.flatMap(source => {
-    const original = references.get(source.agentSessionId)
-    return source.state === 'retired' && original?.kind === 'agent' && original.hostId === source.hostId ? [source.agentSessionId] : []
+    const id = savedAgentPresentationId(references, presentations, source.hostId, source.agentSessionId)
+    const original = id === null ? null : references.get(id)
+    return source.state === 'retired' && id !== null && original?.kind === 'agent' && original.hostId === source.hostId && original.agentSessionId === source.agentSessionId ? [id] : []
   }))
 }
 
@@ -3339,12 +3396,15 @@ function startSessionMembershipResync(
         const savedSessionIds = entry.recoverSavedAgents
           ? persistedSessionSurfaceIds(projectPersistedWorkbench(useAppStore.getState()))
           : new Set<string>()
+        const savedExecutions = entry.recoverSavedAgents ? originalSavedSessionExecutions(useAppStore.getState().tabs, useAppStore.getState().config) : new Map<string, SavedSessionExecution | null>()
+        const savedPresentations = savedAgentPresentationIndex(savedExecutions)
         const startupCandidates = entry.recoverSavedAgents ? [
-          ...snapshot.recoveryCandidates,
+          ...snapshot.recoveryCandidates.map(candidate => ({ candidate,
+            sessionId: savedAgentPresentationId(savedExecutions, savedPresentations, candidate.hostId, candidate.agentSessionId) })),
           ...snapshot.sessions.flatMap((session) => session.kind === 'agent'
-            ? [{ ...session, agentSessionId: session.id, run: session.control.run }]
+            ? [{ candidate: { ...session, agentSessionId: session.control.agentSessionId, run: session.control.run }, sessionId: session.id }]
             : [])
-        ].filter((candidate) => savedSessionIds.has(candidate.agentSessionId)) : []
+        ].filter((entry): entry is typeof entry & { sessionId: string } => entry.sessionId !== null && savedSessionIds.has(entry.sessionId)) : []
         const events = drainSessionMembershipEvents(entry)
         const restoredDuringRead = new Set(events.flatMap(({ event }) => event.event.type === 'connection-state' && event.event.state === 'restored' ? [event.hostId] : []))
         let membershipGap = readOverflowed
@@ -3353,11 +3413,11 @@ function startSessionMembershipResync(
         useAppStore.setState((state) => {
           let projected = reduceAgentMembershipSnapshot(state, snapshot)
           projected = reduceTerminalMembershipSnapshot(projected, snapshot)
-          for (const candidate of startupCandidates) {
-            if (projected.sessions.some((session) => session.id === candidate.agentSessionId)) continue
-            projected = { ...projected, sessions: [...projected.sessions, recoveryCandidateSession(candidate, {
+          for (const { candidate, sessionId } of startupCandidates) {
+            if (projected.sessions.some((session) => session.id === sessionId)) continue
+            projected = { ...projected, sessions: [...projected.sessions, { ...recoveryCandidateSession(candidate, {
               kind: 'pending', detail: agentContinuityDetail(candidate.continuity)
-            })] }
+            }), id: sessionId }] }
           }
           for (const pending of events) {
             if (
@@ -3430,17 +3490,17 @@ function startSessionMembershipResync(
           if (diagnostic) useAppStore.getState().reportError(diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
             ...(diagnostic.subject ? { subject: diagnostic.subject } : {}), ...(diagnostic.cause ? { cause: diagnostic.cause } : {}) })
         }
-        for (const candidate of startupCandidates) {
+        for (const { candidate, sessionId } of startupCandidates) {
           if (restoredDuringRead.has(candidate.hostId)) continue
-          const current = useAppStore.getState().sessions.find((session) => session.id === candidate.agentSessionId)
-          if (!current || attemptedStartupRecovery.has(candidate.agentSessionId)) continue
+          const current = useAppStore.getState().sessions.find((session) => session.id === sessionId)
+          if (!current || attemptedStartupRecovery.has(sessionId)) continue
           const recoveryState = useAppStore.getState()
           if (current.kind === 'agent' && deferScratchConversationRecovery(recoveryState.tabs, recoveryState.config, current.id)) {
             dispatchStartupRecovery(current, true)
             continue
           }
           if (runtimeSnapshotHostUnavailable(snapshot, candidate.hostId)) continue
-          attemptedStartupRecovery.add(candidate.agentSessionId)
+          attemptedStartupRecovery.add(sessionId)
           if (current.kind === 'agent') dispatchStartupRecovery(current, false)
         }
         for (const sessionId of Object.keys(useAppStore.getState().agentSteerQueues)) {
@@ -5979,7 +6039,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       save: () => saveWorkbenchSelection(false)
     }, request) }
     if (request.operation === 'agent.view') return await executeWorkfaceAgentView({
-      get, setViewMode: (...args) => get().setViewMode(...args), save: saveWorkbenchSelection
+      get: () => ({ ...get(), originalSpatialGraph: coreSpatialPersistence?.current?.graph ?? null }),
+      setViewMode: (...args) => get().setViewMode(...args), save: saveWorkbenchSelection
     }, request)
     if (request.operation === 'space.swap') return await executeWorkfaceRegionSwap({
       get, swapRegions: (...args) => get().swapRegions(...args),
@@ -6060,7 +6121,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (request.operation === 'space.ls' || request.operation === 'space.inspect' || request.operation === 'agent.open' || request.operation === 'space.mv' || request.operation === 'space.bind' || request.operation === 'space.unbind') {
       return await executeSpatialControl({
-        get,
+        get: () => ({ ...get(), originalSpatialGraph: coreSpatialPersistence?.current?.graph ?? null }),
         agentPresentation: () => readAgentPresentation(get()),
         motePresentation: (catalog, topics) => readMotePresentation(get(), catalog, topics),
         surveyPresentation: catalog => readSurveyPresentation(get(), catalog),
@@ -7935,7 +7996,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ? focusExecution(state.agentFocus, id) : focusSessionContext(state, id, undefined, reference)
     set({ agentFocus })
     if (!id || options?.navigate === false) return true
-    const result = executionFocusPresentation(agentFocus.execution, state.tabs, workbenchSelectionCatalog(state), () => {})
+    const original = sessionPresentationById(state.sessions).get(id)
+    const result = executionFocusPresentation(agentFocus.execution, state.tabs, spatialCatalog(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []), () => {}, 'tab',
+      original?.control.kind === 'agent' ? original.control.agentSessionId : original?.id ?? id)
     const target = result.projection?.selection[0]
     if (target && get().selectMainRegion(target, state.workbenchSpaceSelection)) {
       set(current => ({ agentFocus: { ...current.agentFocus, execution: { ...current.agentFocus.execution, reference: target } } }))
@@ -12153,7 +12216,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (current.kind === 'agent' && (recovery.session.kind !== 'agent' || recovery.session.control.hostId !== current.control.hostId || recovery.session.control.agentSessionId !== current.control.agentSessionId))
         throw new Error('Recovery response belongs to another Agent Session. The original conversation is kept.')
-      const session = options?.preserveView ? { ...recovery.session, id: sessionId } : recovery.session
+      const session = options?.preserveView || current.kind === 'agent' ? { ...recovery.session, id: sessionId } : recovery.session
       const after = get()
       const live = after.sessions.find((item) => item.id === sessionId)
       const ownerStillCurrent = live !== undefined &&

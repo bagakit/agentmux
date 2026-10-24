@@ -5,6 +5,8 @@ import { spatialCatalog, type SpatialWorkbench } from './space-agent-control';
 import { categoriesFromSpatial, categoryResource } from '../../../shared/topic-categories';
 import { reducePersistedTab, type PersistedWorkbench } from './workbench-persistence';
 import { closeWorktreeGraph } from '../../../shared/worktree-closeout';
+import { sessionPresentationById } from './session-presentation';
+import { desktopAgentPresentationFromSpatial } from './desktop-agent-presentation';
 /** Host resource descriptors, never a second entity or topology store. */
 const tabKey = (id: string) => 'tab:' + id;
 const regionKey = (id: string) => 'region:' + id;
@@ -20,6 +22,9 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
   const { locations: _, ...facts } = catalog;
   if (state.projectGroups === undefined && previous?.projectGroups) facts.projectGroups = previous.projectGroups;
   const persisted = { tabs: Object.fromEntries(Object.values(state.tabs).map(tab => [tab.id, reducePersistedTab(tab)])), layouts: state.layouts };
+  const sessions = sessionPresentationById(state.sessions);
+  const regionFacts = new Map(facts.regions.map(region => [region.regionId, region]));
+  const originalRegions = new Map(previous?.regions.map(region => [region.regionId, region]));
   const resources: AgentMuxSpatialGraph['resources'] = {}, tabLayouts: AgentMuxSpatialGraph['tabLayouts'] = {};
   for (const category of categories) resources['space:' + category.spaceId] = categoryResource(category);
   for (const tab of Object.values(persisted.tabs)) {
@@ -28,10 +33,21 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
     tabLayouts[tab.id] = layout;
     for (const surface of Object.values(regions)) {
       const { regionId: _, kind, ...metadata } = surface;
-      if (kind === 'agent')
+      if (kind === 'agent') {
+        const region = regionFacts.get(surface.regionId);
+        const session = sessions.get(surface.sessionId);
+        const original = originalRegions.get(surface.regionId);
+        const retained = previous && original?.tabId === tab.id ? desktopAgentPresentationFromSpatial(previous, original) : null;
+        const presentation = session?.control.kind === 'agent'
+          ? { sessionId: surface.sessionId, agentSessionId: session.control.agentSessionId, hostId: session.control.hostId }
+          : !session && retained?.sessionId === surface.sessionId ? retained : null;
+        // A missing observation does not rebind the original Core Session to its UI key.
+        if (!session && presentation && region) region.agentSessionId = presentation.agentSessionId;
         delete (metadata as {
           sessionId?: string;
         }).sessionId;
+        if (presentation) Object.assign(metadata, { agentPresentation: presentation });
+      }
       resources[regionKey(surface.regionId)] = json(metadata);
     }
   }
@@ -62,7 +78,8 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
       (facts as unknown as Record<string, unknown>)[field] = [...facts[field], ...retained];
     }
     for (const fact of facts.regions) {
-      const old = previous.regions.find(r => r.regionId === fact.regionId && r.agentSessionId === fact.agentSessionId);
+      const original = originalRegions.get(fact.regionId);
+      const old = original?.tabId === fact.tabId && original.agentSessionId === fact.agentSessionId ? original : undefined;
       if (old) {
         if (fact.runId === null)
           fact.runId = old.runId;
@@ -106,8 +123,10 @@ export function desktopWorkbenchFromSpatial(graph: AgentMuxSpatialGraph, onUnava
         continue;
       // Earlier descriptors used the Tab resource for every Region. An explicit Region
       // resource now survives both save ACK hydration and a fresh client process.
-      regions[id] = { workspaceId: fact.workspaceId, ...data, regionId: id, kind: region.kind,
-        ...(region.kind === 'agent' ? { sessionId: region.agentSessionId } : {}) } as PersistedWorkbench['tabs'][string]['regions'][string];
+      const { agentPresentation: _, ...resource } = data;
+      const presentation = desktopAgentPresentationFromSpatial(graph, region);
+      regions[id] = { workspaceId: fact.workspaceId, ...resource, regionId: id, kind: region.kind,
+        ...(region.kind === 'agent' ? { sessionId: presentation?.sessionId ?? region.agentSessionId } : {}) } as PersistedWorkbench['tabs'][string]['regions'][string];
     }
     if (Object.keys(regions).length !== fact.regionIds.length) {
       onUnavailable?.(fact.tabId);

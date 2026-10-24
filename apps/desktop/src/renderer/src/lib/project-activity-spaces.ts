@@ -39,11 +39,11 @@ export function buildActivitySpaces(sessions: readonly SessionSnapshot[], catalo
     occurrences.add(occurrence)
     const key = regionKey(location.tabId, location.regionId)
     const region = regions.get(key), surface = tabs[location.tabId]?.regions[location.regionId]
-    if (region?.kind !== 'agent' || surface?.kind !== 'agent' || region.agentSessionId !== surface.sessionId) continue
+    if (region?.kind !== 'agent' || !region.agentSessionId || surface?.kind !== 'agent') continue
     // A display Host, cwd or navigation-only catalog cannot substitute the original execution Host.
-    const execution = executionFor({ tabId: location.tabId, regionId: location.regionId, agentSessionId: surface.sessionId })
+    const execution = executionFor({ tabId: location.tabId, regionId: location.regionId, agentSessionId: region.agentSessionId })
     const session = execution ? subjects.get(subjectKey(execution.hostId, surface.sessionId)) : undefined
-    if (!session) continue
+    if (!session || session.control.agentSessionId !== region.agentSessionId) continue
     confirmed.push({ session, location })
     regionSessions.set(key, session)
   }

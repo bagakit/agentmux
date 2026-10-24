@@ -17,8 +17,13 @@ import { addWorkbenchRegion, assertRegionInvariant, createWorkbenchTab, removeWo
 import { resolveSpatialCommit } from './control-spatial-commit'
 import { isSessionSurface } from './workbench-surface-kinds'
 import { topicContentZoneId } from '../../../shared/topic-categories'
+import { agentSessionPresentationIndex } from './session-presentation'
+import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
+import { desktopAgentPresentationFromSpatial } from './desktop-agent-presentation'
 
 export type SpatialWorkbench = {
+  /** Original Core owner input for public discovery, never a client fact store. */
+  originalSpatialGraph?: AgentMuxSpatialGraph | null
   topicCategories?: TopicCategory[]
   projectGroups?: import('@agentmux/core/control').AgentMuxProjectGroupFact[]
   config: AppConfig | null
@@ -73,6 +78,7 @@ export function spatialCatalog(state: SpatialWorkbench, topics: readonly Scratch
     Object.values(state.tabs).flatMap(tab => tab.space ? [{ workspaceId: tab.workspaceId, space: tab.space }] : []), state.topicCategories)
   const catalog: AgentMuxSpaceCatalog = { ...sources, ...(state.projectGroups ? { projectGroups: state.projectGroups } : {}), tabs: [], regions: [], locations: [] }
   const sessions = new Map(state.sessions.map(session => [session.id, session]))
+  const originalRegions = new Map(state.originalSpatialGraph?.regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
   const tabs = new Map<string, AgentMuxSpaceCatalog['tabs'][number]>()
   const spacesByZone = new Map<string, string[]>()
   for (const binding of catalog.bindings) {
@@ -99,6 +105,13 @@ export function spatialCatalog(state: SpatialWorkbench, topics: readonly Scratch
     for (const id of ids) {
       const surface = tab.regions[id]!
       const session = isSessionSurface(surface) ? sessions.get(surface.sessionId) : undefined
+      const original = originalRegions.get(JSON.stringify([tab.id, id]))
+      const presentation = state.originalSpatialGraph && original ? desktopAgentPresentationFromSpatial(state.originalSpatialGraph, original) : null
+      const retained = !session && surface.kind === 'agent' && original?.kind === 'agent' &&
+        (original.agentSessionId === surface.sessionId || presentation?.sessionId === surface.sessionId) ? original : undefined
+      if (!session && surface.kind === 'agent' && state.originalSpatialGraph !== undefined && !retained) {
+        fact.issue = [fact.issue, 'The original Agent binding is unconfirmed. Its Tab and Region are retained; inspect the original Region and Host before choosing this target.'].filter(Boolean).join('\n')
+      }
       let file: AgentMuxSpaceRegionFact['file']
       if (surface.kind === 'file') {
         file = { workspaceId: surface.workspaceId, path: surface.path }
@@ -113,9 +126,10 @@ export function spatialCatalog(state: SpatialWorkbench, topics: readonly Scratch
         } catch (error) { file.issue = error instanceof Error ? error.message : String(error) }
       }
       catalog.regions.push({ tabId: tab.id, regionId: id, kind: surface.kind,
-        agentSessionId: surface.kind === 'agent' ? surface.sessionId : null,
-        runId: session?.control.run.runId ?? null,
-        execution: session ? { hostId: session.hostId, cwd: session.workspacePath } : null,
+        agentSessionId: surface.kind === 'agent' ? session?.control.kind === 'agent' ? session.control.agentSessionId
+          : state.originalSpatialGraph !== undefined ? retained?.agentSessionId ?? null : surface.sessionId : null,
+        runId: session?.control.run.runId ?? retained?.runId ?? null,
+        execution: session ? { hostId: session.hostId, cwd: session.workspacePath } : retained?.execution ?? null,
         ...(surface.kind === 'browser' ? { browserId: surface.browserId } : {}), ...(file ? { file } : {}) })
     }
   }
@@ -380,8 +394,8 @@ function agentFact(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run' 
     ...(session.forkedFrom ? { forkedFrom: session.forkedFrom } : {}) }
 }
 function snapshotFact(session: Extract<SessionSnapshot, { kind: 'agent' }>): AgentMuxSpaceAgentFact {
-  return { agentSessionId: session.id, runId: session.control.run.runId, providerId: session.providerId,
-    executorId: session.executorId, hostId: session.hostId, cwd: session.workspacePath,
+  return { agentSessionId: session.control.agentSessionId, runId: session.control.run.runId, providerId: session.providerId,
+    executorId: session.executorId, hostId: session.control.hostId, cwd: session.workspacePath,
     createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
     ...(session.creation?.executorRevision ? { executorRevision: session.creation.executorRevision } : {}),
     ...(session.creation?.initialMessageOrigin ? { initialMessageOrigin: session.creation.initialMessageOrigin } : {}),
@@ -403,13 +417,19 @@ async function digest(input: unknown): Promise<string> {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(canonical(input))))
   return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
+/** Public references match original control identities; renderer aliases remain local presentation keys. */
+function observedAgent(sessions: readonly SessionSnapshot[], agentSessionId: string, hostId?: string): Extract<SessionSnapshot, { kind: 'agent' }> | undefined {
+  const matches = (agentSessionPresentationIndex(sessions).get(agentSessionId) ?? []).filter(session =>
+    session.control.agentSessionId === agentSessionId && (hostId === undefined || session.control.hostId === hostId))
+  return matches.length === 1 ? matches[0] : undefined
+}
 async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTopicSnapshot[], binding: SpatialRequestBinding): Promise<AgentMuxSpaceMutationReport> {
   const currentLocation = () => {
     const state = ports.get(), catalog = spatialCatalog(state, topics)
     const region = catalog.regions.find(item => item.regionId === binding.regionId && item.agentSessionId === binding.agentSessionId)
     const requested = region ? addressOf(catalog, region.regionId, { ...binding.target, regionId: binding.regionId }) : null
     return { state, catalog, to: requested ?? (region ? addressOf(catalog, region.regionId) : null), atTarget: Boolean(requested && requested.tabId === binding.tabId),
-      snapshot: state.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.id === binding.agentSessionId && session.kind === 'agent' && (!binding.executionHostId || session.hostId === binding.executionHostId)) }
+      snapshot: observedAgent(state.sessions, binding.agentSessionId, binding.executionHostId) }
   }
   let { state, catalog, to, atTarget, snapshot } = currentLocation()
   let agent: AgentMuxSpaceAgentFact | null = snapshot ? snapshotFact(snapshot) : null
@@ -548,6 +568,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     let from: AgentMuxSpaceAddress | undefined
     let sessionId: string
     let sourceSurface: AgentWorkbenchSurface | undefined
+    let existingAgent: Extract<SessionSnapshot, { kind: 'agent' }> | undefined
     let executorId: string | undefined
     let executionWorkspace: WorkspaceRecord | undefined
     let forkParent: AgentMuxAgentSession | undefined
@@ -567,6 +588,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       report.from = from
       sessionId = request.expectedAgentSessionId
       sourceSurface = ports.get().tabs[from.tabId]!.regions[from.regionId] as AgentWorkbenchSurface
+      existingAgent = observedAgent(ports.get().sessions, sessionId)
       if (request.destination.regionId === from.regionId) {
         checkedParent({ spaceId: request.destination.spaceId, zoneId: request.destination.zoneId, tabId: request.destination.tabId }, from)
         if (request.destination.split) failure('SPACE_SELF_SPLIT', 'An exact Region cannot be split beside itself by a move.')
@@ -588,14 +610,14 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         }
       } else if (request.content.kind === 'fork-agent') {
         const source = request.content.source
-        const parent = ports.get().sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent' && session.id === source.agentSessionId)
+        const parent = observedAgent(ports.get().sessions, source.agentSessionId)
         if (!parent) failure('AGENT_SESSION_UNKNOWN', 'The source Agent Session is not currently observed; its workbench is retained.')
         if (!parent.capabilities.providerFork?.current) failure('AGENT_FORK_UNSUPPORTED', 'This Provider does not support forking its current conversation.')
-        const inspected = await ports.creation(parent.hostId, parent.id)
+        const inspected = await ports.creation(parent.control.hostId, parent.control.agentSessionId)
         if (inspected.kind === 'retired-agent') failure('AGENT_SESSION_RETIRED', 'The original fork source is closed. Its history and workface are retained; explicitly reopen it before forking this Session.')
         forkParent = inspected
         // Core owns server-local Session identity; the Desktop snapshot owns the route to that server.
-        forkExecutionHostId = parent.hostId
+        forkExecutionHostId = parent.control.hostId
         const handle = forkParent.nativeHandle
         if (forkParent.agentSessionId !== source.agentSessionId || forkParent.run.runId !== source.expectedRun.runId ||
           forkParent.nativeSourceObservation || handle?.kind !== 'provider' || handle.providerId !== source.expectedNativeHandle.providerId ||
@@ -605,8 +627,9 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         executorId = forkParent.executorId
         if (!ports.get().config!.executors[executorId]) failure('AGENT_EXECUTOR_NOT_CONFIGURED', 'The source Executor is no longer configured.')
       } else {
-        const existingSession = ports.get().sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent' && session.id === sessionId)
+        const existingSession = observedAgent(ports.get().sessions, sessionId)
         if (!existingSession) failure('AGENT_SESSION_UNKNOWN', 'The existing Agent Session is not currently observed.')
+        existingAgent = existingSession
         report.agent = snapshotFact(existingSession)
       }
     }
@@ -635,7 +658,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     if (destination && ports.closing(destination.address.tabId) || from && ports.closing(from.tabId)) failure('SPACE_TARGET_CLOSING', 'An involved Tab is closing; existing contents were preserved.')
     const executionHostId = forkExecutionHostId ?? (operation === 'agent.open' && request.content.kind === 'new-agent'
       ? executionWorkspace?.hostId ?? resourceReference?.hostId ?? catalog.zones.find(zone => zone.zoneId === destination?.address.zoneId)?.hostId
-      : ports.get().sessions.find(session => session.kind === 'agent' && session.id === sessionId)?.hostId)
+      : existingAgent?.control.hostId)
     if (operation === 'agent.open' && request.content.kind === 'new-agent' &&
       ports.get().config!.hosts.find(host => host.id === executionHostId)?.kind === 'local' && !ports.get().config!.executors[executorId!]) {
       failure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Choose the exact saved local Executor template ID.')
@@ -670,7 +693,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     if (selfMove) {
       report.outcome = 'unchanged'; report.to = from!; report.save = { ...admitted, layoutApplied: true }
       if (request.focus) { ports.focus(from!); report.save = await ports.save(true) }
-      const snapshot = ports.get().sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.id === sessionId && session.kind === 'agent')
+      const snapshot = observedAgent(ports.get().sessions, sessionId, executionHostId ?? undefined)
       report.agent = snapshot ? snapshotFact(snapshot) : null
       return finish()
     }
@@ -702,7 +725,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     if (!zone || !zone.hostId || !zone.directoryPath) failure('SPACE_RESOURCE_UNKNOWN', 'The original Zone resource is unavailable; its entity is retained.')
     if (forkParent && zone.hostId !== forkExecutionHostId) failure('AGENT_FORK_HOST_MISMATCH', 'Choose a display destination on the source Host. The source execution directory is retained.')
     const surface: AgentWorkbenchSurface = sourceSurface ?? { kind: 'agent', phase: binding.createAgent ? 'launching' : 'attached',
-      regionId: target.address.regionId, workspaceId: executionWorkspace?.id ?? target.address.workspaceId, sessionId }
+      regionId: target.address.regionId, workspaceId: executionWorkspace?.id ?? target.address.workspaceId, sessionId: existingAgent?.id ?? sessionId }
     const placement = applySpatialPlacement(ports.get(), topics, target, surface, from)
     if (from && !request.focus) ports.preserveMovedFocus?.(from)
     // Record the known removal before patch synchronously captures the durable graph.
@@ -744,7 +767,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       if (signal?.aborted) report.issues.push(issue('control', 'CONTROL_RECEIPT_INTERRUPTED', 'The caller ended while the healthy Agent continued. Inspect the request ID.'))
       report.save = await ports.save(Boolean(report.to))
     } else if (!report.agent) {
-      const snapshot = ports.get().sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent' && session.id === sessionId)
+      const snapshot = observedAgent(ports.get().sessions, sessionId, executionHostId ?? undefined)
       report.agent = snapshot ? snapshotFact(snapshot) : null
     }
     if (report.save.reason) report.issues.push(issue('save', 'SPACE_SAVE_UNCONFIRMED', report.save.reason))

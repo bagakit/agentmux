@@ -43,12 +43,13 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly }: {
     if (owner.current !== session?.id) { owner.current = session?.id; update(restoredState()) }
   }, [session?.id])
   function currentSession(review: CurrentForkReview) {
-    const current = useAppStore.getState().sessions.find(value => value.id === review.source.agentSessionId)
-    return current?.kind === 'agent' ? current : null
+    const matches = useAppStore.getState().sessions.filter((value): value is CurrentForkSession => value.kind === 'agent' && value.id === review.origin.sessionId &&
+      value.control.agentSessionId === review.source.agentSessionId && value.control.hostId === review.hostId)
+    return matches.length === 1 ? matches[0]! : null
   }
   function requireOriginalRegion(review: CurrentForkReview) {
     const surface = useAppStore.getState().tabs[review.origin.tabId]?.regions[review.origin.regionId]
-    if (surface?.kind !== 'agent' || surface.sessionId !== review.source.agentSessionId) {
+    if (surface?.kind !== 'agent' || surface.sessionId !== review.origin.sessionId) {
       throw new Error('The original Region no longer contains the reviewed Agent Session.')
     }
     if (!currentForkSourceMatches(review, currentSession(review))) throw new Error('The reviewed source conversation changed. Review its current identity before this fork.')

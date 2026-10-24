@@ -34,7 +34,7 @@ export function moteConversationChoices(state: State, topic: ScratchTopicSnapsho
     const region = state.tabs[location.tabId]?.regions[location.regionId]
     const agent = catalog.regions.find(item => item.tabId === location.tabId && item.regionId === location.regionId)
     const session = region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
-    if (session?.control.kind !== 'agent' || !agent?.execution?.hostId || agent.agentSessionId !== (region?.kind === 'agent' ? region.sessionId : null) || location.spaceId !== spaceId || location.workspaceId !== workspaceId || region?.kind !== 'agent') return []
+    if (session?.control.kind !== 'agent' || !agent?.execution?.hostId || agent.agentSessionId !== session.control.agentSessionId || location.spaceId !== spaceId || location.workspaceId !== workspaceId || region?.kind !== 'agent') return []
     const choice = { hostId: session.control.hostId, sessionId: session.control.agentSessionId, displayWorkspaceId: location.displayWorkspaceId,
       groupId: location.groupId, tabId: location.tabId, regionId: location.regionId }
     return resolveMoteDefaultConversation(state, { ...topic, quickMode: { status: 'saved', defaults: { conversation: choice }, version: '' } }, workspaceId, catalog).conversation ? [choice] : []
