@@ -259,3 +259,41 @@
 .survey-page-favicon > svg, .survey-page-favicon > img { grid-area: 1 / 1; width: 16px; height: 16px; object-fit: contain; }
 
 .survey-page-favicon:has(> img:not([hidden])) > svg { visibility: hidden; }
+
+/* Survey list groups organize references; drag handles do not intercept row navigation. */
+.survey-list-ungrouped, .survey-list-group-items { display: flex; flex-direction: column; gap: var(--sp-1); min-height: 12px; }
+.survey-list-group { flex: none; min-width: 0; margin-top: var(--sp-2); border-top: 1px solid var(--survey-edge); }
+.survey-list-label, .survey-list-empty { display: block; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-meta); color: var(--text-3); }
+.survey-list-ungrouped[data-drop-over="true"], .survey-list-group[data-drop-over="true"] { background: var(--wash-1); border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1px var(--focus-line); }
+.survey-list-item { position: relative; min-width: 0; }
+.survey-list-item[data-dragging="true"], .survey-list-group[data-dragging="true"] { z-index: 2; opacity: .7; background: var(--surface-2); box-shadow: var(--elev-2); border-radius: var(--radius-sm); }
+.survey-list-group-heading { display: flex; align-items: center; min-height: 32px; min-width: 0; position: relative; }
+.survey-list-group-toggle { display: flex; flex: 1; min-width: 0; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 0; background: transparent; color: var(--text-2); cursor: pointer; font: inherit; text-align: left; }
+.survey-list-group-toggle strong { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-meta); font-weight: 600; }
+.survey-list-group-toggle > span { font-size: var(--fs-meta); color: var(--text-3); }
+.survey-list-group-toggle > svg { flex: none; transform: rotate(90deg); }
+.survey-list-group[data-collapsed="true"] .survey-list-group-toggle > svg { transform: rotate(0); }
+.survey-drag-handle, .survey-group-options, .survey-group-name button { display: grid; place-items: center; flex: none; width: 22px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); cursor: pointer; }
+.survey-drag-handle { touch-action: none; cursor: grab; }
+.survey-drag-handle:active { cursor: grabbing; }
+.survey-item-row > .survey-drag-handle { position: absolute; left: 8px; top: 2px; opacity: 0; }
+.survey-item-row:has(> .survey-drag-handle):is(:hover, :focus-within) > .survey-item > .survey-item-glyph,
+.survey-item-row:has(> .survey-drag-handle):is(:hover, :focus-within) > .survey-item > svg:first-child { visibility: hidden; }
+.survey-item-row:is(:hover, :focus-within) > .survey-drag-handle { opacity: 1; }
+.survey-list-group-heading > .survey-drag-handle { width: 18px; opacity: 0; }
+.survey-list-group-heading:is(:hover, :focus-within) > .survey-drag-handle { opacity: 1; }
+.survey-group-options { margin-right: 3px; opacity: 0; }
+.survey-list-group-heading:is(:hover, :focus-within) .survey-group-options, .survey-group-options[data-state="open"] { opacity: 1; }
+.survey-drag-handle:hover, .survey-group-options:hover, .survey-group-name button:hover { color: var(--text); background: var(--wash-2); }
+.survey-drag-handle:focus-visible, .survey-group-options:focus-visible, .survey-list-group-toggle:focus-visible, .survey-group-name button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.survey-group-name { display: flex; align-items: center; flex: 1; min-width: 0; gap: 2px; padding: 2px; }
+.survey-group-name input { width: 100%; min-width: 0; flex: 1; font-size: var(--fs-meta); }
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-list-label,
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-list-empty,
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-list-group-toggle strong,
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-list-group-toggle > span,
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-drag-handle,
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-group-options { display: none; }
+.global-survey-surface .survey-navigation[data-collapsed="true"] .survey-list-group-toggle { flex: 1; justify-content: center; padding: 6px; }
+.survey-list-group-items[hidden] { display: none; }
+.survey-list-group[data-selected="true"][data-collapsed="true"] .survey-list-group-toggle { color: var(--text); background: var(--surface-3); border-radius: var(--radius-sm); }

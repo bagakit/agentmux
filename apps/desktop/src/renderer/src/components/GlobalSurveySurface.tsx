@@ -16,11 +16,13 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, type ResolvedSurveyZoneSelection } from '../lib/survey-workface'
 import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { workbenchSurfaces } from '../lib/workbench-tabs'
-import { useAppStore } from '../store'
+import { currentDisplayNameRevision, useAppStore } from '../store'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
-import { SurveyZoneItem } from './SurveyZoneItem'
+import { SurveyZoneItem, type SurveyItemNameDraft } from './SurveyZoneItem'
 import { SurveyTabColumn } from './SurveyTabColumn'
+import { SurveyItemList } from './SurveyItemList'
+import { useSurveyListOrganization } from '../hooks/useSurveyListOrganization'
 import { BrowserStartPage } from './BrowserStartPage'
 import { resolveBrowserStartPage } from '../../../shared/browser-start-page'
 import { SurveyPanelChoices } from './SurveyPanelChoices'
@@ -80,6 +82,13 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const [contextZoneId, setContextZoneId] = useState<string | null>(null)
   const contextZone = catalog?.zones.find(zone => zone.zoneId === contextZoneId)
   const [renamingZoneId, setRenamingZoneId] = useState<string | null>(null)
+  const itemNameDraft = useRef<(SurveyItemNameDraft & { zoneId: string }) | null>(null)
+  function editItemName(zone: AgentMuxZoneFact, editing: boolean) {
+    if (editing) { list.setRenamingGroupId(null); itemNameDraft.current = { zoneId: zone.zoneId, value: itemTitle(zone), focusOnMount: true, selection: null, revision: { revision: currentDisplayNameRevision('zone', zone.zoneId) } }; setRenamingZoneId(zone.zoneId) }
+    else { itemNameDraft.current = null; setRenamingZoneId(null) }
+  }
+  const list = useSurveyListOrganization()
+  const contextOrganization = useRef(list.stored)
   const collected = useAppStore(state => state.surveyCollectedZones)
   const setCollected = useAppStore(state => state.setSurveyZoneCollected)
   const toolsOpen = useAppStore(state => state.surveyToolsOpen)
@@ -405,6 +414,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       visible: visible && !controlsCoverPage, title: zone ? itemTitle(zone) : selection ? 'Retained exploration' : 'New exploration',
       zone: zone ?? null, workspace: zone ? resourceWorkspaces.get(zone.workspaceId) ?? null : null,
       collected: !!zone && collected[zone.zoneId] === true,
+      ...(zone && collected[zone.zoneId] ? { grouping: list.groupingFor(zone.zoneId) } : {}),
       relatedSpaces: zone && catalog ? bindings.flatMap(binding => catalog.spaces.filter(space => space.spaceId === binding.spaceId)) : null,
       relatedSpacesUnconfirmed: bindings.some(binding => !catalog?.spaces.some(space => space.spaceId === binding.spaceId && !space.issue)),
       activityDetails,
@@ -413,13 +423,16 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       onCollectedChange: value => { if (zone && !setCollected(zone.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') },
       onOpenWorkspace: workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) },
       ...(zone ? {
-        onRename: () => { setSidebarCollapsed(false); setRenamingZoneId(zone.zoneId) },
+        onRename: () => { setSidebarCollapsed(false); editItemName(zone, true) },
         onClose: () => closeItem(zone.zoneId),
         onNewNote: () => newItemNote(zone.zoneId), onNewAgent: () => newItemAgent(zone.zoneId)
       } : {})
     }
   }
   const options = <SurveyItemOptions key={String(sidebarCollapsed)} {...itemOptionsFor(currentZone)} onManageBrowsers={() => setToolsOpen(!toolsOpen)} />
+  const displayedItems = new Map(items.filter(zone => !((notebooks.some(book => book.workface?.zoneId === zone.zoneId) || pages.some(page => page.workface?.zoneId === zone.zoneId)) &&
+            (tabsByZone.get(zone.zoneId) ?? []).length > 0 && (tabsByZone.get(zone.zoneId) ?? []).every(tabId => !!tabs[tabId] && workbenchSurfaces(tabs[tabId]!).every(surface => surface.kind === 'file' && pages.some(member => member.resource.workspaceId === surface.workspaceId && member.resource.path === surface.path))))).map(zone => [zone.zoneId, zone]))
+  const itemTitles = new Map([...Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => [zoneId, 'Retained exploration'] as const), ...[...displayedItems.values()].map(zone => [zone.zoneId, itemTitle(zone)] as const)])
   const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
   return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform()}
@@ -429,26 +442,24 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <ThemeLayoutOpenLeftIcon size={16} /> : <ThemeLayoutCloseLeftIcon size={16} />}</button>
       </div>
       <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
-        <SurveyItemContextMenu returnFocus={() => contextOrigin.current} {...itemOptionsFor(contextZone)}>
-        <div className="survey-page-list">
-          {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
-            <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><ThemeStatusUnknownIcon size={14} /><strong>Retained exploration</strong></button>
+        <SurveyItemContextMenu returnFocus={() => contextOrigin.current} {...itemOptionsFor(contextZone)} grouping={contextZone ? list.groupingFor(contextZone.zoneId, contextOrganization.current) : undefined}>
+        <SurveyItemList model={list} titles={itemTitles} selectedZoneId={selection?.zoneId} visible={visible && !controlsCoverPage} renderItem={(zoneId, dragHandle) => {
+          const zone = displayedItems.get(zoneId)
+          if (!zone) return <div className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
+            {dragHandle}<button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><ThemeStatusUnknownIcon size={14} /><strong>Retained exploration</strong></button>
             <span className="survey-relation-notice" role="status">Original source is not confirmed. Its reference is kept.</span>
-          </div>)}
-          {items.filter(zone => !((notebooks.some(book => book.workface?.zoneId === zone.zoneId) || pages.some(page => page.workface?.zoneId === zone.zoneId)) &&
-            (tabsByZone.get(zone.zoneId) ?? []).length > 0 && (tabsByZone.get(zone.zoneId) ?? []).every(tabId => !!tabs[tabId] && workbenchSurfaces(tabs[tabId]!).every(surface => surface.kind === 'file' && pages.some(member => member.resource.workspaceId === surface.workspaceId && member.resource.path === surface.path))))).map(zone => {
+          </div>
             const status = activity(zone)
             const itemTabs = [...new Set(itemReferences(zone.zoneId).map(reference => reference.tabId))]
             const itemOptions = itemOptionsFor(zone, status.details)
-            return <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
+            return <SurveyZoneItem dragHandle={dragHandle} key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
               visible={visible && !controlsCoverPage}
               tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn key={tabId} tab={tabs[tabId]!} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} />)}</div> : null}
               options={<SurveyItemOptions {...itemOptions} rowAction compact />}
               onNewBrowser={zoneId => { void newItemTab(zoneId, 'browser') }} onNewTab={zoneId => { void newItemTab(zoneId, 'tab') }}
-              onContextMenu={button => { contextOrigin.current = button; setContextZoneId(zone.zoneId) }} onNewNote={newItemNote} onNewAgent={newItemAgent} activity={status.summary} editing={renamingZoneId === zone.zoneId} onEdit={editing => setRenamingZoneId(editing ? zone.zoneId : null)}
+              onContextMenu={button => { contextOrigin.current = button; contextOrganization.current = list.stored; setContextZoneId(zone.zoneId) }} onNewNote={newItemNote} onNewAgent={newItemAgent} activity={status.summary} editing={renamingZoneId === zone.zoneId} nameDraft={itemNameDraft.current?.zoneId === zone.zoneId ? itemNameDraft.current : undefined} onEdit={editing => editItemName(zone, editing)}
               onRename={async (name, revision) => { const applied = await useAppStore.getState().setSurveyExplorationName(zone.zoneId, name, revision); if (!applied) setError('The exploration source or name revision is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
-          })}
-        </div>
+        }} />
         </SurveyItemContextMenu>
       </aside>
       {locationChoice ? <SurveyPanelChoices mode="button" open visible={visible && !controlsCoverPage} choices={locationChoice.choices} facts={useAppStore.getState()}
