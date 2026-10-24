@@ -15,6 +15,10 @@ and omission means unknown. Association is separate from input ownership and a l
 Agent working status does not acquire webpage input. Human handoff remains a trusted UI action;
 ordinary CLI input cannot grant it. External targets report unsupported isolation;
 an AgentMux visual border cannot block human input in an external browser.
+Native child pages appear as ordinary Browser targets with their own ids and the same page capabilities.
+Their optional `openedFrom` records the original Browser/navigation and, when confirmed, the triggering Tab/Region occurrence.
+It is provenance, not input authority. Opening a child does not switch an existing program to it; discover and run against its exact id.
+Use the original Region identity with `space inspect`/`space focus` to locate its current position; a saved location may have moved.
 Discovery reports coverage=complete or coverage=partial. A partial result cannot confirm that an unreturned page was removed.
 Use `amux browser input inspect --host-id HOST --operation-id INPUT` to read one original captured input scene and message digest.
 HOST is its capture owner and INPUT is its original input ID, independently of Browser operation IDs.
