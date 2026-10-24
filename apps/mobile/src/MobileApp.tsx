@@ -37,6 +37,8 @@ import type { MobileTopicSourceContentReference } from './topics/source-referenc
 import { MobileNotice, MobileNoticeProvider, MobileNoticeRestore, MobileNoticeScope, useMobileNotices } from './notices/MobileNotice'
 import { MobileGoalOperationRecovery, MobileGoalOperationSafety } from './goals/goal-operation-recovery'
 import { MobileWebDiagnostics } from './mobile-web/MobileWebDiagnostics'
+import { MobileWebUpdateSettings } from './mobile-web/MobileWebUpdate'
+import { mobileWebUpdateStatus } from './mobile-web/use-mobile-web-observation'
 import type { MobileWebPageObservation } from './mobile-web/use-mobile-web-observation'
 
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
@@ -430,7 +432,13 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         <MobileTerminalViewer terminalPalette={hostAppearance.terminalPalette} client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} inputActive={exposed} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
       </section>
     </main>
-    {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,projectionError,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></MobileNotice>}
+    <div className="mobile-notice-stack">
+      {webObservation && <MobileNotice owner={client} hidden={mobileWebUpdateStatus(webObservation) !== 'available'}
+        identity={[webObservation.inspection.result?.hostInstanceId, webObservation.inspection.result?.active?.digest]} className="mobile-web-update-notice" kind="feedback">
+        <span>网页有新版本</span><button type="button" onClick={() => setSheet('settings')}>前往更新</button>
+      </MobileNotice>}
+      {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,projectionError,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></MobileNotice>}
+    </div>
     <footer className="mobile-navigation-bar">{menuButton}{workspaceVisible && <MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} />}</footer>
     <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: '原 Agent', project: '项目未确认' })} />
     <Dialog.Root open={sheet !== null && sheet !== 'create'} onOpenChange={open => { if (!open) setSheet(null) }}>
@@ -449,11 +457,13 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
             catch { setHomeIssue('默认主页未保存；原设置和草稿保留。') }
           }}><option value="goals">Goals</option><option value="topics">Topics</option><option value="mote">Mote</option><option value="focus">Focus</option><option value="space">Space</option></select></label>
           {homeIssue && <MobileNotice identity={[homeIssue]} className="mobile-spatial-notice">{homeIssue}</MobileNotice>}
+          {webObservation && <MobileWebUpdateSettings observation={webObservation} />}
           <button className="mobile-menu-row" aria-label="提醒与诊断" onClick={() => setSheet('notices')}><ThemeStatusInfoIcon size={18} /><span>提醒与诊断<small>{notices?.hasDismissed ? '有已收起的提醒' : '收起或恢复原提醒'}</small></span><ThemeNavigationSubmenuIcon size={16} /></button>
           <button className="mobile-menu-row" onClick={() => setSheet('connection')}><ThemeObjectNetworkIcon size={18} /><span>连接与设备<small>{label} · {location.host}</small></span><ThemeNavigationSubmenuIcon size={16} /></button></div>
         </> : sheet === 'notices' ? <>
           <Dialog.Description id="mobile-sheet-description">本设备的提醒呈现</Dialog.Description>
           {webObservation && <MobileWebDiagnostics observation={webObservation} copyText={platform.copyText} />}
+          <MobileGoalOperationRecovery copyText={platform.copyText} />
           <MobileNoticeRestore onRestored={() => setSheet(null)} />
         </> : sheet === 'identity' && profileIdentity ? <>
           <Dialog.Description id="mobile-sheet-description">原资料与当前工作</Dialog.Description>
@@ -463,7 +473,6 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         </> : sheet === 'agent' && menuTarget ? <>
           <Dialog.Description id="mobile-sheet-description">{menuTarget.identity.project}</Dialog.Description>
           {menuIssue && <MobileNotice owner={client} identity={[menuTarget.agentSessionId, menuIssue]} role="status">{menuIssue}</MobileNotice>}
-          <MobileGoalOperationRecovery copyText={platform.copyText} />
           <MobileAgentActions key={menuTarget.agentSessionId} client={client} agentSessionId={menuTarget.agentSessionId} connected={connected} copyText={platform.copyText} beforeAction={validateMenuSource} />
           <button className="mobile-menu-row" onClick={() => { if (validateMenuSource()) { openSession(menuTarget.agentSessionId, menuTarget.identity); setSheet(null) } }}><ThemeObjectConversationIcon size={18} /><span>打开原对话</span></button>
         </> : sheet === 'actions' ? <>
