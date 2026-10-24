@@ -242,6 +242,30 @@ It excludes tool input/output, reasoning, generated context and internal Agent c
 even when a source marks those parts public. Sharing a conversation is not authority to drive
 the Agent: member input grants and the Binding trigger scope govern execution separately.
 
+Application member defaults are managed with connection application access get, configure
+and inspect. Get takes connectionId and an optional exact actor; configure takes operationId,
+connectionId, expectedConnectionRevision, grantId, expectedRevision (null for a new rule),
+actor, state and capabilities. Inspect takes the original operationId. Use --input FILE|-
+for these structured inputs. Only the authenticated person or device can administer access.
+The rule belongs to this hosting owner and exact adapter/application, including its current
+and future bound groups; it is not shared with other bots or Hosts and does not change DM quotas.
+
+Current connection binding inspect returns access separately from the original room grants.
+Each member has a local decision and a typed room/application effective source. An explicit
+group decision wins in full: missing capabilities are not filled from the application rule,
+and revoked group access denies all three. An earlier same-subject decision whose Binding
+revision differs remains visible for review; it never silently becomes application inheritance.
+Use connection binding member inherit with operationId, bindingId, expectedBindingRevision,
+actor and expectedGrant {grantId,revision} to explicitly remove that local override. This
+retains the original revisions and operation receipts. A historical inspection is not a
+current access reading. Unknown writes remain the same original operation for inspection.
+
+Input, answer and permission are independent. Permission access permits the affected groups
+to receive the original request and limited tool context; it is not private disclosure to
+only the allowed person. Every input or interaction rechecks its exact current effective
+source before execution. A new group restriction invalidates an unexecuted application claim,
+without stopping an already accepted Agent input or replaying an old refusal or unknown effect.
+
 Use connection binding pause, resume or detach with operationId, bindingId and expectedRevision.
 Pause keeps the relationship and member decisions. Resume retains the exact application, group,
 Session and sharing rules, captures a fresh source cut and never backfills the paused interval.

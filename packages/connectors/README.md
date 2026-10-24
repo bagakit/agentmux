@@ -380,6 +380,32 @@ Explicit trigger or publication changes preserve these decisions, including revo
 changing authorization subjects never transfers grants. Original frozen references
 remain bound to their original revisions.
 
+`ApplicationAccessHost` keeps application rules in the same original connection
+database, independent of whether any group has been bound. Rules are keyed by the
+exact adapter, native application and actor namespace; another bot or hosting
+owner does not inherit them. The public `connection.application.access` get,
+configure and inspect methods retain original operation identity and revision CAS.
+They require the authenticated person or device, not an external card or managed
+Agent. Rules do not change Mote private-chat quotas.
+
+Current `connection.binding.inspect` exposes member `access` separately from
+persisted room grants. The effective resolver uses the complete local decision
+when present, then the application rule: omitted local capabilities and local
+revocations cannot be filled from application defaults. An old same-subject local
+decision remains visible for review without reviving it. Explicit
+`connection.binding.member.inherit` releases only the local head projection and
+keeps immutable decisions and operation receipts. History is not a second routing
+head. A typed effective source identifies the original room or application grant;
+application rules are never materialized as copied room grants.
+
+Intake and question/permission actions re-resolve that source before the original
+effect, including after a new group override. Application permission sharing
+discloses limited original tool/request context to the application's affected
+bound groups; only the effective authorized actor may decide the original request.
+Changing a rule wakes only related existing publication lanes and never restarts
+receivers or replays refused or unknown inputs. Known local access remains usable
+when application access cannot be read; the observation gap stays explicit.
+
 This package's binding owner authorizes boundaries only. Intake, external
 publication and original Core question or permission execution remain separate
 owners; creating or inspecting a binding performs none of those effects.
