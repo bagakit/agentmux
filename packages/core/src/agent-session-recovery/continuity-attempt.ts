@@ -191,7 +191,7 @@ export async function performAgentContinuity(
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride }),
         ...(input.args === undefined ? {} : { args: [...input.args] }),
         ...(input.env === undefined ? {} : { env: { ...input.env } }) } }
-      : { ...common, source: current.creation?.executorRevision || ports.executors.hostExecutorOwner ? 'host' : 'provider' }
+      : { ...common, source: current.creation?.executorRevision || ports.executors.hostExecutorOwner || ports.executors.sessionExecutorConfiguration ? 'host' : 'provider' }
   }
   const retainExecutor = (value: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession => {
     if (!authoredExecutor) return value
@@ -395,7 +395,7 @@ export async function performAgentContinuity(
       const { commandOverride: _command, args: _args, env: _env, ...rest } = input
       const originalInput: AgentMuxAgentContinuityInput = rest
       if (current.creation?.executorRevision || executor.source === 'host') {
-        if (!ports.executors.hostExecutorOwner) throw unconfirmedContinuityExecutor()
+        if (!ports.executors.hostExecutorOwner && (current.creation?.executorRevision || !ports.executors.sessionExecutorConfiguration)) throw unconfirmedContinuityExecutor()
         input = await ports.executors.sessionExecutorOptions(current, originalInput)
       } else input = executor.source === 'sdk' ? { ...originalInput, ...structuredClone(executor.options) } : originalInput
       const oldInput = current?.promptCompletionAdmission
