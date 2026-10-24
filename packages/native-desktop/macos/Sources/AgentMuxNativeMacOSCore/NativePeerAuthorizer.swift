@@ -43,7 +43,7 @@ public enum NativePeerAuthorizer {
         let certificates = information[kSecCodeInfoCertificates as String] as? [SecCertificate] ?? []
         #if DEBUG
         let flags = (information[kSecCodeInfoFlags as String] as? NSNumber)?.uint32Value
-        if bare, certificates.isEmpty, let flags, flags & UInt32(kSecCodeSignatureAdhoc) != 0 { return .bareDebug }
+        if bare, certificates.isEmpty, let flags, flags & SecCodeSignatureFlags.adhoc.rawValue != 0 { return .bareDebug }
         #endif
         guard let certificate = certificates.first,
               SecCodeCheckValidity(ownCode, [], nil) == errSecSuccess else { return .unavailable }
