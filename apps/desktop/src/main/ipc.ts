@@ -79,7 +79,6 @@ import { FilePreviewResources } from './file-preview-resources.js'
 import { FileDiagramRenderer } from './file-diagram-renderer.js'
 import { FileBuilds } from './file-builds.js'
 import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
-import { TopicSearchHistoryOwner } from '@agentmux/host/topic-search-history'
 import type { SpatialLinkIngress } from './spatial-link-ingress.js'
 import type { WebUrlIngress } from './web-url-ingress.js'
 import { executeBrowserDefaultControl, inspectDefaultBrowser, openDefaultBrowserSettings } from './browser-default.js'
@@ -1467,8 +1466,7 @@ export async function registerIpc(args: {
     requireTrustedSender('moteAvatars:save', event)
     return moteAvatars.call('space.mote.avatar.save', params)
   })
-  const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID),
-    new TopicSearchHistoryOwner(join(app.getPath('userData'), 'topic-search-history.json')))
+  const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID))
   topicKnowledge.setFileReadPort(publicFiles)
   topicKnowledge.setSpatialPort(new TopicSpatialOwner({ state: spatialState,
     workspace: () => workspace(config, SCRATCH_WORKSPACE_ID), topics: () => topicKnowledge.listTopicSnapshots(),
@@ -1492,7 +1490,7 @@ export async function registerIpc(args: {
   })
   handleWithEvent('topics:call', async (event, method: import('@agentmux/core').TopicMethod, params: import('@agentmux/core').TopicParams<import('@agentmux/core').TopicMethod>) => {
     requireTrustedSender('topics:call', event)
-    return topicKnowledge.call(method, params)
+    return args.runtime.callOriginalCore('local', method, params as never, { transport: 'unix' })
   })
   const disposeSpatial = spatialState.subscribe(state => {
     if(!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('spatial:changed',state)
@@ -2461,7 +2459,7 @@ export async function registerIpc(args: {
     files: publicFiles,
     git: publicGit,
     fileUploads: new FileUploadOwner(),
-    topics: topicKnowledge,
+    topics: { call: (method, params, context) => args.runtime.callOriginalCore('local', method, params as never, context ?? { transport: 'unix' }) as Promise<import('@agentmux/core').TopicResult<typeof method>> },
     moteAvatars,
 
     schedules: args.progressLoops,
