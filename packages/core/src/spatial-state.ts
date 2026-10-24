@@ -311,8 +311,12 @@ export class AgentMuxSpatialStateStore {
       setDisplayLabelDocument(graph, document); return projectSpatialState(await this.writeLocked(current, graph));
     });
   }
-  /** Host-owned metadata uses the original graph transaction, never a layout writer. */
-  async commitOwnedResource(input: { key: string; expectedRevision: number; value: SpatialJson }): Promise<{
+  /** Host-owned metadata and an exact producer-confirmed Agent attachment share one transaction.
+   * The caller verifies its original creation receipt; this transaction never creates one. */
+  async commitOwnedResource(input: { key: string; expectedRevision: number; value: SpatialJson;
+    agentRegion?: { tabId: string; regionId: string; agentSessionId: string; runId: string;
+      execution: { hostId: string; cwd: string }; resource: SpatialJson };
+  }): Promise<{
     state: AgentMuxSpatialState; key: string; diskDurability: 'confirmed';
   }> {
     const { key, expectedRevision } = input;
@@ -320,14 +324,32 @@ export class AgentMuxSpatialStateStore {
       invalid('An exact owned resource key with a nonempty stable suffix is required.');
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
       invalid('An exact nonnegative expected revision is required.');
-    const value = structuredClone(input.value);
+    const value = structuredClone(input.value), agentRegion = input.agentRegion === undefined ? undefined : structuredClone(input.agentRegion);
+    if (agentRegion !== undefined && (!agentRegion || typeof agentRegion.agentSessionId !== 'string' || typeof agentRegion.runId !== 'string' || !agentRegion.execution))
+      invalid('An exact Agent Session, Run and execution location are required.');
     return this.locked(async () => {
       const current = await this.requiredState();
       if (current.revision !== expectedRevision)
         throw new AgentMuxError('Spatial state changed. Read the current revision and preserve both edits before retrying.', 'SPATIAL_STATE_CONFLICT');
-      const graph = parseAgentMuxSpatialGraph({ ...current.graph, resources: { ...current.graph.resources, [key]: value } });
+      const graph = structuredClone(current.graph);
+      if (agentRegion) {
+        const tab = graph.tabs.find(tab => tab.tabId === agentRegion.tabId);
+        const index = graph.regions.findIndex(region => region.regionId === agentRegion.regionId && region.tabId === agentRegion.tabId);
+        const original = graph.regions[index];
+        if (!tab?.regionIds.includes(agentRegion.regionId) || !original ||
+            !((original.kind === 'launcher' && original.agentSessionId === null) ||
+              (original.kind === 'agent' && original.agentSessionId === agentRegion.agentSessionId &&
+                (original.runId === null || original.runId === agentRegion.runId))) ||
+            (original.execution !== null && (original.execution.hostId !== agentRegion.execution.hostId || original.execution.cwd !== agentRegion.execution.cwd)))
+          throw new AgentMuxError('The exact Region no longer matches this Agent attachment. Its original binding and all Runs are retained.', 'SPATIAL_RESOURCE_TARGET_CONFLICT');
+        graph.regions[index] = { tabId: agentRegion.tabId, regionId: agentRegion.regionId, kind: 'agent',
+          agentSessionId: agentRegion.agentSessionId, runId: agentRegion.runId, execution: agentRegion.execution };
+        graph.resources['region:' + agentRegion.regionId] = agentRegion.resource;
+      }
+      graph.resources[key] = value;
+      const validated = parseAgentMuxSpatialGraph(graph);
       // An equal read is not a producer ACK. Reconfirm even an identical value.
-      const state = projectSpatialState(await this.writeLocked(current, graph));
+      const state = projectSpatialState(await this.writeLocked(current, validated));
       return { state, key, diskDurability: 'confirmed' };
     });
   }
