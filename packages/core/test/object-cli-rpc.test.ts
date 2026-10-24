@@ -20,9 +20,9 @@ describe('compiled object CLI through a private RPC transport probe', () => {
   it('routes the nonempty complete registration through canonical methods, independently of wire IDs', async () => {
     const fixture = await probe()
     const methods = AGENTMUX_CLI_COMMANDS.filter(entry => !entry.local).map(entry => entry.method)
-    // Learning approval is an actual App main-frame action; its live callback is
-    // a narrow owner adapter. Neither becomes an ordinary CLI approval command.
-    const appOnly = new Set(['agent.learning.confirm', 'agent.learning.confirmation'])
+    // Learning approval belongs to the actual App. Mobile producer writes belong
+    // to the authenticated original phone document, never an Agent CLI impersonation.
+    const appOnly = new Set(['agent.learning.confirm', 'agent.learning.confirmation', 'app.mobile.assets.loaded', 'app.mobile.report'])
     for (const method of appOnly) { expect(Object.hasOwn(AGENTMUX_RPC_NATIVE_METHODS, method)).toBe(true); expect(methods).not.toContain(method) }
     const publicMethods = [...Object.keys(AGENTMUX_RPC_CONTROL_METHODS), ...Object.keys(AGENTMUX_RPC_NATIVE_METHODS)]
       .filter(method => method !== 'system.subscription.cancel' && method !== 'system.endpoint' && !method.startsWith('runtime.') && !appOnly.has(method))
@@ -39,6 +39,9 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     const nativeSource = { nativeHandle: { kind: 'provider', providerId: 'private', sessionId: 'saved-native',
       transcriptPath: join(fixture.root, 'saved-native.jsonl') }, workspacePath: fixture.root, revision: 'a'.repeat(64) }
     const stdinByMethod: Record<string, string> = {
+      'app.mobile.assets.inspect': JSON.stringify({ hostId: 'local' }),
+      'app.mobile.assets.activate': JSON.stringify({ hostId: 'local', operationId: 'original-mobile-publication',
+        candidatePath: 'apps/mobile/dist', candidateDigest: 'sha256:' + 'a'.repeat(64), expectedActiveRevision: 0 }),
       'agent.learning.prepare': JSON.stringify({ operationId: 'original-learning', source: { hostId: 'local', agentSessionId: 'SID' }, executorId: 'E' }),
       'agent.learning.ls': JSON.stringify({ hostId: 'local' }),
       'agent.learning.inspect': JSON.stringify({ hostId: 'local', operationId: 'original-learning' }),

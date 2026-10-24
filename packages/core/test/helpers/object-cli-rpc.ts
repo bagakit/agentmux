@@ -82,6 +82,7 @@ export class ObjectCliProbe {
 export function objectCliSeed(method: string, input: string): string[] {
   const ids = { agent: 'SID', region: 'R', zone: 'Z', space: 'S', goal: 'G' }
   const fixed: Record<string, string[]> = {
+    'app.mobile.assets.inspect': ['--input', '-'], 'app.mobile.assets.activate': ['--input', '-'],
     'agent.learning.prepare': ['--input', '-'], 'agent.learning.ls': ['--input', '-'], 'agent.learning.inspect': ['--input', '-'],
     'agent.learning.propose': ['--input', '-'], 'agent.learning.revise': ['--input', '-'], 'agent.learning.continue': ['--input', '-'],
     'runtime.network.inspect': ['--runtime', 'runtime-original', '--owner', 'owner-original'],
