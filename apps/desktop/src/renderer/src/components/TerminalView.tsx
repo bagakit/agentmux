@@ -1808,7 +1808,10 @@ export function TerminalView({
         }
         attachmentId = result.attachmentId
         initialRecovery?.acquired()
-        if (result.session.id !== session.id || result.session.kind !== session.kind || result.session.hostId !== session.hostId ||
+        const sameSession = session.kind === 'agent'
+          ? result.session.kind === 'agent' && result.session.control.agentSessionId === session.control.agentSessionId
+          : result.session.kind === 'terminal' && result.session.control.runId === session.control.runId
+        if (!sameSession || result.session.hostId !== session.hostId ||
           result.session.control.hostId !== session.control.hostId || result.session.control.run.runId !== session.control.run.runId) {
           throw new Error('The attachment observation did not confirm this original Session and Run. The original Region is kept.')
         }
