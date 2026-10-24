@@ -2,12 +2,12 @@ import { grantAuthorReference } from './effective-grant.js'
 import { parseExternalConversationReference, type AgentExternalAuthoritySource, type AgentExternalConversationAuthority, type AgentExternalConversationReference } from '@agentmux/core'
 import { isDeepStrictEqual } from 'node:util'
 import { ConversationActions, externalActionIntentDigest } from './conversation-actions.js'
-import { sameRoomPublication, parseConnectionQuestionAnswerSubmissions } from '@agentmux/core/connections'
+import { readRoomPublicationBinding, sameRoomPublication, parseConnectionQuestionAnswerSubmissions } from '@agentmux/core/connections'
 import { mintObjectId, AgentMuxError, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
 import { CONNECTION_INGRESS_AUTHORITY_CODES, connectionDiagnosisIntakeCodes, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressReadPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { parseChannelTranscriptQuote, type ChannelQuoteRange, type ChannelTranscriptQuote, type AgentSessionHistorySource } from '@agentmux/core'
-import { IngressContextPositions, unavailableChannelQuote } from './ingress-context.js'
+import { ingressContextRevision, IngressContextPositions, unavailableChannelQuote } from './ingress-context.js'
 import type { ConnectionIngressRuntimeObservation } from '@agentmux/core/connections'
 
 /** Returned only by a Host-registered adapter after verifying the original transport proof. */
@@ -200,7 +200,10 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     const binding = this.options.bindings.findActiveAudience({ application, externalConversationId })
     const source = binding && (binding.executionHostId === 'local' || binding.executionRuntimeId)
       ? this.options.authoritySource?.(binding.executionHostId, binding.executionRuntimeId) : undefined
-    return binding ? { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision, ...(source ? { authoritySource: source } : {}) } : null
+    let publication: RoomBinding | null = null
+    try { if (binding?.scope.publication === 'future-shared-conversation' && !binding.publicationOrigin) publication = readRoomPublicationBinding(this.options.bindings, binding) }
+    catch { /* Intake remains usable; absent root metadata cannot join another configuration's position. */ }
+    return binding ? { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision, ...(publication ? { publicationRevision: publication.revision } : {}), ...(source ? { authoritySource: source } : {}) } : null
   }
   /** The original source owner resolves attribution; callers supply only its immutable ingress reference. */
   async recordAuthority(value: AgentExternalConversationReference): Promise<AgentExternalConversationAuthority> {
@@ -328,7 +331,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     try {
       this.contextPositions ??= new IngressContextPositions(this.database)
       if (this.contextPositions && contextSource) await this.contextPositions.reconcile({ bindingId: binding.bindingId,
-        bindingRevision: binding.revision, hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, source: contextSource },
+        bindingRevision: ingressContextRevision(record, binding.revision), hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, source: contextSource },
         operationId => client.inspectAgentInput({ kind: 'message-control', originalControlOperationId: operationId }))
       if (this.contextPositions) range = this.contextPositions.range(record, binding, contextSource)
       else return unavailableChannelQuote(record, range, 'context-position-unavailable')
@@ -521,7 +524,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     if (!this.contextPositions || !input.contextSource) return { ...summary, positionMessageId: null, observation: 'unavailable' }
     try {
       if (receipt) this.contextPositions.observe(ingress, receipt)
-      const position = this.contextPositions.position({ bindingId: input.author.bindingId, bindingRevision: input.author.bindingRevision,
+      const position = this.contextPositions.position({ bindingId: input.author.bindingId, bindingRevision: ingressContextRevision(ingress, input.author.bindingRevision),
         hostId: input.hostId, agentSessionId: input.agentSessionId, source: input.contextSource })
       return { ...summary, positionMessageId: position?.messageId ?? null, observation: 'observed' }
     } catch {
