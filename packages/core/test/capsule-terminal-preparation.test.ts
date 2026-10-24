@@ -60,10 +60,10 @@ function info(id: string, spec: RunSpec = request()): RunInfo {
   }
 }
 /** Only the Native SDK boundary is controlled; Client and adapter remain production code. */
-async function fixture(stored?: AgentMuxStoredAgentSession) {
+async function fixture(stored?: AgentMuxStoredAgentSession, prepareExecutionEnvironment?: () => Promise<void>) {
   const store = new AgentMuxMemoryAgentSessionStore()
   if (stored) await store.compareAndSwap(null, stored)
-  const client = new AgentMuxClient({ store })
+  const client = new AgentMuxClient({ store, ...(prepareExecutionEnvironment ? { prepareExecutionEnvironment } : {}) })
   clients.push(client)
   const inner = client as unknown as {
     connected: boolean
@@ -113,7 +113,7 @@ describe('Capsule terminal preparation consumes the original Native seams', () =
     const f = await fixture()
     const args = ['original-entry', 'serve']
     const env = { CAPSULE_VALUE: 'original-value' }
-    const captured = f.client.prepareTerminal({
+    const captured = await f.client.prepareTerminal({
       command: process.execPath,
       args,
       env,
@@ -336,4 +336,27 @@ describe('Capsule terminal preparation consumes the original Native seams', () =
     expect(f.sdk.start).not.toHaveBeenCalled()
     expect(f.sdk.attachRecoverableStop).not.toHaveBeenCalled()
   })
+})
+
+it('waits only for new execution capture while original prepared creation remains readable', async () => {
+  let ready = Promise.resolve(), release!: () => void
+  const f = await fixture(undefined, () => ready)
+  const original = await f.client.prepareTerminal({ command: '/bin/sh', workspacePath: fixturePath('original'), createOperationId: 'original' })
+  const run = await f.client.createPreparedTerminal(original)
+  ready = new Promise<void>(resolve => { release = resolve })
+  const args = ['original-argument'], input = { command: '/bin/sh', workspacePath: fixturePath('new'), args, createOperationId: 'new-original-operation' }
+  let completed = false
+  const pending = f.client.prepareTerminal(input).then(value => { completed = true; return value })
+  args.push('later-mutation')
+  await Promise.resolve()
+  expect(completed).toBe(false)
+  expect(await f.client.inspectPreparedTerminal(original, { runId: run.runId })).toMatchObject({ runId: run.runId })
+  expect(f.sdk.start).toHaveBeenCalledTimes(1)
+  vi.stubEnv('PREPARATION_EXPORT', 'complete-export')
+  release()
+  const captured = await pending, request = JSON.parse(captured.launch).request
+  expect(captured.createOperationId).toBe('new-original-operation')
+  expect(request.args).toContain('original-argument')
+  expect(request.args).not.toContain('later-mutation')
+  expect(request.env.PREPARATION_EXPORT).toBe('complete-export')
 })

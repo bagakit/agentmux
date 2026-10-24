@@ -48,6 +48,22 @@ async function initializeSnapshot(warning: string | null) {
 }
 
 describe('global shell environment notice', () => {
+  it('keeps a late preparation failure visible and clears it only on the environment owner update', async () => {
+    let changed!: (warning: string | null) => void
+    const unsubscribe = vi.fn()
+    vi.spyOn(api.ui, 'onEnvironmentWarning').mockImplementation(listener => { changed = listener; return unsubscribe })
+    const config = await initializeSnapshot(null)
+    expect(useAppStore.getState().loading).toBe(false)
+    await act(async () => changed(environmentWarning))
+    expect(useAppStore.getState().environmentWarning).toBe(environmentWarning)
+    await act(async () => useAppStore.getState().selectWorkspace(config.workspaces[0]!.id))
+    expect(useAppStore.getState().environmentWarning).toBe(environmentWarning)
+    await act(async () => changed(null))
+    expect(useAppStore.getState().environmentWarning).toBeNull()
+    dispose!(); dispose = undefined
+    expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+
   it('keeps the snapshot warning in a compact retrievable control across navigation', async () => {
     const config = await initializeSnapshot(environmentWarning)
     await render()
