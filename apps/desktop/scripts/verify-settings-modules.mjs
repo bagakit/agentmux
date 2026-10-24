@@ -42,9 +42,9 @@ function replaceOnce(text, before, after) {
 }
 const mutants = [
   { id: 'registration', file: owners.registration,
-    expectedFailure: { file: 'apps/desktop/test/settings-modules.test.tsx', fullName: 'a contributed module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell' },
+    expectedFailure: { file: 'apps/desktop/test/settings-modules.test.tsx', fullName: 'keeps the contributed draft, component identity and reading position while its summary follows only saved configuration' },
     source: replaceOnce(source.registration, '  generalSettingsModule,\n', ''),
-    proves: 'Removing a real contribution breaks the actual product navigation/catalog.' },
+    proves: 'Removing the real General contribution disconnects its original Overview DOM consumer; the separate contributed-module test still covers generic navigation.' },
   { id: 'pane', file: owners.pane,
     expectedFailure: { file: 'apps/desktop/test/settings-modules.test.tsx', fullName: 'a contributed module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell' },
     source: replaceOnce(source.pane, 'const Pane = settingsModules.find((module) => module.id === pane)!.Pane', 'const Pane = () => null'),
@@ -205,8 +205,11 @@ try {
   await run('control')
   for (const mutant of mutants) {
     await run(mutant.id + '-red', mutant.id)
-    await run(mutant.id + '-restored')
   }
+  // Variants are served strings in independent processes and never write the
+  // original files. Each run still binds all source bytes and runs all nine
+  // suites; one final complete restore also compares every compiled module.
+  await run('all-restored')
   for (const file of inputs.keys()) await bind(file)
   const receipt = { schema: 'settings-modules-proof.v1', source: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     inputs: Object.fromEntries(inputs), callers, runs, mutants: mutants.map(({ source, ...metadata }) => metadata),
