@@ -25,6 +25,19 @@ export const moteChatDiagnosisCodes = [...connectionDiagnosisIntakeCodes, ...con
 ] as const
 export type MoteChatDiagnosisCode = typeof moteChatDiagnosisCodes[number]
 export const moteChatDiagnosisCode = (value: unknown): MoteChatDiagnosisCode | null => moteChatDiagnosisCodes.find(code => code === value) ?? null
+/** Original preclaim leaves only; this is not a general error-log or Provider error catalog. */
+export const moteChatInputFailureCodes = [
+  'UNKNOWN_AGENT_SESSION', 'AGENT_SESSION_STORE_READ_UNCONFIRMED', 'STALE_AGENT_SESSION',
+  'AGENT_SESSION_IDENTITY_CONFLICT', 'AGENT_SESSION_RUN_MISMATCH', 'STALE_AGENT_SESSION_BINDING',
+  'AGENT_RUN_NOT_RUNNING', 'CTXMUX_INPUT_CURSOR_MISSING', 'CTXMUX_DISCONNECTED',
+  'AGENT_INTERACTION_PENDING', 'AGENT_PROMPT_SUBMISSION_BUSY', 'AGENT_PROMPT_INPUT_UNCONFIRMED',
+  'AGENT_PROMPT_OPERATION_CONFLICT', 'AGENT_PROMPT_SOURCE_CHANGED', 'INVALID_AGENT_PROMPT',
+  'INVALID_SESSION_ID', 'INVALID_AGENT_PROVIDER', 'UNKNOWN_PROVIDER', 'AGENT_PROMPT_CANCELLED',
+  'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED', 'INGRESS_SERVICE_DISABLED', 'INGRESS_SERVICE_UNCONFIRMED',
+  'INGRESS_ACTOR_NOT_AUTHORIZED', 'INGRESS_AUTHORITY_REVISED', 'INGRESS_BINDING_UNAVAILABLE',
+  'INGRESS_CONNECTION_UNAVAILABLE', 'INGRESS_INPUT_MISMATCH', 'INGRESS_TARGET_UNCONFIRMED'
+] as const
+export type MoteChatInputFailureCode = typeof moteChatInputFailureCodes[number]
 export type MoteChatDiagnosisInput = { target: MoteChatTarget }
 export type MoteChatDiagnosisIntake = {
   key: string
@@ -37,13 +50,21 @@ export type MoteChatDiagnosisIntake = {
     receiptObservation: AgentInputSubmissionReceipt['observation'] | null
     /** Last retained reason, not proof of an active await or permission to retry. */
     waiting: ConnectionDiagnosisIntake['waiting']
-    preparationReason: AgentPromptPreparationWaitReason | null }
+    preparationReason: AgentPromptPreparationWaitReason | null
+    failureCode: MoteChatInputFailureCode | null }
+}
+function originalInputFailure(receipt: AgentInputSubmissionReceipt) {
+  const waiting = receipt.control.waiting
+  return waiting?.phase === 'native-environment' ? waiting.observation?.failure : waiting?.failure
+}
+/** Read only the original retained typed cause; never infer one from text or nested error details. */
+export function moteChatInputFailureCode(receipt: AgentInputSubmissionReceipt): MoteChatInputFailureCode | null {
+  const failure = originalInputFailure(receipt)
+  return moteChatInputFailureCodes.find(code => code === failure?.code) ?? null
 }
 /** Read a typed original preparation observation, then discard every private identity and retry fence. */
 export function moteChatPreparationReason(receipt: AgentInputSubmissionReceipt): AgentPromptPreparationWaitReason | null {
-  const waiting = receipt.control.waiting
-  const failure = waiting?.phase === 'native-environment' ? waiting.observation?.failure : waiting?.failure
-  const observed = readAgentPromptPreparationWait(failure)
+  const observed = readAgentPromptPreparationWait(originalInputFailure(receipt))
   return observed && observed.agentSessionId === receipt.key.agentSessionId && observed.runId === receipt.key.expectedRun.runId &&
     observed.operationId === agentPromptInputId(receipt.key) ? observed.reason : null
 }
@@ -115,7 +136,7 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
   const incoming = nullable(p.incoming, value => {
     const page = fields(value, ['rows', 'more'])
     const rows = array(page.rows, value => {
-      const row = fields(value, ['key', 'state', 'code', 'codeRecorded', 'preparation', 'input']), i = fields(row.input, ['status', 'observation', 'controlState', 'receiptObservation', 'waiting', 'preparationReason'])
+      const row = fields(value, ['key', 'state', 'code', 'codeRecorded', 'preparation', 'input']), i = fields(row.input, ['status', 'observation', 'controlState', 'receiptObservation', 'waiting', 'preparationReason', 'failureCode'])
       const code = nullable(row.code, value => member(value, moteChatDiagnosisCodes)), codeRecorded = bool(row.codeRecorded)
       const preparation = member(row.preparation, ['not-admitted', 'reserved', 'prepared', 'creation-dispatched', 'ready', 'other-route'] as const)
       const observation = member(i.observation, ['not-started', 'observed', 'unavailable'] as const)
@@ -123,18 +144,20 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
       const controlState = nullable(i.controlState, value => member(value, ['enabled', 'stopped-before-dispatch', 'dispatch-authorized'] as const))
       const receiptObservation = nullable(i.receiptObservation, value => member(value, ['owned', 'rejoin-needed', 'closed'] as const))
       const preparationReason = nullable(i.preparationReason, value => member(value, ['context-compaction', 'native-busy'] as const))
+      const failureCode = nullable(i.failureCode, value => member(value, moteChatInputFailureCodes))
       let waiting: ConnectionDiagnosisIntake['waiting']
       try { waiting = parseConnectionDiagnosisWaiting(i.waiting) } catch { return fail() }
       if (code !== null && !codeRecorded || status !== null && (observation !== 'observed' || preparation === 'other-route')) fail()
-      if (status === null ? controlState !== null || receiptObservation !== null || waiting !== null || preparationReason !== null
+      if (status === null ? controlState !== null || receiptObservation !== null || waiting !== null || preparationReason !== null || failureCode !== null
         : controlState === null || receiptObservation === null) fail()
       if (status === 'waiting' && (controlState !== 'enabled' || receiptObservation === 'closed') ||
           status === 'stopped' && controlState !== 'stopped-before-dispatch' ||
           (status === 'admitted' || status === 'not-applied' || status === 'terminal-confirmed') && controlState !== 'dispatch-authorized' ||
           status !== null && status !== 'waiting' && receiptObservation !== 'closed') fail()
-      if (preparationReason !== null && waiting === null) fail()
+      if ((preparationReason !== null || failureCode !== null) && waiting === null) fail()
+      if (preparationReason !== null && failureCode !== null) fail()
       return { key: key(row.key), state: member(row.state, ['received', 'refused', 'claimed'] as const), code, codeRecorded,
-        preparation, input: { status, observation, controlState, receiptObservation, waiting, preparationReason } }
+        preparation, input: { status, observation, controlState, receiptObservation, waiting, preparationReason, failureCode } }
     }, moteChatDiagnosisWindowLimit)
     if (new Set(rows.map(row => row.key)).size !== rows.length) fail()
     return { rows, more: bool(page.more) }
