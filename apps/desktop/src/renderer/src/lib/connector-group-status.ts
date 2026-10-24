@@ -43,7 +43,7 @@ export type ConnectorProblemKind = 'configuration-unconfirmed' | 'sync-off' | 'p
 export type ConnectorProblem = { kind: ConnectorProblemKind; title: string; detail: string; tone: 'warning' | 'muted' }
 export type ConnectorDirectionSummary = { direction: 'outgoing' | 'incoming'; title: string; value: string; detail: string; tone: 'neutral' | 'warning' | 'muted' }
 export type ConnectorGroupSummary = { problems: ConnectorProblem[]; outgoing: ConnectorDirectionSummary; incoming: ConnectorDirectionSummary; retained: boolean; note: string | null }
-export type ConnectorGroupAction = 'resume' | 'members' | 'sharing' | 'activity' | 'channel-settings'
+export type ConnectorGroupAction = 'resume' | 'members' | 'sharing' | 'sync' | 'activity' | 'channel-settings'
 
 /** Choose a destination from original facts, never from its displayed label. Execution stays with the original owner. */
 export function connectorGroupAction(summary: ConnectorGroupSummary, bindingState: RoomBinding['state']): { kind: ConnectorGroupAction; label: string } {
@@ -51,7 +51,7 @@ export function connectorGroupAction(summary: ConnectorGroupSummary, bindingStat
   if (bindingState === 'paused') return { kind: 'resume', label: 'Resume group sync' }
   if (has('member-access')) return { kind: 'members', label: 'Manage member access' }
   if (has('platform-off') || has('bot-off')) return { kind: 'channel-settings', label: 'Open channel settings' }
-  if (has('sync-off')) return { kind: 'sharing', label: 'Review automatic sync' }
+  if (has('sync-off')) return { kind: 'sync', label: 'Review automatic sync' }
   return { kind: 'activity', label: 'View group details' }
 }
 
@@ -82,7 +82,7 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
   if (counts.notApplied) add('outgoing-not-applied', `${counts.notApplied} request${counts.notApplied === 1 ? '' : 's'} not delivered`, 'The original platform receipts report not applied. Check those exact requests.', 'warning')
   const outgoing: ConnectorDirectionSummary = { direction: 'outgoing', title: 'Conversation → group',
     value: !out ? report ? 'Could not check recent sends' : 'Not checked' : counts.notApplied ? `${counts.notApplied} request${counts.notApplied === 1 ? '' : 's'} not delivered` :
-      counts.unconfirmed ? 'Recent send results not confirmed' : counts.pending ? 'Sending recent requests' : counts.confirmed ? `${counts.confirmed} recent request${counts.confirmed === 1 ? '' : 's'} confirmed` : out.deliveries.length ? 'Recent send results not recorded' : 'No recent requests',
+      counts.unconfirmed ? 'Recent send results not confirmed' : counts.pending ? 'Sending recent requests' : counts.confirmed ? `${counts.confirmed} recent update${counts.confirmed === 1 ? '' : 's'} delivered` : out.deliveries.length ? 'Recent send results not recorded' : 'No recent requests',
     detail: out ? `Original platform requests in this window${out.next ? '; more receipts available' : ''}.` : 'Check the original group to read its receipts.',
     tone: !out ? 'muted' : counts.notApplied ? 'warning' : 'neutral' }
   const incoming = report?.incoming.value, row = incoming?.rows[0]
@@ -102,11 +102,11 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
     else if (row.coreStatus === 'waiting') { value = 'Waiting for Agent'; add('agent-waiting', value, 'The original input is saved and waiting. This does not mean Agent acceptance.', 'muted') }
     else if (row.coreStatus === 'stopped') { value = 'Input delivery stopped'; add('agent-stopped', value, 'The original saved input remains available.', 'muted') }
     else if (row.coreStatus === 'not-applied') { value = 'Not delivered to Agent'; tone = 'warning'; add('agent-not-applied', value, 'Check the original input receipt.', 'warning') }
-    else { value = row.coreStatus === 'terminal-confirmed' || row.coreStatus === 'bytes-accepted' ? 'Sent; Agent acceptance not confirmed' : 'Agent acceptance not confirmed'; add('agent-unconfirmed', value, 'Input transport or recording is separate from Agent acceptance.') }
+    else { value = row.coreStatus === 'terminal-confirmed' || row.coreStatus === 'bytes-accepted' ? 'Sent to Agent · awaiting confirmation' : 'Agent acceptance not confirmed'; add('agent-unconfirmed', value, 'Input transport or recording is separate from Agent acceptance.') }
   }
   const otherResults = !counts.unconfirmed && out?.effectObservation?.state === 'unknown'
   const unsettled = contentGap && otherResults ? 'Some conversation content and other request results still need checking.' :
-    contentGap ? 'Some conversation content is not confirmed for sharing.' : otherResults ? 'Other original request results are still unconfirmed.' : accessUnconfirmed ? 'Member access could not be checked; saved choices are kept.' : sourceUnconfirmed ? 'The conversation source could not be fully checked.' : null
+    contentGap ? 'Some conversation content is not confirmed for sharing.' : otherResults ? 'Other updates: delivery not confirmed.' : accessUnconfirmed ? 'Member access could not be checked; saved choices are kept.' : sourceUnconfirmed ? 'The conversation source could not be fully checked.' : null
   const note = [unsettled, retained ? 'Earlier observations are kept; the latest check is incomplete.' : null].filter(Boolean).join(' ') || null
   return { problems, outgoing, incoming: { direction: 'incoming', title: 'Group → Agent', value, detail, tone }, retained, note }
 }

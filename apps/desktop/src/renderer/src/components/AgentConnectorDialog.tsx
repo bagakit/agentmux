@@ -50,7 +50,7 @@ type Fact = RoomProvisioningOperation | RoomBindingOperation | RoomLinkOperation
 export type AgentConnectorTarget = { channel?: string; hostingTarget?: ConnectionHostingTarget | null; target: RoomBindingTarget; session: AgentNativeSourceReference; name: string; connectionId?: string; bindingId?: string; mote?: AgentMoteConnectionSource
   identity?: Pick<ComponentProps<typeof ResolvedAgentAvatar>, 'providerId' | 'appearance' | 'executorId'> }
 type AgentConnectorDialogProps = {
-  original: AgentConnectorTarget; mode: 'create' | 'existing' | 'details'; initialSection?: 'joining'; onClose(): void; returnFocus(): HTMLElement | null
+  original: AgentConnectorTarget; mode: 'create' | 'existing' | 'details'; initialSection?: 'joining' | 'members' | 'sharing' | 'sync' | 'activity' | undefined; resumeBinding?: Pick<RoomBinding, 'bindingId' | 'revision'> | undefined; onClose(): void; returnFocus(): HTMLElement | null
 }
 const sameHosting = (a: ConnectionHostingTarget | undefined, b: ConnectionHostingTarget) => a?.hostId === b.hostId && a.runtimeId === b.runtimeId
 /** Discover only a new entry. Retained operations always name their original hosting owner. */
@@ -70,7 +70,7 @@ export function AgentConnectorDialog(props: AgentConnectorDialogProps) {
     return () => { live = false }
   }, [selectedKey, retry])
   const owner = selected.hostingTarget ?? (selected.hostingTarget === undefined && read?.key === selectedKey ? read.owner : undefined)
-  if (owner) return <AgentConnectorForm key={JSON.stringify([selected.target, owner, selected.connectionId, selected.bindingId, selected.channel])} {...props} original={{ ...selected, hostingTarget: owner }} onOpenOriginal={intent => {
+  if (owner) return <AgentConnectorForm key={JSON.stringify([selected.target, owner, selected.connectionId, selected.bindingId, selected.channel])} {...props} resumeBinding={opened?.identity === identity ? undefined : props.resumeBinding} original={{ ...selected, hostingTarget: owner }} onOpenOriginal={intent => {
     if (!intent.hostingTarget) return
     const { connectionId: _connection, bindingId: _binding, channel: _channel, ...source } = original
     setOpened({ identity, original: { ...source, target: structuredClone(intent.target), hostingTarget: intent.hostingTarget,
@@ -88,7 +88,7 @@ export function AgentConnectorDialog(props: AgentConnectorDialogProps) {
     </Dialog.Content></DocumentOverlayPortal></Dialog.Root>
 }
 /** A bounded form over original public owners. It retains submitted correlations, never another receipt store. */
-function AgentConnectorForm({ original, mode: initialMode, initialSection, onClose, returnFocus, onOpenOriginal, onOpenDraft }: Omit<AgentConnectorDialogProps, 'original'> & {
+function AgentConnectorForm({ original, mode: initialMode, initialSection, resumeBinding, onClose, returnFocus, onOpenOriginal, onOpenDraft }: Omit<AgentConnectorDialogProps, 'original'> & {
   original: AgentConnectorTarget & { hostingTarget: ConnectionHostingTarget }; onOpenOriginal(intent: ConnectorRoomIntent): void; onOpenDraft(): void
 }) {
   const ownerDocument = useWorkbenchDocument()
@@ -103,6 +103,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
   const mote = useContext(MoteWorkfaceContext), settings = useContext(SettingsNavigation)
   const [connections, setConnections] = useState<ConnectionRecord[]>([]), [bindings, setBindings] = useState<RoomBinding[]>([])
   const [loaded, setLoaded] = useState(false)
+  const entryConsumed = useRef(false)
   const [moteDefault, setMoteDefault] = useState<{ status: 'loading' | 'ready' | 'unconfirmed'; ref: MoteConnectionRef | null; issue: string | null }>(() =>
     original.mote && 'target' in original.mote ? { status: 'loading', ref: null, issue: null }
       : { status: original.mote ? 'unconfirmed' : 'ready', ref: null, issue: original.mote && 'issue' in original.mote ? original.mote.issue : null })
@@ -378,11 +379,14 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
       scope: { input: scope, publication }, expectedSource: { providerId: native.providerId, nativeSessionId: native.sessionId } }
     void work(() => execute(binding ? { method: 'connection.binding.relink', input: { ...input, expectedRevision: binding.revision }, target, phase: 'not-dispatched' } : { method: 'connection.bind', input, target, phase: 'not-dispatched' }))
   }
-  function lifecycle(method: 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach') {
-    if (!binding) return
-    const previous = relevant.find(intent => intent.method === method && intent.input.bindingId === binding.bindingId)
-    if (previous) { void work(async () => { await inspect(previous) }); return }
-    void work(() => execute({ method, target, phase: 'not-dispatched', input: { operationId: mintObjectId(), bindingId: binding.bindingId, expectedRevision: binding.revision } }))
+  function lifecycle(method: 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach', originalBinding = binding) {
+    if (!originalBinding) return
+    const previous = relevant.find(intent => intent.method === method && intent.input.bindingId === originalBinding.bindingId)
+    if (previous) {
+      void work(async () => { if (previous.phase === 'not-dispatched') await execute(previous, true); else await inspect(previous) })
+      return
+    }
+    void work(() => execute({ method, target, phase: 'not-dispatched', input: { operationId: mintObjectId(), bindingId: originalBinding.bindingId, expectedRevision: originalBinding.revision } }))
   }
   function currentGrantIntent(intent: ConnectorRoomIntent): boolean {
     return (intent.method === 'connection.grant' || intent.method === 'connection.binding.member.inherit') && !!binding && intent.input.bindingId === binding.bindingId &&
@@ -424,7 +428,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
     if (id && group) { mote.selectTab(id, group.id); onClose() }
     else setIssue('The original Mote discussion entry is unavailable. Your Agent and draft are kept.')
   }
-  function showSection(section: 'members' | 'sharing' | 'joining' | 'activity') {
+  function showSection(section: 'members' | 'sharing' | 'joining' | 'sync' | 'activity') {
     const node = content.current?.querySelector<HTMLElement>(`[data-connection-section="${section}"]`)
     node?.scrollIntoView({ block: 'start' })
     node?.focus({ preventScroll: true })
@@ -520,8 +524,13 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
             onContinue={() => { if (linkIntent?.phase === 'not-dispatched' && !linkOperation) void work(() => execute(linkIntent, true)) }} /> : null
 
   useEffect(() => {
-    if (joining) showSection('joining')
-  }, [joining, audience])
+    if (!showingCurrentBinding || !binding || !loaded || entryConsumed.current) return
+    entryConsumed.current = true
+    if (initialSection) showSection(initialSection)
+    // Only an explicit header action carries this snapshot. Ordinary open/refresh never resumes.
+    if (resumeBinding && resumeBinding.bindingId === binding.bindingId && binding.state === 'paused')
+      lifecycle('connection.binding.resume', { ...binding, revision: resumeBinding.revision })
+  }, [showingCurrentBinding, binding, loaded, initialSection, resumeBinding])
 
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="dialog-scrim" />
@@ -573,7 +582,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
             <button type="button" onClick={() => showSection('joining')}><JoinIcon size={16} /><span>Join group</span><small>{connection?.capabilities?.roomLink === false ? 'Not supported' : 'Link & code'}</small></button>
           </nav> : null}
           {showingCurrentBinding && binding ? <ConnectorDeliveryDetails key={JSON.stringify([binding.bindingId, binding.revision])} binding={binding} hostingTarget={hostingTarget} onMembers={() => showSection('members')} /> : null}
-          <ConnectorServiceControl active hostingTarget={hostingTarget} />
+          <div data-connection-section="sync" tabIndex={-1}><ConnectorServiceControl active hostingTarget={hostingTarget} /></div>
 
           {bindingPending || binding && changingGroup ? <p className="agent-connector-note" role="status">{bindingPending ? 'The group change is not confirmed. Check its original status.' : 'Your current group stays connected until you confirm this change.'}</p> : null}
           {creatingGroup && !created && (!creationUnsupported || !!roomIntent) ? <fieldset disabled={busy || !!roomIntent} className="agent-connector-fields" aria-label="New dedicated group">
