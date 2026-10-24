@@ -376,7 +376,11 @@ try {
   // End only this fixture's original private CLI. A user stop would retire the Session
   // and would not exercise Level B recovery of an ended original Run.
   expectSameRun(await fixture.sdk.statusAgent(sid), original)
-  await fixture.sdk.signalTerminal(original.session.run, 'SIGTERM')
+  assert.equal(original.session.workspacePath, fixture.workspace)
+  assert.ok(Number.isSafeInteger(original.run.pid) && original.run.pid > 1)
+  assert.notEqual(original.run.pid, fixture.nativeProcessId)
+  // This is an OS fault in the exact private CLI, not the public portable Interrupt action.
+  process.kill(original.run.pid, 'SIGTERM')
   await until('original private Run ended', () => fixture.sdk.statusAgent(sid), status => status.run.state === 'exited')
   const recovery = await browser.action('explicit-mobile-original-session-recovery', recoverOriginalSession, { sessionId: sid })
   const resumed = await until('same Session Level B recovery', () => fixture.sdk.statusAgent(sid),
