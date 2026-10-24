@@ -6,6 +6,7 @@ import type { MobileAssetRelease, MobileAssetsActivateParams, MobileAssetsActiva
   MobileAssetsLoadedReceipt, MobileAssetsPort } from '@agentmux/core/mobile-web'
 import { loadMobileSnapshot, mobileCandidateDirectory, mobileDigest, MobileAssetCapacityError, MOBILE_ASSET_LIMITS, type MobileAsset, type MobileSnapshot } from './mobile-assets.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { isMobilePageEntry, mobilePageUnavailable, mobileResourceUnavailable } from './mobile-page-response.js'
 
 /** One original Host owns HTTP snapshots, activation results and bounded page observations. */
 export class MobileAssetsOwner implements MobileAssetsPort {
@@ -124,23 +125,37 @@ export class MobileAssetsOwner implements MobileAssetsPort {
     try { return await operation } finally { if (this.pending === pending) this.pending = null }
   }
   readonly route = (request: IncomingMessage, response: ServerResponse): void => {
-    let path: string
-    try { path = new URL(request.url ?? '/', 'http://localhost').pathname }
-    catch { response.writeHead(400, { 'Cache-Control': 'no-store' }); response.end(); return }
+    let target: URL
+    try { target = new URL(request.url ?? '/', 'http://localhost') }
+    catch { mobileResourceUnavailable(request, response, 400); return }
+    const path = target.pathname, readable = request.method === 'GET' || request.method === 'HEAD'
+    const entry = isMobilePageEntry(path)
     let snapshot: MobileSnapshot | undefined, file: MobileAsset | undefined
-    if ((path === '/' || path === '/index.html') && this.active && ['GET', 'HEAD'].includes(request.method ?? '')) {
-      response.writeHead(302, { Location: this.namespace(this.active) + 'index.html', 'Cache-Control': 'no-store' }); response.end(); return
+    const openCurrent = () => {
+      response.writeHead(302, { Location: this.namespace(this.active!) + 'index.html' + target.search,
+        'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); response.end()
+    }
+    if ((path === '/' || path === '/index.html') && this.active && readable) {
+      openCurrent(); return
     }
     else for (const candidate of this.retained) {
       const prefix = this.namespace(candidate)
       if (path.startsWith(prefix)) { snapshot = candidate; file = candidate.files.get(path.slice(prefix.length)); break }
     }
-    if (!['GET', 'HEAD'].includes(request.method ?? '') || !file || !snapshot) {
-      response.writeHead(path.startsWith('/mobile/') ? 410 : 404, { 'Cache-Control': 'no-store', 'X-AgentMux-Mobile-Resource': path.startsWith('/mobile/') ? 'not-retained' : 'unavailable' }); response.end(); return
+    if (!readable || !file || !snapshot) {
+      if (readable && entry) {
+        if (this.active) openCurrent()
+        else mobilePageUnavailable(request, response, path.startsWith('/mobile/') ? 410 : 503)
+      } else mobileResourceUnavailable(request, response, path.startsWith('/mobile/') ? 410 : 404)
+      return
     }
-    if (this.responseCount >= MOBILE_ASSET_LIMITS.responses) { response.writeHead(503, { 'Cache-Control': 'no-store', 'Retry-After': '1' }); response.end(); return }
+    if (this.responseCount >= MOBILE_ASSET_LIMITS.responses) {
+      if (entry) mobilePageUnavailable(request, response, 503)
+      else mobileResourceUnavailable(request, response, 503)
+      return
+    }
     response.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
-      'X-AgentMux-Mobile-Build': snapshot.release.buildId, 'Referrer-Policy': 'no-referrer',
+      'X-AgentMux-Mobile-Build': encodeURIComponent(snapshot.release.buildId), 'Referrer-Policy': 'no-referrer',
       'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" })
     if (request.method === 'HEAD') { response.end(); return }
     this.responseCount++; this.sending.set(snapshot, (this.sending.get(snapshot) ?? 0) + 1)

@@ -7,6 +7,10 @@ import type { MobileAssetManifest, MobileAssetRelease, MobileAssetsInspection, M
   MobileWebReportParams, MobileWebReportReceipt } from './mobile-web.js'
 
 const size = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength
+const isText = (value: unknown, max: number): value is string =>
+  typeof value === 'string' && Boolean(value) && !/[\0\r\n]/u.test(value) && size(value) <= max + 2
+/** The same build identity bound used by manifests and page observations. */
+export const isMobileBuildId = (value: unknown): value is string => isText(value, 128)
 const sameProducer = (a: MobileWebProducer, b: MobileWebProducer | undefined) =>
   a.devicePrincipalId === b?.devicePrincipalId && a.documentId === b.documentId
 function boundary(result = false) {
@@ -14,7 +18,7 @@ function boundary(result = false) {
   const fail = (): never => { throw new AgentMuxError('Mobile Web data does not satisfy its finite original contract.', code) }
   const record = (value: unknown, keys: readonly string[]) => rpcRecord(value, keys, code)
   const text = (value: unknown, max = 512): void => {
-    if (typeof value !== 'string' || !value || /[\0\r\n]/u.test(value) || size(value) > max + 2) fail()
+    if (!isText(value, max)) fail()
   }
   const count = (value: unknown, max = Number.MAX_SAFE_INTEGER): void => {
     if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > max) fail()
