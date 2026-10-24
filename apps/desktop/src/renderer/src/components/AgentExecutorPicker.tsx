@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useContext, useState } from 'react'
+import { useContext, useLayoutEffect, useRef, useState } from 'react'
 import type { ExecutorChoice } from '../lib/executors'
 import { executorDetectionLabel } from '../lib/executor-detection'
 import { AgentAvatar } from './AgentAvatar'
@@ -13,6 +13,7 @@ const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
 
 
 type ExecutorPickerProps = {
@@ -28,6 +29,29 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
   const { executors, selected, onSelect, active = true, disabled = false } = props
   const settings = useContext(SettingsNavigation)
   const [showUnavailable, setShowUnavailable] = useState(false)
+  const catalogRef = useRef<HTMLDivElement>(null)
+  const scrollButtonRef = useRef<HTMLButtonElement>(null)
+  const [scroll, setScroll] = useState({ overflow: false, atEnd: false })
+  useLayoutEffect(() => {
+    const catalog = catalogRef.current
+    if (!active || !catalog) return
+    const measure = () => {
+      const overflow = catalog.scrollHeight > catalog.clientHeight + 1
+      const atEnd = catalog.scrollTop + catalog.clientHeight >= catalog.scrollHeight - 1
+      if (!overflow && catalog.ownerDocument.activeElement === scrollButtonRef.current) {
+        const target = catalog.querySelector<HTMLButtonElement>('.agent-pick[aria-pressed="true"]:not(:disabled)')
+          ?? catalog.querySelector<HTMLButtonElement>('button:not(:disabled)')
+        target?.focus({ preventScroll: true })
+      }
+      setScroll(current => current.overflow === overflow && current.atEnd === atEnd ? current : { overflow, atEnd })
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(catalog)
+    for (const child of catalog.children) observer.observe(child)
+    catalog.addEventListener('scroll', measure, { passive: true })
+    return () => { observer.disconnect(); catalog.removeEventListener('scroll', measure) }
+  }, [active, executors, showUnavailable, props.presentation])
   if (props.presentation === 'field') return <SelectionField id={props.id} label={props.label} value={selected ?? ''}
     disabled={disabled} onValueChange={onSelect} options={[
       { value: '', label: props.unsetLabel },
@@ -41,7 +65,8 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
   const available = executors.filter(item => item.detection?.state !== 'missing')
     .sort((a, b) => Number(b.detection?.state === 'ready') - Number(a.detection?.state === 'ready'))
   const unavailable = executors.filter(item => item.detection?.state === 'missing')
-  return <div className="agent-catalog" aria-label="Agent executors">
+  return <div className="agent-catalog-wrapper">
+    <div ref={catalogRef} className="agent-catalog" aria-label="Agent executors">
     <div className="agent-picks">
       <LiquidSelectionSurface selected={selected} active={active} targetAttribute="data-executor-id" />
       {available.map(executor => <button type="button" key={executor.id} data-executor-id={executor.id}
@@ -69,5 +94,13 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
       <span inert aria-hidden="true"><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={14} /></span>
       <strong>{executor.label}</strong><small>{executorDetectionLabel(executor.detection)}</small>
     </span>)}</div> : null}
+    </div>
+    {scroll.overflow ? <button ref={scrollButtonRef} type="button" className="agent-catalog__scroll" onClick={() => {
+      const catalog = catalogRef.current
+      if (catalog) catalog.scrollTop = scroll.atEnd ? 0 : catalog.scrollTop + catalog.clientHeight
+    }}>
+      <span>{scroll.atEnd ? 'Back to top' : 'More agents'}</span>
+      {scroll.atEnd ? <ThemeNavigationUpIcon size={12} /> : <ThemeNavigationDownIcon size={12} />}
+    </button> : null}
   </div>
 }
