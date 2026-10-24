@@ -14,11 +14,35 @@ export type BrowserProjectionState = {
   layouts: Record<string, WorkspaceLayout>
 }
 
+/** Keep native lifecycle boundaries in order while coalescing only their own snapshot segment. */
+export function createBrowserProjectionEventQueue() {
+  let events: BrowserEvent[] = []
+  const updates = new Map<string, number>()
+  return {
+    push(event: BrowserEvent): void {
+      const id = event.type === 'updated' || event.type === 'native-opened' ? event.browser.id : event.id
+      if (event.type === 'updated') {
+        const previous = updates.get(id)
+        if (previous !== undefined) { events[previous] = event; return }
+        updates.set(id, events.length)
+      } else updates.delete(id)
+      events.push(event)
+    },
+    drain(): BrowserEvent[] {
+      const retained = events
+      events = []; updates.clear()
+      return retained
+    }
+  }
+}
+
 export function reduceBrowserEvent(
   state: BrowserProjectionState,
   event: BrowserEvent,
   expectedNavigationId?: string
 ): BrowserProjectionState {
+  // Native creation is projected by the Store before ordinary Browser updates.
+  if (event.type === 'native-opened') return state
   if (event.type === 'released') {
     let tabs = state.tabs
     for (const tab of Object.values(state.tabs)) {

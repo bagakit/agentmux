@@ -32,6 +32,10 @@ type RendererPending = {
 export type WorkbenchNativeWindowOwner = {
   /** Original native pages leave this exact shell before it can be destroyed. */
   beforeClosing(window: BrowserWindow): Promise<void>
+  /** True when this exact shell's original content owns the close request. */
+  requestClose?(window: BrowserWindow): boolean
+  /** Native content may carry its original requested window size. */
+  windowSize?(target: AppWindowTarget): Promise<{ width: number; height: number } | null>
 }
 const actorEqual = (a: AppWindowActor, b: AppWindowActor) => a.kind === b.kind && a.id === b.id
 const targetKey = (target: AppWindowTarget) => JSON.stringify(target)
@@ -202,6 +206,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     window.on('close', event => {
       if (this.quitting || this.mayClose.has(window.id)) return
       event.preventDefault()
+      if (record.target.kind === 'region' && this.nativeOwner?.requestClose?.(window)) return
       void this.call('app.window.return', { operationId: mintObjectId(), windowId: record.windowId, documentGeneration: record.generation },
         { actor: { kind: 'user', id: 'desktop' } }).catch(error => this.warn(String(error)))
     })
@@ -314,6 +319,11 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   }
 
   private async open(operation: AppWindowOperation, target: AppWindowTarget, context: AppWindowCallContext): Promise<AppWindowPage> {
+    let nativeSize: { width: number; height: number } | null | undefined
+    try { nativeSize = await this.nativeOwner?.windowSize?.(target) }
+    catch (error) { this.warn(`The original page remains usable; its requested window size could not be read. Inspect its window arrangement to retry. ${String(error)}`) }
+    // The size lookup can yield. Check ownership only afterwards so concurrent
+    // intents cannot both reserve this original Tab or an overlapping Region.
     const existing = this.byTarget.get(targetKey(target))
     if (existing) {
       operation.windowId = existing.windowId; operation.documentGeneration = existing.native ? existing.generation : null
@@ -348,7 +358,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     const bounds = this.main.getNormalBounds()
     const record: ManagedWindow = { windowId: mintObjectId(), generation: mintObjectId(), target, native: null, phase: 'pending', ticket: null,
       durable: false, geometry: clampGeometryToVisibleArea({ x: bounds.x + 40, y: bounds.y + 40,
-        width: Math.max(640, Math.min(1120, bounds.width)), height: Math.max(480, Math.min(820, bounds.height)), maximized: false }, this.visibleAreas()) }
+        width: nativeSize?.width ?? Math.max(640, Math.min(1120, bounds.width)), height: nativeSize?.height ?? Math.max(480, Math.min(820, bounds.height)), maximized: false }, this.visibleAreas()) }
     this.retain(record)
     operation.windowId = record.windowId
     const prepared = await this.request(record, { action: 'prepare' })

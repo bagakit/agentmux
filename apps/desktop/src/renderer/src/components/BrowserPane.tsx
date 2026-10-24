@@ -1,5 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
+import { BrowserSourceNavigation } from './BrowserSourceNavigation'
 import { CapsuleInteractionChrome } from './CapsuleInteractionChrome'
 import type { SplitDirection } from '@agentmux/layout'
 import { WORKBENCH_TAB_SPLIT_ACTIONS } from '../lib/workbench-tab-actions'
@@ -1163,6 +1164,7 @@ function BrowserPaneContent({
         }}
       >
         {tab.mode === 'private' ? <span className="browser-private-badge" aria-label="Private session" title="Temporary website data ends when this page closes. Network identity is not hidden; explicit saves, downloads and Agent operation records follow their normal retention.">Private</span> : null}
+        {tab.source ? <BrowserSourceNavigation source={tab.source} onOpenChange={setMenuOpen} /> : null}
         <button
           type="button"
           aria-label="Open in external browser"
