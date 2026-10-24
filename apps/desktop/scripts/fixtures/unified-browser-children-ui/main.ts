@@ -78,6 +78,8 @@ async function click(window: BrowserWindow, selector: string) {
 }
 async function capture(window: BrowserWindow, label: string) {
   await wait(160)
+  const observe = async () => ({ at: Date.now(), nativeFocused: window.isFocused(), ...await window.webContents.executeJavaScript(`(()=>{const menu=document.querySelector('.browser-source-navigation__menu'),rect=menu?.getBoundingClientRect();return {appearance:document.documentElement.dataset.appearance,sourceMenuOpen:!!rect&&rect.width>0&&rect.height>0,sourceMenuText:menu?.textContent??null,sourceMenuBounds:rect?{x:rect.x,y:rect.y,width:rect.width,height:rect.height}:null}})()`) })
+  const before = await observe()
   const layer = await window.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })
   const filename = `${phase}-${label}-renderer.png`; await writeFile(join(output, filename), layer.toPNG())
   receipt.images.push({ label, kind: 'original-renderer-layer', filename, size: layer.getSize(), windowId: window.id, webContentsId: window.webContents.id })
@@ -122,7 +124,7 @@ async function capture(window: BrowserWindow, label: string) {
     const release = join(output, `${phase}-${label}-capture-release`)
     const independentFilename = `${phase}-${label}-${captureProvider}.png`
     const request = { pid: process.pid, title: window.getTitle(), browserWindowId: window.id, mediaSourceId: window.getMediaSourceId(), nativeId,
-      appPath: process.execPath, provider: captureProvider, output: join(output, independentFilename), release, deadlineAt: Date.now() + 45000, alreadyComposed: composed }
+      appPath: process.execPath, provider: captureProvider, output: join(output, independentFilename), release, deadlineAt: Date.now() + 45000, alreadyComposed: composed, observation: before }
     await writeFile(join(output, `${phase}-${label}-capture-request.json`), JSON.stringify(request))
     process.stderr.write('UI_CAPTURE_HOLD ' + JSON.stringify(request) + '\n')
     await until('bounded independent capture hold', () => readFile(release).then(() => true).catch(() => false), 45000).catch(() => { receipt.warnings.push({ step: 'capture-hold', outcome: 'deadline', request }) })
@@ -139,6 +141,9 @@ async function capture(window: BrowserWindow, label: string) {
     } catch (error: any) { receipt.warnings.push({ step: 'independent-composed-capture', provider: captureProvider, label, message: error.message }) }
     assert.ok(composed, 'The exact private window requires a real independent compositor image in capture-hold mode')
   }
+  const after = await observe()
+  ;(receipt.captureObservations ??= []).push({ label, before, after })
+  if (label === 'closed-source-notice') assert.equal(after.sourceMenuOpen, true, 'The original Source notice remains actually open after independent native capture')
 }
 async function childFromSource(sourceId: string, contents: Electron.WebContents) {
   const before = new Set(browsers.targets().map(row => row.id))
@@ -311,6 +316,25 @@ async function run() {
     await until('original source display actually closed', async () => !(await facts()).tabs[sourceTab.id])
     await click(main, 'button[aria-label="Go to source Browser"]')
     await until('closed source notice preserves original child', () => js('document.body.textContent.includes("source page no longer has an available display")'))
+    const menuGeometry = await js(`(()=>{
+      const menu=document.querySelector('.browser-source-navigation__menu');
+      const item=[...menu.querySelectorAll('[role="menuitem"]')].find(node=>node.textContent.trim()==='Dismiss');
+      if(!item)throw new Error('The original Source menu Dismiss item is unavailable');
+      const read=()=>{const range=document.createRange();range.selectNodeContents(item);const textRects=[...range.getClientRects()].filter(rect=>rect.width>0&&rect.height>0).map(rect=>({x:rect.x,y:rect.y,width:rect.width,height:rect.height})),rect=menu.getBoundingClientRect();return {textRects,lines:new Set(textRects.map(rect=>Math.round(rect.y*2)/2)).size,menu:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},viewport:innerWidth,withinViewport:rect.x>=0&&rect.right<=innerWidth,columns:getComputedStyle(item).gridTemplateColumns}};
+      const rules=[];const visit=list=>{for(const rule of list){if(rule.selectorText==='.browser-source-navigation__menu .browser-menu__item')rules.push(rule);if(rule.cssRules)visit(rule.cssRules)}};
+      for(const sheet of document.styleSheets)visit(sheet.cssRules);
+      if(rules.length!==1)throw new Error('The original Source text-only CSS owner must be unique');
+      const rule=rules[0],value=rule.style.getPropertyValue('grid-template-columns'),priority=rule.style.getPropertyPriority('grid-template-columns'),before=read();let mutant;
+      try{rule.style.setProperty('grid-template-columns','14px minmax(0, 1fr) auto',priority);mutant=read()}
+      finally{if(value)rule.style.setProperty('grid-template-columns',value,priority);else rule.style.removeProperty('grid-template-columns')}
+      return {before,mutant,restored:read(),mutation:'Only the original Source menu item CSSOM grid columns were temporarily restored to the generic icon grid; original value and priority restored in finally.'}
+    })()`)
+    receipt.assertions.push({ label: 'real-source-menu-geometry-and-CSSOM-mutation', ...menuGeometry })
+    assert.equal(menuGeometry.before.lines, 1, 'Dismiss is one readable text line in the real Source menu')
+    assert.equal(menuGeometry.before.withinViewport, true, 'The real Source menu stays inside its current viewport')
+    assert.notEqual(menuGeometry.mutant.lines, 1, 'The original generic 14px icon grid makes the same live Dismiss geometry fail')
+    assert.equal(menuGeometry.restored.lines, 1, 'Original Source item geometry is restored after the CSSOM mutation')
+    assert.equal(menuGeometry.restored.withinViewport, true, 'Original Source menu bounds are restored')
     assert.equal(browsers.target(expected.childId)?.id, expected.childId)
     receipt.assertions.push({ label: 'closed-source-remains-explicit-and-child-usable', child: browsers.target(expected.childId), facts: await facts() })
     await capture(main, 'closed-source-notice')
