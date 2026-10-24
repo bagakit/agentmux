@@ -33,6 +33,7 @@ const config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', 
 const receipt: any = { schema: 'agentmux.unified-browser-children-ui.phase.v1', phase, pid: process.pid, passed: false,
   calls: [], assertions: [], images: [], warnings: [], boundary: 'Actual App/Store/WorkspaceWorkbench/StableWorkbenchView/BrowserPane, production preload mappings, WorkbenchWindows shell/portal, NativeOverlayWindows, exact BVM presentations and Core spatial durability. Unrelated provider/files/settings data uses existing browser-preview APIs; no user App, Agent Session, Runtime or clipboard.' }
 let main: BrowserWindow, browsers: BrowserViewManager, windows: WorkbenchWindows, overlays: NativeOverlayWindows, profiles: BrowserProfileManager
+let activationRequestCount = 0
 async function js(expression: string) { return main.webContents.executeJavaScript(expression) }
 async function until(label: string, read: () => unknown | Promise<unknown>, budget = 15000): Promise<any> {
   await writeFile(join(output, phase + '-progress.json'), JSON.stringify({ stage: label, pid: process.pid, at: Date.now() }))
@@ -60,7 +61,16 @@ async function ensure(id: string) {
 async function click(window: BrowserWindow, selector: string) {
   // CDP dispatch alone does not perform the OS activation of a real human click.
   window.show(); app.focus({ steal: true }); window.focus()
-  await until('private candidate active before human UI input', () => window.isFocused(), 5000)
+  if (!await until('private candidate active before human UI input', () => window.isFocused(), 5000).catch(() => false)) {
+    assert.equal(process.env.AGENTMUX_CHILD_UI_CAPTURE_HOLD, '1', 'The original private candidate requires actual human activation before UI input')
+    const label = 'activation-' + ++activationRequestCount, release = join(output, `${phase}-${label}-release`)
+    const request = { pid: process.pid, title: window.getTitle(), browserWindowId: window.id, mediaSourceId: window.getMediaSourceId(), nativeId: window.getMediaSourceId().split(':')[1],
+      appPath: process.execPath, release, deadlineAt: Date.now() + 45000, purpose: 'Activate only this exact private candidate before the human action and before any automatic child-focus oracle.' }
+    await writeFile(join(output, `${phase}-${label}-request.json`), JSON.stringify(request))
+    process.stderr.write('UI_ACTIVATION_HOLD ' + JSON.stringify(request) + '\n')
+    await until('independent activation of the original private candidate', () => window.isFocused(), 45000)
+    receipt.assertions.push({ label: 'independent-private-candidate-human-activation', request, nativeFocused: window.isFocused() })
+  }
   const point = await window.webContents.executeJavaScript(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e?.getBoundingClientRect();return r&&r.width&&r.height?{x:r.x+r.width/2,y:r.y+r.height/2}:null})()`)
   assert.ok(point, 'Actual UI selector ' + selector)
   if (!window.webContents.debugger.isAttached()) window.webContents.debugger.attach('1.3')
