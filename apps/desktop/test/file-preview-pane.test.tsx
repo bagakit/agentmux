@@ -16,6 +16,7 @@ import { createWorkbenchTab, documentKey, fileTabId, initialWorkbenchRegionId, t
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { composerConfig } from './helpers/composer-dom-fixture'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
+import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
 
 const initial = useAppStore.getState()
 let root: Root, container: HTMLDivElement
@@ -172,7 +173,7 @@ describe('real format preview pane', () => {
     await act(async () => { useAppStore.getState().updateDocument(a.id, '<svg><text>Current unsaved A</text></svg>', a.file.regionId); root.render(<DraftWitness token="new draft" />) })
     expect(latestCommit).toBeNull(); expect(await blobs.at(-1)!.text()).toBe('<svg><text>Current unsaved A</text></svg>')
   })
-  it.each(['svg','md'] as const)('%s current source preview is bounded while Source and hidden panes do no preview encoding', async extension => {
+  it.each(['svg','md','note.md'] as const)('%s current source preview is bounded while Source and hidden panes do no preview encoding', async extension => {
     const content = '中'.repeat(6 * 1024 * 1024), owner = seed(`large.${extension}`, content)
     const encode = vi.spyOn(TextEncoder.prototype, 'encodeInto')
     await render(<FileSurfaceView tabId={owner.id} surface={owner.file} visible={false} />)
@@ -182,7 +183,19 @@ describe('real format preview pane', () => {
     expect(container.querySelector('.file-preview-state strong')?.textContent).toBe('Source exceeds the preview budget'); expect(createUrl).not.toHaveBeenCalled(); expect(container.querySelector('.file-markdown-preview')).toBeNull()
     expect(encode).toHaveBeenCalledTimes(1); expect(encode.mock.calls[0]![1].byteLength).toBe(16 * 1024 * 1024 + 1)
     await click('Source'); expect(container.querySelector('textarea')?.value).toBe(content); expect(encode).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('.note-block-content')).toBeNull()
     expect(useAppStore.getState().documents[owner.key]?.revision).toBe('original')
+    if (extension === 'note.md') {
+      await render(<FileSurfaceView tabId={owner.id} surface={owner.file} visible={false} />)
+      const smaller = serializeNoteDocument(newNoteDocument('Small original Note', 'original-note', 'original-block'))
+      await act(async () => useAppStore.setState(state => ({ documents: { ...state.documents, [owner.key]: { ...state.documents[owner.key]!, content: smaller } } })))
+      expect(encode).toHaveBeenCalledTimes(1); expect(container.querySelector('.note-block-content')).toBeNull()
+      await render(<FileSurfaceView tabId={owner.id} surface={owner.file} />)
+      expect(encode).toHaveBeenCalledTimes(1); expect(container.querySelector('.note-block-content')).toBeNull()
+      await click('Preview')
+      await vi.waitFor(async () => { await act(async () => {}); expect(container.querySelector('.note-block-content')?.textContent).toBe('Small original Note') })
+      expect(useAppStore.getState().documents[owner.key]?.revision).toBe('original')
+    }
   })
 
 })
