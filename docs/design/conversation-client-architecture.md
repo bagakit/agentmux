@@ -17,6 +17,8 @@ Core 语义窗口、已呈现布局与视口是三个不同范围。取得完整
 
 共同阅读适配复用本阅读位置 Reader 已生成的 Core reading，只附加 speaker、来源等呈现信息，不为同一已接受窗口再次展开记录、建立输入及原记录索引。提交前的候选窗口尚未被接受，仍独立按该候选 snapshot 判断准入；不能复用当前保留帧的 reading 来判断新候选，也不为省去重复计算新增缓存或状态 owner。
 
+阅读来源身份与确认操作身份分开：前者使用完整原生 locator（包含 Provider／Adapter、原生 ID 与记录路径），后者保留原确认 operation，以隔离并发选择及 A→B→A 的旧资格。对同一 locator 重新确认不能把原阅读窗误标为来源改变；已接受另一来源的窗口仍需显式导航。宿主只收窄自身的来源变化提示，不清除 Core 的 scope、过期、held、错误或未知事实；语义目标与前台选择的合同见[同一 Run 内的原生会话切换](behavior/agent-capabilities-and-messaging.md#同一-run-内的原生会话切换)。
+
 ## 统一序列与展示身份
 
 共同序列直接消费有序的 `readonly ConversationRecord[]`，不将 canonical records 拆成 native 主干和 captured 插入列表再恢复顺序。来源差异保留在原记录／资源的内容适配中，不成为第二套定位、折叠与排序协议。`originalRecords` 继续供完整原文、来源详情和准确资源定位使用，不能因为统一展示而删除原贡献。
