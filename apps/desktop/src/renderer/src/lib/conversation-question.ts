@@ -3,6 +3,7 @@ import { type AgentPromptNotApplied } from '@agentmux/core/prompt-condition'
 import { parseQuestionReplyAttempt, questionReplyKey,
   questionReplyState, submitQuestionReply, type ConversationQuestionInput, type ConversationQuestionTarget, type QuestionReplyState } from '@agentmux/client-ui/conversation-question-reply'
 import { api } from './api'
+import { nativeSourceUnconfirmed } from '../../../shared/agent-native-source'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import type { DesktopQuestionReplies } from './conversation-question-intent'
@@ -44,7 +45,7 @@ export async function sendConversationQuestionReply(control: AgentSessionControl
   const assertOwner = () => {
     const current = useAppStore.getState().sessions.find(session => session.id === control.agentSessionId)
     if (current?.kind !== 'agent' || current.control.hostId !== control.hostId || current.control.run.runId !== control.run.runId ||
-        current.nativeSourceObservation || current.nativeHandle?.kind !== 'provider' ||
+        nativeSourceUnconfirmed(current) || current.nativeHandle?.kind !== 'provider' ||
         current.nativeHandle.providerId !== input.source.providerId || current.nativeHandle.sessionId !== input.source.nativeSessionId) {
       throw new Error('The original question source or Run changed. Your draft and original operation are preserved.')
     }

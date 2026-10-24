@@ -1,3 +1,5 @@
+export { hasSelectedNativeTarget, nativeTargetSourceUnconfirmed } from './agent-native-source.js'
+
 import type {
   AgentCapabilities,
   AgentDisplayState,

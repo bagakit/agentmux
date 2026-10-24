@@ -17,7 +17,7 @@ import { createFirstPromptSelector, createSessionViewModeSelector, effectiveSess
 import type { AgentMuxRunExitReason, AgentSessionUserMessage, AgentSessionHistoryPage } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
-import { projectNativeSourceFacts } from '../../../shared/agent-native-source'
+import { nativeSourceUnconfirmed, projectNativeSourceFacts } from '../../../shared/agent-native-source'
 import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
 import { originalFrontendRecovery } from '../lib/session-original-recovery'
 import { sessionExitPresentation, sessionFrontendPresentation, sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
@@ -226,10 +226,12 @@ export function SessionPane({
   // Status/time updates do not change the original native reading source.
   const nativeSourceFacts = useMemo(() => session?.kind === 'agent' ? {
     ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}),
+    ...(session.nativeBinding ? { nativeBinding: session.nativeBinding } : {}),
     ...(session.observedNativeHandle ? { observedNativeHandle: session.observedNativeHandle } : {}),
     ...(session.nativeSourceObservation ? { nativeSourceObservation: session.nativeSourceObservation } : {}),
     ...(session.nativeConfirmation ? { nativeConfirmation: session.nativeConfirmation } : {})
   } : {}, [session?.kind, session?.kind === 'agent' ? session.nativeHandle : undefined,
+    session?.kind === 'agent' ? session.nativeBinding : undefined,
     session?.kind === 'agent' ? session.observedNativeHandle : undefined,
     session?.kind === 'agent' ? session.nativeSourceObservation : undefined,
     session?.kind === 'agent' ? session.nativeConfirmation : undefined])
@@ -1039,7 +1041,7 @@ export function SessionPane({
     ...(session.kind === 'agent' ? { renderRecordActions: renderConversationLandmarkAction,
       renderReadingTools: (active: boolean) => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference)}/> } : {}),
     ...(hasAgentComposer ? { questionReplyRoute: session.capabilities.asyncQuestionReply,
-      questionReplyTarget: !session.nativeSourceObservation && session.nativeHandle?.kind === 'provider' ? {
+      questionReplyTarget: !nativeSourceUnconfirmed(session) && session.nativeHandle?.kind === 'provider' ? {
         source: { providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, run: session.control.run
       } : undefined,
       questionDraftNotice: questionSaveWarning ? `Draft save unconfirmed. Your latest edits are kept in this running app; copy them before closing. ${questionSaveWarning}` : undefined,
@@ -1197,7 +1199,7 @@ export function SessionPane({
             request={session.pendingInteraction}
             readOnly={!hasAgentComposer}
             responseUnavailableReason={session.interactionResponseUnavailableReason}
-            sourceNotice={session.nativeSourceObservation ? 'This request belongs to the retained native source, which is pending confirmation.' : undefined}
+            sourceNotice={nativeSourceUnconfirmed(session) ? 'This request belongs to the retained native source, which is pending confirmation.' : undefined}
             {...(hasAgentComposer ? { onOpenTerminal: openTerminal } : {})}
             // A pending request outlives the process that asked it, so the card must go inert on the
             // same terms as the composer below it — otherwise a dead Run still shows live buttons and

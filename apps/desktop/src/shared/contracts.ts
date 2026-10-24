@@ -998,6 +998,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       nativeSessionId?: string
       nativeHandle?: NonNullable<AgentMuxAgentSession['nativeHandle']>
       nativeHandlePersistence?: NonNullable<AgentMuxAgentSession['nativeHandlePersistence']>
+      nativeBinding?: NonNullable<AgentMuxAgentSession['nativeBinding']>
       observedNativeHandle?: NonNullable<AgentMuxAgentSession['observedNativeHandle']>
       nativeSourceObservation?: NonNullable<AgentMuxAgentSession['nativeSourceObservation']>
       hookIngressObservation?: NonNullable<AgentMuxAgentSession['hookIngressObservation']>
@@ -1155,6 +1156,7 @@ export type AgentSessionRecoveryCandidate = {
   nativeSessionId?: string
   nativeHandle?: NonNullable<AgentMuxAgentSession['nativeHandle']>
   nativeHandlePersistence?: NonNullable<AgentMuxAgentSession['nativeHandlePersistence']>
+  nativeBinding?: NonNullable<AgentMuxAgentSession['nativeBinding']>
   observedNativeHandle?: NonNullable<AgentMuxAgentSession['observedNativeHandle']>
   nativeSourceObservation?: NonNullable<AgentMuxAgentSession['nativeSourceObservation']>
   nativeConfirmation?: NonNullable<AgentMuxAgentSession['nativeConfirmation']>

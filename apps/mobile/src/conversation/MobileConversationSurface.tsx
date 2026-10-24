@@ -7,7 +7,7 @@ import { mobileQuestionReplyState, reconcileMobileQuestionReplies, submitMobileQ
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
 import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
 import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
-import { currentAgentSemanticStatus } from '@agentmux/core/agent-status'
+import { currentAgentSemanticStatus, nativeTargetSourceUnconfirmed } from '@agentmux/core/agent-status'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentSessionUserMessage } from '@agentmux/core'
@@ -393,7 +393,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
               () => { if (mounted.current) redraw(value => value + 1) })}
             questionDraftNotice={local.notice ?? undefined}
             questionReplyRoute={questionCapability.route}
-            questionReplyTarget={pageClient === client && !session?.nativeSourceObservation && session?.nativeHandle?.kind === 'provider' ? {
+            questionReplyTarget={pageClient === client && session && !nativeTargetSourceUnconfirmed(session) && session.nativeHandle?.kind === 'provider' ? {
               source: { providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, run: session.run
             } : undefined}
             questionReplyContext={JSON.stringify([session?.hostId, agentSessionId, session?.run.runId, client?.runtimeOwnerIdentity?.()?.runtimeId])}
