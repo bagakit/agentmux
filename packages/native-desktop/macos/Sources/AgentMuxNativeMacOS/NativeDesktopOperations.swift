@@ -175,8 +175,8 @@ enum NativeDesktopOperations {
               let start = app.launchDate, abs(start.timeIntervalSince1970 * 1000 - expectedStart) < 0.01,
               let windows = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as? [[String: Any]],
               let window = windows.first, (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
-              let boundsDictionary = window[kCGWindowBounds as String] as? CFDictionary,
-              let bounds = CGRect(dictionaryRepresentation: boundsDictionary) else {
+              let boundsDictionary = window[kCGWindowBounds as String] as? [String: Any],
+              let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary) else {
             throw ProviderError.coded("window_stale", "windowId and processStartedAt do not identify the original live window")
         }
         let capture = try windowPixels(windowID: windowID, bounds: bounds, pid: pid)
