@@ -13,9 +13,16 @@ const args = process.argv.slice(2), value = (flag, fallback) => args.includes(fl
 const repository = resolve(value('--repository', process.cwd())), directory = resolve(value('--output', join(repository, '.local/state/mobile-independent-host/join')))
 const serviceReceipt = resolve(value('--service-receipt', join(repository, '.local/state/mobile-independent-host/service/receipt.json')))
 await mkdir(directory, { recursive: true })
+const harnessRoot = resolve(import.meta.dirname, '../../..')
+const harnessPaths = ['apps/host/scripts/verify-mobile-desktop-independence.mjs',
+  'apps/host/test/fixtures/mobile-desktop-independence/candidate-inputs.mjs',
+  'apps/host/test/fixtures/mobile-desktop-independence/compiled-host-fixture.mjs',
+  'apps/host/test/fixtures/mobile-desktop-independence/private-browser.mjs',
+  'apps/desktop/scripts/fixtures/settings-cli/desktop.mjs', 'packages/core/test/fixtures/fake-codex-cli.mjs']
+const harnessInputs = async () => Object.fromEntries(await Promise.all(harnessPaths.map(async path => [path, digest(await readFile(join(harnessRoot, path)))])))
 const receipt = { schema: 'agentmux.mobile-desktop-independence.v1', passed: false,
   scope: 'Actual compiled main Desktop and Mobile, private Chrome mobile context, compiled original Node Host library, official ctxmux and the maintained native Provider CLI fixture. Desktop quit/reopen and manual Host restart are real. Platform automatic recovery is joined separately from the same-candidate launchd proof. No installed user App, commercial Provider CLI, physical phone, cloud deployment, logout or power-loss qualification.',
-  phases: [], cleanup: {} }
+  harness: { sources: await harnessInputs() }, phases: [], cleanup: {} }
 let candidate, fixture, browser, failed, stopCoreErrors
 const coreErrors = { events: [], omitted: 0 }
 const observeCoreErrors = () => {
@@ -199,7 +206,9 @@ try {
   assert.ok(name)
   const goal = (await fixture.rpc.call('goal.create', { goalId: 'original-mobile-goal', title: 'Original Mobile Goal', description: 'Original authorized goal body.',
     status: 'backlog', operationId: 'original-mobile-goal-create', risk: 'low', confirmation: 'user' })).goal
-  phase('compiled-original-host-desktop-native', { owner, original, inputReadiness: fixture.original.terminalPromptReadiness, desktop: desktopBefore, graph: graphBefore, goal })
+  phase('compiled-original-host-desktop-native', { owner, original, executorInventory: fixture.executorInventory,
+    nativeRun: await fixture.readNativeRun(original.session.run),
+    inputReadiness: fixture.original.terminalPromptReadiness, desktop: desktopBefore, graph: graphBefore, goal })
   browser = await privateMobileBrowser(join(directory, 'browser'))
   const url = fixture.ready.origin + '#offer=' + Buffer.from(JSON.stringify(fixture.ready.offer)).toString('base64url')
   const loaded = await browser.action('open-original-mobile', openMobile, { url })
@@ -387,6 +396,7 @@ try {
     status => status.run.state === 'running' && status.session.run.runId !== original.session.run.runId)
   assert.equal(resumed.session.agentSessionId, sid); assert.deepEqual(resumed.session.nativeHandle, original.session.nativeHandle)
   assert.equal(resumed.session.workspacePath, original.session.workspacePath)
+  receipt.restoredNativeRun = await fixture.readNativeRun(resumed.session.run)
   const nativeContext = await until('original native retained conversation restored', async () => {
     const attached = await fixture.sdk.reattachAgent(sid, 0, 'raw')
     return attached.attachment.replay.map(chunk => chunk.data).join('')
@@ -444,6 +454,8 @@ finally {
     try { await close(); receipt.cleanup[name] = 'confirmed' }
     catch (error) { receipt.cleanup[name] = error.message; receipt.passed = false; failed ??= error }
   }
+  try { assert.deepEqual(await harnessInputs(), receipt.harness.sources); receipt.harness.unchanged = true }
+  catch (error) { receipt.harness.unchanged = false; receipt.passed = false; failed ??= error }
   await writeFile(join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 })
 }
 if (failed) throw failed
