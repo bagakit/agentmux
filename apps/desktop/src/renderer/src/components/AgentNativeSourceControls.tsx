@@ -43,6 +43,11 @@ function selectedTargetAvailable(session: Agent): boolean {
   return hasSelectedNativeTarget({ ...session, run: session.control.run }) && !nativeSourceUnconfirmed(session)
 }
 
+function focusCheckAction(event: Event) {
+  const item = event.target as HTMLElement
+  item.closest('[role="menu"]')?.querySelector<HTMLElement>('[data-native-source-check]')?.focus()
+}
+
 export function nativeSourceLabel(session: Agent): string | undefined {
   const state = session.nativeSourceObservation?.state
   if (selectedTargetAvailable(session)) return 'Target selected'
@@ -110,18 +115,22 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
       </div> : null}
       {notice ? <span role="status">{notice}</span> : null}
     </DropdownMenu.Label>
-    <DropdownMenu.Item className="tab-context-menu__item" disabled={busy} onSelect={event => {
+    <DropdownMenu.Item data-native-source-check="" className="tab-context-menu__item" disabled={busy} onSelect={event => {
       event.preventDefault(); void recheck()
     }}><ThemeActionRefreshIcon size={14} /><span>{busy ? 'Checking source…' : 'Check native source'}</span></DropdownMenu.Item>
     {review ? <>
       <DropdownMenu.Item className="tab-context-menu__item" disabled={busy || readOnly} onSelect={event => {
+        focusCheckAction(event)
         event.preventDefault(); void confirm()
       }}><ThemeActionConfirmIcon size={14} /><span>Confirm this native source</span></DropdownMenu.Item>
       <DropdownMenu.Item className="tab-context-menu__item" disabled={busy} onSelect={event => {
+        focusCheckAction(event)
         event.preventDefault(); setReview(null)
       }}><ThemeActionCancelIcon size={14} /><span>Cancel source change</span></DropdownMenu.Item>
     </> : candidates.map(candidate => <DropdownMenu.Item key={candidate.sessionId}
       className="tab-context-menu__item agent-native-source__candidate" disabled={busy} onSelect={event => {
+        // Keep keyboard navigation in the menu when these action rows are replaced.
+        focusCheckAction(event)
         event.preventDefault(); setNotice(null); setReview(nativeConfirmationInput(session, mintObjectId(), candidate))
       }}><ThemeActionReviewSourceIcon size={14} /><span>{observation?.state === 'changed' ? 'Review source change…' : `Choose target: ${candidate.sessionId}`}</span></DropdownMenu.Item>)}
   </>}</WorkbenchMenuScope.Consumer>
