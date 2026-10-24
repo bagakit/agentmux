@@ -109,52 +109,89 @@ export class TerminalRecoveryOwner {
       await this.save(path, created); return created
     })
     this.assertIntent(intent, input)
-    const update = async (change: (current: Intent) => void): Promise<Intent> => this.locked(path, async () => {
-      const current = (await this.read(path))!
-      this.assertIntent(current, input)
-      if (current.prepared.createOperationId === intent!.prepared.createOperationId) { change(current); await this.save(path, current) }
-      return current
-    })
+    // Each update is bound to the attempt observed before its Native await. A lost
+    // compare-and-swap only returns the latest intent; it never follows its successor.
+    const update = async (attempt: AgentMuxPreparedTerminal, change: (current: Intent) => boolean) =>
+      this.locked(path, async () => {
+        const current = (await this.read(path))!
+        this.assertIntent(current, input)
+        const changed = current.prepared.createOperationId === attempt.createOperationId && change(current)
+        if (changed) await this.save(path, current)
+        return { current, changed }
+      })
+    // A confirmed retirement is monotonic even before a successor is prepared.
+    // A reply generated before that fence cannot resurrect the same attempt.
+    const retain = (current: Intent, run: AgentMuxRun): boolean => {
+      if (!['dispatched', 'retained'].includes(current.phase)) return false
+      current.phase = 'retained'; current.run = { runId: run.runId }; return true
+    }
     // A durable dispatched marker may precede a lost Start reply or a Core crash. Only observe.
     if (intent.phase === 'dispatched' || intent.phase === 'retained') {
-      const retained = await this.port.inspect(intent.prepared, intent.run ?? undefined)
-      if (retained) { intent = await update(current => { current.phase = 'retained'; current.run = { runId: retained.runId } }); return this.result(intent, retained) }
+      const attempt = intent.prepared
+      const retained = await this.port.inspect(attempt, intent.run ?? undefined)
+      if (retained) {
+        const observed = await update(attempt, current => retain(current, retained))
+        intent = observed.current
+        if (!observed.changed) return this.result(intent)
+        return this.result(intent, retained)
+      }
       if (intent.retirement) {
-        const fence = await this.port.observeRetirement(intent.prepared, intent.retirement)
-        if (fence.outcome === 'retired') intent = await update(current => { current.phase = 'not_applied' })
+        const fence = await this.port.observeRetirement(attempt, intent.retirement)
+        if (fence.outcome === 'retired') {
+          const observed = await update(attempt, current => { current.phase = 'not_applied'; return true })
+          intent = observed.current
+          if (!observed.changed) return this.result(intent)
+        }
       }
       if (intent.phase !== 'not_applied' && input.action !== 'continue') return this.result(intent)
       if (intent.phase !== 'not_applied' && intent.continuedBy.includes(input.operationId)) return this.result(intent)
       if (intent.phase !== 'not_applied') {
-        // Persist before the fence action, so a lost reply can be observed by a new owner.
-        intent = await update(current => { current.retirement = runtime })
-        const retirement = await this.port.retire(intent.prepared, runtime)
+        // Admit the exact attempt, phase and unused authorization under the lock.
+        // A concurrent owner may already have consumed this operation for a successor.
+        let retirementRuntime: AgentMuxCreationRuntime | null = null
+        const admitted = await update(attempt, current => {
+          if (!['dispatched', 'retained'].includes(current.phase) || current.continuedBy.includes(input.operationId)) return false
+          current.retirement ??= runtime; retirementRuntime = current.retirement; return true
+        })
+        intent = admitted.current
+        if (!admitted.changed) return this.result(intent)
+        const retirement = await this.port.retire(attempt, retirementRuntime!)
         if (retirement.outcome === 'retained') {
-          intent = await update(current => { current.phase = 'retained'; current.run = { runId: retirement.run.runId } })
+          const observed = await update(attempt, current => retain(current, retirement.run))
+          intent = observed.current
+          if (!observed.changed) return this.result(intent)
           return this.result(intent, retirement.run)
         }
-        intent = await update(current => { current.phase = 'not_applied' })
+        const observed = await update(attempt, current => { current.phase = 'not_applied'; return true })
+        intent = observed.current
+        if (!observed.changed) return this.result(intent)
       }
     }
     if (intent.phase === 'not_applied') {
       if (input.action !== 'continue' || intent.continuedBy.includes(input.operationId)) return this.result(intent)
-      const next = await this.port.prepare(mintObjectId(), input.workspacePath)
-      intent = await update(current => {
-        if (current.phase !== 'not_applied' || current.continuedBy.includes(input.operationId)) return
+      const attempt = intent.prepared, next = await this.port.prepare(mintObjectId(), input.workspacePath)
+      const continued = await update(attempt, current => {
+        if (current.phase !== 'not_applied' || current.continuedBy.includes(input.operationId)) return false
         current.retiredAttempts.push({ prepared: current.prepared, runtime: current.retirement!, continuationOperationId: input.operationId })
         current.continuedBy.push(input.operationId); current.prepared = next; current.phase = 'prepared'; current.run = null; current.retirement = null
+        return true
       })
+      intent = continued.current
+      if (!continued.changed) return this.result(intent)
     }
     if (input.action === 'inspect' || intent.phase !== 'prepared') return this.result(intent)
     // One process claims dispatch under a short per-original-Run lock, before any Native wait.
-    let dispatch = false
-    intent = await update(current => { if (current.phase === 'prepared') { current.phase = 'dispatched'; dispatch = true } })
-    if (!dispatch) return this.result(intent)
+    const attempt = intent.prepared
+    const dispatched = await update(attempt, current => { if (current.phase !== 'prepared') return false; current.phase = 'dispatched'; return true })
+    intent = dispatched.current
+    if (!dispatched.changed) return this.result(intent)
     this.identity(input)
     let run: AgentMuxRun
-    try { run = await this.port.start(intent.prepared) }
+    try { run = await this.port.start(attempt) }
     catch { return this.result(intent) }
-    intent = await update(current => { current.phase = 'retained'; current.run = { runId: run.runId } })
+    const observed = await update(attempt, current => retain(current, run))
+    intent = observed.current
+    if (!observed.changed) return this.result(intent)
     return this.result(intent, run)
   }
 }
