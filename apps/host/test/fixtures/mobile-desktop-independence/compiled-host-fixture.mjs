@@ -132,12 +132,13 @@ export async function compiledHostFixture(candidate) {
     for (const path of [privateHome, environment.CODEX_HOME, userData, runtime, join(state, 'ctxmux'), workspace, scratch]) await mkdir(path, { recursive: true, mode: 0o700 })
     await desktop.preparePrivateNotesIsolation({ root, privateHome, environment })
     const command = join(workspace, 'managed-cli.mjs')
-    await writeFile(command, '#!' + process.execPath + '\nif (process.argv.includes("--version")) { console.log("Private native fixture"); process.exit(0) }\nawait import(' + JSON.stringify(pathToFileURL(join(candidate.root, 'packages/core/test/fixtures/fake-codex-cli.mjs')).href) + ');\n', { mode: 0o700 })
+    await writeFile(command, '#!' + process.execPath + '\nif (process.argv.includes("--version")) { console.log("Private native fixture"); process.exit(0) }\nawait import(' + JSON.stringify(new URL('../../../../../packages/core/test/fixtures/fake-codex-cli.mjs', import.meta.url).href) + ');\n', { mode: 0o700 })
     const executorEnv = { CODEX_HOME: environment.CODEX_HOME, AGENTMUX_FAKE_READY_MODE: 'before', AGENTMUX_FAKE_NATIVE_RECORD: '1',
       AGENTMUX_FAKE_NATIVE_PRESERVE: '1', AGENTMUX_FAKE_NATIVE_CONTEXT: 'Original retained mobile conversation',
       AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: join(root, 'native') }
+    const executorConfig = { label: 'Original mobile Agent', providerId: 'codex', command, args: [], env: executorEnv, injectAgentMuxGuide: false }
     await writeFile(environment.AGENTMUX_CONFIG_PATH, JSON.stringify({ version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private Host' }],
-      executors: { codex: { label: 'Original mobile Agent', providerId: 'codex', command, args: [], env: executorEnv, injectAgentMuxGuide: false } },
+      executors: { codex: executorConfig },
       workspaces: [{ id: '__scratch__', name: 'Topics', hostId: 'local', path: scratch, kind: 'folder' },
         { id: 'original-workspace', name: 'Original mobile workspace', hostId: 'local', path: workspace, kind: 'folder' }], appearance: { terminalTheme: 'graphite' },
       browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }, notifications: { mode: 'off' } }))
@@ -151,8 +152,11 @@ export async function compiledHostFixture(candidate) {
       daemon.once('exit', (code, signal) => { clearTimeout(timer); no(new Error('Private ctxmux exited before readiness: ' + code + '/' + signal)) })
     })
     await startHost()
+    const inventory = await sdk.listHostExecutors({ refresh: true })
+    assert.equal(inventory.executors.find(value => value.executorId === 'codex')?.source, 'provider-default')
     original = await sdk.createAgent({ providerId: 'codex', executorId: 'codex', createOperationId: 'original-mobile-session',
       workspacePath: workspace, commandOverride: command, args: [], env: executorEnv, injectAgentMuxGuide: false })
+    assert.equal(original.creation.executorRevision, undefined)
     ownedSessions.add(original.agentSessionId)
     original = await until('original Provider-native identity and ready input frame', () => sdk.statusAgent(original.agentSessionId), value =>
       value.run.state === 'running' && Boolean(value.session.nativeHandle) &&
@@ -160,7 +164,13 @@ export async function compiledHostFixture(candidate) {
       value.session.terminalPromptReadiness.readyThroughByte !== undefined).then(value => value.session)
     const launch = desktop.desktopFixture({ desktopRoot: join(candidate.root, 'apps/desktop'), root, privateHome, environment: { ...environment, ELECTRON_RUN_AS_NODE: undefined }, children, connections, waitFor })
     return { root, privateHome, userData, workspace, environment, children, cleanup, core, get sdk() { return sdk }, get rpc() { return rpc },
-      get ready() { return ready }, get ownerProcess() { return owner }, original, nativeProcessId: daemon.pid,
+      get ready() { return ready }, get ownerProcess() { return owner }, original, executorInventory: inventory, nativeProcessId: daemon.pid,
+      async readNativeRun(run) {
+        const { CtxmuxClient } = await import(pathToFileURL(join(candidate.root, 'packages/core/node_modules/@ctxmux/sdk/dist/index.js')).href)
+        const socketPath = join(runtime, 'ctxmux.sock'), identity = await new CtxmuxClient({ socketPath }).runtimeInfo()
+        assert.equal(identity.daemonInstanceId, ready.owner.ctxmux.instanceId)
+        return await new CtxmuxClient({ socketPath, expectedRuntimeIdentity: identity }).status(run.runId)
+      },
       ownCreatedSession(sessionId) { ownedSessions.add(sessionId) },
       async startDesktop(seed) { if (seed) await launch('seed', seed); desktopProbe = await launch('ordinary-' + String(children.size)); return desktopProbe },
       quitDesktop,
