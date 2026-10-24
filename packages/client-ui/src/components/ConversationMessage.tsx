@@ -16,6 +16,8 @@ import type { LinkClickModifiers, OpenWorkspaceFile } from './AgentMarkdown.js'
 import type { ReadPastedImage } from './ConversationImage.js'
 import { ConversationResourceImage, type ConversationHistoryResourceReader, type ConversationNativeResourceRecord } from './ConversationResourceImage.js'
 import { ConversationResourceText } from './ConversationResourceText.js'
+import { ConversationA2AReferences } from './ConversationA2AReferences.js'
+import { ConversationNotificationDetails } from './ConversationNotificationDetails.js'
 import { ConversationInputText } from './ConversationInputText.js'
 import { ConversationResourceFile } from './ConversationResourceFile.js'
 import { ConversationToolTrace } from './ConversationToolTrace.js'
@@ -95,6 +97,8 @@ export type ConversationMessageProps = {
   contentBoundary?: ConversationContentBoundary
   /** Original Core notice identity, supplied only by the qualified platform record. */
   a2aNotificationId?: string | undefined
+  notificationRecords?: readonly ConversationSourceRecord[] | undefined
+  locatedSourceKey?: string | null | undefined
   /** Recorded Provider reply semantics; clients never parse message text for these facts. */
   questionAnswers?: readonly AgentSessionHistoryQuestionAnswer[]
   /** Non-blocking notice from the Provider's recorded reading projection. */
@@ -180,7 +184,7 @@ function ConversationCollaborationOriginal({ parts, identity, hasResources }: {
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   active = true, compact = false, continuation = false, expandedContent = false, detailsOnlyMetadata = false, sourceLabelsInDetails = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy, copyInParent = false,
-  speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
+  speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, notificationRecords, locatedSourceKey, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
@@ -231,8 +235,8 @@ export function ConversationMessage({
     const parsed = parseAgentMuxMessagePrefix(firstText)
     return a2aNotificationId && parsed?.kind !== 'references' ? null : parsed
   }, [contentBoundary, hasQuestionAnswers, a2aNotificationId, firstText])
-  const a2aReferenceScope = a2aNotificationId ? itemRef ?? (executionHostId && conversationSessionId
-    ? { hostId: executionHostId, agentSessionId: conversationSessionId } : undefined) : undefined
+  const a2aReferenceScope = a2aNotificationId ? itemRef : undefined
+  const primaryNotice = isSystemContext && a2aNotificationId && prefix?.kind === 'references' ? prefix : null
   const systemSummary = prefix?.kind === 'references' ? `${prefix.references.length} A2A Inbox reference${prefix.references.length === 1 ? '' : 's'}`
     : prefix?.protocol ? `${prefix.protocol.id ? AMUX_PROTOCOL_DEFINITIONS[prefix.protocol.id].title : 'Protocol declaration'} · ${prefix.protocol.tag}`
     : prefix?.declaredMessageId !== undefined ? AMUX_PROTOCOL_DEFINITIONS.a2a.title : rawSystemSummary
@@ -376,7 +380,7 @@ export function ConversationMessage({
 
   return (
     <ContentCopyIntentContext.Provider value={messageCopy.cancelPreparation}><div
-      className="log-turn"
+      className={primaryNotice ? "conversation-a2a-notice" : "log-turn"}
       data-compact={compact || undefined}
       data-native-collaboration={nativeCollaboration ? true : undefined}
       data-conversation-event-id={conversationEvent?.id}
@@ -400,25 +404,39 @@ export function ConversationMessage({
       data-trace-only={isTraceOnly ? 'true' : undefined}
       data-message-bubble={messagePhase !== 'progress' && !compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human' || speaker?.role === 'external') ? 'true' : undefined}
     >
-      {nativeCollaboration ? <SubagentReportCard {...card} identity={readingIdentity} collaboration={nativeCollaboration} located={located}
+      {primaryNotice ? <>
+        <div ref={bodyRef} className="conversation-a2a-notice__messages" onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
+        <ConversationA2AReferences references={primaryNotice.references} scope={a2aReferenceScope} active={active}
+          {...(describeSpeaker ? { describeSpeaker } : {})} workspaceRoot={workspaceRoot} homeDir={homeDir}
+          {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})}
+          {...(openHttpLink ? { openHttpLink } : {})} timeFormatter={renderClock} />
+        {parts.length > 1 ? renderBody() : null}
+        </div>
+        {status === 'streaming' || status === 'failed' || status === 'unverified' ? <div className="conversation-a2a-originals__pending" role="status">通知 · {card.badges}</div> : null}
+      </> : nativeCollaboration ? <SubagentReportCard {...card} identity={readingIdentity} collaboration={nativeCollaboration} located={located}
         preview={collaborationPreview} hasResources={collaborationHasResources} emptyText={!collaborationPreview && parts.every(part => part.kind === 'text')} />
         : isSystemContext ? <SystemRecordCard {...card} identity={readingIdentity} title={recordTitle || '系统记录'} summary={systemSummary} hasContent={hasContent} />
         : <ConversationSpeechCard {...card} sender={<>
           <span className="log-turn__who">{recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
           {!detailsOnlyMetadata ? senderIdentity : null}
         </>} />}
+      {a2aNotificationId ? <ConversationNotificationDetails key={JSON.stringify([recordSourceKey, a2aNotificationId])} notificationId={a2aNotificationId} protocol={firstText}
+        records={notificationRecords} locatedSourceKey={locatedSourceKey}>
+        {primaryNotice ? <>{createdAt === undefined ? null : <p>通知记录时间 · {renderClock(createdAt)}</p>}{metadata}{messageDetails}{card.actions}</> : null}
+      </ConversationNotificationDetails> : null}
       {questionDiagnostic ? <p className="agent-interaction__error" role="status" data-question-reply-diagnostic={questionDiagnostic.code}>{questionDiagnostic.message}</p> : null}
       {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
     </div></ContentCopyIntentContext.Provider>
   )
   function renderBody(contentId?: string): ReactNode {
     return hasContent ? discloseBody(
-        <div ref={bodyRef} id={contentId} className="log-turn__body"
-          onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
+        <div ref={primaryNotice ? undefined : bodyRef} id={contentId} className="log-turn__body"
+          onMouseUp={canAnnotate && !primaryNotice ? captureSelection : undefined} onKeyUp={canAnnotate && !primaryNotice ? captureSelection : undefined}>
           {hasQuestionAnswers && firstTextIndex < 0 ? <ConversationQuestionReply visible={active} reveal={located} answers={questionAnswers!}
             inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
             {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /> : null}
           {parts.map((part, index) => {
+            if (primaryNotice && index === 0) return null
             const key = partKeys[index]!
             return part.kind === 'text' && hasQuestionAnswers && index === firstTextIndex ? <ConversationQuestionReply visible={active} reveal={located} key={key}
               answers={questionAnswers!} originalText={part.text} inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}

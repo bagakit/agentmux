@@ -374,6 +374,12 @@
 .log-turn__references code { font-size: var(--fs-micro); white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-turn__references-hint { color: var(--text-3); }
 .conversation-a2a-originals { min-width: 0; }
+.conversation-a2a-notice { min-width: 0; }
+.conversation-a2a-notice__details { margin: var(--sp-1) var(--sp-2) var(--sp-3); padding-inline: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.log-turn > .conversation-a2a-notice__details { grid-column: 2; }
+.conversation-a2a-notice__details > summary { width: fit-content; margin-inline-start: auto; min-height: 24px; cursor: pointer; }
+.conversation-a2a-notice__details > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
+.conversation-a2a-notice__details .conversation-original-record { margin-block: var(--sp-2); }
 .conversation-a2a-originals__pending { padding-block: var(--sp-2); font-size: var(--fs-meta); color: var(--text-2); }
 .conversation-a2a-originals__pending code { overflow-wrap: anywhere; }
 .conversation-a2a-originals__pending p { margin-block: var(--sp-1); }
