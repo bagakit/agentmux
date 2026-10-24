@@ -10,7 +10,6 @@ import {
   isLongAgentMuxControlOperation
 } from '@agentmux/core/control'
 import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge.js'
-import type { ContinuousProgressInputRequest } from '../src/shared/continuous-progress.js'
 
 function inspectRequest(requestId: string): AgentMuxControlRequest {
   return {
@@ -39,10 +38,12 @@ const AGMUX_CONTROL_SCHEMA_VERSION = AGENTMUX_CONTROL_SCHEMA_VERSION
 afterEach(() => vi.useRealTimers())
 
 describe('Desktop Control IPC bridge', () => {
-  it('uses the existing short budget for Desktop-only observeInput and rejects its late reply', async () => {
+  it.each(['inspect.tab', 'inspect.region'] as const)('uses the original short budget for %s and rejects its late reply', async operation => {
     vi.useFakeTimers()
-    const request: ContinuousProgressInputRequest = { requestId: 'observe-timeout', operation: 'continuous-progress.observeInput',
-      control: { kind: 'agent', hostId: 'local', agentSessionId: 'owned-session', run: { runId: 'owned-run' } } }
+    const request: AgentMuxControlRequest = operation === 'inspect.tab' ? inspectRequest('original-tab-timeout') : {
+      schemaVersion: AGMUX_CONTROL_SCHEMA_VERSION, requestId: 'original-region-timeout', operation,
+      target: { kind: 'region', regionId: 'original-region' }
+    }
     const cancellations: unknown[] = [], sent: unknown[] = []
     const bridge = new DesktopControlIpcBridge({ isAvailable: () => true,
       sendRequest: input => sent.push(input), sendCancellation: input => cancellations.push(input) })
@@ -57,8 +58,13 @@ describe('Desktop Control IPC bridge', () => {
       expect(cancellations).toEqual([{ requestId: request.requestId, code: 'CONTROL_TIMEOUT', message: 'Desktop Control request timed out.' }])
       expect(settled).toBe(true)
       expect(await pending).toMatchObject({ ok: false, error: { code: 'CONTROL_TIMEOUT' } })
-      expect(bridge.accept({ requestId: request.requestId, ok: true,
-        result: { operation: request.operation, control: request.control, occupied: false } })).toBe(false)
+      const region = { kind: 'view' as const, tabId: 'original-tab', regionId: 'original-region', workspaceId: 'original-workspace',
+        bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: {
+          left: { kind: 'none' as const }, right: { kind: 'none' as const }, up: { kind: 'none' as const }, down: { kind: 'none' as const }
+        } }
+      expect(bridge.accept({ requestId: request.requestId, ok: true, result: operation === 'inspect.tab'
+        ? { operation, tab: { tabId: region.tabId, workspaceId: region.workspaceId, regions: [region] } }
+        : { operation, region } })).toBe(false)
       expect(cancellations).toHaveLength(1)
     } finally { bridge.dispose(); await pending }
   })
@@ -154,7 +160,7 @@ describe('Control 等待预算只有一处', () => {
   it('慢的是「要等外面」的那些，快的是只读/只动本地状态的', () => {
     // 等进程、composer、Provider 或进程收尾用长档；只读、布局和信号用短档。
     // 到期说明未及时得到完整回复，不证明 owner 已坏。
-    for (const operation of ['agent.open', 'open.terminal', 'open.browser', 'send', 'resume', 'stop'] as const) {
+    for (const operation of ['agent.open', 'open.terminal', 'open.browser', 'message.pending.send', 'resume', 'stop'] as const) {
       expect(isLongAgentMuxControlOperation(operation), `${operation} 要等外面，必须走长预算`).toBe(true)
     }
     for (const operation of ['inspect.tab', 'inspect.region', 'focus', 'arrange', 'list.agents'] as const) {
@@ -186,7 +192,7 @@ describe('Control 等待预算只有一处', () => {
       expect(
         delay,
         `setTimeout 的延时位写着 \`${delay}\`，不是从 @agentmux/core/control 那一处取的`
-      ).toBe("agentMuxControlTimeoutMs(request.operation === 'continuous-progress.observeInput' ? 'inspect.region' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation === 'browser.openFromSystem' ? 'open.browser' : request.operation)")
+      ).toBe("agentMuxControlTimeoutMs(request.operation === 'worktree.closeout.prepare' ? 'space.mv' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation === 'browser.openFromSystem' ? 'open.browser' : request.operation)")
     }
     // 自检：抽取器真的找到了那个调用点，否则上面那个循环跑零次、恒绿。
     expect(delays.length, 'setTimeout 延时位抽取器一个都没找到，上面那条守卫是死代码').toBe(1)
