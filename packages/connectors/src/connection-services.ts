@@ -17,6 +17,7 @@ import type { ChannelMetadataChange, ConnectionPort } from '@agentmux/core/conne
 import type { MoteChatPort, MoteChatTarget } from '@agentmux/core/mote-chat'
 import { ConnectionSecrets } from './connection-secrets.js'
 import { backupConnections, type ConnectionBackupReceipt } from './connection-backup.js'
+import type { PublicationSpeakerReader } from './publication-speaker.js'
 
 export type ConnectionServices = {
   connections: ConnectionPort
@@ -34,7 +35,7 @@ export type ConnectionServices = {
 }
 type LiveServices = { lease?: number; database: DatabaseSync; connections: ConnectionHost; secrets: ConnectionSecrets; bindings?: RoomBindingHost; rooms?: RoomProvisioningHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers; moteChat?: MoteChatHost }
 /** Optional failure stays local. A later exact operation retries storage on the same Host and database. */
-export async function createConnectionServices(options: { directory: string | undefined; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; ingress?: Pick<DurableIngressOptions, 'core' | 'authoritySource'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void> } }): Promise<ConnectionServices> {
+export async function createConnectionServices(options: { directory: string | undefined; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; speaker?: PublicationSpeakerReader; ingress?: Pick<DurableIngressOptions, 'core' | 'authoritySource'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void> } }): Promise<ConnectionServices> {
   const adapters = options.adapters ?? createBuiltinConnectionAdapters()
   let live: LiveServices | undefined, opening: Promise<LiveServices> | undefined, closed = false
   let backingUp: Promise<ConnectionBackupReceipt> | undefined, closing: Promise<void> | undefined
@@ -96,7 +97,12 @@ export async function createConnectionServices(options: { directory: string | un
             }
             return { state: 'ready' as const }
           } } : {}) }) : undefined
-        publication = routing && options.publication ? new PublicationHost({ connections, ...(publicationStore ? { store: publicationStore } : {}), bindings: routing, conversation: options.publication, ...(ingress ? { permissions: ingress.permissions } : {}) }) : undefined
+        publication = routing && options.publication ? new PublicationHost({ connections, ...(publicationStore ? { store: publicationStore } : {}), bindings: routing, conversation: options.publication, ...(ingress ? { permissions: ingress.permissions } : {}),
+          ...(options.speaker ? { speaker: async (reference, signal) => {
+            const generation = moteChat?.store.generationBySession(reference.agentSessionId)?.generation
+            const target = generation?.executionHostId === reference.hostId ? generation.target : undefined
+            return options.speaker!(reference, signal, target)
+          } } : {}) }) : undefined
         if (publication) connections.delivery = publication
         if (ingress) connections.ingress = ingress
         receivers = ingress ? new ConnectionReceivers(connections, ingress) : undefined

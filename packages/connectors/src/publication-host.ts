@@ -9,6 +9,7 @@ import type { PublicationAdapter } from './publication-adapter.js'
 import { publicationEffectContext, publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
 import { isConversationPublicationPart, publicationPartKey } from './publication-content.js'
 import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation, type QuestionPublicationPayload } from './publication-store.js'
+import { publicationSpeaker, type PublicationSpeaker, type PublicationSpeakerDetails, type PublicationSpeakerReader } from './publication-speaker.js'
 
 /** Borrow original exact Core reads and the shared Provider observation. No transcript paths or second watcher. */
 export interface PublicationConversationPort {
@@ -27,7 +28,7 @@ export interface PublicationPermissionsPort {
 }
 export type PublicationObservation = ConnectionDeliveryObservation
 type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; inspectionAfter?: string; watch?: ConversationObservationHandle | undefined; watchViewId?: string | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
-export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore }
+export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; speaker?: PublicationSpeakerReader }
 
 
 /** Durable external publication. Each Binding has an independent read/effect lane, outside original Core input. */
@@ -212,8 +213,9 @@ export class PublicationHost implements ConnectionDeliveryPort {
       }
       const ordered = [...consumed.snapshot.units].reverse() // The Core wire explicitly declares newest-first.
       const resolvedText = await this.resolve(reference, ordered, signal, binding, adapter)
+      const speakers = await this.speakers(reference, ordered, signal)
       const questions = adapter.questionActions ? this.options.permissions?.questions?.(binding, ordered) : undefined
-      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: payload => adapter.fragmentText!(payload, binding) } : {}), ...(questions ? { questions } : {}) })
+      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) } : {}), ...(questions ? { questions } : {}) })
       after = page.checkpoint; lane.view = page.window.view!; lane.viewId = page.window.id; lane.read = { after }
       if (lane.watchViewId !== lane.viewId) lane.dirty = true
       if (!page.more) { lane.read = undefined; break }
@@ -228,6 +230,23 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const code = error instanceof AgentMuxError ? error.code : undefined
     lane.observation = { state: 'unavailable', reason }
     lane.sourceObservation = { state: 'unavailable', reason, code: connectionDiagnosisSourceCode(code), codeRecorded: code !== undefined, checkpointKey }
+  }
+  private async speakers(reference: ConversationRef, units: readonly ConversationUnit[], signal: AbortSignal): Promise<Map<string, PublicationSpeaker>> {
+    const result = new Map<string, PublicationSpeaker>(), details = new Map<string, Promise<PublicationSpeakerDetails>>()
+    for (const unit of units) {
+      const speaker = publicationSpeaker(unit, reference)
+      if (speaker.kind === 'agent' && speaker.reference && this.options.speaker) {
+        const target = speaker.reference, key = JSON.stringify(target)
+        if (!details.has(key)) details.set(key, this.options.speaker(target, signal).catch(() => { signal.throwIfAborted(); return {} }))
+        const observed = await details.get(key)!
+        if (observed.name !== undefined) speaker.name = observed.name
+        if (observed.nameRevision !== undefined) speaker.nameRevision = observed.nameRevision
+        if (observed.mote !== undefined) speaker.mote = observed.mote
+        if (observed.avatar !== undefined) speaker.avatar = observed.avatar
+      }
+      result.set(unit.event.id, speaker)
+    }
+    return result
   }
   private async resolve(reference: ConversationRef, units: readonly ConversationUnit[], signal: AbortSignal, binding: RoomBinding, adapter: PublicationAdapter): Promise<Map<string, ResolvedPublicationPart>> {
     const result = new Map<string, ResolvedPublicationPart>()
@@ -327,7 +346,10 @@ export class PublicationHost implements ConnectionDeliveryPort {
           if (cursor === page.nextCursor) throw Error('Original part continuation made no progress')
           cursor = page.nextCursor
         }
-        for (const unit of units) this.store.recoverPart(binding, gap, unit, await this.resolve(reference, [unit], signal, binding, adapter), () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? payload => adapter.fragmentText!(payload, binding) : undefined)
+        for (const unit of units) {
+          const speakers = await this.speakers(reference, [unit], signal)
+          this.store.recoverPart(binding, gap, unit, await this.resolve(reference, [unit], signal, binding, adapter), () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) : undefined, speakers.get(unit.event.id))
+        }
       } catch { signal.throwIfAborted() /* Original exact gap remains durable and other contents continue. */ }
     }
   }
@@ -412,6 +434,27 @@ export class PublicationHost implements ConnectionDeliveryPort {
         if (qualification === 'cancelled') continue
         if (qualification !== 'qualified') return { state: 'unavailable', reason: 'source-unconfirmed' }
         qualified.add(frozen)
+      }
+      if (original.effect === 'upsert' && original.speaker?.avatar?.image && !original.prepared && original.attempt === undefined) {
+        const last = original.avatarUploads?.at(-1)
+        if (last?.state === 'dispatching') this.store.settleResourceUpload(original.operationId, original.avatarUploads!.length, { state: 'unknown' }, 'avatar')
+        else if (!last && !original.avatarSource && adapter.images?.upload && adapter.images.accepts(original.speaker.avatar.image)) {
+          const upload = this.store.claimResourceUpload(original.operationId, authorized, 'avatar')
+          if (upload?.speaker?.avatar?.image && !upload.avatarSource) {
+            const uploadSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+            let effect: Promise<ResourceUploadReceipt>
+            try { effect = Promise.resolve(adapter.images.upload(upload.speaker.avatar.image, upload.target, credential, uploadSignal)) }
+            catch { effect = Promise.reject(new Error('Unconfirmed original avatar upload.')) }
+            const settle = (receipt: ResourceUploadReceipt) => { if (!this.closed) this.store.settleResourceUpload(upload.operationId, upload.avatarUploads!.length, receipt, 'avatar') }
+            effect.then(receipt => { try { settle(receipt) } catch { try { settle({ state: 'unknown' }) } catch { /* Keep this same optional attempt. */ } } }, () => {
+              try { settle({ state: 'unknown' }) } catch { /* Original bytes and receipt stay retained. */ }
+            })
+            // Optional presentation never delays the original body or replaces its frozen wire.
+            uploadSignal.addEventListener('abort', () => { try { settle({ state: 'unknown' }) } catch { /* Retain the original optional claim. */ } }, { once: true })
+          }
+        }
+        original = this.store.inspect(original.operationId)!
+        if (signal.aborted || !authorized()) return
       }
       if (!adapter.directResources && (original.payload.kind === 'image' || original.payload.kind === 'file') && original.effect === 'upsert' && !original.prepared) {
         const last = original.uploads?.at(-1)
