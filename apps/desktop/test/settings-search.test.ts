@@ -9,6 +9,7 @@ vi.hoisted(() => {
 
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import { visibleSettingsSections } from '../src/renderer/src/components/SettingsPanel.js'
+import { settingsModules } from '../src/renderer/src/components/settings/settings-modules'
 
 function settingsPanelOwner(ast: ts.SourceFile): ts.FunctionDeclaration {
   const exports = ast.statements.filter(ts.isVariableStatement)
@@ -55,12 +56,14 @@ describe('设置搜索', () => {
     // 对用户彻底无用。这里要求一个只属于某一节的词只命中那一节。
     const all = visibleSettingsSections('')
     expect(all.length, '空查询应返回全部 section').toBeGreaterThan(1)
-    expect(visibleSettingsSections('tmux').map((section) => section.id)).toEqual(['general'])
-    expect(visibleSettingsSections('worktree').map((section) => section.id)).toEqual(['workspaces'])
-    for (const keyword of ['copy', 'clipboard', 'tilde', '~', 'absolute']) {
+    expect(visibleSettingsSections('tmux').map((section) => section.id)).toEqual(['general', 'amux-protocols'])
+    expect(visibleSettingsSections('worktree').map((section) => section.id)).toEqual(['hosts'])
+    expect(visibleSettingsSections('copy').map(section => section.id)).toEqual(['general', 'capsule'])
+    for (const keyword of ['clipboard', 'tilde', '~', 'absolute']) {
       expect(visibleSettingsSections(keyword).map((section) => section.id)).toEqual(['general'])
     }
-    expect(all.map(section => section.id)).toEqual(['appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts', 'agents', 'prompts', 'workspaces', 'hosts'])
+    expect(new Set(all.map(section => section.id))).toEqual(new Set(settingsModules.map(module => module.id)))
+    expect(all).toHaveLength(settingsModules.length)
     // 而一个谁都不含的词必须什么都不返回——否则「过滤」只是名义上的。
     expect(visibleSettingsSections('zzzznotakeyword')).toEqual([])
   })
@@ -78,6 +81,8 @@ describe('设置搜索', () => {
     // 而那一句才是侧栏真正渲染用的列表——它现在归 settingsNavGroups 算。
     const navForwarding = source.match(/useMemo\(\(\) => settingsNavGroups\(query\), \[query\]\)/gu)
     expect(navForwarding?.length, '侧栏分组不再来自 settingsNavGroups——壳里又自己算了一遍').toBe(1)
+    expect(source.match(/useMemo\(\(\) => settingsCatalog\.searchResults\(query\), \[query\]\)/gu)?.length,
+      '字段结果必须同样转发到原目录 owner').toBe(1)
   })
 
   it('壳里一句过滤都没有', () => {
@@ -153,6 +158,7 @@ describe('设置搜索', () => {
         ts.isIdentifier(node) &&
         node.text === 'query' &&
         !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) &&
+        !(ts.isJsxAttribute(node.parent) && node.parent.name === node) &&
         !ts.isVariableDeclaration(node.parent) &&
         !ts.isBindingElement(node.parent)
       ) {
@@ -167,13 +173,12 @@ describe('设置搜索', () => {
       .toBeGreaterThan(0)
     expect(readsOfQuery.length, [
       `\`query\` 在壳里的读取点变成了 ${readsOfQuery.length} 处（行号：${readsOfQuery.join(', ')}）。`,
-      '合法的 13 处是：`visibleSettingsSections(query)` 与 `settingsNavGroups(query)` 两句转发各占 2',
-      '（实参 + 依赖数组），搜索框的 `value={query}` 与清空按钮的条件各 1，空结果提示里回显那一句 1。',
-      'Escape 先清空搜索的条件与 effect 依赖各 1；行为由 settings-workbench 的真实键盘事件验证。',
-      'Overview 新增 4 处只决定呈现入口：空 query 不自动跳配置区的守卫与 effect 依赖各 1，',
-      '窄窗菜单与侧栏只在空 query 显示 Overview 各 1；原八区过滤仍只归上述两句转发。',
+      '合法的15处：三个目录投影的实参与依赖共6，searching判定1；Escape条件与依赖2；',
+      '搜索框value与Clear条件2；Overview菜单条件和Esc提示各1；结果页query与返回结果的回显各1。',
+      'JSX的静态属性名query不算state读取。真实搜索→明确选择→清空返回由workbench行为验证。',
+      '过滤及字段匹配只归原catalog，路由和反馈读取不产生第二套搜索。',
       '多出来的读取点通常意味着壳里又判了一次「哪些 section 匹配搜索词」——那就是第二份过滤逻辑。',
       '如果这次新增是别的正当用途，把这个数字连同理由一起更新。'
-    ].join('\n')).toBe(13)
+    ].join('\n')).toBe(15)
   })
 })

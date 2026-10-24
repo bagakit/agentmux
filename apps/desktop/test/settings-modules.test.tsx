@@ -24,7 +24,7 @@ vi.mock('../src/renderer/src/components/settings/settings-modules', async (impor
     </label>
   }
   const fixture = {
-    id: 'fixture-module', group: 'resources', title: 'Fixture module',
+    id: 'fixture-module', group: 'work', title: 'Fixture module',
     description: 'One independently contributed settings page.', keywords: 'fixture-needle', icon: Settings2,
     savedSummary: (config: AppConfig) => config.copyPathsAsAbsolute === true ? 'Saved absolute paths' : 'Saved abbreviated paths',
     Pane: FixturePane
@@ -86,13 +86,13 @@ it('a contributed module reaches Overview, sidebar, compact menu, search and its
   expect(new Set(catalog.map(module => module.id))).toEqual(new Set([...registration.originalIds, 'fixture-module']))
   expect(catalog).toHaveLength(registration.originalIds.length + 1)
   const navigation = settingsNavGroups('').flatMap(group => group.items)
-  expect(settingsNavGroups('').find(group => group.id === 'browser-use')?.items.map(module => module.id)).toEqual(['browser', 'browser-agent-control'])
+  expect(settingsNavGroups('').find(group => group.id === 'browser-use')?.items.map(module => module.id)).toEqual(['browser', 'capsule', 'browser-agent-control'])
   expect(new Set(navigation.map(module => module.id))).toEqual(new Set(catalog.map(module => module.id)))
   expect(navigation).toHaveLength(catalog.length)
   expect(navigation.map(module => module.id)).toEqual(catalog.map(module => module.id))
   expect([...dom.container.querySelectorAll('[data-settings-overview] [data-settings-section]')]
     .map(node => node.getAttribute('data-settings-section'))).toEqual(navigation.map(module => module.id))
-  expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button:not([data-settings-overview-nav])')]
+  expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button[data-settings-target]:not([data-settings-overview-nav])')]
     .map(node => node.textContent)).toEqual(navigation.map(module => module.title))
   expect(overviewRow().textContent).toContain('Saved abbreviated paths')
   expect(mountedPanes()).toEqual([])
@@ -230,12 +230,12 @@ it('presents Mods beside Preferences through the actual shell and preserves the 
   expect(connected('[data-settings-section="toolkit"]', overview).textContent).toContain('Toolkit Library')
   const nav = connected('nav[aria-label="Settings sections"]')
   const row = connected('[data-settings-target="toolkit"]', nav)
-  expect(row.previousElementSibling!.textContent).toBe('Mods')
+  expect(row.closest('[data-settings-group="toolkit"]')!.querySelector('[data-settings-group-toggle]')!.textContent).toBe('Mods')
   const groups = settingsNavGroups('')
   const channelIndex = groups.findIndex(group => group.id === 'conversation-channels')
   expect(channelIndex).toBeGreaterThan(groups.findIndex(group => group.id === 'remote'))
   expect(channelIndex).toBeLessThan(groups.findIndex(group => group.id === 'toolkit'))
-  expect(groups[channelIndex]!.items.map(item => item.id)).toEqual(['inapp-conversation', 'lark'])
+  expect(groups[channelIndex]!.items.map(item => item.id)).toEqual(['inapp-conversation', 'lark', 'discord'])
   expect(groups.find(group => group.id === 'remote')!.items.map(item => item.id)).toEqual(['hosts', 'mobile'])
   expect(groups.find(group => group.title === 'Mods')!.items.map(item => item.id)).toEqual(['toolkit'])
   expect(groups.find(group => group.title === 'Preferences')!.items.map(item => item.id)).not.toContain('toolkit')
