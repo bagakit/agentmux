@@ -267,19 +267,23 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     !conversationVisible ? connection.issue ?? (hasConnected && !connected ? connection.message : null) : null
   ].filter((message): message is string => Boolean(message)))]
   return <div className="mobile-app" data-connection={connection.state} data-drawer={sheet === 'settings' ? 'open' : 'closed'} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
-    {!primaryHeader && <header className="mobile-header">
-      {workspaceVisible ? showSession ? <button className="mobile-icon-button" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={20} /></button> : <span className="mobile-header-spacer" /> : menuButton}
-      {showSession && objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={38} visible={exposed} /></button>
-        : <div className="mobile-brand"><img className="mobile-brand-icon" src={brandIcon} width={24} height={24} alt="" /><span>AgentMux</span></div>}
-      {showSession && objectIdentity?.mote ? <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></button> : <span className="mobile-header-spacer" />}
+    {!primaryHeader && <header className={`mobile-header${workspaceVisible && showSession && !moteConversation ? ' mobile-header--session' : ''}`}>
+      {workspaceVisible && showSession && !moteConversation ? <div className="mobile-session-toolbar">
+        <button type="button" className="mobile-session-origin" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={16} /><span>{pageName}</span></button>
+        {objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={28} visible={exposed} /></button>
+          : <MobileIdentity identity={objectIdentity ?? { name: sessionTitle ?? '原会话', project: pageName }} session={selected} client={client} connected={connected} size={24} visible={exposed} />}
+        <span className="mobile-session-title">{sessionTitle ?? selected?.providerId ?? '原会话'}</span>
+        <button className="mobile-icon-button" aria-label={showGoalWork ? '返回原对话' : '目标与结果'} aria-pressed={showGoalWork} onClick={() => setShowGoalWork(value => !value)}><ThemeObjectGoalIcon size={18} /></button>
+        {!objectIdentity?.mote && <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })) }}>{workface.panel === 'terminal' ? <ThemeObjectConversationIcon size={18} /> : <ThemeObjectTerminalIcon size={18} />}</button>}
+        {objectIdentity?.mote && <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={18} /></button>}
+        {native && selected && !showGoalWork && workface.panel !== 'terminal' && <button className="mobile-icon-button" aria-label="撰写消息" onClick={() => { if (!focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。') }}><ThemeActionComposeIcon size={17} /></button>}
+      </div> : <>
+        {workspaceVisible ? showSession ? <button className="mobile-icon-button" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={20} /></button> : <span className="mobile-header-spacer" /> : menuButton}
+        {showSession && objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={38} visible={exposed} /></button>
+          : <div className="mobile-brand"><img className="mobile-brand-icon" src={brandIcon} width={24} height={24} alt="" /><span>AgentMux</span></div>}
+        {showSession && objectIdentity?.mote ? <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></button> : <span className="mobile-header-spacer" />}
+      </>}
     </header>}
-    {workspaceVisible && showSession && <div className="mobile-session-toolbar">
-      <span className="mobile-session-origin">{pageName}</span>
-      <span>{sessionTitle ?? selected?.providerId ?? '原会话'}</span>
-      <button className="mobile-icon-button" aria-label={showGoalWork ? '返回原对话' : '目标与结果'} aria-pressed={showGoalWork} onClick={() => setShowGoalWork(value => !value)}><ThemeObjectGoalIcon size={18} /></button>
-      {!objectIdentity?.mote && <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })) }}>{workface.panel === 'terminal' ? <ThemeObjectConversationIcon size={18} /> : <ThemeObjectTerminalIcon size={18} />}</button>}
-      {native && selected && !showGoalWork && workface.panel !== 'terminal' && <button className="mobile-icon-button" aria-label="撰写消息" onClick={() => { if (!focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。') }}><ThemeActionComposeIcon size={17} /></button>}
-    </div>}
     <main className="mobile-main">
       {!workspaceVisible && <section className="mobile-connect-page"><img className="mobile-connect-dragon" src={brandIcon} alt="AgentMux 龙" /><h1>连接你的 Mac</h1>
         <p>在 Mac 的 Phone &amp; Devices 中复制连接链接，用手机打开。两台设备连接同一 Wi-Fi。</p>
