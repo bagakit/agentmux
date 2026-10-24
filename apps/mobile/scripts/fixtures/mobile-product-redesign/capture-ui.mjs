@@ -24,6 +24,13 @@ try {
     'hide-unknown': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: "{attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}", after: "{attempt && attempt.phase === 'sending' ? renderPromptAttempt([draftKey, attempt]) : null}" },
     'persistent-confirmed-diagnostic': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: "{attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}", after: "{attempt && (attempt.phase !== 'confirmed' || attempt.manualInput) ? renderPromptAttempt([draftKey, attempt]) : null}" },
     'evidence-touch-target': { file: 'apps/mobile/src/mobile.css', before: '.mobile-goal-evidence button { min-width: 44px; min-height: 44px; padding: 6px 10px;', after: '.mobile-goal-evidence button { min-width: 12px; min-height: 12px; height: 12px; padding: 0;' },
+    'density-padding': { file: 'apps/mobile/src/conversation/conversation.css', edits: [
+      { before: 'padding: 0 6px 4px;', after: 'padding: 0 12px 10px;' },
+      { before: 'padding: 2px 4px 0;', after: 'padding: 4px 6px 2px;' },
+      { before: '--composer-input-pad-top: 2px; --composer-input-pad-bottom: 2px;', after: '--composer-input-pad-top: 4px; --composer-input-pad-bottom: 4px;' },
+      { before: '.mobile-app .mobile-conversation .composer__editor .tiptap { padding-inline: 6px; }', after: '.mobile-app .mobile-conversation .composer__editor .tiptap { padding-inline: 12px; }' }
+    ] },
+    'density-tools': { file: 'apps/mobile/src/conversation/conversation.css', before: 'grid-template-columns: minmax(0,1fr) auto; min-height: 44px;', after: 'grid-template-columns: max-content minmax(0,1fr) max-content; min-height: 44px;' },
     'menu-directory': { file: 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx', before: 'const locations = (id: string) => directory.places.get(id) ?? []',
       after: 'const locations = (id: string) => catalog?.locations.filter(location => catalog.regions.some(region => region.tabId === location.tabId && region.regionId === location.regionId && region.agentSessionId === id)) ?? []' },
     'menu-notice-spacing': { file: 'apps/mobile/src/mobile.css', before: '.mobile-agent-usage > .mobile-notice { margin: 4px 0 8px; font-size: 13px; line-height: 1.5; }', after: '' },
@@ -121,12 +128,12 @@ try {
   }
   receipt.loadedSource = loadedSource
   receipt.virtualInputs = Object.fromEntries(Object.entries(built.metafile.inputs).filter(([name]) => name.startsWith('(disabled):') || name.startsWith('<define:')))
-  for (const name of ['capture-ui.mjs', 'product-main.cjs']) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
+  for (const name of ['capture-ui.mjs', 'product-main.cjs', ...(process.argv.includes('--conversation-density') ? ['conversation-density.cjs'] : []), ...(process.argv.includes('--conversation-density-hit') ? ['conversation-density-hit.cjs'] : []), ...(process.argv.includes('--conversation-attachments') ? ['conversation-attachments.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   for (const file of ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileAttachments.tsx', 'apps/mobile/src/platform/native/device.ts', 'apps/mobile/src/recovery/device-workface.ts', 'apps/mobile/src/conversation/MobileConversationSurface.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  const subset = ['agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  const subset = ['conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
   if (subset) receipt.captureSubset = subset
   receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, ...(subset ? [subset] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
