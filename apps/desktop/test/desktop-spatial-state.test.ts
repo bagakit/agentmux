@@ -12,6 +12,7 @@ import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/
 import { projectPersistedWorkbench, restorePersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence';
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial, desktopBindingsFromSpatial, DesktopSpatialPersistence, reconcileSpatialGraphs } from '../src/renderer/src/lib/desktop-spatial-state';
 import type { AppConfig } from '../src/shared/contracts';
+import { agent } from './helpers/workface-control-fixture';
 const config: AppConfig = { version: 9, hosts: [{ id: 'host', kind: 'local', label: 'Local' }], executors: {}, workspaces: [{ id: 'resource', name: 'Project', hostId: 'host', path: _hygiene_fixturePath("project"), kind: 'folder' }], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } };
 function workbench() {
   const tab = createWorkbenchTab('tab', { regionId: 'agent', kind: 'agent', phase: 'attached', workspaceId: 'resource', sessionId: 'original-session' });
@@ -44,6 +45,38 @@ describe('Desktop consumes the Core spatial owner', () => {
     expect(graph.resources['tab:tab']).not.toHaveProperty('layout');
     expect(graph.resources['region:agent']).not.toHaveProperty('sessionId');
     expect(graph.regions.find(r => r.regionId === 'agent')!.agentSessionId).toBe('original-session');
+  });
+  it('retains the exact presentation alias and canonical Host binding through ACK projection and missing observations', () => {
+    const original = workbench(), session = agent('original-session');
+    session.control = { ...session.control, agentSessionId: 'canonical-session' };
+    const observed = { ...original, sessions: [session] }, graph = desktopSpatialGraph(observed, []);
+    expect(graph.regions.find(region => region.regionId === 'agent')).toMatchObject({ agentSessionId: 'canonical-session', runId: session.control.run.runId });
+    expect(graph.resources['region:agent']).toMatchObject({ agentPresentation: { sessionId: session.id, agentSessionId: 'canonical-session', hostId: session.control.hostId } });
+    expect(desktopWorkbenchFromSpatial(graph)).toMatchObject(projectPersistedWorkbench(original));
+    const missing = desktopSpatialGraph(original, [], graph);
+    expect(missing.regions).toEqual(graph.regions);
+    expect(missing.resources['region:agent']).toEqual(graph.resources['region:agent']);
+    expect(desktopWorkbenchFromSpatial(missing)).toMatchObject(projectPersistedWorkbench(original));
+    const unknownExecution = structuredClone(missing);
+    unknownExecution.regions.find(region => region.regionId === 'agent')!.execution = null;
+    expect(desktopWorkbenchFromSpatial(unknownExecution).tabs.tab!.regions.agent).toHaveProperty('sessionId', session.id);
+    expect(desktopWorkbenchFromSpatial(missing).tabs.tab!.regions.agent).not.toHaveProperty('agentPresentation');
+  });
+  it('does not attach a saved alias to a different canonical Session, Host or Region occurrence', () => {
+    const original = workbench(), session = agent('original-session');
+    session.control = { ...session.control, agentSessionId: 'canonical-session' };
+    const graph = desktopSpatialGraph({ ...original, sessions: [session] }, []);
+    for (const changed of ['session', 'host'] as const) {
+      const replaced = structuredClone(graph), region = replaced.regions.find(value => value.regionId === 'agent')!;
+      if (changed === 'session') region.agentSessionId = 'replacement-session';
+      else region.execution = { hostId: 'other-host', cwd: 'other-directory' };
+      expect(desktopWorkbenchFromSpatial(replaced).tabs.tab!.regions.agent).toHaveProperty('sessionId', region.agentSessionId);
+    }
+    const moved = structuredClone(graph);
+    moved.regions.find(region => region.regionId === 'agent')!.tabId = 'other-tab';
+    const missing = desktopSpatialGraph(original, [], moved);
+    expect(missing.regions.find(region => region.regionId === 'agent')!.agentSessionId).toBe(session.id);
+    expect(missing.resources['region:agent']).not.toHaveProperty('agentPresentation');
   });
   it('retains missing observations and permits only explicit entity removal', () => {
     const original = workbench(), graph = desktopSpatialGraph(original, []);
