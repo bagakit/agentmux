@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
 import { fixturePath } from './lib/fixture-values.mjs'
@@ -24,7 +24,8 @@ await mkdir(join(root, '.tmp'), { recursive: true })
 const evidence = await mkdtemp(join(root, '.tmp/conversation-keyframes-')), temporary = await mkdtemp(fixturePath('tmp/amx-conversation-keyframes-'))
 const report = { passed: false, evidence, sourceHashes: hashes, fixtureHashes, phases: [], boundary: 'Private Chromium over production ConversationReadingRuler → Ruler → Axis, actual keyframe hook, and shared ConversationMessage → ConversationImage. ClientUiPlatform supplies original configured avatars and an exact bounded image reader; only Desktop window portal and unused Store avatar fallback are adapted. Full Workbench/store navigation and native Browser/capsule acquisition are outside this probe; no user Session or Browser is operated.' }
 try {
-  report.unit = await runProbeProcess('pnpm', ['--filter', '@agentmux/desktop', 'exec', 'vitest', 'run', '--configLoader', 'runner', '--config', 'test/conversation-keyframes.config.mts'], { cwd: root, env: process.env, timeoutMs: 45000 })
+  const vitest = join(dirname(createRequire(join(root, 'package.json')).resolve('vitest/package.json')), 'vitest.mjs')
+  report.unit = await runProbeProcess(process.execPath, [vitest, 'run', '--configLoader', 'runner', '--config', 'test/conversation-keyframes.config.mts'], { cwd: desktop, env: process.env, timeoutMs: 45000 })
   assert.equal(report.unit.exitCode, 0, 'The owning isolated keyframe unit suite must pass first')
   for (const mode of ['green', 'blank-capture', 'restored']) {
     const loaded = [], outDir = join(temporary, 'out')
