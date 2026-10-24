@@ -209,10 +209,29 @@ it('retains the original unknown post-launch claim without replay after retry', 
 
 it('releases unused direct preparation for an authoritatively not-applied Start', async () => {
   const f = await fixture()
-  f.start.mockRejectedValueOnce(new core.AgentMuxError('Start not applied', 'CONTROL_UNAVAILABLE', undefined, { disposition: 'not_applied', confirmedInputBytes: null }))
-  await expect(f.resume()).rejects.toMatchObject({ controlFailure: { disposition: 'not_applied' } })
+  f.start.mockImplementationOnce(async (input: { operationKey: string }) => {
+    throw new core.AgentMuxError('Start not applied', 'CONTROL_UNAVAILABLE', undefined, undefined, undefined,
+      { operationId: input.operationKey, disposition: 'not_applied' })
+  })
+  await expect(f.resume()).rejects.toMatchObject({ creationFailure: { disposition: 'not_applied' } })
   expect(await f.correlation()).toBeUndefined(); expect((await f.store.readMetadata(f.previous.agentSessionId))?.run).toEqual(f.previous.run)
   expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
+})
+
+it.each(['foreign-operation', 'input-receipt', 'unknown-start'] as const)('retains direct resume preparation for a %s negative receipt', async kind => {
+  const f = await fixture()
+  const storageFailure = { stage: 'start' as const, sqlitePrimaryCode: 14, sqliteExtendedCode: 14,
+    systemErrno: 2, transactionOutcome: 'not_started' as const }
+  const original = new core.AgentMuxError('Original Start transport outcome unknown', 'CTXMUX_io', undefined,
+    kind === 'input-receipt' ? { disposition: 'not_applied', confirmedInputBytes: null } : undefined,
+    undefined, kind === 'foreign-operation' ? { operationId: 'unrelated-start', disposition: 'not_applied' }
+      : kind === 'unknown-start' ? { operationId: agentLifecycleOperationIdentity('resume', f.previous.agentSessionId, f.request.operationId), disposition: 'unknown' } : undefined, storageFailure)
+  f.start.mockRejectedValueOnce(original)
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED', cause: original, storageFailure,
+    creationFailure: { operationId: agentLifecycleOperationIdentity('resume', f.previous.agentSessionId, f.request.operationId), disposition: 'unknown' } })
+  expect(await f.correlation()).toMatchObject({ preparedSession: { run: f.previous.run } })
+  await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
+  f.noReplacement()
 })
 
 it('existing Hosted direct resume and actual public CLI inspect share the original typed receipt', async () => {
