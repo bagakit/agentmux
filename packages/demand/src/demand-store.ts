@@ -1214,7 +1214,7 @@ export class DemandStore {
         const result: DemandReceipt = { schema: DEMAND_RECEIPT_SCHEMA, operation, operationId, revision: snapshot.revision,
           demand: { ...clone(demand), activities: projectActivities(demand.activities, new Map(snapshot.nameHistory.map(change => [change.id, change]))) }, ...(nameChange ? { nameChange: clone(nameChange) } : {}) }
         for (const listener of this.listeners) {
-          try { listener(published) } catch {
+          try { listener(published, [demand.id]) } catch {
             console.warn(`Demand snapshot observer failed after confirmed revision ${snapshot.revision}, operation ${operationId}.`)
           }
         }
