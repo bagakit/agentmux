@@ -1,8 +1,8 @@
-import { AgentMuxError, forwardConversationInput, readRoutedConversation, type AgentMuxClient } from '@agentmux/core'
+import { AgentMuxError, parseAgentInputJournalCut, forwardConversationInput, readRoutedConversation, type AgentMuxClient } from '@agentmux/core'
 import { parseConversationChangesPage, parseConversationCheckpointPage, parseConversationReadPage } from '@agentmux/core/conversation'
 import type { PublicationConversationPort } from './publication-host.js'
 
-type Reader = Pick<AgentMuxClient, 'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeConversation' | 'sessionHistoryResource'>
+type Reader = Pick<AgentMuxClient, 'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeConversation' | 'sessionHistoryResource' | 'inspectMessageNotification' | 'readMessage'>
 /** Adapt existing execution owners. Every read resolves its frozen Host, never current UI or a replacement Session. */
 export function createPublicationConversationPort(clients: () => readonly { hostId: string; client: Reader }[]): PublicationConversationPort {
   const original = (hostId: string): Reader => {
@@ -11,6 +11,19 @@ export function createPublicationConversationPort(clients: () => readonly { host
     return found[0]!.client
   }
   return {
+    // These original journal APIs cannot cancel an in-flight RPC. PublicationHost owns cancellable waiting and discards late results.
+    notification: async (reference, notificationId, signal) => {
+      signal.throwIfAborted()
+      const result = await original(reference.hostId).inspectMessageNotification({ operationId: notificationId })
+      signal.throwIfAborted()
+      return { notification: result.notification, inputOrigin: result.inputOrigin === null ? null : parseAgentInputJournalCut(result.inputOrigin) }
+    },
+    message: async (reference, messageId, notificationId, signal) => {
+      signal.throwIfAborted()
+      const result = await original(reference.hostId).readMessage({ messageId, notificationId })
+      signal.throwIfAborted()
+      return result
+    },
     checkpoint: async (reference, signal) => {
       const page = await original(reference.hostId).conversationCheckpoint({ ...reference, hostId: 'local' }, { signal })
       return parseConversationCheckpointPage({ ...page, hostId: reference.hostId, checkpoint: { ...page.checkpoint, hostId: reference.hostId } }, reference)

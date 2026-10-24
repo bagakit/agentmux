@@ -4,6 +4,7 @@ import { externalConversationAuthor, externalConversationRecordId } from '@agent
 import { createHash } from 'node:crypto'
 import type { PublicationImage, PublicationFile, ResourceUploadReceipt, ResolvedPublicationPart } from './publication-resource.js'
 import { publicationContent, publicationPartKey, type PublicationContentPlan } from './publication-content.js'
+import type { PublicationA2A, PublicationOriginalMessage } from './publication-a2a.js'
 import type { PublicationSpeaker } from './publication-speaker.js'
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication, type PublicationPreparer } from './publication-wire.js'
 import type { DatabaseSync } from 'node:sqlite'
@@ -65,6 +66,8 @@ export type PublicationOperation = ConnectionDelivery & {
   /** Frozen before dispatch; private to this Host, never exposed in public delivery DTOs. */
   prepared?: PreparedPublication
   sourceRecords?: ConversationItemRef[]
+  /** Exact immutable journal body, qualified before queuing; the source remains its original notification record. */
+  originalMessage?: Pick<PublicationOriginalMessage, 'messageId' | 'senderSessionId' | 'notificationId'>
   /** Original qualified adoption proof retained with its effect for later turn completion. */
   queryTurn?: import('@agentmux/core/conversation').ConversationInputWitness
   queryCompletion?: { record: ConversationItemRef; revision: string }
@@ -78,7 +81,7 @@ export type PublicationOperation = ConnectionDelivery & {
 /** Reuse the original public receipt codec without accepting private request or body fields. */
 const parseReceipt = parseConnectionDeliveryReceipt
 export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
-  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, ...delivery } = operation
+  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, originalMessage: _originalMessage, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, ...delivery } = operation
   const last = operation.uploads?.at(-1)
   return parseConnectionDelivery({ ...delivery, ...((operation.payload.kind === 'image' || operation.payload.kind === 'file') && operation.effect === 'upsert' && !operation.prepared?.request.multipart ? { resourceUpload: { kind: operation.payload.kind, part: operation.payload.part, attempt: operation.uploads?.length ?? 0, state: last?.state ?? 'pending' } } : {}) })
 }
@@ -90,6 +93,7 @@ export type PublicationPageOptions = {
   resolvedText: ReadonlyMap<string, ResolvedPublicationPart>
   questions?: ReadonlyMap<string, QuestionPublicationPayload>
   speakers?: ReadonlyMap<string, PublicationSpeaker>
+  originals?: ReadonlyMap<string, readonly PublicationA2A[]>
 }
 // JSON object property order carries no source or platform identity.
 const encode = (value: unknown) => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
@@ -591,6 +595,7 @@ export class PublicationStore {
         const materialized = this.materialize(boundary, projectionId, unit, plan, coalesced)
         this.queueRepresentation(boundary, projectionId, unit, materialized, options.fragmentBytes ?? 4096, undefined, undefined,
           plan.pieces.map(piece => options.questions?.get(conversationRecordId(piece.part.record))).find(value => value !== undefined), options.fragmentText, options.speakers?.get(unit.event.id))
+        this.projectOriginalMessages(boundary, unit, options.originals?.get(unit.event.id) ?? [], page.checkpoint, options.fragmentBytes ?? 4096, options.fragmentText)
         // Explicit Core coalescence moves only representation intent. Original
         // platform mappings retire through their normal ordered effects; an
         // unknown predecessor remains inspect-only and keeps its request bytes.
@@ -599,7 +604,7 @@ export class PublicationStore {
       this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?').run(encode(page.checkpoint), ...scopeKey(boundary), 'unified')
     })
   }
-  private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }, references: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)], question?: QuestionPublicationPayload, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker): void {
+  private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }, references: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)], question?: QuestionPublicationPayload, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker, originalMessage?: PublicationOriginalMessage): void {
     const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal').all(projectionId).map(row => this.read(row)!)
     // An unresolved part never withdraws a prior complete platform representation.
     if (!plan.text && !plan.resourceParts?.some(part => part.image || part.file) && !plan.complete) return
@@ -627,10 +632,11 @@ export class PublicationStore {
         const readingOriginal = unit.records.find(record => record.id === unit.event.anchorId)?.original
         const original = readingOriginal?.kind === 'deferred' ? readingOriginal.item : readingOriginal
         const sourceTime = original?.kind === 'native' ? original.item.startedAt : original?.item.createdAt
-        const presentationTime = sourceTime !== undefined && Number.isFinite(sourceTime) && Math.abs(sourceTime) <= 8.64e15
-          ? sourceTime : prior?.presentationTime ?? Date.now()
+        const presentationTime = originalMessage?.createdAt ?? (sourceTime !== undefined && Number.isFinite(sourceTime) && Math.abs(sourceTime) <= 8.64e15
+          ? sourceTime : prior?.presentationTime ?? Date.now())
         const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision, presentationTime, ...(event ? { event } : {}), sourceRecords: [...references],
           ...(speaker && payload.kind === 'speech' ? { speaker } : {}),
+          ...(originalMessage ? { originalMessage: { messageId: originalMessage.messageId, senderSessionId: originalMessage.senderSessionId, notificationId: originalMessage.notificationId } } : {}),
           bindingId: boundary.bindingId, bindingRevision: boundary.revision, publicationScope: boundary.scope.publication,
           reference: unit.event.reference!, target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
           payload, ...(plan.relay ? { relay: plan.relay } : {}), effect, fragment: { ordinal, count: parts.length }, state: 'pending', ...(parent ? { predecessorOperationId: parent.operationId } : {}) }
@@ -645,6 +651,33 @@ export class PublicationStore {
       queue(body ? 'upsert' : 'withdraw', body ?? { kind: 'speech', text: '' }, predecessor)
 
     }
+  }
+  /** Journal originals reuse this Outbox; a repeated notification cannot acquire a second representation. */
+  private projectOriginalMessages(boundary: PublicationBoundary, unit: ConversationUnit, values: readonly PublicationA2A[], frontier: ConversationCheckpoint, fragmentBytes: number, fragmentText?: PublicationPageOptions['fragmentText']): void {
+    if (boundary.scope.publication !== 'future-shared-conversation') return
+    for (const value of values) {
+      const gapId = 'a2a-gap-' + digest([...scopeKey(boundary), conversationRecordId(value.record), value.revision, value.notificationId])
+      if (value.unavailable) {
+        const gap: ConnectionDeliveryGap = { gapId, reason: value.startUnconfirmed ? 'start-cut-unconfirmed' : 'resource-unavailable', code: 'PUBLICATION_A2A_ORIGINAL_UNAVAILABLE',
+          event: { id: unit.event.id, revision: unit.event.revision }, record: value.record, ...(value.part ? { part: value.part } : {}),
+          anchor: { record: value.record, revision: value.revision, frontier } }
+        this.saveDecision(boundary, gapId, value.revision, { kind: 'gap', gap, state: 'unresolved' })
+      } else this.database.prepare("UPDATE connector_publication_decision SET decision_json=json_set(decision_json,'$.state','resolved') WHERE binding_id=? AND binding_revision=? AND record_id=?").run(...scopeKey(boundary), gapId)
+      for (const message of value.messages) {
+        const projectionId = 'a2a-original-' + digest([...scopeKey(boundary), boundary.executionHostId, boundary.agentSessionId, message.messageId])
+        if (this.latestProjection(projectionId)) continue
+        const plan: MaterializedPlan = { text: message.body, pieces: [], gaps: [], origins: [], excluded: [], complete: true }
+        this.queueRepresentation(boundary, projectionId, unit, plan, fragmentBytes, undefined, [value.record], undefined, fragmentText, message.speaker, message)
+      }
+    }
+  }
+  recoverOriginalMessages(boundary: PublicationBoundary, gap: ConnectionDeliveryGap, unit: ConversationUnit, values: readonly PublicationA2A[], authorized: () => boolean, fragmentBytes: number, fragmentText?: PublicationPageOptions['fragmentText']): void {
+    if (!gap.anchor || gap.code !== 'PUBLICATION_A2A_ORIGINAL_UNAVAILABLE') return
+    this.transaction(() => {
+      if (!authorized()) return
+      const row = this.database.prepare("SELECT 1 FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND record_id=? AND json_extract(decision_json,'$.state')='unresolved'").get(...scopeKey(boundary), gap.gapId)
+      if (row) this.projectOriginalMessages(boundary, unit, values.filter(value => same(value.record, gap.anchor!.record) && value.revision === gap.anchor!.revision), gap.anchor!.frontier, fragmentBytes, fragmentText)
+    })
   }
   recoverableGaps(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, after = 0): Array<{ ordinal: number; gap: ConnectionDeliveryGap }> {
     return this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND rowid>? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.gap.reason') IN ('resource-unavailable','version-unavailable') ORDER BY rowid LIMIT 4")
