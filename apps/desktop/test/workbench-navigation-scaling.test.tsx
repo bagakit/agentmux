@@ -46,7 +46,7 @@ it('shares one graph across retained Pane file contexts and ignores Browser page
   const build = vi.spyOn(spatial, 'spatialCatalog')
   const selectors = state.sessions.map(s => createSessionProjectFileContextSelector(s.id, {
     workspaceId: 'workspace', tabGroupId: 'group', tabId: s.id, regionId: `region-${s.id}`, sessionId: s.id
-  }))
+  }, () => null))
   const values = selectors.map(select => select(state))
   expect(values).toHaveLength(48)
   expect(values.map(value => value.kind)).toEqual(Array(48).fill('session'))
@@ -132,7 +132,7 @@ it('reuses the structural graph through actual Tab activation and mounted layout
   const build = vi.spyOn(spatial, 'spatialCatalog')
   const selectors = state.sessions.map(s => createSessionProjectFileContextSelector(s.id, {
     workspaceId: 'workspace', tabGroupId: 'group', tabId: s.id, regionId: `region-${s.id}`, sessionId: s.id
-  }))
+  }, () => null))
   const original = selectors.map(select => select(state))
   expect(original).toHaveLength(48)
   expect(original.every(context => context.kind === 'session')).toBe(true)
@@ -181,7 +181,7 @@ it('refreshes original location and file consumers when membership, order, ident
   const baseline = { ...state, layouts: { workspace: layout } }
   const select = createSessionProjectFileContextSelector('agent-1', {
     workspaceId: 'workspace', tabGroupId: 'group', tabId: 'agent-1', regionId: 'region-agent-1', sessionId: 'agent-1'
-  })
+  }, () => null)
   const build = vi.spyOn(spatial, 'spatialCatalog'), before = workbenchNavigationCatalog(baseline)
   expect(select(baseline).kind).toBe('session')
   const removed = { ...baseline, layouts: { workspace: { ...layout,

@@ -20,6 +20,10 @@ import * as projectOwner from '@agentmux/host/goal-project-context'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { createWorkbenchTab, fileTabId, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
+import * as storeModule from '../src/renderer/src/store'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { goalDiscussionBindingKey, readGoalDiscussionBinding } from '@agentmux/host/goal-discussion-bindings'
+import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import { workbenchProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { installNativePopover } from './fixtures/mote-workface'
@@ -50,6 +54,8 @@ const initial = useAppStore.getState()
 const origin = { workspaceId: SCRATCH_WORKSPACE_ID, tabGroupId: 'pmo-group', tabId: 'pmo-tab', regionId: 'pmo-region', sessionId: 'pmo' }
 let tinyRoot: string, project: WorkspaceRecord, scratch: WorkspaceRecord, config: AppConfig
 let root: Root, container: HTMLDivElement, files: WorkspaceFiles
+let canonicalGraph: AgentMuxSpatialGraph | null = null
+const discussionBinding = () => ({ schema: 'agentmux.goal-discussion-binding.v1' as const, tabId: origin.tabId, regionId: origin.regionId, recipient: { kind: 'agent' as const, hostId: 'local', agentSessionId: 'pmo' } })
 let commits = 0, restorePopover: (() => void) | undefined
 let reading: Awaited<ReturnType<typeof conversationPagePortFixture>>, seededContent = ''
 function agent(id = 'pmo', workspacePath = scratch.path): Extract<SessionSnapshot, { kind: 'agent' }> {
@@ -73,9 +79,12 @@ function seed(content: string, mapped = true) {
       kind: 'assistant_message', title: 'Project findings', content, source: 'native-hook', status: 'complete', createdAt: 100, updatedAt: 100 }] } },
     tabs: { [tab.id]: tab }, layouts: { [scratch.id]: createWorkspaceLayout(origin.tabGroupId, [tab.id]),
       [project.id]: createWorkspaceLayout('project-group') }, activeWorkspaceId: scratch.id, mainSurface: 'workbench',
-    demands: { goal: goal(), unrelated: goal('unrelated') }, demandPmoTabIds: mapped ? { goal: tab.id } : {},
+    demands: { goal: goal(), unrelated: goal('unrelated') }, demandPmoTabIds: {},
     documents: {}, documentIssues: {}, documentRevealTargets: {}, agentNames: {}, agentComposerDrafts: { pmo: 'KEEP DRAFT' },
     retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, error: null })
+  canonicalGraph = desktopSpatialGraph(useAppStore.getState(), [])
+  if (mapped) canonicalGraph.resources[goalDiscussionBindingKey('goal')] = discussionBinding()
+  vi.spyOn(storeModule, 'currentCoreSpatialGraph').mockImplementation(() => canonicalGraph)
 }
 async function flush() { await act(async () => { for (let n = 0; n < 12; n++) await Promise.resolve() }) }
 async function waitReading() {
@@ -266,7 +275,8 @@ describe('current mapped Goal project links through the original mounted Pane', 
     expect(useAppStore.getState().documents[documentKey(project.id, 'src/a.ts')]?.content).toBe('REAL PROJECT CONTENT')
     expect(useAppStore.getState().documentRevealTargets[documentKey(project.id, 'src/a.ts')]).toEqual({ line: 12, column: 3 })
     placed(); retained()
-    expect(useAppStore.getState().demandPmoTabIds).toEqual({ goal: origin.tabId })
+    expect(useAppStore.getState().demandPmoTabIds).toEqual({})
+    expect(readGoalDiscussionBinding(canonicalGraph!, 'goal')).toEqual(discussionBinding())
   })
   it('uses remote relative/absolute resources and keeps remote home literal despite matching local paths', async () => {
     project = { ...project, hostId: 'remote' }
@@ -302,7 +312,7 @@ describe('current mapped Goal project links through the original mounted Pane', 
     seed('Read `src/a.ts` and [source](./src/a.ts).')
     if (mode === 'unknown') useAppStore.setState(state => ({ demands: { ...state.demands, goal: goal('goal', 'unregistered-project') } }))
     if (mode === 'deleted') useAppStore.setState({ demands: {} })
-    if (mode === 'conflict') useAppStore.setState({ demandPmoTabIds: { goal: origin.tabId, unrelated: origin.tabId } })
+    if (mode === 'conflict') canonicalGraph = { ...canonicalGraph!, resources: { ...canonicalGraph!.resources, [goalDiscussionBindingKey('unrelated')]: discussionBinding() } }
     await mount(); expect(buttons()).toEqual([])
     expect(container.textContent).toContain('src/a.ts')
     expect(container.textContent).toContain('The PMO keeps running')
@@ -347,7 +357,7 @@ describe('current mapped Goal project links through the original mounted Pane', 
   })
   it('retains a previously mapped Pane when its mapping is removed', async () => {
     seed('Read src/a.ts.'); await mount(); expect(buttons()).toHaveLength(1)
-    await act(async () => useAppStore.setState({ demandPmoTabIds: {} }))
+    await act(async () => { canonicalGraph = { ...canonicalGraph!, resources: {} }; useAppStore.setState(state => ({ demands: { ...state.demands } })) })
     expect(buttons()).toEqual([]); expect(container.textContent).toContain('Goal association')
     expect(vi.mocked(api.files.read).mock.calls).toEqual([]); retained()
   })
