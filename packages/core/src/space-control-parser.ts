@@ -1,3 +1,4 @@
+import { parseSurveyOrganization } from './survey-organization.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
@@ -11,7 +12,7 @@ import { parseMoteDefaultConversation, parseMotePreferencesReadInput, parseMoteP
   parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote-preferences.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
-  AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport, AgentMuxSpaceRegionFact, AgentMuxMotePresentation, AgentMuxMoteConversationReference
+  AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport, AgentMuxSpaceRegionFact, AgentMuxMotePresentation, AgentMuxMoteConversationReference, AgentMuxSurveyOrganization
 } from './space-control.js'
 
 const MAX_SPATIAL_ID_BYTES = 16 * 1024
@@ -118,7 +119,7 @@ function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
 }
 
 export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceControlRequest['operation'] {
-  if (value === 'space.agent-order') return true
+  if (value === 'space.agent-order' || value === 'space.survey-list') return true
   if (value === 'space.mote.preferences.read' || value === 'space.mote.preferences.save') return true
   return value === 'agent.open' || value === 'space.ls' || value === 'space.inspect' || value === 'space.mv' ||
     value === 'agent.rename' || value === 'agent.inspect' || value === 'space.rename' ||
@@ -127,12 +128,17 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource', 'order', 'expectedOrder'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource', 'order', 'expectedOrder', 'organization', 'expected'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
   let request: AgentMuxSpaceControlRequest
-  if (operation === 'space.agent-order') {
+  if (operation === 'space.survey-list') {
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'organization', 'expected'], code)
+    if (Object.hasOwn(source, 'organization') !== Object.hasOwn(source, 'expected')) fail('Survey list writes require organization and its exact expected original value.', code)
+    request = { ...base, operation, ...(Object.hasOwn(source, 'organization') ? {
+      organization: parseSurveyOrganization(source.organization, code), expected: parseSurveyOrganization(source.expected, code) } : {}) }
+  } else if (operation === 'space.agent-order') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'displayWorkspaceId', 'order', 'expectedOrder'], code)
     if (Object.hasOwn(source, 'expectedOrder') && !Object.hasOwn(source, 'order')) fail('Expected order requires an explicit order change.', code)
     request = { ...base, operation, displayWorkspaceId: spaceControlId(source.displayWorkspaceId, 'Display Workspace', code),
@@ -397,13 +403,14 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
       ...(avatar ? { avatar: { ...(Object.hasOwn(avatar, 'tint') ? { tint: string(avatar.tint, 'Avatar tint', code) } : {}), ...(Object.hasOwn(avatar, 'badge') ? { badge: string(avatar.badge, 'Avatar badge', code) } : {}) } } : {}) }
   }, 'Agent presentation', code), item => item.agentSessionId, 'Agent presentation', code) : undefined
   const survey = Object.hasOwn(source, 'survey') ? (() => {
-    const raw = fields(source.survey, ['items', 'selection', 'issue'], code)
+    const raw = fields(source.survey, ['items', 'selection', 'issue', 'organization'], code)
     const reference = (value: unknown) => {
       const item = fields(value, ['tabId', 'regionId'], code)
       return { tabId: spaceControlId(item.tabId, 'Survey Tab', code, true), regionId: spaceControlId(item.regionId, 'Survey Region', code, true) }
     }
     const selected = raw.selection === null ? null : fields(raw.selection, ['zoneId', 'selection', 'active'], code)
     return {
+      ...(Object.hasOwn(raw, 'organization') ? { organization: parseSurveyOrganization(raw.organization, code) } : {}),
       items: unique(list(raw.items, value => {
         const item = fields(value, ['zoneId', 'name', 'issue'], code)
         return { zoneId: spaceControlId(item.zoneId, 'Survey Zone', code, true), name: string(item.name, 'Survey name', code),
@@ -539,7 +546,12 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const requestId = spaceControlId(source.requestId, 'Receipt Request', code)
   let result: AgentMuxSpaceControlResult
-  if (operation === 'space.agent-order') {
+  if (operation === 'space.survey-list') {
+    const body = fields(source.result, [...WORKFACE_FIELDS, 'scope', 'storedOrganization', 'effectiveOrganization'], code)
+    result = { operation, scope: member(body.scope, ['survey-list'], 'Survey list scope', code),
+      storedOrganization: parseSurveyOrganization(body.storedOrganization, code), effectiveOrganization: parseSurveyOrganization(body.effectiveOrganization, code),
+      outcome: member(body.outcome, VIEW_OUTCOMES, 'Survey list outcome', code), ...workfaceCommon(body, code) }
+  } else if (operation === 'space.agent-order') {
     const body = fields(source.result, [...WORKFACE_FIELDS, 'scope', 'displayWorkspaceId', 'storedOrder', 'effectiveOrder'], code)
     result = { operation, scope: member(body.scope, ['workspace-agent-list'], 'Agent list scope', code),
       displayWorkspaceId: spaceControlId(body.displayWorkspaceId, 'Display Workspace', code), storedOrder: agentOrder(body.storedOrder, code),

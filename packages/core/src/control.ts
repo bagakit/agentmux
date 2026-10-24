@@ -32,6 +32,7 @@ export type { InputObservationReference, InputPerformanceSnapshot, InputPerforma
 import type { AgentMuxToolkitPort, ToolkitRequest, ToolkitResult } from './toolkit.js'
 export * from './toolkit.js'
 export type * from './space-control.js'
+export { parseSurveyOrganization } from './survey-organization.js'
 export type * from './desktop-focus-control.js'
 export * from './mote-context-observation.js'
 import type { AgentMuxMoteContextEvidenceTarget, AgentMuxMoteContextObservation } from './mote-context-observation.js'
@@ -1056,6 +1057,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'agent.view': 'long',
   'space.view': 'long',
   'space.agent-order': 'long',
+  'space.survey-list': 'long',
   'file.format': 'long',
   'file.build': 'long',
   'file.build.inspect': 'short',

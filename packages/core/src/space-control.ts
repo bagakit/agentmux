@@ -120,8 +120,20 @@ export type AgentMuxMotePresentation = {
   conversation: AgentMuxMoteConversationReference | null
   issue?: string
 }
+/** Client list groups, independent of Core Tab Groups and membership qualification. */
+export type AgentMuxSurveyOrganization = {
+  ungrouped: string[]
+  groups: { groupId: string; name: string; collapsed: boolean; zoneIds: string[] }[]
+}
+export type AgentMuxSurveyListReport = AgentMuxWorkfaceReport & {
+  scope: 'survey-list'
+  storedOrganization: AgentMuxSurveyOrganization
+  effectiveOrganization: AgentMuxSurveyOrganization
+  outcome: 'read' | 'changed' | 'unchanged' | 'partial' | 'unknown' | 'refused'
+}
 /** Original Survey display preferences; missing topology does not retire these references. */
 export type AgentMuxSurveyPresentation = {
+  organization?: AgentMuxSurveyOrganization
   items: { zoneId: string; name: string; issue?: string }[]
   selection: {
     zoneId: string
@@ -278,6 +290,7 @@ export type AgentMuxWorkspaceAgentOrderReport = AgentMuxWorkfaceReport & {
 }
 type Base = { schemaVersion: 5; requestId: string }
 export type AgentMuxSpaceControlRequest = Base & (
+  | { operation: 'space.survey-list'; organization?: AgentMuxSurveyOrganization; expected?: AgentMuxSurveyOrganization }
   | { operation: 'space.agent-order'; displayWorkspaceId: string; order?: AgentMuxWorkspaceAgentOrderMember[]; expectedOrder?: AgentMuxWorkspaceAgentOrderMember[] }
   | ({ operation: 'space.mote.preferences.read' } & import('./mote-preferences.js').MotePreferencesReadInput)
   | ({ operation: 'space.mote.preferences.save' } & import('./mote-preferences.js').MotePreferencesSaveInput)
@@ -309,6 +322,7 @@ export type AgentMuxSpaceControlRequest = Base & (
       destination: AgentMuxSpaceDestination; focus: boolean }
 )
 export type AgentMuxSpaceControlResult =
+  | ({ operation: 'space.survey-list' } & AgentMuxSurveyListReport)
   | ({ operation: 'space.agent-order' } & AgentMuxWorkspaceAgentOrderReport)
   | ({ operation: 'space.mote.preferences.read' } & import('./mote-preferences.js').MotePreferencesReadResult)
   | ({ operation: 'space.mote.preferences.save'; requestId: string } & import('./mote-preferences.js').MotePreferencesSaveControlResult)

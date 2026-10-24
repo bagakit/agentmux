@@ -232,7 +232,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const identitySelector = useMemo(createFocusContextIdentitySelector, [])
   const contextIdentities = useMemo(() => identitySelector(navigationCatalog, identityTabs, executionRows, config, layouts, agentRegionExecution),
     [identitySelector, navigationCatalog, identityTabs, executionRows, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts])
-  const survey = useAppStore(useShallow(state => ({ surveyCollectedZones: state.surveyCollectedZones, surveyExplorationNames: state.surveyExplorationNames })))
+  const survey = useAppStore(useShallow(state => ({ surveyCollectedZones: state.surveyCollectedZones, surveyOrganization: state.surveyOrganization, surveyExplorationNames: state.surveyExplorationNames })))
   const originContent = useAppStore(useShallow(state => ({ bindings: state.spaceZoneBindings, categories: state.topicCategories })))
   const surveyItems = useMemo(() => readSurveyPresentation({ ...survey, surveyZoneSelection: null, tabs }, navigationCatalog).items, [survey, tabs, navigationCatalog])
   const laneMembership = JSON.stringify(allLanes.map(lane => [lane.id, lane.objectKind, lane.contextIds]))
