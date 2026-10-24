@@ -113,14 +113,14 @@ describe('actual phone primary workfaces', () => {
       if (method === 'goal.ls') return { goals: [goal] }
       if (method === 'goal.inspect') return { goal, goalContinuations: [] }
       if (method === 'goal.decisions') return { goalId: goal.id, decisions: [] }
-      if (method === 'goal.discuss') return { goal, receipt: { goalId: goal.id, tabId: 'original-tab', agentSessionId: 'session-original', mode: params.mode, operationId: params.operationId } }
+      if (method === 'goal.discuss') return { goal, receipt: { goalId: goal.id, tabId: 'original-tab', regionId: 'original-region', hostId: 'local', agentSessionId: 'session-original', mode: params.mode, operationId: params.operationId } }
       return original(method, params)
     }) as any
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     await click(button(nav(view.element), 'Goals')); await click(view.element.querySelector('.mobile-goals-list button')!)
     await click(button(view.element, '打开目标原讨论'))
     expect(view.element.querySelector('.mobile-session-toolbar')).not.toBeNull()
-    expect(getDeviceWorkface().snapshot().record.presentation!.goals!.discussion).toEqual({ goalId: goal.id, tabId: 'original-tab', agentSessionId: 'session-original' })
+    expect(getDeviceWorkface().snapshot().record.presentation!.goals!.discussion).toEqual({ goalId: goal.id, tabId: 'original-tab', regionId: 'original-region', hostId: 'local', agentSessionId: 'session-original' })
     await click(button(view.element, '返回 Goals'))
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
     expect(view.element.querySelector('.mobile-session-toolbar')).toBeNull()
