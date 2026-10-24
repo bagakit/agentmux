@@ -4,6 +4,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { parseCapsuleRpcResult, type CapsuleOpenResult } from '@agentmux/core/capsule'
 import type { ToolkitCapsuleReference, ToolkitExecution } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { deliveryFailure } from '@agentmux/core/delivery-attempt'
 import { api } from '../../lib/api'
 
 type Source = { toolId: string; execution: ToolkitExecution }
@@ -27,7 +28,12 @@ export function ToolkitCapsuleResults({ references, source }: { references: read
     const attempt: Attempt = { ...page, source: origin, operationId: mintObjectId(), phase: 'pending', message: '' }
     busy.current.add(page.capsuleId); put(attempt)
     try { confirmed(attempt, await api.capsules.call('capsule.open', { capsuleId: page.capsuleId, operationId: attempt.operationId })) }
-    catch (error) { put({ ...attempt, phase: 'unknown', message: presentError(error) }) }
+    catch (error) {
+      const failure = deliveryFailure(error).controlFailure
+      const notApplied = failure?.disposition === 'not_applied' && failure.confirmedInputBytes === 0
+      put({ ...attempt, phase: notApplied ? 'failed' : 'unknown', message: notApplied
+        ? `The original open was not applied. You can open the page again. ${presentError(error)}` : presentError(error) })
+    }
     finally { busy.current.delete(page.capsuleId) }
   }
   async function inspect(original: Attempt) {
