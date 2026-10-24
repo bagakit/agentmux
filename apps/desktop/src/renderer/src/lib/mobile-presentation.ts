@@ -1,3 +1,4 @@
+import { effectiveSurveyOrganization, surveyOrganizationZoneIds } from './survey-list'
 import { surveyExplorationName } from './survey-exploration-name'
 import type { SurveyZoneSelection } from './survey-workface'
 import type { WorkbenchTab } from './workbench-tabs'
@@ -109,6 +110,7 @@ export async function readSpatialAppearance(state: State, catalog: AgentMuxSpace
 /** Preserve the original explicit research references, including temporarily missing topology. */
 export function readSurveyPresentation(state: {
   surveyCollectedZones: Record<string, true>
+  surveyOrganization?: import('@agentmux/core/control').AgentMuxSurveyOrganization
   surveyExplorationNames: Record<string, string>
   surveyZoneSelection: SurveyZoneSelection | null
   tabs: Record<string, WorkbenchTab>
@@ -119,8 +121,10 @@ export function readSurveyPresentation(state: {
     const original = state.tabs[tab.tabId]
     if (original && tab.zoneId !== null) { if (!tabsByZone.has(tab.zoneId)) tabsByZone.set(tab.zoneId, []); tabsByZone.get(tab.zoneId)!.push(original) }
   }
+  const organization = effectiveSurveyOrganization(state.surveyOrganization, state.surveyCollectedZones)
   return {
-    items: Object.keys(state.surveyCollectedZones).filter(id => state.surveyCollectedZones[id] === true).map(zoneId => {
+    organization,
+    items: surveyOrganizationZoneIds(organization).map(zoneId => {
       const tabs = tabsByZone.get(zoneId) ?? []
       return { zoneId, name: surveyExplorationName(state.surveyExplorationNames[zoneId], tabs),
         ...(!zones.has(zoneId) ? { issue: '研究工作面暂未确认，原引用保留。' } : {}) }

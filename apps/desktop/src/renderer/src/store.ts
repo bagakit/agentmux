@@ -95,6 +95,7 @@ import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { goalProjectContext, goalProjectContextText } from './lib/goal-project-context'
 import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext, type SpatialControlOptions } from './lib/space-agent-control'
 import { executeWorkfaceAgentView } from './lib/workface-agent-view'
+import { executeSurveyList, restoreSurveyOrganization } from './lib/survey-list'
 import { executeWorkspaceAgentOrder, restoreWorkspaceAgentOrder, workspaceAgentOrderMembers } from './lib/workspace-agent-order'
 import { executeWorkfaceRegionSwap } from './lib/workface-region-swap'
 import { executeWorkfaceFileOpen } from './lib/workface-file-open'
@@ -995,6 +996,8 @@ export type AppState = {
   surveyZoneSelection: SurveyZoneSelection | null
   /** Explicit Survey creation or saved display membership; Browser existence does not imply membership. */
   surveyCollectedZones: Record<string, true>
+  surveyOrganization: import('@agentmux/core/control').AgentMuxSurveyOrganization
+  setSurveyOrganization(organization: import('@agentmux/core/control').AgentMuxSurveyOrganization, expected: import('@agentmux/core/control').AgentMuxSurveyOrganization): Promise<import('@agentmux/core/control').AgentMuxSurveyListReport>
   surveyExplorationNames: Record<string, string>
   setSurveyExplorationName(zoneId: string, name: string, expectedNameRevision?: number): Promise<boolean>
   setSurveyZoneCollected(zoneId: string, collected: boolean): boolean
@@ -3646,6 +3649,7 @@ type PersistedAppState = {
   surveyNoteId?: string | null
   surveyZoneSelection?: PersistedSurveyZoneSelection | null
   surveyCollectedZones?: Record<string, true>
+  surveyOrganization?: import('@agentmux/core/control').AgentMuxSurveyOrganization
   surveyExplorationNames?: Record<string, string>
   noteBlockSelections?: Record<string, NoteBlockTarget>
   noteCanvasLayouts?: Record<string, NoteCanvasLayout>
@@ -3692,6 +3696,7 @@ export type RestoredUiState = Pick<
   | 'recallSidebarWidth'
   | 'surveyZoneSelection'
   | 'surveyCollectedZones'
+  | 'surveyOrganization'
   | 'surveyExplorationNames'
   | 'noteBlockSelections'
   | 'noteCanvasLayouts'
@@ -3790,6 +3795,7 @@ export function restorePersistedUiState(
     | 'recallSidebarWidth'
     | 'surveyZoneSelection'
     | 'surveyCollectedZones'
+  | 'surveyOrganization'
     | 'surveyExplorationNames'
     | 'noteBlockSelections'
   | 'noteCanvasLayouts'
@@ -3832,6 +3838,7 @@ export function restorePersistedUiState(
     recallSidebarWidth: clampSurveySidebarWidth(persisted.recallSidebarWidth ?? SURVEY_SIDEBAR_DEFAULT_WIDTH),
     surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyNotebookId ? null : persisted.surveyZoneSelection),
     surveyCollectedZones: restoredSurveyCollection(persisted.surveyCollectedZones),
+    surveyOrganization: restoreSurveyOrganization(persisted.surveyOrganization),
     surveyExplorationNames: restoredSurveyExplorationNames(persisted.surveyExplorationNames),
     noteBlockSelections: restoreNoteBlockSelections(persisted.noteBlockSelections),
     noteCanvasLayouts: restoreNoteCanvasLayouts(persisted.noteCanvasLayouts),
@@ -3926,6 +3933,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     recallZoneSelection: state.recallZoneSelection, recallSidebarCollapsed: state.recallSidebarCollapsed, recallSidebarWidth: state.recallSidebarWidth,
     surveyZoneSelection: state.surveyZoneSelection,
     surveyCollectedZones: state.surveyCollectedZones,
+    surveyOrganization: state.surveyOrganization,
     surveyExplorationNames: state.surveyExplorationNames,
     surveySidebarCollapsed: state.surveySidebarCollapsed,
     surveySidebarWidth: state.surveySidebarWidth,
@@ -5079,6 +5087,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   surveyZoneSelection: null,
   surveyCollectedZones: {},
+  surveyOrganization: restoreSurveyOrganization(undefined),
+  async setSurveyOrganization(organization, expected) {
+    return await executeSurveyList({ get, set: surveyOrganization => set({ surveyOrganization }), save: () => saveWorkbenchSelection(false) },
+      { schemaVersion: 5, requestId: mintObjectId(), operation: 'space.survey-list', organization, expected })
+  },
   surveyExplorationNames: {},
   async setSurveyExplorationName(zoneId, name, expectedNameRevision) {
     const state = get(), trimmed = name.trim()
@@ -5904,6 +5917,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         request.operation === 'settings.resource.remove') {
       throw Object.assign(new Error('Settings requests belong to the Main configuration owner.'), { code: 'CONTROL_FAILED' })
     }
+    if (request.operation === 'space.survey-list') return { operation: request.operation, ...await executeSurveyList({ get,
+      set: surveyOrganization => set({ surveyOrganization }), save: () => saveWorkbenchSelection(false) }, request) }
     if (request.operation === 'space.agent-order') return { operation: request.operation, ...await executeWorkspaceAgentOrder({ get, resolveExecution: agentRegionExecution,
       set: (id, value) => set(state => ({ workspaceAgentOrder: { ...state.workspaceAgentOrder, [id]: value } })),
       save: () => saveWorkbenchSelection(false)
@@ -12505,7 +12520,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
     return { ...state, agentLearningReviewDrafts: restoredLearningReviewDrafts(state.agentLearningReviewDrafts), manualConnectionIntents: restoredManualConnectionIntents(state.manualConnectionIntents), manualConnectionSelections: restoredManualConnectionSelections(state.manualConnectionSelections), workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
-      agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
+      agentComposerHistoryNavigation: {}, surveyOrganization: restoreSurveyOrganization(state.surveyOrganization), surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
 }))
