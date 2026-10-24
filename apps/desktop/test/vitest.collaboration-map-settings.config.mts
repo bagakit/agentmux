@@ -5,6 +5,7 @@ import { relative } from 'node:path'
 import { createHash } from 'node:crypto'
 
 export const focusMapSettingsMutations = [
+  { name: 'map-entry-preview', file: 'renderer/src/components/settings/FocusSettingsPane.tsx', before: "onFocusCapture={() => setScene('map')}", after: '', assertion: 'opens the original Focus Map field without search and preserves the visited editor draft on return' },
   { name: 'polygon-serializer', file: 'renderer/src/lib/collaboration-map-geometry.ts', before: "if (boundary === 'polygon')", after: 'if (false)', assertion: 'edits complete Map drafts with production preview geometry, keeps invalid input and restores only Map defaults' },
   { name: 'invalid-draft-save', file: 'renderer/src/components/settings/FocusSettingsPane.tsx', before: 'disabled={Boolean(mapIssue)}', after: 'disabled={false}', assertion: 'edits complete Map drafts with production preview geometry, keeps invalid input and restores only Map defaults' },
   { name: 'last-valid-preview', file: 'renderer/src/components/settings/FocusSettingsPane.tsx', before: 'mapPreviewLastValid={Boolean(mapIssue)}', after: 'mapPreviewLastValid={false}', assertion: 'edits complete Map drafts with production preview geometry, keeps invalid input and restores only Map defaults' },
