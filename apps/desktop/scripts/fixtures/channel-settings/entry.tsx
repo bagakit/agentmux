@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import type { ConnectionMethod, ConnectionParamsMap, ConnectionRecord, ConnectionResultMap } from '@agentmux/core/connections'
+import { parseConnectionServiceParams, type ConnectionMethod, type ConnectionParamsMap, type ConnectionRecord, type ConnectionResultMap, type ConnectionServiceOperation, type ConnectionServiceState } from '@agentmux/core/connections'
 import type { MoteChatMethod, MoteChatParamsMap, MoteChatResultMap } from '@agentmux/core/mote-chat'
 import type { MoteConnectionPreferencesReadResult } from '@agentmux/core/mote-preferences'
 import type { AppConfig, ConnectionHostingTarget, ScratchTopicSnapshot } from '../../../src/shared/contracts'
@@ -13,10 +13,12 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { moteConnectionTarget } from '../../../src/renderer/src/lib/mote-connection-default'
 import { mountThemeRuntime } from '@agentmux/client-ui/theme'
+import { applyConfigEdit } from '../../../src/shared/config-edit'
 import '../../../src/renderer/src/styles/index.css'
 
-type Scenario = 'normal' | 'empty' | 'host-unavailable'
+type Scenario = 'normal' | 'empty' | 'host-unavailable' | 'service-unavailable'
 type Channel = 'lark' | 'discord'
+const controls = new URLSearchParams(location.search).get('mode') === 'platform-controls'
 const owner: ConnectionHostingTarget = { hostId: 'local', runtimeId: 'preview-bot-host-runtime' }
 const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: (new URL('file:///').pathname + "preview/motes"), name: 'Motes', kind: 'folder' as const }
 const topics: ScratchTopicSnapshot[] = ['Research companion', 'Writing partner', 'Build assistant', 'Design studio', 'Learning notes', 'Team coordinator'].map((title, index) => {
@@ -41,7 +43,9 @@ Object.assign(window, { channelSettingsSetup: setup })
 const note = (method: string, input?: unknown, target?: ConnectionHostingTarget) => { calls.push({ method, ...(input === undefined ? {} : { input: structuredClone(input) }), ...(target ? { owner: { ...target } } : {}) }) }
 const refuseWrite = async () => { note('forbidden-write'); throw Error('This visual preview never submits a platform or credential write.') }
 const base = await api.config.get()
-const config: AppConfig = { ...base, hosts: [{ id: 'preview-build-host', kind: 'ssh', label: 'Build server', hostname: 'build.invalid' }], workspaces: [workspace], startup: { ...base.startup, skipAgentAvailabilityCheckWait: true } }
+let config: AppConfig = { ...base, hosts: [{ id: 'preview-build-host', kind: 'ssh', label: 'Build server', hostname: 'build.invalid' }], workspaces: [workspace], startup: { ...base.startup, skipAgentAvailabilityCheckWait: true } }
+const initialConfig = structuredClone(config)
+const serviceStates = new Map<string, ConnectionServiceState>(), serviceOperations = new Map<string, ConnectionServiceOperation>()
 // Bootstrap the same empty presentation shell as the manual-owner fixture. The
 // controlled resource catalog is installed below, after startup has disposed.
 api.config.get = async () => ({ ...config, workspaces: [] })
@@ -55,7 +59,15 @@ setup.phase = 'controlled-resource-catalog'
 mountThemeRuntime(window, config.appearance)
 const originalDraft = 'Keep this original conversation draft.'
 useAppStore.setState({ config, sessions: [], manualConnectionIntents: {}, manualConnectionSelections: {}, botTaskSelections: {}, moteBotRequests: {}, moteConnectionSaveIntents: {}, moteChatIntents: {}, connectorServiceIntents: {}, connectorServiceObservation: {}, agentComposerDrafts: { 'preview-original-session': originalDraft }, scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 0, topics, reading: false, error: null } } })
-api.config.save = refuseWrite
+api.config.save = async (next, before) => {
+  if (!controls) return refuseWrite()
+  if (!before) throw Error('The original display baseline is required.')
+  const withoutDisplay = (value: AppConfig) => { const copy = structuredClone(value); delete copy.appearance.channelHeaderVisibility; return JSON.stringify(copy) }
+  if (withoutDisplay(next) !== withoutDisplay(before)) throw Error('This preview only saves the original App header display choice.')
+  note('app-display-save', { before: before.appearance.channelHeaderVisibility ?? {}, after: next.appearance.channelHeaderVisibility ?? {} })
+  config = applyConfigEdit(config, before, next)
+  return structuredClone(config)
+}
 api.connections.storeCredential = refuseWrite
 api.connections.inspectCredential = async () => null
 api.ui.openExternal = async () => { note('external-open'); throw Error('External navigation is not exercised by this preview.') }
@@ -73,8 +85,21 @@ api.connections.call = async <M extends ConnectionMethod>(method: M, input: Conn
   const record = visible.find(item => item.config.connectionId === p.connectionId)
   let result: unknown
   if (method === 'connection.owner.inspect') result = { ownership: 'local' }
-  else if (method === 'connection.service.get') result = { enabled: true, revision: 1 }
-  else if (method === 'connection.service.inspect') result = { operation: null }
+  else if (method === 'connection.service.get') {
+    const selector = parseConnectionServiceParams('connection.service.get', input)
+    if (controls && scenario === 'service-unavailable') throw Error('The original Host automatic-message setting could not be read. Saved bots and App display choices are kept.')
+    result = serviceStates.get(selector.adapterId ?? 'global') ?? { enabled: true, revision: 0, ...selector }
+  }
+  else if (method === 'connection.service.inspect') result = { operation: serviceOperations.get(parseConnectionServiceParams('connection.service.inspect', input).operationId) ?? null }
+  else if (method === 'connection.service.configure' && controls) {
+    const original = parseConnectionServiceParams('connection.service.configure', input), key = original.adapterId ?? 'global'
+    const current = serviceStates.get(key) ?? { enabled: true, revision: 0 }
+    if (!original.adapterId || original.expectedRevision !== current.revision) throw Error('The original platform scope and revision are required.')
+    const service = { adapterId: original.adapterId, enabled: original.service.enabled, revision: current.revision + 1 }
+    const operation = { operationId: original.operationId, expectedRevision: original.expectedRevision, status: 'configured' as const, service } satisfies ConnectionServiceOperation
+    result = operation
+    serviceStates.set(key, service); serviceOperations.set(original.operationId, operation)
+  }
   else if (method === 'connection.ls') result = { connections: visible }
   else if (method === 'connection.inspect') result = { connection: record ?? null, operation: null }
   else if (method === 'connection.enrollment.ls') result = { operations: [], next: null, capabilities: [] }
@@ -120,10 +145,11 @@ const proof = {
   ready: false, calls, errors, owner, topics: topics.map(topic => ({ id: topic.id, title: topic.title })),
   show(nextChannel: Channel, nextScenario: Scenario) {
     channel = nextChannel; scenario = nextScenario; epoch++
-    useAppStore.setState({ manualConnectionSelections: {}, manualConnectionIntents: {}, connectorServiceObservation: {} })
+    if (controls) { config = structuredClone(initialConfig); serviceStates.clear(); serviceOperations.clear() }
+    useAppStore.setState({ ...(controls ? { config, connectorServiceIntents: {} } : {}), manualConnectionSelections: {}, manualConnectionIntents: {}, connectorServiceObservation: {} })
     render(); return sceneKey()
   },
-  facts() { return { channel, scenario, draft: useAppStore.getState().agentComposerDrafts['preview-original-session'], calls: structuredClone(calls), errors: [...errors] } },
+  facts() { return { channel, scenario, draft: useAppStore.getState().agentComposerDrafts['preview-original-session'], calls: structuredClone(calls), errors: [...errors], display: config.appearance.channelHeaderVisibility ?? {}, services: Object.fromEntries(serviceStates), requests: structuredClone(useAppStore.getState().connectorServiceIntents) } },
 }
 Object.assign(window, { channelSettingsProof: proof })
 render(); proof.ready = true; setup.phase = 'ready'
