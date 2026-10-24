@@ -18,6 +18,7 @@
 | Mote 身份、快捷面、浮窗及协调控件 | [Mote 与协调面的呈现](presentation/motes-and-coordination.md) |
 | 目标正文、需求卡片、详情和 Board 密度 | [Goals 与需求面的呈现](presentation/goals-and-demand.md) |
 | 执行台、焦点历史、泳道和底部音轨 | [Focus 执行台的呈现](presentation/focus-context.md) |
+| Map 层级轮廓、关系绘制、连续 LOD 与交互动效 | [Focus Map 的呈现](presentation/collaboration-map.md) |
 | 连接、恢复、启动、服务窗和版本边界 | [Session 与恢复的呈现](presentation/session-recovery.md) |
 | 对话消息、身份、正文／资源、过程与请求卡密度 | [对话模式的呈现](presentation/conversation-mode.md) |
 | 输入工具、队列、Mailbox 容器与持续推进密度 | [输入工具与邮箱的呈现](presentation/conversation-input.md) |
