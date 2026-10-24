@@ -44,7 +44,7 @@ vi.mock('electron', async () => {
   webFrame: { getZoomFactor: () => 1 }, app: Object.assign(new EventEmitter(), { getPath: () => bridge.directory, getAppPath: () => resolve('apps/desktop') }),
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() }
   }
 })
 vi.mock('@agentmux/native-desktop', async importOriginal => {
