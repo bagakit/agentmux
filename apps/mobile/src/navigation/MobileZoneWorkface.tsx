@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { MobileRegionContent } from './MobileRegionContent'
 import type { MobileObjectIdentity } from './MobileIdentity'
 
 /** Topic discussions and original content use the same public Zone and Region identities. */
-export function MobileZoneWorkface({ client, zoneId, name, visible, openSession, tabId, regionId }: {
+export function MobileZoneWorkface({ client, zoneId, name, visible, openSession, tabId, regionId, onCreateAgent }: {
   client: AgentMuxHostedClient | null; zoneId?: string | undefined; name: string; visible: boolean
   openSession(id: string, identity: MobileObjectIdentity): void
-  tabId?: string | undefined; regionId?: string | undefined
+  tabId?: string | undefined; regionId?: string | undefined; onCreateAgent?(target: { spaceId?: string; zoneId?: string }): void
 }) {
   const [catalog, setCatalog] = useState<AgentMuxSpaceCatalog | null>(null)
   const [issue, setIssue] = useState('')
@@ -24,7 +25,7 @@ export function MobileZoneWorkface({ client, zoneId, name, visible, openSession,
   }, [client, zoneId, tabId, visible, revision])
   return <section className="mobile-zone-workface" aria-label={`${name} 的讨论与内容`}>
     {issue && <p className="mobile-spatial-notice" role="status">{issue}</p>}
-    <button className="mobile-text-button" onClick={() => refresh(value => value + 1)}>刷新讨论</button>
+    <div className="mobile-zone-tools">{zoneId && onCreateAgent && <button className="mobile-icon-button" aria-label="在此 Topic 新建 Agent" onClick={() => onCreateAgent({ zoneId })}><SemanticIcon name="action.create-agent" size={18} /></button>}<button className="mobile-icon-button" aria-label="刷新讨论" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={17} /></button></div>
     {catalog?.tabs.filter(tab => !tabId || tab.tabId === tabId).map(tab => <section key={tab.tabId}>
       <h2 className="mobile-spatial-subheading">{tab.name || '讨论'}</h2>
       {catalog.regions.filter(region => region.tabId === tab.tabId && (!regionId || region.regionId === regionId)).map(region => {

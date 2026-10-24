@@ -69,3 +69,11 @@
 .mobile-session-state:has(.focus-state-mark) { grid-template-columns: auto auto; column-gap: 2px; }
 .mobile-session-state:has(.focus-state-mark) > :not(.focus-state-mark) { grid-column: 2; }
 .mobile-session-state[data-state='done'] { color: var(--status-success-text, var(--green)); }
+
+.mobile-section-actions, .mobile-zone-tools { display: flex; align-items: center; gap: 2px; }
+.mobile-zone-tools { justify-content: flex-end; }
+.mobile-agent-create { display: grid; gap: 10px; }
+.mobile-agent-create label { display: grid; gap: 4px; font-size: 12px; }
+.mobile-agent-create select, .mobile-agent-create textarea { width: 100%; min-height: 44px; font-size: 16px; background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--line-soft); border-radius: var(--radius-md, 8px); padding: 8px; }
+.mobile-agent-create textarea { min-height: 76px; resize: vertical; }
+.mobile-create-receipt { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
