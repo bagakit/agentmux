@@ -13,6 +13,14 @@ import { prepareRemoteProofCandidate } from './remote-runtime-proof-candidate.mj
 const desktop = path.resolve(import.meta.dirname, '..'), root = path.resolve(desktop, '../..')
 const fixture = path.join(desktop, 'scripts/fixtures/remote-runtime-renderer')
 const evidence = path.resolve(process.argv[2] ?? path.join(root, '.tmp/collaboration-map-restart', ("run-" + (globalThis.crypto.randomUUID()) + "")))
+try { await fs.access(path.join(evidence, 'receipt.json')); throw Error('Restart evidence already exists; choose a new evidence directory: ' + evidence) }
+catch (error) { if (error.code !== 'ENOENT') throw error }
+const mapProfile = { boundary: 'polygon', levels: [
+  { form: 'point', information: 'identity', from: .05, to: .05 },
+  { form: 'compact', information: 'identity', from: .25, to: .46 },
+  { form: 'compact', information: 'status', from: .48, to: .64 },
+  { form: 'card', information: 'summary', from: .92, to: 1.12 },
+] }
 const require = createRequire(path.join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')
@@ -21,7 +29,7 @@ const hash = value => createHash('sha256').update(value).digest('hex')
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory()
   ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const receipt = { schema: 'agentmux.collaboration-map-restart-native.v1', passed: false, phases: [], inputBefore: null, inputAfter: null,
-  aestheticReview: 'not-performed', userAppRunTouched: false, limitations: [] }
+  aestheticReview: 'not-performed', userAppRunTouched: false, mapProfileExpected: mapProfile, limitations: [] }
 // Compile the existing native restart fixture with only private harness boundaries changed.
 // Product App, Store, Map, Worker, Host, Core, PTY and configuration owners remain original.
 const transforms = []
@@ -40,9 +48,33 @@ api.config.onChange = listener => window.remoteProof.onConfigChange(listener)`)
 window.remoteMapLeave = () => useAppStore.getState().setMainSurface('workbench')
 window.remoteMapToggleMotion = () => document.querySelector('button[aria-label="Map animations"]').click()
 window.remoteMapState = () => ({ mainSurface: useAppStore.getState().mainSurface, focusView: useAppStore.getState().focusView,
-  preference: useAppStore.getState().config?.focus?.mapMotion, canvas: Boolean(document.querySelector('.collaboration-canvas')),
+  preference: useAppStore.getState().config?.focus?.mapMotion, profile: useAppStore.getState().config?.focus?.map,
+  canvas: Boolean(document.querySelector('.collaboration-canvas')),
   motion: document.querySelector('button[aria-label="Map animations"]')?.getAttribute('aria-pressed'),
-  agents: [...document.querySelectorAll('[data-collaboration-agent]')].map(node => node.dataset.collaborationAgent) })\n`
+  envelopes: [...document.querySelectorAll('.collaboration-area__envelope path')].map(node => node.getAttribute('d')),
+  agents: [...document.querySelectorAll('[data-collaboration-agent]')].map(node => node.dataset.collaborationAgent) })
+window.remoteMapSettingsState = () => {
+  const page = document.querySelector('.settings-page[data-settings-page="focus"]:not([hidden])'), pane = page?.querySelector('.focus-settings')
+  if (!pane) return null
+  const field = label => pane.querySelector('[aria-label="' + label + '"]')
+  return { targetFocused: document.activeElement === pane.querySelector('[data-settings-field="map"]'),
+    boundary: pane.querySelector('input[name="focus-map-boundary"]:checked')?.closest('label')?.textContent.trim(),
+    levels: [...pane.querySelectorAll('.focus-map-settings__levels > details')].map((_node, index) => ({
+      form: field('Level ' + (index + 1) + ' form').value,
+      information: field('Level ' + (index + 1) + ' information').value,
+      from: index ? Number(field('Level ' + (index + 1) + ' start zoom').value) / 100 : .05,
+      to: index ? Number(field('Level ' + (index + 1) + ' complete zoom').value) / 100 : .05,
+    })), saveDisabled: pane.querySelector('[data-settings-save-bar] button').disabled,
+    invalidDraft: Boolean(pane.querySelector('[role="alert"]')) }
+}
+window.remoteMapEdit = (label, value) => {
+  const control = document.querySelector('.settings-page[data-settings-page="focus"]:not([hidden]) [aria-label="' + label + '"]')
+  if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) throw Error('Missing original Map control: ' + label)
+  const prototype = control instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype
+  Object.getOwnPropertyDescriptor(prototype, 'value').set.call(control, value)
+  control.dispatchEvent(new Event(control instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }))
+  return true
+}\n`
   }
   if (file === path.join(fixture, 'main.ts')) {
     next = replaceExactly(next, 'const config = recoveryInput?.config ?? defaultConfig', `const { ConfigStore } = await import('../../../src/main/config-store')
@@ -81,14 +113,49 @@ const configOwner = new ConfigOwner({ read: () => config, save: next => configSt
     } else {
       assert.equal(result.mapBefore.preference, 'off', 'The second original Map consumes its saved motion preference')
       assert.equal(result.mapBefore.motion, 'false')
+      assert.deepEqual(result.mapBefore.profile, ${JSON.stringify(mapProfile)}, 'The restored original Map consumes the exact custom profile')
       assert.equal(calls.filter(call => call.operation === 'config-save').length, 0, 'Restoration cannot reseed a preference')
     }
+    // Use the original Map navigation, controls, Save action and publication.
+    // The renderer helper only dispatches input events; it cannot write configuration.
+    await win.webContents.executeJavaScript(${JSON.stringify('document.querySelector(\'button[aria-label="Map settings"]\').click(); true')})
+    await until('window.remoteMapSettingsState()?.targetFocused')
+    result.mapSettingsBefore = await win.webContents.executeJavaScript('window.remoteMapSettingsState()')
+    const profileSaveCount = calls.filter(call => call.operation === 'config-save').length
+    if (phase === 'seed') {
+      await win.webContents.executeJavaScript('window.remoteMapEdit("LOD levels", "4")')
+      await until('window.remoteMapSettingsState()?.levels.length === 4')
+      await win.webContents.executeJavaScript(${JSON.stringify('[...document.querySelectorAll(\'.focus-settings input[name="focus-map-boundary"]\')].find(input => input.closest("label").textContent.trim() === "Polygon").click(); true')})
+      await win.webContents.executeJavaScript('window.remoteMapEdit("Level 4 complete zoom", "112")')
+      await until('window.remoteMapSettingsState()?.levels[3].to === 1.12')
+      await win.webContents.executeJavaScript('window.remoteMapEdit("Level 4 start zoom", "92")')
+      await until('window.remoteMapSettingsState()?.levels[3].from === .92 && window.remoteMapSettingsState()?.boundary === "Polygon" && !window.remoteMapSettingsState()?.saveDisabled')
+      result.mapSettingsDraft = await win.webContents.executeJavaScript('window.remoteMapSettingsState()')
+      assert.equal(result.mapSettingsDraft.invalidDraft, false)
+      assert.deepEqual(result.mapSettingsDraft.levels, ${JSON.stringify(mapProfile.levels)})
+      await win.webContents.executeJavaScript('document.querySelector(".focus-settings [data-settings-save-bar] button").click(); true')
+      await until('window.remoteMapState().profile?.levels.length === 4 && window.remoteMapState().profile.levels[3].to === 1.12 && window.remoteMapSettingsState()?.saveDisabled')
+      assert.equal(calls.filter(call => call.operation === 'config-save').length, profileSaveCount + 1, 'One original Save publishes the complete authored Map profile')
+    } else {
+      assert.equal(result.mapSettingsBefore.boundary, 'Polygon')
+      assert.deepEqual(result.mapSettingsBefore.levels, ${JSON.stringify(mapProfile.levels)}, 'Restored settings read every original custom LOD field')
+      assert.equal(result.mapSettingsBefore.saveDisabled, true, 'An unchanged deep Map profile is a clean draft')
+      assert.equal(calls.filter(call => call.operation === 'config-save').length, 0)
+    }
+    result.mapSettings = await win.webContents.executeJavaScript('window.remoteMapSettingsState()')
+    await capture(phase + '-map-settings.png')
+    await win.webContents.executeJavaScript(${JSON.stringify('document.querySelector(\'button[aria-label="Close settings"]\').click(); true')})
+    await until('document.querySelector(".settings-page")?.hidden === true && window.remoteMapState().canvas')
+    await until('window.remoteMapState().envelopes.length > 0 && window.remoteMapState().envelopes.every(path => typeof path === "string" && /^M/.test(path) && /L/.test(path) && !/[CQ]/.test(path))')
     result.map = await win.webContents.executeJavaScript('window.remoteMapState()')
+    assert.deepEqual(result.map.profile, ${JSON.stringify(mapProfile)})
     await capture(phase + '-map.png')
     await win.webContents.executeJavaScript('window.remoteMapLeave(); true')
     await until('window.remoteLiveReady() && window.remoteState().editor', 20000)
     result.configSaved = await configStore.get()
     await configStore.confirmSaved(result.configSaved)
+    assert.deepEqual(result.configSaved.focus.map, ${JSON.stringify(mapProfile)}, 'The production ConfigStore confirms the entire custom Map profile')
+    result.mapProfileSaveCalls = calls.filter(call => call.operation === 'config-save').slice(profileSaveCount)
     if (phase === 'seed') await fs.writeFile(path.join(privateRoot, 'expected-config.json'), JSON.stringify(result.configSaved))
     result.saved = await state()`)
   }
@@ -134,7 +201,8 @@ receipt.limitations = [
   'Current original App/Store/Map/Worker/SessionPane/TerminalView and production ConfigStore/ConfigOwner are compiled into an isolated native Electron profile.',
   'The Provider protocol is the repository CLI fixture; Session/Run/PTY, input, replay, Host and ctxmux survival are real public Core facts.',
   'The private workbench is seeded exactly once. The second real Electron PID loads Core spatial state, workbench localStorage and production configuration without reseeding.',
-  'Actual Map motion UI publishes through the original typed API and production configuration owners; the second Map reads the saved off choice.',
+  'Actual Map motion and Map settings UI publish through the original typed API and production configuration owners. The second Map and original settings controls read the saved off motion and complete custom polygon/four-level profile; restoration performs zero config-save calls.',
+  'Original Map polygon paths are checked after each generation. Public scalar discovery/setter behavior and full visual quality have separate owning gates.',
   'Host connector modules are compiled from the same worktree source; shared installed workspace dist cannot substitute another candidate.',
   'The transport IPC fixture replaces ordinary Desktop IPC registration. No user profile, existing Agent, active Run or current GUI is operated.',
   'This proves ordinary client process restart with a healthy independent Host/Run, not Host death, cold runtime loss, semantic Level B recovery, full package installation, aesthetics or terminal continuous-history performance.',
@@ -198,7 +266,27 @@ try {
     assert.equal(hash(await fs.readFile(file)), fact.sourceSHA256, 'The compiled connector source remains the exact candidate')
     receipt.consumedModules[path.relative(root, file)] = fact
   }
-  for (const file of ['apps/desktop/src/renderer/src/App.tsx', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/AgentCollaborationGraph.tsx', 'apps/desktop/src/renderer/src/lib/collaboration-layout.worker.ts', 'apps/desktop/src/renderer/src/lib/collaboration-layout-engine.ts', 'apps/desktop/src/main/config-store.ts', 'apps/desktop/src/main/config-owner.ts']) assert.ok(receipt.consumedModules[file], 'The actual current product module must be compiled: ' + file)
+  const requiredProductModules = [
+    ...['App.tsx', 'store.ts',
+      'components/AgentCollaborationGraph.tsx', 'components/AgentContextContent.tsx',
+      'components/CollaborationCompactState.tsx', 'components/CollaborationRegionLabels.tsx',
+      'components/FocusContextCardBody.tsx', 'components/FocusContextRow.tsx',
+      'components/SettingsNavigation.tsx', 'components/SettingsPanel.tsx',
+      'components/settings/FocusMapSettings.tsx', 'components/settings/FocusSettingsPane.tsx',
+      'components/settings/FocusSettingsPreview.tsx', 'components/settings/use-setting-draft.ts',
+      'lib/collaboration-layout.worker.ts', 'lib/collaboration-layout-engine.ts',
+      'lib/collaboration-layout-refinement.ts', 'lib/use-collaboration-layout.ts',
+      'lib/collaboration-map-transition.ts', 'lib/collaboration-map-preferences.ts',
+      'lib/collaboration-map-lod.ts', 'lib/collaboration-map-camera.ts',
+      'lib/collaboration-map-geometry.ts', 'lib/focus-preferences.ts',
+      'styles/collaboration.css', 'styles/settings-focus.css',
+    ].map(file => 'apps/desktop/src/renderer/src/' + file),
+    ...['shared/focus-map-preferences.ts', 'shared/focus-preferences.ts', 'shared/config-edit.ts',
+      'main/config-store.ts', 'main/config-owner.ts',
+    ].map(file => 'apps/desktop/src/' + file),
+  ]
+  for (const file of requiredProductModules) assert.ok(receipt.consumedModules[file], 'The actual current product module must be compiled: ' + file)
+  receipt.requiredProductModules = requiredProductModules
   identities = async () => ({ ...await candidate.identity(), ...Object.fromEntries(await Promise.all([
     ...await files(path.join(privateRoot, 'renderer')), ...await files(path.join(privateRoot, 'main')),
     preload, path.join(privateRoot, 'fake-codex-cli.mjs')
@@ -260,7 +348,7 @@ finally {
   receipt.cleanup = { errors, remaining: await listProbeProcesses(-1, privateRoot), temporaryRootRemoved: false }
   if (receipt.cleanup.remaining.length === 0) { await fs.rm(privateRoot, { recursive: true, force: true }); receipt.cleanup.temporaryRootRemoved = true }
   await fs.writeFile(path.join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-  const screenshots = receipt.phases.flatMap(({ phase }) => [`${phase}-workbench.png`, `${phase}-map.png`])
+  const screenshots = receipt.phases.flatMap(({ phase }) => [`${phase}-workbench.png`, `${phase}-map-settings.png`, `${phase}-map.png`])
   await fs.writeFile(path.join(evidence, 'review.md'), `# Focus Map: original native process restart\n\nNative proof passed: ${receipt.passed}. Aesthetic review: not performed.\n\n` +
     receipt.limitations.map(item => `- ${item}`).join('\n') + '\n\n' + screenshots.map(file => `- [${file}](./${file})`).join('\n') + '\n')
 }
