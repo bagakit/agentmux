@@ -46,7 +46,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   const stop = useSessionStop(active)
   const moreTrigger = useRef<HTMLButtonElement>(null)
   const menuObservation = useRegionMenuObservation()
-  const nativeSourceActions = useAgentNativeSourceControls({ session: nativeSession ?? null, readOnly })
+  const nativeSource = useAgentNativeSourceControls({ session: nativeSession ?? null, readOnly })
   useLayoutEffect(() => {
     if (sessionKind !== 'agent' || !menuObservation.setAgentMenuAvailable) return
     menuObservation.setAgentMenuAvailable(true)
@@ -86,7 +86,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     onTakeOver={onTakeOver ? () => { handoffFocus.current = true; onTakeOver(moreTrigger.current ?? undefined) } : undefined}
     onLearn={onLearn ? () => { handoffFocus.current = true; onLearn(moreTrigger.current ?? undefined) } : undefined}
     onHistory={onHistory ? () => { handoffFocus.current = true; onHistory(moreTrigger.current ?? undefined) } : undefined} onRefreshObservation={onRefreshObservation} refreshing={refreshing}
-    nativeSourceActions={nativeSourceActions} currentConversationActions={currentConversationActions} contextualActions={contextual?.tools} />
+    nativeSourceDetails={nativeSource.details} nativeSourceCheck={nativeSource.checkAction} currentConversationActions={currentConversationActions} contextualActions={contextual?.tools} />
   function closeMenuFocus(event: Event) {
     if (handoffFocus.current || menuObservation.dialogOpen || stop.dialog !== null) event.preventDefault()
     handoffFocus.current = false

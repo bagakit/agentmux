@@ -12,13 +12,13 @@ const InformationIcon = semanticIconComponent('status.info')
 
 /** One live SessionPane menu body for Header More and the same Region's context menu. */
 export function AgentRegionMenuContent({ name, executorLabel, sessionId, sessionKind, executionHost, readOnly,
-  onTakeOver, onLearn, onHistory, onRefreshObservation, refreshing, nativeSourceActions, currentConversationActions, entries, contextualActions }: {
+  onTakeOver, onLearn, onHistory, onRefreshObservation, refreshing, nativeSourceDetails, nativeSourceCheck, currentConversationActions, entries, contextualActions }: {
   name: string; executorLabel: string; sessionId: string; sessionKind: 'agent' | 'terminal'
   executionHost: RegionExecutionHost; readOnly: boolean
   onTakeOver: (() => void) | undefined; onHistory: (() => void) | undefined
   onLearn?: (() => void) | undefined
   onRefreshObservation: (() => void) | undefined; refreshing: boolean
-  nativeSourceActions: ReactNode; currentConversationActions: ReactNode; entries: readonly RegionMenuEntry[]
+  nativeSourceDetails: ReactNode; nativeSourceCheck: ReactNode; currentConversationActions: ReactNode; entries: readonly RegionMenuEntry[]
   contextualActions?: ReactNode
 }) {
   const Menu = useContext(WorkbenchMenuScope)
@@ -37,7 +37,11 @@ export function AgentRegionMenuContent({ name, executorLabel, sessionId, session
         <HistoryIcon size={14} /><span>Conversation history</span>
       </Menu.Item> : null}
       <AgentMenuSubmenu
-        label={sessionKind === 'agent' ? 'Session details' : 'Terminal details'} icon={<InformationIcon size={14} />} className="agent-region-menu__details">
+        label={sessionKind === 'agent' ? 'Session details' : 'Terminal details'} icon={<InformationIcon size={14} />} className="agent-region-menu__details"
+        onFocusCapture={event => {
+          // Restoring this container must not reselect a candidate being replaced.
+          if (event.target === event.currentTarget) event.stopPropagation()
+        }}>
         <Menu.Label className="agent-region-menu__context">
           <span>{name}</span>
           {sessionKind === 'agent' ? <><span>Executor: {executorLabel}</span><span>Session: {sessionId}</span></> : <span>Terminal: {sessionId}</span>}
@@ -45,11 +49,13 @@ export function AgentRegionMenuContent({ name, executorLabel, sessionId, session
           <span>Host ID: {executionHost.id ?? 'Unknown'}</span>
           <span>Directory: {executionHost.cwd || 'Unknown'}</span>
         </Menu.Label>
-        {nativeSourceActions}
-        {onRefreshObservation ? <Menu.Item className="tab-context-menu__item" disabled={refreshing} onSelect={onRefreshObservation}>
-          <RefreshIcon size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
-        </Menu.Item> : null}
+        {nativeSourceDetails}
       </AgentMenuSubmenu>
-    </>} />
+    </>} maintenance={nativeSourceCheck || onRefreshObservation ? <>
+      {nativeSourceCheck}
+      {onRefreshObservation ? <Menu.Item className="tab-context-menu__item" disabled={refreshing} onSelect={onRefreshObservation}>
+        <RefreshIcon size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
+      </Menu.Item> : null}
+    </> : null} />
   </>
 }
