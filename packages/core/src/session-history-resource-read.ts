@@ -4,14 +4,17 @@ import { open, stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { decodeBase64, encodeBase64 } from './hosted-value.js'
 import { fileBytes, imageBytes, unavailable } from './session-history-resource.js'
-import type { AgentSessionHistoryContentPart, AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult } from './types.js'
+import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult } from './types.js'
 import { markdownImageReferences } from './markdown-images.js'
 import { AgentMuxError } from './errors.js'
 
 /** Called only after the original owner locates the exact record and part. */
 export async function readRecordedMarkdownImage(part: AgentSessionHistoryContentPart | undefined, input: AgentSessionHistoryResourceReadOptions,
-  maxBytes: number, signal: AbortSignal, signedText = false): Promise<AgentSessionHistoryResourceReadResult['result']> {
+  maxBytes: number, signal: AbortSignal, originalKind: AgentSessionHistoryItem['kind'] | undefined, signedText = false): Promise<AgentSessionHistoryResourceReadResult['result']> {
   signal.throwIfAborted()
+  // Sharing original text does not grant new file IO to paths supplied by a user or a tool.
+  if (originalKind !== 'assistant-message' || part?.contentEligibility !== 'public' || part.contentRole === 'tool' || part.contentRole === 'reasoning')
+    throw new AgentMuxError('Only the original public assistant text can supply a Markdown image.', 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH')
   const selector = input.markdownImage
   if (part?.kind !== 'text' || !selector || createHash('sha256').update(part.text).digest('hex') !== selector.textSha256)
     throw new AgentMuxError('The original Markdown text revision changed.', 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH')

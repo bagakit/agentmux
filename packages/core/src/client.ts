@@ -2777,15 +2777,17 @@ export class AgentMuxClient {
       }
       if (isNativeContentReference(request.expectedReference)) {
         let authorizedReference = request.expectedReference
-        if (nativeContentNeedsRevalidation(request.expectedReference)) {
+        let originalKind: AgentSessionHistoryItem['kind'] | undefined
+        if (request.markdownImage || nativeContentNeedsRevalidation(request.expectedReference)) {
           const item = await locateRecord(), part = item.contentParts[request.partIndex]
           if (item.id !== request.recordId || item.turnId !== request.turnId || part?.kind !== 'resource' || part.resourceType !== 'text') {
             throw new AgentMuxError('The exact native content part changed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
           }
           revalidateNativeContentReference(request.expectedReference, part.reference)
           authorizedReference = part.reference
+          originalKind = item.kind
         }
-        const result = await read(readNativeContentResource(context, { ...request, expectedReference: authorizedReference }))
+        const result = await read(readNativeContentResource(context, { ...request, expectedReference: authorizedReference }, originalKind))
         await read(assertSource())
         return { ...identity, result: result.status === 'fragment' && authorizedReference !== request.expectedReference
           ? { ...result, continuationReference: authorizedReference } : result }
@@ -2796,7 +2798,7 @@ export class AgentMuxClient {
         throw new AgentMuxError('The native lookup returned another record.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
       if (request.markdownImage) {
         await read(assertSource())
-        const result = await read(readRecordedMarkdownImage(part, request, request.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, controller.signal))
+        const result = await read(readRecordedMarkdownImage(part, request, request.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, controller.signal, item.kind))
         await read(assertSource())
         return { ...identity, result }
       }
@@ -3344,9 +3346,10 @@ export class AgentMuxClient {
           command: resolveAgentExecutable(input.commandOverride, provider.executable), args: input.args ?? [], env: input.env ?? {},
           workspacePath: session.workspacePath, ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }) }
         let authorizedReference = input.expectedReference
-        if (nativeContentNeedsRevalidation(input.expectedReference, contentSigningSecret)) {
-          // The original credential may have been retired or replaced. The Provider reissues the
-          // exact record; untrusted old paths never authorize physical IO.
+        let originalKind: AgentSessionHistoryItem['kind'] | undefined
+        if (input.markdownImage || nativeContentNeedsRevalidation(input.expectedReference, contentSigningSecret)) {
+          // The Provider reissues a retired credential's exact extent. Markdown file IO also
+          // needs its original speaker and purpose even when the signed text remains valid.
           let cursor: string | undefined
           for (;;) {
             const page = provider.readSessionHistoryRecord
@@ -3357,14 +3360,14 @@ export class AgentMuxClient {
               const part = item.contentParts[input.partIndex]
               if (part?.kind !== 'resource' || part.resourceType !== 'text') throw new AgentMuxError('The original native content is no longer the same resource.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
               revalidateNativeContentReference(input.expectedReference, part.reference, contentSigningSecret)
-              authorizedReference = part.reference; break
+              authorizedReference = part.reference; originalKind = item.kind; break
             }
             if (!page.nextCursor) throw new AgentMuxError('The original native record is no longer present.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
             if (page.nextCursor === cursor) throw new AgentMuxError('The native Provider did not advance the exact-record search.', 'INVALID_AGENT_SESSION_HISTORY_PAGE')
             cursor = page.nextCursor
           }
         }
-        const result = await read(readNativeContentResource(context, { ...input, expectedReference: authorizedReference }))
+        const result = await read(readNativeContentResource(context, { ...input, expectedReference: authorizedReference }, originalKind))
         await read(binding.assertCurrent())
         return { ...identity, reference: input.expectedReference, result: result.status === 'fragment' && authorizedReference !== input.expectedReference
           ? { ...result, continuationReference: authorizedReference } : result }
@@ -3383,7 +3386,7 @@ export class AgentMuxClient {
       const part = record.contentParts[input.partIndex]
       if (input.markdownImage) {
         await read(binding.assertCurrent())
-        const result = await read(readRecordedMarkdownImage(part, input, input.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, controller.signal))
+        const result = await read(readRecordedMarkdownImage(part, input, input.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, controller.signal, record.kind))
         await read(binding.assertCurrent())
         return { ...identity, reference: input.expectedReference, result }
       }

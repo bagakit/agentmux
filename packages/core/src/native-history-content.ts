@@ -143,7 +143,8 @@ export async function materializeNativeContent(
 /** The signed read extent was issued by the original Provider; caller fields grant no path authority. */
 export async function readNativeContentResource(
   context: Omit<AgentProviderSessionHistoryContext, 'cursor' | 'limit'>,
-  input: AgentSessionHistoryResourceReadOptions
+  input: AgentSessionHistoryResourceReadOptions,
+  originalKind?: AgentSessionHistoryItem['kind']
 ): Promise<AgentSessionHistoryResourceReadResult['result']> {
   const reference = decode(input.expectedReference, context.contentSigningSecret)
   if (reference.agentSessionId !== context.agentSessionId || reference.providerId !== context.source.providerId || reference.nativeSessionId !== context.source.nativeSessionId ||
@@ -169,7 +170,7 @@ export async function readNativeContentResource(
       if (error instanceof AgentMuxError) throw error
       return unavailable('AGENT_SESSION_HISTORY_RESOURCE_CONTENT_INVALID', 'The original signed part could not be verified as a complete resource. Its original reference remains available.')
     }
-    if (input.markdownImage) return readRecordedMarkdownImage(part, input, maxBytes, context.signal, true)
+    if (input.markdownImage) return readRecordedMarkdownImage(part, input, maxBytes, context.signal, originalKind, true)
     if (part.kind !== 'resource' || part.resourceType !== input.representation) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'This original signed part has another resource type.')
     if (input.representation === 'file') return await readRecordedFile(part.reference, maxBytes, context.signal, part.label)
     return await readRecordedImage(part.reference, maxBytes, context.signal)
