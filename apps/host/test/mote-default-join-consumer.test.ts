@@ -1,4 +1,4 @@
-import { stat, writeFile } from 'node:fs/promises'
+import { appendFile, stat, writeFile } from 'node:fs/promises'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
@@ -10,10 +10,13 @@ import { MoteChatStore } from '../../../packages/connectors/src/mote-chat-store.
 import { moteChatJourneyFixture } from '../../../packages/connectors/test/fixtures/mote-chat-journey.js'
 import { createHostConnectionOwner } from '../src/connections.js'
 
-it.each([{ guide: false, pending: false, exited: false }, { guide: true, pending: false, exited: false },
-  { guide: false, pending: true, exited: false }, { guide: false, pending: false, exited: true }])(
-  'default Host Mote join keeps its original AppConfig Executor and real Provider plan (guide=$guide, pending=$pending, exited=$exited)', async ({ guide, pending, exited }) => {
-  const f = await moteChatJourneyFixture(1, 60_000, 'desktop')
+it.each([{ guide: false, pending: false, exited: false, recover: null }, { guide: true, pending: false, exited: false, recover: null },
+  { guide: false, pending: true, exited: false, recover: null }, { guide: false, pending: false, exited: true, recover: null },
+  { guide: false, pending: false, exited: false, recover: 'interrupted' as const },
+  { guide: false, pending: false, exited: false, recover: 'exited' as const }])(
+  'default Host Mote join keeps its original AppConfig Executor and real Provider plan (guide=$guide, pending=$pending, exited=$exited, recover=$recover)', async ({ guide, pending, exited, recover }) => {
+  const f = await moteChatJourneyFixture(recover ? 3 : 1, 60_000, 'desktop')
+  const actor = recover ? f.guest : f.creator
   // Keep the qualified resource/configuration fixture; replace its embedding with the real
   // Headless owner and default Host Mote composition, not another Agent or lifecycle owner.
   await f.sdk.dispose(); f.services.close(); await f.client.dispose()
@@ -23,6 +26,7 @@ it.each([{ guide: false, pending: false, exited: false }, { guide: true, pending
   } } }))
   const previous = f.client as unknown as Record<string, any>
   let exitedRunId: string | undefined
+  const ended = new Map<string, { type: 'interrupted'; reason: string } | { type: 'exited'; code: number; signal: null }>()
   const connection = createHostConnectionOwner({ directory: join(f.root, 'connectors'),
     spatial: new core.AgentMuxSpatialStateStore(join(f.root, 'spatial.json')), moteConfigurationPath: f.configurationPath,
     adapters: [{ ...f.wire.adapter, ingress: { ...f.wire.adapter.ingress!, verify: async (...args) => {
@@ -34,10 +38,10 @@ it.each([{ guide: false, pending: false, exited: false }, { guide: true, pending
   const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function (this: core.AgentMuxClient) {
     const inner = this as unknown as Record<string, any>
     await inner.registry.load('local'); inner.connected = true
-    for (const name of ['isConnected', 'status', 'identity', 'input', 'observeOutput', 'attach', 'detach', 'stop', 'start']) inner.kernel[name] = previous.kernel[name]
+    for (const name of ['isConnected', 'status', 'identity', 'input', 'observeOutput', 'attach', 'detach', 'stop', 'start', 'inspectCreation']) inner.kernel[name] = previous.kernel[name]
     // The controlled Runtime must report the same accepted byte frontier returned by Input.
     inner.kernel.status = async (id: string) => ({ ...await previous.kernel.status(id), acceptedInputBytes: f.run(id).acceptedInputBytes,
-      ...(id === exitedRunId ? { state: { type: 'exited', code: 0, signal: null } } : {}) })
+      ...(id === exitedRunId ? { state: { type: 'exited', code: 0, signal: null } } : ended.has(id) ? { state: ended.get(id) } : {}) })
     inner.hookServer.isRunning = previous.hookServer.isRunning; inner.hookServer.createBinding = previous.hookServer.createBinding
     inner.ensureManagedHooks = previous.ensureManagedHooks
     inner.ensureTerminalHandshakeOrDegrade = previous.ensureTerminalHandshakeOrDegrade
@@ -56,13 +60,9 @@ it.each([{ guide: false, pending: false, exited: false }, { guide: true, pending
     await expect(stat(join(f.root, 'host-executors.json'))).rejects.toMatchObject({ code: 'ENOENT' })
     const originalCreate = runtime.client.createAgentWithDelivery.bind(runtime.client)
     const creation = vi.spyOn(runtime.client, 'createAgentWithDelivery')
-    if (pending || exited) creation.mockImplementation(async input => {
+    if (pending) creation.mockImplementation(async input => {
       const result = await originalCreate(input)
       const saved = (await f.store.readMetadata(input.agentSessionId!))!
-      if (exited) {
-        expect(saved.creation?.agentMuxContext).toBe('confirmed')
-        exitedRunId = saved.run.runId
-      }
       if (pending) await f.store.compareAndSwapMetadata(saved, { ...saved, pendingInteraction: { request: {
         kind: 'permission', id: 'original-bootstrap-permission', agentSessionId: saved.agentSessionId,
         title: 'The original CLI requires a response', options: [{ id: 'allow', label: 'Allow once', kind: 'allow-once' }],
@@ -70,9 +70,23 @@ it.each([{ guide: false, pending: false, exited: false }, { guide: true, pending
       } } })
       return result
     })
+    const continuity = vi.spyOn(runtime.client, 'ensureAgentContinuity')
+    if (exited) {
+      // Both messages pass healthy preparation and save their immutable claims before
+      // this Runtime leaf exits. New preclaim recovery must not retarget old inputs.
+      const submit = runtime.client.submitAgentMessage.bind(runtime.client)
+      let arrivals = 0, release!: () => void
+      const claimed = new Promise<void>(resolve => { release = resolve })
+      vi.spyOn(runtime.client, 'submitAgentMessage').mockImplementation(async (...args) => {
+        if (++arrivals === 2) { exitedRunId = args[0].envelope.recipientRunId!; release() }
+        await claimed
+        return await submit(...args)
+      })
+    }
     await connection.start(runtime)
     await vi.waitFor(() => expect(f.wire.endpoint).toBeDefined())
-    expect(await f.wire.post(f.message('default-owner'))).toBe(202)
+    expect(await f.wire.post(f.message('default-owner', actor))).toBe(202)
+    if (exited) expect(await f.wire.post(f.message('same-exited-owner'))).toBe(202)
     const services = await connection.services()
     const diagnosticClient = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: runtime.socketPath } })
     try {
@@ -93,7 +107,6 @@ it.each([{ guide: false, pending: false, exited: false }, { guide: true, pending
         expect(session.run.runId).toBe(exitedRunId)
         const observedRun = await (runtime.client as unknown as { kernel: { status(id: string): Promise<{ runId: string; state: unknown }> } }).kernel.status(exitedRunId!)
         expect(observedRun).toMatchObject({ runId: original!.input!.expectedRun.runId, state: { type: 'exited', code: 0, signal: null } })
-        expect(await f.wire.post(f.message('same-exited-owner'))).toBe(202)
         await vi.waitFor(async () => {
           const records = (await services.ingress!.list({ connectionId: 'original-bot' })).ingresses
           expect(records).toHaveLength(2)
@@ -250,9 +263,80 @@ it.each([{ guide: false, pending: false, exited: false }, { guide: true, pending
     expect(saved.prepared).toEqual({ executionHostId: 'local', input })
     expect(saved.prepared).not.toHaveProperty('executorRevision')
     await writeFile(join(f.topic.physicalDirectoryPath!, 'MOTE.md'), '---\nversion: 1\ndefaults:\n  executorId: changed-after-the-original-create\n---\n')
+    if (recover) {
+      const records = async () => (await services.ingress!.list({ connectionId: 'original-bot' })).ingresses as ConnectionIngressMessage[]
+      const original = (await records())[0]!, frozenInput = structuredClone(original.input!)
+      const session = (await runtime.client.readAgentSession(input.agentSessionId!))!
+      if (session.nativeHandle?.kind !== 'provider') throw Error('Missing original native conversation')
+      expect(continuity).not.toHaveBeenCalled()
+      expect(store.people(f.target.spaceId, '', 10)[0]!.person.used).toBe(1)
+      ended.set(session.run.runId, recover === 'interrupted'
+        ? { type: 'interrupted', reason: 'controlled original Runtime interruption' }
+        : { type: 'exited', code: 0, signal: null })
+      let release!: () => void
+      const resumeGate = new Promise<void>(resolve => { release = resolve })
+      const startNative = f.start.getMockImplementation()!
+      f.start.mockImplementationOnce(async launch => { await resumeGate; return await startNative(launch) })
+      try {
+        expect(await f.wire.post(f.message('recovered-one', actor))).toBe(202)
+        expect(await f.wire.post(f.message('recovered-two', actor))).toBe(202)
+        await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(2))
+        await vi.waitFor(async () => {
+          const retained = await records()
+          expect(retained).toHaveLength(3)
+          expect(retained.filter(row => row.state === 'received')).toHaveLength(2)
+          expect(retained.filter(row => row.input)).toHaveLength(1)
+        })
+        expect(continuity).toHaveBeenCalledOnce()
+        expect(continuity.mock.calls[0]![0]).toMatchObject({ agentSessionId: session.agentSessionId,
+          expectedRun: session.run, trigger: 'input', commandOverride: process.execPath, args: ['--original-host-guide'],
+          env: { MOTE_VALUE: 'original-app-config', AGENTMUX_WIKI_DIR: f.topic.physicalDirectoryPath } })
+        expect(continuity.mock.calls[0]![0]).not.toHaveProperty('input')
+        expect(f.inner.kernel.input).toHaveBeenCalledTimes(2)
+      } finally { release() }
+      await vi.waitFor(async () => expect((await records()).filter(row => row.state === 'claimed')).toHaveLength(3))
+      await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledTimes(6), { timeout: 10_000 })
+      const resumed = (await runtime.client.readAgentSession(session.agentSessionId))!
+      expect(resumed.run).not.toEqual(session.run)
+      expect(resumed.nativeHandle).toEqual(session.nativeHandle)
+      expect(resumed.continuity).toMatchObject({ kind: 'resumed', previousRun: session.run, newRun: resumed.run, trigger: 'input' })
+      const launch = f.start.mock.calls[1]![0]
+      expect(launch.args).toContain('--resume')
+      expect(launch.args[launch.args.indexOf('--resume') + 1]).toBe(session.nativeHandle!.sessionId)
+      expect(launch.args).toContain('--original-host-guide')
+      expect(launch.env).toMatchObject({ MOTE_VALUE: 'original-app-config', AGENTMUX_WIKI_DIR: f.topic.physicalDirectoryPath })
+      for (const id of ['default-owner', 'recovered-one', 'recovered-two']) expect(JSON.stringify(launch.args)).not.toContain(f.message(id, actor).text)
+      const resumedRecords = await records()
+      expect(resumedRecords.find(row => row.ingressId === original.ingressId)!.input).toEqual(frozenInput)
+      for (const record of resumedRecords.filter(row => row.ingressId !== original.ingressId)) {
+        expect(record.input).toMatchObject({ agentSessionId: session.agentSessionId, expectedRun: resumed.run })
+        expect((await services.ingress!.inspect({ ingressId: record.ingressId })).inputReceipt).toMatchObject({ status: 'terminal-confirmed' })
+      }
+      const writes = vi.mocked(f.inner.kernel.input as (...args: any[]) => Promise<unknown>).mock.calls
+      expect(writes.filter(([id]) => id === session.run.runId)).toHaveLength(2)
+      expect(writes.filter(([id]) => id === resumed.run.runId)).toHaveLength(4)
+      expect(store.people(f.target.spaceId, '', 10)[0]!.person.used).toBe(3)
+      expect(store.generationBySession(session.agentSessionId)!.generation.generationId).toBe(saved.generation.generationId)
+      expect(store.generationBySession(session.agentSessionId)!.prepared).toEqual(saved.prepared)
+      expect(await f.wire.post({ ...f.message('recovered-one', actor), deliveryKey: 'redelivery/recovered-one' })).toBe(202)
+      expect(store.people(f.target.spaceId, '', 10)[0]!.person.used).toBe(3)
+      expect(f.start).toHaveBeenCalledTimes(2); expect(creation).toHaveBeenCalledOnce(); expect(continuity).toHaveBeenCalledOnce()
+      const native = resumed.nativeHandle!
+      if (native.kind !== 'provider' || !native.transcriptPath) throw Error('Missing original native reply source')
+      await appendFile(native.transcriptPath, JSON.stringify({ sessionId: native.sessionId, uuid: 'recovered-native-answer',
+        type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Reply from the same recovered native conversation' }] } }) + '\n')
+      await vi.waitFor(() => expect(f.wire.effects.some(effect => effect.text === 'Reply from the same recovered native conversation')).toBe(true), { timeout: 4_000 })
+      if (process.env.T035_FACTS) appendFileSync(process.env.T035_FACTS, JSON.stringify({ phase: 'default-host-recovered-before-claim',
+        originalState: recover, sameSession: true, sameNativeConversation: true, sameGeneration: true, originalPreparedRetained: true,
+        receivedUntilContinuity: 2, continuityCalls: continuity.mock.calls.length, startCalls: f.start.mock.calls.length,
+        originalRunWrites: 2, resumedRunWrites: 4, quotaUsed: 3, originalFrozenInputRetained: true,
+        nativeReplyPublished: true, providerPlan: 'render-then-submit' }) + '\n')
+      return
+    }
     expect(await f.wire.post(f.message('same-person-after-settings-edit'))).toBe(202)
     await vi.waitFor(async () => expect((await services.ingress!.list({ connectionId: 'original-bot' })).ingresses.filter(record => record.state === 'claimed')).toHaveLength(2))
     expect(store.generationBySession(input.agentSessionId!)!.prepared).toEqual(saved.prepared)
+    expect(continuity).not.toHaveBeenCalled()
     expect(f.start).toHaveBeenCalledOnce(); expect(creation).toHaveBeenCalledOnce()
     await expect(stat(join(f.root, 'host-executors.json'))).rejects.toMatchObject({ code: 'ENOENT' })
     const sdk = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: runtime.socketPath } })

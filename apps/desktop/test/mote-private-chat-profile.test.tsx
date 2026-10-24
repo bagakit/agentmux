@@ -62,7 +62,7 @@ it('saves Profile chat policy through trusted IPC and the real public owner with
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).source).toEqual(before.source)
   expect((await f.client.call('connection.service.get', {})).enabled).toBe(false)
   expect(chat().textContent).toContain('Automatic chat sync is off.')
-  expect(f.chatAgentCalls).toEqual({ prepare: 0, create: 0, inspect: 0, activity: 0 })
+  expect(f.chatAgentCalls).toEqual({ prepare: 0, create: 0, inspect: 0, prepareInput: 0, activity: 0 })
   expect(useAppStore.getState().moteChatIntents).toEqual({})
   await expect(f.handlers.get('moteChat:call')!({ sender: {} }, 'space.mote.chat.configure', { operationId: 'untrusted-write' })).rejects.toThrow('Untrusted renderer')
 })
@@ -114,7 +114,7 @@ it('keeps a refused enable draft and opens the original Executor preference with
   await f.click('Close quick mode'); missingExecutor = false
   await button('Save chat settings')
   await ready(() => expect(chat().textContent).toContain('Original chat settings save confirmed.'))
-  expect(f.chatAgentCalls).toEqual({ prepare: 0, create: 0, inspect: 0, activity: 0 })
+  expect(f.chatAgentCalls).toEqual({ prepare: 0, create: 0, inspect: 0, prepareInput: 0, activity: 0 })
 })
 
 it('shows creator unlimited access and each guest used, total and remaining allowance, then preserves used through a real allocation', async () => {

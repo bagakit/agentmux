@@ -136,7 +136,8 @@ it('keeps the original created Agent usable without waiting for native history',
     agents: createMoteChatAgents(f.options), assertTarget: f.agents.assertTarget })
   const result = await restarted.prepareIncoming(f.incoming)
   expect(result).toMatchObject({ agentSessionId: original.agentSessionId })
-  expect(inspection).not.toHaveBeenCalled()
+  expect(inspection).toHaveBeenCalledTimes(2)
+  expect(inspection.mock.calls).toEqual([[original.agentSessionId], [original.agentSessionId]])
   expect(creation).toHaveBeenCalledTimes(1); expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled()
 })
 

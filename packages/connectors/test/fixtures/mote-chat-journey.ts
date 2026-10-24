@@ -51,14 +51,20 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   const inner = original.client as unknown as typeof original.inner & { hookServer: Record<string, unknown>; ensureManagedHooks: unknown; ensureTerminalHandshakeOrDegrade: unknown;
     providers: { get(id: string): core.AgentProvider } }
   const runs = new Map<string, ReturnType<typeof original.run>>(), sources = new Map<number, { id: string; path: string }>()
-  const start = vi.fn(async (_input: { env?: Record<string, string>; args: string[] }) => {
-    const number = runs.size + 1, runId = `native-run-${number}`, pid = 400_000 + number, id = `native-chat-${number}`, path = join(original.root, `${id}.jsonl`)
-    if (!nativeAfterInput) await writeFile(path, JSON.stringify({ sessionId: id, uuid: 'original-context', type: 'system', message: { role: 'system', content: 'Native system context' } }) + '\n')
-    const run = { ...original.run(runId), program: 'claude', pid, workspacePath: topic.physicalDirectoryPath! }
+  const start = vi.fn(async (input: { operationKey?: string; env?: Record<string, string>; args: string[] }) => {
+    const previous = input.operationKey && [...runs.values()].find(run => run.lifecycleOperationId === input.operationKey)
+    if (previous) return previous
+    const number = runs.size + 1, runId = `native-run-${number}`, pid = 400_000 + number
+    const resumeIndex = input.args.indexOf('--resume'), resumed = resumeIndex < 0 ? undefined : [...sources.values()].find(source => source.id === input.args[resumeIndex + 1])
+    if (resumeIndex >= 0 && !resumed) throw new Error('Resume must retain an existing original native conversation')
+    const id = resumed?.id ?? `native-chat-${number}`, path = resumed?.path ?? join(original.root, `${id}.jsonl`)
+    if (!resumed && !nativeAfterInput) await writeFile(path, JSON.stringify({ sessionId: id, uuid: 'original-context', type: 'system', message: { role: 'system', content: 'Native system context' } }) + '\n')
+    const run = { ...original.run(runId), lifecycleOperationId: input.operationKey ?? null, program: 'claude', pid, workspacePath: topic.physicalDirectoryPath! }
     runs.set(runId, run); sources.set(pid, { id, path }); return run
   })
   inner.kernel.start = start
   inner.kernel.status = async (id: string) => { const run = runs.get(id); if (!run) throw new Error('Unknown original native Run'); return run }
+  inner.kernel.inspectCreation = async (operationId: string) => [...runs.values()].find(run => run.lifecycleOperationId === operationId) ?? null
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   inner.ensureManagedHooks = async () => {}

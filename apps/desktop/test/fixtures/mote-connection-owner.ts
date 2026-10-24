@@ -208,14 +208,14 @@ export async function moteConnectionOwner(
     }
   }
   const adapters = options.generic ? [adapter] : createBuiltinConnectionAdapters()
-  const chatAgentCalls = { prepare: 0, create: 0, inspect: 0, activity: 0 }
+  const chatAgentCalls = { prepare: 0, create: 0, inspect: 0, prepareInput: 0, activity: 0 }
   const unavailableChatAgent = (kind: keyof typeof chatAgentCalls) => async () => { chatAgentCalls[kind]++; throw new Error('Profile metadata and settings must not create or borrow a Runtime') }
   const connections = await createConnectionServices({
     directory: join(root, 'connections'),
     adapters,
     moteChat: { assertTarget: async target => { if ((await preferences.read({ kind: 'connection', target })).status !== 'ready') throw new Error('The exact original Mote home is unconfirmed') },
       ...(options.chatReadiness ? { assertReady: options.chatReadiness } : {}),
-      agents: { prepare: unavailableChatAgent('prepare'), create: unavailableChatAgent('create'), inspect: unavailableChatAgent('inspect'), activity: unavailableChatAgent('activity') } },
+      agents: { prepare: unavailableChatAgent('prepare'), create: unavailableChatAgent('create'), inspect: unavailableChatAgent('inspect'), prepareInput: unavailableChatAgent('prepareInput'), activity: unavailableChatAgent('activity') } },
     ...(options.generic ? { bindings: { spatial, checkpoint: async () => { throw new Error('Profile settings must not borrow a conversation checkpoint') } }, ingress: { core: () => undefined } } : {})
   })
   const preferences = new MoteConnectionPreferences({
