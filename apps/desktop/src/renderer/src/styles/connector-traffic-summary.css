@@ -15,3 +15,11 @@
 .connector-traffic-summary__retained { margin: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
 .connector-traffic-summary__inspect { justify-self: start; }
 @container (max-width: 260px) { .connector-traffic-summary__directions { grid-template-columns: 1fr; } }
+
+.connector-traffic-summary--compact { gap: var(--sp-2); }
+.connector-traffic-summary--compact .connector-traffic-summary__directions { grid-template-columns: 1fr; gap: var(--sp-2); }
+.connector-traffic-summary--compact .connector-traffic-summary__tile { display: grid; grid-template-columns: 82px minmax(0, 1fr); align-items: baseline; column-gap: var(--sp-2); row-gap: 0; padding: 0; background: transparent; }
+.connector-traffic-summary--compact .connector-traffic-summary__direction { font-size: var(--fs-micro); }
+.connector-traffic-summary--compact .connector-traffic-summary__direction svg { align-self: center; width: 12px; height: 12px; }
+.connector-traffic-summary--compact .connector-traffic-summary__tile strong { font-size: var(--fs-meta); font-weight: 400; }
+.connector-traffic-summary--compact .connector-traffic-summary__retained { color: var(--text-3); font-size: var(--fs-micro); }
