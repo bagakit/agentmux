@@ -3,7 +3,7 @@ import { COLLECTED_REPLY_TITLE, describeCapturedConversationSource } from '../li
 import { ConversationSourceLabels } from './ConversationSourceLabels.js'
 import type { AgentTimelineItem } from '@agentmux/core'
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
-import { conversationItemRef } from '@agentmux/core/conversation'
+import { conversationA2ANotificationId, conversationItemRef } from '@agentmux/core/conversation'
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { conversationReplyPreview } from '../lib/conversation-reply-preview.js'
 import { formatClock } from '../lib/conversation-time.js'
@@ -25,11 +25,11 @@ export function CapturedConversationMessage({ item, record, replyObservation, su
   const itemRef = record ? conversationItemRef(record) : conversationItemRef({ agentSessionId: item.agentSessionId, ...(props.executionHostId ? { executionHostId: props.executionHostId } : {}), source: { kind: 'captured', recordId: item.id } })
   const submission = Boolean(submissionDisclosure && record?.original.kind === 'captured' && record.role === 'message' && item.kind === 'user_message' && item.source === 'user')
   const originalSubmission = submission ? record?.records?.find(source => source.original.item === item) : undefined
-  const a2aNotificationId = item.kind === 'system_message' && item.source === 'agentmux' ? item.a2aNotificationId : undefined
+  const a2aNotificationId = conversationA2ANotificationId({ original: { kind: 'captured', item } })
   const input = record?.input ?? item
   const message = <ConversationMessage {...props} expandedContent sources={record?.sources ?? props.sources} {...(record?.role === 'observation' ? { recordedIdentity: true } : {})} {...(record?.event && !submission ? { conversationEvent: record.event } : {})} {...(itemRef ? { itemRef } : {})} {...(record?.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})} messageId={record?.input?.id ?? item.id} content={record?.contentParts ?? item.content ?? ''} status={item.inputSubmission ? item.status : record?.input?.deliveryStatus ?? item.status} createdAt={item.createdAt}
     {...(input.inputContext ? { inputContext: input.inputContext, inputContextSource: input.inputContextSource } : {})}
-    a2aNotificationId={a2aNotificationId} contentBoundary={a2aNotificationId ? 'wire' : item.kind === 'user_message' && input.publicContent === 'confirmed' ? 'body' : props.contentBoundary ?? 'wire'}
+    a2aNotificationId={a2aNotificationId} notificationRecords={record?.records} contentBoundary={a2aNotificationId ? 'wire' : item.kind === 'user_message' && input.publicContent === 'confirmed' ? 'body' : props.contentBoundary ?? 'wire'}
     messageDetails={<>{originalSubmission ? <ConversationSubmissionFacts record={originalSubmission} /> : <dl className="conversation-input-details__facts">
       <dt>记录方式</dt><dd>{source.label}</dd>
       <dt>来源说明</dt><dd>{source.description}</dd>

@@ -594,7 +594,7 @@ export function ActivityView({
   // This same exact rendered-record owner also serves closed Sessions with no Run.
   function locateLoadedRecord(sourceKey: string, isCurrent: () => boolean): boolean {
     if (!readingEnabled || !feedEl?.isConnected || !isCurrent()) return false
-    const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key], .conversation-reply-observation[data-message-source-key], .conversation-original-record[data-message-source-key], [data-conversation-process-source-key]'))
+    const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key], .conversation-a2a-notice[data-message-source-key], .conversation-reply-observation[data-message-source-key], .conversation-original-record[data-message-source-key], [data-conversation-process-source-key]'))
       .filter(node => node.dataset.messageSourceKey === sourceKey && (node.matches('.conversation-reply-observation') || !node.closest('.conversation-reply-observation')))
     const owners = matches.filter(node => !matches.some(parent => parent !== node && parent.contains(node)))
     if (owners.length !== 1) return false
@@ -947,6 +947,7 @@ export function ActivityView({
           {...(entry.item.kind === 'user_message' ? { publicContent: entry.item.publicContent ?? 'unknown' } : {})}
           {...(entry.item.kind === 'user_message' || speaker.role === 'system' || entry.item.sourceDevice || entry.item.sourceChannel ? { inputSource: { kind: 'captured' as const, submissionId: entry.item.id, ...(entry.item.sourceChannel ? { channel: entry.item.sourceChannel } : {}), ...(entry.item.sourceDevice ? { device: entry.item.sourceDevice } : {}) } } : {})}
           located={locatedMessageKey === conversationMessageSourceKey(sessionId, { kind: 'captured', recordId: entry.item.id })}
+          locatedSourceKey={locatedMessageKey}
           {...(describeSpeaker ? { describeSpeaker } : {})}
           {...(speaker.role === 'system' ? { recordTitle: entry.item.title } : {})}
           origin={origin}

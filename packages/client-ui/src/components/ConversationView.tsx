@@ -21,7 +21,7 @@ import type { ConversationQuestionInput, ConversationQuestionTarget, QuestionRep
 import { projectConversationQuestions } from '@agentmux/core/conversation'
 import type { ConversationSourceRead } from '../lib/use-conversation-view.js'
 import { completedNativeReply } from '../lib/conversation-files.js'
-import { conversationItemRef, type ConversationItemRef } from '@agentmux/core/conversation'
+import { conversationA2ANotificationId, conversationItemRef, type ConversationItemRef } from '@agentmux/core/conversation'
 
 type ReadingProps = Pick<ConversationMessageProps,
   'sourceLabelsInDetails' | 'active' | 'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace' | 'traceDisclosure'>
@@ -163,10 +163,12 @@ export const ConversationView = memo(function ConversationView({
         {...(record.speaker ? { speaker: record.speaker } : {})}
         {...(describeSpeaker ? { describeSpeaker } : {})} conversationSessionId={sessionId}
         located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)}
+        locatedSourceKey={locatedMessageKey}
         {...reading}
         messageDetails={<CapturedToolDetails record={record} />} />
   }
   function renderOriginals(record: ConversationRecord): ReactNode {
+    if (conversationA2ANotificationId(record)) return null // Notification evidence reads raw contributors inside its one disclosure.
     const contributors = record.records?.filter(source => source.original.item !== record.original.item).flatMap(source => {
       const original = originals.get(source.id)
       if (!original) return []
@@ -197,8 +199,7 @@ export const ConversationView = memo(function ConversationView({
       const collaboration = item.collaboration?.kind === 'message' ? item.collaboration : undefined
       // A native actor is scoped to its Provider conversation, never an AgentMux SID.
       const speaker = record.role === 'process' || collaboration ? undefined : record.speaker
-      const adopted = item.conversation?.adoptedInput
-      const a2aNotificationId = adopted?.purpose === 'a2a-notification' && adopted.key.kind === 'prompt' ? adopted.key.submissionId : undefined
+      const a2aNotificationId = conversationA2ANotificationId(record)
       const described = speaker && item.kind !== 'system-message' && !a2aNotificationId ? describeSpeaker?.(speaker) : undefined
       const body = <ConversationMessage sources={record.sources} {...(record.event ? { conversationEvent: record.event } : {})} messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
           {...(collaboration ? { compact: true, recordedIdentity: true, nativeCollaboration: collaboration,
@@ -210,7 +211,7 @@ export const ConversationView = memo(function ConversationView({
             </dl> } : {})}
           continuation={!original && continuedProgress.has(record.id) && locatedMessageKey !== conversationMessageSourceKey(sessionId, record.source)}
           renderSubmissionOriginal={source => { const original = originals.get(source.id); return original ? <ConversationOriginalRecordContent record={original} renderRecord={renderOriginal} /> : null }}
-          {...(a2aNotificationId ? { a2aNotificationId } : {})}
+          {...(a2aNotificationId ? { a2aNotificationId, notificationRecords: record.records, locatedSourceKey: locatedMessageKey } : {})}
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           {...(itemRef ? { itemRef } : {})}
           located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)}
