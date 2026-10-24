@@ -1,3 +1,4 @@
+import { spatialDestination } from '@agentmux/core/spatial-graph'
 import type { FileReadResource, FileReadResult, TopicKnowledgeDocument } from '@agentmux/core'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -6,7 +7,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
-import { spatialCatalog, spatialDestination, zoneContext } from '../lib/space-agent-control'
+import { spatialCatalog, zoneContext } from '../lib/space-agent-control'
 import { fileWorkbenchIdentity } from '../lib/file-workbench-state'
 import { useAppStore } from '../store'
 

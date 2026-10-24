@@ -1,8 +1,9 @@
+import { spatialDestination, selectSpatialCatalog } from '@agentmux/core/spatial-graph'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult, AgentMuxSpatialIssue, AgentMuxSpatialSave } from '@agentmux/core/control'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { fileWorkbenchIdentity } from './file-workbench-state'
 import type { FileOpenPlacement, FileOpenResult, FileWorkbenchState } from './file-workbench-state'
-import { spatialCatalog, spatialDestination, selectSpatialCatalog, zoneContext, type SpatialWorkbench, type SpatialControlOptions } from './space-agent-control'
+import { spatialCatalog, zoneContext, type SpatialWorkbench, type SpatialControlOptions } from './space-agent-control'
 import { zoneFileResource } from '../../../shared/zone-file-resource'
 import { awaitDesktopPresentation, captureDesktopInput, desktopInputPreserved } from './desktop-presentation'
 

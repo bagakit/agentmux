@@ -1,10 +1,11 @@
+import { selectSpatialCatalog } from '@agentmux/core/spatial-graph'
 import { workbenchSurfaces, type WorkbenchTab } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { AgentFocusContext } from './agent-focus'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import { mainRegionReference } from './desktop-focus-navigation'
-import { selectSpatialCatalog } from './space-agent-control'
+
 
 export type ExecutionFocusPresentation = {
   projection: WorkbenchProjection | null

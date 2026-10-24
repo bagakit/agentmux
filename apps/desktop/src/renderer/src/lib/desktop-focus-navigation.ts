@@ -1,8 +1,9 @@
+import { selectSpatialCatalog } from '@agentmux/core/spatial-graph'
 import type { AgentMuxDesktopMainSurface, AgentMuxDesktopSelection, AgentMuxDesktopSpaceSelection,
   AgentMuxDesktopSurface, AgentMuxSpaceCatalog, AgentMuxSpaceSelector, AgentMuxSpatialIssue } from '@agentmux/core'
 import type { WorkspaceLayout } from '@agentmux/layout'
 import type { WorkbenchTab } from './workbench-tabs'
-import { selectSpatialCatalog, spatialCatalog, type SpatialWorkbench } from './space-agent-control'
+import { spatialCatalog, type SpatialWorkbench } from './space-agent-control'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
 import { projectWorkbenchProjection, resolveWorkbenchZone, sameWorkbenchProjectionSelection, workbenchProjectionLocationsMatchOwner,
