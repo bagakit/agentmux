@@ -15,6 +15,7 @@ import { MoteChatHost, composeMoteChatBindings, type MoteChatAgentPort } from '.
 import { createBuiltinConnectionAdapters } from './platform-adapters.js'
 import type { ChannelMetadataChange, ConnectionPort } from '@agentmux/core/connections'
 import type { MoteChatPort, MoteChatTarget } from '@agentmux/core/mote-chat'
+import { moteChatDiagnosisCode } from '@agentmux/core/mote-chat'
 import { ConnectionSecrets } from './connection-secrets.js'
 import { backupConnections, type ConnectionBackupReceipt } from './connection-backup.js'
 import type { PublicationSpeakerReader } from './publication-speaker.js'
@@ -66,7 +67,8 @@ export async function createConnectionServices(options: { directory: string | un
         connections.onChannelMetadataChanged(relayMetadata)
         const publicationStore = options.publication ? new PublicationStore(database) : undefined
         const bindings = options.bindings ? new RoomBindingHost({ ...options.bindings, connections, ...(publicationStore ? { lifecycle: publicationStore } : {}) }) : undefined
-        const moteChat = options.moteChat ? new MoteChatHost({ connections, agents: options.moteChat.agents, assertTarget: options.moteChat.assertTarget }) : undefined
+        const moteChat = options.moteChat ? new MoteChatHost({ connections, agents: options.moteChat.agents, assertTarget: options.moteChat.assertTarget,
+          ...(options.moteChat.assertReady ? { assertReady: options.moteChat.assertReady } : {}), ingress: () => ingress }) : undefined
         const routing = bindings && moteChat ? composeMoteChatBindings(bindings, moteChat) : bindings
         if (bindings) connections.bindings = moteChat ? {
           bind: (input, context) => bindings.bind(input, context),
@@ -93,7 +95,11 @@ export async function createConnectionServices(options: { directory: string | un
           ...(moteChat ? { prepareInput: async (record: import('@agentmux/core/connections').ConnectionIngressMessage) => {
             if (record.conversationKind === 'direct') {
               try { const binding = await moteChat.prepareIncoming({ ...record, conversationKind: 'direct' }); if (binding) publication?.refresh() }
-              catch (error) { if (error instanceof AgentMuxError && error.code === 'MOTE_CHAT_QUOTA_EXHAUSTED') return { state: 'refused' as const, code: error.code }; throw error }
+              catch (error) {
+                if (error instanceof AgentMuxError && error.code === 'MOTE_CHAT_QUOTA_EXHAUSTED') return { state: 'refused' as const, code: error.code }
+                throw new AgentMuxError('The original private-chat preparation is unavailable. Its intake and creation are retained.',
+                  moteChatDiagnosisCode(error instanceof AgentMuxError ? error.code : undefined) ?? 'INGRESS_PREPARATION_UNAVAILABLE')
+              }
             }
             return { state: 'ready' as const }
           } } : {}) }) : undefined
@@ -148,6 +154,11 @@ export async function createConnectionServices(options: { directory: string | un
         return await owner.configure(input, context)
       },
       inspect: async (input, context) => (await ensure()).moteChat!.inspect(input, context),
+      diagnose: async (input, context) => {
+        const owner = live?.moteChat
+        if (!owner) throw new AgentMuxError('The original Mote chat owner is unavailable. Diagnosis does not restart it.', 'CONTROL_UNAVAILABLE')
+        return await owner.diagnose(input, context)
+      },
       history: async (input, context) => (await ensure()).moteChat!.history(input, context),
       audience: async (input, context) => (await ensure()).moteChat!.audience(input, context),
       allocate: async (input, context) => (await ensure()).moteChat!.allocate(input, context)

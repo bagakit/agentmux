@@ -12,6 +12,7 @@ import { parseConnectionActor, parseConnectionGrant, parseRoomBinding, type Conn
   type RoomBinding, type RoomBindingListInput, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { MoteChatStore, type MoteChatGenerationRow, type MoteChatPersonRow, type MoteChatPreparedLaunch } from './mote-chat-store.js'
+import { readMoteChatDiagnosis, type MoteChatDiagnosisOwner } from './mote-chat-diagnosis.js'
 
 export type { MoteChatPreparedLaunch } from './mote-chat-store.js'
 export type MoteChatCreatedAgent = { executionHostId: string; agentSessionId: string; regionId?: string; checkpoint: ConversationCheckpointPage }
@@ -28,6 +29,8 @@ export type MoteChatHostOptions = {
   connections: ConnectionHost
   agents: MoteChatAgentPort
   assertTarget(target: MoteChatTarget): Promise<void>
+  assertReady?: NonNullable<MoteChatDiagnosisOwner['assertReady']>
+  ingress?: NonNullable<MoteChatDiagnosisOwner['ingress']>
   now?: () => number
 }
 export type MoteChatIncoming = Pick<ConnectionIngressMessage, 'ingressId' | 'connectionId' | 'application' | 'externalMessageId' | 'externalConversationId' | 'actor'> & { conversationKind: 'direct' }
@@ -108,6 +111,13 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     const current = input.target ? this.exact(input.target) : operation ? this.store.configuration(operation.configuration.target.spaceId) : null
     const configuration = operation && current && !sameMotePreferencesTarget(current.target, operation.configuration.target) ? null : current
     return parseMoteChatResult('space.mote.chat.inspect', { configuration, operation }, input)
+  }
+  async diagnose(value: { target: MoteChatTarget }, context?: MoteChatCallContext) {
+    const input = parseMoteChatParams('space.mote.chat.diagnose', value)
+    await context?.assertCurrent?.()
+    const report = await readMoteChatDiagnosis(input.target, { ...this.options, store: this.store })
+    await context?.assertCurrent?.()
+    return parseMoteChatResult('space.mote.chat.diagnose', report, input)
   }
   async audience(value: MoteChatAudienceInput, context?: MoteChatCallContext) {
     const input = parseMoteChatParams('space.mote.chat.audience', value); management(context); await context?.assertCurrent?.(); this.exact(input.target)

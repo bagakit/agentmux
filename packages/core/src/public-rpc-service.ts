@@ -673,8 +673,9 @@ export class AgentMuxRpcService {
     if (isMoteChatMethod(method)) {
       const caller = await this.authenticated(context)
       if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Mote chat requires its original authenticated actor.', 'CONTROL_PERMISSION_DENIED')
-      if (caller && method !== 'space.mote.chat.history') throw new AgentMuxError('Managed Agents may read their own chat history; chat settings and audience administration require the original person or device.', 'CONTROL_PERMISSION_DENIED')
+      if (caller && method !== 'space.mote.chat.history' && method !== 'space.mote.chat.diagnose') throw new AgentMuxError('Managed Agents may read redacted diagnosis or their own chat history; chat settings and audience administration require the original person or device.', 'CONTROL_PERMISSION_DENIED')
       const input = parseMoteChatParams(method, params), owner = this.ports.moteChat
+      if (method === 'space.mote.chat.diagnose') await this.assertRuntimeFence(context)
       if (!owner) {
         if (this.ports.forwardControl) {
           context.signal?.throwIfAborted(); await context.assertCurrent?.()
@@ -683,12 +684,13 @@ export class AgentMuxRpcService {
         throw new AgentMuxError('The original Mote chat owner is unavailable. Existing conversations are retained.', 'CONTROL_UNAVAILABLE')
       }
       const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId } : { kind: context.principal!.kind as 'user' | 'device', id: context.principal!.id }
-      const administration = { actor, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context) } }
+      const administration = { actor, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (method === 'space.mote.chat.diagnose') await this.assertRuntimeFence(context); if (caller) await this.authenticated(context) } }
       await administration.assertCurrent()
       const result = method === 'space.mote.chat.configure' ? await owner.configure(parseMoteChatParams(method, params), administration)
         : method === 'space.mote.chat.inspect' ? await owner.inspect(parseMoteChatParams(method, params), administration)
         : method === 'space.mote.chat.history' ? await owner.history(parseMoteChatParams(method, params), administration)
         : method === 'space.mote.chat.audience' ? await owner.audience(parseMoteChatParams(method, params), administration)
+        : method === 'space.mote.chat.diagnose' ? await owner.diagnose(parseMoteChatParams(method, params), administration)
         : await owner.allocate(parseMoteChatParams('space.mote.chat.allocate', params), administration)
       await administration.assertCurrent()
       return parseMoteChatResult(method as MoteChatMethod, result, input as MoteChatParamsMap[MoteChatMethod]) as unknown as AgentMuxRpcResult<M>

@@ -98,6 +98,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       CREATE TABLE IF NOT EXISTS connection_ingress_event (domain TEXT NOT NULL, app_id TEXT NOT NULL, event_id TEXT NOT NULL, ingress_id TEXT NOT NULL, event_json TEXT NOT NULL, raw_payload TEXT NOT NULL, PRIMARY KEY(domain, app_id, event_id));
       CREATE INDEX IF NOT EXISTS connection_ingress_query_input ON connection_ingress_message(json_extract(record_json,'$.input.hostId'),json_extract(record_json,'$.input.agentSessionId'),json_extract(record_json,'$.input.expectedRun.runId'),json_extract(record_json,'$.input.messageId'));
       CREATE INDEX IF NOT EXISTS connection_ingress_received ON connection_ingress_message(connection_id,sequence) WHERE json_extract(record_json,'$.state')='received';
+      CREATE INDEX IF NOT EXISTS connection_ingress_direct_application ON connection_ingress_message(domain,app_id,sequence) WHERE json_extract(record_json,'$.conversationKind')='direct';
       CREATE UNIQUE INDEX IF NOT EXISTS connection_ingress_input_operation ON connection_ingress_message(json_extract(record_json,'$.input.operationId')) WHERE json_extract(record_json,'$.input.operationId') IS NOT NULL;
     `))
     // Action receipts belong to the original authenticated event, not a fabricated platform message.
@@ -398,11 +399,28 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     }
     if (intake.state !== 'received') return await this.inspect({ ingressId })
     if (this.options.prepareInput) {
-      const preparation = await this.options.prepareInput(intake)
+      let preparation: Awaited<ReturnType<NonNullable<DurableIngressOptions['prepareInput']>>>
+      try { preparation = await this.options.prepareInput(intake) }
+      catch (error) {
+        const code = error instanceof AgentMuxError ? error.code : 'INGRESS_PREPARATION_UNAVAILABLE'
+        this.transaction(() => {
+          const current = this.read(ingressId)!
+          if (current.kind !== 'action' && current.state === 'received') this.write({ ...current, code })
+        })
+        // The original receiver still owns recovery; recording an observation never claims input.
+        throw error
+      }
       if (preparation.state === 'refused') {
         this.transaction(() => { const current = this.read(ingressId)!; if (current.kind !== 'action' && current.state === 'received') this.write({ ...current, state: 'refused', code: preparation.code }) })
         return await this.inspect({ ingressId })
       }
+      intake = this.transaction(() => {
+        const current = this.read(ingressId)!
+        if (current.kind === 'action') fail('INGRESS_EVENT_CONFLICT')
+        if (current.state !== 'received' || current.code === undefined) return current
+        const { code: _resolvedPreparation, ...ready } = current
+        return this.write(ready)
+      })
     }
     let record: ConnectionIngressMessage = intake
     let original: ReturnType<DurableIngressHost['authorize']>
@@ -593,6 +611,16 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       const rows = this.database.prepare(`SELECT record_json FROM (${intakeRows}) WHERE connection_id=? AND sequence>? ` + (input.bindingId ? "AND COALESCE(json_extract(record_json,'$.group.target.bindingId'),json_extract(record_json,'$.input.author.bindingId'))=? " : '') + 'ORDER BY sequence LIMIT ?').all(input.connectionId, Number(after?.sequence ?? 0), ...(input.bindingId ? [input.bindingId] : []), (input.limit ?? 25) + 1)
       const ingresses = rows.slice(0, input.limit ?? 25).map(row => parseConnectionIngressRecord(JSON.parse(String(row.record_json))))
       return { ingresses, nextAfterIngressId: rows.length > ingresses.length ? ingresses.at(-1)!.ingressId : null }
+    })
+  }
+  /** Owner-private bounded observation; callers publish only a redacted diagnostic projection. */
+  listDirect(application: ConnectionIngressMessage['application'], limit: number): { ingresses: ConnectionIngressMessage[]; more: boolean } {
+    return this.safe(() => {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail('INVALID_CONNECTION_INGRESS')
+      const rows = this.database.prepare("SELECT record_json FROM connection_ingress_message WHERE domain=? AND app_id=? AND json_extract(record_json,'$.conversationKind')='direct' ORDER BY sequence DESC LIMIT ?")
+        .all(application.domain, application.appId, limit + 1)
+      const ingresses = rows.slice(0, limit).map(row => parseConnectionIngressRecord(JSON.parse(String(row.record_json))) as ConnectionIngressMessage)
+      return { ingresses, more: rows.length > limit }
     })
   }
   /** Private recovery reader: unfinished observation or unclaimed input, bounded to this connection. */

@@ -1,6 +1,7 @@
 import type { MoteConnectionRef, MotePreferencesTarget } from './mote-preferences.js'
 import type { ConnectionActor, ConnectionApplication } from './connections-contract.js'
 import type { ConnectionEnrollmentCallContext } from './connection-enrollment-contract.js'
+import type { MoteChatDiagnosis, MoteChatDiagnosisInput } from './mote-chat-diagnosis.js'
 
 /** Chat policy is owned once by the connector Host, separately from MOTE.md group defaults. */
 export type MoteChatTarget = MotePreferencesTarget
@@ -75,6 +76,7 @@ export type MoteChatParamsMap = {
   'space.mote.chat.history': MoteChatHistoryInput
   'space.mote.chat.audience': MoteChatAudienceInput
   'space.mote.chat.allocate': MoteChatAllocate
+  'space.mote.chat.diagnose': MoteChatDiagnosisInput
 }
 export type MoteChatResultMap = {
   'space.mote.chat.configure': Extract<MoteChatOperation, { action: 'configure' }>
@@ -82,9 +84,10 @@ export type MoteChatResultMap = {
   'space.mote.chat.history': MoteChatHistoryPage
   'space.mote.chat.audience': MoteChatAudiencePage
   'space.mote.chat.allocate': Extract<MoteChatOperation, { action: 'allocate' }>
+  'space.mote.chat.diagnose': MoteChatDiagnosis
 }
 export type MoteChatMethod = keyof MoteChatParamsMap
-/** The transport supplies original authority. Managed Agents may read only their retained chat lane. */
+/** The transport supplies original authority. Redacted diagnosis does not grant private-history or management access. */
 export type MoteChatCallContext = ConnectionEnrollmentCallContext
 export interface MoteChatPort {
   configure(input: MoteChatConfigure, context: MoteChatCallContext): Promise<MoteChatResultMap['space.mote.chat.configure']>
@@ -92,4 +95,5 @@ export interface MoteChatPort {
   history(input: MoteChatHistoryInput, context?: MoteChatCallContext): Promise<MoteChatHistoryPage>
   audience(input: MoteChatAudienceInput, context?: MoteChatCallContext): Promise<MoteChatAudiencePage>
   allocate(input: MoteChatAllocate, context: MoteChatCallContext): Promise<MoteChatResultMap['space.mote.chat.allocate']>
+  diagnose(input: MoteChatDiagnosisInput, context?: MoteChatCallContext): Promise<MoteChatDiagnosis>
 }
