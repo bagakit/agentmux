@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { durableWriteFile, DurableWriteError, parseClientIncidentRecord, parseClientIncidentReport,
   type AgentMuxClientIncidentRecord, type AgentMuxClientIncidentReport, type AgentMuxClientIncidentProducer,
   type AgentMuxClientIncidentPage, type AgentMuxClientIncidentTarget, parseClientIncidentPage, parseClientIncidentTarget } from '@agentmux/core'
-import type { DiagnosticEvidenceRead, DiagnosticEvidenceAuthority, DiagnosticEvidenceIssueCode } from '@agentmux/core/diagnostic-evidence'
+import type { DiagnosticEvidenceRead, DiagnosticEvidenceAuthority, DiagnosticEvidenceIssueCode, DiagnosticEvidenceRef } from '@agentmux/core/diagnostic-evidence'
 
 /** Limits protect the diagnostic owner only. Rejected reports never affect the original operation.
  * The queue retains at most half a MiB while one real disk write is pending; a timed-out caller
@@ -69,6 +69,13 @@ export class ClientIncidentArchive {
   }
   private get authority(): DiagnosticEvidenceAuthority | null {
     return this.manifest ? { kind: 'client-incident-archive', id: this.manifest.archiveId, lifetime: 'durable' } : null
+  }
+  /** Original archive route and namespace; admission still does not claim durable publication. */
+  reference(logId: string): DiagnosticEvidenceRef | null {
+    const authority = this.authority
+    return authority && this.startup === 'ready' && (this.queue.some(item => item.logId === logId) ||
+      this.manifest?.entries.some(entry => entry.summary.recordRef.logId === logId))
+      ? { domain: 'client.incident', logId, authority, routeHostId: this.hostId } : null
   }
   private async readFile(path: string, maxBytes: number): Promise<string> {
     await this.dependencies.beforeRead?.(path)
@@ -293,7 +300,10 @@ export class ClientIncidentArchive {
     const summary: Summary = { recordRef: { domain: 'client.incident', logId: record.logId, authority, routeHostId: this.hostId },
       kind: record.report.kind, stage: record.report.stage, code: record.report.code,
       agentSessionId: record.report.agentSessionId, runId: record.report.runId, attemptId: record.report.attemptId,
-      occurrenceId: record.report.occurrenceId, receivedAt: record.receivedAt, persistence: 'unconfirmed' }
+      occurrenceId: record.report.occurrenceId, receivedAt: record.receivedAt, persistence: 'unconfirmed',
+      ...(record.producer.kind === 'mobile-web' ? { producer: { kind: 'mobile-web' as const,
+        devicePrincipalId: record.producer.devicePrincipalId, documentId: record.producer.documentId, buildId: record.producer.buildId,
+        namespaceDigest: record.producer.namespaceDigest } } : {}) }
     const entry: Entry = { summary, sequence: manifest.revision + 1, bytes, key: pending.key, digest: pending.digest }
     manifest.entries.push(entry); this.memory.set(record.logId, record)
     // Reserve the immutable identity before publication. A crash after this fence leaves a visible
@@ -381,7 +391,10 @@ export class ClientIncidentArchive {
   private recent(target: Extract<AgentMuxClientIncidentTarget, { recent: unknown }>, maxBytes: number) {
     const query = target.recent, scope = digest({ archiveId: this.manifest!.archiveId, hostId: this.hostId,
       limit: query.limit ?? 20, since: query.since ?? null, until: query.until ?? null,
-      agentSessionId: query.agentSessionId ?? null, runId: query.runId ?? null, kind: query.kind ?? null })
+      agentSessionId: query.agentSessionId ?? null, runId: query.runId ?? null, kind: query.kind ?? null,
+      producer: query.producer ? [query.producer.kind, query.producer.devicePrincipalId, query.producer.documentId,
+        Object.hasOwn(query.producer, 'buildId'), query.producer.buildId ?? null,
+        Object.hasOwn(query.producer, 'namespaceDigest'), query.producer.namespaceDigest ?? null] : null })
     let highWater = this.manifest!.revision
     let before: { receivedAt: number; logId: string } | null = null
     if (query.cursor) {
@@ -394,7 +407,10 @@ export class ClientIncidentArchive {
     const selected = this.manifest!.entries.filter(entry => entry.sequence <= highWater && (!before || entry.summary.receivedAt < before.receivedAt || entry.summary.receivedAt === before.receivedAt && entry.summary.recordRef.logId < before.logId) &&
       (query.since === undefined || entry.summary.receivedAt >= query.since) && (query.until === undefined || entry.summary.receivedAt <= query.until) &&
       (!query.agentSessionId || entry.summary.agentSessionId === query.agentSessionId) && (!query.runId || entry.summary.runId === query.runId) &&
-      (!query.kind || entry.summary.kind === query.kind)).sort((a, b) => b.summary.receivedAt - a.summary.receivedAt || (a.summary.recordRef.logId < b.summary.recordRef.logId ? 1 : a.summary.recordRef.logId > b.summary.recordRef.logId ? -1 : 0))
+      (!query.kind || entry.summary.kind === query.kind) && (!query.producer || entry.summary.producer?.devicePrincipalId === query.producer.devicePrincipalId &&
+        entry.summary.producer.documentId === query.producer.documentId && (!Object.hasOwn(query.producer, 'buildId') || entry.summary.producer.buildId === query.producer.buildId) &&
+        (!Object.hasOwn(query.producer, 'namespaceDigest') || entry.summary.producer.namespaceDigest === query.producer.namespaceDigest)))
+      .sort((a, b) => b.summary.receivedAt - a.summary.receivedAt || (a.summary.recordRef.logId < b.summary.recordRef.logId ? 1 : a.summary.recordRef.logId > b.summary.recordRef.logId ? -1 : 0))
     const items: Summary[] = [], limit = query.limit ?? 20
     for (const entry of selected.slice(0, limit)) {
       if (Buffer.byteLength(JSON.stringify(items)) + Buffer.byteLength(JSON.stringify(entry.summary)) + 2048 > maxBytes) break
