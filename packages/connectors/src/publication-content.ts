@@ -1,6 +1,6 @@
 import { AgentMuxError, type AgentPromptInputKey } from '@agentmux/core'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
-import { conversationRecordAuthor, conversationRecordId, conversationInputKey, type ConversationSourceRecord, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
+import { conversationRecordAuthor, conversationRecordRole, conversationRecordId, conversationInputKey, type ConversationSourceRecord, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
 import type { PublicationImage, PublicationFile, PublicationMarkdown, ResolvedPublicationPart } from './publication-resource.js'
 import type { ConnectionDeliveryGap, ConnectionDeliveryRelay, ConnectionOriginRepresentation, RoomBinding } from '@agentmux/core/connections'
 
@@ -34,6 +34,7 @@ export function isConversationPublicationPart(record: ConversationSourceRecord, 
   if (original.kind === 'captured') {
     const item = original.item
     return selector.kind === 'captured-field' && selector.field === 'content' &&
+      conversationRecordRole(record) === 'message' &&
       (item.kind === 'user_message' || item.kind === 'assistant_message') &&
       !item.a2aNotificationId && !(item.kind === 'user_message' && item.authorAgentSessionId)
   }
