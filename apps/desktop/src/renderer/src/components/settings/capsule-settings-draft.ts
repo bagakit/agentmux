@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { deliveryFailure } from '@agentmux/core/delivery-attempt'
 import { parseCapsuleParams, parseCapsuleResult, type CapsuleParamsMap, type CapsuleResultMap } from '@agentmux/core/capsule'
 import { api } from '../../lib/api'
 
@@ -52,7 +53,10 @@ export function useCapsuleMutation<M extends Mutation>(method: M, confirmed: (re
       consume.current(result, params)
       setAttempt({ ...original, phase: 'committed', message: 'Confirmed by the Capsule owner.' })
     } catch (error) {
-      if (mounted.current) setAttempt({ ...original, phase: 'unknown', message: presentError(error) })
+      const failure = deliveryFailure(error).controlFailure
+      const notApplied = failure?.disposition === 'not_applied' && failure.confirmedInputBytes === 0
+      if (mounted.current) setAttempt({ ...original, phase: notApplied ? 'failed' : 'unknown', message: notApplied
+        ? `The original operation was not applied. Your draft is kept. ${presentError(error)}` : presentError(error) })
     } finally { running.current = false }
   }
   async function inspect() {
