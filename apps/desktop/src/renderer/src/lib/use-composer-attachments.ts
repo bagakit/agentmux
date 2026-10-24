@@ -123,9 +123,11 @@ export function useComposerAttachments({ scope, hostId, workspacePath, disabled,
   useEffect(() => { if (!shortcut.current.enabled) releaseScreenshotTarget(shortcutTarget) }, [shortcutTarget, shortcutActive, disabled, hostId])
   const claimScreenshotTarget = (event?: { target: EventTarget | null }) => {
     const element = event?.target as HTMLElement | null | undefined
-    if (shortcut.current.enabled && element?.nodeType === 1 && typeof element.focus === 'function') {
-      shortcutFocus.current = { key: shortcutKey, element }
-      selectScreenshotTarget(shortcutTarget)
+    if (element?.nodeType === 1 && typeof element.focus === 'function') {
+      if (shortcut.current.enabled) {
+        shortcutFocus.current = { key: shortcutKey, element }
+        selectScreenshotTarget(shortcutTarget)
+      } else selectScreenshotTarget(null)
     }
   }
   const referencePaths = (paths: readonly string[]) => feedback.run(() => insertResolved(() => appendSelectedFileReferences('', paths, workspacePath)))
