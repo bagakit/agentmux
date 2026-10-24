@@ -83,3 +83,15 @@ it('retains unknown restart operations while allowing a new explicit intent afte
   const unknown = { ...original, errorCode: undefined }
   expect(originalSessionRestart({ ...session, continuityOperations: { [unknown.operationId]: unknown } })?.operationId).toBe(original.operationId)
 })
+
+
+it('uses the retained original restart when an older current pointer has the same ID', () => {
+  const original = { operationId: 'original-restart', agentSessionId: session.id, trigger: 'manual' as const,
+    action: 'restart' as const, policy: { ...DEFAULT_AGENT_CONTINUITY_POLICY }, previousRun: session.control.run,
+    admittedAt: _tailFixtureEpoch(0, 0, 1), observedAt: _tailFixtureEpoch(0, 0, 2), rechecks: 0, kind: 'starting' as const,
+    reason: 'restart-stopping', evidence: { kind: 'run-unknown' as const, observedAt: _tailFixtureEpoch(0, 0, 2) } }
+  const stale = { ...original, action: undefined, kind: 'reattachable' as const, reason: 'reattachable' }
+  const view = { ...session, continuityOperations: { [original.operationId]: original }, continuity: stale }
+  expect(originalSessionRestart(view)).toEqual(original)
+  expect(originalSessionRestart({ ...view, continuity: { ...stale, operationId: 'other-observation' } })).toEqual(original)
+})

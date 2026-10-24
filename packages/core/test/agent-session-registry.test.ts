@@ -375,6 +375,7 @@ describe('semantic session registry concurrency', () => {
         await memory.compareAndSwapMetadata(expected, next)
       },
       async reserveLifecycle(value) { await memory.reserveLifecycle(value) },
+      recordRestartAdmission: memory.recordRestartAdmission.bind(memory),
       async claimStaleLifecycles(value, target) { return await memory.claimStaleLifecycles(value, target) },
       async releaseLifecycle(value) { await memory.releaseLifecycle(value) },
       async retireRuns(value) { await memory.retireRuns(value) },
@@ -443,6 +444,7 @@ describe('semantic session registry concurrency', () => {
         await memory.compareAndSwapMetadata(expected, next, signal)
       },
       async reserveLifecycle(value) { await memory.reserveLifecycle(value) },
+      recordRestartAdmission: memory.recordRestartAdmission.bind(memory),
       async claimStaleLifecycles(value, target) { return await memory.claimStaleLifecycles(value, target) },
       async releaseLifecycle(value) { await memory.releaseLifecycle(value) },
       async retireRuns(value) { await memory.retireRuns(value) },
