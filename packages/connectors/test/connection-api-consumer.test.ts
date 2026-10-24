@@ -27,7 +27,7 @@ async function fixture(platform: 'feishu' | 'discord') {
   await owner.store.compareAndSwap(null, { ...saved, agentSessionId: 'foreign-agent', run: { runId: 'run-foreign-agent' }, nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'foreign-native', transcriptPath: path } })
   await owner.inner.registry.load('local')
   const wire: Wire[] = []
-  let effect: (path: string) => unknown | Promise<unknown> = async () => ({ code: 0, id: 'native-message', token: returned, reflected: { raw: secret, bearer: platform === 'feishu' ? derived : secret, mixed: encodeURIComponent(returned).replace('%2F', '%2f'), double: encodeURIComponent(encodeURIComponent(returned)).replace('252F', '252f') } })
+  let effect: (path: string) => unknown | Promise<unknown> = async () => ({ code: 0, id: 'native-message', app_token: 'native-resource-identifier', token: returned, reflected: { raw: secret, bearer: platform === 'feishu' ? derived : secret, mixed: encodeURIComponent(returned).replace('%2F', '%2f'), double: encodeURIComponent(encodeURIComponent(returned)).replace('252F', '252f') } })
   const nativeOrigin = platform === 'feishu' ? 'https://open.feishu.cn' : 'https://discord.com'
   const remote = createServer(async (request, response) => {
     try {
@@ -94,7 +94,7 @@ it.each(['feishu', 'discord'] as const)('actual managed CLI -> default Host -> %
   const f = await fixture(platform), input = f.request('native-business', { method: 'POST', path: nativePath(platform), query: { marker: 'original' }, body: [{ text: 'Original array is not object-merged' }] })
   const result: ConnectionApiOperation = await f.cli(['request', '--input', '-'], input)
   expect(JSON.stringify(result)).not.toContain(secret)
-  expect(result).toMatchObject({ state: 'responded', response: { status: 200, redacted: true, body: { format: 'json', value: { code: 0, id: 'native-message', token: '[redacted]' } } } })
+  expect(result).toMatchObject({ state: 'responded', response: { status: 200, redacted: true, body: { format: 'json', value: { code: 0, id: 'native-message', app_token: 'native-resource-identifier', token: '[redacted]' } } } })
   expect(f.wire).toHaveLength(1)
   const sent = f.wire[0]!
   expect(sent.path).toContain(platform === 'feishu' ? 'https://open.feishu.cn/open-apis/' : 'https://discord.com/api/v10/')
