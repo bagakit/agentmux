@@ -102,8 +102,11 @@ export async function headlessFixture(options: { cli?: boolean; memoryStore?: bo
     server = spawn(process.execPath, [...(options.ownerNodeArgs ?? []), ownerEntry, ...ownerArgs], { env, stdio: ['ignore', 'pipe', 'pipe'] })
     current = await receipt(server); return current
   }
-  const restartNativeDaemon = async () => {
+  const stopNativeDaemon = async () => {
     if (daemon.exitCode === null && daemon.signalCode === null) { daemon.kill('SIGTERM'); await once(daemon, 'exit') }
+  }
+  const restartNativeDaemon = async () => {
+    await stopNativeDaemon()
     daemonErrors = ''
     daemon = spawn(artifact, ['--socket', join(runtimeDirectory, 'ctxmux.sock'), '--state-dir', join(stateDirectory, 'ctxmux'), '--readiness-fd', '3'],
       { env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
@@ -115,7 +118,7 @@ export async function headlessFixture(options: { cli?: boolean; memoryStore?: bo
       daemon.once('exit', code => { clearTimeout(timer); no(new Error(`Private official ctxmux restart exited ${code}: ${daemonErrors}`)) })
     })
   }
-  return { root, env, client, restart, restartNativeDaemon, stopOwner, failProbe: () => writeFile(join(stateDirectory, 'probe-failure'), 'failed'), get owner() { return current.owner }, get socketPath() { return current.socketPath },
+  return { root, env, client, restart, restartNativeDaemon, stopNativeDaemon, stopOwner, failProbe: () => writeFile(join(stateDirectory, 'probe-failure'), 'failed'), get owner() { return current.owner }, get socketPath() { return current.socketPath },
     get nativeProcessId() { return daemon.pid }, get ownerProcess() { return server },
     failInput: (failure: import('../../src/errors.js').AgentMuxControlFailure) => writeFile(join(stateDirectory, 'input-failure'), JSON.stringify(failure)),
     inputFailureCalls: async () => (await readFile(join(stateDirectory, 'input-failure-calls'), 'utf8')).trim().split('\n'),
