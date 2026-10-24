@@ -13,7 +13,7 @@ const dom = composerDOM(), initial = useAppStore.getState(); let cleanup: () => 
 const old = { kind: 'provider' as const, providerId: 'codex' as const, sessionId: 'original-native', transcriptPath: _reshape_fixturePath("private/tmp/original-native.jsonl") }
 const candidate = { ...old, sessionId: 'candidate-native', transcriptPath: _reshape_fixturePath("private/tmp/candidate-native.jsonl") }
 const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'same-session', run: { runId: 'same-run' } }
-const session = { id: control.agentSessionId, kind: 'agent', providerId: 'codex', executorId: 'private', hostId: 'local', workspacePath: _reshape_fixturePath("private/tmp/theme-icon-proof"), label: 'Private Agent', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 50), control, processState: 'running', status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, nativeHandle: old, nativeSourceObservation: { state: 'ambiguous', candidates: [old, candidate], run: control.run, observedAt: _reshape_fixtureEpoch(0, 0, 100), reason: 'Authoritative current candidate differs.' } } as Extract<SessionSnapshot, { kind: 'agent' }>
+const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: control.agentSessionId, kind: 'agent', providerId: 'codex', executorId: 'private', hostId: 'local', workspacePath: _reshape_fixturePath("private/tmp/theme-icon-proof"), label: 'Private Agent', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 50), control, processState: 'running', latestOutputBytes: 0, status: { state: 'running', source: 'run-process', observedAt: _reshape_fixtureEpoch(0, 0, 1) }, nativeHandle: old, nativeSourceObservation: { state: 'ambiguous', candidates: [old, candidate], run: control.run, observedAt: _reshape_fixtureEpoch(0, 0, 100), reason: 'Authoritative current candidate differs.' } }
 beforeEach(() => { cleanup = mountThemeRuntime(window); useAppStore.setState({ sessions: [session] }) })
 afterEach(() => { cleanup(); useAppStore.setState(initial, true); vi.restoreAllMocks() })
 const action = (label: string) => {
@@ -22,7 +22,7 @@ const action = (label: string) => {
 }
 it('the original Region menu themes candidate Review independently and keeps cancellation and exact confirmation', async () => {
   const confirm = vi.spyOn(api.sessions, 'confirmNativeSession').mockResolvedValue({ session: {} as never, persisted: true, current: true } as never)
-  await dom.render(<AgentRegionHeader name="Private Agent" executorLabel="Private" sessionId={session.id} sessionKind="agent" executionHost={{ label: 'This Mac', id: 'local', cwd: session.workspacePath, configured: true }} regionId="original-region" readOnly={false} onHistory={undefined} nativeSession={session}/>)
+  await dom.render(<AgentRegionHeader name="Private Agent" executorLabel="Private" sessionId={session.id} sessionKind="agent" executionHost={{ label: 'This Mac', id: 'local', kind: 'local', cwd: session.workspacePath, configured: true }} regionId="original-region" readOnly={false} onHistory={undefined} nativeSession={session}/>)
   await act(async () => dom.container.querySelector('.agent-region-header__more')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
   await act(async () => { const details = action('Session details'); details.focus(); details.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
   const review = action('Choose target: '+candidate.sessionId)
@@ -31,12 +31,12 @@ it('the original Region menu themes candidate Review independently and keeps can
   await act(async () => { expect(previewTheme(custom).applied).toBe(true) })
   expect(action('Choose target: '+candidate.sessionId)).toBe(review)
   expect(document.getElementById(semanticIconHref('action.review-source').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M4 4H20V20H4Z')
-  expect(confirm).not.toHaveBeenCalled(); expect(useAppStore.getState().sessions[0]?.nativeHandle).toEqual(old)
+  expect(confirm).not.toHaveBeenCalled(); expect(useAppStore.getState().sessions.find(value => value.kind === 'agent')?.nativeHandle).toEqual(old)
   await act(async () => review.click())
   expect(document.querySelector('[data-native-source-review]')?.textContent).toContain(old.sessionId)
   expect(document.querySelector('[data-native-source-review]')?.textContent).toContain(candidate.sessionId)
   await act(async () => action('Cancel source change').click())
-  expect(confirm).not.toHaveBeenCalled(); expect(useAppStore.getState().sessions[0]?.nativeHandle).toEqual(old)
+  expect(confirm).not.toHaveBeenCalled(); expect(useAppStore.getState().sessions.find(value => value.kind === 'agent')?.nativeHandle).toEqual(old)
   await act(async () => action('Choose target: '+candidate.sessionId).click())
   await act(async () => action('Confirm this native source').click())
   expect(confirm).toHaveBeenCalledOnce()
