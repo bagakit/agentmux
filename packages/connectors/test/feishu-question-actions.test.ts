@@ -140,3 +140,27 @@ it('original live Hook question preserves the same unavailable route as local Co
   await f.original.client.writeAgent({ agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' }, source: 'user', data: 'Original terminal answer' })
   expect(f.original.inner.kernel.input).toHaveBeenCalledOnce()
 }, 25_000)
+
+it('application access answers original questions through the same native owner without materializing room grants', async () => {
+  const f = await fixture()
+  expect((await f.cli(['connection', 'application', 'access', 'configure', '--input', '-'], { operationId: 'application-answer', connectionId: 'feishu-connection', expectedConnectionRevision: 1, grantId: 'application-answerer', expectedRevision: null, actor: f.actor, state: 'active', capabilities: ['answer'] })).state).toBe('applied')
+  expect((await f.cli(['connection', 'binding', 'inspect', '--binding', f.binding.bindingId])).grants).toEqual([])
+  await f.publish()
+  const originalProjections = f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'question').map(value => ({ projectionId: value.projectionId, payload: value.payload }))
+  const owner = Reflect.get(f.services.bindings!, 'options').connections
+  const unavailable = vi.spyOn(owner.applicationAccess, 'grants').mockImplementation(() => { throw Error('Controlled application access outage') })
+  f.services.publication!.refreshAccess('feishu', f.actor.application)
+  await vi.waitFor(async () => expect((await f.services.connections.delivery!.list({ connectionId: 'feishu-connection', bindingId: f.binding.bindingId, bindingRevision: 1 })).observation?.reason).toBe('access-unconfirmed'))
+  const observed = f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'question').map(value => ({ projectionId: value.projectionId, payload: value.payload }))
+  expect(observed, JSON.stringify({ originalProjections, observed })).toEqual(originalProjections)
+  unavailable.mockRestore()
+  const wire = f.answer(), actionRef = f.submit().value.actionRef
+  await f.sdk.receive(wire)
+  await vi.waitFor(() => expect(f.send).toHaveBeenCalledOnce(), { timeout: 8_000 })
+  const record = (await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])).ingresses[0]
+  expect(record.input.author).toMatchObject({ actionRef, actor: f.actor, grantSource: 'application', grantId: 'application-answerer', grantRevision: 1 })
+  expect((await f.cli(['connection', 'ingress', 'inspect', '--ingress', record.ingressId])).questionReceipt).toMatchObject({ operationId: record.input.operationId, outcome: 'submitted', questionIds: [savedQuestionId, f.questionId2] })
+  await f.sdk.receive(wire)
+  expect(f.send).toHaveBeenCalledOnce()
+  expect(f.original.inner.kernel.input).not.toHaveBeenCalled()
+}, 25_000)

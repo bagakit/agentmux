@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { isObjectId } from '@agentmux/core'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { appendFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -9,6 +9,8 @@ import { permissionActionsFixture } from './fixtures/permission-actions.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
+const applicationFacts: Record<string, unknown> = {}
+afterAll(async () => { const path = process.env.AGENTMUX_TEST_APPLICATION_ACCESS_FACTS; if (path) await writeFile(path + '.permission.json', JSON.stringify(applicationFacts, null, 2) + '\n') })
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 async function fixture(initialCoreAvailable = true) { const value = await permissionActionsFixture(initialCoreAvailable); cleanup.push(() => value.close()); return value }
@@ -389,3 +391,80 @@ it('resolves original action and operation claims through actual SQLite indexes 
   await writeFile('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/permission-actions/projection-query-plans.json', JSON.stringify({ projectionPlans }, null, 2) + '\n')
   for (const query of projectionPlans) expect(query.plan.some(detail => detail.startsWith('SEARCH ') && detail.includes('connection_ingress_action_audience') && detail.includes('binding_id=? AND binding_revision=? AND projection_id=?')), 'Projection reads must search only the exact Binding revision').toBe(true)
 }, 20_000)
+
+it.each(['applied', 'local-revoke'] as const)('application access permission keeps the exact original native effect and rechecks %s after claim', async mode => {
+  const f = await fixture()
+  const app = await f.cli(['connection', 'application', 'access', 'configure', '--input', '-'], { operationId: 'application-permission', connectionId: 'feishu-connection', expectedConnectionRevision: 1, grantId: 'application-member', expectedRevision: null, actor: f.actor, state: 'active', capabilities: ['permission'] })
+  expect(app.state).toBe('applied')
+  const original = await f.open()
+  await vi.waitFor(() => expect(f.buttons().length).toBeGreaterThan(0), { timeout: 8_000 })
+  const send = f.hosted.respondAgentInteraction.bind(f.hosted)
+  let captured: Parameters<typeof send>[0] | undefined, release!: () => void
+  const hold = new Promise<void>(resolve => { release = resolve })
+  const dispatch = vi.spyOn(f.hosted, 'respondAgentInteraction').mockImplementation(async input => { captured = structuredClone(input); await hold; return await send(input) })
+  const ref = f.buttons().find(button => /deny|reject/i.test(button.text.content))!.value.actionRef
+  await f.sdk.receive(f.action(ref))
+  await vi.waitFor(() => expect(captured).toBeDefined())
+  expect(captured!.externalAction).toMatchObject({ grantSource: 'application', grantId: 'application-member', grantRevision: 1 })
+  if (mode === 'local-revoke') {
+    expect((await f.grant([], null)).state).toBe('applied')
+    expect((await f.cli(['connection', 'application', 'access', 'inspect', '--input', '-'], { operationId: 'application-permission' })).operation).toEqual(app)
+  }
+  release()
+  if (mode === 'applied') {
+    await expect(original.callback).resolves.toMatchObject({ hookSpecificOutput: { decision: { behavior: 'deny' } } })
+    await vi.waitFor(async () => {
+      const row = (await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])).ingresses[0]
+      expect((await f.cli(['connection', 'ingress', 'inspect', '--ingress', row.ingressId])).interactionReceipt?.delivery).toBe('hook-written')
+    })
+  } else {
+    await vi.waitFor(async () => {
+      const row = (await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])).ingresses[0]
+      const authority = await f.cli(['connection', 'ingress', 'authority', '--operation-id', row.input.operationId])
+      applicationFacts['interleaved-local-revoke'] = { authority: authority.authority, appRevision: app.grant.revision, originalSource: row.input.author.grantSource,
+        nativeResponseDelivery: f.original.client.agentSession('original-agent').pendingInteraction?.request.permissionHook?.response?.delivery ?? null,
+        originalInput: row.input.operationId, dispatches: dispatch.mock.calls.length }
+      expect(authority.authority, 'A later exact local revoke prevents the original application claim from reaching the native permission responder').toBe('refused')
+    })
+    expect(f.original.client.agentSession('original-agent').pendingInteraction?.request.permissionHook?.response).toBeUndefined()
+    const row = (await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])).ingresses[0]
+    expect((await f.cli(['connection', 'binding', 'member', 'inherit', '--input', '-'], { operationId: 'restore-inherit', bindingId: f.binding.bindingId, expectedBindingRevision: f.binding.revision, actor: f.actor, expectedGrant: { grantId: 'original-member', revision: 1 } })).state).toBe('applied')
+    await f.services.ingress!.dispatch(row.ingressId)
+    expect((await f.services.ingress!.inspect({ ingressId: row.ingressId })).ingress!.input).toEqual(row.input)
+    expect(dispatch).toHaveBeenCalledOnce()
+    expect(f.original.client.agentSession('original-agent').pendingInteraction?.request.permissionHook?.response).toBeUndefined()
+  }
+  expect(f.original.inner.kernel.input).not.toHaveBeenCalled()
+  expect(f.original.client.agentSession('original-agent').run.runId).toBe('run-original-agent')
+}, 25_000)
+
+it('application access keeps original room-only projection identity for punctuation grant IDs', async () => {
+  const f = await fixture()
+  for (const [grantId, userId] of [['a', f.actor.userId], ['a:1', 'second-person']]) await f.cli(['connection', 'grant', '--input', '-'], { operationId: 'room-' + grantId, grantId, bindingId: f.binding.bindingId, expectedBindingRevision: 1, expectedRevision: null, actor: { ...f.actor, userId }, capabilities: ['permission'], state: 'active' })
+  const original = await f.open()
+  await vi.waitFor(() => expect(f.buttons().length).toBeGreaterThan(0), { timeout: 8_000 })
+  const { createHash } = await import('node:crypto')
+  const projectionId = 'permission-' + createHash('sha256').update(JSON.stringify([f.binding.bindingId, f.binding.revision, f.original.client.agentSession('original-agent').run, agentInteractionRequestDigest(original.request), [['a', 1], ['a:1', 1]]])).digest('hex')
+  expect(f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'permission').every(value => value.projectionId === projectionId)).toBe(true)
+  expect(f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'permission')).not.toHaveLength(0)
+}, 25_000)
+
+it('application access outage preserves a mixed original permission mapping and a known local actor effect', async () => {
+  const f = await fixture(); await f.grant()
+  expect((await f.cli(['connection', 'application', 'access', 'configure', '--input', '-'], { operationId: 'other-app-person', connectionId: 'feishu-connection', expectedConnectionRevision: 1, grantId: 'app-other-person', expectedRevision: null, actor: { ...f.actor, userId: 'other-person' }, state: 'active', capabilities: ['permission'] })).state).toBe('applied')
+  const original = await f.open()
+  await vi.waitFor(() => expect(f.buttons().length).toBeGreaterThan(0), { timeout: 8_000 })
+  const projections = f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'permission').map(value => value.projectionId)
+  const ref = f.buttons().find(button => /deny|reject/i.test(button.text.content))!.value.actionRef
+  const owner = Reflect.get(f.services.bindings!, 'options').connections
+  vi.spyOn(owner.applicationAccess, 'grants').mockImplementation(() => { throw new AgentMuxError('Controlled unavailable rule', 'APPLICATION_ACCESS_UNCONFIRMED') })
+  f.services.publication!.refreshAccess('feishu', f.actor.application)
+  await vi.waitFor(async () => expect((await f.services.connections.delivery!.list({ connectionId: 'feishu-connection', bindingId: f.binding.bindingId, bindingRevision: 1 })).observation?.reason).toBe('access-unconfirmed'))
+  expect(f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'permission').map(value => value.projectionId)).toEqual(projections)
+  expect(f.effects.filter(value => value.method === 'POST')).toHaveLength(1)
+  await f.sdk.receive(f.action(ref))
+  await expect(original.callback).resolves.toMatchObject({ hookSpecificOutput: { decision: { behavior: 'deny' } } })
+  const record = (await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])).ingresses[0]
+  expect(record.input.author).not.toHaveProperty('grantSource')
+  expect(record.input.author.grantId).toBe('original-member')
+}, 25_000)

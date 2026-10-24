@@ -9,6 +9,7 @@ import { connectHostedAgentMux } from '../../../core/dist/hosted.js'
 import { rpcOwnerFixture } from '../../../core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../core/test/helpers/object-cli-rpc.js'
 import { createWorkspaceLayout } from '../../../core/src/spatial-layout.js'
+import { createConnectionExternalInputAuthority } from '../../../../apps/host/src/external-input-authority.js'
 import { startAgentMuxHost } from '../../../../apps/host/src/host.js'
 import { createConnectionServices } from '../../src/connection-services.js'
 import { createPublicationConversationPort } from '../../src/core-conversation-port.js'
@@ -41,7 +42,9 @@ export async function permissionActionsFixture(initialCoreAvailable = true) {
       for (const name of ['isConnected', 'status', 'identity', 'input', 'observeOutput', 'attach', 'detach', 'stop']) inner.kernel[name] = runtime[name]
       inner.connected = true
     })
-    const host = await startAgentMuxHost({ store: original.store, socketPath, desktopSocketPath, mobileBuildDirectory: join(original.root, 'absent-assets') })
+    let services!: Awaited<ReturnType<typeof createConnectionServices>>
+    const externalInputAuthority = createConnectionExternalInputAuthority({ executionHostId: 'local', ingress: async () => services.ingress! })
+    const host = await startAgentMuxHost({ externalInputAuthority, store: original.store, socketPath, desktopSocketPath, mobileBuildDirectory: join(original.root, 'absent-assets') })
     cleanup.push(() => host.dispose())
     original.client = host.client; original.inner = host.client as unknown as typeof original.inner
     original.coreClients = () => [{ hostId: 'local', client: original.client }]
@@ -76,7 +79,7 @@ export async function permissionActionsFixture(initialCoreAvailable = true) {
       if (path.includes('/chats/')) return { code: 0, data: { name: 'Design review', chat_status: 'normal', chat_mode: 'group' } }
       return sdk.request({ url: path })
     })
-    const services = await createConnectionServices({ directory: join(original.root, 'connectors'),
+    services = await createConnectionServices({ directory: join(original.root, 'connectors'),
       bindings: { spatial, checkpoint: async ref => await hosted.conversationCheckpoint(ref) },
       publication: createPublicationConversationPort(clients), ingress: { core: hostId => coreAvailable ? ingressCore(hostId) : undefined } })
     cleanup.push(() => services.close())
