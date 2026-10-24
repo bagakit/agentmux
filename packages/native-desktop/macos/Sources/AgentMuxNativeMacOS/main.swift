@@ -2192,12 +2192,14 @@ private enum Input {
             result.insert(modifier.flag)
         }
         let target = syntheticClickRecipient(pid: targetWindow.app.pid, windowId: targetWindow.windowId)
+        var postedPresses = 0
         do {
             try SyntheticMouseClickDelivery.deliver(
                 clickCount: count,
                 target: target,
                 currentObservation: {
-                    currentSyntheticClickRecipient(snapshot: targetWindow, point: point)
+                    guard originalProcessIsLive(targetWindow) else { return .unavailable }
+                    return currentSyntheticClickRecipient(snapshot: targetWindow, point: point)
                 },
                 makeEvent: { step in
                     let type: CGEventType
@@ -2224,7 +2226,10 @@ private enum Input {
                     }
                     return event
                 },
-                post: { $0.post(tap: .cghidEventTap) },
+                post: { event in
+                    event.post(tap: .cghidEventTap)
+                    if event.type == button.downEvent { postedPresses += 1 }
+                },
                 pause: { _ = usleep($0) }
             )
         } catch let failure as SyntheticMouseClickDelivery.FenceFailure {
@@ -2241,6 +2246,11 @@ private enum Input {
                     "coordinate click aborted because target pid \(expected.ownerPID) window \(expected.windowID) is no longer the focused topmost recipient (current: \(actualDescription)); \(recovery)"
                 )
             }
+        } catch {
+            if postedPresses > 0 {
+                throw ProviderError.coded("action_outcome_unknown", "click allocation failed after \(postedPresses) posted press(es); the original operation was not replayed")
+            }
+            throw error
         }
     }
 
