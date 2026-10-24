@@ -352,6 +352,7 @@ Mobile 消费原 Topic、Survey 与 Goals 的完整工作面及公共 owner，�
 - **对象分享直接复制 `amux://` 链接。** 对象类型与准确编码只见 [amux 协议的对象链接](../../specs/amux-protocol.md#对象链接)；每份只包含原对象类型与一个准确身份，不再复制身份名片、执行器资料或重复命令说明。Agent 链接始终指向 Core SID，不以原生会话 ID、显示名、执行器、Run 或空间位置替代。右键菜单按真实动作命名 Copy Agent/Region/Tab/Category/Topic Link，同一目标只保一个复制入口；复制本身不发送、不导航、不改变焦点、展示、草稿或健康 Run。
   - 新 ID 的等长 Base58 规则见[产品实体 ID 分配](spaces-and-layout.md#产品实体-id-分配)，Session 既有 ID／持久创建重试保全见[Session、Run 与 View](session-recovery.md#sessionrun-与-view)；链接仍准确引用原对象身份，不增加分享别名或另一种地址格式。
   - 生成与严格解析来自无 UI 依赖的同一 Core 公共出口，消费上述唯一格式合同；不附带正文、命令、父位置暗示或自动执行参数。格式有效不证明对象存在、健康、已呈现、跨设备可达或内容作者可信。非法 URI 只拒绝这次打开，保留工作面与其他健康能力，并明确原因和重取链接的恢复动作。
+  - Desktop 的系统协议、正文、Terminal 与 Browser 对象链接入口共用同一 Main 打开编排，再沿原对象发现与导航 owner 执行；各入口不另写 URI 解析器、对象名册或位置选择规则。应用内已获准的对象打开直接汇入该编排，不经系统协议绕回本应用；入口可信性与授权仍由原来源核对，Browser 网页的询问与拒绝沿[应用链接边界](browser-workface.md#browser-工作面)，不能因内部路由跳过。
   - Agent 链接定位为唯一现有 Region 时，原 focus owner 在提交导航前按预期 SID 原子核对该格当前 Agent，导航回执保留该条件。位置已更换只拒绝这次导航，后续异步呈现或持久确认期间变化只报告未确认、保留用户后来工作面，不回滚或操作替换者。相同条件由已有 `space focus --region … --expect-session …` 可用，空间身份与 Agent 身份仍分开。
   - 接收 Agent 在既有启动引导中知道 `amux://` 是对象引用，遇到链接先查 `amux --skill`，再按类型和原 ID 使用已有公开 inspect、send 或 focus 能力。用法在原 skill 按需发现，不在每次分享附带一份命令；可执行名及入口一致性只见[对象优先 CLI 与统一公共业务服务](#对象优先-cli-与统一公共业务服务)。当前能力以实际构建的 `--help`／`--skill` 为准，没有相关工具或引导的外部 Agent 不被假定自动知道用法。
   - Core 持有 Session、耐久空间组成与全部 bindings，client 只消费原事实，不另建对象或位置名册。Agent 链接的语义收件人始终唯一；其多个展示不是多个 Agent，也不能据 SID 猜唯一 Region。打开时沿原空间发现与导航通路解析准确现有展示，多候选完整可辨并要求明确位置，无已知展示时说明本次位置未确认并提供原对象检查／打开／恢复入口，不把观察缺口冒成 Session 终局或创建替代 Agent。
