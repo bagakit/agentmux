@@ -134,19 +134,9 @@ async function headerObservationAction(scope: ParentNode, label: string) {
   await agentHistoryMenuEntry(scope)
   const more = scope.querySelector<HTMLButtonElement>('.agent-region-header__more')!
   const menu = document.getElementById(more.getAttribute('aria-controls')!)!
-  const details = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-    (item) => item.textContent?.trim() === 'Session details',
-  )!
-  expect(details, 'original Session details menu').toBeDefined()
-  await act(async () => {
-    details.focus()
-    details.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
-  })
   let item: HTMLElement | undefined
   await wait(() => {
-    const submenu = document.getElementById(details.getAttribute('aria-controls')!)
-    expect(submenu, 'original Session details submenu').not.toBeNull()
-    item = [...submenu!.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+    item = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
       (entry) => entry.textContent?.trim() === label,
     )
     expect(item, label).toBeDefined()

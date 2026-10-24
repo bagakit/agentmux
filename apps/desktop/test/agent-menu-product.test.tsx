@@ -25,8 +25,8 @@ it('groups typed actions without implementation separators and exposes layout co
     { kind: 'separator' }, { kind: 'separator' }, { kind: 'promote', onSelect: promote },
     { kind: 'restart', onSelect: restart }
   ])
-  expect([...root.querySelectorAll('[role="menuitem"]')].map(node => (node.getAttribute('aria-label') ?? node.textContent)?.trim())).toEqual(['Take over', 'Restart Session…', 'Conversation history', 'Session details', 'Split Right', 'Move to New Tab'])
-  expect(root.querySelectorAll('[role="separator"]')).toHaveLength(3)
+  expect([...root.querySelectorAll('[role="menuitem"]')].map(node => (node.getAttribute('aria-label') ?? node.textContent)?.trim())).toEqual(['Conversation history', 'Session details', 'Take over', 'Restart Session…', 'Split Right', 'Move to New Tab'])
+  expect(root.querySelectorAll('[role="separator"]')).toHaveLength(2)
   expect(item(root, 'Split Right').getAttribute('aria-haspopup')).toBeNull()
   await act(async () => item(root, 'Split Right').click())
   expect(split).toHaveBeenCalledOnce(); expect(promote).not.toHaveBeenCalled(); expect(restart).not.toHaveBeenCalled()
@@ -39,6 +39,7 @@ it('keeps compact exact link actions and connector recovery issues directly in t
     { kind: 'connector-group', group: { label: 'Team chat', entries: [{ label: 'Bind existing group chat', onSelect: connect }], issue: 'Connection observation unavailable. Retry from this group.' } }
   ])
   expect(root.textContent).not.toContain('Copy Agent Link')
+  expect([...root.querySelectorAll('[role="menuitem"]')].slice(0, 2).map(node => node.getAttribute('aria-label'))).toEqual(['Copy Agent Link', 'Copy Region Link'])
   const links = root.querySelector('[role="group"][aria-label="Copy link"]')!
   expect([...links.querySelectorAll('[role="menuitem"]')].map(node => node.getAttribute('aria-label'))).toEqual(['Copy Agent Link', 'Copy Region Link'])
   expect(links.querySelector('[aria-haspopup]')).toBeNull()

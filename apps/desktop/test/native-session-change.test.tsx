@@ -28,7 +28,7 @@ beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true; host=docum
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();useAppStore.setState(initialStore,true);vi.restoreAllMocks()})
 async function render(element: any) { await act(async()=>root.render(element)) }
 async function click(text:string) { const element=[...document.querySelectorAll<HTMLElement>('[role=menuitem],button')].find(one=>one.textContent?.trim()===text);expect(element,`Missing ${text}`).toBeTruthy();await act(async()=>element!.click()) }
-async function menu(value: ReturnType<typeof session>,readOnly=false) { await render(createElement(AgentRegionHeader,{name:'Private Agent',executorLabel:'Private',sessionId:value.id,sessionKind:'agent',executionHost:{label:'This Mac',id:'local',kind:'local',cwd:_hygiene_fixturePath("private"),configured:true},regionId:'original-region',readOnly,onHistory:undefined,nativeSession:value}));const trigger=document.querySelector<HTMLButtonElement>('.agent-region-header__more')!;await act(async()=>{trigger.focus();trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}))}); const details=[...document.querySelectorAll<HTMLElement>('[role=menuitem]')].find(node=>node.textContent?.trim()==='Session details')!; expect(details).toBeTruthy(); await act(async()=>{details.focus();details.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))}) }
+async function menu(value: ReturnType<typeof session>,readOnly=false,openDetails=true) { await render(createElement(AgentRegionHeader,{name:'Private Agent',executorLabel:'Private',sessionId:value.id,sessionKind:'agent',executionHost:{label:'This Mac',id:'local',kind:'local',cwd:_hygiene_fixturePath("private"),configured:true},regionId:'original-region',readOnly,onHistory:undefined,nativeSession:value}));const trigger=document.querySelector<HTMLButtonElement>('.agent-region-header__more')!;await act(async()=>{trigger.focus();trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}))}); if(!openDetails)return; const details=[...document.querySelectorAll<HTMLElement>('[role=menuitem]')].find(node=>node.textContent?.trim()==='Session details')!; expect(details).toBeTruthy(); await act(async()=>{details.focus();details.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))}) }
 async function closeMenu() {
  const trigger=document.querySelector<HTMLButtonElement>('.agent-region-header__more')!
  await act(async()=>document.querySelector('[data-menu-entry=more]')!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})))
@@ -64,9 +64,9 @@ it('shows a corner label and exact two-step confirmation; cancellation writes no
 })
 it('unknown cannot invent a candidate and rechecks the true source even if history reading fails',async()=>{
  vi.mocked(api.sessions.historyPage).mockRejectedValueOnce(new Error('Reader unavailable after discovery'))
- await menu(session({nativeSourceObservation:{...observation,state:'unknown'}}));expect(document.querySelector('[data-native-source-marker]')?.textContent).toBe('Source unknown');expect(document.body.textContent).not.toContain('Review source change…');await click('Check native source');expect(api.sessions.historyPage).toHaveBeenCalledWith(control,{refreshNativeSource:true,limit:1});expect(useAppStore.getState().refreshSession).toHaveBeenCalledWith(control.agentSessionId);expect(document.body.textContent).toContain('Reader unavailable after discovery')
+ await menu(session({nativeSourceObservation:{...observation,state:'unknown'}}),false,false);expect(document.querySelector('[data-native-source-check]')?.closest('[role=menu]')?.classList.contains('agent-region-menu')).toBe(true);expect(document.querySelector('[data-native-source-marker]')?.textContent).toBe('Source unknown');expect(document.body.textContent).not.toContain('Review source change…');await click('Check native source');expect(api.sessions.historyPage).toHaveBeenCalledWith(control,{refreshNativeSource:true,limit:1});expect(useAppStore.getState().refreshSession).toHaveBeenCalledWith(control.agentSessionId);expect(document.body.textContent).toContain('Reader unavailable after discovery')
 })
-it.each([undefined,old])('offers real discovery without guessing a changed source for %j',async handle=>{ await menu(session({nativeHandle:handle}));expect(document.querySelector('[data-native-source-marker]')).toBeNull();expect(document.body.textContent).toContain('Check native source');await click('Check native source');expect(api.sessions.historyPage).toHaveBeenCalledWith(control,{refreshNativeSource:true,limit:1}) })
+it.each([undefined,old])('offers real discovery without guessing a changed source for %j',async handle=>{ await menu(session({nativeHandle:handle}),false,false);expect(document.querySelector('[data-native-source-marker]')).toBeNull();expect(document.body.textContent).toContain('Check native source');await click('Check native source');expect(api.sessions.historyPage).toHaveBeenCalledWith(control,{refreshNativeSource:true,limit:1}) })
 it('keeps a stale reviewed payload exact and reports Core CAS refusal without adopting it',async()=>{
  const confirm=vi.spyOn(api.sessions,'confirmNativeSession').mockRejectedValue(new Error('Observation changed; review the current candidate'))
  await menu(session({observedNativeHandle:candidate,nativeSourceObservation:observation}));await click('Review source change…');await render(createElement(AgentRegionHeader,{name:'Private Agent',executorLabel:'Private',sessionId:control.agentSessionId,sessionKind:'agent',executionHost:{label:'This Mac',id:'local',kind:'local',cwd:_hygiene_fixturePath("private"),configured:true},regionId:'original-region',readOnly:false,onHistory:undefined,nativeSession:session({observedNativeHandle:{...candidate,sessionId:'newer-candidate'},nativeSourceObservation:{...observation,observedAt:101}})}));await click('Confirm this native source');expect(confirm.mock.calls[0]?.[1].candidateNativeHandle).toEqual(candidate);expect(document.body.textContent).toContain('Observation changed');expect(useAppStore.getState().sessions.find(value=>value.kind==='agent')?.nativeHandle).toEqual(old)
@@ -107,18 +107,20 @@ it('keeps keyboard focus in the same menu across candidate review, cancellation 
  const confirm=vi.spyOn(api.sessions,'confirmNativeSession').mockResolvedValue({session:core({nativeHandle:candidate}),confirmation,persisted:true,current:true})
  await menu(session({nativeSourceObservation:ambiguous}))
  const item=(label:string)=>[...document.querySelectorAll<HTMLElement>('[role=menuitem]')].find(node=>node.textContent?.trim()===label)!
- const check=item('Check native source')
+ const details=item('Choose target: '+candidate.sessionId).closest<HTMLElement>('[role=menu]')!
+ expect(details).not.toBeNull()
+ expect(item('Check native source').closest('[role=menu]')).not.toBe(details)
  const activate=async(label:string)=>{const row=item(label);expect(row).toBeTruthy();await act(async()=>{row.focus();row.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))})}
  await activate('Choose target: '+candidate.sessionId)
- expect(document.activeElement).toBe(check)
- await act(async()=>check.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})))
+ expect(document.activeElement).toBe(details)
+ await act(async()=>details.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})))
  await act(async()=>{await vi.waitFor(()=>expect(document.activeElement).toBe(item('Confirm this native source')))})
  await activate('Cancel source change')
- expect(document.activeElement).toBe(check)
+ expect(document.activeElement).toBe(details)
  expect(confirm).not.toHaveBeenCalled()
  await activate('Choose target: '+candidate.sessionId)
  await activate('Confirm this native source')
- expect(document.activeElement).toBe(check)
+ expect(document.activeElement).toBe(details)
  expect(confirm).toHaveBeenCalledOnce()
  await closeMenu()
 })
