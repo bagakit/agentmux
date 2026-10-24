@@ -259,12 +259,18 @@ export class PublicationHost implements ConnectionDeliveryPort {
     // Transient fragment state is bounded to one original batch. A restart discards
     // it and resumes the original durable cut, preserving all unknown effects.
     lane.read ??= { after }
+    let nativeFailure: { code?: string } | undefined
     for (let reads = 0; reads < 8; reads++) {
       if (signal.aborted || !this.authorized(binding)) return
       const state = lane.read, input = { ...reference, checkpoint: state.after, limit: 100, ...(state.cursor ? { cursor: state.cursor } : {}), ...(lane.view ? { view: lane.view } : {}) }
       let page: ConversationChangesPage
       try { page = parseConversationChangesPage(await this.options.conversation.changes(input, signal), input) }
       catch (error) { lane.read = undefined; lane.view = undefined; lane.viewId = undefined; this.sourceUnavailable(lane, 'source-gap', error, connectionDiagnosisCheckpointKey(state.after)); return }
+      // Core may return captured records while the exact native changes read failed.
+      // The current page, not an established cut or an open watch, owns that fact.
+      const unavailable = page.coverage.find(value => (value.source.kind === 'native' || value.source.kind === 'native-unavailable') &&
+        (value.current === 'unavailable' || value.current === 'unsupported' || value.gaps.length > 0))
+      nativeFailure = unavailable ? { ...(unavailable.gaps[0]?.code ? { code: unavailable.gaps[0].code } : {}) } : undefined
       const consumed = consumeConversationWindowPage(page, state.pending)
       if (consumed.kind === 'pending') {
         state.pending = consumed.pending
@@ -285,12 +291,12 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (!page.more) { lane.read = undefined; break }
       if (reads === 7) lane.dirty = true
     }
-    const failure = lane.watch?.failure
-    if (failure) this.sourceUnavailable(lane, 'source-unconfirmed', failure.code ? new AgentMuxError('The original publication subscription is unavailable.', failure.code) : undefined, connectionDiagnosisCheckpointKey(after))
+    const failure = nativeFailure ?? lane.watch?.failure
+    if (failure) this.sourceUnavailable(lane, nativeFailure ? 'source-gap' : 'source-unconfirmed', failure.code ? new AgentMuxError('The original publication source is unavailable.', failure.code) : undefined, connectionDiagnosisCheckpointKey(after))
     else lane.sourceObservation = { state: 'ready', code: null, codeRecorded: false, checkpointKey: connectionDiagnosisCheckpointKey(after) }
     await this.recoverContent(lane, adapter)
     lane.observation = this.store.coverage(binding).state === 'incomplete' ? { state: 'unavailable', reason: 'content-unconfirmed' }
-      : lane.watch?.handle && !lane.watch.failure && !lane.watch.handle.closed.aborted ? { state: 'ready' } : { state: 'unavailable', reason: 'source-unconfirmed' }
+      : lane.sourceObservation?.state === 'ready' && lane.watch?.handle && !lane.watch.failure && !lane.watch.handle.closed.aborted ? { state: 'ready' } : { state: 'unavailable', reason: 'source-unconfirmed' }
   }
   private sourceUnavailable(lane: Lane, reason: 'source-unconfirmed' | 'source-gap', error: unknown, checkpointKey = lane.sourceObservation?.checkpointKey ?? null): void {
     const code = error instanceof AgentMuxError ? error.code : undefined
