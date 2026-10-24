@@ -28,6 +28,13 @@ reasoning, tools and platform notices are not answers. message ls/read cover ori
 participation. Read leaf help for the exact Host, source, cursor and authorization contract.
 Discovery never grants access to another Agent's private messages or working surface.
 
+agent conversation checkpoint cuts current native and captured positions by default.
+Use --native-position beginning only when the consuming owner explicitly needs the original
+native source start. It returns a Provider-owned beginning cursor without reading or skipping
+the first item; captured sources still use their current independent cut. An unavailable native
+source stays unavailable. Reading a beginning checkpoint grants no earlier-history sharing,
+input retry, new source selection or permission; retain the original audience boundary.
+
 Trusted first-party human inputs saved by Core also appear in the original captured
 conversation while waiting. The same inputRef and record survive rejoin and dispatch;
 recorded means its public content is saved. inputSubmission retains the original
