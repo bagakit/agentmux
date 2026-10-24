@@ -96,6 +96,17 @@ it('keeps confirmed original navigation available when the details read fails an
   vi.mocked(api.notebooks.content).mockRejectedValue(new Error('Original detail reader unavailable'))
   await f.mount(); await dom.click('.note-links-toggle')
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Links from this note (at least 1)'))
+  expect(dom.container.querySelector('.note-links-toggle')!.textContent).toBe('Linked references')
+  expect([...dom.container.querySelectorAll('.note-links-state')].some(node => node.textContent?.includes('Partial link coverage'))).toBe(false)
+  const coverage = dom.container.querySelector<HTMLDetailsElement>('.note-links-coverage')!
+  expect(coverage.open).toBe(false); expect(coverage.querySelector('summary')!.getAttribute('aria-description')).toBe('Partial link coverage')
+  await act(async () => coverage.querySelector('summary')!.click())
+  expect(coverage.open).toBe(true);expect(coverage.textContent).toContain('Saved partial catalog');expect(coverage.textContent).toContain('originals read')
+  await dom.click('.note-links-toggle')
+  expect(dom.container.querySelector('.note-links-toggle')!.textContent).toBe('Linked references')
+  expect(dom.container.querySelector('.note-links-toggle')!.getAttribute('aria-description')).toBe('Partial link coverage')
+  expect(dom.container.querySelector('.note-links-toggle [data-semantic-icon="status.unknown"]')).not.toBeNull()
+  await dom.click('.note-links-toggle')
   await clickText('Shared content')
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Original detail reader unavailable'))
   const original = dom.container.querySelector<HTMLButtonElement>('.note-links-shared-original .note-links-target')!

@@ -125,7 +125,8 @@ it('reads related originals by default, reuses full context, and opens a selecte
   await dom.click('[aria-label="Full note: Original target"]')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Saved target'))
   const block = dom.container.querySelector<HTMLElement>('.note-canvas-reader [data-block-id="target-block"]')!
-  expect(block.querySelector('[data-author-block]')?.textContent).toBe('Agent · ExactRes…')
+  expect(block.querySelector('[data-author-block]')?.textContent).toBe('')
+  expect(block.querySelector('[data-author-block]')?.getAttribute('aria-label')).toContain('Agent · ExactRes…')
   expect(block.querySelector('[data-author-block]')?.getAttribute('aria-haspopup')).toBe('dialog')
   expect(dom.container.querySelector('.note-canvas-reader [contenteditable]')?.getAttribute('contenteditable')).toBe('false')
   await act(async () => block.click()); await dom.click('.note-canvas-open-block')
@@ -415,6 +416,9 @@ it('attaches the real Reader original blocks as independent Block nodes and keep
   const endpoint = (noteId: string, blockId: string) => [...dom.container.querySelectorAll<HTMLElement>(`.note-canvas-block-node[data-note-id="${noteId}"] [data-port-block-id]`)].find(element => element.dataset.portBlockId === blockId)
   const labels = () => [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-edge-label')]
   await vi.waitFor(() => expect(endpoint('target', 'target-block')).toBeDefined())
+  const badge = dom.container.querySelector('.note-canvas-block-node[data-note-id="target"] .note-canvas-block-badge')!
+  expect(badge.textContent).not.toContain('target-block')
+  expect(badge.getAttribute('title')).toBe('Original block: target-block')
   await vi.waitFor(() => expect(labels().filter(label => label.dataset.relationshipKind === 'reference').map(label => label.dataset.sourceBlock)).toEqual(['source-reference-0', 'source-reference-1']))
   expect(dom.container.querySelector('.note-canvas-reader .mobile-note-reference[data-block-id="source-reference-0"]')).not.toBeNull()
   await vi.waitFor(() => expect(labels().filter(label => label.dataset.targetKind === 'block').every(label => label.dataset.targetBlock === 'target-block')).toBe(true))

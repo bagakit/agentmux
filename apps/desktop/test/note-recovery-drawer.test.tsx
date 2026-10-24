@@ -144,6 +144,38 @@ it('keeps ordinary retained input and conversion backups available without makin
   expect(api.files.write).not.toHaveBeenCalled()
 })
 
+it('keeps passive history and title uncertainty in the existing entry with their original detail and editor intact', async () => {
+  const current = original()
+  current.noteEditing!.receipt = { status: 'written', revision: current.revision,
+    noteHistory: { status: 'unconfirmed', reason: 'Original history record unavailable' },
+    noteTitleProjection: { status: 'unconfirmed', noteId: 'original', resource, code: 'catalog-unavailable', message: 'Original title catalog unavailable' } }
+  useAppStore.setState({ documents: { [key]: current } })
+  await mount()
+  const input = dom.container.querySelector('[aria-label="Mounted Note input"]')!
+  const entry = dom.container.querySelector<HTMLButtonElement>('[aria-label="Open versions and recovery"]')!
+  expect(dom.container.querySelector('.note-recovery-summary')).toBeNull()
+  expect(entry.textContent).toBe('History');expect(entry.title).toContain('History unconfirmed');expect(entry.title).toContain('Page-list title unconfirmed')
+  expect(entry.getAttribute('aria-description')).toBe('History unconfirmed · Page-list title unconfirmed')
+  await click('Open versions and recovery')
+  expect(drawer()!.textContent).toContain('Original history record unavailable');expect(drawer()!.textContent).toContain('Original title catalog unavailable')
+  expect(api.files.historyPublic).not.toHaveBeenCalled()
+  await click('Close versions and recovery', drawer()!)
+  expect(dom.container.querySelector('[aria-label="Mounted Note input"]')).toBe(input)
+  expect(api.files.write).not.toHaveBeenCalled();expect(useAppStore.getState().documents[key]).toBe(current)
+})
+
+it('keeps an actual failed save visible with its original reason and preserved draft', async () => {
+  useAppStore.setState({ documentIssues: { [key]: { kind: 'write-error', message: 'Original disk is full' } } })
+  await mount()
+  const input = dom.container.querySelector('[aria-label="Mounted Note input"]')!
+  expect(dom.container.querySelector('.note-recovery-summary')!.textContent).toContain('Save failed; draft kept')
+  await click('View')
+  expect(drawer()!.textContent).toContain('Original disk is full')
+  expect(drawer()!.textContent).toContain('Your draft is still unsaved')
+  expect(dom.container.querySelector('[aria-label="Mounted Note input"]')).toBe(input)
+  expect(useAppStore.getState().documents[key]!.content).toBe(original().content);expect(api.files.write).not.toHaveBeenCalled()
+})
+
 it('aggregates overlapping recovery facts into one summary while exposing original requests and conflict actions only in recovery', async () => {
   const current = original(), incoming = content('Incoming agent change')
   current.noteEditing!.attempt = { operationId: 'original-unknown-operation', noteId: 'original', content: content('Original submitted body'), expectedRevision: current.revision, generation: 1, resource, phase: 'unknown' }
@@ -158,7 +190,8 @@ it('aggregates overlapping recovery facts into one summary while exposing origin
   await mount()
   expect(dom.container.querySelectorAll('.editor-file-notices [role="status"]')).toHaveLength(1)
   expect(dom.container.querySelector('.note-recovery-summary')!.textContent).toContain('Original save unconfirmed')
-  expect(dom.container.querySelector('.note-recovery-summary span')!.getAttribute('title')).toContain('Authorship unconfirmed')
+  expect(dom.container.querySelector('.note-recovery-summary span')!.getAttribute('title')).not.toContain('Authorship unconfirmed')
+  expect(dom.container.querySelector('[aria-label="Open versions and recovery"]')!.getAttribute('title')).toContain('Authorship unconfirmed')
   expect(dom.container.querySelector('[aria-label="Mounted readonly comparison"]')).toBeNull()
   expect([...dom.container.querySelectorAll('button')].some(button => button.textContent === 'Overwrite with this draft')).toBe(false)
   await click('View')
@@ -219,6 +252,7 @@ it('returns Escape focus to the opener and stops hidden activity without stealin
   const neighbor = document.createElement('button'); neighbor.textContent = 'Neighboring Agent input'; document.body.append(neighbor)
   try {
     neighbor.focus(); await mount({ visible: false, active: false })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
     expect(drawer()).toBeNull(); expect(document.activeElement).toBe(neighbor)
     await act(async () => useAppStore.setState({ agentNames: { unrelated: 'Other agent' } }))
     expect(api.files.historyPublic).toHaveBeenCalledTimes(2)
