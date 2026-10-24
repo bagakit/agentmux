@@ -273,6 +273,10 @@
       "types": "./dist/goals.d.ts",
       "import": "./dist/goals.js"
     },
+    "./goal-discussion-launcher": {
+      "types": "./dist/goal-discussion-launcher.d.ts",
+      "import": "./dist/goal-discussion-launcher.js"
+    },
     "./goal-discussion-bindings": {
       "types": "./dist/goal-discussion-bindings.d.ts",
       "import": "./dist/goal-discussion-bindings.js"
