@@ -1,6 +1,7 @@
-import { app } from 'electron'
+import { app, clipboard, nativeImage } from 'electron'
 import { join, resolve } from 'node:path'
 import { NativeDesktop } from '@agentmux/native-desktop'
+import { nativeImageFromBrowserPng } from './browser-image.js'
 
 /** Explicit host profiles; a missing artifact never selects another executable. */
 export function resolvedNativeDesktopOptions(): { appPath: string } | { executablePath: string } {
@@ -20,4 +21,20 @@ export function getNativeDesktopOwner(): NativeDesktop {
     })
   }
   return owner
+}
+
+type DesktopNativeUiOwner = Pick<NativeDesktop, 'captureScreenshot' | 'readClipboardText' | 'writeClipboardText' | 'writeClipboardImage'>
+
+// These existing Electron operations retain their original platform owner.
+// NativeDesktop itself remains macOS-only, including its public Core port.
+const electronUiOwner: DesktopNativeUiOwner = {
+  captureScreenshot: input => getNativeDesktopOwner().captureScreenshot(input),
+  readClipboardText: async () => clipboard.readText(),
+  writeClipboardText: async text => { clipboard.writeText(text) },
+  writeClipboardImage: async image => { clipboard.writeImage(nativeImageFromBrowserPng(image, nativeImage.createFromBuffer)) }
+}
+
+/** Platform is fixed before each operation; a failed native request never changes its owner. */
+export function getDesktopNativeUiOwner(): DesktopNativeUiOwner {
+  return process.platform === 'darwin' ? getNativeDesktopOwner() : electronUiOwner
 }
