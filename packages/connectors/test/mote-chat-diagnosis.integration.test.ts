@@ -41,12 +41,14 @@ it('reads frozen runtime and one bounded generation publication window through t
   const runtime = vi.spyOn(f.services.ingress!, 'inspectInputRuntime'), rejoin = vi.spyOn(f.client, 'rejoinAgentInputWaiting')
   const inspect = f.services.ingress!.inspect.bind(f.services.ingress!)
   const inspectSpy = vi.spyOn(f.services.ingress!, 'inspect')
+  await writeFile(join(f.topic.physicalDirectoryPath!, 'MOTE.md'), '---\nversion: 1\ndefaults:\n  executorId: unavailable-executor\n---\n')
   const report = await f.cli('diagnose', { target: f.target }, f.credentials(0))
   expect(list).toHaveBeenCalledOnce(); expect(runtime).toHaveBeenCalledOnce()
   expect(report.incoming.rows).toHaveLength(2)
   for (const row of report.incoming.rows) expect(row.input).toMatchObject({ status: 'terminal-confirmed', runtime: { target: 'original', state: 'running', exitCode: null } })
   expect(report.publications).toHaveLength(1)
-  expect(report.publications[0]).toMatchObject({ intakeKeys: report.incoming.rows.map((row: { key: string }) => row.key), reading: 'observed', effects: [], more: false })
+  expect(report.readiness).toEqual({ state: 'unavailable', code: 'MOTE_CHAT_EXECUTOR_UNAVAILABLE' })
+  expect(report.publications[0]).toMatchObject({ preparedProviderId: 'claude', intakeKeys: report.incoming.rows.map((row: { key: string }) => row.key), reading: 'observed', effects: [], more: false })
   mode = 'source-failure'
   const failed = await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
   expect(failed.publications[0]).toMatchObject({ reading: 'observed', sourceObservation: { state: 'unavailable', code: 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE' },
@@ -91,6 +93,8 @@ it('diagnoses retained private preparation through authenticated CLI without gra
   const store = new MoteChatStore(f.services.database!)
   const admission = store.admissionByIngress(record.ingressId)!, generation = store.generation(admission.generationId)!
   const report = await f.cli('diagnose', { target: f.target }, f.credentials(0))
+  expect(report.publications.find((row: { intakeKeys: string[] }) => row.intakeKeys.includes(moteChatDiagnosisKey(f.target, record.ingressId))))
+    .toMatchObject({ preparedProviderId: null })
   expect(report).toMatchObject({ targetKey: moteChatDiagnosisKey(f.target), limit: 5,
     configuration: { enabled: true, revision: 1, connection: { connectionId: 'original-bot' } },
     readiness: { state: 'unavailable', code: 'MOTE_CHAT_EXECUTOR_UNAVAILABLE' }, issues: [],
