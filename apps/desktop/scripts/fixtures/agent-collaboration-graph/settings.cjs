@@ -1,6 +1,24 @@
 const assert = require('node:assert/strict')
 const readerSelector = '.agent-information-reader'
 
+function verifyReadingEndpoints(records) {
+  assert.deepEqual(records?.map(record => record.label), ['saved-profile-reading', 'restore-after-information'], 'Both explicit saved-profile reading endpoints must be observed')
+  for (const record of records) {
+    assert.equal(record.reached, true, 'The actual original camera must reach the saved reading endpoint within the bounded wait')
+    assert.ok(record.before && record.final && record.samples?.length > 0, 'Reading endpoint evidence cannot be empty')
+    assert.deepEqual(record.samples[0], record.before)
+    assert.deepEqual(record.samples.at(-1), record.final)
+    for (const sample of record.samples) {
+      assert.ok(Number.isFinite(sample.zoom) && sample.zoom > 0 && typeof sample.camera === 'string' && sample.camera.includes('scale('), 'Record the actual viewport transform')
+      assert.equal(sample.profile?.boundary, 'polygon')
+      assert.equal(sample.profile?.levels?.length, 4)
+      assert.deepEqual(sample.profile.levels[3], { form: 'card', information: 'summary', from: .92, to: 1.12 })
+      assert.deepEqual(sample.profile, records[0].before.profile, 'The camera consumes the same original saved profile throughout both explicit locates')
+    }
+    assert.ok(record.final.zoom >= 1.119 && record.final.zoom <= 1.121, 'The observed final camera reaches the original strict endpoint')
+  }
+}
+
 function verifyInformation(samples) {
   assert.deepEqual(samples?.map(sample => sample.budget), ['summary', 'status', 'identity'], 'All three actual information budgets must be observed in order')
   const first = samples[0]
@@ -33,11 +51,25 @@ function verifyInformation(samples) {
 /** Original settings and Map, driven by Chromium input. Reads never assign a
  * control value, camera transform, world coordinate or product identity. */
 module.exports = async function settings({ win, result, read, click, key, move, frame, check, intact, closeDetails, locate, pause, until, matrix }) {
-  const evidence = result.mapSettings = { phases: [], hitTests: [], controlEdits: [], informationSamples: [], boundary: 'Original App/Focus settings/ConfigOwner and original Graph/Reader; controlled platform facts only. No real user configuration, Session or Run touched.' }
+  const evidence = result.mapSettings = { phases: [], hitTests: [], controlEdits: [], informationSamples: [], readingEndpoints: [], boundary: 'Original App/Focus settings/ConfigOwner and original Graph/Reader; controlled platform facts only. No real user configuration, Session or Run touched.' }
   const profile = () => read('window.graphCapture.preferences()?.map')
   const layout = () => read('window.graphCapture.deliveredLayout().boxes')
   const readerCount = () => read(`document.querySelectorAll(${JSON.stringify(readerSelector)}).length`)
   const settled = () => until('original settings world has settled', () => read('window.graphCapture.deliveredLayout()?.busy===false'))
+  async function readingEndpoint(label) {
+    const observe = () => read(`(()=>{const viewport=document.querySelector('.react-flow__viewport');return{zoom:new DOMMatrix(getComputedStyle(viewport).transform).a,camera:viewport.getAttribute('style'),profile:window.graphCapture.preferences()?.map}})()`)
+    const before = await observe(), record = { label, before, samples: [before], final: before, reached: false }
+    evidence.readingEndpoints.push(record)
+    // An actionable mark and an idle layout can precede the end of setCenter.
+    // Observe the original camera; neither a sleep nor a camera assignment proves its destination.
+    await until('original camera reaches the exact saved reading endpoint: ' + label, async () => {
+      const current = await observe()
+      if (JSON.stringify(current) !== JSON.stringify(record.samples.at(-1))) record.samples.push(current)
+      record.final = current
+      return current.zoom >= 1.119 && current.zoom <= 1.121
+    })
+    record.reached = true
+  }
   async function reveal(selector) { await read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Original control missing');e.scrollIntoView({block:'center'});return true})()`); await pause(60) }
   async function choose(label, value) {
     const selector = `select[aria-label="${label}"]`
@@ -137,6 +169,7 @@ module.exports = async function settings({ win, result, read, click, key, move, 
     await frame('settings-saved-profile-reopened')
     await close()
     await locate('fixture-terrain-a'); await closeDetails(); await settled()
+    await readingEndpoint('saved-profile-reading')
     const zoom = await read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`)
     assert.ok(zoom >= 1.119 && zoom <= 1.121, 'Explicit later reading consumes the saved LOD endpoint')
     const outlines = await read(`[...document.querySelectorAll('.collaboration-area__envelope path')].map(path=>path.getAttribute('d'))`)
@@ -152,7 +185,9 @@ module.exports = async function settings({ win, result, read, click, key, move, 
     verifyInformation(evidence.informationSamples)
     assert.deepEqual(await layout(), informationGeometry, 'Changing information budget by native wheel changes no world slot')
     await locate('fixture-terrain-a'); await closeDetails(); await settled()
+    await readingEndpoint('restore-after-information')
     assert.ok(Math.abs(await read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`) - 1.12) < .002, 'The next explicit locate restores the same saved reading endpoint')
+    verifyReadingEndpoints(evidence.readingEndpoints)
     evidence.phases.push({ phase: 'custom-saved-reopened', before, saved, zoom, outlines })
     await intact()
 
@@ -187,6 +222,7 @@ module.exports.verify = (evidence, frames) => {
   assert.deepEqual(evidence.phases.map(phase => phase.phase), ['custom-saved-reopened', 'point-only-real-hit-and-reader', 'defaults-restored'])
   assert.ok(evidence.hitTests.length > 0 && evidence.hitTests.every(hit => hit.readerBefore === false && hit.readerAfter === false))
   assert.deepEqual(evidence.readerMeasurement, { selector: readerSelector, count: 1 }, 'Reader absence samples require a nonempty measurement of the existing actual Reader')
+  verifyReadingEndpoints(evidence.readingEndpoints)
   verifyInformation(evidence.informationSamples)
   for (const label of ['settings-two-level-draft', 'settings-invalid-kept-draft', 'settings-custom-four-level-dark', 'settings-custom-narrow-dark', 'settings-custom-narrow-light', 'settings-saved-profile-reopened', 'settings-polygon-map-custom-reading', 'settings-status-only-map', 'settings-identity-only-map', 'settings-all-point-accurate-reader', 'settings-map-defaults-restored']) assert.ok(frames.some(frame => frame.label === label), 'Missing original native settings frame ' + label)
 }
