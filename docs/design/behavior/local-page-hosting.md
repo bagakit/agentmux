@@ -182,7 +182,7 @@ Capsule 使用指南建议 Agent 为对话内嵌的新页面显式选择注入�
 
 展示与页面身份分别成立：有 Region 的卡片消费真实承载位置，无空间 Region 的 Gallery／Focus 卡片按已鉴权原 Renderer 和窗口文档标识内嵌 occurrence，不制造 Core Region，不借焦点或 cwd 猜展示。准确原消息／来源、content part、Markdown 嵌入位置、原 URI 和承载工作面共同限定内嵌呈现引用；不同消息或同页的不同嵌入不合并。沿现有身份组件派生同一 Browser 寻址，原 native owner 的 existing／released 绑定保持唯一，消息暂离阅读窗口或组件卸载后再回原位置仍复用原 Browser，不以另开一页代替保留的表单和 DOM。缺少准确来源或承载位置的独立阅读面保原地址；位置未确认时就近说明并保完整打开动作，不创建匿名、可能互串的页面，也不因此判原页面故障。
 
-隐藏撤原 lease 与 capture，沿原 native release 的 released／retained／unknown 回执保原 Browser 和导航身份，不自动 Close、不清表单或重放未知操作。原生输入覆盖不能越出真实滚动窗口或遮住时间尺：部分裁剪时保 live capture 和原页，仅撤下不适用于当前几何的 native 输入覆盖；完整进入阅读窗口或打开原 Browser 后仍可交互，几何不成为页面／Agent 权限或健康事实。完整 Browser 打开仍沿原 Capsule 公共 owner。
+隐藏撤原 lease 与 capture，沿原 native release 的 released／retained／unknown 回执保原 Browser 和导航身份，不自动 Close、不清表单或重放未知操作。页面 DOM 与可信宿主答复编辑分别保全；尚未保存的答复、原保存基线及 unknown 操作句柄沿同一准确 Browser／Capsule／问题的编辑 owner 保留，不随隐藏、滚出或消息组件卸载丢失。恢复挂载只回接和查询原操作，不自动保存、确认或重发；迟到回执不能覆盖后来的输入。原生输入覆盖不能越出真实滚动窗口或遮住时间尺：部分裁剪时保 live capture 和原页，仅撤下不适用于当前几何的 native 输入覆盖；完整进入阅读窗口或打开原 Browser 后仍可交互，几何不成为页面／Agent 权限或健康事实。完整 Browser 打开仍沿原 Capsule 公共 owner。
 
 共享阅读通过窄 host adapter 呈现，不持页面事实或第二份 Browser／交互账本。外部原生 Channel 卡片按本平台实际能力保原文和引用，不因协议或 skill 获得网页执行能力。公开查询和打开复用 `capsule.inspect`／`capsule.open`，服务、模式、授权和操作查询合同保持。
 
