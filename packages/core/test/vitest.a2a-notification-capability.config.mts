@@ -10,7 +10,8 @@ const mutations = {
   'missing-transport-silenced': { file: 'client.ts', before: 'if (!provider.prepareNativeInput) return { ...observation, unavailable:', after: 'if (false) return { ...observation, unavailable:' },
   'diagnostic-repeat': { file: 'agent-message-notifications.ts', before: 'if (this.unavailableReads.get(agentSessionId) !== failure)', after: 'if (true)' },
   'diagnostic-recovery-stuck': { file: 'agent-message-notifications.ts', before: '    this.unavailableReads.delete(agentSessionId)\n', after: '' },
-  'diagnostic-run-omitted': { file: 'client.ts', before: 'evidence: { source: \'agentmux\', observedAt: Date.now(), ...(run ? { run } : {}) }', after: 'evidence: { source: \'agentmux\', observedAt: Date.now() }' }
+  'diagnostic-run-omitted': { file: 'client.ts', before: 'evidence: { source: \'agentmux\', observedAt: Date.now(), ...(run ? { run } : {}) }', after: 'evidence: { source: \'agentmux\', observedAt: Date.now() }' },
+  'explicit-recovery-disabled': { file: 'client.ts', before: ": { ...base, expectedRun: notice.key.expectedRun, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' }", after: ": { ...base, expectedRun: notice.key.expectedRun, admissionIntent: { kind: 'manual-actor' }, execution: 'default' }" }
 } as const
 if (mutation && !Object.hasOwn(mutations, mutation)) throw new Error('Unknown A2A notification capability mutation')
 export default defineConfig({ ...base, plugins: [...(base.plugins ?? []), {

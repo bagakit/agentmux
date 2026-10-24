@@ -64,12 +64,33 @@ it('explains the missing built-in Grok idle notification transport while preserv
   expect(h.providers.get('grok').prepareNativeInput).toBeUndefined()
   await h.send('original-grok-message'); await retained(h, 'original-grok-message')
   expect(h.events).toContainEqual(expect.objectContaining({ type: 'agent-error', agentSessionId: 'recipient',
-    code: 'A2A_NOTIFICATION_UNCONFIRMED', message: expect.stringContaining('idle-only'), evidence: expect.objectContaining({ run: h.original.run }) }))
+    code: 'A2A_NOTIFICATION_UNCONFIRMED', message: expect.stringContaining('automatic idle-only Inbox notifications'), evidence: expect.objectContaining({ run: h.original.run }) }))
+  expect(h.diagnostics()[0]?.message).toContain('healthy manual input')
+  expect(h.diagnostics()[0]?.message).toContain('explicitly notify')
   const ack = await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: h.original.run, source: 'user', data: 'Existing draft' })
   expect(ack.appliedByteRange).toEqual({ startByte: 0, endByte: Buffer.byteLength('Existing draft') })
   expect(h.inner.kernel.input).toHaveBeenCalledTimes(1)
   expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   expect(h.client.agentSession('recipient').semanticStatus).toEqual(h.semanticStatus)
+})
+
+it('uses the built-in Grok terminal input to explicitly notify an original MID while its automatic queue is unavailable', async () => {
+  const h = await fixture('grok')
+  await h.send('original-grok-reference'); await retained(h, 'original-grok-reference')
+  const request = { operationId: 'grok-explicit-notice', messageIds: ['original-grok-reference'], caller: h.credentials }
+  const result = await h.client.notifyMessages(request)
+  expect(result.notification).toMatchObject({ state: 'submitted', mode: 'steer', messageIds: ['original-grok-reference'],
+    key: { expectedRun: h.original.run, submissionId: request.operationId } })
+  expect(result.input?.admission?.acknowledged === true || result.input?.terminalPromptSubmission?.submit.acknowledged === true).toBe(true)
+  expect(h.inner.kernel.input).toHaveBeenCalledTimes(1)
+  const wire = vi.mocked(h.inner.kernel.input as (...args: any[]) => unknown).mock.calls[0]![1].data as string
+  expect(wire).toContain('msg-id="original-grok-reference"')
+  expect(wire).not.toContain('Retained original original-grok-reference')
+  expect((await h.queue.readByMessageId('original-grok-reference'))?.envelope.body).toBe('Retained original original-grok-reference')
+  const repeated = await h.client.notifyMessages(request)
+  expect(repeated.notification.key).toEqual(result.notification.key)
+  expect(h.inner.kernel.input).toHaveBeenCalledTimes(1)
+  expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 it.each([true, false])('checks the actual native input contribution before waiting on current working=%s', async working => {
