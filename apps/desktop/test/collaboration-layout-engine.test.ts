@@ -117,6 +117,88 @@ describe('finite collaboration Worker engine', () => {
     console.info(JSON.stringify({ candidate: 'adaptive-addition', oldNeighborMovement: distance(peer, before.get('peer')!), weighted, fixedEndpointLowerBound: 12600, work: result.work }))
   })
 
+  it('reclaims a recorded compound vacancy when one occurrence migrates with both original weak messages retained', async () => {
+    const occurrence = (area: string, subject: string) => JSON.stringify([area, subject])
+    const members = Array.from({ length: 12 }, (_, index) => occurrence('work', 'member-' + String(index).padStart(2, '0')))
+    const reading = members[0]!, control = occurrence('control', 'control'), fresh = occurrence('work', 'new-member')
+    // An anonymized relative-coordinate slice observed from the original
+    // product Worker after a real compound arrangement and strong addition.
+    // Replay retains the old geometry, not a hand-authored expected target;
+    // the separate force-arrangement case still exercises a fresh real solve.
+    const positions = [[0, 0], [104.3, -71.9], [106, -151.2], [136.4, -218.3], [351.4, -327], [526.4, -185.3],
+      [571.8, -114.7], [800.1, -60.3], [786.9, 12], [755.27559791, 90.04573756], [747.78147361, 158.60511914], [591.42451525, 225.02126132]]
+    const added: CollaborationLayoutInput = { areas: [{ id: 'root', name: 'Ancestor', members: [], folded: false },
+      { id: 'middle', name: 'Middle', parentId: 'root', members: [], folded: false },
+      { id: 'work', name: 'Work', parentId: 'middle', members: [...members, fresh], folded: false },
+      { id: 'holding', name: 'New membership', members: [], folded: false },
+      { id: 'control', name: 'Unrelated', members: [control], folded: false }],
+      nodes: [...members, fresh].map(id => ({ id, areaId: 'work', width: 154, height: 38 })).concat([{ id: control, areaId: 'control', width: 154, height: 38 }]),
+      connections: [...members.slice(1).map((id, index) => edge('chain-' + index, members[index]!, id)),
+        { ...edge('new-reader', fresh, reading), strength: 32 }, { ...edge('new-peer', fresh, members[11]!), strength: 32 }] }
+    const boxes: CollaborationLayoutBox[] = [
+      ...([['root', -78, -625, 1104.1, 960.02126132, 24, 24, 40], ['middle', -54, -529, 1056.1, 840.02126132, 24, 24, 40],
+        ['work', -30, -433, 1008.1, 720.02126132, 24, 24, 40], ['control', -4419.9, 105.6, 280, 186, 32, 28, 40],
+        ['holding', -6177.5, 4850.3, 184, 32, 0, 0, 32]] as const).map(([id, x, y, width, height, headingX, headingY, headingHeight]) => ({
+        id, areaId: id, kind: 'area' as const, folded: false, x, y, width, height, heading: { x: headingX, y: headingY, width: 184, height: headingHeight } })),
+      ...members.map((id, index) => box(id, positions[index]![0]!, positions[index]![1]!, 154, 38, 'work')),
+      box(control, -4356.9, 215.6, 154, 38, 'control'), box(fresh, 298.60658413, 114.35876294, 154, 38, 'work')]
+    const before = new Map(boxes.map(box => [box.id, box]))
+    const removed = members[1]!, migrated = occurrence('holding', JSON.parse(removed)[1]), vacancy = before.get(removed)!
+    const surrounding = members.filter(id => id !== reading && id !== removed).sort((a, b) => distance(before.get(a)!, vacancy) - distance(before.get(b)!, vacancy) || a.localeCompare(b)).slice(0, 2)
+    const nearest = before.get(surrounding[0]!)!, available = { x: vacancy.x - 28, y: vacancy.y - 28, width: nearest.width + 56, height: nearest.height + 56 }
+    for (const other of boxes.filter(box => box.id !== nearest.id && box.id !== removed)) {
+      const body = other.kind === 'area' ? { ...other.heading, x: other.x + other.heading.x, y: other.y + other.heading.y } : other
+      expect(intersects(available, body)).toBe(false)
+    }
+    const hole = (values: ReadonlyMap<string, CollaborationLayoutBox>) => surrounding.reduce((sum, id) => sum + distance(values.get(id)!, vacancy), 0)
+    const move = (id: string) => id === removed ? migrated : id
+    const next: CollaborationLayoutInput = { ...added, areas: added.areas.map(area => area.id === 'work' ? { ...area, members: area.members.filter(id => id !== removed) }
+      : area.id === 'holding' ? { ...area, members: [migrated] } : area),
+      nodes: added.nodes.map(node => node.id === removed ? { ...node, id: migrated, areaId: 'holding' } : node),
+      connections: added.connections.map(connection => ({ ...connection, source: move(connection.source), target: move(connection.target) })) }
+    const responses: CollaborationLayoutResponse[] = []
+    await handleCollaborationLayoutRequest({ id: 'preserved-message-membership', type: 'reconcile', input: next, previousStructure: added, boxes, paths: [], anchor: reading }, response => responses.push(response))
+    const result = responses.find(response => response.type === 'boxes')!; if (result.type !== 'boxes') throw Error('Original Worker geometry required')
+    const after = new Map(result.boxes.map(box => [box.id, box])), moved = surrounding.map(id => distance(before.get(id)!, after.get(id)!))
+    console.info(JSON.stringify({ candidate: 'preserved-message-membership', holeBefore: hole(before), holeAfter: hole(after), survivorMovement: moved,
+      vacancyRadiusBefore: surrounding.map(id => distance(before.get(id)!, vacancy)), vacancyRadiusAfter: surrounding.map(id => distance(after.get(id)!, vacancy)),
+      migratedDistance: distance(after.get(migrated)!, vacancy), work: result.work }))
+    expect(hole(after)).toBeLessThan(hole(before) * .95)
+    // Aggregate improvement must not hide the closest survivor being pulled
+    // away by the remote weak edge when the original vacant slot is clear.
+    expect(distance(after.get(nearest.id)!, vacancy)).toBeLessThan(distance(nearest, vacancy))
+    expect(Math.max(...moved)).toBeGreaterThan(1)
+    expect(JSON.parse(migrated)[1]).toBe(JSON.parse(removed)[1])
+    expect(after.has(removed)).toBe(false); expect(after.has(migrated)).toBe(true)
+    expect(next.nodes).toHaveLength(added.nodes.length); expect(next.connections).toHaveLength(added.connections.length)
+    expect(next.connections.filter(connection => connection.source === migrated || connection.target === migrated)).toHaveLength(2)
+    for (const [index, connection] of next.connections.entries()) expect(connection).toEqual({ ...added.connections[index], source: move(added.connections[index]!.source), target: move(added.connections[index]!.target) })
+    for (const id of [reading, 'control', control]) expect(after.get(id)).toEqual(before.get(id))
+    for (const area of next.areas) if (area.parentId) expect(contains(after.get(area.parentId)!, after.get(area.id)!)).toBe(true)
+    for (const node of next.nodes) expect(contains(after.get(node.areaId)!, after.get(node.id)!)).toBe(true)
+    expect(result.work!.passes).toBeLessThanOrEqual(4); expect(result.work!.candidates).toBeLessThanOrEqual(result.work!.nodes * 4 * 48)
+    expect(responses.filter(response => response.type === 'error')).toEqual([])
+    expect(responses.filter(response => response.type === 'paths').flatMap(response => Object.keys(response.paths)).sort()).toEqual(next.connections.map(connection => connection.id).sort())
+    expect(reconcileCollaborationLayout(next, result.boxes, reading, next)).toEqual(result.boxes)
+  })
+
+  it('keeps two actually movable vacancy neighbors when the original reading anchor is closer than either survivor', async () => {
+    const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Work', members: ['reading', 'removed', 'first', 'second'], folded: false }],
+      nodes: ['reading', 'removed', 'first', 'second'].map(id => ({ id, areaId: 'work', width: 154, height: 38 })), connections: [] }
+    const boxes = [heading('work'), box('reading', 500, 100, 154, 38, 'work'), box('removed', 500, 0, 154, 38, 'work'),
+      box('first', 800, 0, 154, 38, 'work'), box('second', 1100, 0, 154, 38, 'work')]
+    const before = new Map(boxes.map(box => [box.id, box])), vacancy = before.get('removed')!
+    expect(distance(before.get('reading')!, vacancy)).toBeLessThan(distance(before.get('first')!, vacancy))
+    const next: CollaborationLayoutInput = { ...input, areas: input.areas.map(area => ({ ...area, members: area.members.filter(id => id !== 'removed') })), nodes: input.nodes.filter(node => node.id !== 'removed') }
+    const responses: CollaborationLayoutResponse[] = []
+    await handleCollaborationLayoutRequest({ id: 'eligible-vacancy-neighbors', type: 'reconcile', input: next, previousStructure: input, boxes, paths: [], anchor: 'reading' }, response => responses.push(response))
+    const result = responses.find(response => response.type === 'boxes')!; if (result.type !== 'boxes') throw Error('Original Worker geometry required')
+    const after = new Map(result.boxes.map(box => [box.id, box]))
+    for (const id of ['first', 'second']) { expect(distance(after.get(id)!, before.get(id)!)).toBeGreaterThan(1); expect(distance(after.get(id)!, vacancy)).toBeLessThan(distance(before.get(id)!, vacancy) * .95) }
+    expect(after.get('reading')).toEqual(before.get('reading')); expect(result.work!.nodes).toBe(2)
+    expect(responses.filter(response => response.type === 'error')).toEqual([])
+  })
+
   it.each(['remove', 'shrink'] as const)('reclaims an internal %s gap by moving a surviving neighbor rather than only shrinking its outline', async change => {
     const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Work', members: ['reading', 'middle', 'peer'], folded: false }],
       nodes: [{ id: 'reading', areaId: 'work', width: 154, height: 38 }, { id: 'middle', areaId: 'work', width: 500, height: 94 }, { id: 'peer', areaId: 'work', width: 154, height: 38 }], connections: [edge('survivors', 'reading', 'peer')] }
