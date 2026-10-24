@@ -856,6 +856,7 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   ui: {
+    onEnvironmentWarning: () => () => {},
     readLoadedIdentity: async () => ({ package: null, renderer: null }),
     initialTheme: null,
     workbenchWindows: {

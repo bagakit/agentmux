@@ -408,7 +408,7 @@ export class CapsuleRunManager {
     if (!b.run) {
       if (!b.launch) {
         await mkdir(b.stateDirectory, { recursive: true, mode: 0o700 })
-        b.launch = this.client.prepareTerminal({ command: process.execPath,
+        b.launch = await this.client.prepareTerminal({ command: process.execPath,
           args: [capsuleRuntimeEntrypoint(), 'serve', '--state-directory', b.stateDirectory, '--socket', b.socketPath],
           workspacePath: b.stateDirectory, env: { ELECTRON_RUN_AS_NODE: '1' }, createOperationId: mintObjectId() })
         b.launchPhase = 'prepared'

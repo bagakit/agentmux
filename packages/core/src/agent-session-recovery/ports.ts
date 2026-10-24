@@ -32,6 +32,7 @@ export type AgentSessionRecoveryPorts = {
     retainUnconfirmedLifecycle(error: unknown, expected: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession;
   };
   runtime: {
+    prepareExecutionEnvironment?(): Promise<void>;
     readonly kernel: Pick<CtxmuxRunAdapter, "inspectCreation" | "list" | "prepareStop" | "status" | "launchIdentity" | "start" | "observeLifecycle">;
     assertAgentRun(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, durableSessions?: readonly AgentMuxAgentSession[]): void;
     requireCurrentAgentRun(session: AgentMuxAgentSession, durableSessions?: readonly AgentMuxAgentSession[]): Promise<CtxmuxAdapterRun>;

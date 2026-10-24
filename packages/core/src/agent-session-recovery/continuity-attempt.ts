@@ -382,6 +382,7 @@ export async function performAgentContinuity(
   let launchExecutable: string | undefined
   if (canProbe && current) {
     try {
+      await ports.runtime.prepareExecutionEnvironment?.()
       receipt.evidence = evidence
       receipt.nativeTarget = structuredClone(handle!)
       // All attempts share only the root's private logical invocation source.

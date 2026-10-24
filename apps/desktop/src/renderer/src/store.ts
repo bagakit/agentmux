@@ -5238,6 +5238,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       : request.operation === 'metrics.renderer'
         ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), ...api.readRendererMemory(), counts: readRendererResourceOwnerCounts(), performance: rendererPerformance.snapshot() }
         : get().executeControl(request, signal, { admittedControlRequestId: request.requestId }))
+    const disposeEnvironmentWarning = api.ui.onEnvironmentWarning(warning => set({ environmentWarning: warning }))
     const disposeSpatialLinkIssues = api.ui.onSpatialLinkIssue(message => get().reportError(new Error(message)))
     const disposeFileInvalidations = api.files.onInvalidated((event) => {
       const key = documentKey(event.workspaceId, event.path)
@@ -5260,7 +5261,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       disposeSessions()
       disposeBrowsers()
       disposeControl()
-      disposeSpatialLinkIssues()
+      disposeEnvironmentWarning(); disposeSpatialLinkIssues()
       disposeFileInvalidations()
       disposeNotesStorage()
       const candidates = Object.values(get().warmTerminals).flat()

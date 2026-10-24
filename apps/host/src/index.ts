@@ -1,5 +1,5 @@
 import { isAbsolute } from 'node:path'
-import { hydrateProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from '@agentmux/core'
+import { prepareProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from '@agentmux/core'
 import { startAgentMuxHost, agentMuxHostStore } from './host.js'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,13 +16,10 @@ const mobileBuildDirectory = process.env.AGENTMUX_MOBILE_BUILD_DIRECTORY ?? join
 // The long-lived execution owner must load the user's shell environment itself;
 // a Desktop launched from Finder may still be hydrating when it starts this Host.
 // Runtime namespace and Agent identity belong to the original launch context, not shell setup.
-const hostContextKey = (key: string) => key.startsWith('AGENTMUX_') || key.startsWith('CTXMUX_')
-const hostContext = Object.fromEntries(Object.entries(process.env).filter(([key]) => hostContextKey(key)))
-const environment = await hydrateProcessEnvironmentFromLoginShell()
-for (const key of Object.keys(process.env)) if (hostContextKey(key)) delete process.env[key]
-Object.assign(process.env, hostContext)
-const environmentWarning = loginShellEnvironmentWarning(environment)
-if (environmentWarning) process.stderr.write(`${environmentWarning}\n`)
+const environmentReady = prepareProcessEnvironmentFromLoginShell().then(environment => {
+  const warning = loginShellEnvironmentWarning(environment)
+  if (warning) process.stderr.write(`${warning}\n`)
+})
 const configured = configuredHostClients(configurationPath)
 let host: Awaited<ReturnType<typeof startAgentMuxHost>> | undefined
 let stopping: Promise<void> | undefined
@@ -39,7 +36,7 @@ const shutdown = (): Promise<void> => stopping ??= (async () => {
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
   void shutdown().catch(error => { console.error(error); process.exit(1) })
 })
-startup = startAgentMuxHost({ store: agentMuxHostStore(storePath), mobileBuildDirectory, shutdown,
+startup = startAgentMuxHost({ prepareExecutionEnvironment: () => environmentReady, store: agentMuxHostStore(storePath), mobileBuildDirectory, shutdown,
   ...(configurationPath === undefined ? {} : { configurationPath }),
   ...(connectionDirectory === undefined && moteConfigurationPath === undefined ? {} : { connections: { directory: connectionDirectory, clients: () => configured.clients(), subscribeClients: listener => configured.subscribeClients(listener),
     ...(moteConfigurationPath === undefined ? {} : { moteConfigurationPath }) } }) }).catch(async error => {
