@@ -25,12 +25,20 @@ export function connectorGroupDiagnostics(snapshot: CheckedGroupDiagnosis | unde
       ...(retained ? [['Earlier observations', 'Kept after this check failed; not current confirmation']] : [])] as Array<[string, string]> }
 }
 
+/** A past refusal describes that one event, never current access or the whole link. */
+function incomingRefusal(code: string | null): { title: string; detail: string } {
+  if (code === 'INGRESS_CONTENT_UNSUPPORTED') return { title: 'Message type not supported', detail: 'This message was not sent to the Agent. Try a text message. Other messages and replies can still be delivered.' }
+  if (code === 'INGRESS_ACTION_UNSUPPORTED') return { title: 'Action not supported', detail: 'This group action was not sent to the Agent. It does not stop ordinary messages or replies.' }
+  if (code === 'INGRESS_ACTOR_NOT_AUTHORIZED') return { title: 'Member request was refused', detail: 'This message was not sent because its sender did not have request access at that time. Review current member access; the earlier refusal is kept.' }
+  return { title: 'Last request refused', detail: 'This request was not sent to the Agent. Open its original receipt for the reason; other messages have independent results.' }
+}
+
 function incomingStatus(report: GroupDiagnosis): string {
   const row = report.incoming.value?.rows[0]
   if (!report.incoming.value) return 'Reading unavailable'
   if (!row) return 'No events in this window'
-  const recorded = row.recording?.state === 'recorded' ? 'Conversation recorded' : 'Recording unconfirmed'
-  if (!row.inputOperationId) return recorded + (row.state === 'refused' ? row.code === 'INGRESS_ACTOR_NOT_AUTHORIZED' ? ' · not sent; member request access missing' : ' · request refused' : ' · no Agent submission recorded')
+  const recorded = row.recording?.state === 'recorded' ? 'Conversation recorded' : row.recording?.state === 'refused' ? 'Message not recorded' : 'Recording unconfirmed'
+  if (!row.inputOperationId) return recorded + (row.state === 'refused' ? ' · ' + incomingRefusal(row.code).title : ' · no Agent submission recorded')
   if (row.coreObservation === 'unavailable') return recorded + ' · Agent submission observation unavailable'
   const status = row.coreStatus
   const input = status === 'admitted' ? 'Accepted by Agent' : status === 'waiting' ? 'Waiting for Agent' : status === 'stopped' ? 'Input delivery stopped' :
@@ -90,12 +98,13 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
   let detail = row ? row.recording?.state === 'recorded' ? 'Conversation recorded.' : 'Conversation recording unconfirmed.' : incoming ? 'This bounded window does not describe all group history.' : 'Check the original group to read its input receipts.'
   let tone: ConnectorDirectionSummary['tone'] = !incoming ? 'muted' : 'neutral'
   if (report?.binding.value?.activeInputGrants === 0 && !report.binding.issue) add('member-access', 'No member has request access', 'Group recording and permission to ask the Agent are separate. Review member access explicitly.', 'warning')
-  if (row?.recording && row.recording.state !== 'recorded') add('recording-unconfirmed', 'Conversation recording unconfirmed', 'Keep the original received event and check its recording receipt.')
+  if (row?.recording && (row.recording.state === 'unavailable' || row.recording.state === 'not-started')) add('recording-unconfirmed', 'Conversation recording unconfirmed', 'Keep the original received event and check its recording receipt.')
   if (row?.scope === 'other-binding') { value = 'Earlier connection receipt'; detail += ' It does not confirm the current group connection.'; tone = 'muted' }
   else if (row) {
     if (!row.inputOperationId) {
-      value = row.state === 'refused' ? row.code === 'INGRESS_ACTOR_NOT_AUTHORIZED' ? 'Member request was refused' : 'Request refused' : 'No Agent submission recorded'
-      if (row.state === 'refused') add('request-refused', row.code === 'INGRESS_ACTOR_NOT_AUTHORIZED' ? 'Member request was refused' : 'Group request refused', 'Check its original refusal receipt. This does not determine the sender’s current access.', 'warning')
+      const refusal = row.state === 'refused' ? incomingRefusal(row.code) : undefined
+      value = refusal?.title ?? 'No Agent submission recorded'
+      if (refusal) { detail = refusal.detail; add('request-refused', refusal.title, refusal.detail, 'warning') }
       tone = row.state === 'refused' ? 'warning' : 'neutral'
     } else if (row.coreObservation === 'unavailable') { value = 'Agent receipt could not be checked'; add('agent-unconfirmed', value, 'The original input remains recorded; its current Agent receipt could not be read.') }
     else if (row.coreStatus === 'admitted') value = 'Accepted by Agent'

@@ -102,7 +102,7 @@ function GroupEntry(props: { binding: RoomBinding; visible: boolean; hostingTarg
   const action = connectorGroupAction(summary, binding.state)
   const fullConversation = binding.scope.publication === 'future-shared-conversation'
   const scope = fullConversation ? 'Conversation messages' : 'Agent replies only'
-  const scopeDescription = fullConversation ? 'Includes new user messages and public Agent replies.' : 'Includes public Agent replies and questions. Messages you write in AgentMux are excluded.'
+  const scopeDescription = fullConversation ? 'Includes new user messages, original Agent-to-Agent messages and public Agent replies.' : 'Includes public Agent replies and questions. User and Agent-to-Agent messages are not shared.'
   return <div className="connector-header-menu__group">
     <DropdownMenu.Item className="tab-context-menu__item connector-header-menu__item" onSelect={() => props.onSelect()}
       title={`${name.label} · ${binding.application.appId} · ${binding.externalConversationId}`}
