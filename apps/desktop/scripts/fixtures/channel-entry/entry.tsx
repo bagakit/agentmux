@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { groupTarget, type ConnectionApplicationAccessOperation, type ConnectionApplicationGrant, type ConnectionDiagnosis, type ConnectionGrant, type ConnectionMemberAccess, type ConnectionRecord, type RoomBinding, type RoomBindingOperation, type RoomLinkOperation, type RoomMembersResult } from '@agentmux/core/connections'
+import { conversationRevision, parseConversationReadPage, projectConversationTimeline, type ConversationTimelineReadInput } from '@agentmux/core/conversation'
+import type { AgentTimelineSnapshot } from '@agentmux/core'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SettingsNavigation, type SettingsNavigationRequest } from '../../../src/renderer/src/components/SettingsNavigation'
@@ -11,6 +13,7 @@ import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { mountThemeRuntime } from '@agentmux/client-ui/theme'
+import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { invalidateConnectorTarget } from '../../../src/renderer/src/lib/connector-room-intent'
 import type { ConnectionHostingTarget } from '../../../src/shared/contracts'
 import { fixturePath } from '../../lib/fixture-values.mjs'
@@ -26,18 +29,25 @@ if (launched.kind !== 'agent') throw Error('Preview requires the original Agent 
 const session = { ...launched, label: 'Research Agent', nativeHandle: { kind: 'provider' as const, providerId: launched.providerId, sessionId: 'preview-original-native' } }
 const tab = createWorkbenchTab('channel-preview-tab', { kind: 'agent', phase: 'attached', regionId: 'channel-preview-region', workspaceId: workspace.id, sessionId: session.id })
 useAppStore.setState({ config, loading: false, sessions: [session], tabs: { [tab.id]: tab }, layouts: { [workspace.id]: createWorkspaceLayout('channel-preview-group', [tab.id]) },
-  activeWorkspaceId: workspace.id, mainSurface: 'workbench', viewModes: { [session.id]: 'terminal' }, agentComposerDrafts: { [session.id]: 'Keep this original research draft.' },
+  activeWorkspaceId: workspace.id, mainSurface: 'workbench', viewModes: { [session.id]: new URLSearchParams(location.search).has('composer-sharing') ? 'activity' : 'terminal' }, agentComposerDrafts: { [session.id]: 'Keep this original research draft.' },
   connectorRoomIntents: {}, connectorRoomDrafts: {}, connectorServiceIntents: {}, connectorServiceObservation: {} })
 mountThemeRuntime(window, config.appearance)
 
 // Controlled typed facts only. The real IPC/SDK/binding and App route are proven by the consumer tests.
 const conversationSharing = new URLSearchParams(location.search).has('conversation-sharing')
+const composerSharing = new URLSearchParams(location.search).has('composer-sharing')
+const sharedAudiences = conversationSharing || composerSharing
+let composerScenario: 'normal' | 'unavailable' | 'paused-off' = 'normal'
+const composerReads: { kind: 'metadata' | 'service'; scenario: string; connectionId?: string; adapterId?: string; state: string }[] = []
+const composerWrites: string[] = []
+const composerConversationReads: string[] = []
+const composerNames = ['Research and Engineering - customer investigation and release planning', 'Cross-platform product collaboration and operational follow-up']
 const popoverClarity = new URLSearchParams(location.search).has('popover-clarity')
 const memberAccess = new URLSearchParams(location.search).has('member-access')
 const applicationAccess = new URLSearchParams(location.search).has('application-access'), memberScenario = memberAccess || applicationAccess
-const feishuScenario = memberScenario || conversationSharing || popoverClarity
+const feishuScenario = memberScenario || sharedAudiences || popoverClarity
 const connection: ConnectionRecord = { config: { connectionId: feishuScenario ? 'preview-feishu' : 'preview-discord', adapterId: feishuScenario ? 'feishu' : 'discord', application: feishuScenario ? { domain: 'open.feishu.cn', appId: 'cli_original_members' } : { domain: 'discord.com', appId: '123456789012345678' },
-  label: conversationSharing ? 'Lark research bot' : 'Research discussion', enabled: true, credentialRef: 'preview-secure-reference' }, revision: 1,
+  label: sharedAudiences ? 'Lark research bot' : 'Research discussion', enabled: true, credentialRef: 'preview-secure-reference' }, revision: 1,
   capabilities: { roomDiscovery: true, roomCreation: false, roomLink: true },
   observation: { authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } } }
 const secondConnection: ConnectionRecord = { ...connection, config: { ...connection.config, connectionId: 'preview-second-discord', adapterId: 'discord', application: { domain: 'discord.com', appId: '234567890123456789' }, label: 'Discord project bot' } }
@@ -113,12 +123,16 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   proof.requests.push({ method, input: structuredClone(input), owner: owner ? structuredClone(owner) : undefined })
   if (owner && JSON.stringify(owner) !== JSON.stringify(hostingTarget)) throw Error('The preview cannot read a different bot hosting target')
   const subject = { kind: 'conversation', externalConversationId: input.subject?.externalConversationId ?? room.externalConversationId }
-  const sourceConnection = conversationSharing && input.connectionId === secondConnection.config.connectionId ? secondConnection : connection
+  const sourceConnection = sharedAudiences && input.connectionId === secondConnection.config.connectionId ? secondConnection : connection
   const meta = { connectionId: sourceConnection.config.connectionId, connectionRevision: 1, application: sourceConnection.config.application,
-    entry: { subject, cacheRevision: 'preview-cache', observation: { subject, state: 'observed', freshness: 'current', profile: { name: room.name, observedAt: Date.now() }, checkedAt: Date.now() } } }
-  if (method === 'connection.ls') return { connections: proof.omitOriginal ? [] : conversationSharing ? [connection, secondConnection] : [connection] }
+    entry: { subject, cacheRevision: 'preview-cache', observation: { subject, state: 'observed', freshness: composerSharing ? 'stale' : 'current', profile: { name: composerSharing ? composerNames[sourceConnection === secondConnection ? 1 : 0] : room.name, observedAt: composerSharing ? 1 : Date.now() }, checkedAt: composerSharing ? 1 : Date.now() } } }
+  if (method === 'connection.ls') return { connections: proof.omitOriginal ? [] : sharedAudiences ? [connection, secondConnection] : [connection] }
   if (method === 'connection.inspect') return { connection: sourceConnection, operation: null }
-  if (method === 'connection.service.get') return input.adapterId ? { adapterId: input.adapterId, enabled: true, revision: 0 } : { enabled: true, revision: 1 }
+  if (method === 'connection.service.get') {
+    if (composerSharing) composerReads.push({ kind: 'service', scenario: composerScenario, adapterId: input.adapterId, state: !input.adapterId && composerScenario === 'unavailable' ? 'unavailable' : !input.adapterId && composerScenario === 'paused-off' ? 'off' : 'enabled' })
+    if (composerSharing && composerScenario === 'unavailable' && !input.adapterId) throw Error('Controlled original global policy read unavailable')
+    return input.adapterId ? { adapterId: input.adapterId, enabled: true, revision: 0 } : { enabled: !composerSharing || composerScenario !== 'paused-off', revision: composerSharing && composerScenario === 'paused-off' ? 2 : 1 }
+  }
   if (method === 'connection.binding.ls') return { bindings: structuredClone(bindings) }
   if (method === 'connection.diagnose') {
     if (proof.status === 'unavailable') throw Error('Controlled unavailable local status read')
@@ -199,6 +213,10 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   if (applicationAccess && method === 'connection.setup.ls') return { operations: [], next: null, support: { connectionRevision: 1, capabilities: [] } }
   if (applicationAccess && method === 'connection.profile.ls') return { operations: [], next: null }
   const actorMetadata = members.map(member => { const actor = { application: connection.config.application, idType: member.idType, userId: member.userId }; return { subject: { kind: 'actor', actor }, cacheRevision: 'preview-actor-' + member.userId, observation: { actor, state: 'observed', freshness: 'current', profile: { name: member.name, observedAt: 1 }, checkedAt: 1 } } })
+  if (composerSharing && method === 'connection.metadata.get') {
+    composerReads.push({ kind: 'metadata', scenario: composerScenario, connectionId: sourceConnection.config.connectionId, state: composerScenario === 'unavailable' ? 'unavailable' : 'observed-stale' })
+    if (composerScenario === 'unavailable') throw Error('Controlled original cached group name read unavailable')
+  }
   if (method === 'connection.metadata.get') return applicationAccess && input.subject.kind === 'actor' ? { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, entry: actorMetadata.find(entry => entry.subject.actor.userId === input.subject.actor.userId)! } : meta
   if (method === 'connection.metadata.ls') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, entries: applicationAccess && input.kind === 'actor' ? actorMetadata : [], next: null }
   if (method === 'connection.bind') {
@@ -231,13 +249,50 @@ if (memberScenario) {
     facts: () => ({ grants: structuredClone(applicationGrants), operations: [...applicationOperations.values()].map(item => structuredClone(item)), memberGrants: structuredClone(memberGrants), drafts: structuredClone(useAppStore.getState().manualConnectionIntents), groupDrafts: structuredClone(useAppStore.getState().connectorRoomDrafts) })
   } })
 }
-if (conversationSharing) {
+if (sharedAudiences) {
   bindings = [{ ...target, regionAnchor: { regionId: 'channel-preview-region' }, bindingId: 'preview-partial-lark', revision: 1, state: 'active',
     connectionId: connection.config.connectionId, application: connection.config.application, externalConversationId: room.externalConversationId,
     scope: { input: 'mentions-and-replies', publication: 'future-native-user-facing' }, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } },
   { ...target, bindingId: 'preview-whole-discord', revision: 1, state: 'active', connectionId: secondConnection.config.connectionId, application: secondConnection.config.application,
     externalConversationId: '456789012345678901', scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' }, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } }]
   Object.assign(proof, { sharing: { facts: () => ({ bindings: structuredClone(bindings), drafts: structuredClone(useAppStore.getState().connectorRoomDrafts) }) } })
+}
+if (composerSharing) {
+  const reference = { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }, sourceHostId = reference.hostId
+  const items: AgentTimelineSnapshot['items'] = [
+    { id: 'preview-sharing-request', agentSessionId: reference.agentSessionId, kind: 'user_message', source: 'user', status: 'complete', title: 'Request', content: 'Please review the research notes and suggest the next step.', publicContent: 'confirmed', authorHuman: true, sourceChannel: 'api', createdAt: 1, updatedAt: 1 },
+    { id: 'preview-sharing-reply', agentSessionId: reference.agentSessionId, kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Reply', content: 'The notes are ready to review. We can compare the open questions next.', createdAt: 2, updatedAt: 2 }
+  ]
+  const stream = { epoch: 'preview-sharing-stream', revision: 2, sequence: 2, origin: 'beginning' as const, gaps: [], positions: items.map((item, index) => ({ id: item.id, firstSequence: index + 1, sequence: index + 1, revision: conversationRevision(item) })) }
+  const projected = projectConversationTimeline({ ...reference, executionHostId: sourceHostId, timeline: { agentSessionId: reference.agentSessionId, sourceHostId, revision: 2, items, stream } })
+  const conversation = (input: ConversationTimelineReadInput) => {
+    if (input.hostId !== reference.hostId || input.agentSessionId !== reference.agentSessionId) throw Error('The preview cannot read another conversation')
+    const checkpoint = { ...reference, sourceHostId, frontier: { ...reference, scope: projected.scope, cuts: [{ kind: 'captured', epoch: stream.epoch, sequence: stream.sequence }] } }
+    const items = [...projected.events].reverse().map(event => ({ kind: 'item' as const, item: { event, records: projected.records.filter(record => event.recordIds.includes(record.id)) } }))
+    return parseConversationReadPage({ ...reference, sourceHostId, scope: projected.scope, coverage: projected.coverage, order: { ...projected.order, direction: 'newest-first' }, items, nextCursor: null, budgetBytes: input.maxBytes ?? 65536,
+      window: { id: 'preview-sharing-window', revision: 1, itemCount: items.length, complete: true, view: 'preview-sharing-view', replay: 'preview-sharing-replay', checkpoint, outside: { older: null, newer: null }, navigation: { older: null, newer: null } } }, input)
+  }
+  api.conversation.readAgentConversation = async input => { composerConversationReads.push('readAgentConversation'); return conversation(input) }
+  api.conversation.readConversationChanges = async input => { composerConversationReads.push('readConversationChanges'); const page = conversation(input); return { ...page, checkpoint: page.window.checkpoint, more: false } }
+  api.conversation.observeConversation = async input => {
+    composerConversationReads.push('observeConversation'); const page = conversation(input), closed = new AbortController()
+    return { ...reference, sourceHostId, scope: page.scope, coverage: page.coverage, closed: closed.signal, dispose() { closed.abort() } }
+  }
+  api.conversation.releaseConversationView = async input => ({ ...reference, sourceHostId, viewId: input.view, released: true })
+  // Guard the original public input leaves without invoking the preview Agent implementation.
+  for (const method of ['write', 'submitPrompt', 'replyQuestion', 'respondInteraction', 'interrupt', 'stopInputWaiting', 'rejoinInputWaiting'] as const) {
+    Object.assign(api.sessions, { [method]: async () => { composerWrites.push(method); throw Error('Composer preview must not write: ' + method) } })
+  }
+  Object.assign(proof, { composerSharing: {
+    setScenario(value: typeof composerScenario) {
+      composerScenario = value
+      bindings = bindings.map((binding, index) => ({ ...binding, revision: value === 'paused-off' && index === 0 ? 2 : 1, state: value === 'paused-off' && index === 0 ? 'paused' : 'active' }))
+      invalidateConnectorTarget(target)
+    },
+    facts: () => ({ scenario: composerScenario, bindings: structuredClone(bindings), names: composerNames.slice(), reads: structuredClone(composerReads), writes: composerWrites.slice(), conversationReads: composerConversationReads.slice(),
+      conversationKeys: projected.records.map(record => conversationMessageSourceKey(reference.agentSessionId, record.reference!.source)),
+      service: Object.entries(useAppStore.getState().connectorServiceObservation).map(([key, value]) => ({ key, state: value.state, issue: value.issue, generation: value.generation, currentSource: value.source === api.connections.call })) })
+  } })
 }
 Object.assign(window, { channelEntryProof: proof })
 window.addEventListener('error', event => proof.errors.push(event.message))
