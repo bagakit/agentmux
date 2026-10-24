@@ -126,7 +126,7 @@ describe('original Inbox and independent A2A reference notification', () => {
     expect(originals).toHaveLength(2)
     expect(originals.map(original => ({ id: original.envelope.messageId, body: original.envelope.body, delivery: original.delivery.state,
       notification: original.notification?.state }))).toEqual(['first', 'late'].map(id => ({ id, body: message(id).body, delivery: 'queued', notification: 'submitted' })))
-    expect(await new DurableAgentMuxMessageQueue(queue.path).readNotification(first.notificationId)).toEqual({ ...first, state: 'submitted' })
+    expect(await new DurableAgentMuxMessageQueue(queue.path).readNotification(first.notificationId)).toEqual({ ...first, state: 'submitted', resultRecordedAt: expect.any(Number) })
   })
 
   it('preserves unknown automatic input while an independently authorized manual notice uses its own key', async () => {
@@ -136,14 +136,14 @@ describe('original Inbox and independent A2A reference notification', () => {
     const reason = 'Original native acknowledgement is unknown'
     await queue.recordNotificationResult(original.notificationId, 'unconfirmed', reason)
     const reopened = new DurableAgentMuxMessageQueue(queue.path)
-    expect(await reopened.prepareNotification(notice('same-reference-opportunity'))).toEqual({ ...original, state: 'unconfirmed', reason })
+    expect(await reopened.prepareNotification(notice('same-reference-opportunity'))).toEqual({ ...original, state: 'unconfirmed', reason, resultRecordedAt: expect.any(Number) })
     // The trusted public owner authorizes this separate action; the journal does not grant that permission.
     const manual = (await reopened.prepareNotification({ notificationId: 'explicit-user-action', agentSessionId: 'recipient', condition, messageIds: ['unknown'] }))!
     expect(manual).toMatchObject({ mode: 'steer', messageIds: ['unknown'], key: { kind: 'prompt', submissionId: 'explicit-user-action' } })
     expect(manual.key).not.toEqual(original.key)
-    expect(await reopened.readNotification(original.notificationId)).toEqual({ ...original, state: 'unconfirmed', reason })
+    expect(await reopened.readNotification(original.notificationId)).toEqual({ ...original, state: 'unconfirmed', reason, resultRecordedAt: expect.any(Number) })
     await reopened.recordNotificationResult(manual.notificationId, 'submitted')
-    expect(await reopened.readNotification(original.notificationId)).toEqual({ ...original, state: 'unconfirmed', reason })
+    expect(await reopened.readNotification(original.notificationId)).toEqual({ ...original, state: 'unconfirmed', reason, resultRecordedAt: expect.any(Number) })
     expect((await reopened.readByMessageId('unknown'))?.notification).toMatchObject({ state: 'submitted', notificationId: manual.notificationId, key: manual.key })
     expect((await reopened.readJournal()).filter(record => record.kind === 'a2a-notification')).toHaveLength(2)
   })
@@ -163,7 +163,7 @@ describe('original Inbox and independent A2A reference notification', () => {
       ? { ...record, notification: { ...record.notification, wire } } : record)
     const path = join(dirname(queue.path), 'retained-' + shape + '.ndjson')
     await writeFile(path, records.map(record => JSON.stringify(record)).join('\n') + '\n')
-    const imported = new DurableAgentMuxMessageQueue(path), retained = { ...original, wire, state: 'unconfirmed', reason }
+    const imported = new DurableAgentMuxMessageQueue(path), retained = { ...original, wire, state: 'unconfirmed', reason, resultRecordedAt: expect.any(Number) }
     expect(wire).not.toBe(original.wire)
     // This resolves through openMessageJournal's actual legacyRecords import callback.
     await expect(imported.readNotification(original.notificationId)).resolves.toEqual(retained)
@@ -214,7 +214,7 @@ describe('original Inbox and independent A2A reference notification', () => {
     const next = (await queue.prepareNotification(notice('new-opportunity')))!
     expect(next.messageIds).toEqual(['independent-new']); expect(next.key).not.toEqual(old.key)
     expect(next.wire).not.toContain('msg-id="old-unknown"')
-    expect(await queue.readNotification(old.notificationId)).toEqual({ ...old, state: 'unconfirmed', reason: 'Original queue ACK is unknown' })
+    expect(await queue.readNotification(old.notificationId)).toEqual({ ...old, state: 'unconfirmed', reason: 'Original queue ACK is unknown', resultRecordedAt: expect.any(Number) })
   })
 
   it('releases an automatic reference only after the exact original input is confirmed not-applied', async () => {
@@ -224,7 +224,7 @@ describe('original Inbox and independent A2A reference notification', () => {
     await queue.recordNotificationResult(original.notificationId, 'not-applied', 'Exact original native request was rejected')
     const retry = (await queue.prepareNotification(notice('fresh-authorized-opportunity')))!
     expect(retry.messageIds).toEqual(['not-applied-original']); expect(retry.key).not.toEqual(original.key)
-    expect(await queue.readNotification(original.notificationId)).toEqual({ ...original, state: 'not-applied', reason: 'Exact original native request was rejected' })
+    expect(await queue.readNotification(original.notificationId)).toEqual({ ...original, state: 'not-applied', reason: 'Exact original native request was rejected', resultRecordedAt: expect.any(Number) })
   })
 
   it('preserves the frozen Run while explicit historical references keep their original recipient', async () => {

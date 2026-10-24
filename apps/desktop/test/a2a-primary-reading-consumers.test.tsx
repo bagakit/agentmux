@@ -17,7 +17,7 @@ import { createClientUiRoot } from './helpers/client-ui-render'
 import { activityReadingProps } from './helpers/activity-reading-props'
 import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
 import { hostedTestClient } from '../../../packages/core/test/helpers/hosted-runtime-port'
-import { a2aPrimaryReadingFixture, body, messageId, senderSessionId, wire } from './helpers/a2a-primary-reading-fixture'
+import { a2aPrimaryReadingFixture, body, messageId, senderSessionId, wire, metadataResultAt, metadataSentAt, type MetadataScene } from './helpers/a2a-primary-reading-fixture'
 
 const initial = useAppStore.getState()
 const closes: Array<() => unknown | Promise<unknown>> = []
@@ -45,7 +45,7 @@ async function desktopReader() {
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(f.root, 'conversation.sock') } })
   closes.push(() => rpc.dispose())
   // Electron delivery is the transport seam; the public service and original journal own the result.
-  return vi.spyOn(api.sessions, 'readMessage').mockImplementation((reference, messageId) => rpc.call('message.read', { hostId: reference.hostId, messageId }))
+  return vi.spyOn(api.sessions, 'readMessage').mockImplementation((reference, messageId, notificationId) => rpc.call('message.read', { hostId: reference.hostId, messageId, ...(notificationId ? { notificationId } : {}) }))
 }
 function originalCard() { return document.querySelector<HTMLElement>('[data-a2a-original-message-id]') }
 async function assertPrimary() {
@@ -87,7 +87,7 @@ it('the actual Desktop Activity Reader presents one right Agent original with bo
   const read = await desktopReader()
   const props = activityReadingProps({ control: f.reference })
   await render(<ActivityView {...props} />); await assertPrimary()
-  expect(read).toHaveBeenCalledExactlyOnceWith(f.reference, messageId)
+  expect(read).toHaveBeenCalledExactlyOnceWith(f.reference, messageId, f.key.submissionId)
 })
 
 it('Desktop selection of an original body retains the canonical notification record and source locator', async () => {
@@ -140,7 +140,7 @@ it('the actual Mobile Reader uses the receiving Hosted client for the same origi
   const read = vi.spyOn(hosted.sdk, 'readMessage')
   await render(<MobileConversationSurface client={hosted.sdk} agentSessionId={f.reference.agentSessionId}
     connection={{ state: 'connected', message: 'Original Hosted owner' }} platform={createBrowserPlatform()} />)
-  await assertPrimary(); expect(read).toHaveBeenCalledExactlyOnceWith({ messageId })
+  await assertPrimary(); expect(read).toHaveBeenCalledExactlyOnceWith({ messageId, notificationId: f.key.submissionId })
 })
 
 it('the actual Focus preview forwards the qualified notification and exact source scope', async () => {
@@ -148,7 +148,7 @@ it('the actual Focus preview forwards the qualified notification and exact sourc
   await render(<FocusMessagePreview message={f.projection.records[0]} sender={undefined} recipient={undefined} lane={undefined}
     hierarchy={undefined} interactive anchor={anchor} autoFocus={false} describeSpeaker={speaker => ({ name: speaker.id })}
     onSelect={() => {}} onClose={() => {}} />)
-  await assertPrimary(); expect(read).toHaveBeenCalledExactlyOnceWith(f.reference, messageId)
+  await assertPrimary(); expect(read).toHaveBeenCalledExactlyOnceWith(f.reference, messageId, f.key.submissionId)
   const caption = document.querySelector('.recent-focus__message-caption')!
   expect(caption.textContent).toContain('System message')
   expect(caption.textContent).not.toContain('Sender not recorded')
@@ -171,4 +171,56 @@ it('exports actual public Reader facts for the source-bound three-consumer Rende
     JSON.stringify({ page: batch.page, snapshot: batch.snapshot, projection: batch.projection, original: batch.original, originals: batch.originals, session: batch.session,
       reference: batch.reference, notificationId: batch.key.submissionId, body, wire: batch.wire, messageId, senderSessionId,
       boundary: 'Actual Core public Reader, built-in Provider and durable FileStore with controlled native records; Renderer API/Hosted delivery is private fixture IO. No installed App or live Agent is used.' }, null, 2) + '\n')
+})
+
+it.each(['desktop', 'mobile', 'focus'] as const)('the actual %s reader preserves the captured notification mode and recorded clocks after a newer manual notice', async surface => {
+  f = await a2aPrimaryReadingFixture(false, 'idle'); closes.push(f.close)
+  expect((await f.client.readMessage({ messageId }))?.notification).toMatchObject({ mode: 'steer', notificationId: 'later-manual-notification' })
+  let read: ReturnType<typeof vi.spyOn>
+  if (surface === 'mobile') {
+    const hosted = await hostedTestClient(f.client); closes.push(hosted.dispose); read = vi.spyOn(hosted.sdk, 'readMessage')
+    await render(<MobileConversationSurface client={hosted.sdk} agentSessionId={f.reference.agentSessionId}
+      connection={{ state: 'connected', message: 'Original Hosted owner' }} platform={createBrowserPlatform()} />)
+  } else {
+    read = await desktopReader()
+    await render(surface === 'desktop' ? <ActivityView {...activityReadingProps({ control: f.reference })} /> :
+      <FocusMessagePreview message={f.projection.records[0]} sender={undefined} recipient={undefined} lane={undefined} hierarchy={undefined}
+        interactive anchor={anchor} autoFocus={false} describeSpeaker={speaker => ({ name: speaker.id })} onSelect={() => {}} onClose={() => {}} />)
+  }
+  await vi.waitFor(() => expect(originalCard()?.textContent).toContain('空闲后通知'))
+  const card = originalCard()!
+  expect(card.textContent).toContain('发送'); expect(card.textContent).toContain('通知确认')
+  expect(card.textContent).not.toContain('立即通知')
+  expect([...card.querySelectorAll('time')].map(time => time.dateTime)).toEqual(expect.arrayContaining([
+    new Date(metadataSentAt).toISOString(), new Date(metadataResultAt).toISOString()
+  ]))
+  if (surface === 'mobile') expect(read).toHaveBeenCalledExactlyOnceWith({ messageId, notificationId: f.key.submissionId })
+  else expect(read).toHaveBeenCalledExactlyOnceWith(f.reference, messageId, f.key.submissionId)
+})
+
+it.each(['steer', 'legacy', 'unconfirmed'] as const)('the actual Desktop reader presents %s notification evidence without inventing receipt or read time', async variant => {
+  f = await a2aPrimaryReadingFixture(false, variant); closes.push(f.close)
+  await desktopReader(); await render(<ActivityView {...activityReadingProps({ control: f.reference })} />)
+  await vi.waitFor(() => expect(originalCard()?.textContent).toContain('原始协作消息'))
+  const card = originalCard()!
+  if (variant === 'steer') expect(card.textContent).toContain('立即通知')
+  if (variant === 'legacy') {
+    expect(card.textContent).toContain('通知时间未记录')
+    expect([...card.querySelectorAll('time')].map(time => time.dateTime)).not.toContain(new Date(metadataResultAt).toISOString())
+  }
+  if (variant === 'unconfirmed') { expect(card.textContent).not.toContain('通知确认'); expect(card.textContent).not.toContain('通知时间未记录') }
+  expect(card.textContent).not.toContain('已读')
+})
+
+it('exports actual journal and public Reader metadata variants for all product consumers', async () => {
+  const scenes: Record<string, unknown> = {}
+  for (const variant of ['idle', 'steer', 'legacy', 'unconfirmed'] satisfies MetadataScene[]) {
+    const batch = await a2aPrimaryReadingFixture(true, variant); closes.push(batch.close)
+    expect(batch.original.notification).toMatchObject({ notificationId: batch.key.submissionId,
+      mode: variant === 'steer' ? 'steer' : 'idle', state: variant === 'unconfirmed' ? 'unconfirmed' : 'submitted' })
+    scenes[variant] = { page: batch.page, snapshot: batch.snapshot, projection: batch.projection, original: batch.original, originals: batch.originals,
+      session: batch.session, reference: batch.reference, notificationId: batch.key.submissionId, body, wire: batch.wire, messageId, senderSessionId }
+  }
+  if (process.env.AGENTMUX_MESSAGE_METADATA_SCENE) await writeFile(process.env.AGENTMUX_MESSAGE_METADATA_SCENE,
+    JSON.stringify({ scenarios: scenes, boundary: 'Actual journal and public Core Reader facts. Private Renderer API/Hosted delivery, no installed App or live Session is operated.' }, null, 2) + '\n')
 })

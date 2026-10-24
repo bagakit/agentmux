@@ -212,7 +212,7 @@ it('reopens old-version manual unknown derived rows without automatically replay
   f.idle(); await f.notifications.restore(); await f.settled(); expect(f.native).not.toHaveBeenCalled()
   await f.append('old-version-independent'); await f.notifications.restore(); await f.settled()
   expect(f.native).toHaveBeenCalledTimes(1); expect(f.native.mock.calls[0]![0]).not.toContain('msg-id="old-version-unknown"')
-  expect(await reopened.readNotification(notice.notificationId)).toEqual({ ...notice, state: 'unconfirmed' })
+  expect(await reopened.readNotification(notice.notificationId)).toEqual({ ...notice, state: 'unconfirmed', resultRecordedAt: expect.any(Number) })
 })
 
 it('indexes the first notification in an original legacy journal before any automatic selection', async () => {
@@ -260,10 +260,12 @@ it('promotes a producer-qualified input ACK in a read-only notice copy without w
   const failure = vi.spyOn(f.queue, 'recordNotificationResult').mockRejectedValue(new Error('Receipt persistence unavailable'))
   await expect(f.client.notifyMessages({ operationId: 'ack-copy-op', messageIds: ['ack-copy'] })).rejects.toThrow()
   failure.mockRestore()
+  await f.queue.recordNotificationResult('ack-copy-op', 'unconfirmed', 'Receipt reconciliation has not been recorded')
   const retained = (await f.queue.readNotification('ack-copy-op'))!, before = await f.queue.readJournal()
-  expect(retained.state).toBe('pending')
+  expect(retained.state).toBe('unconfirmed'); expect(retained.resultRecordedAt).toEqual(expect.any(Number))
   const result = await f.rpc.call('message.notify.inspect', { hostId: 'local', operationId: 'ack-copy-op' })
   expect(result.notification?.state).toBe('submitted'); expect(await f.queue.readNotification('ack-copy-op')).toEqual(retained)
+  expect(result.notification).not.toHaveProperty('resultRecordedAt')
   expect(await f.queue.readJournal()).toEqual(before)
   const altered = structuredClone(result.input!)
   if (!altered.admission?.intent) throw new Error('Missing the original notification input intent')

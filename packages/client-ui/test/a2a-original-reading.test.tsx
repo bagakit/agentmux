@@ -45,7 +45,7 @@ async function openNoticeDetails() { await click('.conversation-a2a-notice__deta
 it.each([wire, '<amux>\n<a2a from="sender" msg-id="original-mid" read-via="message --skill" />\n</amux>'])(
   'reads a visible typed notice as one full Agent card and keeps notification protocol and body Copies separate', async content => {
     await render(notice({ content }))
-    expect(read).toHaveBeenCalledExactlyOnceWith(scope, 'original-mid')
+    expect(read).toHaveBeenCalledExactlyOnceWith(scope, 'original-mid', 'original-notice')
     const message = host.querySelector('[data-a2a-original-message-id="original-mid"]')!
     expect(message).not.toBeNull(); expect(message.textContent).toContain('这是原信正文。')
     expect(message.querySelector('[data-avatar="sender"]')).not.toBeNull()
@@ -101,14 +101,14 @@ it.each(['missing', 'failure', 'mid', 'sender', 'recipient'])(
     expect(host.querySelector('[data-a2a-reference-id]')?.textContent).toContain('original-mid')
     expect(host.querySelector('[role="status"]')?.textContent).toMatch(/retained|unavailable/u)
     await click('.conversation-a2a-originals__pending button')
-    expect(read.mock.calls).toEqual([[scope, 'original-mid'], [scope, 'original-mid']])
+    expect(read.mock.calls).toEqual([[scope, 'original-mid', 'original-notice'], [scope, 'original-mid', 'original-notice']])
     expect(host.querySelector('[data-a2a-original-message-id]')?.textContent).toContain('这是原信正文。')
   })
 
 it('shows successful originals independently of another failed item in the same batch', async () => {
   read.mockImplementation(async (_scope, mid) => mid === 'second-mid' ? original(mid, 'Second original body') : null)
   await render(notice({ content: renderAgentMuxMessageReferences([...references, { senderSessionId: 'sender', messageId: 'second-mid' }]) }))
-  expect(read.mock.calls).toEqual([[scope, 'original-mid'], [scope, 'second-mid']])
+  expect(read.mock.calls).toEqual([[scope, 'original-mid', 'original-notice'], [scope, 'second-mid', 'original-notice']])
   expect(host.querySelector('[data-a2a-original-message-id="second-mid"]')?.textContent).toContain('Second original body')
   expect(host.querySelector('[data-a2a-reference-id="original-mid"]')).not.toBeNull()
 })
@@ -172,7 +172,7 @@ it('never applies a late old-Host body to the newly selected scope', async () =>
   read.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
   await render(notice())
   await render(notice({ executionHostId: 'another-host', itemRef: { ...scope, hostId: 'another-host', source: { kind: 'captured', recordId: 'notice-record' } } }))
-  expect(read.mock.calls).toEqual([[scope, 'original-mid'], [{ ...scope, hostId: 'another-host' }, 'original-mid']])
+  expect(read.mock.calls).toEqual([[scope, 'original-mid', 'original-notice'], [{ ...scope, hostId: 'another-host' }, 'original-mid', 'original-notice']])
   await act(async () => finish(original('original-mid', 'STALE OLD HOST BODY')))
   expect(host.textContent).not.toContain('STALE OLD HOST BODY')
   expect(host.querySelector('[data-a2a-original-message-id]')?.textContent).toContain('这是原信正文。')
@@ -199,6 +199,6 @@ it('reads a resource reference only after explicitly opening the complete origin
     nativeResourceRecord: record, readHistoryResource: resource }))
   await click('.log-turn__system-toggle'); expect(resource).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled()
   await click('.conversation-resource-text__controls button')
-  expect(resource).toHaveBeenCalledTimes(1); expect(read).toHaveBeenCalledExactlyOnceWith(scope, 'original-mid')
+  expect(resource).toHaveBeenCalledTimes(1); expect(read).toHaveBeenCalledExactlyOnceWith(scope, 'original-mid', 'original-notice')
   expect(host.querySelector('[data-a2a-original-message-id]')?.textContent).toContain('这是原信正文。')
 })

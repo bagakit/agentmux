@@ -8,12 +8,12 @@ import { pathToFileURL } from 'node:url'
 import { candidateAlias, candidateModule } from '../../candidate-package-resolve.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-export async function capturePrimaryReading({ root, evidence, scene }) {
+export async function capturePrimaryReading({ root, evidence, scene, metadata = false }) {
   const desktop = resolve(root, 'apps/desktop'), fixture = resolve(desktop, 'scripts/fixtures/a2a-primary-reading')
   const require = createRequire(resolve(desktop, 'package.json')), { build } = await import(pathToFileURL(require.resolve('vite')).href)
   const { runProbeProcess, listProbeProcesses, stopProbeProcesses } = await import(pathToFileURL(resolve(desktop, 'scripts/probe-process.mjs')).href)
   const privateRoot = await mkdtemp(resolve(tmpdir(), 'amx-primary-reading-')), compiled = resolve(privateRoot, 'compiled')
-  const receipt = { schema: 'agentmux.a2a-primary-reading-capture.v1', completed: false, captureOnly: true,
+  const receipt = { schema: metadata ? 'agentmux.a2a-message-metadata-capture.v1' : 'agentmux.a2a-primary-reading-capture.v1', completed: false, captureOnly: true,
     aestheticReview: 'not-performed', userRunTouched: false, inputs: {}, sceneSha256: hash(await readFile(scene)) }
   const bind = (file, bytes) => {
     const path = relative(root, file), digest = hash(bytes)
@@ -49,12 +49,12 @@ export async function capturePrimaryReading({ root, evidence, scene }) {
       'packages/client-ui/src/styles/conversation-message.css']) assert.ok(receipt.inputs[file], 'Actual product consumer compiled: ' + file)
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
     const lines = []
-    receipt.process = await runProbeProcess(require('electron'), [resolve(fixture, 'main.cjs'), resolve(compiled, 'index.html'), privateRoot, evidence],
+    receipt.process = await runProbeProcess(require('electron'), [resolve(fixture, 'main.cjs'), resolve(compiled, 'index.html'), privateRoot, evidence, ...(metadata ? ['--metadata'] : [])],
       { cwd: root, env, timeoutMs: 60000, onLine: line => lines.push(line) })
     await writeFile(resolve(evidence, 'process.log'), lines.join('\n') + '\n')
     receipt.render = JSON.parse(await readFile(resolve(evidence, 'render.json'), 'utf8'))
     assert.equal(receipt.process.exitCode, 0, JSON.stringify(receipt.render.failure)); assert.equal(receipt.process.timedOut, false)
-    assert.equal(receipt.render.passed, true); assert.equal(receipt.render.frames.length, 18)
+    assert.equal(receipt.render.passed, true); assert.equal(receipt.render.frames.length, metadata ? 15 : 18)
     receipt.sourceIdentity = hash(JSON.stringify(Object.fromEntries(Object.entries(receipt.inputs).sort(([a], [b]) => a.localeCompare(b)))))
     receipt.completed = true
   } catch (error) { receipt.failure = String(error.stack ?? error) }
