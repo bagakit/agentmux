@@ -252,8 +252,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const describeSpeaker = useMemo(() => createSpeakerResolver({
     lookupAgent: id => {
       try {
-        const author = client?.agentSessions().find(value => value.agentSessionId === id)
-        return author ? { label: author.agentSessionId === agentSessionId && displayName ? displayName : `${author.providerId} Agent`, providerId: author.providerId } : undefined
+        const author = client?.agentSession(id)
+        return author?.agentSessionId === id ? { label: author.agentSessionId === agentSessionId && displayName ? displayName : `${author.providerId} Agent`, providerId: author.providerId } : undefined
       } catch { return undefined }
     },
     ...(session ? { currentSession: { id: session.agentSessionId, label: displayName ?? `${session.providerId} Agent`, providerId: session.providerId } } : {})
