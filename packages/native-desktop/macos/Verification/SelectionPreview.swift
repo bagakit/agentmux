@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import AgentMuxNativeMacOSCore
 
 /// A bare AppKit host for the production picker. Commands deliver events to
@@ -6,7 +7,7 @@ import AgentMuxNativeMacOSCore
 @main
 @MainActor
 private final class SelectionPreview: NSObject, NSApplicationDelegate {
-    private var background: NSWindow!
+    private var backgrounds: [NSWindow] = []
     private var completions = 0
     private var current: NativeScreenSelection?
     private var savedApplication: NSRunningApplication?
@@ -23,11 +24,14 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let screen = NSScreen.screens.first else { emit(["event": "failed", "message": "No display"]); NSApp.terminate(nil); return }
-        background = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
-        background.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue - 1)
-        background.isReleasedWhenClosed = false
-        background.contentView = PreviewBackground(frame: NSRect(origin: .zero, size: screen.frame.size))
-        background.makeKeyAndOrderFront(nil)
+        for display in NSScreen.screens {
+            let background = NSWindow(contentRect: display.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            background.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue - 1)
+            background.isReleasedWhenClosed = false
+            background.contentView = PreviewBackground(frame: NSRect(origin: .zero, size: display.frame.size))
+            background.orderFrontRegardless()
+            backgrounds.append(background)
+        }
         NSApp.activate(ignoringOtherApps: true)
         DispatchQueue.global().async { [weak self] in
             while let line = readLine() {
@@ -40,7 +44,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { NSApp.terminate(nil) }
         }
         let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
-        emit(["event": "ready", "pid": Int(getpid()), "screen": rect(screen.frame), "displayId": displayID])
+        emit(["event": "ready", "pid": Int(getpid()), "screen": rect(screen.frame), "displayId": displayID, "screens": NSScreen.screens.map(screenObservation),
+              "separateSpaces": NSScreen.screensHaveSeparateSpaces])
         if CommandLine.arguments.contains("--interactive") { begin(id: 0) }
     }
 
@@ -54,11 +59,15 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                 switch result {
                 case let .success(choice):
                     var receipt: [String: Any] = ["event": "completion", "state": choice == nil ? "cancelled" : "confirmed",
-                               "rect": choice.map { self.rect($0.rectangle) } as Any? ?? NSNull(), "count": self.completions]
+                               "rect": choice.map { self.rect($0.rectangle) } as Any? ?? NSNull(), "count": self.completions,
+                               "visiblePickerWindows": self.pickerViews().count]
                     if allowEditing, let choice { receipt["completionAction"] = choice.completionAction.rawValue }
                     self.emit(receipt)
                 case let .failure(error):
-                    self.emit(["event": "completion", "state": "failed", "message": String(describing: error), "count": self.completions])
+                    var receipt: [String: Any] = ["event": "completion", "state": "failed", "message": String(describing: error),
+                                                  "count": self.completions, "visiblePickerWindows": self.pickerViews().count]
+                    if let failure = error as? NativeScreenSelectionError { receipt["code"] = failure.code }
+                    self.emit(receipt)
                 }
                 if CommandLine.arguments.contains("--interactive") { NSApp.terminate(nil) }
             }
@@ -68,15 +77,16 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
 
     private func discoverPicker(id: Int, attempts: Int) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [self] in
-            let views = NSApp.windows.filter { $0.isVisible }.compactMap { $0.contentView as? NativeScreenSelection }
-            guard views.count == 1, let view = views.first else {
+            let views = pickerViews()
+            let primaryFrame = NSScreen.screens.first?.frame
+            guard let view = views.first(where: { $0.window?.frame == primaryFrame }) ?? views.first else {
                 if attempts > 0 { discoverPicker(id: id, attempts: attempts - 1) }
-                else { emit(["id": id, "ok": false, "message": "Production picker window is not unique"]) }
+                else { emit(["id": id, "ok": false, "message": "Production picker window is unavailable"]) }
                 return
             }
             current = view
             emit(["id": id, "ok": true, "window": rect(view.window!.frame), "windowId": view.window!.windowNumber,
-                  "pid": Int(getpid()), "completions": completions])
+                  "pid": Int(getpid()), "completions": completions, "surfaces": views.map(surfaceObservation)])
         }
     }
 
@@ -87,6 +97,18 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             if method == "begin" { begin(id: id, allowEditing: value["allowEditing"] as? Bool == true); return }
             if method == "close" { emit(["id": id, "ok": true]); NSApp.terminate(nil); return }
             if method == "inspect" { emit(observation(id: id)); return }
+            if method == "displayChange" {
+                NotificationCenter.default.post(name: NSApplication.didChangeScreenParametersNotification, object: NSApp)
+                emit(observation(id: id))
+                return
+            }
+            if let displayID = value["displayId"] as? UInt32 {
+                guard let view = pickerViews().first(where: { screenID($0.window?.screen) == displayID }) else {
+                    throw PreviewFailure("Exact display picker is unavailable")
+                }
+                current = view
+            }
+            if method == "useDisplay" { emit(observation(id: id)); return }
             guard let view = current, let window = view.window else { throw PreviewFailure("Original picker is unavailable") }
             if method == "drag" {
                 let from = try point(value["from"]), to = try point(value["to"])
@@ -130,6 +152,34 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         } catch { emit(["id": id, "ok": false, "message": String(describing: error)]) }
     }
 
+    private func pickerViews() -> [NativeScreenSelection] {
+        NSApp.windows.filter { $0.isVisible }.compactMap { $0.contentView as? NativeScreenSelection }
+    }
+    private func screenID(_ screen: NSScreen?) -> UInt32 {
+        (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+    }
+    private func screenObservation(_ screen: NSScreen) -> [String: Any] {
+        ["displayId": screenID(screen), "frame": rect(screen.frame), "scale": screen.backingScaleFactor]
+    }
+    private func surfaceObservation(_ view: NativeScreenSelection) -> [String: Any] {
+        guard let window = view.window else { return [:] }
+        let panels = descendants(view).filter { $0.identifier?.rawValue == "native-selection-toolbar" && !$0.isHidden }
+        return ["displayId": screenID(window.screen), "windowId": window.windowNumber, "frame": rect(window.frame),
+                "selection": view.selection.rectangle.map(rect) as Any? ?? NSNull(), "toolbarVisible": !panels.isEmpty, "acceptsFirstMouse": view.acceptsFirstMouse(for: nil),
+                "viewGlobalOrigin": rect(window.convertToScreen(view.convert(view.bounds, to: nil))),
+                "windowServer": windowServerObservation(window)]
+    }
+    private func windowServerObservation(_ window: NSWindow) -> [String: Any] {
+        let identifier = CGWindowID(window.windowNumber)
+        guard let rows = CGWindowListCopyWindowInfo(.optionIncludingWindow, identifier) as? [[String: Any]],
+              let row = rows.first(where: { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == identifier
+                  && ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == getpid() }) else {
+            return ["state": "unknown"]
+        }
+        return ["state": "observed", "bounds": row[kCGWindowBounds as String] ?? NSNull(),
+                "onScreen": row[kCGWindowIsOnscreen as String] ?? NSNull(), "windowId": identifier, "pid": Int(getpid()),
+                "scope": "metadata-only-no-pixel-or-physical-input-proof"]
+    }
     private func controls() -> [[String: Any]] {
         guard let view = current else { return [] }
         return descendants(view).compactMap { child in
@@ -139,7 +189,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
     }
     private func observation(id: Int) -> [String: Any] {
         var value: [String: Any] = ["id": id, "ok": true, "completions": completions, "controls": controls(),
-                                  "toolbar": panelFrame("native-selection-toolbar"), "dimensions": panelFrame("native-selection-dimensions")]
+                                  "toolbar": panelFrame("native-selection-toolbar"), "dimensions": panelFrame("native-selection-dimensions"),
+                                  "surfaces": pickerViews().map(surfaceObservation)]
         if let view = current {
             value["rectangle"] = view.selection.rectangle.map(rect) as Any? ?? NSNull()
             value["isInteracting"] = view.selection.isInteracting
@@ -179,7 +230,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             }
             defer { constrainedWindow?.close() }
             guard let view = constrainedWindow?.contentView as? NativeScreenSelection ?? current,
-                  let window = view.window, let backgroundView = background.contentView else {
+                  let window = view.window, let background = backgrounds.first(where: { $0.frame == window.frame }) ?? backgrounds.first,
+                  let backgroundView = background.contentView else {
                 throw PreviewFailure("Original production view is unavailable")
             }
             let backdrop = constrainedSize.map { PreviewBackground(frame: NSRect(origin: .zero, size: $0)) } ?? backgroundView
@@ -216,7 +268,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             emit(["id": id, "ok": true, "width": composite.pixelsWide, "height": composite.pixelsHigh,
                   "source": "AppKit-view-layout-only", "windowServerFrame": false,
                   "rasterization": "actual-root-draw-and-cached-controls", "compositing": "source-over", "scale": 1,
-                  "constrainedViewport": constrainedSize != nil])
+                  "constrainedViewport": constrainedSize != nil, "displayId": screenID(window.screen),
+                  "viewport": rect(window.frame)])
         } catch { emit(["id": id, "ok": false, "message": String(describing: error)]) }
     }
 
