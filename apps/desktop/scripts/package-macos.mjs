@@ -28,10 +28,6 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { observeApplicationProcesses, assertApplicationActivationOwnership, applicationQuitOwnershipDiagnostic } from './package-process-scope.mjs'
-import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, confirmUiTerminalRebindings, observeUiClient, requireOutgoingWorkbenchStorage, createPrivateRuntimeScope } from './package-runtime-upgrade.mjs'
-import { prepareSemanticHostReload, inspectSemanticHostForInstall, stopSemanticHostForInstall, confirmSemanticHostReload } from './package-semantic-host.mjs'
-import { defaultAgentMuxControlSocketPath, probeSocketLiveness } from '@agentmux/core'
-import { macosHostService, macosHostServiceRegistration, inspectMacosHostService, stopMacosHostService } from '../../host/dist/macos-service.js'
 import {
   assertPackageIdentity,
   canonicalInstallPath,
@@ -116,7 +112,7 @@ async function sourceIdentity() {
   const [commit, tree, status] = await Promise.all([
     run('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot, capture: true }),
     run('git', ['write-tree'], { cwd: repositoryRoot, capture: true }),
-    run('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+    run('git', ['--no-optional-locks', 'status', '--porcelain=v1', '--untracked-files=all'], {
       cwd: repositoryRoot,
       capture: true
     })
@@ -579,6 +575,8 @@ async function cleanupProcessScope(scope, findProcessIds) {
 }
 
 async function cleanupSmokeHost(service) {
+  const { macosHostServiceRegistration, inspectMacosHostService, stopMacosHostService } = await import('../../host/dist/macos-service.js')
+  const { probeSocketLiveness } = await import('@agentmux/core')
   const registration = await macosHostServiceRegistration(service)
   let owner
   if (registration) {
@@ -592,6 +590,9 @@ async function cleanupSmokeHost(service) {
 }
 
 async function verifyLaunchServices(appPath, verificationRoot) {
+  const { createPrivateRuntimeScope } = await import('./package-runtime-upgrade.mjs')
+  const { macosHostService, macosHostServiceRegistration } = await import('../../host/dist/macos-service.js')
+  const { defaultAgentMuxControlSocketPath } = await import('@agentmux/core')
   const canonicalAppPath = await realpath(appPath)
   const readyFile = join(verificationRoot, 'desktop-ready.json')
   const userData = join(verificationRoot, 'user-data')
@@ -764,6 +765,7 @@ async function verifyDmg(dmgPath, temporaryRoot, source, signedWorkspaceMoveHelp
  * 路径不发信号是这里的既定承诺（见 package-install-restart.test.ts），交给 OS 回收更安全。
  */
 async function quitInstalledApplication(appPath, originalOwners = [], semanticHost = null) {
+  const { inspectSemanticHostForInstall } = await import('./package-semantic-host.mjs')
   if (semanticHost) assert(semanticHost.currentApp === appPath, 'The prepared Semantic Host belongs to another application; its processes are retained.')
   const semanticOwner = semanticHost ? (await inspectSemanticHostForInstall(semanticHost)).row : null
   // Independent execution ownership ends GUI ancestry, including branches
@@ -849,6 +851,7 @@ function workbenchIdentity(workbench, { expectedAfterRestart = false, includeSur
 
 /** Actual loaded identity and complete Store topology, not process appearance. */
 async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
+  const { observeUiClient, requireOutgoingWorkbenchStorage } = await import('./package-runtime-upgrade.mjs')
   const observation = await observeUiClient(appPath)
   try {
     assert(observation.main.package, 'The loaded Main package identity is unknown; no UI commit can be confirmed.')
@@ -883,6 +886,7 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
 }
 
 async function awaitUiActivation(appPath, before, runtimePlan = null) {
+  const { confirmUiRuntime, assertUiRuntimeObservation, confirmUiTerminalRebindings } = await import('./package-runtime-upgrade.mjs')
   const deadline = Date.now() + 30_000
   let lastError, lastObservation = null
   do {
@@ -906,6 +910,8 @@ async function awaitUiActivation(appPath, before, runtimePlan = null) {
 
 export async function installApplication(appPath, { intent = installIntent, homeDirectory = homedir(),
   quit = quitInstalledApplication, launch = relaunchInstalledApplication } = {}) {
+  const { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime } = await import('./package-runtime-upgrade.mjs')
+  const { prepareSemanticHostReload, stopSemanticHostForInstall, confirmSemanticHostReload } = await import('./package-semantic-host.mjs')
   assert(intent === 'full' || intent === 'ui-only', 'Unknown installation intent.')
   const currentPath = canonicalInstallPath(homeDirectory)
   let runtimeReviewPath
@@ -1131,9 +1137,9 @@ async function main() {
   await run(process.execPath, [join(electronRoot, 'install.js')])
   const electronApp = join(electronRoot, 'dist', 'Electron.app')
   assert(await pathExists(electronApp), 'The locked Electron application is missing.')
-  // Emit the client package consumed by Main and its Core dependencies before compiling Desktop.
-  await run('pnpm', ['--filter', '@agentmux/client-ui...', 'build'], { cwd: repositoryRoot })
-  await run('pnpm', ['build'], { cwd: desktopRoot })
+  // Desktop prebuild owns the complete Host/Core/client and native/asset dependency graph.
+  // Explicitly preserve that lifecycle even when a caller disables implicit pre/post hooks.
+  await run('pnpm', ['--config.enable-pre-post-scripts=true', 'build'], { cwd: desktopRoot })
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'agentmux-macos-package-'))
   let retainedDiagnostics = false
   let packagingError
