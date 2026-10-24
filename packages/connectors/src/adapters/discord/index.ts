@@ -13,6 +13,7 @@ import { createDiscordRooms } from './rooms.js'
 import { handleDiscordInteraction } from './actions.js'
 import { discordConfig, discordFailure, discordId, discordMessage } from './protocol.js'
 import { createDiscordHistory } from './history.js'
+import { createDiscordApi } from './api.js'
 
 type Receiver = { config: ConnectionConfig; signal: AbortSignal; closed: boolean; botId: string; observed: boolean; socketFailed: boolean; cursorFailed: boolean; callbackFailure: string | null }
 type Witness = { receiver: Receiver; raw: string; event?: VerifiedIngressEvent }
@@ -29,10 +30,12 @@ export class DiscordAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly publication
   readonly clients: DiscordClients
   readonly readHistory
+  readonly api
   private readonly witnesses = new WeakSet<Witness>()
   private readonly stores = new Map<string, () => ChannelStoragePort>()
   constructor(options: { http?: Partial<DiscordHttpOptions> } = {}) {
     this.clients = new DiscordClients(options.http)
+    this.api = createDiscordApi(this.clients)
     this.readHistory = createDiscordHistory(this.clients)
     this.channelProfiles = createDiscordProfiles(this.clients)
     this.roomDiscovery = createDiscordRooms(this.clients)
