@@ -95,7 +95,7 @@ await client.writeTerminal(run, {
 await client.releaseRunAttachment(attachment.run)
 ```
 
-需要跨进程继续未知创建时，先调用 `prepareTerminal(input)`，私有持久保存返回值，再将原值传给 `createPreparedTerminal(prepared)`。准备步骤只读取执行 Host 的默认 shell 与完整启动环境，不创建 Run；重复创建复用原操作 key 和完整 Native 请求，不重合当前环境。返回值含敏感环境，只能由可信 client 私有保管，不能进入配置、公开结果或日志。普通 `createTerminal` 组合这两个步骤，使用同一启动规则。
+需要跨进程继续未知创建时，先 `await client.prepareTerminal(input)`，私有持久保存返回值，再将原值传给 `createPreparedTerminal(prepared)`。准备步骤等待执行 Host 的完整启动环境，再读取默认 shell 并冻结请求，不创建 Run；原 `inspectPreparedTerminal` 只核对已有请求和回执，不等待新环境准备。重复创建复用原操作 key 和完整 Native 请求，不重合当前环境。返回值含敏感环境，只能由可信 client 私有保管，不能进入配置、公开结果或日志。普通 `createTerminal` 组合这两个步骤，使用同一启动规则。
 
 `connectLocalAgentMuxRuntime` 返回已连接原 Runtime 的 Client，终端控制不等待 Session 清单、Hook 或 Provider 观察。需要完整语义时，在同一 Client 上显式 `await client.connect()`；等待或失败期间仍保留终端能力，`runtimeDiagnostics()` 确认物理 Runtime，`onEvent` 提供观察失败阶段及后续恢复事实，修正原因后可再次 `connect()`。`connectLocalAgentMux` 仍等待完整观察成功才返回，适合直接需要 Agent 语义的调用者；两入口共用 Runtime、身份和生命周期。连接组合不新增同义 CLI，现有终端／Agent 命令继续使用原公开控制能力。
 
