@@ -1055,7 +1055,7 @@ export class AgentMuxClient {
         const provider = this.providers.get(session.providerId)
         const observation = { session, inputByte: run.acceptedInputBytes }
         if (!provider.prepareNativeInput) return { ...observation, unavailable: new AgentMuxError(
-          'This Provider has no native input adapter for idle-only Inbox notifications. Read the original MID or explicitly use message.notify; the original Agent and manual input remain available.',
+          'This Provider has not contributed the queue adapter required for automatic idle-only Inbox notifications.',
           'AGENT_NATIVE_INPUT_UNAVAILABLE') }
         if (agentTurnCompletionIdentity(session)) return observation
         if (session.semanticStatus?.state === 'working' || session.currentActivity?.state === 'active') {
