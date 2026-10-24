@@ -607,7 +607,11 @@ export async function handleCollaborationLayoutRequest(request: CollaborationLay
     if (request.type === 'reconcile') {
       const previous = new Map(request.boxes.map(box => [box.id, layoutObstacle(box)])), current = new Map(boxes.map(box => [box.id, layoutObstacle(box)]))
       const same = (a: Obstacle | undefined, b: Obstacle | undefined) => a && b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
-      const changed = [...current.values()].filter(box => !same(box, previous.get(box.id))), paths = new Map(request.paths.map(path => [path.id, path]))
+      // Both footprints matter: a deleted, moved or shrunken obstruction can
+      // release an old detour even when its endpoints and new corridor are clear.
+      const changed = [...current.values()].filter(box => !same(box, previous.get(box.id)))
+      changed.push(...[...previous.values()].filter(box => !same(box, current.get(box.id))))
+      const paths = new Map(request.paths.map(path => [path.id, path]))
       const retainedPaths = connections.filter(connection => {
         const path = paths.get(connection.id)
         return path && same(previous.get(connection.source), current.get(connection.source)) && same(previous.get(connection.target), current.get(connection.target))
