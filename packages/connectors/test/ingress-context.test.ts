@@ -31,7 +31,7 @@ function admitted(record: ConnectionIngressMessage): AgentInputSubmissionReceipt
     originalControlOperationId: ref.operationId, status: 'admitted', admission: { admission: { transport: 'native', acknowledged: true,
       native: { outcome: 'admitted', plan: { sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), threadId: source.nativeSessionId } } } } } as AgentInputSubmissionReceipt
 }
-async function fixture() {
+async function fixture(baseline: unknown = base('baseline')) {
   const directory = await mkdtemp(join(tmpdir(), 'agentmux-context-position-')), path = join(directory, 'original.sqlite')
   let database = new DatabaseSync(path)
   database.exec('CREATE TABLE connection_ingress_message(ingress_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, record_json TEXT NOT NULL) STRICT')
@@ -42,7 +42,7 @@ async function fixture() {
     database.prepare('INSERT INTO connection_ingress_message VALUES (?,?,?)').run(parsed.ingressId, ++sequence, JSON.stringify(parsed))
     if (parsed.kind !== 'action' && parsed.state === 'claimed') owner.claimed(parsed)
   }
-  insert(base('baseline'))
+  insert(baseline)
   return { insert, get owner() { return owner }, get database() { return database },
     reopen: () => { database.close(); database = new DatabaseSync(path); owner = new IngressContextPositions(database) },
     pending: () => database.prepare('SELECT ingress_id FROM connection_ingress_context_pending ORDER BY sequence').all().map(row => row.ingress_id) }
@@ -95,4 +95,54 @@ it('keeps unknown original effects inspect-only and excludes another recipient s
   await f.owner.reconcile(recipient, inspect)
   expect(inspect).toHaveBeenCalledExactlyOnceWith(first.input!.operationId)
   expect(f.pending()).toEqual([first.ingressId, other.ingressId]); expect(f.owner.position(recipient)?.messageId).toBe('second')
+})
+
+function revision(record: ConnectionIngressMessage, configuration: number, publication?: number): ConnectionIngressMessage {
+  return parseConnectionIngressRecord({ ...record, group: { ...record.group, target: { ...record.group!.target!, bindingRevision: configuration,
+    ...(publication === undefined ? {} : { publicationRevision: publication }) } }, ...(record.input ? { input: { ...record.input, author: { ...record.input.author, bindingRevision: configuration } } } : {}) }) as ConnectionIngressMessage
+}
+
+it('a first-observed intake after a trigger edit establishes the exact original publication baseline before claim', async () => {
+  const baseline = revision(parseConnectionIngressRecord(base('baseline')) as ConnectionIngressMessage, 2, 1)
+  const f = await fixture(baseline), first = revision(input('first', ['baseline']), 3, 1)
+  f.insert(first)
+  const saved = f.database.prepare('SELECT record_json FROM connection_ingress_message ORDER BY sequence').all()
+  expect(f.owner.observe(first, admitted(first))).toBe(true)
+  expect(f.owner.position(recipient)).toEqual({ ingressId: first.ingressId, messageId: 'first' })
+  const second = revision(input('second', [], 'first', 'admitted-input'), 4, 1)
+  f.insert(second); expect(f.owner.observe(second, admitted(second))).toBe(true)
+  f.database.exec("CREATE INDEX connection_ingress_context_origin ON connection_ingress_message(json_extract(record_json,'$.group.target.bindingId'),json_extract(record_json,'$.group.target.bindingRevision'),sequence)")
+  f.reopen()
+  expect(f.owner.position(recipient)?.messageId).toBe('second')
+  expect(f.database.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='connection_ingress_context_origin'").get()).toBeUndefined()
+  expect(f.database.prepare('SELECT record_json FROM connection_ingress_message ORDER BY sequence LIMIT 2').all()).toEqual(saved)
+})
+
+it('a missing frozen publication fact and another source remain independent instead of guessing a prior root', async () => {
+  const f = await fixture(), first = revision(input('first', ['baseline']), 2)
+  f.insert(first)
+  expect(f.owner.observe(first, admitted(first))).toBe(false)
+  expect(f.owner.position(recipient)).toBeNull()
+  expect(f.owner.position({ ...recipient, bindingRevision: 2 })).toBeNull()
+  const original = input('accepted', ['baseline']); f.insert(original)
+  expect(f.owner.observe(original, admitted(original))).toBe(true)
+  expect(f.owner.position({ ...recipient, source: { ...source, nativeSessionId: 'different-original-source' } })).toBeNull()
+  const unknown = revision(input('unknown', [], 'accepted', 'admitted-input'), 3, 1); f.insert(unknown)
+  expect(f.owner.observe(unknown, { ...admitted(unknown), status: 'unknown' })).toBe(false)
+  const terminal = { ...admitted(unknown), status: 'terminal-confirmed' as const }
+  expect(f.owner.observe(unknown, terminal)).toBe(false)
+  expect(f.owner.position(recipient)?.messageId).toBe('accepted')
+  expect(() => revision(original, 2, 3)).toThrow()
+})
+
+it('a late original native receipt across configuration revisions retires once without moving an accepted later interval backwards', async () => {
+  const f = await fixture(), first = revision(input('first', ['baseline']), 2, 1), second = revision(input('second', ['baseline', 'first']), 3, 1)
+  f.insert(first); f.insert(second)
+  expect(f.owner.observe(second, admitted(second))).toBe(true)
+  f.reopen()
+  const inspect = vi.fn(async () => admitted(first))
+  await f.owner.reconcile(recipient, inspect)
+  expect(inspect).toHaveBeenCalledExactlyOnceWith(first.input!.operationId)
+  expect(f.owner.position(recipient)?.messageId).toBe('second'); expect(f.pending()).toEqual([])
+  await f.owner.reconcile(recipient, inspect); expect(inspect).toHaveBeenCalledTimes(1)
 })
