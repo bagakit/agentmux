@@ -7,6 +7,7 @@ import type { MobileObjectIdentity } from '../navigation/MobileIdentity'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import { sameMobileGoalDraftScope, type MobileGoalDraftScope } from '../recovery/goal-drafts'
 import { mobileGoalDraftSource } from './useGoalDraft'
+import { MobileAgentRow } from '../navigation/MobileAgentRow'
 
 export function MobileGoalSessions({ client, sessionIds, visible, openSession, goal, factScope }: {
   client: AgentMuxHostedClient | null; sessionIds: string[]; visible: boolean
@@ -52,16 +53,18 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
     {sessionIds.map(id => {
       const row = displayedRows.find(value => value.agentSessionId === id)
       const identity = { name: row?.name || 'Agent 名称未确认', project: row?.project || '项目未确认' }
+      const originalSource = () => {
+        const source = mobileGoalDraftSource(client, getDeviceWorkface())
+        if (!goal || source && factScope && sameMobileGoalDraftScope(source.scope, factScope)) return true
+        setIssue('打开未完成：原目标与当前 Host 尚未匹配，未将同名 Session 当作原会话。原引用与呈现保留，可接回原 Host 后重试。')
+        return false
+      }
       return <div key={id} className="mobile-goal-session"><strong>{identity.name}</strong><p>{identity.project}{row?.state ? ` · ${row.state}` : ''}</p>
         {row?.recap && <p>{row.recap.text}<small> · {row.recap.source}</small></p>}
         {row?.detail && <p>{row.detail}</p>}
-        {openSession && <button onClick={() => {
-          const source = mobileGoalDraftSource(client, getDeviceWorkface())
-          if (goal && (!source || !factScope || !sameMobileGoalDraftScope(source.scope, factScope))) {
-            setIssue('打开未完成：原目标与当前 Host 尚未匹配，未将同名 Session 当作原会话。原引用与呈现保留，可接回原 Host 后重试。'); return
-          }
-          openSession(id, identity)
-        }}>打开关联会话</button>}
+        {openSession && <div className="mobile-agent-row"><MobileAgentRow agentSessionId={id} identity={identity} beforeMenu={originalSource} onOpen={() => {
+          if (originalSource()) openSession(id, identity)
+        }}>打开关联会话</MobileAgentRow></div>}
         <details><summary>会话身份</summary><code>{id}</code>{row?.providerId && <p>{row.providerId}</p>}</details>
       </div>
     })}

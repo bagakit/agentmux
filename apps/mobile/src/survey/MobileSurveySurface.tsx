@@ -131,8 +131,8 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
             const regions = catalog?.regions.filter(value => value.tabId === tab.tabId && value.regionId === regionId) ?? [], region = regions.length === 1 ? regions[0] : undefined
             const row = catalog?.agentPresentation?.find(value => value.agentSessionId === region?.agentSessionId)
             const addresses = catalog?.locations.filter(value => value.tabId === tab.tabId && value.regionId === regionId) ?? []
-            return <li key={regionId}>
-              {region?.kind === 'agent' && region.agentSessionId ? <button className="mobile-menu-row" type="button" onClick={() => openAgent(region, addresses.length === 1 ? addresses[0] : undefined)}><span><strong>继续对话 · {row?.name ?? '名称未确认'}</strong><small>{row?.recap?.text ?? row?.detail ?? '继续原 Agent'}</small></span></button>
+            return <li key={regionId} className={region?.agentSessionId ? 'mobile-agent-row' : undefined}>
+              {region?.kind === 'agent' && region.agentSessionId ? <MobileAgentRow agentSessionId={region.agentSessionId} identity={{ name: row?.name ?? '名称未确认', project: row?.project ?? item?.name ?? '项目未确认', ...(addresses.length === 1 ? { context: addresses[0] } : {}) }} className="mobile-menu-row" onOpen={() => openAgent(region, addresses.length === 1 ? addresses[0] : undefined)}><span><strong>继续对话 · {row?.name ?? '名称未确认'}</strong><small>{row?.recap?.text ?? row?.detail ?? '继续原 Agent'}</small></span></MobileAgentRow>
                 : region && ['file', 'browser'].includes(region.kind) ? <button className="mobile-menu-row" type="button" onClick={() => openContent(tab, region)}><span><strong>{region.kind === 'file' ? region.file?.path.split('/').at(-1) ?? '文件名称未确认' : '查看原网页'}</strong><small>{kindName(region)}</small></span></button>
                   : <p>{region ? kindName(region) : 'Region 未确认'}<small>原工作面保留，此内容尚未提供手机操作。</small></p>}
               <details className="mobile-survey-provenance"><summary>原位置与来源</summary><code>{tab.tabId} / {regionId}</code>{addresses.map(address => <div key={JSON.stringify(address)}><code>{address.displayWorkspaceId} / {address.groupId}{address.spaceId ? ` / ${address.spaceId}` : ''}</code>
@@ -149,3 +149,4 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
   </section></MobileNoticeScope>
 }
 import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
+import { MobileAgentRow } from '../navigation/MobileAgentRow'

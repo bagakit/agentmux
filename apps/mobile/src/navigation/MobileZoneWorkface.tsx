@@ -5,6 +5,7 @@ import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { MobileRegionContent } from './MobileRegionContent'
 import type { MobileObjectIdentity } from './MobileIdentity'
+import { MobileAgentRow } from './MobileAgentRow'
 
 /** Topic discussions and original content use the same public Zone and Region identities. */
 export function MobileZoneWorkface({ client, zoneId, name, visible, openSession, tabId, regionId, onCreateAgent }: {
@@ -33,9 +34,9 @@ export function MobileZoneWorkface({ client, zoneId, name, visible, openSession,
         const agent = catalog.agentPresentation?.find(value => value.agentSessionId === region.agentSessionId)
         const occurrences = catalog.locations.filter(place => place.tabId === tab.tabId && place.regionId === region.regionId)
         const identity = (context?: typeof occurrences[number]): MobileObjectIdentity => ({ name: agent?.name ?? tab.name ?? name, project: agent?.project ?? name, ...(context ? { context } : {}) })
-        return region.agentSessionId ? <div key={region.regionId}><button className="mobile-menu-row" onClick={() => openSession(region.agentSessionId!, identity(occurrences.length === 1 ? occurrences[0] : undefined))}>
+        return region.agentSessionId ? <div key={region.regionId} className="mobile-agent-row"><MobileAgentRow agentSessionId={region.agentSessionId} identity={identity(occurrences.length === 1 ? occurrences[0] : undefined)} className="mobile-menu-row" onOpen={() => openSession(region.agentSessionId!, identity(occurrences.length === 1 ? occurrences[0] : undefined))}>
           <span>{agent?.name ?? tab.name ?? name}<small>{agent?.recap?.text ?? agent?.detail ?? '打开原对话'}</small></span>
-        </button>{occurrences.length > 1 && <details className="mobile-session-locations"><summary>{occurrences.length} 个原展示位置</summary>{occurrences.map(place => <button type="button" key={JSON.stringify(place)} onClick={() => openSession(region.agentSessionId!, identity(place))}>{catalog.spaces.find(space => space.spaceId === place.spaceId)?.name ?? name} · {place.displayWorkspaceId} / {place.groupId}</button>)}</details>}</div> : region.kind === 'file' || region.kind === 'browser' ? <MobileRegionContent visible={visible} key={region.regionId} client={client} tabId={tab.tabId} regionId={region.regionId} kind={region.kind} browserId={region.browserId} file={region.file} zoneId={zoneId ?? tab.zoneId} />
+        </MobileAgentRow>{occurrences.length > 1 && <details className="mobile-session-locations"><summary>{occurrences.length} 个原展示位置</summary>{occurrences.map(place => <button type="button" key={JSON.stringify(place)} onClick={() => openSession(region.agentSessionId!, identity(place))}>{catalog.spaces.find(space => space.spaceId === place.spaceId)?.name ?? name} · {place.displayWorkspaceId} / {place.groupId}</button>)}</details>}</div> : region.kind === 'file' || region.kind === 'browser' ? <MobileRegionContent visible={visible} key={region.regionId} client={client} tabId={tab.tabId} regionId={region.regionId} kind={region.kind} browserId={region.browserId} file={region.file} zoneId={zoneId ?? tab.zoneId} />
           : <p key={region.regionId} className="mobile-spatial-notice">{region.kind === 'launcher' ? '此讨论尚未启动 Agent。' : '终端工作面'}</p>
       })}
     </section>)}
