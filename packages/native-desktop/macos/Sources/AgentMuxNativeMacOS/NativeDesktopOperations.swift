@@ -14,10 +14,10 @@ enum NativeDesktopOperations {
             let mode = params["mode"]?.string ?? "selection"
             let rect: CGRect
             if mode == "selection" {
-                return try NativeSelectionCaptureLease.shared.withCapture {
+                return try NativeSelectionCaptureLease.shared.withCapture { ownership in
                     let selection = try NativeSelectionRequest.run()
                     guard let selection else { return ["state": "cancelled"] }
-                    return try capturedRectangle(selection)
+                    return try capturedRectangle(selection, ownership: ownership)
                 }
             } else if mode == "rect" {
                 guard case let .object(values)? = params["rect"],
@@ -47,11 +47,11 @@ enum NativeDesktopOperations {
         }
     }
 
-    private static func capturedRectangle(_ rect: CGRect) throws -> [String: Any] {
+    private static func capturedRectangle(_ rect: CGRect, ownership: NativeSelectionCaptureLease.Ownership? = nil) throws -> [String: Any] {
         guard NativeCaptureGeometry.isValid(rect) else {
             throw ProviderError.coded("invalid_argument", "capture rectangle must have finite coordinates and positive dimensions")
         }
-        let capture = try captureRect(rect)
+        let capture = try captureRect(rect, ownership: ownership)
         return ["state": "captured", "screenshot": try png(capture.image, scale: capture.scale), "engine": capture.engine,
                 "selectionRect": renderRect(rect)]
     }
@@ -226,8 +226,8 @@ enum NativeDesktopOperations {
         return CapturedImage(image: image, engine: engine)
     }
 
-    private static func captureRect(_ rect: CGRect) throws -> (image: CGImage, scale: Double, engine: String) {
-        if #available(macOS 14.0, *) { return try captureRectWithScreenCaptureKit(rect) }
+    private static func captureRect(_ rect: CGRect, ownership: NativeSelectionCaptureLease.Ownership? = nil) throws -> (image: CGImage, scale: Double, engine: String) {
+        if #available(macOS 14.0, *) { return try captureRectWithScreenCaptureKit(rect, ownership: ownership) }
         let scale = displayScale(for: rect)
         guard NativeImageLimits.permits(width: ceil(rect.width * scale), height: ceil(rect.height * scale)) else {
             throw ProviderError.coded("image_too_large", "rectangle pixels exceed the host image allocation limit")
@@ -239,8 +239,11 @@ enum NativeDesktopOperations {
     }
 
     @available(macOS 14.0, *)
-    private static func captureRectWithScreenCaptureKit(_ rect: CGRect) throws -> (image: CGImage, scale: Double, engine: String) {
+    private static func captureRectWithScreenCaptureKit(_ rect: CGRect, ownership: NativeSelectionCaptureLease.Ownership? = nil) throws -> (image: CGImage, scale: Double, engine: String) {
         try BlockingAsync.run(timeout: 10) {
+            // A timed-out observer can return while SCK still owns pixels.
+            // Release this selection only after the actual producer body exits.
+            defer { withExtendedLifetime(ownership) {} }
             let content = try await SCShareableContent.current
             let displays = content.displays.filter { $0.frame.intersects(rect) }
             guard !displays.isEmpty else { throw ProviderError.coded("display_not_found", "capture rectangle does not intersect an active display") }
