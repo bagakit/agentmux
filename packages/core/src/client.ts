@@ -1,3 +1,4 @@
+import { originalMessageInputKey } from './agent-message-query.js'
 import { decodePreparedTerminal, parsePreparedTerminal, parsePreparedTerminalStop, type AgentMuxPreparedTerminal, type AgentMuxPreparedTerminalStop } from './terminal-preparation.js'
 import type { AgentMuxCreationRuntime, AgentMuxTerminalCreationRetirement, AgentMuxTerminalCreationRetirementObservation } from './terminal-creation-retirement.js'
 import { AgentSessionRecoveryService } from './agent-session-recovery/service.js'
@@ -4395,7 +4396,7 @@ export class AgentMuxClient {
   }
 
   /** Read original intake before any input claim or dispatch exists; no Runtime readiness is required. */
-  async readMessage(input: import('./agent-message-query.js').AgentMuxMessageRead & { caller?: { agentSessionId: string; capability: string } }): Promise<DurableAgentMuxMessage | null> {
+  async readMessage(input: import('./agent-message-query.js').AgentMuxMessageRead & { caller?: { agentSessionId: string; capability: string } }): Promise<import('./agent-message-query.js').AgentMuxMessageReadView | null> {
     if ((input.operationId !== undefined) === (input.messageId !== undefined)) throw new AgentMuxError(
       'Choose exactly one original message operationId or messageId.', 'INVALID_CONTROL_REQUEST')
     const reauthorize = async (message: DurableAgentMuxMessage | null) => {
@@ -4406,9 +4407,14 @@ export class AgentMuxClient {
         caller.agentSessionId !== message.envelope.recipientSessionId) throw new AgentMuxError(
         'Only an original message participant can read it with Agent authority.', 'MESSAGE_PARTICIPANT_MISMATCH')
     }
-    return input.messageId === undefined
+    const message = await (input.messageId === undefined
       ? this.messageQueue.readByOperationId(input.operationId!, reauthorize, input.notificationId)
-      : this.messageQueue.readByMessageId(input.messageId, reauthorize, input.notificationId)
+      : this.messageQueue.readByMessageId(input.messageId, reauthorize, input.notificationId))
+    if (!message) return null
+    const key = originalMessageInputKey(message)
+    // Optional membership observation cannot revoke the original authorized body read.
+    const inputOrigin = key ? await this.messageQueue.readConversationInputOrigin(key).catch(() => null) : null
+    return { ...message, inputOrigin }
   }
 
   /** Original A2A metadata only; no connection, Run probe, input or acknowledgement. */
