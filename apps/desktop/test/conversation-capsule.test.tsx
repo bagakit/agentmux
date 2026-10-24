@@ -222,3 +222,28 @@ it('reconnects its original retained document before failed service observation 
   expect(api.browser.restore).toHaveBeenLastCalledWith(original.id, { workspaceId: null, profileId: null, mode: 'normal', viewport: 'responsive' })
   expect(create).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled()
 })
+
+it('preserves the trusted question editor node and unsaved bytes through Hide and reading visibility handoffs', async () => {
+  mode = 'injected'
+  const originalRead = inspect.getMockImplementation()!
+  inspect.mockImplementation((async (method: string, params: any) => method === 'capsule.interaction.ls' ? {
+    interactions: [{ capsuleId: params.capsuleId, interactionId: 'original-hidden-question', question: 'Original hidden question?', draft: 'Saved draft', revision: 0, status: 'pending' }], issues: []
+  } : originalRead(method, params)) as never)
+  await render(`![Connected result](${first})`)
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Page questions"]')!.click())
+  const before = container.querySelector<HTMLTextAreaElement>('textarea')!
+  expect(before).not.toBeNull()
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(before, 'Unsaved trusted answer')
+    before.dispatchEvent(new Event('input', { bubbles: true })); before.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await click('Hide')
+  expect(before.isConnected, 'Hide must keep the original trusted form mounted').toBe(true)
+  expect(before.closest('[hidden][inert]')).not.toBeNull()
+  await click('Show page'); expect(container.querySelector('textarea')).toBe(before); expect(before.value).toBe('Unsaved trusted answer')
+  await render(`![Connected result](${first})`, false)
+  expect(before.isConnected, 'A reading visibility handoff must retain the same trusted editor').toBe(true)
+  await render(`![Connected result](${first})`, true)
+  expect(container.querySelector('textarea')).toBe(before); expect(before.value).toBe('Unsaved trusted answer')
+  expect(inspect.mock.calls.filter(([method]) => method === 'capsule.interaction.draft')).toHaveLength(0)
+})

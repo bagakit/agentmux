@@ -157,7 +157,19 @@ try {
   await until('document.body.textContent.includes("Review the original page")', 'Trusted original question must be readable from the card')
   assert.ok((await owner.call('capsule.interaction.ls', { capsuleId: injected.record.capsuleId })).interactions.length === 1)
   await writeFile(join(evidence!, `${phase}-injected.png`), (await win.webContents.capturePage()).toPNG())
+  const trustedEditor = await evaluate(`(() => { const node=document.querySelector('.capsule-question textarea'); window.originalTrustedEditor=node; node.scrollIntoView({block:'nearest'}); const r=node.getBoundingClientRect(); return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)} })()`)
+  win.webContents.sendInputEvent({ type: 'mouseDown', ...trustedEditor, button: 'left', clickCount: 1 })
+  win.webContents.sendInputEvent({ type: 'mouseUp', ...trustedEditor, button: 'left', clickCount: 1 })
+  assert.equal(await evaluate('document.activeElement===window.originalTrustedEditor'), true, 'The trusted original host question must actually own keyboard focus')
+  await evaluate('window.originalTrustedEditor.select()'); await win.webContents.insertText('Trusted unsaved answer')
+  await evaluate("conversationCapsuleProbe.click('Hide')")
+  assert.equal(await evaluate('window.originalTrustedEditor.isConnected'), true, 'Hide keeps the original trusted host editor connected')
+  await evaluate("conversationCapsuleProbe.click('Show page')")
+  assert.equal(await evaluate('document.querySelector(".capsule-question textarea")===window.originalTrustedEditor'), true)
+  assert.equal(await evaluate('window.originalTrustedEditor.value'), 'Trusted unsaved answer')
+  report.trustedEditor = { actualKeyboardInput: true, hideShowSameNode: true, bytes: 'Trusted unsaved answer', retentionPort: 'private memory port; actual Workbench writer verified by T004' }
   metadataUnavailable = true
+  await evaluate('window.originalTrustedEditor.focus();window.originalTrustedEditor.select()'); await win.webContents.insertText('Trusted retained after unmount')
   await evaluate('conversationCapsuleProbe.unmount()')
   await until('!document.querySelector(".conversation-capsule")', 'The injected original message fully unmounts')
   await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(injected.record.capsuleId))})`)
@@ -165,6 +177,9 @@ try {
   await evaluate(`document.querySelector('[aria-label="Page questions"]').click()`)
   await until('document.body.textContent.includes("Review the original page") && document.body.textContent.includes("Original page metadata observation is unavailable")', 'Independent saved-question reads survive metadata failure')
   report.injectedMetadataFailure = { browserId: (await facts()).browserId, questionReadable: true, sourceFailed: 'capsule.inspect', independentOwnerRead: 'capsule.interaction.ls' }
+  assert.equal(await evaluate('document.querySelector(".capsule-question textarea").value'), 'Trusted retained after unmount', 'True message unmount retains trusted editable bytes without resuming autosave')
+  report.trustedEditor.remountBytes = 'Trusted retained after unmount'
+
   await writeFile(join(evidence!, `${phase}-metadata-unavailable.png`), (await win.webContents.capturePage()).toPNG())
   metadataUnavailable = false
   await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(injected.record.capsuleId))},true,'light')`)
