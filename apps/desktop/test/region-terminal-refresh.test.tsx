@@ -351,3 +351,64 @@ it('late observation reply after a subject change releases only the old lease an
   expect(api.sessions.detach).toHaveBeenCalledExactlyOnceWith('observed-attachment')
   expect(useAppStore.getState().sessions[0]!.control.run.runId).toBe('new-run')
 })
+
+function savedAttachmentSubject(kind: 'agent' | 'terminal'): SessionSnapshot {
+  return kind === 'agent' ? { ...session, id: 'saved-agent-alias' } : {
+    ...session, id: 'saved-terminal-alias', kind: 'terminal', providerId: null,
+    control: { kind: 'terminal', hostId: session.hostId, runId: session.control.run.runId, run: session.control.run }
+  }
+}
+function canonicalAttachment(subject: SessionSnapshot): SessionAttachResult {
+  return { ...replay('ORIGINAL CANONICAL OUTPUT'), session: { ...subject,
+    id: subject.kind === 'agent' ? subject.control.agentSessionId : subject.control.runId,
+    latestOutputBytes: 'ORIGINAL CANONICAL OUTPUT'.length } }
+}
+it.each(['agent', 'terminal'] as const)('original canonical attachment reaches the saved %s alias without changing its Core receipt', async kind => {
+  const subject = savedAttachmentSubject(kind), receipt = canonicalAttachment(subject), originalReceipt = structuredClone(receipt.session)
+  surfaceState(subject)
+  useAppStore.setState({ agentComposerDrafts: { [subject.id]: 'Original unsent draft' } })
+  const before = frozenState()
+  attach.mockResolvedValue(receipt)
+  await render(subject)
+  await act(async () => await vi.waitFor(() => expect(readTerminalViewObservation({ regionId: origin.regionId,
+    sessionId: subject.id, runId: subject.control.run.runId })?.liveReady).toBe(true)))
+  expect(attach).toHaveBeenCalledExactlyOnceWith(subject.control, 0)
+  expect(fixture.terminals[0]!.buffer.active.getLine(0)?.translateToString(true)).toBe('ORIGINAL CANONICAL OUTPUT')
+  expect(receipt.session).toEqual(originalReceipt)
+  expect(useAppStore.getState().sessions).toEqual([subject])
+  expect(frozenState()).toEqual(before)
+  await act(async () => fixture.terminals[0]!.input('x'))
+  expect(write).toHaveBeenCalledExactlyOnceWith(subject.control, 'x', 'user', expect.objectContaining({ source: 'user' }))
+  expect(recover).not.toHaveBeenCalled()
+})
+
+it.each(['agent-sid', 'host', 'control-host', 'run', 'kind', 'terminal-run-id', 'terminal-run'] as const)(
+  'original canonical attachment refuses the wrong %s while retaining the saved alias and original workface', async mismatch => {
+    const subject = savedAttachmentSubject(mismatch.startsWith('terminal') ? 'terminal' : 'agent')
+    const receipt = canonicalAttachment(subject)
+    // A matching presentation alias cannot grant a different Core Agent or Run.
+    receipt.session = { ...receipt.session, id: subject.id }
+    if (mismatch === 'agent-sid' && receipt.session.kind === 'agent') receipt.session = {
+      ...receipt.session, control: { ...receipt.session.control, agentSessionId: 'another-core-agent' }
+    }
+    if (mismatch === 'host') receipt.session = { ...receipt.session, hostId: 'another-host' }
+    if (mismatch === 'control-host') receipt.session = { ...receipt.session, control: { ...receipt.session.control, hostId: 'another-control-host' } }
+    if (mismatch === 'run' || mismatch === 'terminal-run') receipt.session = { ...receipt.session, control: { ...receipt.session.control, run: { runId: 'another-run' } } }
+    if (mismatch === 'kind') receipt.session = savedAttachmentSubject('terminal')
+    if (mismatch === 'terminal-run-id' && receipt.session.kind === 'terminal') receipt.session = {
+      ...receipt.session, control: { ...receipt.session.control, runId: 'another-terminal-run' }
+    }
+    const originalReceipt = structuredClone(receipt.session)
+    surfaceState(subject)
+    useAppStore.setState({ agentComposerDrafts: { [subject.id]: 'Original unsent draft' } })
+    const before = frozenState()
+    attach.mockResolvedValue(receipt)
+    await render(subject)
+    await act(async () => await vi.waitFor(() => expect(container.textContent).toContain('The attachment observation did not confirm this original Session and Run.')))
+    expect(readTerminalViewObservation({ regionId: origin.regionId, sessionId: subject.id,
+      runId: subject.control.run.runId })?.liveReady).toBe(false)
+    expect(fixture.terminals[0]!.buffer.active.getLine(0)?.translateToString(true)).not.toContain('ORIGINAL CANONICAL OUTPUT')
+    expect(receipt.session).toEqual(originalReceipt)
+    expect(useAppStore.getState().sessions).toEqual([subject]); expect(frozenState()).toEqual(before)
+    expect(write).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+  })
