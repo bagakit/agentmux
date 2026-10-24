@@ -9,6 +9,7 @@ import { isObjectId } from '@agentmux/core/object-id'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 const mounts: { root: Root; element: HTMLDivElement }[] = []
+const goalOwner = { runtimeId: 'private-goal-runtime', ownerInstanceId: 'original-goal-process' }
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const view of mounts.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() } vi.useRealTimers() })
 const original: AgentMuxRpcGoal = {
@@ -32,7 +33,7 @@ async function mount(initial = [original], onBackChange?: (back: (() => void) | 
     if (method === 'goal.start') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, updatedAt: goal.updatedAt + 1, status: 'in_progress' as const } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, sessionId: params.sessionId ?? goals.find(goal => goal.id === params.goalId)!.assigneeSessionIds[0] ?? null } } }
     if (method === 'goal.delete') { const goal = goals.find(goal => goal.id === params.goalId)!; goals = goals.filter(goal => goal.id !== params.goalId); return { goal, receipt: { goalId: params.goalId, deletedAt: 4 } } }
     if (method === 'goal.create') { const goal = { ...original, id: params.goalId, title: params.title, description: params.description, status: params.status, sessionIds: [], projectId: params.projectId ?? null, projectName: params.projectId ? '原项目' : null, alignment: undefined, grounding: undefined }; goals.push(goal); return { goal, receipt: { goalId: goal.id, createdAt: 3 } } }
-    if (method === 'goal.discuss') return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, mode: params.mode, operationId: params.operationId, tabId: 'original-goal-tab', agentSessionId: 'session-exact' } }
+    if (method === 'goal.discuss') return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, mode: params.mode, operationId: params.operationId, tabId: 'original-goal-tab', regionId: 'original-goal-region', hostId: 'local', agentSessionId: 'session-exact' } }
     if (method === 'goal.update') {
       const previous = goals.find(goal => goal.id === params.goalId)!
       if (params.expectedUpdatedAt !== undefined && params.expectedUpdatedAt !== previous.updatedAt) throw new Error('Goal version conflict')
@@ -44,7 +45,7 @@ async function mount(initial = [original], onBackChange?: (back: (() => void) | 
   })
   const element = document.createElement('div'); document.body.append(element)
   const root = createRoot(element); mounts.push({ root, element })
-  const openSession = vi.fn(), client = { forwardRpc, runtimeOwnerIdentity: () => ({ runtimeId: 'private-goal-runtime', ownerInstanceId: 'original-goal-process', availability: 'connected' }) } as any
+  const openSession = vi.fn(), client = { forwardRpc, runtimeOwnerIdentity: () => ({ ...goalOwner, availability: 'connected' }) } as any
   const render = async (visible = true, connected = true) => { await act(async () => root.render(<MobileGoalsSurface client={client} connected={connected} visible={visible} openSession={openSession} {...(onBackChange ? { onBackChange } : {})} />)) }
   await render()
   const click = async (text: string) => { const button = [...element.querySelectorAll('button')].find(button => (button.getAttribute('aria-label') ?? button.textContent) === text && !button.closest('[hidden]')); expect(button).toBeDefined(); await act(async () => button!.click()) }
@@ -262,11 +263,11 @@ describe('Mobile Goals original owner slice', () => {
     const input = view.element.querySelector('[aria-label="关联 Session ID"]') as HTMLInputElement
     await view.text(input, 'new-session-exact')
     await act(async () => input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
-    expect(view.forwardRpc).toHaveBeenCalledWith('goal.link-session', { goalId: original.id, sessionId: 'new-session-exact', operationId: expect.any(String) })
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.link-session', { goalId: original.id, sessionId: 'new-session-exact', operationId: expect.any(String) }, undefined, goalOwner)
     const project = view.element.querySelector('[aria-label="关联 Project ID"]') as HTMLInputElement
     await view.text(project, 'new-project-exact')
     await act(async () => project.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
-    expect(view.forwardRpc).toHaveBeenCalledWith('goal.link-project', { goalId: original.id, projectId: 'new-project-exact', operationId: expect.any(String) })
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.link-project', { goalId: original.id, projectId: 'new-project-exact', operationId: expect.any(String) }, undefined, goalOwner)
     expect(view.element.textContent).toContain('new-session-exact'); expect(view.element.textContent).toContain('new-project-exact')
   })
   it('does not relabel old accepted checks as current criteria or current acceptance', async () => {
@@ -342,14 +343,14 @@ describe('Mobile Goals original owner slice', () => {
     const view = await mount(); await view.click('原目标原项目 · 已完成原用户意图')
     const assignees = view.element.querySelector('[aria-label="分配 Session IDs"]') as HTMLInputElement
     await view.text(assignees, 'session-exact, session-explicit'); await view.click('保存负责人分配')
-    expect(view.forwardRpc).toHaveBeenCalledWith('goal.assign', { goalId: original.id, assigneeSessionIds: ['session-exact', 'session-explicit'], supervisorSessionId: 'session-exact', expectedUpdatedAt: 2, start: false, operationId: expect.any(String) })
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.assign', { goalId: original.id, assigneeSessionIds: ['session-exact', 'session-explicit'], supervisorSessionId: 'session-exact', expectedUpdatedAt: 2, start: false, operationId: expect.any(String) }, undefined, goalOwner)
     expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.start')).toBe(false)
     await view.text(view.element.querySelector('[aria-label="执行 Session ID"]') as HTMLInputElement, 'session-explicit')
     await view.click('开始执行此目标')
-    expect(view.forwardRpc).toHaveBeenCalledWith('goal.start', { goalId: original.id, sessionId: 'session-explicit', operationId: expect.any(String) })
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.start', { goalId: original.id, sessionId: 'session-explicit', operationId: expect.any(String) }, undefined, goalOwner)
     expect(view.element.querySelector<HTMLSelectElement>('[aria-label="工作状态"]')?.value).toBe('in_progress')
     await view.click('保存交接关系')
-    expect(view.forwardRpc).toHaveBeenCalledWith('goal.handoff', { goalId: original.id, assigneeSessionIds: ['session-exact', 'session-explicit'], supervisorSessionId: 'session-exact', expectedUpdatedAt: 4, sessionId: 'session-explicit', operationId: expect.any(String) })
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.handoff', { goalId: original.id, assigneeSessionIds: ['session-exact', 'session-explicit'], supervisorSessionId: 'session-exact', expectedUpdatedAt: 4, sessionId: 'session-explicit', operationId: expect.any(String) }, undefined, goalOwner)
     expect(view.element.textContent).toContain('未自动发送新任务')
   })
   it('requires the explicit deletion step and keeps the original Goal on an unknown deletion receipt', async () => {
@@ -362,7 +363,7 @@ describe('Mobile Goals original owner slice', () => {
     await view.click('读取当前目标')
     expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.delete')).toHaveLength(1)
     await view.click('确认删除此目标')
-    expect(view.forwardRpc).toHaveBeenCalledWith('goal.delete', { goalId: original.id, confirmation: 'delete', operationId: expect.any(String) })
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.delete', { goalId: original.id, confirmation: 'delete', operationId: expect.any(String) }, undefined, goalOwner)
     expect(view.element.querySelector('h2')).toBeNull(); expect(view.element.querySelectorAll('.mobile-goals-list li')).toHaveLength(0)
     expect(view.forwardRpc.mock.calls.some(([method]) => method === 'agent.stop')).toBe(false)
   })
