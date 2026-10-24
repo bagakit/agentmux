@@ -8,17 +8,20 @@ import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './
 
 const desktop=resolve(import.meta.dirname,'..'), repository=resolve(desktop,'../..'), sourceRoot=join(desktop,'src/renderer/src')
 const require=createRequire(import.meta.url), {build}=await import('vite'), ts=require('typescript'), postcss=createRequire(require.resolve('vite'))('postcss')
-const fixture=join(desktop,'scripts/fixtures/terminal-chrome-craft'), recovery=process.argv.includes('--recovery'), candidateOnly=process.argv.includes('--candidate-only'), connectorGeometry=process.argv.includes('--connector-geometry'), geometryBaseline=process.argv.includes('--geometry-baseline')
+const fixture=join(desktop,'scripts/fixtures/terminal-chrome-craft'), recovery=process.argv.includes('--recovery'), candidateOnly=process.argv.includes('--candidate-only'), connectorNeutral=process.argv.includes('--connector-neutral'), connectorGeometry=process.argv.includes('--connector-geometry')||connectorNeutral, geometryBaseline=process.argv.includes('--geometry-baseline')
 const privateRoot=await mkdtemp(_hygiene_fixturePath("tmp/amx-chrome-craft-")), evidence=join(repository,'.tmp/terminal-chrome-craft',("attempt-" + (globalThis.crypto.randomUUID()) + "" + (recovery?'-recovery':'') + ""))
 const hash=value=>createHash('sha256').update(value).digest('hex')
 const files=['components/TerminalView.tsx','components/TerminalContextMenu.tsx','components/SessionPane.tsx','components/FullPageLoadingSurface.tsx','styles/terminal.css','styles/agent-region-header.css','styles/full-page-loading.css']
 if(connectorGeometry)files.push('components/ConnectorHeaderLinks.tsx')
-const result={schema:'agentmux.terminal-chrome-craft.v1',passed:false,recovery,candidateOnly,connectorGeometry,geometryBaseline,userRunTouched:false,
+const result={schema:'agentmux.terminal-chrome-craft.v1',passed:false,recovery,candidateOnly,connectorGeometry,connectorNeutral,geometryBaseline,userRunTouched:false,
   boundary:'Actual isolated production Renderer/CSS/xterm. Controlled preview API and loading caller facts. No installed App, user Run, TCC, Vendor CLI or durable restart claim.',
   aestheticReview:'Root self-review only; independent image review pending under user no-messaging instruction',mutations:[],callers:[]}
 async function sources(){return Object.fromEntries(await Promise.all(files.map(async file=>[file,hash(await readFile(join(sourceRoot,file)))])))}
 function replaceOne(source,from,to){assert.equal(source.split(from).length,2,'Private mutation anchors one real production block');return source.replace(from,to)}
-const mutations=connectorGeometry?[
+const mutations=connectorNeutral?[
+  {label:'brand-hue-returned',file:'styles/agent-region-header.css',expected:/Platform glyph stays grayscale/,
+    change:source=>replaceOne(source,'filter: grayscale(1); opacity: .65;', 'filter: none; opacity: .65;')}
+]:connectorGeometry?[
   {label:'full-width-inset-returned',file:'styles/agent-region-header.css',expected:/first row follows the original quiet band without extra full-width inset/,
     change:source=>replaceOne(source,'--agent-region-reading-inset: calc(var(--sp-6) + var(--region-focus-ring-width)); margin-top:', '--agent-region-reading-inset: calc(var(--sp-6) + var(--sp-2)); margin-top:')}
 ]:recovery?[
@@ -82,7 +85,7 @@ export class Terminal extends xterm.Terminal { constructor(...args){super(...arg
   const xtermEntry=require.resolve('@xterm/xterm')
   const identity={loadedSources,importedStyles,compiled,changes,fixtureSources,xterm:{entry:xtermEntry.slice(repository.length+1),sha256:hash(await readFile(xtermEntry))},mainSha256:hash(mainBytes)};await writeFile(join(directory,'compiled.json'),JSON.stringify(identity,null,2))
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
-  const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),processRoot,directory,connectorGeometry?(geometryBaseline?'connector-baseline':'connector-geometry'):recovery?'recovery':'terminal'],{
+  const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),processRoot,directory,connectorNeutral?'connector-neutral':connectorGeometry?(geometryBaseline?'connector-baseline':'connector-geometry'):recovery?'recovery':'terminal'],{
     temporaryRoot:processRoot,cwd:repository,env,timeoutMs:90_000,onLine:line=>lines.push(line)})
   await writeFile(join(directory,'process.log'),lines.join('\n'));assert.equal(outcome.timedOut,false);assert.equal(outcome.interruption,null)
   const rendered=JSON.parse(await readFile(join(directory,'render.json'),'utf8'))
