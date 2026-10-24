@@ -143,7 +143,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
   }
   const visibleGoals = useMemo(() => goals?.filter(goal => (!status || goal.status === status) && `${goal.title} ${goal.description} ${goal.projectName ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [goals, status, query])
   return <section className="mobile-goals" aria-label="Goals" hidden={!visible}>
-    <header className="mobile-page-header"><h1>Goals</h1><button className="mobile-icon-button mobile-goals-refresh" aria-label="刷新目标" title="刷新目标" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} /><span className="mobile-visually-hidden">刷新目标</span></button></header>
+    <header className="mobile-page-header">{(selected || discussionTab) && <button className="mobile-goals-back" aria-label={discussionTab ? '返回原目标' : '返回目标列表'} onClick={discussionTab ? backToGoal : backToList}><SemanticIcon name="navigation.back" size={18} /><span>返回</span></button>}<h1>Goals</h1><button className="mobile-icon-button mobile-goals-refresh" aria-label="刷新目标" title="刷新目标" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} /><span className="mobile-visually-hidden">刷新目标</span></button></header>
     {!connected && <p role="status">连接暂不可用，已读目标与草稿保留；可刷新核对。</p>}
     {!client?.forwardRpc && <p role="status">目标公共端口暂不可用，已读目标与会话保留。</p>}
     {issue && <p role="status">{issue}</p>}
@@ -182,7 +182,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
         }).catch(error => { if (sequence === lookupRead.current && epoch === (factEpoch.current.goals[goalId] ?? 0)) setLookupIssue(`读取目标失败：${message(error)}。原列表与输入保留，可重试。`) })
       }}><label>Goal ID<TextInput aria-label="打开 Goal ID" value={lookup} onChange={event => setLookup(event.target.value)} required /></label><button>打开指定目标</button></form>{lookupIssue && <p role="status">{lookupIssue}</p>}</details>
     </div>
-    {[...new Set([...Object.keys(details), ...(selected ? [selected] : [])])].map(id => { const detail = details[id]; return <div key={id} hidden={selected !== id || !!discussionTab}><button onClick={backToList}>返回目标列表</button>{selected === id && [detailIssue, decisionIssue].filter(Boolean).map((value, index) => <p key={index} role="status">{value}</p>)}
+    {[...new Set([...Object.keys(details), ...(selected ? [selected] : [])])].map(id => { const detail = details[id]; return <div key={id} hidden={selected !== id || !!discussionTab}>{selected === id && [detailIssue, decisionIssue].filter(Boolean).map((value, index) => <p key={index} role="status">{value}</p>)}
       <GoalDetail key={id} goalId={id} goal={detail ?? null} factScope={detailScopes[id] ?? null} visible={visible && selected === id && !discussionTab} editing={context.mode === 'edit' && selected === id} edit={editing => setContext(value => ({ ...value, mode: editing ? 'edit' : 'detail' }))} decisions={decisions[id] ?? null} client={client} connected={connected} updated={updated} refresh={() => refresh(value => value + 1)} copyText={copyText}>
         {detail && <>
         <MobileGoalAlignment client={client} goal={detail} updated={updated} openDiscussion={openDiscussion} beginPresentation={beginPresentation} />
@@ -194,7 +194,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
       <MobileGoalActions client={client} goal={detail} visible={visible && selected === detail.id} updated={updated} deleted={deleted} />
       </details></>}
     </div> })}
-    {discussionTab && <div><button type="button" onClick={backToGoal}>返回原目标</button><MobileZoneWorkface key={discussionTab.tabId} client={client} name="目标原主 Mote" tabId={discussionTab.tabId} visible={visible}
+    {discussionTab && <div><MobileZoneWorkface key={discussionTab.tabId} client={client} name="目标原主 Mote" tabId={discussionTab.tabId} visible={visible}
       openSession={(id, identity) => { if (openSession) openSession(id, identity) }} /></div>}
   </section>
 }

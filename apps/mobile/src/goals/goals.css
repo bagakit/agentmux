@@ -7,6 +7,8 @@
 .mobile-goals button, .mobile-goals input, .mobile-goals select, .mobile-goals textarea { font: inherit; color: inherit; background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); min-height: 44px; padding: 6px 8px; }
 .mobile-goals button { cursor: pointer; font-size: 12px; }
 .mobile-goals .mobile-goals-refresh { background: transparent; border: 0; padding: 0; width: 44px; }
+.mobile-goals header h1 { flex: 1; }
+.mobile-goals .mobile-goals-back { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--text-2); padding-inline: 0 6px; }
 .mobile-goals :focus-visible:not(.ui-input) { outline: 2px solid var(--mobile-accent); outline-offset: 2px; }
 .mobile-goals-filters input { flex: 1; min-width: 0; }
 .mobile-goals-filters select { width: 112px; max-width: 112px; }
@@ -18,7 +20,7 @@
 .mobile-goals-list span, .mobile-goals-list small { color: var(--text-2); font-size: 11px; }
 .mobile-goals-list span { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-goals-list small { grid-column: 1 / -1; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
-.mobile-goals article section, .mobile-goals details { margin-block: 12px; padding-top: 6px; }
+.mobile-goals article section, .mobile-goals details { margin-block: 8px; padding-top: 4px; }
 .mobile-goals-body { white-space: pre-wrap; line-height: 1.6; }
 .mobile-goals label { display: grid; gap: 6px; margin-block: 8px; font-size: 11px; }
 .mobile-goals textarea { min-height: 110px; resize: vertical; }
