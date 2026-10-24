@@ -358,6 +358,10 @@ Object.assign(window, { graphCapture: {
   },
   bodyState() { return { connected: originalBody?.isConnected, sameBody: originalBody === document.querySelector('.collaboration-evidence .composer-mailbox__detail .log-turn__body'), text: originalBody?.textContent, selection: getSelection()?.toString(), messageId: originalBody?.closest<HTMLElement>('[data-message-id]')?.dataset.messageId } },
   workerSamples() { return structuredClone(nativeWorkers) },
+  deliveredLayout() {
+    const layout = (globalThis as typeof globalThis & { __collaborationCaptureLayout?: { boxes: ReadonlyMap<string, unknown>; paths: ReadonlyMap<string, unknown>; busy: boolean; issues: ReadonlyMap<string, string> } }).__collaborationCaptureLayout
+    return layout ? structuredClone({ boxes: [...layout.boxes.values()], pathIds: [...layout.paths.keys()], busy: layout.busy, issues: [...layout.issues] }) : null
+  },
   activityMS: COLLABORATION_ACTIVITY_MS,
   delayRoutes(milliseconds: number, sender = 'fixture-core', recipient = 'fixture-design') { if (![0, 1200, 3600].includes(milliseconds)) throw Error('Use a declared finite transport delay'); delayedRoute = milliseconds ? { milliseconds, sender, recipient } : undefined },
   activity() {
@@ -369,8 +373,8 @@ Object.assign(window, { graphCapture: {
       packets: [...document.querySelectorAll('.collaboration-edge__packet')].map(element => ({ id: element.closest<HTMLElement>('[data-id]')?.dataset.id, kind: element.getAttribute('data-kind'), distance: getComputedStyle(element).offsetDistance, ...animation(element), ...screen(element) })) }
   },
   world() {
-    const latest = [...nativeWorkers].reverse().find(sample => sample.geometry)
-    return { camera: document.querySelector('.collaboration-map .react-flow__viewport')?.getAttribute('style'), geometry: structuredClone(latest?.geometry ?? []),
+    const layout = (globalThis as typeof globalThis & { __collaborationCaptureLayout?: { boxes: ReadonlyMap<string, unknown> } }).__collaborationCaptureLayout
+    return { camera: document.querySelector('.collaboration-map .react-flow__viewport')?.getAttribute('style'), geometry: structuredClone([...(layout?.boxes.values() ?? [])]),
       nodes: [...document.querySelectorAll<HTMLElement>('.collaboration-map .react-flow__node')].map(element => { const r = element.getBoundingClientRect(); return { id: element.dataset.id, transform: element.style.transform, x: r.x, y: r.y, width: r.width, height: r.height } }),
       reader: (() => { const element = document.querySelector('.agent-information-reader'); if (!element) return null; const r = element.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, subject: element.getAttribute('data-agent-session-id'), pinned: Boolean(document.querySelector('[aria-label="Remove Agent bookmark"]')) } })() }
   },
@@ -409,7 +413,7 @@ Object.assign(window, { graphCapture: {
     for (const listener of listeners) listener({ type: 'core', hostId, event: { type: 'agent-session', session } })
     return { expectedWorldAgents: sessions.length + retired.length, expectedAgentKeys: [...sessions.map(session => JSON.stringify([session.hostId, session.kind === 'agent' ? session.control.agentSessionId : session.id])), ...retired.map(source => JSON.stringify([source.hostId, source.agentSessionId]))], snapshotMembers: sessions.length, retiredMembers: retired.length, unassociatedMembers: added.filter(session => !refs.some(ref => ref.senderSessionId === session.id || ref.recipientSessionId === session.id)).length, nativeActivityCounts: { active: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'active').length, idle: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'idle').length, unknown: sessions.filter(session => session.kind === 'agent' && session.currentActivity?.state === 'unknown').length, exited: sessions.filter(session => session.processState === 'exited').length }, fixtureMutationMS: performance.now() - start }
   },
-  terrain() { return { areas: terrainProjects.map(project => ({ id: directoryIdentity(hostId, project.path), name: project.name })), agents: terrainSessions.map(session => ({ id: session.id, name: session.label })) } },
+  terrain() { return { areas: terrainProjects.map(project => ({ id: directoryIdentity(hostId, project.path), name: project.name })), agents: terrainSessions.map(session => ({ id: session.id, name: session.label, areaId: directoryIdentity(session.hostId, session.workspacePath) })) } },
   prepare() {
     useAppStore.setState({ activeWorkspaceId: projects[0]!.id, mainSurface: 'workbench', toolsOpen: true, projectRailOpen: true,
       ...(perception ? { spaceObjectIcons: { ...useAppStore.getState().spaceObjectIcons, [topicSpaceIconTarget(scratch, topics[1]!, bindings)!.key]: { ...DEFAULT_MOTE_FACE, palette: 'peach' as const, accessory: 'glasses' as const } } } : {}),

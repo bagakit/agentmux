@@ -103,6 +103,13 @@ async function compileRenderer() {
         instrumented.push({ file: relative(root, id), originalSHA256: hash(source), effectiveSHA256: hash(effective), boundary: 'Counters only; original context function body and result remain intact' })
         return effective
       }
+      if (id === join(desktop, 'src/renderer/src/lib/use-collaboration-layout.ts')) {
+        const anchor = '  return { boxes, paths, busy, issues, retry:'
+        assert.equal(source.split(anchor).length, 2, 'Observe the one original delivered layout owner')
+        const effective = source.replace(anchor, '  ;(globalThis as any).__collaborationCaptureLayout = { boxes, paths, busy, issues }\n' + anchor)
+        instrumented.push({ file: relative(root, id), originalSHA256: hash(source), effectiveSHA256: hash(effective), boundary: 'Reference-only O(1) observation of the original post-offset hook result; no geometry, paths, state, input or camera replacement. Uncalibrated reference-publication cost; arrays copy only at explicit evidence boundaries.' })
+        return effective
+      }
       const component = id.slice(id.lastIndexOf('/') + 1)
       if (component === 'SessionPane.tsx') {
         isolated.push({ file: relative(root, id), boundary: 'Unrelated PTY/Agent painting only; original Store draft' })
