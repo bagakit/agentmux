@@ -97,7 +97,19 @@ const configOwner = new ConfigOwner({ read: () => config, save: next => configSt
     return next
   }
 } }
+const dependencySources = new Map()
+const pinnedWorkspaceSources = { name: 'native-restart-pinned-workspace-sources', enforce: 'pre', async transform(code, id) {
+  const file = id.split('?')[0]
+  if (!file.includes('/node_modules/') && /\/(?:packages|apps)\/[^/]+\/(?:src|dist)\//.test(file) && !file.startsWith(root + '/'))
+    throw Error('A shared dependency escaped the exact native candidate: ' + file)
+  if (!file.startsWith(path.join(root, 'packages/connectors/src/'))) return
+  const sourceSHA256 = hash(await fs.readFile(file)), previous = dependencySources.get(file)
+  if (previous) assert.equal(previous.sourceSHA256, sourceSHA256, 'A consumed connector module changed during native compilation')
+  dependencySources.set(file, { sourceSHA256, consumedCodeSHA256: hash(code), consumedVia: 'vite-transform-input' })
+} }
 const sourceAliases = [
+  { find: /^@agentmux\/connectors$/, replacement: path.join(root, 'packages/connectors/src/index.ts') },
+  { find: /^@agentmux\/connectors\/adapters\/(feishu|discord)$/, replacement: path.join(root, 'packages/connectors/src/adapters/$1/index.ts') },
   { find: /^@agentmux\/host\/host-configuration$/, replacement: path.join(root, 'apps/host/src/host-configuration.ts') },
   { find: /^@agentmux\/layout$/, replacement: path.join(root, 'packages/layout/src/index.ts') },
 ]
@@ -113,6 +125,7 @@ receipt.limitations = [
   'The Provider protocol is the repository CLI fixture; Session/Run/PTY, input, replay, Host and ctxmux survival are real public Core facts.',
   'The private workbench is seeded exactly once. The second real Electron PID loads Core spatial state, workbench localStorage and production configuration without reseeding.',
   'Actual Map motion UI publishes through the original typed API and production configuration owners; the second Map reads the saved off choice.',
+  'Host connector modules are compiled from the same worktree source; shared installed workspace dist cannot substitute another candidate.',
   'The transport IPC fixture replaces ordinary Desktop IPC registration. No user profile, existing Agent, active Run or current GUI is operated.',
   'This proves ordinary client process restart with a healthy independent Host/Run, not Host death, cold runtime loss, semantic Level B recovery, full package installation, aesthetics or terminal continuous-history performance.',
 ]
@@ -150,25 +163,31 @@ try {
   transforms.push({ file: path.relative(root, path.join(fixture, 'preload.cjs')), originalSHA256: hash(preloadSource), effectiveSHA256: hash(privatePreload),
     boundary: 'Forward the original public configuration publication channel to the original App subscription' })
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
-    plugins: [extendFixture, candidate.capture],
+    plugins: [pinnedWorkspaceSources, extendFixture, candidate.capture],
     esbuild: { jsx: 'automatic' },
-    worker: { format: 'es', plugins: () => [candidate.capture] },
+    worker: { format: 'es', plugins: () => [pinnedWorkspaceSources, candidate.capture] },
     css: { postcss: { plugins: [candidate.captureCss] } },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"', __TERMINAL_WHEEL_UMD_URL__: '"unused"' },
     resolve: { alias: [...sourceAliases, { find: /^@xterm\/xterm$/, replacement: path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts') }] },
     build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true } })
   await build({ configFile: false, root: fixture, logLevel: 'error',
-    plugins: [extendFixture, candidate.capture],
+    plugins: [pinnedWorkspaceSources, extendFixture, candidate.capture],
     resolve: { alias: sourceAliases },
     build: { ssr: path.join(fixture, 'main.ts'), target: 'node22', outDir: path.join(privateRoot, 'main'), emptyOutDir: true,
       rollupOptions: { external: ['electron', '@agentmux/core', /^@agentmux\/core\//], output: { format: 'es', entryFileNames: 'main.mjs', chunkFileNames: '[name]-[hash].js' } } } })
   await candidate.buildHost(options => {
     const external = options.build.rollupOptions.external
     // Discord's optional compression backend is absent here; preserve its optional import.
-    return build({ ...options, build: { ...options.build, rollupOptions: { ...options.build.rollupOptions,
-      external: id => id === 'zlib-sync' || external(id) } } })
+    return build({ ...options, plugins: [pinnedWorkspaceSources, ...options.plugins], resolve: { alias: sourceAliases },
+      build: { ...options.build, rollupOptions: { ...options.build.rollupOptions,
+        external: id => id === 'zlib-sync' || external(id) } } })
   })
   await candidate.seal()
+  assert.ok(dependencySources.has(path.join(root, 'packages/connectors/src/index.ts')), 'The Host must consume its own worktree connector source')
+  for (const [file, fact] of dependencySources) {
+    assert.equal(hash(await fs.readFile(file)), fact.sourceSHA256, 'The compiled connector source remains the exact candidate')
+    receipt.consumedModules[path.relative(root, file)] = fact
+  }
   for (const file of ['apps/desktop/src/renderer/src/App.tsx', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/AgentCollaborationGraph.tsx', 'apps/desktop/src/renderer/src/lib/collaboration-layout.worker.ts', 'apps/desktop/src/renderer/src/lib/collaboration-layout-engine.ts', 'apps/desktop/src/main/config-store.ts', 'apps/desktop/src/main/config-owner.ts']) assert.ok(receipt.consumedModules[file], 'The actual current product module must be compiled: ' + file)
   identities = async () => ({ ...await candidate.identity(), ...Object.fromEntries(await Promise.all([
     ...await files(path.join(privateRoot, 'renderer')), ...await files(path.join(privateRoot, 'main')),
