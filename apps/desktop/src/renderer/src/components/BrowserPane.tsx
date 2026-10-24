@@ -28,7 +28,7 @@ import {
   normalizeBrowserAnnotationNote,
   type BrowserAnnotation
 } from '../lib/browser-annotations'
-import { composeScreenshot } from './browser-screenshot/compose'
+import { composeScreenshot } from './image-annotation/compose'
 import { formatScreenshotContext } from './browser-screenshot/context'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { BrowserOperationHistory, BrowserOperatorPresence, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'

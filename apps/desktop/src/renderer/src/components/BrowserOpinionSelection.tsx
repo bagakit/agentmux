@@ -6,7 +6,7 @@ import type { BrowserInputFrameResult, BrowserInputSelectionPrepare, BrowserInpu
 import type { BrowserOpinionSource } from '../lib/browser-opinion-draft'
 import { browserOpinionSelection } from '../lib/browser-opinion-draft'
 import { api } from '../lib/api'
-import { composeScreenshot, screenshotCropGeometry } from './browser-screenshot/compose'
+import { composeScreenshot, screenshotCropGeometry } from './image-annotation/compose'
 import { ImageAnnotationEditor } from './image-annotation/ImageAnnotationEditor'
 import type { ImageAnnotationInput } from './image-annotation/types'
 import { getWindowOverlayHost, WindowOverlayPortal } from './WindowOverlayHost'
