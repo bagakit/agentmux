@@ -221,6 +221,7 @@ async function run() {
     await js(`window.childrenUi.select(${JSON.stringify(sourceTabBefore.id)},${JSON.stringify(source.id)})`)
     await click(main, '.browser-surface input[role="combobox"]')
     await wait(60)
+    await js(`(()=>{const input=document.querySelector('.browser-surface input[role="combobox"]');input.setSelectionRange(0,input.value.length)})()`)
     await main.webContents.insertText('Private source draft 42')
     await js(`(()=>{const input=document.querySelector('.browser-surface input[role="combobox"]');input.setSelectionRange(8,14)})()`)
     const sourceFocusBefore = await sourceInputFacts()
