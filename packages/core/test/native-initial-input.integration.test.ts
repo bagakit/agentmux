@@ -107,6 +107,10 @@ it.runIf(process.platform === 'darwin').each(['plain', 'git'] as const)(
           causes: await readFile(join(scope.env.AGENTMUX_STATE_DIRECTORY!, 'initial-input-errors.ndjson'), 'utf8').catch(() => ''),
           session: await reader.statusAgent(original.agentSessionId), initialInput: current.initialInput, claim: await reader.inspectAgentPromptSubmission(key), inputs }, null, 2))
       }
+      // The polling reporter may omit its nested assertion cause. Read the
+      // original receipt once more and fail on its actual business outcome.
+      const outcome = await reader.inspectAgentPromptSubmission(key)
+      expect(outcome?.admission?.transport === 'native' ? outcome.admission.native.outcome : null).toBe('admitted')
       throw error
     }
     const delivered = await reader.inspectAgentPromptSubmission(key)
@@ -122,18 +126,18 @@ it.runIf(process.platform === 'darwin').each(['plain', 'git'] as const)(
     expect(nativeAfter.thread.sessionId).toBe(nativeRuntime); expect(nativeAfter.thread.id).toBe(id)
     expect(JSON.stringify(nativeAfter.thread.turns)).toContain(prompt)
     expect(nativeAfter.thread.turns).toHaveLength(1); expect(await exists(nativeAfter.thread.path)).toBe(true)
+    let authorizationReads = 0
+    await expect(provider.reconnectTerminalFrontend({ ...nativeContext, assertCurrent: async () => {
+      if (++authorizationReads === 2) throw new core.AgentMuxError('Private original recovery was cancelled after Native preparation', 'PRIVATE_RECOVERY_CANCELLED')
+    } }, { operationId: 'cancelled-after-native-preparation', expectedFrontendId: before.session.terminalFrontend!.frontendId,
+      target: { kind: 'native-session', nativeSessionId: id } })).rejects.toMatchObject({ code: 'PRIVATE_RECOVERY_CANCELLED' })
+    expect(authorizationReads).toBe(2)
+    expect((await reader.statusAgent(original.agentSessionId)).session.terminalFrontend!.frontendId).toBe(before.session.terminalFrontend!.frontendId)
     // Rejoin the same public operation; no replacement request or Native input.
     resumed = await rpc.call('agent.resume', resumeRequest)
     const after = await until(() => reader.statusAgent(original.agentSessionId), value => value.session.terminalFrontend?.state === 'attached', 'original remote TUI rejoined')
     expect(after.run).toMatchObject({ runId: before.run.runId, pid: before.run.pid, state: 'running' })
     expect(after.session.nativeHandle).toMatchObject(saved.nativeHandle)
-    let authorizationReads = 0
-    await expect(provider.reconnectTerminalFrontend({ ...nativeContext, assertCurrent: async () => {
-      if (++authorizationReads === 2) throw new core.AgentMuxError('Private original recovery was cancelled after Native preparation', 'PRIVATE_RECOVERY_CANCELLED')
-    } }, { operationId: 'cancelled-after-native-preparation', expectedFrontendId: after.session.terminalFrontend!.frontendId,
-      target: { kind: 'native-session', nativeSessionId: id } })).rejects.toMatchObject({ code: 'PRIVATE_RECOVERY_CANCELLED' })
-    expect(authorizationReads).toBe(2)
-    expect((await reader.statusAgent(original.agentSessionId)).session.terminalFrontend!.frontendId).toBe(after.session.terminalFrontend!.frontendId)
     if (sha) {
       expect((await exec('git', ['-C', workspace, 'rev-parse', 'HEAD'])).stdout.trim()).toBe(sha)
       const records = (await readFile(nativeAfter.thread.path, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
