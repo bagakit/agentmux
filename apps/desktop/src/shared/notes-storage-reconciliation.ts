@@ -1,5 +1,5 @@
 import type { NotesResourceChange } from '@agentmux/core/notebook-store'
-import { NOTES_WORKSPACE_ID } from './notes-library'
+import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import type { AgentMuxSpatialGraph, SpatialJson } from '@agentmux/core/spatial-graph'
 /** Rebind exact file and dedicated Notes directory resources; entity IDs, topology and execution cwd stay intact. */
 export function reconcileNotesSpatialResources(graph: AgentMuxSpatialGraph, changes: readonly NotesResourceChange[], directoryChanges: readonly { from: string; to: string }[] = []): AgentMuxSpatialGraph {

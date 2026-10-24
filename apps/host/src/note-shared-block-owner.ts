@@ -1,4 +1,4 @@
-import { noteShareRange, noteShareRangeContent } from '../shared/note-share-range.js'
+import { noteShareRange, noteShareRangeContent } from '@agentmux/client-ui/note/note-share-range'
 import type { NoteSharedUndoOwner } from './note-shared-undo-owner.js'
 import type { FileShareUndoParams, FileShareUndoResult } from '@agentmux/core/files'
 import type { NoteHistoryWriteAction } from './note-history-actions.js'
@@ -8,8 +8,8 @@ import { fileShareCreateOperation, fileShareSourceOperation, parseFileShareParam
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 import { noteHistoryRevision, type NoteHistoryRecord } from '@agentmux/core/note-history'
 import { noteProvenanceResourceKey } from '@agentmux/core/note-provenance'
-import { readNoteDocument, serializeNoteDocument, type NoteDocument } from '../shared/note-document.js'
-import { noteContentSchema } from '../shared/note-content-schema.js'
+import { readNoteDocument, serializeNoteDocument, type NoteDocument } from '@agentmux/client-ui/note/note-document'
+import { noteContentSchema } from '@agentmux/client-ui/note/note-content-schema'
 
 type Node = NoteDocument['content']
 type SourcePlan = { request: FileWriteParams; original: FileWriteParams; noteId: string; promotions: FileSharePromotion[] }

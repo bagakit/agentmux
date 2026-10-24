@@ -15,9 +15,9 @@ import { mobileWebReportOwner } from './mobile-web-report-owner.js'
 import { isAgentSchedule } from '@agentmux/core'
 import { NoteFileMutations } from './note-file-mutations.js'
 import { parseFileShareUndoParams, parseFileShareUndoResult } from '@agentmux/core/files'
-import { NoteSharedUndoOwner } from './note-shared-undo-owner.js'
-import { NoteSharedFileDeleteOwner } from './note-shared-file-delete-owner.js'
-import { NoteSharedBlockOwner } from './note-shared-block-owner.js'
+import { NoteSharedUndoOwner } from '@agentmux/host/note-shared-undo-owner'
+import { NoteSharedFileDeleteOwner } from '@agentmux/host/note-shared-file-delete-owner'
+import { NoteSharedBlockOwner } from '@agentmux/host/note-shared-block-owner'
 import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult } from '@agentmux/core/files'
 import { RendererAllocationSampler } from './renderer-allocations.js'
 import type { PerformanceSceneOwner } from './performance-scene.js'
@@ -62,28 +62,28 @@ import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDeman
 import { resolveGoalsPreferences } from '../shared/goals-preferences.js'
 import { assertGoalPmoIntent, goalPmoOperation, type GoalPmoIntent } from '../shared/goal-pmo-origin.js'
 import { NotesStorageOwner } from './notes-storage-owner.js'
-import { NOTES_WORKSPACE_ID } from '../shared/notes-library.js'
+import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { DeliveryAttemptStore, parseDeliveryAttempt, type DeliveryAttempt } from '@agentmux/core'
 import { SpaceObjectImages } from './space-object-images.js'
 import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from '@agentmux/host/object-avatars'
 import { homedir, hostname } from 'node:os'
 import { FileUploadOwner } from '@agentmux/host/file-upload-owner'
 import { GitPublicControl } from './git-public-control.js'
-import { NoteTitleFileWriter } from './note-title-file-writer.js'
+import { NoteTitleFileWriter } from '@agentmux/host/note-title-file-writer'
 import { createNotebookObservationServices } from './notebook-observation-requests.js'
-import { FileReadOwner } from './file-read-owner.js'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { parseFileHistoryParams, parseFileHistoryResult, parseFileRestoreParams, parseFileRestoreResult, parseFileUndoParams, parseFileUndoResult } from '@agentmux/core/files'
 import { registerMotePreferencesIpc } from './mote-preferences-ipc.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
 import { FilePreviewResources } from './file-preview-resources.js'
 import { FileDiagramRenderer } from './file-diagram-renderer.js'
 import { FileBuilds } from './file-builds.js'
-import { TopicKnowledgeOwner } from './topic-knowledge.js'
-import { TopicSearchHistoryOwner } from './topic-search-history.js'
+import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
+import { TopicSearchHistoryOwner } from '@agentmux/host/topic-search-history'
 import type { SpatialLinkIngress } from './spatial-link-ingress.js'
 import type { WebUrlIngress } from './web-url-ingress.js'
 import { executeBrowserDefaultControl, inspectDefaultBrowser, openDefaultBrowserSettings } from './browser-default.js'
-import { TopicSpatialOwner } from './topic-spatial-owner.js'
+import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage, type NotebookWrite } from '@agentmux/core/notebook-store'
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
 import { displayLabel } from '@agentmux/core/spatial-graph'
@@ -256,7 +256,7 @@ import { ScratchTopics } from './scratch-topics.js'
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
 import { configWithRuntimeBindings, saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles, workspaceFileObserverCount } from './workspace-files.js'
-import { NoteFileWriter } from './note-file-writer.js'
+import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 
 import { WorktreeService } from './worktree-service.js'
 import { WorktreeCloseoutOwner } from './worktree-closeout.js'
@@ -1034,12 +1034,12 @@ export async function registerIpc(args: {
   const notebookObservation = createNotebookObservationServices(notebookStore, { files, workspace: id => config.workspaces.find(item => item.id === id) }, () => notesStorageReady)
   const noteFileWriter = new NoteFileWriter(files, { state: async () => { await notesStorageReady; return notebookStore.read() }, owner: notebookObservation.owner }, notebookStore)
   let noteSharedBlocks: NoteSharedBlockOwner
-  const publicFiles = new FileReadOwner({ share: { share: (input, context) => noteSharedBlocks.share(input, context), undoShare: (input, context) => noteSharedBlocks.undoShare(input, context), inspectShare: (input, context) => noteSharedBlocks.inspectShare(input, context) }, files: { writeBytes: (owner, input) => notesStorageOwner.write(owner, input, actual => files.writeBytes(actual, input)), writeSharedUndo: (owner, input, context, action, transferred) => notesStorageOwner.write(owner, input, actual => noteFileWriter.writeSharedUndo(actual, input, context, action, transferred)), createShared: (owner, input, context, source) => notesStorageOwner.write(owner, input, actual => noteFileWriter.createShared(actual, input, context, source)), read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), history: noteFileWriter.history.bind(noteFileWriter), restore: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.restore(actual, input, context)), undo: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.undo(actual, input, context)), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
+  const publicFiles = new FileReadOwner<WorkspaceRecord>({ share: { share: (input, context) => noteSharedBlocks.share(input, context), undoShare: (input, context) => noteSharedBlocks.undoShare(input, context), inspectShare: (input, context) => noteSharedBlocks.inspectShare(input, context) }, files: { writeBytes: (owner, input) => notesStorageOwner.write(owner, input, actual => files.writeBytes(actual, input)), writeSharedUndo: (owner, input, context, action, transferred) => notesStorageOwner.write(owner, input, actual => noteFileWriter.writeSharedUndo(actual, input, context, action, transferred)), createShared: (owner, input, context, source) => notesStorageOwner.write(owner, input, actual => noteFileWriter.createShared(actual, input, context, source)), read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), history: noteFileWriter.history.bind(noteFileWriter), restore: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.restore(actual, input, context)), undo: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.undo(actual, input, context)), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
     retiredZone: async id => (await spatialState.read())?.graph.resources['zone:' + id],
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
   const noteFileMutations = new NoteFileMutations(files, notebookStore.runWithWriteLease.bind(notebookStore))
   const sharedFileDeletion = new NoteSharedFileDeleteOwner(files, notebookStore)
-  const sharedUndo = new NoteSharedUndoOwner({ files, workspaces: () => config.workspaces, target: publicFiles.targetForNote.bind(publicFiles), read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles), history: notebookStore.readHistory.bind(notebookStore), operation: notebookStore.readHistoryOperation.bind(notebookStore), lease: notebookStore.runWithWriteLease.bind(notebookStore), delete: async (resource, input, context) => { const owner = titleWorkspace(resource); return owner ? notesStorageOwner.write(owner, input, actual => sharedFileDeletion.delete(actual, input, context)) : { status: 'unknown', code: 'NOTE_RESOURCE_CHANGED', message: 'The exact original shared deletion resource changed.' } } })
+  const sharedUndo = new NoteSharedUndoOwner({ files, workspaces: async () => ({ workspaces: config.workspaces, complete: true }), target: publicFiles.targetForNote.bind(publicFiles), read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles), history: notebookStore.readHistory.bind(notebookStore), operation: notebookStore.readHistoryOperation.bind(notebookStore), lease: notebookStore.runWithWriteLease.bind(notebookStore), delete: async (resource, input, context) => { const owner = titleWorkspace(resource); return owner ? notesStorageOwner.write(owner, input, actual => sharedFileDeletion.delete(actual, input, context)) : { status: 'unknown', code: 'NOTE_RESOURCE_CHANGED', message: 'The exact original shared deletion resource changed.' } } })
   noteSharedBlocks = new NoteSharedBlockOwner({ undo: sharedUndo, files: { read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), createShared: publicFiles.createShared.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles) }, historyOperation: notebookStore.readHistoryOperation.bind(notebookStore), withWriteLease: notebookStore.runWithWriteLease.bind(notebookStore) })
   handleWithEvent('files:shareUndoPublic', async (event, input: import('@agentmux/core').FileShareUndoParams) => {
     requireTrustedSender('files:shareUndoPublic', event)

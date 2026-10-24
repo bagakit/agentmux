@@ -1,9 +1,9 @@
 import { AgentMuxError, type NotebookObservationPort, type NoteContentObservation, type NoteContentMetadata, type NotebookGraph, type NotebookGraphParams } from '@agentmux/core'
 import { notebookFingerprint, type NotebookPage, type NotebookState } from '@agentmux/core/notebook-catalog'
 import { noteKnowledge, parseNoteFile, resolveNoteBlock, type NoteFileDocument } from '@agentmux/client-ui/note/note-knowledge'
-import type { WorkspaceRecord } from '../shared/contracts.js'
-import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
-import type { WorkspaceFiles } from './workspace-files.js'
+import type { WorkspaceRecord } from './content-types.js'
+import { WORKSPACE_FILE_MAX_BYTES } from './workspace-file-bytes.js'
+import type { WorkspaceFiles } from './content-types.js'
 import { matchingNoteLinkBlocks, normalizeNoteLinkName, parseNotebookResolveParams, parseNotebookResolveResult, parseNoteWikiQuery, type NoteLinkTarget, type NotebookResolveParams, type NotebookResolveResult } from '@agentmux/core/note-links'
 import type { PendingNoteWikiLink } from '@agentmux/client-ui/note/note-wikilinks'
 import type { NoteCorpusParams, NoteCorpusResult } from '@agentmux/core'
@@ -147,8 +147,8 @@ export class NotebookObservationOwner implements NotebookObservationPort {
     // A graph request discovers shared files only in Workspaces whose observed originals
     // actually include a file. The same bounded scan supplies bytes and duplicate evidence.
     const includeWorkspaces = new Set<string>()
-    const includeScopes = (content: import('@tiptap/core').JSONContent, workspaceId: string) => {
-      const visit = (node: import('@tiptap/core').JSONContent) => { if (node.type === 'noteInclude') { includeWorkspaces.add(workspaceId); if (typeof node.attrs?.workspaceId === 'string') includeWorkspaces.add(node.attrs.workspaceId) }; node.content?.forEach(visit) }
+    const includeScopes = (content: import('@agentmux/client-ui/note/note-document').NoteDocument['content'], workspaceId: string) => {
+      const visit = (node: import('@agentmux/client-ui/note/note-document').NoteDocument['content']) => { if (node.type === 'noteInclude') { includeWorkspaces.add(workspaceId); if (typeof node.attrs?.workspaceId === 'string') includeWorkspaces.add(node.attrs.workspaceId) }; node.content?.forEach(visit) }
       visit(content)
     }
     for (const original of documents) {

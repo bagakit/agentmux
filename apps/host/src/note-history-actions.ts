@@ -5,8 +5,8 @@ import { noteHistoryRevision, type NoteHistorySource, type NoteHistoryRecord } f
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 import { noteProvenanceResourceKey, type NoteBlockProvenance } from '@agentmux/core/note-provenance'
 import { mergeNoteTextInWorker } from '@agentmux/core/note-merge-node'
-import { newNoteDocument, readNoteDocument, serializeNoteDocument, type NoteDocument } from '../shared/note-document.js'
-import type { WorkspaceRecord, WorkspaceFileReadResult, WorkspaceFileWriteInput, WorkspaceFileWriteResult, WorkspaceFileRestoreInput, WorkspaceFileUndoInput } from '../shared/contracts.js'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument, type NoteDocument } from '@agentmux/client-ui/note/note-document'
+import type { WorkspaceRecord, WorkspaceFileReadResult, WorkspaceFileWriteInput, WorkspaceFileWriteResult, WorkspaceFileRestoreInput, WorkspaceFileUndoInput } from './content-types.js'
 
 export type NoteHistoryWriteAction = { operation: 'edit' | 'restore' | 'undo'; noteId: string; source?: NoteHistorySource; fingerprint: string; historicalBlocks?: Record<string, NoteBlockProvenance>; draft?: true }
 type ActionInput = WorkspaceFileRestoreInput | WorkspaceFileUndoInput

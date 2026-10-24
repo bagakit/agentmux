@@ -5,9 +5,9 @@ import { noteTitleEventId, noteTitleIntentFingerprint, parseNoteTitleIntent,
   type NoteTitleIntent, type NoteTitleOperation, type NoteFileTitle } from '@agentmux/core/note-title'
 import type { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import type { NoteResource } from '@agentmux/core/notebook-catalog'
-import type { WorkspaceFiles } from './workspace-files.js'
-import type { WorkspaceRecord } from '../shared/contracts.js'
-import { readNoteDocument } from '../shared/note-document.js'
+import type { WorkspaceFiles } from './content-types.js'
+import type { WorkspaceRecord } from './content-types.js'
+import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 
 /** Header-only writes borrow the original Files CAS and immutable Note journal. */
 export class NoteTitleFileWriter {

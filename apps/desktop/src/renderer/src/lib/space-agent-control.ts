@@ -16,7 +16,7 @@ import { addWorkbenchRegion, assertRegionInvariant, createWorkbenchTab, removeWo
   type AgentWorkbenchSurface, type WorkbenchTab } from './workbench-tabs'
 import { resolveSpatialCommit } from './control-spatial-commit'
 import { isSessionSurface } from './workbench-surface-kinds'
-import { topicContentZoneId } from '../../../shared/topic-categories'
+import { topicContentZoneId } from '@agentmux/host/topic-categories'
 import { agentSessionPresentationIndex } from './session-presentation'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import { desktopAgentPresentationFromSpatial } from './desktop-agent-presentation'

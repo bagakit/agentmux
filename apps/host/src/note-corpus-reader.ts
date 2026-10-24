@@ -2,9 +2,9 @@ import { observeRead, parseNoteCorpusParams, parseNoteCorpusResult, type NoteCor
 import type { NoteResource } from '@agentmux/core/notebook-catalog'
 import { deriveNoteCorpus } from '@agentmux/client-ui/note/note-corpus'
 import type { NoteFileDocument } from '@agentmux/client-ui/note/note-knowledge'
-import type { WorkspaceRecord } from '../shared/contracts.js'
-import type { WorkspaceFiles } from './workspace-files.js'
-import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
+import type { WorkspaceRecord } from './content-types.js'
+import type { WorkspaceFiles } from './content-types.js'
+import { WORKSPACE_FILE_MAX_BYTES } from './workspace-file-bytes.js'
 
 export type NoteCorpusSource = { resource: NoteResource; document: NoteFileDocument }
 type CorpusPorts = {

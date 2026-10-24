@@ -1,9 +1,10 @@
+import { writeOriginalNoteResource } from '@agentmux/host/note-resource-write'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxNotesStorage, type NotesStorageChange, type NotesStorageSnapshot } from '@agentmux/core/notebook-store'
 import type { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import type { WorkspaceRecord, WorkspaceFileWriteInput } from '../shared/contracts.js'
 import type { ConfigOwner } from './config-owner.js'
-import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '../shared/notes-library.js'
+import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '@agentmux/host/notes-library'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { workspaceLocationKey } from './workspace-location.js'
 import { dirname, join } from 'node:path'
@@ -45,17 +46,9 @@ export class NotesStorageOwner {
     return this.reconcile(await this.storage.change(input))
   }
   async write<T>(workspace: WorkspaceRecord, input: Pick<WorkspaceFileWriteInput, 'path'>, save: (owner: WorkspaceRecord) => Promise<T>): Promise<T> {
-    if (workspace.id !== NOTES_WORKSPACE_ID && !/\.note\.(?:json|md)$/u.test(input.path)) return save(workspace)
-    return this.storage.withLock(async () => {
-      const current = await this.inspect()
-      if (current.operation && (workspace.id === NOTES_WORKSPACE_ID || current.operation.resourceChanges.some(change => change.from.workspaceId === workspace.id && change.from.workspacePath === workspace.path && change.from.path === input.path))) throw Object.assign(new Error('The original Notes directory move needs recovery before another Note write. Your draft and existing pages are retained.'), { code: 'NOTEBOOK_BUSY' })
-      const relocation = current.resourceChanges.find(change => change.from.hostId === workspace.hostId && change.from.workspaceId === workspace.id && change.from.workspacePath === workspace.path && change.from.path === input.path &&
-        (change.from.workspaceId !== change.to.workspaceId || change.from.workspacePath !== change.to.workspacePath || change.from.path !== change.to.path))
-      if (relocation) throw Object.assign(new Error('This Note now belongs to its confirmed Notes directory. Its draft is retained; refresh the original resource before saving.'), { code: 'NOTE_RESOURCE_CHANGED' })
-      if (workspace.id === NOTES_WORKSPACE_ID && workspace.path !== current.directory) throw Object.assign(new Error('The pinned Notes directory changed before this write. Your original resource and draft are retained; inspect the current directory before retrying.'), { code: 'NOTE_RESOURCE_CHANGED' })
-      return save(workspace)
-    })
+    return writeOriginalNoteResource(this.storage, workspace, input, save)
   }
+
   async confirmResources(snapshot: NotesStorageSnapshot) {
     for (let attempt = 0; ; attempt++) {
       const state = await this.spatial.readForLayout()

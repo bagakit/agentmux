@@ -1,7 +1,7 @@
 import type { JSONContent } from '@tiptap/core'
 import type { NoteDocument } from '../../../shared/note-document'
 import type { PendingNoteShare } from '../../../shared/note-file-editing'
-import { noteBlockFingerprint, noteNodeAtPath, noteShareRange, noteShareRangeContent, noteShareSiblingRange } from '../../../shared/note-share-range'
+import { noteBlockFingerprint, noteNodeAtPath, noteShareRange, noteShareRangeContent, noteShareSiblingRange } from '@agentmux/client-ui/note/note-share-range'
 
 /** The original pending-source range, without subscription, draft cleanup, IO or any write capability. */
 export function notePendingSharePreview(note: NoteDocument, ticket: PendingNoteShare, pendingReferences: ReadonlySet<string>): JSONContent | undefined {

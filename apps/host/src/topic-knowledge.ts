@@ -7,15 +7,15 @@ import { AgentMuxError, type AgentMuxRpcCallContext, type TopicCategory, type Kn
   parseFileListResult, parseFileReadResult, type FileReadParams,
   type TopicMigrationPreview, type TopicMigrationReceipt, type TopicKnowledge, type TopicKnowledgeItem, type TopicKnowledgeDocument, type TopicKnowledgeWrite, type TopicUnavailable,
   type TopicSearchRecord, type TopicSearchObservation } from '@agentmux/core'
-import type { WorkspaceRecord } from '../shared/contracts.js'
-import { directoryIdentity } from '../shared/space-addresses.js'
-import { UNCLASSIFIED_TOPIC_CATEGORY_ID } from '../shared/topic-categories.js'
+import type { WorkspaceRecord } from './content-types.js'
+import { directoryIdentity } from './mote-model.js'
+import { UNCLASSIFIED_TOPIC_CATEGORY_ID } from './topic-categories.js'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicPhysicalPath,
-  scratchTopicStorageRoots, scratchTopicDirectoryName, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_TOPIC_WIKI_STATE_PATH, type ScratchTopicSnapshot, type ScratchTopicList } from '../shared/scratch-topics.js'
+  scratchTopicStorageRoots, scratchTopicDirectoryName, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_TOPIC_WIKI_STATE_PATH, type ScratchTopicSnapshot, type ScratchTopicList } from './mote-topic-model.js'
 import { isTopicMethod, parseTopicParams, parseTopicResult, parseTopicKnowledge } from '@agentmux/core/control'
-import { ensureScratchStorageRoot } from './scratch-topic-directories.js'
-import type { ScratchTopics } from './scratch-topics.js'
-import type { WorkspaceFiles } from './workspace-files.js'
+import { ensureScratchStorageRoot } from './mote-directories.js'
+import type { ScratchTopics } from './mote-resources.js'
+import type { WorkspaceFiles } from './content-types.js'
 import type { FileReadOwner } from './file-read-owner.js'
 import { TopicSearchHistoryOwner, searchHistoryUnavailable, TOPIC_SEARCH_HISTORY_MAX_BYTES, TOPIC_SEARCH_HISTORY_MAX_RECORDS } from './topic-search-history.js'
 

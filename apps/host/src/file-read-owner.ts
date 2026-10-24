@@ -1,10 +1,10 @@
-import { FileResourceOwner } from '@agentmux/host/file-resource'
+import { FileResourceOwner } from './file-resource.js'
 import type { FileShareParams, FileShareResult, FileShareInspectParams, FileShareInspectResult, FileShareUndoParams, FileShareUndoResult, AgentMuxRpcFileShareOwner } from '@agentmux/core/files'
 import { AgentMuxError, parseFileCreateParams, type FileCreateParams, type FileCreateResult, parseFileWriteParams, type FileWriteParams, type FileWriteResult, type FileWriteContext, type AgentMuxRpcFilesOwner, type FileReadParams, type FileReadResource } from '@agentmux/core'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
-import type { WorkspaceRecord, WorkspaceFileRestoreInput, WorkspaceFileUndoInput, WorkspaceFileWriteResult } from '../shared/contracts'
-import type { ScratchDirectoryFact } from '../shared/scratch-topics'
-import type { WorkspaceFiles } from './workspace-files'
+import type { WorkspaceRecord, WorkspaceFileRestoreInput, WorkspaceFileUndoInput, WorkspaceFileWriteResult } from './content-types.js'
+import type { ScratchDirectoryFact } from './mote-topic-model.js'
+import type { WorkspaceFiles } from './content-types.js'
 import { parseFileHistoryParams, type FileHistoryParams, type FileHistoryResult, parseFileRestoreParams, parseFileUndoParams, type FileRestoreParams, type FileRestoreResult, type FileUndoParams, type FileUndoResult } from '@agentmux/core/files'
 import type { NoteHistoryQuery, NoteHistorySnapshot } from '@agentmux/core/note-history'
 import { fileUploadRevision, parseFileImportParams, type FileImportParams, type FileImportResult } from '@agentmux/core/files'
@@ -12,22 +12,22 @@ import { fileUploadRevision, parseFileImportParams, type FileImportParams, type 
 const publicWrite = (value: WorkspaceFileWriteResult): WorkspaceFileWriteResult => { if (value.status !== 'written') return value; const { fileWitness: _internal, ...receipt } = value; return receipt }
 
 /** Resolve once from original spatial/resource facts, then delegate to original Files. */
-export class FileReadOwner extends FileResourceOwner<WorkspaceRecord> implements AgentMuxRpcFilesOwner {
+export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends FileResourceOwner<W> implements AgentMuxRpcFilesOwner {
   constructor(protected override readonly ports: {
     share?: AgentMuxRpcFileShareOwner
     catalog(): Promise<AgentMuxSpaceCatalog | null>
     /** Original closed Zone descriptor from the same durable spatial resource owner. */
     retiredZone?(zoneId: string): Promise<unknown>
-    topicForDirectory?(workspace: WorkspaceRecord, directory: string): Promise<ScratchDirectoryFact | null>
-    workspace(id: string): WorkspaceRecord | undefined
-    files: Pick<WorkspaceFiles, 'read' | 'listFiles'> & {
-      writeBytes?(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['writeBytes']>[1]): ReturnType<WorkspaceFiles['writeBytes']>
-      write(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context?: FileWriteContext): ReturnType<WorkspaceFiles['write']>
-      writeSharedUndo?(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context: FileWriteContext | undefined, action: import('./note-history-actions.js').NoteHistoryWriteAction, transferred?: Record<string, import('@agentmux/core/note-provenance').NoteBlockProvenance>): Promise<WorkspaceFileWriteResult>
-      createShared?(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context: FileWriteContext | undefined, source: { workspace: WorkspaceRecord; input: Parameters<WorkspaceFiles['write']>[1] }): Promise<WorkspaceFileWriteResult>
-      history?(workspace: WorkspaceRecord, input: Omit<NoteHistoryQuery, 'resource'> & { path: string }): Promise<NoteHistorySnapshot>
-      restore?(workspace: WorkspaceRecord, input: WorkspaceFileRestoreInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult>
-      undo?(workspace: WorkspaceRecord, input: WorkspaceFileUndoInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult>
+    topicForDirectory?(workspace: W, directory: string): Promise<ScratchDirectoryFact | null>
+    workspace(id: string): W | undefined
+    files: Pick<WorkspaceFiles<W>, 'read' | 'listFiles'> & {
+      writeBytes?(workspace: W, input: Parameters<WorkspaceFiles<W>['writeBytes']>[1]): ReturnType<WorkspaceFiles<W>['writeBytes']>
+      write(workspace: W, input: Parameters<WorkspaceFiles<W>['write']>[1], context?: FileWriteContext): ReturnType<WorkspaceFiles<W>['write']>
+      writeSharedUndo?(workspace: W, input: Parameters<WorkspaceFiles<W>['write']>[1], context: FileWriteContext | undefined, action: import('./note-history-actions.js').NoteHistoryWriteAction, transferred?: Record<string, import('@agentmux/core/note-provenance').NoteBlockProvenance>): Promise<WorkspaceFileWriteResult>
+      createShared?(workspace: W, input: Parameters<WorkspaceFiles<W>['write']>[1], context: FileWriteContext | undefined, source: { workspace: W; input: Parameters<WorkspaceFiles<W>['write']>[1] }): Promise<WorkspaceFileWriteResult>
+      history?(workspace: W, input: Omit<NoteHistoryQuery, 'resource'> & { path: string }): Promise<NoteHistorySnapshot>
+      restore?(workspace: W, input: WorkspaceFileRestoreInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult>
+      undo?(workspace: W, input: WorkspaceFileUndoInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult>
     }
   }) { super(ports) }
   async share(input: FileShareParams, context?: FileWriteContext): Promise<FileShareResult> {

@@ -3,7 +3,7 @@ import { notebookFingerprint } from '@agentmux/core/notebook-catalog'
 import type { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import type { WebContentsDidStartNavigationEventParams } from 'electron'
 import { parseNotebookGraphSnapshot, type NotebookGraphSnapshot } from '../shared/notebook-observation.js'
-import { NotebookObservationOwner } from './notebook-observation-owner.js'
+import { NotebookObservationOwner } from '@agentmux/host/notebook-observation-owner'
 import { parseNotebookResolveParams, parseNotebookResolveResult, type NotebookResolveResult } from '@agentmux/core/note-links'
 import { noteContentInCatalogScope } from '@agentmux/core/notebook-observation'
 

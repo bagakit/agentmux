@@ -97,6 +97,70 @@
     "./macos-service": {
       "types": "./dist/macos-service.d.ts",
       "import": "./dist/macos-service.js"
+    },
+    "./file-read-owner": {
+      "types": "./dist/file-read-owner.d.ts",
+      "import": "./dist/file-read-owner.js"
+    },
+    "./topic-knowledge": {
+      "types": "./dist/topic-knowledge.d.ts",
+      "import": "./dist/topic-knowledge.js"
+    },
+    "./topic-spatial-owner": {
+      "types": "./dist/topic-spatial-owner.d.ts",
+      "import": "./dist/topic-spatial-owner.js"
+    },
+    "./topic-search-history": {
+      "types": "./dist/topic-search-history.d.ts",
+      "import": "./dist/topic-search-history.js"
+    },
+    "./note-file-writer": {
+      "types": "./dist/note-file-writer.d.ts",
+      "import": "./dist/note-file-writer.js"
+    },
+    "./note-history-actions": {
+      "types": "./dist/note-history-actions.d.ts",
+      "import": "./dist/note-history-actions.js"
+    },
+    "./note-title-file-writer": {
+      "types": "./dist/note-title-file-writer.d.ts",
+      "import": "./dist/note-title-file-writer.js"
+    },
+    "./note-corpus-reader": {
+      "types": "./dist/note-corpus-reader.d.ts",
+      "import": "./dist/note-corpus-reader.js"
+    },
+    "./notebook-observation-owner": {
+      "types": "./dist/notebook-observation-owner.d.ts",
+      "import": "./dist/notebook-observation-owner.js"
+    },
+    "./note-shared-block-owner": {
+      "types": "./dist/note-shared-block-owner.d.ts",
+      "import": "./dist/note-shared-block-owner.js"
+    },
+    "./note-shared-undo-owner": {
+      "types": "./dist/note-shared-undo-owner.d.ts",
+      "import": "./dist/note-shared-undo-owner.js"
+    },
+    "./note-shared-file-delete-owner": {
+      "types": "./dist/note-shared-file-delete-owner.d.ts",
+      "import": "./dist/note-shared-file-delete-owner.js"
+    },
+    "./topic-categories": {
+      "types": "./dist/topic-categories.d.ts",
+      "import": "./dist/topic-categories.js"
+    },
+    "./notes-library": {
+      "types": "./dist/notes-library.d.ts",
+      "import": "./dist/notes-library.js"
+    },
+    "./note-resource-write": {
+      "types": "./dist/note-resource-write.d.ts",
+      "import": "./dist/note-resource-write.js"
+    },
+    "./content-types": {
+      "types": "./dist/content-types.d.ts",
+      "import": "./dist/content-types.js"
     }
   }
 }

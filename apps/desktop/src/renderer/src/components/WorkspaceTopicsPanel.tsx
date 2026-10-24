@@ -1,7 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { formatZoneAddress } from '@agentmux/core/sharing'
 import { usePathDisplay } from '../hooks/usePathDisplay'
-import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
+import { isKnowledgeTopicInBindings } from '@agentmux/host/topic-categories'
 import { originalTopicAddress } from '../../../shared/space-addresses'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'

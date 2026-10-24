@@ -2,7 +2,7 @@ import { AGENTMUX_DISPLAY_LABEL_RESOURCE, type AgentMuxSpatialGraph, type AgentM
 import { spatialSources, type SpaceZoneBindings } from '../../../shared/space-addresses';
 import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics';
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control';
-import { categoriesFromSpatial, categoryResource } from '../../../shared/topic-categories';
+import { categoriesFromSpatial, categoryResource } from '@agentmux/host/topic-categories';
 import { reducePersistedTab, type PersistedWorkbench } from './workbench-persistence';
 import { closeWorktreeGraph } from '../../../shared/worktree-closeout';
 import { sessionPresentationById } from './session-presentation';

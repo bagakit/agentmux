@@ -4,8 +4,8 @@ import type { FileWriteContext } from '@agentmux/core/files'
 import { noteHistoryRevision, type NoteFileWitness, type NoteHistoryDeleteRecord } from '@agentmux/core/note-history'
 import type { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import { noteProvenanceResourceKey } from '@agentmux/core/note-provenance'
-import type { WorkspaceRecord } from '../shared/contracts.js'
-import type { WorkspaceFiles } from './workspace-files.js'
+import type { WorkspaceRecord } from './content-types.js'
+import type { WorkspaceFiles } from './content-types.js'
 
 export type SharedFileDeleteInput = { path: string; noteId: string; expectedRevision: string; witness: NoteFileWitness; operationId: string; creationEventId: string; undoFingerprint: string }
 export type SharedFileDeleteOutcome = { status: 'deleted' | 'conflict' | 'unknown' | 'error'; code?: string; message?: string; retainedPath?: string; noteHistory?: import('@agentmux/core/note-history').NoteHistoryReceipt }

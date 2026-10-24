@@ -1,6 +1,6 @@
 import { validateComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
-import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '../shared/notes-library.js'
+import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '@agentmux/host/notes-library'
 import { constants, mkdir, open, readFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
