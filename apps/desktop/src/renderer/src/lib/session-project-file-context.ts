@@ -1,3 +1,5 @@
+import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
+import { goalDiscussionGoalsForRecipient, readGoalDiscussionBinding, resolveGoalDiscussionBinding } from '@agentmux/host/goal-discussion-bindings'
 import { groupIds, regionIds, type WorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { directoryIdentity, workspaceZoneId, type SpaceZoneBindings, type SpatialRequestBinding } from '../../../shared/space-addresses'
@@ -15,7 +17,6 @@ import { workspaceRootForPath, type WorkbenchTab } from './workbench-tabs'
 type Facts = {
   config: AppConfig | null
   localHome: string
-  demandPmoTabIds: Readonly<Record<string, string>>
   demands: Readonly<Record<string, DemandRecord>>
   sessions: readonly SessionSnapshot[]
   tabs: Readonly<Record<string, WorkbenchTab>>
@@ -43,28 +44,10 @@ export function sessionFileResourcePath(context: SessionProjectFileContext, path
   return context.pathPrefix ? `${context.pathPrefix}/${path}` : path
 }
 
-// This is an index of the immutable mapping, not another mapping owner. Unrelated Session
-// output never scans Goals; replacing the mapping naturally releases the old index.
-const goalIdsByTab = new WeakMap<Facts['demandPmoTabIds'], ReadonlyMap<string, readonly string[]>>()
 const NO_GOALS: readonly string[] = []
-function mappedGoals(mapping: Facts['demandPmoTabIds'], tabId: string | undefined): readonly string[] {
-  if (!tabId) return NO_GOALS
-  let index = goalIdsByTab.get(mapping)
-  if (!index) {
-    const next = new Map<string, string[]>()
-    for (const [goalId, tab] of Object.entries(mapping)) {
-      const ids = next.get(tab) ?? []
-      ids.push(goalId)
-      next.set(tab, ids)
-    }
-    index = next
-    goalIdsByTab.set(mapping, index)
-  }
-  return index.get(tabId) ?? NO_GOALS
-}
 
 /** One Pane's current parsing scope. It makes no claim about earlier messages' origins. */
-export function createSessionProjectFileContextSelector(sessionId: string, origin: OpenHttpLinkOrigin): (state: Facts) => SessionProjectFileContext {
+export function createSessionProjectFileContextSelector(sessionId: string, origin: OpenHttpLinkOrigin, readGraph: () => AgentMuxSpatialGraph | null): (state: Facts) => SessionProjectFileContext {
   let seenGoal = false
   let previous: SessionProjectFileContext | undefined
   let previousKey = ''
@@ -76,20 +59,26 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
   let topicDirectory: { root: string; prefix: string } | undefined
   let relatedInputs: readonly unknown[] | undefined
   return (state) => {
-    const ids = mappedGoals(state.demandPmoTabIds, origin.tabId)
+    const session = sessionPresentationById(state.sessions).get(sessionId), graph = readGraph()
+    const ids = session?.kind === 'agent' ? goalDiscussionGoalsForRecipient(graph, {
+      ...(origin.tabId ? { tabId: origin.tabId } : {}), ...(origin.regionId ? { regionId: origin.regionId } : {}),
+      hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }) : NO_GOALS
     seenGoal ||= ids.length > 0
     const goalId = ids.length === 1 ? ids[0] : undefined
     const goal = goalId ? state.demands[goalId] : undefined
-    const session = sessionPresentationById(state.sessions).get(sessionId)
     const navigationTabs = workbenchNavigationTabs(state.tabs)
     // Runtime clocks, status and unrelated timelines do not alter a file resource.
     // Return before walking layout/Workspace metadata or serializing the result.
-    const inputs = [state.config, state.localHome, ids, goal, navigationTabs, state.layouts,
+    const inputs = [state.config, state.localHome, ids, goal, graph, navigationTabs, state.layouts,
       state.spaceZoneBindings, state.spatialRequests, state.scratchTopicSnapshots,
       state.topicCategories, state.projectGroups, session?.id, session?.kind,
       session?.hostId, session?.workspacePath, session?.control.run.runId]
     if (previous && relatedInputs && inputs.every((input, index) => input === relatedInputs![index])) return previous
     relatedInputs = inputs
+    let canonical = false
+    if (graph && goalId) {
+      try { const binding = readGoalDiscussionBinding(graph, goalId); if (binding) { resolveGoalDiscussionBinding(graph, binding); canonical = true } } catch { /* Retain the known Goal context as unconfirmed. */ }
+    }
     const tab = origin.tabId ? state.tabs[origin.tabId] : undefined
     const region = origin.regionId ? tab?.regions[origin.regionId] : undefined
     const resourceWorkspace = state.config?.workspaces.find(workspace => workspace.id === tab?.workspaceId)
@@ -108,7 +97,7 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
     if (seenGoal) {
       issue = ids.length > 1 ? 'More than one Goal refers to this PMO Tab.'
         : !goal ? 'The Goal association for this PMO Tab is unavailable.'
-        : !occurrence || !session ? 'The original PMO Region or display occurrence is unconfirmed.'
+        : !canonical || !occurrence || !session ? 'The original PMO Region, execution Host, Session or display occurrence is unconfirmed.'
         : goal.projectId && !project ? 'The associated Project, Workspace or Host is unconfirmed.' : undefined
     }
     if (!seenGoal) {

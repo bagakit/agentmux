@@ -4,7 +4,7 @@ import { restoredManualConnectionIntents, restoredManualConnectionSelections, ma
 import { emptyApplicationAccess, restoredApplicationAccess, type ApplicationAccessContinuation } from './lib/application-member-intent'
 import { restoreToolkitPresentations, updateToolkitPresentation, type ToolkitPresentations, type ToolkitPresentationPatch } from './lib/toolkit-presentation'
 import { isSessionRecoveryReplyUnconfirmed } from '../../shared/session-recovery-result'
-import { goalDiscussionTarget } from './lib/goal-discussion-recipient'
+import { handoffSavedGoalDiscussions } from './lib/goal-discussion-handoff'
 import { restoredGoalFiniteStartIntents, type GoalFiniteStartIntent } from './lib/goal-finite-start'
 import { observeNotifications } from './lib/notification-observation'
 import type { CollaborationMapTarget } from './lib/collaboration-map-navigation'
@@ -4017,7 +4017,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     focusTimelineRuler: state.focusTimelineRuler,
     selectedDemandId: state.selectedDemandId,
     demandArrangement: state.demandArrangement,
-    demandPmoTabIds: state.demandPmoTabIds,
+    ...(Object.keys(state.demandPmoTabIds).length ? { demandPmoTabIds: state.demandPmoTabIds } : {}),
     projectRailOpen: state.projectRailOpen,
     // 折叠了哪几组是用户意图，重开要还在。key 里带的是父目录路径——与同一份记录里已经逐字
     // 持久化的 file Region path 同一档事实，没有引入新的敏感面。
@@ -4080,6 +4080,7 @@ function partializeAppState(state: AppState): PersistedAppState {
 }
 
 let coreSpatialPersistence:DesktopSpatialPersistence|null=null
+export function currentCoreSpatialGraph() { return coreSpatialPersistence?.current?.graph ?? null }
 
 /** Record the exact result of an admitted close/retirement before spatial capture.
  * Inventory absence and remote hydration never authorize entity removal here. */
@@ -4853,19 +4854,7 @@ function gitNavigationTarget(state: AppState) {
 
 async function openGoalPmo(demandId: string, mode: 'open' | 'grill' | 'grounding', options?: { onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string> {
   const state = useAppStore.getState(), originalNavigation = fileNavigationSelection(state)
-  const retained = goalDiscussionTarget(state, demandId)
-  // The original client may navigate a retained exact workface without adopting
-  // its private relation into the background domain or creating a replacement.
-  if (mode === 'open' && retained.kind === 'existing') {
-    const region = retained.region, session = region.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
-    const sessionId = session?.kind === 'agent' ? session.control.agentSessionId : null
-    if (session?.kind === 'agent') state.revealFocusAgent({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }, session.id)
-    else {
-      const layout = state.layouts[retained.tab.workspaceId], groupId = layout && tabGroupForTab(layout, retained.tab.id)
-      if (groupId) state.activateTab(retained.tab.workspaceId, groupId, retained.tab.id)
-    }
-    options?.onReceipt?.({ tabId: retained.tabId, agentSessionId: sessionId }); return retained.tabId
-  }
+  await handoffOriginalGoalDiscussions(demandId)
   const choice = primaryMoteExecutorChoice(state)
   const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.discuss', requestId: mintObjectId(), demandId, mode, ...(choice.executorId ? { executorId: choice.executorId } : {}) })
   if (result.operation !== 'demand.discuss') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original discussion returned another operation.')
@@ -4873,9 +4862,25 @@ async function openGoalPmo(demandId: string, mode: 'open' | 'grill' | 'grounding
   useAppStore.setState(current => ({ demands: { ...current.demands, [goal.id]: demandRecordFromFilesystem(goal, current.demands[goal.id]) } }))
   const receipt = { tabId: result.receipt.tabId, agentSessionId: result.receipt.agentSessionId }
   options?.onReceipt?.(receipt)
-  if (receipt.agentSessionId && fileNavigationSelection(useAppStore.getState()) === originalNavigation)
-    useAppStore.getState().revealFocusAgent({ hostId: 'local', agentSessionId: receipt.agentSessionId })
+  if (fileNavigationSelection(useAppStore.getState()) === originalNavigation) {
+    const current = useAppStore.getState()
+    if (receipt.agentSessionId && result.receipt.hostId) current.revealFocusAgent({ hostId: result.receipt.hostId, agentSessionId: receipt.agentSessionId })
+    else {
+      const tab = current.tabs[receipt.tabId], layout = tab && current.layouts[tab.workspaceId], groupId = layout && tabGroupForTab(layout, receipt.tabId)
+      if (tab && groupId) current.selectMainRegion({ displayWorkspaceId: tab.workspaceId, groupId, tabId: receipt.tabId, regionId: result.receipt.regionId })
+    }
+  }
   return receipt.tabId
+}
+
+export async function handoffOriginalGoalDiscussions(goalId?: string): Promise<void> {
+  await handoffSavedGoalDiscussions({ getState: () => useAppStore.getState(),
+    handoff: input => api.goals.handoffDiscussion(input),
+    acknowledged: (id, originalTabId, receipt) => {
+      coreSpatialPersistence?.acceptNames(receipt.state)
+      useAppStore.setState(current => current.demandPmoTabIds[id] !== originalTabId ? {} : {
+        demandPmoTabIds: Object.fromEntries(Object.entries(current.demandPmoTabIds).filter(([goal]) => goal !== id)) })
+    } }, goalId)
 }
 
 // Undelivered display projections retain the exact native creation event, never a URL replay.
@@ -5160,7 +5165,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (get().workbenchSaveWarning !== warning || get().workbenchSaveWarningOwner !== owner) set({ workbenchSaveWarning: warning, workbenchSaveWarningOwner: owner })
   },
   async retryWorkbenchSave() {
-    try { await prepareRendererUpdate() }
+    try { await handoffOriginalGoalDiscussions(); await prepareRendererUpdate() }
     catch (error) { get().reportWorkbenchSaveFailure(error) }
   },
   async initialize() {
@@ -5541,6 +5546,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           set({}) // Rewrite UI preferences after the Core ACK, removing the old entity snapshot.
         } catch(error) {get().reportWorkbenchSaveFailure(error)}
       }
+      void handoffOriginalGoalDiscussions().catch(error => { if (observing) get().reportWorkbenchSaveFailure(error) })
       // Ordinary startup ensures the original primary identity once. Metadata failure is advisory;
       // it cannot hold up restored workfaces or reconcile a healthy Session into a replacement.
       if (config.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) {
@@ -6964,12 +6970,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         recordClosedWorkbenchEntities(current.tabs, committed.tabs)
         const removedTabId = removedTab?.id
         if (!removedTabId) return committed
-        // Only this admitted, committed close releases a Goal's dedicated discussion binding.
-        // A missing projection elsewhere remains unknown and never authorizes replacement.
-        const discussionClosed = Object.values(current.demandPmoTabIds).includes(removedTabId)
-        if (discussionClosed) collectionChanged = true
+        // Closing a presentation does not reassign its original discussion Session.
         return { ...committed,
-          ...(discussionClosed ? { demandPmoTabIds: Object.fromEntries(Object.entries(current.demandPmoTabIds).filter(([, id]) => id !== removedTabId)) } : {}),
           recentMoteAgents: Object.fromEntries(Object.entries(current.recentMoteAgents).filter(([, agent]) => agent.tabId !== removedTabId)) }
       })
       if (removedTab && !get().tabs[removedTab.id]) publishWorkbenchTabRemoved(removedTab, { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabOrder: removedTabOrder }, error => get().reportError(error))
@@ -7742,7 +7744,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const { [id]: _removed, ...demands } = state.demands
       return {
         demands,
-        demandPmoTabIds: Object.fromEntries(Object.entries(state.demandPmoTabIds).filter(([demandId]) => demandId !== id)),
         ...(state.selectedDemandId === id ? { selectedDemandId: null } : {})
       }
     })

@@ -2,6 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentFocusContext } from './agent-focus'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from './pmo-teams-topic-floating'
 import { useAppStore } from '../store'
+import { goalDiscussionTarget } from './goal-discussion-recipient'
 
 type PresentationIntent = {
   surface: string
@@ -75,7 +76,8 @@ function runDirectGoal(current: DirectGoalRequest, intent: PresentationIntent, c
     } catch (cause) {
       publish({ ...(request ?? current), pending: false, error: cause instanceof Error ? cause.message : String(cause),
         ...((request ?? current).phase === 'save' ? { notSaved: (cause as { code?: unknown })?.code === 'GOAL_OWNER_NOT_FOUND' } : {}) })
-      const tabId = useAppStore.getState().demandPmoTabIds[current.id]
+      const target = goalDiscussionTarget(useAppStore.getState(), current.id)
+      const tabId = target.kind === 'existing' ? target.tabId : undefined
       if (request?.phase === 'pmo' && tabId && mayPresent(intent, current.id, tabId)) requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId })
     }
   }).finally(() => { flight = null })

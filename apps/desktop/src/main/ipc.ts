@@ -1,3 +1,4 @@
+import { handoffGoalDiscussion } from './goal-discussion-handoff.js'
 import { desktopGoalControl, desktopGoalChanges, observeDesktopGoalChanges, readDesktopGoals, confirmDesktopGoalParticipation, reconcileDesktopGoalDispatch } from './desktop-goals.js'
 import { hostGoalRecord } from '@agentmux/host/goal-projection'
 import { sessionRecoveryOperationResult } from './session-recovery-operation'
@@ -1186,6 +1187,17 @@ export async function registerIpc(args: {
   )
   const disposeGoalChanges = observeDesktopGoalChanges(args.runtime, (ids, snapshot) => { if (!contents.isDestroyed()) contents.send('demands:changed', ids, snapshot) }, message => { if (!contents.isDestroyed()) contents.send('demands:observationIssue', message) })
   const executeGoal = desktopGoalControl(args.runtime)
+  handleWithEvent('goals:handoffDiscussion', async (event, input: import('@agentmux/host/goal-discussion-bindings').GoalDiscussionHandoff) => {
+    requireTrustedSender('goals:handoffDiscussion', event)
+    return handoffGoalDiscussion(input, { spatial: spatialState,
+      goal: async goalId => (await args.runtime.callOriginalCore('local', 'goal.inspect', { goalId },
+        { principal: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'current') } })).goal,
+      agent: async (hostId, agentSessionId) => {
+        const clients = args.runtime.rpcClients().filter(item => item.hostId === hostId)
+        if (clients.length !== 1) throw new AgentMuxError('The exact original discussion Host is unconfirmed. Its saved relationship is retained.', 'GOAL_DISCUSSION_UNCONFIRMED')
+        return clients[0]!.client.agentSession(agentSessionId)
+      } })
+  })
   handleWithEvent('goals:execute', async (event, request: AgentMuxControlRequest) => {
     requireTrustedSender('goals:execute', event)
     return executeGoal(parseAgentMuxControlRequest(request))

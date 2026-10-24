@@ -28,7 +28,7 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { dismissOpenDestinationRequest, type OpenHttpLinkOrigin } from '../lib/open-destination'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
-import { useAppStore } from '../store'
+import { useAppStore, currentCoreSpatialGraph } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { installTerminalOscHandlers } from '../lib/terminal-capability-replies'
 import {
@@ -385,7 +385,7 @@ export function TerminalView({
     regionCaretFocusTargets(state.regionCaretFocus, linkOrigin?.regionId) ? state.regionCaretFocus : null)
   const clearRegionCaretFocus = useAppStore((state) => state.clearRegionCaretFocus)
   const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(session.id,
-    { ...displayOrigin, workspaceId: displayOrigin?.workspaceId ?? '', sessionId: session.id }),
+    { ...displayOrigin, workspaceId: displayOrigin?.workspaceId ?? '', sessionId: session.id }, currentCoreSpatialGraph),
   [session.id, displayOrigin?.workspaceId, displayOrigin?.tabGroupId, displayOrigin?.tabId, displayOrigin?.regionId])
   const fileContext = useAppStore(selectFileContext)
   const fileContextRef = useRef(fileContext)

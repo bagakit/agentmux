@@ -9,7 +9,7 @@ import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conver
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps } from 'react'
-import { agentRegionExecution, useAppStore } from '../store'
+import { agentRegionExecution, useAppStore, currentCoreSpatialGraph } from '../store'
 import { sessionNameMetadataFor } from '../lib/session-name-metadata'
 import { useShallow } from 'zustand/react/shallow'
 import { retainActivityControls } from '../lib/retained-activity'
@@ -505,7 +505,7 @@ export function SessionPane({
   const activeWorkspaceRoot = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) =>
     (session ? workspaceRootForPath(state.config ?? null, session) : undefined) ?? ''
   )
-  const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(sessionId, mailboxOrigin),
+  const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(sessionId, mailboxOrigin, currentCoreSpatialGraph),
     [sessionId, mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, mailboxOrigin.regionId, mailboxOrigin.sessionId])
   const fileContext = useObservedAppStore('sessionPane', observationVisible, consumerScope, selectFileContext)
   const [fileLinkIssue, setFileLinkIssue] = useState<string | null>(null)

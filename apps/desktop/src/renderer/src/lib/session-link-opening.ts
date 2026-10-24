@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { LinkClickModifiers } from '@agentmux/client-ui'
 import { resolveFocusLinkDestination } from '../../../shared/focus-preferences'
-import { useAppStore } from '../store'
+import { useAppStore, currentCoreSpatialGraph } from '../store'
 import { api } from './api'
 import { mainFocusPresentation } from './focus-tab-projection'
 import { createSessionProjectFileContextSelector, sessionFileResourcePath, type SessionProjectFileContext } from './session-project-file-context'
@@ -135,7 +135,7 @@ export function useSessionLinkOpening(origin: OpenHttpLinkOrigin, onService?: (m
     if (current.surface !== surface || (heldParent ? !sameWorkbenchProjectionSelection(currentParent, heldParent) : currentParent !== null)) return
     current.onSelectRegion?.(regionId)
   } } : {}) }
-  const selector = useMemo(() => createSessionProjectFileContextSelector(origin.sessionId ?? '', origin),
+  const selector = useMemo(() => createSessionProjectFileContextSelector(origin.sessionId ?? '', origin, currentCoreSpatialGraph),
     [origin.workspaceId, origin.tabGroupId, origin.tabId, origin.regionId, origin.sessionId])
   const context = useAppStore(selector)
   const [request, setRequest] = useState<LinkRequest | null>(null)

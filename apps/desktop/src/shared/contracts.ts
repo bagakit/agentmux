@@ -1726,7 +1726,10 @@ export type AgentMuxDesktopApi = {
     setWikiEnabled(workspaceId: string, topicId: string, enabled: boolean): Promise<ScratchTopicSnapshot>
     resetWiki(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
   }
-  goals: { execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult> }
+  goals: {
+    execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult>
+    handoffDiscussion(input: import('@agentmux/host/goal-discussion-bindings').GoalDiscussionHandoff): Promise<import('@agentmux/host/goal-discussion-bindings').GoalDiscussionBindingReceipt>
+  }
   demands: {
     delegation<M extends 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue'>(method: M, input: import('@agentmux/core/goal-delegation').GoalDelegationParamsMap[M]): Promise<import('@agentmux/core/goal-delegation').GoalDelegationResult>
     onObservationIssue(listener: (message: string) => void): () => void

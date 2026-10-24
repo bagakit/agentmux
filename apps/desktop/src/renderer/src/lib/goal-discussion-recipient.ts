@@ -1,29 +1,31 @@
 import { useShallow } from 'zustand/react/shallow'
-import { tabGroupForTab } from './workbench-tabs'
-import { useAppStore } from '../store'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { useAppStore, currentCoreSpatialGraph } from '../store'
+import { readGoalDiscussionBinding, resolveGoalDiscussionBinding } from '@agentmux/host/goal-discussion-bindings'
+import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import { agentDisplayName } from './workbench-tabs'
 import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { agentSessionPresentationIndex, sessionPresentationById } from './session-presentation'
 
 type State = Pick<ReturnType<typeof useAppStore.getState>, 'demandPmoTabIds' | 'tabs' | 'layouts'>
 /** Read the same dedicated workface used by the original discussion owner. Never substitute the Supervisor. */
-export function goalDiscussionTarget(state: State, goalId: string) {
-  const tabId = state.demandPmoTabIds[goalId]
-  if (!tabId) return { kind: 'new' as const }
-  const tab = state.tabs[tabId], layout = state.layouts[SCRATCH_WORKSPACE_ID]
-  const region = tab?.regions[tab.layout.activeRegionId]
-  if (!tab || tab.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== PMO_TEAMS_TOPIC_ID || !layout ||
-    tabGroupForTab(layout, tab.id) === null || !region || region.kind !== 'agent' && region.kind !== 'launcher')
-    return { kind: 'unconfirmed' as const, tabId }
-  return { kind: 'existing' as const, tabId, tab, region }
+export function goalDiscussionTarget(state: State, goalId: string, graph: AgentMuxSpatialGraph | null = currentCoreSpatialGraph()) {
+  if (!graph) return { kind: 'unconfirmed' as const }
+  try {
+    const binding = readGoalDiscussionBinding(graph, goalId)
+    if (!binding) return state.demandPmoTabIds[goalId] ? { kind: 'unconfirmed' as const } : { kind: 'new' as const }
+    resolveGoalDiscussionBinding(graph, binding)
+    const tab = state.tabs[binding.tabId], region = tab?.regions[binding.regionId]
+    if (!tab || !region || region.kind !== binding.recipient.kind) return { kind: 'unconfirmed' as const }
+    return { kind: 'existing' as const, tabId: binding.tabId, tab, region, recipient: binding.recipient }
+  } catch { return { kind: 'unconfirmed' as const } }
 }
 
 export function useGoalDiscussionRecipient(goalId: string) {
   const data = useAppStore(useShallow(state => {
     const target = goalDiscussionTarget(state, goalId)
     const session = target.kind === 'existing' && target.region.kind === 'agent' ? sessionPresentationById(state.sessions).get(target.region.sessionId) : undefined
-    const known = session?.kind === 'agent' && session.control.kind === 'agent'
+    const known = target.kind === 'existing' && target.recipient.kind === 'agent' && session?.kind === 'agent' && session.control.kind === 'agent' &&
+      session.control.hostId === target.recipient.hostId && session.control.agentSessionId === target.recipient.agentSessionId
     const name = known ? agentDisplayName({ userName: state.agentNames[session.id], firstPrompt: firstPromptFromTimeline(state.timelines[session.id]), fallbackLabel: session.label, providerLabel: session.providerId }) : null
     return { kind: target.kind, name, launcher: target.kind === 'existing' && target.region.kind === 'launcher', outlined: Boolean(state.demands[goalId]?.alignment) }
   }))

@@ -1,5 +1,6 @@
+import { goalDiscussionSessionBindings } from '@agentmux/host/goal-discussion-bindings'
 import { useCallback, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
-import { useAppStore } from '../store'
+import { useAppStore, currentCoreSpatialGraph } from '../store'
 import { rendererPerformance } from './renderer-performance'
 import { sessionPresentationById } from './session-presentation'
 import { workbenchNavigationTabs } from './workbench-navigation-catalog'
@@ -12,7 +13,7 @@ type State = ReturnType<typeof useAppStore.getState>
 const sharedFacts = {
   composer: ['config', 'scratchTopicSnapshots', 'providerCatalog', 'errorNoticeContext', 'error', 'lastError', 'lastActiveFileByWorkspace'],
   sessionPane: ['config', 'workbenchSaveWarning', 'scratchTopicSnapshots', 'runtimeEndpointWarnings',
-    'localHome', 'demandPmoTabIds', 'demands', 'layouts', 'spaceZoneBindings', 'spatialRequests', 'topicCategories', 'projectGroups'],
+    'localHome', 'demands', 'layouts', 'spaceZoneBindings', 'spatialRequests', 'topicCategories', 'projectGroups'],
   reactions: ['config'],
   workbenchTab: ['layouts', 'config', 'scratchTopicSnapshots']
 } as const satisfies Record<ConsumerKind, readonly (keyof State)[]>
@@ -32,6 +33,7 @@ type Listener = () => void
 const listenersByScope = new Map<RetainedConsumerScope, { kind: ConsumerKind; listeners: Set<Listener> }>()
 const scopesBySession = new Map<string, Set<RetainedConsumerScope>>()
 let unsubscribe: (() => void) | undefined
+let observedGoalGraph: ReturnType<typeof currentCoreSpatialGraph> = null
 // Revisions are notification watermarks, including preview's in-place timeline append.
 // They never replace Store facts or supply selector results.
 const timelineRevisions = new Map<string, number | undefined>()
@@ -42,6 +44,18 @@ function notify(current: State, previous: State): void {
     for (const scope of scopesBySession.get(id) ?? []) {
       const kind = listenersByScope.get(scope)!.kind
       if (!fact || (sessionFactsByKind[kind] as readonly string[]).includes(fact)) changed.add(scope)
+    }
+  }
+  const graph = currentCoreSpatialGraph(), beforeGraph = observedGoalGraph
+  observedGoalGraph = graph
+  if (graph?.resources !== beforeGraph?.resources) {
+    const before = sessionPresentationById(previous.sessions), after = sessionPresentationById(current.sessions)
+    for (const id of scopesBySession.keys()) {
+      const old = before.get(id), next = after.get(id)
+      const original = old?.kind === 'agent' ? goalDiscussionSessionBindings(beforeGraph, old.control.hostId, old.control.agentSessionId) : []
+      const actual = next?.kind === 'agent' ? goalDiscussionSessionBindings(graph, next.control.hostId, next.control.agentSessionId) : []
+      if (original.length === actual.length && original.every((value, index) => value === actual[index])) continue
+      for (const scope of scopesBySession.get(id) ?? []) if (listenersByScope.get(scope)?.kind === 'sessionPane') changed.add(scope)
     }
   }
   // Shared capabilities/configuration remain live when hidden. Only visible primary
@@ -103,7 +117,7 @@ function subscribe(kind: ConsumerKind, scope: RetainedConsumerScope, listener: L
     }
   }
   listeners.add(listener)
-  if (!unsubscribe) unsubscribe = useAppStore.subscribe(notify)
+  if (!unsubscribe) { observedGoalGraph = currentCoreSpatialGraph(); unsubscribe = useAppStore.subscribe(notify) }
   return () => {
     listeners!.delete(listener)
     if (listeners!.size === 0) {
