@@ -137,11 +137,19 @@ async function authenticatedFixture(request?: AgentMuxInteractionRequest, retain
   provider.planPromptInput = prompt => ({ kind: 'single-phase', data: prompt + '\r' })
   vi.spyOn(provider, 'discoverNativeSession').mockResolvedValue({ handle: { kind: 'provider', providerId, sessionId: source.nativeSessionId }, assertCurrent: async () => {} })
   let recent = { ...page(), source: fixtureSource }, older = { ...recent, nextCursor: null }
-  let observe: ((event: AgentProviderSessionHistoryObservation) => void) | undefined
-  vi.spyOn(provider, 'readSessionHistoryPage').mockImplementation(async context => structuredClone(context.cursor ? older : recent))
+  const observers = new Set<(event: AgentProviderSessionHistoryObservation) => void>()
+  let cut = 0
+  vi.spyOn(provider, 'readSessionHistoryPage').mockImplementation(async context => structuredClone({ ...(context.cursor ? older : recent), changesCursor: 'fixture-native-cut-' + cut }))
   vi.spyOn(provider, 'observeSessionHistory').mockImplementation(async context => {
-    observe = context.onChange
-    return { source: context.source, dispose() { observe = undefined } }
+    observers.add(context.onChange)
+    return { source: context.source, dispose() { observers.delete(context.onChange) } }
+  })
+  vi.spyOn(provider, 'readConversationChanges').mockImplementation(async context => ({ source: recent.source,
+    items: context.tail ? [] : structuredClone(recent.items), cursor: 'fixture-native-cut-' + cut, more: false }))
+  vi.spyOn(provider, 'readSessionHistoryRecord').mockImplementation(async context => {
+    const record = [...recent.items, ...older.items].find(item => item.id === context.recordId)
+    if (!record) throw new Error('Original native fixture record is unavailable')
+    return structuredClone(record)
   })
   // The original Provider catalog owns async reply routing. A history record
   // does not supply a live editor target or an automatic input capability.
@@ -154,8 +162,8 @@ async function authenticatedFixture(request?: AgentMuxInteractionRequest, retain
     await mkdir(process.env.AGENTMUX_MOBILE_PROTOCOL_EVIDENCE, { recursive: true }); await writeFile(target, JSON.stringify(evidence, null, 2) + '\n')
   }
   return { ...h, ...transport, core: h.client, submit, reply, respond, inspect, recordProof, retainedInput,
-    setRecent(value: AgentSessionHistoryPage) { recent = value }, setOlder(value: AgentSessionHistoryPage) { older = value },
-    invalidate() { observe?.({ kind: 'invalidated', source }) } }
+    setRecent(value: AgentSessionHistoryPage) { recent = value; cut++ }, setOlder(value: AgentSessionHistoryPage) { older = value },
+    invalidate() { for (const observe of observers) observe({ kind: 'invalidated', source }) } }
 }
 
 it('authenticated Mobile keeps compact sends beside distinct native records and preserves their expanded authors, failures, selection and original reads', async () => {
@@ -176,15 +184,16 @@ it('authenticated Mobile keeps compact sends beside distinct native records and 
       title: 'Observed reply', content: 'Captured original reply', authorAgentSessionId: 'exact-peer-author' }
   ]
   for (const item of items) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item })
-  const reads = vi.spyOn(f.core, 'sessionHistoryPage'), changes = vi.spyOn(f.core, 'readConversationChanges'), view = await mount(f.surface())
-  const readOptions = () => reads.mock.calls.map(([, options]) => ({ limit: options?.limit, cursor: options?.cursor }))
+  const reads = vi.mocked(f.core.providers.get('codex').readSessionHistoryPage!), changes = vi.spyOn(f.client, 'readConversationChanges'), view = await mount(f.surface())
+  const readOptions = () => reads.mock.calls.map(([context]) => ({ limit: context.limit, cursor: context.cursor }))
   await vi.waitFor(() => expect(view.element.textContent).toContain('Captured original reply'))
   const record = (id: string) => view.element.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!
-  for (const [id, status] of [['input-duplicated', '提交已记录'], ['input-failed', '提交失败'], ['input-unconfirmed', '提交未确认']] as const) {
+  for (const [id, status] of [['input-duplicated', 'complete'], ['input-failed', 'failed'], ['input-unconfirmed', 'streaming']] as const) {
     const row = view.element.querySelector<HTMLElement>(`[data-submission-id="${id}"]`)!, detail = row.querySelector<HTMLDetailsElement>('details')!
     expect(detail.open).toBe(false); expect(row.querySelector('.log-turn__body')).toBeNull()
     const summary = detail.querySelector('summary')!
-    expect(summary.textContent).toContain('消息发送'); expect(summary.textContent).toContain(status)
+    expect(summary.textContent).toContain('对话记录'); expect(summary.textContent).toContain('对话已收录')
+    expect(summary.querySelector('[data-status]')?.getAttribute('data-status')).toBe(status)
     expect(summary.textContent).not.toContain('Message Tool'); expect(summary.textContent).not.toContain(f.device.name)
     expect(summary.textContent).not.toContain('已进入对话'); expect(summary.querySelector('.message-disclosure__preview')).not.toBeNull()
     await act(async () => { detail.open = true; detail.dispatchEvent(new Event('toggle')) })
@@ -213,7 +222,6 @@ it('authenticated Mobile keeps compact sends beside distinct native records and 
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 6); window.getSelection()!.addRange(range)
   const reply = record('reply-captured'), body = reply.querySelector('.log-turn__body')!
   await vi.waitFor(() => expect(f.core.providers.get('codex').observeSessionHistory).toHaveBeenCalledTimes(1))
-  const changeReadsBefore = changes.mock.calls.length
   await f.store.applyTimelineMutation({ type: 'update', agentSessionId: sid, itemId: 'reply-captured', updatedAt: _historyTailFixtureEpoch(0, 0, 5), content: 'Captured reply grows in place' })
   await act(async () => f.invalidate())
   await vi.waitFor(() => expect(body.textContent).toBe('Captured reply grows in place'))
@@ -221,11 +229,16 @@ it('authenticated Mobile keeps compact sends beside distinct native records and 
   expect(view.element.querySelector('[data-native-record-id="native-answer"] .log-turn__body')).toBe(native)
   expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(range.toString()).toBe('Native')
   expect(readOptions()).toEqual([{ limit: 100, cursor: undefined }])
-  expect(changes.mock.calls.slice(changeReadsBefore).some(([input]) => input.hostId === 'local' && input.agentSessionId === sid)).toBe(true)
+  expect(changes.mock.calls.length).toBeGreaterThan(0)
+  expect(new Set(changes.mock.calls.map(([input]) => JSON.stringify([input.hostId, input.agentSessionId])))).toEqual(new Set([JSON.stringify(['local', sid])]))
+  const changedPages = await Promise.all(changes.mock.results.map(result => result.value))
+  expect(changedPages.flatMap(page => page.items).filter(entry => entry.kind === 'item').flatMap(entry => entry.item.records)
+    .filter(record => record.original.kind === 'captured' && record.original.item.id === 'reply-captured')
+    .map(record => record.original.item.content)).toContain('Captured reply grows in place')
   expect(button(view.element, '更早消息')).toBeDefined()
   expect(f.writes).toHaveLength(0); expect(f.submit).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled()
   await f.recordProof('visible-captured-reading', { passed: true, boundary: 'Authenticated HTTP/Hosted/Core/FileStore → actual MobileConversationSurface; controlled Provider history',
-    page: nativePage, timeline: await f.core.sessionTimeline(sid), session: f.client.agentSession(sid), reads: reads.mock.calls.map(call => call[1]),
+    page: nativePage, timeline: await f.core.sessionTimeline(sid), session: f.client.agentSession(sid), reads: reads.mock.calls.map(call => ({ limit: call[0].limit, cursor: call[0].cursor })),
     sameBodyNativeAndCapturedRetained: true, originalRange: range.toString(), runtimeWrites: f.writes.length })
 }, 15000)
 
@@ -237,6 +250,7 @@ it('authenticated Mobile keeps captured original speech readable when the native
   vi.mocked(f.core.providers.get('codex').readSessionHistoryPage!).mockRejectedValue(Object.assign(new Error('Original native reader unavailable'), { code: 'AGENT_SESSION_HISTORY_OBSERVATION_UNSUPPORTED' }))
   const view = await mount(f.surface())
   await vi.waitFor(() => expect(view.element.textContent).toContain(item.content))
+  await click(view.element.querySelector<HTMLButtonElement>('[data-captured-reply-observation="retained-hook-reply"] .conversation-reply-observation__toggle')!)
   const reply = view.element.querySelector<HTMLElement>('[data-message-id="retained-hook-reply"]')!
   expect(reply.closest('details:not([open]), [hidden], [inert]')).toBeNull()
   expect(view.element.querySelector('[data-native-record-id]')).toBeNull()
@@ -252,12 +266,13 @@ it('authenticated Hosted preserves ordinary input and the original terminal rout
   expect(f.client.forwardRpc).toBeUndefined()
   await click(button(view.element, 'Keep original'))
   expect([...view.element.querySelectorAll('button')].some(item => item.textContent === 'Submit reply')).toBe(false)
-  await click(button(view.element, '打开原终端'))
+  await click(view.element.querySelector<HTMLButtonElement>('.mobile-message-tools__trigger')!)
+  await click(button(document.body, '查看 Terminal'))
   expect(f.openTerminal).toHaveBeenCalledOnce(); expect(f.reply).not.toHaveBeenCalled(); expect(f.writes).toEqual([])
   const originalReply = { agentSessionId: sid, source, recordId: question.id, turnId: question.turnId,
     expectedRun: { runId: RUN_ID }, afterSubmissionId: null, operationId: 'unsupported-original-question',
     authorHuman: true as const, answers: [{ questionId: 'exact-async-question', answer: 'Keep original' }] }
-  await expect(f.client.replySessionQuestion(originalReply)).rejects.toMatchObject({ code: 'AGENT_QUESTION_REPLY_UNSUPPORTED' })
+  await expect(f.client.replySessionQuestion(originalReply)).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
   expect(f.reply).toHaveBeenCalledOnce(); expect(f.writes).toEqual([])
   expect((await f.core.sessionTimeline(sid)).items.some(item => item.kind === 'user_message')).toBe(false)
   await paste(view.element, 'Ordinary original mobile message')
@@ -374,8 +389,9 @@ it('keeps original older-window text and selection while another entry records a
   local.questions.set(questionReplyKey(sid, legacy.input), legacy); await local.save()
   const view = await mount(f.surface())
   await vi.waitFor(() => expect(view.element.textContent).toContain('Original asynchronous question'))
+  await vi.waitFor(() => expect(button(view.element, '更早消息').disabled).toBe(false))
   await click(button(view.element, '更早消息'))
-  await vi.waitFor(() => expect(button(view.element, '回到最新')).toBeDefined())
+  await vi.waitFor(() => expect(view.element.textContent).toContain('Current reading window'))
   const row = view.element.querySelector<HTMLElement>('[data-native-record-id="exact-async-record"]')!
   const originalText = row.querySelector('.conversation-message__body') ?? row.querySelector('p')!
   const selection = window.getSelection()!, range = document.createRange(); range.selectNodeContents(originalText); selection.removeAllRanges(); selection.addRange(range)
@@ -532,6 +548,8 @@ it('the main Mobile conversation reads an exact native image through the authent
   f.setRecent({ ...page(), items: [record] })
   const lookup = vi.spyOn(f.core.providers.get('codex'), 'readSessionHistoryRecord').mockResolvedValue(record)
   const read = vi.spyOn(f.core, 'sessionHistoryResource'), view = await mount(f.surface())
+  await vi.waitFor(() => expect(view.element.querySelector('[data-native-record-id="main-native-image"] .conversation-progressive-body__placeholder button')).not.toBeNull())
+  await click(view.element.querySelector<HTMLButtonElement>('[data-native-record-id="main-native-image"] .conversation-progressive-body__placeholder button')!)
   await vi.waitFor(() => expect(view.element.querySelector<HTMLImageElement>('.conversation-native-thread img')?.src).toBe(image))
   expect(read).toHaveBeenCalledWith(sid, expect.objectContaining({ source, recordId: record.id, turnId: record.turnId, partIndex: 0, expectedReference: image }))
   expect(lookup).toHaveBeenCalledWith(expect.objectContaining({ source, recordId: record.id, turnId: record.turnId }))
@@ -615,38 +633,43 @@ it('authenticated Mobile pages the original captured stream beyond the recent wi
   const f = await authenticatedFixture()
   const provider = f.core.providers.get('codex') as AgentProvider & Required<Pick<AgentProvider, 'readSessionHistoryPage'>>
   vi.spyOn(provider, 'readSessionHistoryPage').mockRejectedValue(new Error('Original native source unavailable'))
+  vi.spyOn(provider, 'readConversationChanges').mockRejectedValue(new Error('Original native source unavailable'))
   const items: AgentTimelineItem[] = Array.from({ length: 720 }, (_, index) => ({ id: `retained-mobile:${index}`, agentSessionId: sid,
     kind: 'user_message', source: 'user', status: 'complete', authorHuman: true, publicContent: 'confirmed', title: 'Original retained input',
     content: index === 1 ? `Complete 原文中🙂\n${'原文中🙂\n'.repeat(8000)}END retained` : `Complete retained ${index}`, createdAt: index + 1, updatedAt: index + 1 }))
   for (const item of items) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item })
-  const raw = vi.spyOn(f.core, 'readAgentSessionHistory')
+  const raw = vi.spyOn(f.store, 'readCapturedHistory')
   const view = await mount(f.surface())
   await vi.waitFor(() => expect(view.element.textContent).toContain('Complete retained 719'))
   await paste(view.element, 'Original retained draft')
-  const originalIds = [...view.element.querySelectorAll<HTMLElement>('[data-message-id^="captured:retained-mobile:"]')].map(node => node.dataset.messageId)
-  const read = f.client.readAgentSessionHistory.bind(f.client)
+  const originalIds = [...view.element.querySelectorAll<HTMLElement>('[data-submission-id^="retained-mobile:"]')].map(node => node.dataset.submissionId)
+  const read = f.client.readAgentConversation.bind(f.client)
   let foreignSource = true
-  vi.spyOn(f.client, 'readAgentSessionHistory').mockImplementation(async input => {
+  vi.spyOn(f.client, 'readAgentConversation').mockImplementation(async input => {
     const result = await read(input)
     return foreignSource ? { ...result, sourceHostId: 'foreign-source' } : result
   })
-  await click(button(view.element, '更早消息')!)
-  await vi.waitFor(() => expect(view.element.textContent).toContain('The original captured source Host changed'))
-  expect([...view.element.querySelectorAll<HTMLElement>('[data-message-id^="captured:retained-mobile:"]')].map(node => node.dataset.messageId)).toEqual(originalIds)
+  await vi.waitFor(() => expect(button(view.element, '更早消息').disabled).toBe(false))
+  await click(button(view.element, '更早消息'))
+  await vi.waitFor(() => expect(view.element.textContent).toContain('Conversation data changed scope, version or shape.'))
+  expect([...view.element.querySelectorAll<HTMLElement>('[data-submission-id^="retained-mobile:"]')].map(node => node.dataset.submissionId)).toEqual(originalIds)
   expect(editor(view.element).textContent).toContain('Original retained draft')
   foreignSource = false
-  for (let attempt = 0; attempt < 12 && !view.element.querySelector('[data-message-id="captured:retained-mobile:0"]'); attempt++) {
+  for (let attempt = 0; attempt < 12 && !view.element.querySelector('[data-submission-id="retained-mobile:0"]'); attempt++) {
     const earlier = button(view.element, '更早消息')
     expect(earlier).toBeDefined(); await click(earlier!)
     await vi.waitFor(() => expect([...view.element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '更早消息')?.disabled).not.toBe(true), { timeout: 8000 })
   }
-  expect([...view.element.querySelectorAll<HTMLElement>('[data-message-id^="captured:retained-mobile:"]')].map(node => node.dataset.messageId)).toEqual(items.map(item => 'captured:' + item.id))
+  expect([...view.element.querySelectorAll<HTMLElement>('[data-submission-id^="retained-mobile:"]')].map(node => node.dataset.submissionId)).toEqual(items.map(item => item.id))
+  const detail = view.element.querySelector<HTMLDetailsElement>('[data-submission-id="retained-mobile:1"] details')!
+  await act(async () => { detail.open = true; detail.dispatchEvent(new Event('toggle')) })
   const large = view.element.querySelector<HTMLElement>('[data-message-id="captured:retained-mobile:1"]')!
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
   await click(large.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!)
   expect(createHash('sha256').update(copy.mock.calls.at(-1)?.[0] ?? '').digest('hex')).toBe(createHash('sha256').update(items[1]!.content!).digest('hex'))
   expect(raw.mock.calls.length).toBeGreaterThan(7)
-  expect(raw.mock.calls.every(([input]) => input.agentSessionId === sid && input.source === 'captured' && input.limit === 100)).toBe(true)
+  expect(new Set(raw.mock.calls.map(([agentSessionId]) => agentSessionId))).toEqual(new Set([sid]))
+  expect(new Set(raw.mock.calls.map(([, options]) => options?.limit))).toEqual(new Set([1, 100]))
   expect(f.authenticated.length).toBeGreaterThan(0); expect(f.writes).toHaveLength(0); expect(f.submit).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled()
   expect(editor(view.element).textContent).toContain('Original retained draft')
   expect(view.element.textContent).toContain('Original native source unavailable')
@@ -657,13 +680,14 @@ it('authenticated Mobile reads confirmed source labels from the original Core ev
   const item:AgentTimelineItem={id:'confirmed-hook-source',agentSessionId:sid,kind:'assistant_message',source:'native-hook',status:'complete',title:'Recorded observation',content:'Original observed contribution',createdAt:_historyTailFixtureEpoch(0, 0, 1),updatedAt:_historyTailFixtureEpoch(0, 0, 1),
     conversation:{sameEvent:{hostId:'local',agentSessionId:sid,source:{kind:'native',...source,recordId:question.id}}}}
   await f.store.applyTimelineMutation({type:'append',agentSessionId:sid,item})
-  const history=vi.spyOn(f.core,'sessionHistoryPage'),raw=vi.spyOn(f.core,'readAgentSessionHistory')
+  const history=vi.mocked(f.core.providers.get('codex').readSessionHistoryPage!),raw=vi.spyOn(f.store,'readCapturedHistory')
   const view=await mount(f.surface())
   await vi.waitFor(()=>expect(view.element.querySelectorAll('.log-turn__meta [data-conversation-source]')).toHaveLength(2))
   expect(view.element.querySelectorAll('[data-conversation-event-id]')).toHaveLength(1)
   expect([...view.element.querySelectorAll<HTMLElement>('.log-turn__meta [data-conversation-source]')].map(n=>n.dataset.conversationSource).sort()).toEqual(['native','native-hook'])
   expect(view.element.textContent).toContain('原生对话');expect(view.element.textContent).not.toContain('Authenticated Terminal')
   const counts=[history.mock.calls.length,raw.mock.calls.length]
+  expect(counts[0]).toBeGreaterThan(0); expect(counts[1]).toBeGreaterThan(0)
   await click(view.element.querySelector<HTMLButtonElement>('.conversation-input-details__toggle')!)
   expect([history.mock.calls.length,raw.mock.calls.length]).toEqual(counts)
   expect(view.element.querySelector('[aria-label="Native asynchronous question"]')).not.toBeNull()
@@ -806,8 +830,8 @@ it('authenticated Mobile shows submission activity only for the original exact s
   await vi.waitFor(() => { expect(submission()).not.toBeNull(); expect(view.element.querySelector('[data-native-record-id="original-unrelated"]')).not.toBeNull() })
   const initialDetail = submission().querySelector<HTMLDetailsElement>('details')!
   expect(initialDetail.open).toBe(false); expect(submission().querySelector('.log-turn__body')).toBeNull()
-  expect(initialDetail.querySelector('summary')?.textContent).toContain('消息发送')
-  expect(initialDetail.querySelector('summary')?.textContent).toContain('提交已记录')
+  expect(initialDetail.querySelector('summary')?.textContent).toContain('对话记录')
+  expect(initialDetail.querySelector('summary')?.textContent).toContain('对话已收录')
   expect(initialDetail.querySelector('.message-disclosure__preview')?.textContent).toBe(body)
   expect(submission().querySelector('[data-icon-animation]')).toBeNull()
   let release!: () => void, once = true
@@ -830,8 +854,9 @@ it('authenticated Mobile shows submission activity only for the original exact s
   expect(submission()).toBeNull(); expect(submission('unrelated-submission')).not.toBeNull()
   const accepted = view.element.querySelector<HTMLElement>('[data-native-record-id="canonical-input"] [data-submission-record]')!, acceptedDetail = accepted.querySelector<HTMLDetailsElement>('details')!
   expect(view.element.querySelectorAll('[data-original-contribution]')).toHaveLength(0)
-  expect(acceptedDetail.open).toBe(false); expect(accepted.querySelector('summary')?.textContent).toContain('已进入对话')
-  expect(accepted.querySelector('summary')?.textContent).toContain('消息发送'); expect(accepted.querySelector('summary time')).not.toBeNull()
+  expect(acceptedDetail.open).toBe(false); expect(accepted.querySelector('summary')?.textContent).toContain('对话已收录')
+  expect(accepted.getAttribute('data-native-readable')).toBe('true')
+  expect(accepted.querySelector('summary')?.textContent).toContain('对话记录'); expect(accepted.querySelector('summary time')).not.toBeNull()
   expect(accepted.querySelector('.log-turn__body')).toBeNull()
   await act(async () => { acceptedDetail.open = true; acceptedDetail.dispatchEvent(new Event('toggle')) })
   expect(accepted.querySelector('.log-turn__body')?.textContent).toBe(body)
