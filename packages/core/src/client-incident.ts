@@ -111,7 +111,7 @@ export type AgentMuxClientIncidentRecent = {
 }
 export type AgentMuxClientIncidentTarget =
   | { domain: 'client.incident'; hostId: string; logId: string; authority?: Pick<DiagnosticEvidenceAuthority, 'kind' | 'id'> }
-  | { domain: 'client.incident'; hostId: string; recent: AgentMuxClientIncidentRecent }
+  | { domain: 'client.incident'; hostId: string; recent: AgentMuxClientIncidentRecent; authority?: Pick<DiagnosticEvidenceAuthority, 'kind' | 'id'> }
 export type AgentMuxClientIncidentCoverage = {
   startup: 'ready' | 'loading' | 'unavailable'
   retainedCount: number; retainedBytes: number; pendingWrites: number
@@ -131,6 +131,8 @@ export type AgentMuxClientIncidentPage = {
 export type AgentMuxClientIncidentEvidence = AgentMuxClientIncidentRecord | AgentMuxClientIncidentPage
 export type AgentMuxClientIncidentPort = {
   hostId: string
+  /** The original injected archive namespace, when its owner has confirmed it. */
+  readonly authority?: DiagnosticEvidenceAuthority | null
   read(target: AgentMuxClientIncidentTarget, bounds: { signal: AbortSignal; maxBytes: number }):
     Promise<DiagnosticEvidenceRead<AgentMuxClientIncidentTarget, AgentMuxClientIncidentEvidence>>
 }
@@ -263,7 +265,8 @@ export function parseClientIncidentReport(value: unknown): AgentMuxClientInciden
 export function parseClientIncidentTarget(value: unknown): AgentMuxClientIncidentTarget {
   const p = rpcRecord(value); member(p.domain, ['client.incident']); id(p.hostId)
   if (Object.hasOwn(p, 'recent')) {
-    object(p, ['domain', 'hostId', 'recent'])
+    object(p, ['domain', 'hostId', 'recent', 'authority'], ['domain', 'hostId', 'recent'])
+    if (p.authority !== undefined) namespace(p.authority)
     const r = object(p.recent, ['limit', 'cursor', 'since', 'until', 'agentSessionId', 'runId', 'kind', 'producer'], [])
     if (r.limit !== undefined && (!Number.isSafeInteger(r.limit) || (r.limit as number) < 1 || (r.limit as number) > CLIENT_INCIDENT_MAX_PAGE)) fail()
     if (r.cursor !== undefined && (typeof r.cursor !== 'string' || !/^[A-Za-z0-9_-]{1,768}$/u.test(r.cursor))) fail()
@@ -310,6 +313,7 @@ export function parseClientIncidentPage(value: unknown, target: Extract<AgentMux
     member(ref.domain, ['client.incident']); validateDeliveryLogId(ref.logId); namespace(ref.authority, true)
     const archive = rpcRecord(ref.authority)
     if (archive.kind !== 'client-incident-archive' || archive.lifetime !== 'durable' || seen.has(ref.logId as string)) fail()
+    if (target.authority && (target.authority.kind !== archive.kind || target.authority.id !== archive.id)) fail()
     seen.add(ref.logId as string)
     if (ref.routeHostId !== target.hostId) fail()
     member(i.kind, CLIENT_INCIDENT_KINDS); member(i.stage, CLIENT_INCIDENT_STAGES); member(i.code, [...CLIENT_INCIDENT_CODES, null])

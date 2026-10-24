@@ -39,7 +39,59 @@ function readingKey(report: AgentMuxClientIncidentReport, producer: AgentMuxClie
     scope.consumerKind, scope.consumerId, scope.hostId, scope.agentSessionId, scope.runId, scope.sourceHostId, scope.producerBuildId, report.reading.trigger])
 }
 
-/** Main-owned immutable records and a bounded durable index. This owner performs no business calls. */
+async function readIncidentFile(path: string, maxBytes: number, beforeRead?: (path: string) => Promise<void>): Promise<string> {
+  await beforeRead?.(path)
+  const handle = await open(path, 'r')
+  try {
+    const buffer = Buffer.alloc(maxBytes + 1)
+    let length = 0
+    while (length < buffer.length) {
+      const read = await handle.read(buffer, length, buffer.length - length, length)
+      if (!read.bytesRead) break
+      length += read.bytesRead
+    }
+    if (length > maxBytes) throw new Error('Diagnostic file exceeds its owner budget.')
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length))
+  } finally { await handle.close() }
+}
+function parseIncidentManifest(raw: string, hostId: string): Manifest {
+  const value = JSON.parse(raw) as Manifest
+  if (!value || Object.keys(value).sort().join() !== 'archiveId,counters,entries,evicted,revision,schema' || value.schema !== 'agentmux.client-incidents.v1' || !ID.test(value.archiveId) || !safeInt(value.revision) ||
+    !Array.isArray(value.entries) || value.entries.length > CLIENT_INCIDENT_LIMITS.records ||
+    !Array.isArray(value.evicted) || value.evicted.length > CLIENT_INCIDENT_LIMITS.records || value.evicted.some(id => typeof id !== 'string' || !ID.test(id)) ||
+    !value.counters || Object.keys(emptyCounters()).some(key => !safeInt(value.counters[key as keyof Manifest['counters']]))) throw new Error('Invalid diagnostic index.')
+  let bytes = 0
+  const ids = new Set<string>()
+  for (const entry of value.entries) {
+    if (Object.keys(entry).sort().join() !== 'bytes,digest,key,sequence,summary') throw new Error('Invalid diagnostic index entry.')
+    const ref = entry?.summary?.recordRef
+    if (!ref || !ID.test(ref.logId) || ref.domain !== 'client.incident' || ref.routeHostId !== hostId ||
+      ref.authority?.id !== value.archiveId || ref.authority?.kind !== 'client-incident-archive' || ref.authority?.lifetime !== 'durable' ||
+      !safeInt(entry.sequence) || entry.sequence > value.revision || !safeInt(entry.bytes) || entry.bytes > CLIENT_INCIDENT_LIMITS.recordBytes || typeof entry.key !== 'string' || entry.key.length > 450 ||
+      !/^[a-f0-9]{64}$/.test(entry.digest) || !safeInt(entry.summary.receivedAt) || ids.has(ref.logId)) throw new Error('Invalid diagnostic index entry.')
+    ids.add(ref.logId); bytes += entry.bytes
+    // Historical bytes were observed, not fsync-confirmed by this process.
+    if (entry.summary.persistence === 'confirmed') entry.summary.persistence = 'observed'
+  }
+  parseClientIncidentPage({ kind: 'client-incident-page', items: value.entries.map(entry => entry.summary).slice(0, 32), nextCursor: null,
+    coverage: { startup: 'ready', retainedCount: value.entries.length, retainedBytes: bytes, pendingWrites: 0, ...value.counters } },
+    { domain: 'client.incident', hostId: hostId, recent: { limit: 32 } })
+  for (let offset = 32; offset < value.entries.length; offset += 32) parseClientIncidentPage({ kind: 'client-incident-page',
+    items: value.entries.slice(offset, offset + 32).map(entry => entry.summary), nextCursor: null,
+    coverage: { startup: 'ready', retainedCount: value.entries.length, retainedBytes: bytes, pendingWrites: 0, ...value.counters } },
+    { domain: 'client.incident', hostId: hostId, recent: { limit: 32 } })
+  if (bytes > CLIENT_INCIDENT_LIMITS.bytes) throw new Error('Diagnostic index exceeds its owner budget.')
+  return value
+}
+function manifestAuthority(manifest: Manifest): DiagnosticEvidenceAuthority {
+  return { kind: 'client-incident-archive', id: manifest.archiveId, lifetime: 'durable' }
+}
+/** Original namespace observation only. This never creates, repairs or writes an archive. */
+export async function readOriginalIncidentArchiveAuthority(directory: string): Promise<DiagnosticEvidenceAuthority> {
+  return manifestAuthority(parseIncidentManifest(await readIncidentFile(join(directory, 'index.json'), CLIENT_INCIDENT_LIMITS.indexBytes), 'local'))
+}
+
+/** Host-owned immutable records and a bounded durable index. This owner performs no business calls. */
 export class ClientIncidentArchive {
   readonly hostId = 'local'
   readonly appInstanceId = mintObjectId()
@@ -67,8 +119,8 @@ export class ClientIncidentArchive {
       throw error
     }
   }
-  private get authority(): DiagnosticEvidenceAuthority | null {
-    return this.manifest ? { kind: 'client-incident-archive', id: this.manifest.archiveId, lifetime: 'durable' } : null
+  get authority(): DiagnosticEvidenceAuthority | null {
+    return this.manifest ? manifestAuthority(this.manifest) : null
   }
   /** Original archive route and namespace; admission still does not claim durable publication. */
   reference(logId: string): DiagnosticEvidenceRef | null {
@@ -78,48 +130,7 @@ export class ClientIncidentArchive {
       ? { domain: 'client.incident', logId, authority, routeHostId: this.hostId } : null
   }
   private async readFile(path: string, maxBytes: number): Promise<string> {
-    await this.dependencies.beforeRead?.(path)
-    const handle = await open(path, 'r')
-    try {
-      const buffer = Buffer.alloc(maxBytes + 1)
-      let length = 0
-      while (length < buffer.length) {
-        const read = await handle.read(buffer, length, buffer.length - length, length)
-        if (!read.bytesRead) break
-        length += read.bytesRead
-      }
-      if (length > maxBytes) throw new Error('Diagnostic file exceeds its owner budget.')
-      return new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length))
-    } finally { await handle.close() }
-  }
-  private parseManifest(raw: string): Manifest {
-    const value = JSON.parse(raw) as Manifest
-    if (!value || Object.keys(value).sort().join() !== 'archiveId,counters,entries,evicted,revision,schema' || value.schema !== 'agentmux.client-incidents.v1' || !ID.test(value.archiveId) || !safeInt(value.revision) ||
-      !Array.isArray(value.entries) || value.entries.length > CLIENT_INCIDENT_LIMITS.records ||
-      !Array.isArray(value.evicted) || value.evicted.length > CLIENT_INCIDENT_LIMITS.records || value.evicted.some(id => typeof id !== 'string' || !ID.test(id)) ||
-      !value.counters || Object.keys(emptyCounters()).some(key => !safeInt(value.counters[key as keyof Manifest['counters']]))) throw new Error('Invalid diagnostic index.')
-    let bytes = 0
-    const ids = new Set<string>()
-    for (const entry of value.entries) {
-      if (Object.keys(entry).sort().join() !== 'bytes,digest,key,sequence,summary') throw new Error('Invalid diagnostic index entry.')
-      const ref = entry?.summary?.recordRef
-      if (!ref || !ID.test(ref.logId) || ref.domain !== 'client.incident' || ref.routeHostId !== this.hostId ||
-        ref.authority?.id !== value.archiveId || ref.authority?.kind !== 'client-incident-archive' || ref.authority?.lifetime !== 'durable' ||
-        !safeInt(entry.sequence) || entry.sequence > value.revision || !safeInt(entry.bytes) || entry.bytes > CLIENT_INCIDENT_LIMITS.recordBytes || typeof entry.key !== 'string' || entry.key.length > 450 ||
-        !/^[a-f0-9]{64}$/.test(entry.digest) || !safeInt(entry.summary.receivedAt) || ids.has(ref.logId)) throw new Error('Invalid diagnostic index entry.')
-      ids.add(ref.logId); bytes += entry.bytes
-      // Historical bytes were observed, not fsync-confirmed by this process.
-      if (entry.summary.persistence === 'confirmed') entry.summary.persistence = 'observed'
-    }
-    parseClientIncidentPage({ kind: 'client-incident-page', items: value.entries.map(entry => entry.summary).slice(0, 32), nextCursor: null,
-      coverage: { startup: 'ready', retainedCount: value.entries.length, retainedBytes: bytes, pendingWrites: 0, ...value.counters } },
-      { domain: 'client.incident', hostId: this.hostId, recent: { limit: 32 } })
-    for (let offset = 32; offset < value.entries.length; offset += 32) parseClientIncidentPage({ kind: 'client-incident-page',
-      items: value.entries.slice(offset, offset + 32).map(entry => entry.summary), nextCursor: null,
-      coverage: { startup: 'ready', retainedCount: value.entries.length, retainedBytes: bytes, pendingWrites: 0, ...value.counters } },
-      { domain: 'client.incident', hostId: this.hostId, recent: { limit: 32 } })
-    if (bytes > CLIENT_INCIDENT_LIMITS.bytes) throw new Error('Diagnostic index exceeds its owner budget.')
-    return value
+    return await readIncidentFile(path, maxBytes, this.dependencies.beforeRead)
   }
   private async initialize(): Promise<void> {
     const earlyCounters = this.counters
@@ -127,7 +138,7 @@ export class ClientIncidentArchive {
     await mkdir(this.directory, { recursive: true, mode: 0o700 })
     await this.cleanupTemporaryFiles()
     const path = join(this.directory, 'index.json')
-    try { this.manifest = this.parseManifest(await this.readFile(path, CLIENT_INCIDENT_LIMITS.indexBytes)) }
+    try { this.manifest = parseIncidentManifest(await this.readFile(path, CLIENT_INCIDENT_LIMITS.indexBytes), this.hostId) }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { this.counters.corrupt++; throw error }
       existing = false
@@ -157,7 +168,7 @@ export class ClientIncidentArchive {
     const omitted = this.queue.splice(index, 1)[0]!
     this.queueBytes -= omitted.bytes; this.accepted.delete(omitted.key); this.counters.dropped++
   }
-  /** Main stamps the actual receiving owner. The Renderer cannot supply any archive authority. */
+  /** The receiving Host stamps its own authority. The Renderer cannot supply any archive authority. */
   enqueue(input: AgentMuxClientIncidentReport, producer: AgentMuxClientIncidentProducer): ClientIncidentReceipt {
     let report: AgentMuxClientIncidentReport
     try { report = parseClientIncidentReport(input) } catch { this.counters.invalid++; return { accepted: false } }
@@ -344,10 +355,10 @@ export class ClientIncidentArchive {
     if (target.hostId !== this.hostId) return { ...unavailable, availability: 'forbidden' as const,
       issue: { code: 'DIAGNOSTIC_EVIDENCE_SOURCE_FORBIDDEN' as const, stage: 'read' as const, causeCode: null } }
     if (this.startup !== 'ready') {
+      if (target.authority) return this.result(target, 'DIAGNOSTIC_EVIDENCE_AUTHORITY_UNAVAILABLE')
       if ('recent' in target) return { ...unavailable, availability: 'found' as const, scope: 'interval-observation' as const,
         data: { kind: 'client-incident-page' as const, items: [], nextCursor: null, coverage: this.coverage() },
         raw: { retention: 'unknown' as const, returned: 'withheld' as const, truncated: false } }
-      if (target.authority) return this.result(target, 'DIAGNOSTIC_EVIDENCE_AUTHORITY_UNAVAILABLE')
       return this.readOriginal(target, bounds)
     }
     if ('authority' in target && target.authority && (target.authority.id !== this.authority!.id || target.authority.kind !== this.authority!.kind)) return {

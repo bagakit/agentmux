@@ -13,7 +13,7 @@ import type { AgentMuxDiagnosticEvidenceData, AgentMuxDiagnosticEvidenceInspectP
   AgentMuxDiagnosticEvidenceResult, AgentMuxDiagnosticEvidenceTarget, AgentMuxDiagnosticAuthorityObservation } from './diagnostic-evidence.js'
 
 export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, params: AgentMuxDiagnosticEvidenceInspectParams,
-  ports: AgentMuxRpcServiceOptions, caller: AgentMuxRpcCoreClient | undefined, signal?: AbortSignal): Promise<AgentMuxDiagnosticEvidenceResult> {
+  ports: Omit<AgentMuxRpcServiceOptions, 'clientIncidents'> & { clientIncidents?: import('./client-incident.js').AgentMuxClientIncidentPort }, caller: AgentMuxRpcCoreClient | undefined, signal?: AbortSignal): Promise<AgentMuxDiagnosticEvidenceResult> {
   const capabilities: AgentMuxDiagnosticEvidenceResult['capabilities'] = [
     ...(ports.coreClients ? [
       { domain: 'agent.startup' as const, target: 'log-id' as const, raw: true, read: 'supported' as const },

@@ -1,3 +1,4 @@
+import { createHostMobileIncidents } from './mobile-incidents.js'
 import { createHostSettingsResourceRead } from './settings-resource-read.js'
 import { createHostAppearanceObservation } from './host-appearance.js'
 import { createHostContent } from './content-owner.js'
@@ -52,10 +53,11 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   let authority: DeviceAuthority | undefined
   let relay: RelayTransportController | undefined
   let local: Awaited<ReturnType<typeof startLocalRelay>> | undefined
+  let mobileIncidents: ReturnType<typeof createHostMobileIncidents> | undefined
   const closeResources = async () => {
     const errors: unknown[] = []
     for (const close of [() => relay?.stop(), () => local?.stop(), () => authority?.flush(),
-      () => connectionOwner?.close(), () => runtime?.stop()]) {
+      () => mobileIncidents?.flush(), () => connectionOwner?.close(), () => runtime?.stop()]) {
       try { await close() } catch (error) { errors.push(error) }
     }
     if (errors.length === 1) throw errors[0]
@@ -75,6 +77,9 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       ...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {}) })
   }
   const configurationPath = options.configurationPath ?? options.connections?.moteConfigurationPath
+  if (options.store instanceof AgentMuxFileAgentSessionStore) mobileIncidents = createHostMobileIncidents({
+    directory: join(dirname(options.store.path), 'mobile-web-incidents'), desktop: desktopClient,
+    ...(configurationPath ? { originalMainDirectory: join(dirname(configurationPath), 'client-incidents') } : {}) })
   const avatarConfigurationPath = options.connections?.moteConfigurationPath ?? configurationPath
   const moteAvatars = avatarConfigurationPath ? createHostMoteAvatarRead({ configurationPath: avatarConfigurationPath }) : undefined
   const agentLearning = configurationPath && options.store instanceof AgentMuxFileAgentSessionStore ? createHostAgentLearning({
@@ -91,6 +96,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const content = configurationPath ? createHostContent({ configurationPath, spatial: spatialState }) : undefined
   const service = {
     spatialState,
+    ...(mobileIncidents ? { clientIncidents: mobileIncidents.clientIncidents, mobileWebReports: mobileIncidents.mobileWebReports } : {}),
     ...content,
     ...(configurationPath ? { settingsResources: createHostSettingsResourceRead(configurationPath), appearance: createHostAppearanceObservation(configurationPath) } : {}),
     snapshot: createHostSnapshotObservation(configurationPath, spatialState),

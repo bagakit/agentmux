@@ -173,6 +173,14 @@
     "./theme-observation": {
       "types": "./dist/theme-observation.d.ts",
       "import": "./dist/theme-observation.js"
+    },
+    "./client-incident-archive": {
+      "types": "./dist/client-incident-archive.d.ts",
+      "import": "./dist/client-incident-archive.js"
+    },
+    "./mobile-web-report-owner": {
+      "types": "./dist/mobile-web-report-owner.d.ts",
+      "import": "./dist/mobile-web-report-owner.js"
     }
   }
 }

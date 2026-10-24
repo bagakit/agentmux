@@ -173,6 +173,7 @@ export function parseDiagnosticEvidenceResult(value: unknown, request: unknown):
           if ('recent' in target) {
             if (r.recordRef !== null || r.scope !== 'interval-observation') bad()
             const page = parseClientIncidentPage(r.data, target)
+            if (target.authority && (!r.readAuthority || target.authority.kind !== rpcRecord(r.readAuthority).kind || target.authority.id !== rpcRecord(r.readAuthority).id)) bad()
             if (page.items.some(item => r.authorityStatus !== 'verified' || !isDeepStrictEqual(item.recordRef.authority, r.readAuthority))) bad()
           } else {
             if (r.recordRef === null || r.scope !== 'record' || raw.retention !== 'retained') bad()

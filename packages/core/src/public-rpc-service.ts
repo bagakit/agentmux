@@ -156,7 +156,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   connections?: ConnectionPort
   goalDelegations?: GoalDelegationsOwner
   moteContext?: import('./diagnostic-evidence.js').AgentMuxMoteContextEvidencePort
-  clientIncidents?: import('./client-incident.js').AgentMuxClientIncidentPort
+  clientIncidents?(context: AgentMuxRpcCallContext): import('./client-incident.js').AgentMuxClientIncidentPort | Promise<import('./client-incident.js').AgentMuxClientIncidentPort>
   mobileAssets?: import('./mobile-web.js').MobileAssetsPort
   mobileWebReports?: import('./mobile-web.js').MobileWebReportPort
   clientNotifications?: import('./client-notifications.js').AgentMuxClientNotificationsPort
@@ -601,10 +601,9 @@ export class AgentMuxRpcService {
       const caller = await this.authenticated(context)
       if (caller || context.principal?.kind !== 'device' || !context.principal.id || !context.assertCurrent) throw new AgentMuxError('Mobile reports require the original authenticated device.', 'CONTROL_PERMISSION_DENIED')
       context.signal?.throwIfAborted(); await context.assertCurrent(); await this.assertRuntimeFence(context)
-      const result = this.ports.mobileWebReports ? this.ports.mobileWebReports.report(input, context.principal.id)
-        : this.ports.forwardControl ? await this.ports.forwardControl('app.mobile.report', input, context)
-          : undefined
-      if (!result) throw new AgentMuxError('The original Main diagnostic archive is unavailable. The phone and its business operations remain available.', 'CONTROL_UNAVAILABLE')
+      if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', 'app.mobile.report', input, context) as AgentMuxRpcResult<M>
+      const result = this.ports.mobileWebReports?.report(input, context.principal.id)
+      if (!result) throw new AgentMuxError('The original Host diagnostic archive is unavailable. The phone and its business operations remain available.', 'CONTROL_UNAVAILABLE')
       if (result.producer.devicePrincipalId !== context.principal.id) throw new AgentMuxError('The mobile report receipt has another original producer.', 'CONTROL_PROTOCOL_ERROR')
       return parseMobileWebReportReceipt(result, input) as AgentMuxRpcResult<M>
     }
@@ -1738,9 +1737,18 @@ export class AgentMuxRpcService {
       }
       case 'system.diagnostics.inspect': {
         const input = parseDiagnosticEvidenceParams(p)
+        const { clientIncidents: incidentFactory, ...originalPorts } = this.ports
+        const incidents = await incidentFactory?.(context)
+        // Only this injected original archive's exact namespace terminates here.
+        // All other client reads borrow the same Host domain from every screen.
+        if (input.target?.domain === 'client.incident' && this.ports.callOriginalCore &&
+          (!input.target.authority || input.target.authority.kind !== incidents?.authority?.kind || input.target.authority.id !== incidents?.authority?.id)) {
+          result = await this.ports.callOriginalCore('local', 'system.diagnostics.inspect', input, context); break
+        }
+        const diagnosticPorts = { ...originalPorts, ...(incidents ? { clientIncidents: incidents } : {}) }
         // Discovery reads registered contracts only. An attached client cannot replace
         // an original local journal, authority or reader for an already-owned domain.
-        const local = await inspectDiagnosticEvidence(this.diagnosticQuery, {}, this.ports, caller, context.signal)
+        const local = await inspectDiagnosticEvidence(this.diagnosticQuery, {}, diagnosticPorts, caller, context.signal)
         const ownsTarget = local.capabilities.some(capability => capability.domain === input.target?.domain &&
           (input.target?.domain !== 'agent.startup' || capability.target === ('recent' in input.target ? 'recent' : 'log-id')) &&
           (input.target?.domain !== 'client.incident' || capability.target === ('recent' in input.target ? 'recent' : 'log-id')) &&
@@ -1765,7 +1773,7 @@ export class AgentMuxRpcService {
             if (!(error instanceof AgentMuxError) || error instanceof AgentMuxRpcError || error.code !== 'CONTROL_UNAVAILABLE') throw error
           }
         }
-        result = input.target ? await inspectDiagnosticEvidence(this.diagnosticQuery, input, this.ports, caller, context.signal) : local
+        result = input.target ? await inspectDiagnosticEvidence(this.diagnosticQuery, input, diagnosticPorts, caller, context.signal) : local
         break
       }
       case 'agent.native.ls': {
