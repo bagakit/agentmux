@@ -260,6 +260,7 @@ api.conversation.observeConversation = async input => {
 api.conversation.releaseConversationView = async input => ({ hostId, agentSessionId: input.agentSessionId, sourceHostId: hostId, viewId: input.view, released: true })
 const reference = (messageId: string, senderSessionId: string, recipientSessionId: string) => ({ messageId, senderSessionId, recipientSessionId, threadId: messageId, replyTo: null })
 const refs = [reference('fixture-request', 'fixture-ui', 'fixture-core'), reference('fixture-review-request', 'fixture-core', 'fixture-review'), reference('fixture-design-question', 'fixture-ui', 'fixture-design'), reference('fixture-return-report', 'fixture-core', 'fixture-ui'), ...terrainSessions.flatMap((session, index) => [reference('fixture-terrain-message-' + index, session.id, index === 0 ? 'fixture-terrain-a' : index === 1 ? 'fixture-terrain-b' : 'fixture-core')])]
+if (terrainSessions.length) refs.push(reference('fixture-terrain-followup-1', 'fixture-terrain-a', 'fixture-terrain-b'), reference('fixture-terrain-followup-2', 'fixture-terrain-a', 'fixture-terrain-b'))
 const events: AgentMuxMessageEvent[] = [
   { sequence: 1, kind: 'message', at: now - 9000, messages: [refs[0]!] },
   { sequence: 2, kind: 'message', at: now - 8000, messages: [refs[1]!] },
@@ -269,6 +270,7 @@ const events: AgentMuxMessageEvent[] = [
   { sequence: 6, kind: 'message', at: now - 4000, messages: [refs[3]!] }
 ]
 for (const ref of refs.slice(4)) events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'message', at: now - 3500, messages: [ref] })
+if (terrainSessions.length) events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'delivery', state: 'delivered', at: now - 3200, messages: [refs.at(-1)!] })
 const denseSenders = extraSessions.slice(0, 88).filter(session => session.workspacePath === projects[0]!.path).slice(0, 12)
 const densePeers = extraSessions.slice(singletonProjects.length, 88).filter(session => session.workspacePath !== projects[0]!.path && session.processState === 'running').slice(0, 12)
 if (denseSenders.length !== 12 || densePeers.length !== 12) throw Error('The declared cross-area collaboration input must be nonempty and complete')
