@@ -1,8 +1,8 @@
 import { matchesProviderNativeSessionTarget } from './agent-native-locator.js'
 import type { AgentMuxAgentSession } from './types.js'
 
-/** Original Runs whose untouched Inbox references may first notify this exact resumed writer. */
-export function messageNotificationSourceRuns(session: AgentMuxAgentSession): readonly string[] {
+/** Original Runs connected to this exact writer by unambiguous semantic resume receipts. */
+export function sessionSemanticResumeSourceRuns(session: AgentMuxAgentSession): readonly string[] {
   const runs = [session.run.runId]
   const seen = new Set(runs)
   if ((session.nativeBinding?.source !== 'semantic-resume-target' && session.nativeBinding?.source !== 'user-selected') || session.nativeBinding.run.runId !== session.run.runId ||
