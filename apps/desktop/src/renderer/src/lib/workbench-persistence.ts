@@ -45,6 +45,7 @@ export type PersistedBrowserSurface = {
   title: string
   viewport?: BrowserWorkbenchSurface['viewport']
   bookmarkOrigin?: BrowserWorkbenchSurface['bookmarkOrigin']
+  source?: BrowserWorkbenchSurface['source']
   agent?: BrowserWorkbenchSurface['agent']
   agentCreationRequestId?: string
 }
@@ -87,6 +88,7 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
     browserId: surface.browserId,
     ...(agent === undefined ? {} : { agent }),
     ...(surface.agentCreationRequestId ? { agentCreationRequestId: surface.agentCreationRequestId } : {}),
+    ...(surface.source ? { source: surface.source } : {}),
     id: surface.browserId,
     mode: privateMode ? 'private' : 'normal',
     url: privateMode ? 'about:blank' : surface.url,
@@ -113,6 +115,7 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
 function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): PersistedBrowserSurface {
   const agent = surface.control ? surface.control.agent : surface.agent
   const association = { ...(agent === undefined ? {} : { agent }),
+    ...(surface.source ? { source: surface.source } : {}),
     ...(surface.agentCreationRequestId ? { agentCreationRequestId: surface.agentCreationRequestId } : {}) }
   if (surface.mode === 'private') return {
     regionId: surface.regionId, kind: 'browser', workspaceId: surface.workspaceId,

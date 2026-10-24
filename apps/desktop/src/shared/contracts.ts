@@ -1245,6 +1245,7 @@ export const CONTROL_RESPONSE_CHANNEL = 'control:response'
 
 export type BrowserSnapshot = {
   id: string
+  source?: import('@agentmux/core').AgentMuxBrowserSource
   mode: import('@agentmux/core').AgentMuxBrowserMode
   /** Durable container provenance, independent of current document authority. */
   capsuleId?: string
@@ -1453,6 +1454,7 @@ export type BrowserPageFrameFailure = {
 }
 
 export type BrowserEvent =
+  | { type: 'native-opened'; browser: BrowserSnapshot; workspaceId: string | null; window: { width: number; height: number } }
   | { type: 'updated'; browser: BrowserSnapshot }
   | { type: 'released'; id: string; navigationId: string }
   | { type: 'unavailable'; id: string; error: string }

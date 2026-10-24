@@ -1,5 +1,13 @@
 export type AgentMuxBrowserMode = 'normal' | 'private'
 
+/** Original native page request. This provenance grants no input or navigation authority. */
+export type AgentMuxBrowserSource = {
+  browserId: string
+  navigationId: string
+  /** Exact presentation at creation, when the original owner could confirm it. */
+  location?: { displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }
+}
+
 /** Current host-owned input facts. A retained operation alone grants no control. */
 export type AgentMuxBrowserControl = {
   /** Current host-owned input recipient; Agent ownership survives execution completion until explicit handoff. */
@@ -23,6 +31,7 @@ export type AgentMuxBrowserTarget = {
   title: string
   /** Absent when an embedded durable description has no native document yet. */
   navigationId?: string
+  openedFrom?: AgentMuxBrowserSource
   capabilities: readonly string[]
   /** Present when the target exposes a bounded CDP subset rather than all engine commands. */
   cdpMethods?: readonly string[]

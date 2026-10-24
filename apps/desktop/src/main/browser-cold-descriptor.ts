@@ -1,4 +1,5 @@
 import type { AgentMuxBrowserTarget } from '@agentmux/core'
+import { parseBrowserSource } from '@agentmux/core'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import type { CapsuleInspection } from '@agentmux/core/capsule'
 import { cloneBrowserViewport, isBrowserViewport, type BrowserViewport } from '../shared/browser-viewport.js'
@@ -21,6 +22,7 @@ export type BrowserColdDescriptor = {
   /** Older records did not save a viewport. Absence is not a confirmed responsive setting. */
   viewport?: BrowserViewport
   agent?: import('@agentmux/core').AgentMuxBrowserControl['agent']
+  source?: import('@agentmux/core').AgentMuxBrowserSource
   warning?: string
 }
 
@@ -58,13 +60,18 @@ export function browserColdDescriptor(graph: AgentMuxSpatialGraph | null, id: st
     } else agent = { hostId: data.agent.hostId, agentSessionId: data.agent.agentSessionId }
   }
   const privateMode = data.mode === 'private'
+  let source: BrowserColdDescriptor['source']
+  if (data.source !== undefined) {
+    try { source = parseBrowserSource(data.source) }
+    catch { warning = [warning, 'The saved Browser source is unconfirmed. The original page remains usable; inspect its source before returning.'].filter(Boolean).join(' ') }
+  }
   return { id, workspaceId: data.workspaceId, url: privateMode ? 'about:blank' : data.url,
     title: privateMode ? 'Private page' : typeof data.title === 'string' ? data.title : '', mode: privateMode ? 'private' : 'normal',
     ...(!privateMode && data.profileId ? { profileId: data.profileId as string } : {}),
     ...(data.capsuleId ? { capsuleId: data.capsuleId as string, capsuleOrigin: data.capsuleOrigin as string } : {}),
     ...(Array.isArray(data.capsuleOpenOperationIds) ? { capsuleOpenOperationIds: [...data.capsuleOpenOperationIds] as string[] } : {}),
     ...(data.viewport !== undefined ? { viewport: cloneBrowserViewport(data.viewport as BrowserViewport) } : {}),
-    ...(agent === undefined ? {} : { agent }), ...(warning ? { warning } : {}) }
+    ...(source ? { source } : {}), ...(agent === undefined ? {} : { agent }), ...(warning ? { warning } : {}) }
 }
 
 function isCapsuleOrigin(value: string): boolean {
@@ -83,6 +90,7 @@ export function coldBrowserTargets(graph: AgentMuxSpatialGraph | null, live: rea
     try {
       const saved = browserColdDescriptor(graph, id)
       return [{ id, workspaceId: saved.workspaceId, source: 'embedded' as const, mode: saved.mode,
+        ...(saved.source ? { openedFrom: saved.source } : {}),
         status: 'unavailable' as const, url: saved.url, title: saved.title, capabilities: [],
         control: { owner: 'unknown', activeOperationId: null, revision: 0, inputIsolation: 'unconfirmed',
           ...(saved.agent === undefined ? {} : { agent: saved.agent }) },

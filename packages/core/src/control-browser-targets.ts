@@ -1,4 +1,4 @@
-import type { AgentMuxBrowserControl, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserResource, AgentMuxBrowserReleaseReceipt, AgentMuxBrowserRetention } from './browser-targets.js'
+import type { AgentMuxBrowserControl, AgentMuxBrowserSource, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserResource, AgentMuxBrowserReleaseReceipt, AgentMuxBrowserRetention } from './browser-targets.js'
 import { BROWSER_PAGE_CAPABILITY_NAMES } from './browser-page-capability.js'
 import { AgentMuxError } from './errors.js'
 
@@ -29,6 +29,18 @@ export function parseBrowserControl(value: unknown): AgentMuxBrowserControl {
   }
   return { owner: row.owner as AgentMuxBrowserControl['owner'], activeOperationId, revision: Number(row.revision), inputIsolation: row.inputIsolation as AgentMuxBrowserControl['inputIsolation'],
     ...(agent === undefined ? {} : { agent }) }
+}
+
+export function parseBrowserSource(value: unknown): AgentMuxBrowserSource {
+  const row = record(value)
+  if (Object.keys(row).some(key => !['browserId', 'navigationId', 'location'].includes(key))) throw new AgentMuxError('Browser source is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  const source: AgentMuxBrowserSource = { browserId: text(row.browserId, 200), navigationId: text(row.navigationId, 200) }
+  if (row.location !== undefined) {
+    const location = record(row.location)
+    if (Object.keys(location).some(key => !['displayWorkspaceId', 'groupId', 'tabId', 'regionId'].includes(key))) throw new AgentMuxError('Browser source position is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    source.location = { displayWorkspaceId: text(location.displayWorkspaceId, 200), groupId: text(location.groupId, 200), tabId: text(location.tabId, 200), regionId: text(location.regionId, 200) }
+  }
+  return source
 }
 /** Discovery facts carry no pairing secret, profile or credential store. */
 export function parseBrowserTargetsResult(value: unknown): AgentMuxBrowserTargetsResult {
@@ -62,6 +74,7 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
     ...(row.mode === undefined ? {} : { mode: row.mode as 'normal' | 'private' }),
     status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, 512, true),
     ...(row.navigationId === undefined ? {} : { navigationId: text(row.navigationId, 200) }), capabilities: [...row.capabilities] as string[],
+    ...(row.openedFrom === undefined ? {} : { openedFrom: parseBrowserSource(row.openedFrom) }),
     ...(row.cdpMethods === undefined ? {} : { cdpMethods: [...row.cdpMethods as string[]] }),
     ...(row.control === undefined ? {} : { control: parseBrowserControl(row.control) }),
     ...(row.resource === undefined ? {} : { resource: parseBrowserResource(row.resource) }),

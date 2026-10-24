@@ -481,7 +481,7 @@ export async function registerIpc(args: {
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE)), { nameAudit }),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews,
-  { readTheme: () => themeBootstrap(configOwner.current.appearance, nativeTheme.shouldUseDarkColors) }, browserAgentAuthority(args.runtime))
+  {}, browserAgentAuthority(args.runtime))
   const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
     if (JSON.stringify(saved.browser.agentControl) !== JSON.stringify(previous.browser.agentControl)) browsers.refreshAgentFeedback()
   })
@@ -529,7 +529,12 @@ export async function registerIpc(args: {
   browsers.setPresentationWindowOwner((document, occurrence) => 'kind' in occurrence
     ? args.workbenchWindows.windowForDocument(document) : args.workbenchWindows.presentationWindow(document, occurrence))
   const nativeChrome = new NativeOverlayWindows(args.window, browsers, args.workbenchWindows)
-  const releaseNativeWindowOwner = args.workbenchWindows.setNativeOwner({ beforeClosing: async window => {
+  const releaseNativeWindowOwner = args.workbenchWindows.setNativeOwner({ requestClose: window => browsers.requestNativeWindowClose(window), windowSize: async target => {
+    const graph = (await spatialState.read())?.graph
+    const regions = graph?.regions.filter(region => region.tabId === target.tabId && region.kind === 'browser' &&
+      (target.kind === 'tab' || region.regionId === target.regionId)) ?? []
+    return regions.length === 1 && regions[0]?.browserId ? browsers.nativeWindowSize(regions[0].browserId) : null
+  }, beforeClosing: async window => {
     await browsers.returnWindow(window)
     nativeChrome.releaseWindow(window)
   } })

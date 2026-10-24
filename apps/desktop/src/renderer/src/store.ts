@@ -272,7 +272,8 @@ import {
   restorePersistedWorkbench,
   type PersistedWorkbench
 } from './lib/workbench-persistence'
-import { reduceBrowserEvent } from './lib/browser-state'
+import { createBrowserProjectionEventQueue, reduceBrowserEvent } from './lib/browser-state'
+import { projectNativeBrowserOpening } from './lib/browser-child-projection'
 import {
   bumpWorkspaceFileRevision,
   reduceDocumentAttached,
@@ -4969,6 +4970,16 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
   return done(tab.id)
 }
 
+// Undelivered display projections retain the exact native creation event, never a URL replay.
+const pendingNativeBrowsers = new Map<string, Extract<BrowserEvent, { type: 'native-opened' }>>()
+function settleNativeBrowserProjectionNotice(state: AppState, browserId: string): Partial<AppState> {
+  const key = `native-browser:${browserId}`
+  const records = state.notificationEvents.filter(notice => notice.context?.event?.source === 'spatial' && notice.context.event.key === key)
+  return { ...settleNotificationRecords(state, records),
+    ...(state.errorNoticeContext?.event?.source === 'spatial' && state.errorNoticeContext.event.key === key
+      ? { error: null, lastError: null, errorNoticeContext: null, errorDismissed: false } : {}) }
+}
+
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
   restoredWorkbench: null,
   workbenchSpaceSelection: null,
@@ -5256,8 +5267,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const disposeInputOccupation = initializeAgentInputOccupation()
     const disposeGoalResponsibilities = initializeGoalResponsibilityObservation()
     const pendingSessionEvents = sessionMembershipEventBuffer()
-    const pendingBrowserEvents: BrowserEvent[] = []
+    const pendingBrowserEvents = createBrowserProjectionEventQueue()
     let booting = true
+    let browserBooting = true
     let observing = true
     const a2aNotifications = createA2AMessageNotifier(async input => {
       const delivery = await api.ui.notifyAgentAttention(input)
@@ -5287,9 +5299,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().applyEvent(event)
     })
     const disposeBrowsers = api.browser.onEvent((event) => {
-      if (booting) {
+      if (browserBooting) {
         pendingBrowserEvents.push(event)
-        if (pendingBrowserEvents.length > 256) pendingBrowserEvents.shift()
       }
       else get().applyBrowserEvent(event)
     })
@@ -5643,7 +5654,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         void api.files.observe(workspaceId, path).then(() => get().refreshDocument(workspaceId, path)).catch((error) => get().reportError(error))
       }
       for (const sessionId of Object.keys(get().agentSteerQueues)) void get().flushAgentSteerQueue(sessionId)
-      for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
+      for (const event of pendingBrowserEvents.drain()) get().applyBrowserEvent(event)
+      browserBooting = false
       // Browser Regions are restored descriptions. Main acquires their original pages only
       // for a visible presentation or an admitted public page operation.
       // A rejected initial snapshot used the saved Workbench as a temporary projection. Retry one
@@ -10797,6 +10809,35 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } finally { unsubscribe(); unsubscribeLocal() }
   },
   applyBrowserEvent(event, expectedNavigationId) {
+    if (event.type === 'native-opened') {
+      const projection = projectNativeBrowserOpening(get(), event)
+      if (projection.issue) {
+        const firstObservation = !pendingNativeBrowsers.has(event.browser.id)
+        pendingNativeBrowsers.set(event.browser.id, event)
+        if (firstObservation) get().reportError(new Error(projection.issue), { kind: 'indeterminate',
+          event: { source: 'spatial', key: `native-browser:${event.browser.id}` } })
+        return
+      }
+      pendingNativeBrowsers.delete(event.browser.id)
+      const current = get(), settled = settleNativeBrowserProjectionNotice(current, event.browser.id)
+      if (projection.state !== current || Object.keys(settled).length) set({ ...projection.state, ...settled })
+      if (projection.target) {
+        const target = projection.target
+        void import('./lib/workbench-windows').then(({ openWorkbenchWindow }) => {
+          const surface = get().tabs[target.tabId]?.regions[target.regionId]
+          if (surface?.kind === 'browser' && surface.browserId === event.browser.id) return openWorkbenchWindow({ kind: 'region', ...target })
+        }).catch(error => get().reportError(error))
+      }
+      return
+    }
+    if (event.type === 'closed') pendingNativeBrowsers.delete(event.id)
+    if (event.type === 'updated') {
+      const pending = pendingNativeBrowsers.get(event.browser.id)
+      if (pending) pendingNativeBrowsers.set(event.browser.id, { ...pending, browser: event.browser })
+    }
+    const retiredRegions = event.type === 'closed' ? Object.values(get().tabs).flatMap(tab =>
+      workbenchSurfaces(tab).flatMap(surface => surface.kind === 'browser' && surface.browserId === event.id
+        ? [{ tabId: tab.id, regionId: surface.regionId }] : [])) : []
     set((state) => {
       const topology = reduceBrowserEvent(state, event, expectedNavigationId)
       let choice = state.workbenchSpaceSelection
@@ -10817,6 +10858,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       return {
         ...topology,
+        ...(event.type === 'closed' ? settleNativeBrowserProjectionNotice(state, event.id) : {}),
         workbenchSpaceSelection: choice,
         ...(event.type === 'closed'
           ? {
@@ -10828,6 +10870,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           : {})
       }
     })
+    if (retiredRegions.length) void import('./lib/workbench-windows')
+      .then(({ returnClosedWorkbenchWindows }) => returnClosedWorkbenchWindows(retiredRegions)).catch(error => get().reportError(error))
   },
   addBrowserAnnotation(annotation) {
     if (
@@ -12540,6 +12584,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   partialize: partializeAppState
 }))
+
+let projectingNativeBrowsers = false
+useAppStore.subscribe((state, previous) => {
+  if (!pendingNativeBrowsers.size || projectingNativeBrowsers || state.tabs === previous.tabs && state.layouts === previous.layouts) return
+  projectingNativeBrowsers = true
+  try { for (const event of pendingNativeBrowsers.values()) useAppStore.getState().applyBrowserEvent(event) }
+  finally { projectingNativeBrowsers = false }
+})
 
 /** The same membership lifecycle is used by initialize and isolated real-consumer fixtures. */
 export function initializeRunServiceProjection(): () => void {

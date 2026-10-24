@@ -100,6 +100,10 @@
 .browser-toolbar > button { width: 27px; height: 27px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .browser-toolbar > button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 .browser-toolbar > button:disabled { opacity: .3; cursor: default; }
+.browser-source-navigation { position: relative; flex: none; }
+.browser-source-navigation__trigger { height: 27px; display: flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-meta); cursor: pointer; }
+.browser-source-navigation__trigger:hover { color: var(--text); background: var(--surface-3); }
+.browser-source-navigation__menu { max-width: 300px; overflow-wrap: anywhere; }
 .browser-toolbar label { min-width: 96px; height: 28px; flex: 1; display: flex; align-items: center; gap:var(--sp-3); padding:0 var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: var(--bg); }
 .browser-toolbar label:focus-within { border-color: var(--focus-line); color: var(--green); }
 .browser-toolbar input { min-width: 0; flex: 1; border: 0; padding: 0; outline: 0; color: var(--text-2); background: transparent; font: var(--fs-meta) "SFMono-Regular", monospace; }

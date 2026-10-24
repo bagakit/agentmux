@@ -41,6 +41,15 @@ export async function returnWorkbenchWindow(identity: WorkbenchWindowDocument): 
     if (page.recordedOperation?.state !== 'confirmed') publishIssue(page.recordedOperation?.message ?? 'Returning the original workface is unconfirmed. Original work remains.')
   } catch (error) { publishIssue(error) }
 }
+/** Native page destruction has already retired these Regions; close only their borrowed shells. */
+export async function returnClosedWorkbenchWindows(regions: readonly { tabId: string; regionId: string }[]): Promise<void> {
+  for (const record of opened.values()) {
+    const target = record.target
+    if (record.returned || !regions.some(region => region.tabId === target.tabId &&
+      (target.kind === 'region' ? region.regionId === target.regionId : !useAppStore.getState().tabs[target.tabId]))) continue
+    await returnWorkbenchWindow(record.identity)
+  }
+}
 function validateTarget(target: AppWindowTarget): void {
   const state = useAppStore.getState(), group = state.layouts[target.displayWorkspaceId]?.groups.find(group => group.id === target.groupId)
   const tab = state.tabs[target.tabId]
