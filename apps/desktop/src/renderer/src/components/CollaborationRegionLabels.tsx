@@ -23,6 +23,8 @@ type Region = { box: Extract<CollaborationLayoutBox, { kind: 'area' }>; area: Co
   activity?: { pulse: { kind: 'communication' | 'supervision' } } | undefined
   internal: readonly unknown[]; onInspect(): void; onLocate(): void; onToggle(anchor?: { x: number; y: number }): void }
 const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((value, index) => value === b[index])
+type LabelSearchPoint = { key: string; x: number; y: number; distance: number; order: number }
+function compareLabelSearchPoints(a: LabelSearchPoint, b: LabelSearchPoint) { return a.distance - b.distance || a.order - b.order }
 
 /** One screen-space identity layer. Natural text size is observed only when it
  * changes; camera movement projects the same boxes without measuring the world. */
@@ -87,24 +89,33 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
       })
     }
     for (const candidate of candidates) {
-      const pending = [{ x: candidate.x, y: candidate.y }], seen = new Set<string>()
+      const pending = new Map<string, LabelSearchPoint>(), seen = new Set<string>()
+      let order = 0
+      const enqueue = (x: number, y: number) => {
+        const actualX = clamp(x, 12, width - candidate.width - 12), actualY = clamp(y, 8, height - candidate.height - 8)
+        const key = `${Math.round(actualX * 2)},${Math.round(actualY * 2)}`
+        if (seen.has(key)) return
+        // Keep the original proposal priority even when viewport clamping maps
+        // several proposals to one cell; stable ties retain their first offer.
+        const point = { key, x: actualX, y: actualY, distance: (x - candidate.x) ** 2 + (y - candidate.y) ** 2, order: order++ }
+        const old = pending.get(key)
+        if (!old || compareLabelSearchPoints(point, old) < 0) pending.set(key, point)
+      }
+      enqueue(candidate.x, candidate.y)
       let resolved = false
-      for (let attempts = 0; pending.length && attempts < 64;) {
-        pending.sort((a, b) => (a.x - candidate.x) ** 2 + (a.y - candidate.y) ** 2 - (b.x - candidate.x) ** 2 - (b.y - candidate.y) ** 2)
-        const next = pending.shift()!, x = clamp(next.x, 12, width - candidate.width - 12), y = clamp(next.y, 8, height - candidate.height - 8)
-        // Repeated obstacle moves can differ only by floating point roundoff.
-        // Deduplicate their screen cells instead of exhausting the finite search.
-        const key = `${Math.round(x * 2)},${Math.round(y * 2)}`
-        if (seen.has(key)) continue
-        seen.add(key); attempts++
+      for (let attempts = 0; pending.size && attempts < 64; attempts++) {
+        let next: LabelSearchPoint | undefined
+        for (const point of pending.values()) if (!next || compareLabelSearchPoints(point, next) < 0) next = point
+        const { key, x, y } = next!
+        pending.delete(key); seen.add(key)
         const label = { x, y, width: candidate.width, height: candidate.height }
         const padded = { x: x - clearance, y: y - clearance, width: label.width + clearance * 2, height: label.height + clearance * 2 }
         const blockers = [...placed.filter(other => collaborationBoundsOverlap(padded, other)), ...occlusion.filter(other => collaborationBoundsOverlap(padded, other)), ...blockingAgents(label)]
         if (!blockers.length) { placed.push({ ...candidate, x, y }); resolved = true; break }
         const left = Math.min(...blockers.map(box => box.x)), right = Math.max(...blockers.map(box => box.x + box.width))
         const top = Math.min(...blockers.map(box => box.y)), bottom = Math.max(...blockers.map(box => box.y + box.height))
-        pending.push({ x: left - label.width - clearance, y }, { x: right + clearance, y },
-          { x, y: top - label.height - clearance }, { x, y: bottom + clearance })
+        enqueue(left - label.width - clearance, y); enqueue(right + clearance, y)
+        enqueue(x, top - label.height - clearance); enqueue(x, bottom + clearance)
       }
       if (!resolved) {
         // A distant dense neighborhood can occupy every local candidate. Give
