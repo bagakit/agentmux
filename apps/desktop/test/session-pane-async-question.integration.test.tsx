@@ -38,18 +38,19 @@ async function waitCard() {
 }
 function card() { const values = [...container.querySelectorAll<HTMLElement>('[aria-label="Native asynchronous question"]')].filter(node => !node.closest('[inert]')); expect(values).toHaveLength(1); return values[0]! }
 async function click(selector: string) { await act(async () => card().querySelector<HTMLButtonElement>(selector)!.click()); await flush() }
-async function setup(unknown = false) {
+async function setup(unknown = false, historyPage = page) {
+  const questionTarget = { ...target, source: historyPage.source }, replyKey = questionReplyKey(control.agentSessionId, questionTarget)
   const capabilities = new AgentProviderRegistry().catalog().find(provider => provider.id === 'codex')!.capabilities
   expect(capabilities.asyncQuestionReply).toBe('native-input')
   const config: AppConfig = { version: 9, hosts: [{ id: control.hostId, kind: 'ssh', label: 'Private host', hostname: 'original-host.invalid' }], executors: { codex: { label: 'Private reader', providerId: 'codex', command: 'unused', args: [], env: {}, injectAgentMuxGuide: true } }, workspaces: [{ id: 'ws', name: 'Project', hostId: control.hostId, path: _newTailFixturePath("private/project"), kind: 'folder' }], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
-  const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: control.agentSessionId, kind: 'agent', hostId: control.hostId, workspacePath: _newTailFixturePath("private/project"), label: 'Original question agent', providerId: 'codex', executorId: 'codex', agentSessionUpdatedAt: _newTailFixtureEpoch(0, 0, 1), promptSubmissionPredecessor: null, nativeSessionId: target.source.nativeSessionId, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: target.source.nativeSessionId }, createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1), processState: 'running', status: { state: 'done', source: 'native-hook', observedAt: _newTailFixtureEpoch(0, 0, 1) }, latestOutputBytes: 0, capabilities, control }
-  const focus = vi.fn(); useAppStore.setState({ config, sessions: [session], agentComposerDrafts: { [control.agentSessionId]: 'ORIGINAL UNSENT' }, viewModes: { [control.agentSessionId]: 'activity' }, timelines: {}, pendingAgentLaunches: {}, runtimeOwnershipWarnings: [], recoveryCandidates: [], agentSteerQueues: {}, questionReplies: unknown ? { [control.agentSessionId]: { [key]: structuredClone(held) } } : {}, questionReplyDrafts: {}, focusRegion: focus, workbenchSaveWarning: null })
-  const reads = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page), send = vi.spyOn(api.sessions, 'replyQuestion'), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+  const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: control.agentSessionId, kind: 'agent', hostId: control.hostId, workspacePath: _newTailFixturePath("private/project"), label: 'Original question agent', providerId: 'codex', executorId: 'codex', agentSessionUpdatedAt: _newTailFixtureEpoch(0, 0, 1), promptSubmissionPredecessor: null, nativeSessionId: questionTarget.source.nativeSessionId, nativeHandle: { kind: 'provider', providerId: questionTarget.source.providerId, sessionId: questionTarget.source.nativeSessionId }, createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1), processState: 'running', status: { state: 'done', source: 'native-hook', observedAt: _newTailFixtureEpoch(0, 0, 1) }, latestOutputBytes: 0, capabilities, control }
+  const focus = vi.fn(); useAppStore.setState({ config, sessions: [session], agentComposerDrafts: { [control.agentSessionId]: 'ORIGINAL UNSENT' }, viewModes: { [control.agentSessionId]: 'activity' }, timelines: {}, pendingAgentLaunches: {}, runtimeOwnershipWarnings: [], recoveryCandidates: [], agentSteerQueues: {}, questionReplies: unknown ? { [control.agentSessionId]: { [replyKey]: structuredClone({ ...held, input: { ...held.input, ...questionTarget } }) } } : {}, questionReplyDrafts: {}, focusRegion: focus, workbenchSaveWarning: null })
+  const reads = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(historyPage), send = vi.spyOn(api.sessions, 'replyQuestion'), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
   const write = vi.spyOn(api.sessions, 'write'), resume = vi.spyOn(api.sessions, 'resume'), stop = vi.spyOn(api.sessions, 'stop')
-  const reader = await conversationPagePortFixture(control, target.source, async () => page); closes.push(reader.close)
+  const reader = await conversationPagePortFixture(control, questionTarget.source, async () => historyPage); closes.push(reader.close)
   await act(async () => root.render(pane())); await flush()
   await vi.waitFor(() => expect(container.querySelector('[aria-label="Native asynchronous question"]')).not.toBeNull())
-  return { reads, send, copy, focus, write, resume, stop }
+  return { reads, send, copy, focus, write, resume, stop, questionTarget, replyKey }
 }
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container) })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); for (const close of closes.splice(0).reverse()) await close(); useAppStore.setState(original, true); vi.restoreAllMocks() })
@@ -143,4 +144,68 @@ it('a failed Desktop storage receipt retains the answer and never dispatches the
     input: { answers: [{ questionId: 'first', answer: 'Keep original' }, { questionId: 'second', answer: 'Retained written answer' }] } })
   expect(card().textContent).toContain('Original storage commit unavailable')
   expect(card().querySelector<HTMLTextAreaElement>('[aria-label="Your answer: Free text answer"]')!.disabled).toBe(false)
+})
+
+it.each([target.source.nativeSessionId, 'selected-other-native'])('actual Pane rejoins the original reply for selected Run member %s while preserving later drafts', async nativeSessionId => {
+  const dispose = await useAppStore.getState().initialize(); closes.push(async () => dispose())
+  const f = await setup(true, { ...page, source: { ...target.source, nativeSessionId } })
+  const frozen = structuredClone(useAppStore.getState().questionReplies[control.agentSessionId]![f.replyKey]!)
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map((session): SessionSnapshot => session.kind !== 'agent' ? session : {
+    ...session, nativeBinding: { source: 'user-selected', run: control.run, observedAt: session.updatedAt },
+    nativeSourceObservation: { state: 'ambiguous', run: control.run, observedAt: session.updatedAt, reason: 'frontend-selection-unconfirmed',
+      candidates: [target.source.nativeSessionId, 'selected-other-native'].map(sessionId => ({ kind: 'provider', providerId: 'codex', sessionId })) }
+  }) }))); await flush(); await waitCard()
+  f.send.mockImplementation(async (actual, input) => {
+    expect(actual).toEqual(control)
+    expect(input).toEqual(frozen.input)
+    expect(useAppStore.getState().questionReplies[control.agentSessionId]![f.replyKey]).toMatchObject({ phase: 'sending', input: frozen.input })
+    return { agentSessionId: control.agentSessionId, source: input.source, recordId: input.recordId,
+      operationId: input.operationId, questionIds: input.answers.map(answer => answer.questionId), outcome: 'submitted' }
+  }).mockRejectedValueOnce(new Error('Original reply acknowledgement unavailable'))
+  await fill(card().querySelector('[aria-label="Your answer: Free text answer"]')!, 'Later answer stays a separate draft')
+  expect(card().querySelector('[data-question-action="send"]')).not.toBeNull()
+  await click('[data-question-action="send"]')
+  expect(f.send).toHaveBeenCalledExactlyOnceWith(control, frozen.input)
+  expect(useAppStore.getState().questionReplies[control.agentSessionId]![f.replyKey]).toMatchObject({ phase: 'unknown', input: frozen.input })
+  await click('[data-question-action="send"]')
+  expect(f.send).toHaveBeenCalledTimes(2)
+  expect(f.send.mock.calls[1]).toEqual(f.send.mock.calls[0])
+  expect(useAppStore.getState().questionReplies[control.agentSessionId]![f.replyKey]?.phase).toBe('submitted')
+  expect(useAppStore.getState().questionReplyDrafts[control.agentSessionId]![f.replyKey]).toEqual([...frozen.input.answers, { questionId: 'second', answer: 'Later answer stays a separate draft' }])
+  expect(useAppStore.getState().agentComposerDrafts[control.agentSessionId]).toBe('ORIGINAL UNSENT')
+  expect(useAppStore.getState().viewModes[control.agentSessionId]).toBe('activity')
+  for (const action of [f.write, f.resume, f.stop, f.focus]) expect(action).not.toHaveBeenCalled()
+})
+
+it('actual Pane keeps selected-target replies unavailable for stale, missing or foreign source facts without losing the original operation', async () => {
+  const f = await setup(true), frozen = structuredClone(useAppStore.getState().questionReplies[control.agentSessionId]![key])
+  const originalSession = useAppStore.getState().sessions[0]!
+  if (originalSession.kind !== 'agent') throw new Error('The mounted fixture requires an Agent Session')
+  const selected = { ...originalSession, nativeBinding: { source: 'user-selected' as const, run: control.run, observedAt: originalSession.updatedAt },
+    nativeSourceObservation: { state: 'ambiguous' as const, run: control.run, observedAt: originalSession.updatedAt, reason: 'frontend-selection-unconfirmed',
+      candidates: [{ kind: 'provider' as const, providerId: 'codex', sessionId: target.source.nativeSessionId }] } }
+  await fill(card().querySelector('[aria-label="Your answer: Free text answer"]')!, 'Preserved across unavailable sources')
+  const { candidates: _candidates, ...missingCandidates } = selected.nativeSourceObservation
+  const states: SessionSnapshot[] = [
+    { ...selected, nativeSourceObservation: { ...selected.nativeSourceObservation, state: 'unknown' } },
+    { ...selected, nativeSourceObservation: { ...selected.nativeSourceObservation, state: 'changed' } },
+    { ...selected, nativeBinding: { ...selected.nativeBinding, run: { runId: 'old-run' } } },
+    { ...selected, nativeSourceObservation: missingCandidates },
+    { ...selected, nativeSourceObservation: { ...selected.nativeSourceObservation, candidates: [{ kind: 'provider', providerId: 'codex', sessionId: 'foreign-native' }] } },
+    { ...selected, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'foreign-native' },
+      nativeSourceObservation: { ...selected.nativeSourceObservation, candidates: [{ kind: 'provider', providerId: 'codex', sessionId: 'foreign-native' }] } }
+  ]
+  for (const session of states) {
+    await act(async () => useAppStore.setState({ sessions: [session] })); await flush(); await waitCard()
+    expect(card().querySelector('[data-question-action="send"]')).toBeNull()
+    expect(card().querySelector('[data-question-action="terminal"]')).not.toBeNull()
+    expect(card().querySelector<HTMLTextAreaElement>('[aria-label="Your answer: Free text answer"]')!.value).toBe('Preserved across unavailable sources')
+    expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toEqual(frozen)
+    for (const action of [f.send, f.write, f.resume, f.stop]) expect(action).not.toHaveBeenCalled()
+  }
+  await act(async () => useAppStore.setState({ sessions: [{ ...selected, nativeSourceObservation: { ...selected.nativeSourceObservation, run: { runId: 'earlier-observation-run' } } }] })); await flush(); await waitCard()
+  expect(card().querySelector('[data-question-action="send"]')).not.toBeNull()
+  expect(f.send).not.toHaveBeenCalled()
+  expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toEqual(frozen)
+  expect(useAppStore.getState().agentComposerDrafts[control.agentSessionId]).toBe('ORIGINAL UNSENT')
 })
