@@ -24,9 +24,9 @@ export function ConnectorHeaderLinks(props: Props) {
   const diagnosis = useConnectorGroupDiagnosis(props.bindings, props.nameVersion, props.visible, props.syncEnabled, props.hostingTarget)
   const matches = (channel: ChannelEntry, binding: RoomBinding) => channel.domains.includes(binding.application.domain)
   const unknown = props.bindings.filter(binding => !channels.some(channel => matches(channel, binding)))
-  return <>{channels.map(channel => <ChannelHeaderEntry key={channel.adapterId} {...props} channel={channel}
+  return <span className="agent-region-header__channels">{channels.map(channel => <ChannelHeaderEntry key={channel.adapterId} {...props} channel={channel}
     bindings={props.bindings.filter(binding => matches(channel, binding))} diagnosis={diagnosis} totalBindings={props.bindings.length} />)}
-    {unknown.length ? <ChannelHeaderEntry {...props} bindings={unknown} diagnosis={diagnosis} totalBindings={props.bindings.length} /> : null}</>
+    {unknown.length ? <ChannelHeaderEntry {...props} bindings={unknown} diagnosis={diagnosis} totalBindings={props.bindings.length} /> : null}</span>
 }
 
 function ChannelHeaderEntry({ channel, diagnosis, totalBindings, ...props }: Props & { channel?: ChannelEntry; totalBindings: number; diagnosis: ReturnType<typeof useConnectorGroupDiagnosis> }) {
