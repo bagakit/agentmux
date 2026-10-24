@@ -224,6 +224,10 @@
     "./name-history": {
       "types": "./dist/name-history.d.ts",
       "import": "./dist/name-history.js"
+    },
+    "./goal-project-context": {
+      "types": "./dist/goal-project-context.d.ts",
+      "import": "./dist/goal-project-context.js"
     }
   }
 }
