@@ -447,6 +447,25 @@ per-operation facts; this scheduling change adds no public operation.
 
 An image upload is a separate effect from its chat message. Each upload attempt and its result stay in the original operation JSON. A confirmed asset key is saved before the original claim freezes the final message request and key. Reopening after that save does not upload again. An interrupted upload or a reply without a key stays unknown; only explicit `connection.delivery.retry` may start another upload of the same bytes while the message is provably unattempted. Earlier unknown uploads remain recorded. A possibly applied message remains inspect-only, retaining its original key and wire. `ConnectionDelivery.resourceUpload` reports the exact part, upload attempt and stage without bytes or an asset key.
 
+Mermaid fences in qualified public assistant text use the same ordered image
+representation and upload owner. The Host renders with the official Mermaid
+engine in a private headless browser, retaining the original text digest, source
+span and derived PNG. It uses an installed Chrome, or the Host's explicit
+`PUPPETEER_EXECUTABLE_PATH` for a compatible Chromium executable; dependencies do
+not download a browser. This works independently of an open Desktop window and
+does not attach to a person's browser profile. The private page cannot load
+external or local resources, and diagram directives cannot relax its policy.
+
+The engine's native source/edge limits and the existing Core raster decode
+budget constrain only this derived image. A single render has a cancellable
+30-second observation window, matching other Host resource observations; expiry
+does not declare the original Agent or message failed. Missing browsers, invalid
+diagrams and unconfirmed rendering leave a named gap, keep the original source
+and deliver neighboring text. Source remains available in the original
+conversation. Rendering adds no RPC, queue or credential store: existing
+`connection.delivery.inspect`, `connection.delivery.ls` and content coverage
+expose the original image upload, delivery and any unresolved resource gap.
+
 Public `connection.delivery.inspect` and bounded `connection.delivery.ls` expose the original safe receipt and exact source reference, excluding body, prepared wire and credentials. The scoped list can report a source gap before any effect exists. Source replacement retains its old frontier for explicit relinking; storage or authority uncertainty retains the original work and reports the failed service step. Closing this publication owner releases only its readers and external-effect observation, preserving original Agents and durable operations.
 
 ## Durable external intake
