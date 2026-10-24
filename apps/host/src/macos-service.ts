@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { promisify } from 'node:util'
-import { AgentMuxError, connectAgentMuxRpc, durableWriteFile, type AgentMuxRuntimeOwnerIdentity } from '@agentmux/core'
+import { isDeepStrictEqual, promisify } from 'node:util'
+import { AgentMuxError, connectAgentMuxRpc, defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory, durableWriteFile, type AgentMuxRuntimeOwnerIdentity } from '@agentmux/core'
 
 const exec = promisify(execFile)
 const wait = (ms: number) => new Promise<void>(yes => setTimeout(yes, ms))
@@ -78,6 +78,32 @@ export function macosHostServicePlist(service: MacosHostService): string {
 <key>StandardOutPath</key>${string(service.logPath)}
 <key>StandardErrorPath</key>${string(service.logPath)}
 </dict></plist>\n`
+}
+
+async function parseServicePlist(plist: string): Promise<unknown> {
+  const conversion = exec('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '--', '-'],
+    { timeout: 5000, maxBuffer: 64 * 1024 })
+  const written = new Promise<void>((resolve, reject) => {
+    const input = conversion.child.stdin!
+    input.once('error', reject)
+    input.end(plist, resolve)
+  })
+  const [result] = await Promise.all([conversion, written])
+  return JSON.parse(result.stdout)
+}
+
+/** Compare the original service's effective paths, without adopting another target or rewriting it. */
+export function normalizeMacosHostServiceDefinition(definition: unknown, storePath: string): unknown {
+  if (!definition || typeof definition !== 'object' || Array.isArray(definition)) return definition
+  const fields = definition as Record<string, unknown>, environment = fields.EnvironmentVariables
+  if (!environment || typeof environment !== 'object' || Array.isArray(environment) ||
+    Object.values(environment).some(value => typeof value !== 'string')) return definition
+  const original = environment as Record<string, string>
+  return { ...fields, EnvironmentVariables: { ...original,
+    AGENTMUX_STATE_DIRECTORY: defaultAgentMuxStateDirectory(original),
+    // Undefined would borrow this launcher's environment through the helper's default argument.
+    AGENTMUX_MESSAGE_QUEUE_PATH: defaultAgentMuxMessageQueuePath(storePath, original.AGENTMUX_MESSAGE_QUEUE_PATH ?? '')
+  } }
 }
 
 async function launchctl(args: string[]): Promise<string> {
@@ -176,7 +202,19 @@ export async function ensureMacosHostService(service: MacosHostService): Promise
   await mkdir(dirname(service.plistPath), { recursive: true, mode: 0o700 })
   const verify = async () => {
     const info = await lstat(service.plistPath)
-    if (!info.isFile() || info.uid !== process.getuid!() || await readFile(service.plistPath, 'utf8') !== definition) throw failure(
+    if (!info.isFile() || info.uid !== process.getuid!()) throw failure(
+      'The original platform service definition changed. Keep its owner and inspect the installation before changing this namespace.', 'HOST_SERVICE_CONFIGURATION_CHANGED')
+    const original = await readFile(service.plistPath, 'utf8')
+    let matches: boolean
+    try {
+      const [actual, expected] = await Promise.all([parseServicePlist(original), parseServicePlist(definition)])
+      matches = isDeepStrictEqual(normalizeMacosHostServiceDefinition(actual, service.storePath),
+        normalizeMacosHostServiceDefinition(expected, service.storePath))
+    } catch (cause) {
+      throw Object.assign(failure('The original platform service definition could not be verified. Its definition and healthy Agents were retained.',
+        'HOST_SERVICE_CONFIGURATION_CHANGED'), { cause })
+    }
+    if (!matches) throw failure(
       'The original platform service definition changed. Keep its owner and inspect the installation before changing this namespace.', 'HOST_SERVICE_CONFIGURATION_CHANGED')
   }
   try { await verify() } catch (error) {
