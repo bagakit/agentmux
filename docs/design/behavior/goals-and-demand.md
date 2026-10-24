@@ -87,6 +87,10 @@ PMO 请求必须使用所关联的真实 Project 与具体 Workspace 的身份�
 
 默认 Goals 扫描和详情的工作量随当前可见目标、实际关联 Session 和相关新事实增长；不为每张目标挂载完整终端/拓扑，不因无关 Run 输出重算全部目标或重挂载原工作面。相关消费者成本与连续阅读的 P0 边界继续归[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)，本轮只验证新增表面的放大边界。
 
+桌面退出不改变 Goal 的领域 owner：原 Host 组合同一 Demand Store、Core 输入与空间能力，持有后台讨论、执行、持续跟进和安排的业务责任；客户端只保草稿、导航和呈现。Host 的局部观察或某次讨论缺少前提时只说明该操作未知，不能关闭健康 Agent、阻断无关 Goal 编辑或把调度责任转回某个窗口。
+
+新 Goal 的专属讨论先在同一领域记录保存唯一创建操作引用，首次实际讨论冻结准确主 Mote、已确认 Executor、初始请求与平台 Goal 上下文。Tab／Region／Session 关联仍只有 Core 空间 owner 一份事实，Goal 不另存展示映射或创建日志；跨进程恢复沿原操作继续，Goal 后续修改不改写原首句。旧记录没有该来源时不自动补写或迁移，已确认的原专属讨论仍按原准确关系可达；原来源未知不能新建替代讨论。已知 bot 的选择继续遵循上文的准确来源与未确认服务窗。
+
 Grill/Grounding 的领域事实属于独立 Demand 文件系统包，同一份公开 API/CLI、Main 与 Renderer 投影可读；UI 只持有草稿和展示状态。Provider 与 Core/ctxmux 的生命周期事实保持原 owner，Goals 不新增第二套 Runtime、流程引擎或转录库。本轮不扩展复杂任务依赖、自定义字段、甘特图、自动审批或自动结果验收。
 
 ## Goals、Focus 与执行工作面
