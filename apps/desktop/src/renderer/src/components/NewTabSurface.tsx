@@ -14,7 +14,7 @@ import { mainRegionReference } from '../lib/desktop-focus-navigation'
 import { currentHostCheck } from '../lib/host-check'
 import { formatPathForDisplay } from '../lib/copy-path-display'
 import { hostExecutorInventoryMatches, executorsForHost } from '../lib/executors'
-import { executorDetectionLabel } from '../lib/executor-detection'
+import { useLauncherExecutorRecovery } from '../hooks/useLauncherExecutorRecovery'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useLauncherInputs } from '../lib/launcher-inputs'
 import { EMPTY_LAUNCH_OPTION_SELECTION } from '../lib/launcher-option-draft'
@@ -39,6 +39,7 @@ import { LauncherResumePicker } from './LauncherResumePicker'
 import { LauncherEnvironment } from './LauncherEnvironment'
 import { ComposerFileReferences } from './ComposerFileReferences'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
+import { LauncherAvailabilityNotice } from './LauncherAvailabilityNotice'
 import { DEFAULT_LAUNCHER_SECTIONS, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { primaryMoteExecutorId, primaryMoteHasBot } from '../lib/primary-mote-executor'
@@ -204,6 +205,10 @@ export function NewTabSurface({
   const saveExecutor = useLauncherState(state => state.selectExecutor)
   const savedExecutor = useLauncherState(state => workspace ? state.executors[workspace.id] : undefined)
   const selectedExecutor = executors.find(executor => executor.id === displayedExecutorId)
+  const unconfirmedAvailability = host?.kind === 'ssh' && (!hostExecutorInventoryMatches(inventory, host) || inventory.state !== 'ready') ||
+    executors.some(executor => executor.detection?.state !== 'ready' && executor.detection?.state !== 'missing')
+  const retryingAvailability = useLauncherExecutorRecovery(host,
+    motionActive && inputRegionActive && !controlNavigation && sections.agents !== 'hidden', unconfirmedAvailability)
   function setSection(section: LauncherSection, mode: LauncherSectionMode) {
     if (section === 'agents' && mode !== 'expanded' && surfaceRef.current?.contains(document.activeElement)) restoreAgentsFocus.current = mode
     if (workspace) saveSection(workspace.id, section, mode)
@@ -420,10 +425,14 @@ export function NewTabSurface({
         </div>
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
       </div> : null}
-      {inventory?.state === 'error' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
-        step: 'Host Executor discovery failed', mode: `${host?.label ?? workspace?.hostId}: ${inventory.detail ?? 'Current inventory is unknown.'} Previously read configurations remain selectable.`,
-        restore: 'Refresh agents on this host. Configure custom commands in Settings → Agents on this Host.'
-      } }} /> : selectedExecutor && selectedExecutor.detection?.state !== 'ready' && selectedExecutor.detection?.state !== 'missing' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Agent availability check is unconfirmed', mode: `${selectedExecutor.label} is configured; ${executorDetectionLabel(selectedExecutor.detection).toLowerCase()}. Launch remains available and reports its actual result.`, restore: 'Recheck agents on this host to confirm discovery.' } }} /> : null}
+      {host?.kind === 'ssh' && inventory && inventory.state !== 'ready' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+        step: inventory.state === 'checking' ? 'Checking agents on this host' : 'Host Executor discovery failed', mode: `${host?.label ?? workspace?.hostId}: ${inventory.detail ?? 'Current inventory is unknown.'} Previously read configurations remain selectable.`,
+        restore: inventory.state === 'checking' ? 'Checking this host. Existing configurations remain selectable.'
+          : retryingAvailability ? 'Rechecking automatically. You can keep writing or check again now.'
+            : 'Check again to refresh this host. Existing configurations and your draft are kept.'
+      } }} actions={<button type="button" className="small-button" disabled={inventory.state === 'checking'}
+        onClick={() => { if (workspace) void detectExecutors(workspace.hostId) }}>{inventory.state === 'checking' ? 'Checking…' : 'Check again'}</button>} /> : sections.agents !== 'hidden' ? <LauncherAvailabilityNotice executor={selectedExecutor}
+        checking={selectedExecutor?.detection?.state === 'checking'} retrying={retryingAvailability} onCheck={() => { if (workspace) void detectExecutors(workspace.hostId) }} /> : null}
       {fileReferencesOpen && workspace && motionActive ? <ComposerFileReferences key={toolsScope} workspace={workspace} hostLabel={host?.label}
         onSelect={path => { void attachments.referencePaths([path]) }} onClose={() => setFileReferencesOpen(false)} /> : null}
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}

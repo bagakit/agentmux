@@ -1307,7 +1307,7 @@ export type AppState = {
     workspaceId: string,
     update: (current: FileExplorerViewState) => FileExplorerViewState
   ): void
-  detectExecutors(hostId: string): Promise<void>
+  detectExecutors(hostId: string, options?: { onlyUnconfirmed?: boolean; onlyObserved?: boolean }): Promise<void>
   discoverHostExecutors(hostId: string): Promise<void>
   checkHost(host: HostConfig): Promise<void>
   /**
@@ -8219,12 +8219,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     try { await promise }
     finally { if (pendingHostExecutorDiscoveries.get(hostId)?.promise === promise) pendingHostExecutorDiscoveries.delete(hostId) }
   },
-  async detectExecutors(hostId) {
+  async detectExecutors(hostId, options) {
     const config = get().config, host = config?.hosts.find(host => host.id === hostId)
     if (!config || !host) return
-    if (host.kind === 'ssh') return await get().discoverHostExecutors(hostId)
+    if (host.kind === 'ssh') {
+      const inventory = get().hostExecutorInventories[hostId]
+      if (options?.onlyUnconfirmed && hostExecutorInventoryMatches(inventory, host) && inventory.state === 'ready' &&
+        inventory.result && inventory.result.executors.every(item => item.availability === 'available' || item.availability === 'missing')) return
+      return await get().discoverHostExecutors(hostId)
+    }
     const inFlight: Promise<void>[] = []
     const targets = Object.entries(config.executors).filter(([executorId, executor]) => {
+      const observed = currentExecutorDetection(get().executorDetections[executorDetectionKey(hostId, executorId)], executorId, executor, host)
+      if (options?.onlyObserved && !observed) return false
+      if (options?.onlyUnconfirmed && (observed?.state === 'ready' || observed?.state === 'missing')) return false
       const pending = pendingExecutorDetections.get(executorDetectionKey(hostId, executorId))
       if (pending && executorDetectionMatches(pending.input, executorId, executor, host)) {
         inFlight.push(pending.promise)
@@ -12241,6 +12249,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { runtimeEndpointWarnings, sessions: projectRuntimeEndpointSessions(state.sessions, runtimeEndpointWarnings) }
     })
     if (core.type === 'connection-state' && core.state === 'restored') {
+      // Reconcile already requested diagnostics on this exact Host. Reconnection
+      // does not authorize discovery on every configured remote Host.
+      const state = get(), host = state.config?.hosts.find(item => item.id === event.hostId)
+      const observed = host?.kind === 'ssh' ? hostExecutorInventoryMatches(state.hostExecutorInventories[event.hostId], host)
+        : host && Object.entries(state.config?.executors ?? {}).some(([id, executor]) =>
+          currentExecutorDetection(state.executorDetections[executorDetectionKey(host.id, id)], id, executor, host))
+      if (observed) void get().detectExecutors(event.hostId, { onlyUnconfirmed: true, onlyObserved: true })
       for (const candidates of Object.values(get().warmTerminals)) {
         for (const warm of candidates) {
           const request = warm.creation?.request
