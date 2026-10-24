@@ -369,10 +369,10 @@ export class DeviceWorkfaceStore {
       this.reloadWait = wait
       const current = wait
       void current.tail.then(() => {
-        if (this.reloadWait === current) this.reloadWait = undefined
+        if (this.reloadWait === current) delete this.reloadWait
         for (const listener of current.listeners) listener(undefined, false)
       }, error => {
-        if (this.reloadWait === current) this.reloadWait = undefined
+        if (this.reloadWait === current) delete this.reloadWait
         for (const listener of current.listeners) listener(error, true)
       })
     }
