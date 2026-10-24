@@ -65,10 +65,10 @@ async function click(window: BrowserWindow, selector: string) {
     assert.equal(process.env.AGENTMUX_CHILD_UI_CAPTURE_HOLD, '1', 'The original private candidate requires actual human activation before UI input')
     const label = 'activation-' + ++activationRequestCount, release = join(output, `${phase}-${label}-release`)
     const request = { pid: process.pid, title: window.getTitle(), browserWindowId: window.id, mediaSourceId: window.getMediaSourceId(), nativeId: window.getMediaSourceId().split(':')[1],
-      appPath: process.execPath, release, deadlineAt: Date.now() + 45000, purpose: 'Activate only this exact private candidate before the human action and before any automatic child-focus oracle.' }
+      appPath: process.execPath, release, deadlineAt: Date.now() + 120000, purpose: 'Activate only this exact private candidate before the human action and before any automatic child-focus oracle.' }
     await writeFile(join(output, `${phase}-${label}-request.json`), JSON.stringify(request))
     process.stderr.write('UI_ACTIVATION_HOLD ' + JSON.stringify(request) + '\n')
-    await until('independent activation of the original private candidate', () => window.isFocused(), 45000)
+    await until('independent activation of the original private candidate', () => window.isFocused(), 120000)
     receipt.assertions.push({ label: 'independent-private-candidate-human-activation', request, nativeFocused: window.isFocused() })
   }
   const point = await window.webContents.executeJavaScript(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e?.getBoundingClientRect();return r&&r.width&&r.height?{x:r.x+r.width/2,y:r.y+r.height/2}:null})()`)
