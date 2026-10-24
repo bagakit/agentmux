@@ -3,7 +3,8 @@ import { JSONRPCClient } from 'json-rpc-2.0'
 
 /** A connection to the already authenticated actor, not another native server or thread owner. */
 export async function connectCodexNativeActor(endpoint: string, token: string, signal: AbortSignal,
-  name: 'agentmux_native_input' | 'agentmux_managed_resume' | 'agentmux_frontend_reconnect' | 'agentmux_resumed_turn_read' | 'agentmux_managed_initialization') {
+  name: 'agentmux_native_input' | 'agentmux_managed_resume' | 'agentmux_frontend_reconnect' | 'agentmux_resumed_turn_read' | 'agentmux_managed_initialization',
+  options?: { retainPendingInitialization?: true }) {
   signal.throwIfAborted()
   const ws = new WebSocket(endpoint, { headers: { Authorization: `Bearer ${token}` }, maxPayload: 4 * 1024 * 1024, handshakeTimeout: 2_000 })
   const client = new JSONRPCClient(request => new Promise<void>((resolve, reject) => {
@@ -25,13 +26,14 @@ export async function connectCodexNativeActor(endpoint: string, token: string, s
   signal.addEventListener('abort', close, { once: true })
   const request = async (method: string, params: Record<string, unknown>, options?: { retainPending?: true }): Promise<any> => {
     signal.throwIfAborted()
-    // A bootstrap mutation has no native idempotency key. Its actor retains the
-    // original request and late response; a caller's bounded observation never resends it.
+    // The managed startup actor retains its original preparation and mutation
+    // requests until a response or its lifetime ends. A bounded reader never resends them.
     return await (options?.retainPending ? client.request(method, params) : client.timeout(10_000).request(method, params))
   }
   try {
     await new Promise<void>((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); ws.once('close', () => reject(new Error('Original native actor closed before connection.'))) })
-    await request('initialize', { clientInfo: { name, version: '1' }, capabilities: { experimentalApi: true } })
+    await request('initialize', { clientInfo: { name, version: '1' }, capabilities: { experimentalApi: true } },
+      options?.retainPendingInitialization ? { retainPending: true } : undefined)
     client.notify('initialized', {}, undefined)
     return { request, dispose }
   } catch (error) { dispose(); throw error }

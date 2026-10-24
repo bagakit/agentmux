@@ -134,10 +134,10 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
           setInitialization({ lifecycleOperationId, phase: 'preparing', native: { state: plan.resume ? 'unknown' : 'not-created' } })
           const address = await locateEndpoint()
           nativeConnection?.dispose()
-          nativeConnection = await connectCodexNativeActor(address, token, lifetime.signal, 'agentmux_managed_initialization')
+          nativeConnection = await connectCodexNativeActor(address, token, lifetime.signal, 'agentmux_managed_initialization', { retainPendingInitialization: true })
           // Read-only preflight may be retried before any native creation request exists.
           initializationStep = 'preflight'
-          const account = await nativeConnection.request('account/read', { refreshToken: false })
+          const account = await nativeConnection.request('account/read', { refreshToken: false }, { retainPending: true })
           if (typeof account?.requiresOpenaiAuth !== 'boolean' || account.requiresOpenaiAuth && !account.account) {
             throw new ManagedNativeLaunchError('The native account preflight did not confirm its required authentication.')
           }
