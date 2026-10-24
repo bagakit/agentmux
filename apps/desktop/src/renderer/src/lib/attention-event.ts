@@ -1,6 +1,6 @@
 import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { isNeedsYouState, type NeedsYouState } from './attention-vocabulary'
+import { isNeedsYouState, type NeedsYouState } from '@agentmux/client-ui/attention-vocabulary'
 
 // Which state change is worth interrupting a person over.
 //

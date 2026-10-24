@@ -2,7 +2,8 @@ import type { AgentTimelineSnapshot } from '@agentmux/core'
 import { builtInAgentProviderLabel } from '@agentmux/core/provider-id'
 import type { AgentSessionNameMetadata, SessionSnapshot } from '../../../shared/contracts'
 import { assertUnreachableSurface } from './workbench-surface-kinds'
-import { firstPromptFromTimeline, tabDisplayName, titleWorkbenchSurface, type AgentNameFacts, type WorkbenchTab } from './workbench-tabs'
+import { tabDisplayName, titleWorkbenchSurface, type AgentNameFacts, type WorkbenchTab } from './workbench-tabs'
+import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 
 function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[], metadata: Readonly<Record<string, AgentSessionNameMetadata>>, noteName?: string): string {
   const surface = titleWorkbenchSurface(tab)

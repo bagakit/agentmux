@@ -6,7 +6,7 @@ import { useAppStore } from '../store'
 import { nextAttentionSessionId } from '../lib/agent-attention'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
-import { isNeedsYouState } from '../lib/attention-vocabulary'
+import { isNeedsYouState } from '@agentmux/client-ui/attention-vocabulary'
 import { api } from '../lib/api'
 import type { SessionSnapshot } from '../../../shared/contracts'
 

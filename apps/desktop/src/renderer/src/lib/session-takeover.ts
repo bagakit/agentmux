@@ -4,7 +4,7 @@ import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { OpenHttpLinkOrigin } from './open-destination'
 import { currentDisplayNameRevision, useAppStore } from '../store'
 import { spatialCatalog } from './space-agent-control'
-import { firstPromptFromTimeline } from './workbench-tabs'
+import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { api } from './api'
 
 export type TakeoverSource = {

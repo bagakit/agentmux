@@ -25,7 +25,7 @@ import {
 } from '../lib/activity-autoscroll'
 import { createRulerScale, describeReadout, describeRulerAxis, describeSpan, describeActivityRecordTime, rulerBand, stepRulerSelection, type RulerReadoutText, type RulerScale } from '../lib/activity-ruler'
 import { formatClock } from '@agentmux/client-ui/conversation-time'
-import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-state'
+import { showEmptyState, showWorkingIndicator } from '@agentmux/client-ui/activity-working-state'
 import { speaksAsAgent, type ConversationAxisItem, type ConversationAxisMark } from '../lib/conversation-axis'
 import { buildContinuationPrompt } from '../lib/session-continuation'
 import { isConversationTurn, speakerOf } from '../lib/conversation-speaker'

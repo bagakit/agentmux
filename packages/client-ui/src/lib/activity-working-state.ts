@@ -17,7 +17,7 @@
  */
 
 import type { AgentDisplayState } from '@agentmux/core'
-import type { AgentTimelineItem } from '../../../shared/contracts'
+import type { AgentTimelineItem } from '@agentmux/core'
 
 /**
  * Session 显示状态里，代表「这个 turn 正在被处理」的那些。

@@ -6,7 +6,8 @@ import { steerEntryTargetsRun, steerQueueCanEverDrain } from './agent-steer-queu
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { agentPromptDeliveryServiceOutcome, agentSessionServiceOutcome, nativeSessionServiceOutcome, nativeSessionServiceCause, hookIngressServiceOutcome, classifyServiceNotice, serviceNoticeToRender } from './service-window-notice'
 import type { ServiceNoticeItem } from './use-service-notices'
-import { observeAgentSession, activityObservationPresentation } from './agent-observation'
+import { observeAgentSession } from './agent-observation'
+import { activityObservationPresentation } from '@agentmux/client-ui/agent-presentation'
 
 const NO_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
 

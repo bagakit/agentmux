@@ -7,15 +7,15 @@ import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../share
 import { type ScratchTopicSnapshot, scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
 import { focusLaneForSession, type AgentFocusLane } from './agent-focus'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
-import { agentDisplayName, firstPromptFromTimeline, workspaceForSession } from './workbench-tabs'
-import { isNeedsYouState } from './attention-vocabulary'
-import { turnWorking } from './activity-working-state'
+import { agentDisplayName, workspaceForSession } from './workbench-tabs'
+import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
+import { isNeedsYouState } from '@agentmux/client-ui/attention-vocabulary'
 import { clampStep } from '@agentmux/client-ui/activity-step-summary'
 import { sessionRecentActivity } from './session-recency'
-import { sessionStatusLabel } from './session-presentation'
 import { agentStateEnteredAt } from './agent-state-time'
-import { launcherTimelineRecap, type LauncherRecap } from './launcher-resume'
-import { observeAgentSession, activityObservationPresentation } from './agent-observation'
+import { launcherTimelineRecap, type LauncherRecap } from '@agentmux/client-ui/conversation-recap'
+import { observeAgentSession } from './agent-observation'
+import { agentPresentationBucket, agentPresentationState, activityObservationPresentation } from '@agentmux/client-ui/agent-presentation'
 import type { AgentObservation } from '@agentmux/core/agent-status'
 
 export const FOCUS_BUCKETS = ['attention', 'working', 'results', 'idle'] as const
@@ -125,13 +125,7 @@ function workingEntryTime(session: SessionSnapshot): number | null {
     && time !== undefined && Number.isFinite(time) && time > 0 ? time : null
 }
 export function focusBucketForSession(session: SessionSnapshot, hasCurrentResult: boolean, now = Date.now()): FocusBucket {
-  const state = session.status.state
-  if ((session.kind === 'agent' && session.pendingInteraction) || isNeedsYouState(state) || state === 'error') return 'attention'
-  if (session.runUnobserved || session.processState !== 'running') return 'idle'
-  const activity = session.kind === 'agent' ? observeAgentSession(session, now).semantic : undefined
-  if (activity === 'active' || turnWorking(state) && (state === 'starting' || session.kind !== 'agent')) return 'working'
-  if (hasCurrentResult && state === 'done' && (session.kind !== 'agent' || !session.currentActivity)) return 'results'
-  return 'idle'
+  return agentPresentationBucket(session, session.kind === 'agent' ? observeAgentSession(session, now) : undefined, hasCurrentResult)
 }
 /** The neutral column is a presentation group, not evidence that every member is idle. */
 export function focusNeutralGroupSummary(rows: readonly FocusContext[]): { label: string; detail: string } {
@@ -203,13 +197,8 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
   const observation = session.kind === 'agent' ? observeAgentSession(session, now) : undefined
   const activitySemantic = observation?.semantic
   const activityExplanation = observation ? activityObservationPresentation(observation, state !== 'disconnected') : null
-  const stateLabel = session.runUnobserved && bucket === 'idle' ? 'Run not observed'
-    : session.processState === 'interrupted' && bucket === 'idle' ? 'Interrupted'
-    : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unknown'
-    ? activityExplanation!.label
-    : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'unsupported'
-      ? 'Activity not reported' : session.processState === 'running' && bucket === 'idle' && activitySemantic === 'idle'
-        ? 'Idle' : bucket === 'working' && activitySemantic === 'active' ? 'Working' : sessionStatusLabel(session)
+  const presentation = agentPresentationState(session, observation, Boolean(result))
+  const stateLabel = presentation.stateLabel
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const lastActivityAt = focusLastTaskActivityAt(items, focusActivityEntryTime(session), now)
   const stateEnteredAt = session.kind === 'agent' && session.currentActivity ? undefined : agentStateEnteredAt(session, now)
@@ -248,9 +237,7 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
   // The latest non-lifecycle record can only be the recap's record if its kind matches
   // the helper's chosen kind and it is nonempty. A newer prompt is a different fact.
   const detailIsRecap = Boolean(detailIsMessage && latest?.matchesRecap)
-  const displayState = bucket === 'working' && activitySemantic === 'active' ? 'working'
-    : state === 'working' && activitySemantic !== 'active' || bucket === 'idle' && activitySemantic === 'idle' && session.kind === 'agent' && session.currentActivity
-      ? 'running' : state
+  const displayState = presentation.state
   const retainedRunIds = [...new Set(items.flatMap(item => item.activityState ? [item.activityState.run.runId] : []))]
   return { ...(retainedRunIds.length ? { retainedRunIds } : {}), id: session.id, ...(session.kind === 'agent' && (session.nativeHandle?.sessionId ?? session.nativeSessionId) ? { nativeSessionId: session.nativeHandle?.sessionId ?? session.nativeSessionId } : {}), name, detail, state: displayState, stateLabel, processState: session.processState, runUnobserved: session.runUnobserved === true, bucket, kind: session.kind, providerId: session.providerId,
     ...(session.kind === 'agent' ? { executorId: session.executorId, control: session.control } : {}),
