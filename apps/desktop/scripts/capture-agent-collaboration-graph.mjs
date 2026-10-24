@@ -39,7 +39,7 @@ if (verifying) {
   if (scenario === 'perception-scale') {
     assert.ok(receipt.actual.perceptionScale?.input?.nodes >= 240)
     assert.equal(receipt.actual.perceptionScale.boxes.agents, receipt.actual.perceptionScale.input.nodes)
-    for (const label of ['terrain-nested-dark', 'terrain-folded-dark', 'terrain-expanded-dark', 'terrain-deep-agent-revealed', 'terrain-lod-0-319', 'terrain-lod-0-321', 'terrain-lod-0-44', 'terrain-lod-0-46', 'terrain-lod-0-62', 'terrain-lod-0-72', 'terrain-lod-0-82', 'terrain-lod-light', 'terrain-narrow-light', 'terrain-narrow-dark', 'terrain-held-reader-overview', 'terrain-held-focus-overview', 'terrain-motion-off-static']) assert.ok(receipt.frames.some(frame => frame.label === label), 'Missing complete native frame: ' + label)
+    for (const label of ['terrain-parent-readable-destination', 'terrain-nested-dark', 'terrain-folded-dark', 'terrain-expanded-dark', 'terrain-deep-agent-revealed', 'terrain-lod-0-319', 'terrain-lod-0-321', 'terrain-lod-0-44', 'terrain-lod-0-46', 'terrain-lod-0-62', 'terrain-lod-0-72', 'terrain-lod-0-82', 'terrain-lod-light', 'terrain-narrow-light', 'terrain-narrow-dark', 'terrain-held-reader-overview', 'terrain-held-focus-overview', 'terrain-motion-off-static']) assert.ok(receipt.frames.some(frame => frame.label === label), 'Missing complete native frame: ' + label)
     const samples = receipt.actual.terrainLod.samples
     assert.ok(samples.length >= 7 && samples.find(sample => sample.target === .319)?.actual < .32 && samples.find(sample => sample.target === .321)?.actual > .32, 'Actual camera samples cross the glyph boundary')
   }

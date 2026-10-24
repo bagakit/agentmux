@@ -184,7 +184,7 @@ app.whenReady().then(async () => {
       const actual = new Set(sample.input.edges.filter(edge => edge.kind === 'communication').map(edge => JSON.stringify([JSON.parse(edge.source)[1], JSON.parse(edge.target)[1]])))
       assert.equal(result.distribution.denseCommunication.length, 36)
       for (const expected of result.distribution.denseCommunication) assert.ok(actual.has(JSON.stringify([expected.sender, expected.recipient])), 'The actual Worker receives observed cross-area message ' + expected.messageId)
-      assert.equal(sample.input.areas.filter(area => area.members === 0).length, 60)
+      assert.deepEqual(sample.input.areas.filter(area => result.distribution.emptyAreaNodeIds.includes(area.id) && area.members === 0).map(area => area.id).sort(), result.distribution.emptyAreaNodeIds.slice().sort())
       result.dense = { request, actualWorkerInput: sample.input, expectedCommunication: result.distribution.denseCommunication, visited: result.distribution.denseSubjects, bodyReads: beforeBodies }
       return beforeBodies
     }
