@@ -29,7 +29,11 @@ For a human-selected exact Session, use connection diagnose --host ID --session 
 This bounded local read is available with the original managed caller. It exposes global service,
 the exact Connection's adapterService policy (adapterId, enabled and revision),
 transport, binding scope/grant counts and newest application/group intake with original Core
-outcome/waiting reasons, including receiver aliases. It returns no bodies, member identities,
+outcome/waiting reasons, including receiver aliases. Outgoing diagnosis reads the newest five
+original delivery operations, retaining independent unknown effects and source gaps. For explicit
+delivery pages use connection delivery ls --order oldest|newest (default oldest); --after continues
+the same requested order, while --after-content independently pages unresolved content. A newer
+confirmed operation does not prove complete synchronization. It returns no bodies, member identities,
 credentials or private setup data. Partial sections stay explicit; an empty page is not an
 absence proof. Follow original cursors for older observations; diagnosis never retries or
 rejoins input, reads the platform, or changes existing administration and grant permissions.
