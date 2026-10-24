@@ -2,6 +2,8 @@
 
 This document describes the update mechanisms in the current source, not an installation receipt. `pnpm update:local` builds the candidate and selects a route through [update-local.mjs](../../apps/desktop/scripts/update-local.mjs) and [update-policy.ts](../../apps/desktop/src/shared/update-policy.ts). Product constraints belong to the [interaction SSOT](../design/agentmux-desktop-interaction.md).
 
+For packaging operation order, resource discipline and failure continuation, use the [macOS packaging guide](../guides/macos-packaging.md). It does not add another installer or acceptance gate.
+
 | Candidate change | Route | Running work |
 | --- | --- | --- |
 | Renderer only; host and ctxmux fingerprints match | Activate versioned frontend resources | Main and Runs stay alive; the renderer checkpoints drafts, dirty buffers and layout, then reattaches |
@@ -52,6 +54,8 @@ Source releases and the installer fingerprint the actual ctxmux artifact directo
 ### Running application and Runtime continuity
 
 The installer compares the actual installed and candidate host artifacts before requesting quit. For an existing workbench, an unchanged Native fingerprint does not replace the public SDK's positive confirmation of the serving Runtime and original Runs. A graceful-quit timeout stops installation; it never escalates to force-killing the user's application or Runs. The confirmed semantic Host and its bound Node descendants belong to that namespace, rather than the GUI quit barrier. The installer signals only the Host after normal GUI exit and waits for its original workers to close themselves; unknown modes, changed identities and other GUI workers remain protected. Activation, preserved workbench, Session/Run/PID continuity and Native upgrade are separate outcomes; an unavailable observation cannot stand in for confirmation.
+
+[observeApplicationProcesses](../../apps/desktop/scripts/package-process-scope.mjs) returns current `serving` PIDs and an `admissions` history retained for the installer operation. An admission remains after that exact process exits; iterating all `admissions` as if they were live prevents a completed quit from settling. Current membership and UID/PID/birth bindings determine liveness; retained history preserves the original ownership evidence. A shared executable alone does not make a semantic Host or external Node client part of the GUI.
 
 The installer retains auxiliary Desktop presentation and startup-check observations verbatim; their field evolution does not authorize or block installation. Loaded identity, storage, original topology, independent focus and healthy Run bindings keep their strict validation and continuity checks. Restart expectations follow the existing [private Browser contract](../design/behavior/browser-workface.md#匿名-browser): only the outgoing private URL is projected to an empty page. Incoming observations stay unmodified and strictly checked, so a retained private URL cannot pass as a valid restart.
 

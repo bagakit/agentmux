@@ -42,6 +42,7 @@
 | Agent Session 启动、恢复阶段与唯一恢复 owner | [Session 恢复行为](design/behavior/session-recovery.md) · [恢复模块](architecture/agent-session-recovery.md) |
 | 字节到画面、Attachment 与 viewport 链路 | [Terminal Runtime 架构](architecture/terminal-runtime.md) |
 | Renderer 更新、应用安装与 Native 保全 | [Desktop 更新架构](architecture/desktop-updates.md) |
+| 并行开发中快速打包、安装、续做和清理 | [macOS 打包指南](guides/macos-packaging.md) |
 | 防止流程失败阻断健康能力 | [红线判定](../RED-LINES.md) |
 | 新功能需要哪些 JSON-RPC／CLI、如何接线交付 | [公共能力贡献约定](guides/public-capability-contributions.md) |
 | 跨模块观测诊断、证据与错误码、历史/采样接入边界 | [Diagnostic Evidence 设计](design/diagnostic-evidence.md) |
