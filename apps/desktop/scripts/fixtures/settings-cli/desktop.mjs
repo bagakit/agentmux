@@ -146,25 +146,26 @@ export function desktopFixture({ desktopRoot, root, privateHome, environment, ch
       await main.call('Debugger.removeBreakpoint', { breakpointId: preparation.breakpointId })
     }
     await main.call('Debugger.resume')
-    const endpoint = new URL(await waitFor(`${label} Renderer debugger`, () => { alive(); return rendererUrl }))
-    const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`, { signal: AbortSignal.timeout(5_000) })).json())
-      .find(item => item.type === 'page' && item.url.startsWith('file:')))
-    const cdp = await connectCdp(target.webSocketDebuggerUrl, connections)
-    await cdp.call('Runtime.enable'); await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
-    const ready = await waitFor(`${label} ready`, async () => {
+    const readReady = async () => {
       try { return JSON.parse(await readFile(readyFile, 'utf8')) }
       catch (error) { if (error.code !== 'ENOENT') throw error; alive(); return null }
-    })
+    }
     if (seed) {
-      // Node waits for an attached inspector on exit. Detach our own observers once the
-      // ready file proves seed completion, then demand the actual clean process exit.
-      main.close(); cdp.close()
+      // A seed exits after its ready receipt; its Renderer need not remain available.
+      await waitFor(`${label} ready`, readReady)
+      main.close()
       try { await waitFor('seed exit', () => child.exitCode !== null || child.signalCode !== null) }
       catch (error) { throw new Error(`${error.message}; private diagnostics=${diagnostics}`) }
       assert.equal(child.exitCode, 0); assert.equal(child.signalCode, null)
       children.delete(child)
       return { report: JSON.parse(await readFile(report, 'utf8')) }
     }
+    const endpoint = new URL(await waitFor(`${label} Renderer debugger`, () => { alive(); return rendererUrl }))
+    const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`, { signal: AbortSignal.timeout(5_000) })).json())
+      .find(item => item.type === 'page' && item.url.startsWith('file:')))
+    const cdp = await connectCdp(target.webSocketDebuggerUrl, connections)
+    await cdp.call('Runtime.enable'); await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
+    const ready = await waitFor(`${label} ready`, readReady)
     await waitFor(`${label} actual App`, () => cdp.evaluate('Boolean(window.agentmux && document.querySelector(".app-shell"))'))
     let runtimeFailure
     if (expectRuntimeUnavailable) {

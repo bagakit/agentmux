@@ -73,7 +73,7 @@ export async function compiledHostFixture(candidate) {
   const children = new Set(), connections = new Set(), clients = new Set(), rpcClients = new Set(), ownedSessions = new Set()
   const core = await import(pathToFileURL(join(candidate.root, 'packages/core/dist/index.js')).href)
   const hosted = await import(pathToFileURL(join(candidate.root, 'packages/core/dist/hosted.js')).href)
-  const desktop = await import(pathToFileURL(join(candidate.root, 'apps/desktop/scripts/fixtures/settings-cli/desktop.mjs')).href)
+  const desktop = await import(new URL('../../../../desktop/scripts/fixtures/settings-cli/desktop.mjs', import.meta.url).href)
   let daemon, owner, ready, desktopProbe, original, sdk, rpc
   const cleanup = { errors: [], completed: [] }
   const waitFor = (label, read, budget) => until(label, read, Boolean, budget)
