@@ -73,6 +73,7 @@ export function FullPageLoadingSurface({
   scope,
   eyebrow = 'AgentMux',
   title,
+  description,
   detail,
   actions,
   details,
@@ -85,6 +86,7 @@ export function FullPageLoadingSurface({
   scope: 'app' | 'region'
   eyebrow?: string
   title: string
+  description?: ReactNode
   detail: string
   actions?: ReactNode
   details?: { summary: string; content: ReactNode }
@@ -142,6 +144,7 @@ export function FullPageLoadingSurface({
         activity={busy && children == null ? <WaitingActivity key={phase} surface={surfaceRef} visible={visible} /> : undefined}
         identity={!busy && scope === 'region' && children == null ? <ThemeStatusInfoIcon size={22} aria-hidden="true" /> : undefined}
         title={children == null ? title : undefined}
+        description={children == null ? description : undefined}
         actions={actions}
         body={<>{children}{detail ? <p className="full-page-loading__detail">{detail}</p> : null}{supplement}</>}
         details={details} />

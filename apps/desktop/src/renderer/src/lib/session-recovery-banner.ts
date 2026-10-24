@@ -3,7 +3,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { currentRunRecoveryOperation } from './continuity-presentation'
 
 /** A live Run and its terminal frontend have distinct, source-owned lifetimes. */
-export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'initialization' | 'unknown'; phase?: 'failed' | 'recovering' | 'parked'; fullPage?: boolean; title: string; detail: string; diagnostic?: string } | null {
+export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'initialization' | 'unknown'; phase?: 'failed' | 'recovering' | 'parked'; fullPage?: boolean; title: string; description?: string; detail: string; actionLabel?: string; actionDetail?: string; diagnostic?: string } | null {
   if (session?.kind !== 'agent' || session.processState !== 'running') return null
   const frontend = session.terminalFrontend
   if (!frontend || frontend.run.runId !== session.control.run.runId) return null
@@ -13,23 +13,47 @@ export function sessionFrontendPresentation(session: SessionSnapshot | undefined
     // bootstrap cannot cover an already attached, usable terminal.
     const noTerminal = frontend.state === 'starting'
     const diagnostic = initialization.failure?.message
+    const backend = frontend.backendState === 'running' ? 'The backend is still running.'
+      : frontend.backendState === 'stopping' ? 'The backend is stopping.'
+        : frontend.backendState === 'exited' ? 'The backend has exited.' : 'The backend state is unconfirmed.'
+    const native = initialization.native.state === 'not-created' ? 'The conversation has not been created yet.'
+      : initialization.native.state === 'confirmed' ? 'The conversation is saved.' : 'The conversation’s startup result is unconfirmed.'
+    const retained = `${backend} ${native} Your Session and draft are kept.`
     if (initialization.phase === 'failed') return {
       kind: noTerminal ? 'initialization' : 'unknown', fullPage: noTerminal, phase: 'failed',
-      title: 'Agent couldn’t finish starting',
-      detail: `${frontend.backendState === 'running' ? 'The backend is still running. ' : frontend.backendState === 'stopping' ? 'The backend is stopping. ' : frontend.backendState === 'exited' ? 'The backend has exited. ' : 'The backend state is unconfirmed. '}${initialization.native.state === 'not-created'
-        ? 'Setup failed before a native conversation was created. Resume continues this original initialization.'
-        : initialization.native.state === 'confirmed' ? 'The conversation is saved. Resume reconnects its terminal.'
-          : 'The native startup result is unconfirmed. Resume checks the original request.'} Your Session and draft are kept.`, ...(diagnostic ? { diagnostic } : {})
+      title: 'Startup needs attention',
+      description: initialization.failure ? {
+        connection: 'The connection to the agent service did not complete.',
+        preflight: 'A required setup check did not complete.',
+        'native-session': 'The conversation could not finish opening.',
+        frontend: 'The terminal could not connect to the conversation.'
+      }[initialization.failure.step] : 'Startup failed without a confirmed cause.',
+      detail: retained,
+      actionLabel: initialization.native.state === 'not-created' ? 'Retry setup' : 'Resume',
+      actionDetail: initialization.native.state === 'confirmed'
+        ? 'Checks the original conversation and reconnects its terminal without sending your message again.'
+        : 'Checks and continues the original setup without sending your message again.',
+      ...(diagnostic ? { diagnostic } : {})
     }
     if (initialization.phase === 'unknown') return {
       kind: noTerminal ? 'initialization' : 'unknown', fullPage: noTerminal, phase: 'parked',
       title: 'Startup result unconfirmed',
-      detail: 'The original native request may still be in progress. Check the original request for its latest result. Your Session, draft and available input are kept.', ...(diagnostic ? { diagnostic } : {})
+      description: initialization.failure?.code === 'AGENT_NATIVE_INITIALIZATION_OBSERVATION_UNCONFIRMED'
+        ? 'The original request is still being observed. A successful response will let setup continue automatically.'
+        : 'Startup has not returned a confirmed result. Its outcome is still unknown.',
+      detail: retained,
+      actionLabel: 'Check startup',
+      actionDetail: 'Checks or continues the original setup without sending your message again.',
+      ...(diagnostic ? { diagnostic } : {})
     }
     if (noTerminal) return {
       kind: 'initialization', fullPage: true, phase: 'recovering',
       title: initialization.phase === 'creating' ? 'Opening your conversation' : 'Preparing your session',
-      detail: 'The backend is preparing the original Session. You can keep writing your draft while startup completes.'
+      description: initialization.phase === 'creating' ? 'Waiting for the original conversation request to return.'
+        : 'Connecting to the agent service and checking its startup requirements.',
+      detail: retained,
+      actionLabel: 'Check progress',
+      actionDetail: 'Follows the original setup. You can keep writing your draft while it completes.'
     }
   }
   if (frontend.state === 'detached' && typeof frontend.exitCode === 'number' && frontend.exitCode !== 0) return {

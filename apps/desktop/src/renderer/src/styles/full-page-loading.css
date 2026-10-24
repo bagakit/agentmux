@@ -25,6 +25,8 @@
 .full-page-loading__elapsed { padding-inline-start: var(--sp-4); border-inline-start: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
 .full-page-loading__activity { color: var(--green-text); }
 .full-page-loading__detail { max-width: 60ch; margin: 0; color: var(--text-2); font-size: var(--fs-prose); line-height: 1.65; overflow-wrap: anywhere; }
+.full-page-loading .surface-state__description { font-size: var(--fs-prose); }
+.session-startup-action-detail { flex: 0 0 100%; margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
 .full-page-loading--failed > .surface-state > .surface-state__content > .surface-state__identity { color: var(--red-text); }
 .full-page-loading--failed .full-page-loading__art { opacity: .48; }
 .full-page-loading--parked .full-page-loading__art { opacity: .58; }
