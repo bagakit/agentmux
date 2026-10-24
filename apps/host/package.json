@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "files": ["dist", "resources/bin"],
+  "files": [
+    "dist",
+    "resources/bin"
+  ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -14,7 +17,8 @@
     "@agentmux/core": "workspace:*",
     "@agentmux/relay": "workspace:*",
     "yaml": "2.9.0",
-    "fs-native-extensions": "1.5.1"
+    "fs-native-extensions": "1.5.1",
+    "@agentmux/client-ui": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -85,6 +89,10 @@
     "./file-resource-model": {
       "types": "./dist/file-resource-model.d.ts",
       "import": "./dist/file-resource-model.js"
+    },
+    "./presentation-configuration": {
+      "types": "./dist/presentation-configuration.d.ts",
+      "import": "./dist/presentation-configuration.js"
     }
   }
 }

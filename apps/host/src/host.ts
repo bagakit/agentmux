@@ -1,6 +1,8 @@
+import { createHostSnapshotObservation } from './snapshot-observation.js'
+import { createHostSpatialPresentation } from './spatial-presentation.js'
 import { createDesktopInputContextCaptureReader } from './input-context-capture-reader.js'
 import { dirname, join } from 'node:path'
-import { AgentMuxFileAgentSessionStore, AgentMuxError,
+import { AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore, AgentMuxError,
   startHeadlessAgentMux, connectAgentMuxRpc, defaultAgentMuxControlSocketPath, isMoteChatMethod,
   type AgentMuxAgentSessionStore, type AgentMuxRpcCallContext, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
@@ -81,11 +83,15 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     try { return { ...mobileState, ...(offerUrl ? { origin: new URL(offerUrl()).origin } : {}) } }
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
+  const spatialState = connectionOwner?.spatial ?? new AgentMuxSpatialStateStore()
   const service = {
+    spatialState,
+    snapshot: createHostSnapshotObservation(configurationPath, spatialState),
+    spatialPresentation: createHostSpatialPresentation({ ...(configurationPath ? { configurationPath } : {}), clients: () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])] }),
     mobileAssets,
     fileUploads: options.fileUploads ?? new FileUploadOwner(),
     ...(agentLearning ? { agentLearning } : {}),
-    ...(connectionOwner ? { connections: connectionOwner.connections, spatialState: connectionOwner.spatial,
+    ...(connectionOwner ? { connections: connectionOwner.connections,
       ...(connectionOwner.moteChat ? { moteChat: connectionOwner.moteChat } : {}),
       ...(connectionOwner.moteConnections ? { moteConnections: connectionOwner.moteConnections, motePreferences: connectionOwner.motePreferences } : {}) } : {}),
     operationSource: (context: AgentMuxRpcCallContext) => context.caller ? undefined : authority?.operationSource(context.principal),

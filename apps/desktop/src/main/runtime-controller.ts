@@ -1,3 +1,4 @@
+import { configuredAgentFallbackLabel as agentFallbackLabel, workspacePresentationLabel as workspaceLabel } from '@agentmux/host/presentation-configuration'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { executorEnvironmentRevision } from '../shared/executor-probe-context.js'
 import { readInputObservation, type InputObservationReference, type InputPerformanceSender, type InputPerformanceHandle } from '@agentmux/core/control'
@@ -5,7 +6,7 @@ import { MainPerformanceDiagnostics } from './performance-diagnostics.js'
 import { profileAgentContext } from '../shared/user-profile.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
 import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE, type AgentScheduleCheckInPolicy } from '@agentmux/core/schedule'
-import { checkInHumanObservation, type CheckInObservation } from './agent-schedule-check-in.js'
+import { checkInHumanObservation, type CheckInObservation } from '@agentmux/host/agent-schedule-check-in'
 
 import { isAbsolute } from 'node:path'
 import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, AGENTMUX_AGENT_MESSAGING_ENTRY, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryDescriptor, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
@@ -152,32 +153,6 @@ function hostSignature({ label: _label, ...host }: HostConfig): string {
 
 function signatures(config: AppConfig): Map<string, string> {
   return new Map(config.hosts.map(host => [host.id, hostSignature(host)]))
-}
-
-function workspaceLabel(config: AppConfig, hostId: string, path: string): string {
-  return config.workspaces.find((workspace) => workspaceOwnsSessionPath(workspace, {
-    hostId,
-    workspacePath: path
-  }))?.name
-    ?? path.split(/[\\/]/).filter(Boolean).at(-1)
-    ?? path
-}
-
-/**
- * The Provider·Workspace derived name — the LOWEST tier of the display-name priority chain (see the
- * renderer's `display-name.ts`). This is the ONE place that builds that string; it rides on `session.label`
- * and the renderer consumes it verbatim as the chain's fallback, never re-deriving it. Every agent Session
- * and recovery candidate takes its label from here so the three sites cannot drift apart.
- */
-function agentFallbackLabel(
-  config: AppConfig,
-  session: { executorId: AgentExecutorId; providerId: AgentProviderId; hostId: string; workspacePath: string }
-): string {
-  const configuredExecutor = Object.hasOwn(config.executors, session.executorId) ? config.executors[session.executorId] : undefined
-  const executorLabel = configuredExecutor?.providerId === session.providerId
-    ? configuredExecutor.label
-    : session.executorId
-  return `${executorLabel} · ${workspaceLabel(config, session.hostId, session.workspacePath)}`
 }
 
 function terminalInputKey(hostId: string, runId: string): string {
