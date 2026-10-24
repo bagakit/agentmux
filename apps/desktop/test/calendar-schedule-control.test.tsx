@@ -21,7 +21,6 @@ const receipt = (schedule: ContinuousProgressLoop) => ({ schedule, diskDurabilit
 beforeEach(() => {
   useLauncherState.setState({ drafts: {}, persistenceIssue: null })
   vi.spyOn(api.schedule, 'list').mockResolvedValue({ schedules: [], executionScope: 'connected-host' })
-  vi.spyOn(api.schedule, 'onChanged').mockImplementation(() => vi.fn())
 })
 async function mount(schedule?: ContinuousProgressLoop) {
   if (schedule) vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [schedule], executionScope: 'connected-host' })
@@ -42,25 +41,26 @@ async function openForm() {
 async function clickText(text: string) {
   await act(async () => { [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === text)!.click() })
 }
+async function refreshVisible() {
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+}
 
 describe('original calendar control', () => {
-  it.each([1, 32])('avoids repeated timezone work across %i hidden retained controls while their status stays live', async count => {
+  it.each([1, 32])('keeps %i hidden forms without starting schedule readers or repeated timezone work', async count => {
     const timezone = vi.spyOn(automationPreferences, 'automationCalendarTimezone')
     const targets = Array.from({ length: count }, (_, index) => ({ ...target, agentSessionId: `retained-arrangement-${index}` }))
-    const status = vi.fn(), listeners: ((record: ContinuousProgressLoop) => void)[] = []
-    vi.mocked(api.schedule.onChanged).mockImplementation(listener => { listeners.push(listener); return vi.fn() })
+    const status = vi.fn()
     const render = () => dom.render(<>{targets.map(exact => <CalendarScheduleControl key={exact.agentSessionId}
       target={exact} presented={false} onStatusChange={status} />)}</>)
     await render()
-    await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-schedule-state="inactive"]')).toHaveLength(count))
+    expect(dom.container.querySelectorAll('[data-schedule-state="unconfirmed"]')).toHaveLength(count)
+    expect(api.schedule.list).not.toHaveBeenCalled()
     expect(dom.container.querySelectorAll('textarea')).toHaveLength(count)
     const input = dom.container.querySelector('textarea')
     timezone.mockClear()
     for (let index = 0; index < 10; index++) await render()
     expect(timezone).not.toHaveBeenCalled()
-    await act(async () => listeners.forEach(listener => listener(saved({ ...targets[0]!, status: 'paused' }))))
-    expect(status).toHaveBeenLastCalledWith('paused')
-    expect(dom.container.querySelector('[data-schedule-state="paused"]')).not.toBeNull()
+    expect(status).toHaveBeenLastCalledWith('unconfirmed')
     expect(dom.container.querySelector('textarea')).toBe(input)
     expect(timezone).not.toHaveBeenCalled()
     expect(dom.draft()).toBe('Keep my draft')
@@ -69,7 +69,7 @@ describe('original calendar control', () => {
     vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved(), saved({ loopId: 'second-arrangement' })], executionScope: 'connected-host' })
     const timezone = vi.spyOn(automationPreferences, 'automationCalendarTimezone'), status = vi.fn()
     await dom.render(<CalendarScheduleControl target={target} presented={false} onStatusChange={status} />)
-    await vi.waitFor(() => expect(dom.container.querySelector('[data-schedule-state="active"]')).not.toBeNull())
+    expect(api.schedule.list).not.toHaveBeenCalled()
     const input = dom.container.querySelector('textarea')
     await act(async () => useAppStore.setState({ config: { ...useAppStore.getState().config!, automation: { calendarTimezone: 'Asia/Tokyo' } } }))
     timezone.mockClear()
@@ -90,15 +90,15 @@ describe('original calendar control', () => {
     expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(0)
   })
   it.each([false, true])('replaces loading with a retryable read failure and preserves input and original arrangements (retained: %s)', async retained => {
-    let reject!: (error: Error) => void, changed!: (record: ContinuousProgressLoop) => void
+    let reject!: (error: Error) => void
+    if (retained) await mount(saved())
     vi.mocked(api.schedule.list).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
-    vi.mocked(api.schedule.onChanged).mockImplementation(listener => { changed = listener; return vi.fn() })
     const create = vi.spyOn(api.schedule, 'create')
     await dom.render(<CalendarScheduleControl target={target} />)
-    expect(dom.container.textContent).toContain('Reading arrangements…')
+    if (retained) await refreshVisible()
+    else expect(dom.container.textContent).toContain('Reading arrangements…')
     await openForm(); await edit('textarea', 'Keep this unsaved arrangement')
     const input = dom.container.querySelector<HTMLTextAreaElement>('textarea')!
-    if (retained) await act(async () => changed(saved()))
     await act(async () => reject(new Error('Calendar source unavailable')))
     expect(dom.container.querySelector('[role="status"]')!.textContent).toContain('Calendar source unavailable')
     expect([...dom.container.querySelectorAll('button')].some(button => button.textContent === 'Retry arrangements')).toBe(true)
@@ -110,7 +110,7 @@ describe('original calendar control', () => {
     expect(dom.draft()).toBe('Keep my draft')
     vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved({ revision: 2, status: 'paused' })], executionScope: 'connected-host' })
     await clickText('Retry arrangements')
-    expect(api.schedule.list).toHaveBeenCalledTimes(2)
+    expect(api.schedule.list).toHaveBeenCalledTimes(retained ? 3 : 2)
     expect(dom.container.querySelector('[data-schedule-state]')!.getAttribute('data-schedule-state')).toBe('paused')
     expect(dom.container.querySelector('.calendar-schedules__heading')!.textContent).toContain('1 saved')
     expect(dom.container.textContent).not.toContain('Calendar source unavailable')
@@ -177,7 +177,6 @@ describe('original calendar control', () => {
   it('consumes the exact control identity for both calendar and interval rather than its display id', async () => {
     const session = { ...composerSession('display-region'), control: { ...composerSession().control, agentSessionId: target.agentSessionId } }
     const interval = vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
-    vi.spyOn(api.continuousProgress, 'onChanged').mockImplementation(() => vi.fn())
     await dom.render(<ContinuousProgressControl session={session} />)
     expect(api.schedule.list).toHaveBeenCalledExactlyOnceWith({ target })
     expect(interval).toHaveBeenCalledExactlyOnceWith(target)
@@ -265,16 +264,16 @@ describe('original calendar control', () => {
   })
   it('quiet follow-up controls distinguish accepted, unconfirmed and skipped attempts using the saved policy', async () => {
     const checkInState = { budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1, unanswered: { humanId: 'real-human', humanCreatedAt: _batchFixtureEpoch(0, 0, 1), claimAt: _batchFixtureEpoch(0, 0, 2) } }
-    let changed!: (schedule: ContinuousProgressLoop) => void
-    vi.mocked(api.schedule.onChanged).mockImplementation(listener => { changed = listener; return vi.fn() })
     await mount(saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState, lastOutcome: 'unknown', status: 'paused' }))
     expect(dom.container.textContent).toContain('Previous follow-up is unconfirmed')
     expect(dom.container.textContent).not.toContain('Waiting for your next confirmed reply')
     await dom.render(<CalendarScheduleControl target={{ ...target }} />)
     expect(api.schedule.list).toHaveBeenCalledTimes(1)
-    await act(async () => changed(saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState, lastOutcome: 'sent', revision: 2 })))
+    vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState, lastOutcome: 'sent', revision: 2 })], executionScope: 'connected-host' })
+    await refreshVisible()
     await vi.waitFor(() => expect(dom.container.textContent).toContain('Waiting for your next confirmed reply'))
-    await act(async () => changed(saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState: { budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1 }, lastOutcome: 'skipped', lastDecision: 'No new question was delivered', revision: 3 })))
+    vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState: { budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1 }, lastOutcome: 'skipped', lastDecision: 'No new question was delivered', revision: 3 })], executionScope: 'connected-host' })
+    await refreshVisible()
     await vi.waitFor(() => expect(dom.container.textContent).toContain('No new question was delivered'))
     expect(dom.container.textContent).not.toContain('Waiting for your next confirmed reply')
   })
@@ -343,13 +342,14 @@ describe('original calendar control', () => {
     expect(dom.container.querySelector('.schedule-arrangement__message')!.textContent).toBe('A confirmed new idea')
     expect(dom.draft()).toBe('Keep my draft')
   })
-  it('keeps fresher event facts when a list returns late and rejects a different target', async () => {
+  it('keeps a confirmed action when a list returns late and rejects a different target', async () => {
+    await mount(saved())
     let finish!: (value: Awaited<ReturnType<typeof api.schedule.list>>) => void
-    vi.mocked(api.schedule.list).mockImplementation(() => new Promise(resolve => { finish = resolve }))
-    let changed!: (loop: ContinuousProgressLoop) => void
-    vi.mocked(api.schedule.onChanged).mockImplementation(listener => { changed = listener; return vi.fn() })
-    await dom.render(<CalendarScheduleControl target={target} />)
-    await act(async () => { changed(saved({ revision: 2, status: 'paused' })); changed(saved({ hostId: 'foreign' })); finish({ schedules: [saved()], executionScope: 'connected-host' }) })
+    vi.mocked(api.schedule.list).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await refreshVisible()
+    vi.spyOn(api.schedule, 'pause').mockImplementation(async params => receipt(saved({ revision: 2, status: 'paused', lastMutation: { operationId: params.operationId, expectedRevision: params.expectedRevision, action: 'pause' } })))
+    await clickText('Pause arrangement')
+    await act(async () => finish({ schedules: [saved()], executionScope: 'connected-host' }))
     expect(dom.container.querySelector('[data-schedule-state]')!.getAttribute('data-schedule-state')).toBe('paused')
     expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(1)
     const resume = vi.spyOn(api.schedule, 'resume').mockResolvedValue(receipt(saved({ hostId: 'foreign', revision: 3 })))
