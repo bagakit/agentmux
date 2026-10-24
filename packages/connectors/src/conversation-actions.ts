@@ -139,12 +139,12 @@ export class ConversationActions implements PublicationPermissionsPort {
     return this.current(JSON.parse(String(row.reference_json))).length > 0
   }
   authorize(record: ConnectionIngressAction): Reference {
-    this.options.connections.assertServiceEnabled()
+    const original = this.options.connections.readConfiguration(record.connectionId)
+    if (!original?.config.enabled || !same(original.config.application, record.application)) return failure('INGRESS_CONNECTION_UNAVAILABLE')
+    this.options.connections.assertServiceEnabled(original.config.adapterId)
     if (!record.actor || !record.actionRef || !record.sourceMessageId || !record.externalConversationId) failure('INGRESS_ACTOR_NOT_AUTHORIZED')
     const ref = this.reference(record.actionRef!)
     if (!ref || ref.binding.connectionId !== record.connectionId || !same(ref.binding.application, record.application) || ref.binding.externalConversationId !== record.externalConversationId) failure('INGRESS_AUTHORITY_REVISED')
-    const connection = this.options.connections.readConfiguration(record.connectionId)
-    if (!connection?.config.enabled || !same(connection.config.application, record.application)) failure('INGRESS_CONNECTION_UNAVAILABLE')
     const grant = this.current(ref!).find(value => same(value.actor, record.actor))
     if (!grant) failure('INGRESS_ACTOR_NOT_AUTHORIZED')
     const mapping = ref!.kind === 'question'

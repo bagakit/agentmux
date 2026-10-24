@@ -82,11 +82,11 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     const binding = this.readExact(bindingId, revision), current = this.readCurrent(bindingId)
     const result = (reason: NonNullable<RoomPublicationAuthority['reason']>): RoomPublicationAuthority => ({ binding, authorized: false, reason })
     if (!binding || !current) return result('missing')
-    if (!this.options.connections.readService().enabled) return result('service-disabled')
     if (current.revision !== revision) return result('binding-revised')
     if (binding.state !== 'active') return result('paused')
     const connection = this.options.connections.readConfiguration(binding.connectionId)
     if (!connection?.config.enabled || !equal(connection.config.application, binding.application)) return result('connection-disabled')
+    if (!this.options.connections.automaticTrafficEnabled(connection.config.adapterId)) return result('service-disabled')
     if (!['future-native-user-facing', 'future-shared-conversation'].includes(binding.scope.publication) || !['user', 'device', 'agent'].includes(binding.authorizedBy.kind) || binding.authorizedBy.kind === 'agent' && binding.authorizedBy.id !== binding.agentSessionId) return result('publication-not-granted')
     return { binding, authorized: true }
   }
@@ -127,9 +127,14 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
   }
   private notices(operationId: string, entries: Array<{ binding: RoomBinding; event: RoomBindingNoticeEvent }>): RoomBindingNotice[] | undefined {
     if (!this.options.lifecycle) return undefined
-    let synchronization: boolean | null = null
-    try { synchronization = this.options.connections.readService().enabled } catch { /* Notification describes the observation gap; it cannot block ending this relationship. */ }
-    return entries.map(({ binding, event }) => ({ event, deliveryOperationId: this.options.lifecycle!.queueBindingNotice(operationId, binding, event, synchronization) }))
+    return entries.map(({ binding, event }) => {
+      let synchronization: boolean | null = null
+      try {
+        const connection = this.options.connections.readConfiguration(binding.connectionId)
+        if (connection) synchronization = this.options.connections.automaticTrafficEnabled(connection.config.adapterId)
+      } catch { /* Notification describes the observation gap; it cannot block ending this relationship. */ }
+      return { event, deliveryOperationId: this.options.lifecycle!.queueBindingNotice(operationId, binding, event, synchronization) }
+    })
   }
   private sameAudience(left: RoomBinding, right: RoomBinding): boolean {
     return equal(left.application, right.application) && left.externalConversationId === right.externalConversationId && left.executionHostId === right.executionHostId && left.executionRuntimeId === right.executionRuntimeId && left.agentSessionId === right.agentSessionId && equal(left.scope, right.scope) && equal(left.inputTarget, right.inputTarget)

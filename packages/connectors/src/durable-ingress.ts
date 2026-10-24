@@ -134,14 +134,16 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     this.database.prepare(value.kind === 'action' ? 'UPDATE connection_ingress_event SET record_json=? WHERE ingress_id=? AND record_json IS NOT NULL' : 'UPDATE connection_ingress_message SET record_json=? WHERE ingress_id=?').run(JSON.stringify(value), value.ingressId)
     return value as T
   }
-  private assertService(): void {
-    try { this.options.connections.assertServiceEnabled() }
+  private assertService(connectionId: string): void {
+    const connection = this.options.connections.readConfiguration(connectionId)
+    if (!connection) fail('INGRESS_CONNECTION_UNAVAILABLE')
+    try { this.options.connections.assertServiceEnabled(connection.config.adapterId) }
     catch (error) { fail(error instanceof AgentMuxError && error.code === 'CONNECTION_SERVICE_DISABLED' ? 'INGRESS_SERVICE_DISABLED' : 'INGRESS_SERVICE_UNCONFIRMED') }
   }
   /** Authenticate, retain the complete original event, then ACK. ACK certifies persistence alone. */
   async receive(input: { connectionId: string; raw: string; transportProof?: unknown }, acknowledge: () => void | Promise<void>): Promise<{ ingress: ConnectionIngressRecord; duplicate: 'event' | 'message' | null }> {
     input = { ...input }
-    this.assertService()
+    this.assertService(input.connectionId)
     const connection = this.options.connections.readConfiguration(input.connectionId)
     if (!connection?.config.enabled) fail('INGRESS_CONNECTION_UNAVAILABLE')
     const authenticator = this.authenticators.get(connection.config.adapterId)
@@ -151,7 +153,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     catch { return fail('INGRESS_AUTHENTICATION_FAILED') }
     if (event.actor && !equal(event.actor.application, connection.config.application)) fail('INGRESS_ISSUER_MISMATCH')
     const saved = this.transaction(() => {
-      this.assertService()
+      this.assertService(input.connectionId)
       const current = this.options.connections.readConfiguration(input.connectionId)
       if (!current?.config.enabled || current.revision !== connection.revision) fail('INGRESS_CONNECTION_REVISED')
       const { domain, appId } = current.config.application, encoded = JSON.stringify(event)
@@ -207,7 +209,8 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
           inputMetadata: { ingressId: record.ingressId, state: record.state, ...(record.code && connectionDiagnosisIntakeCodes.includes(record.code as never) ? { code: record.code as typeof connectionDiagnosisIntakeCodes[number] } : {}) }, author: {
           kind: 'external', connectionId: target.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: target.bindingId, bindingRevision: target.bindingRevision, ...(target.authoritySource ? { authoritySource: target.authoritySource } : {})
         } }
-        this.assertService()
+        this.assertService(record.connectionId)
+        if (target.connectionId !== record.connectionId) this.assertService(target.connectionId)
         const binding = this.binding(record), current = binding && this.options.bindings.readCurrent(binding.bindingId)
         const connection = this.options.connections.readConfiguration(target.connectionId), receiver = this.options.connections.readConfiguration(record.connectionId)
         if (!binding || !current || current.state !== 'active' || current.revision !== binding.revision || binding.agentSessionId !== target.agentSessionId || binding.executionHostId !== target.hostId || binding.connectionId !== target.connectionId || binding.executionRuntimeId && binding.executionRuntimeId !== target.authoritySource?.executionRuntimeId) fail('INGRESS_BINDING_UNAVAILABLE')
@@ -240,7 +243,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     return this.options.bindings.findActiveAudience({ application: record.application, externalConversationId: record.externalConversationId })
   }
   private authorize(record: ConnectionIngressMessage, expected?: ConnectionIngressMessage['input'], allowPendingReply = false) {
-    this.assertService()
+    this.assertService(record.connectionId)
     const connection = this.options.connections.readConfiguration(record.connectionId)
     const binding = expected ? this.options.bindings.readExact(expected.author.bindingId, expected.author.bindingRevision) : this.binding(record)
     const current = binding ? this.options.bindings.readCurrent(binding.bindingId) : null
@@ -249,6 +252,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     if (!binding) fail('INGRESS_BINDING_UNAVAILABLE')
     const target = binding.connectionId === record.connectionId ? connection : this.options.connections.readConfiguration(binding.connectionId)
     if (!target?.config.enabled || !equal(target.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
+    if (binding.connectionId !== record.connectionId) this.assertService(binding.connectionId)
     const grant = expected ? this.options.bindings.readGrant(expected.author.grantId, expected.author.grantRevision)
       : this.options.bindings.findGrant({ connectionId: binding.connectionId, externalConversationId: record.externalConversationId, actor: record.actor })
     const currentGrant = grant ? this.options.bindings.readGrant(grant.grantId) : null
@@ -287,7 +291,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
           const credential = await this.options.connections.resolveCredential(record.connectionId)
           if (controller.signal.aborted) return unknown
           if (!credential) return { replyToMessageId, state: 'unavailable', reason: 'credential-missing' }
-          this.assertService()
+          this.assertService(record.connectionId)
           const selection = await authenticator.qualifyReply!(structuredClone(connection.config), structuredClone(event), raw, credential, controller.signal)
           return !controller.signal.aborted && (selection === 'reply' || selection === 'message') ? { replyToMessageId, state: 'confirmed', selection } : unknown
         }
@@ -455,7 +459,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       const record = this.read(original.ingressId)
       if (!record || record.kind !== 'action' || record.state !== 'received') return
       try {
-        this.assertService()
+        this.assertService(record.connectionId)
         const target = this.permissions.authorize(record)
         client = this.options.core(target.binding.executionHostId)
         // No Core call has started; retain received until this exact consumer is available.
@@ -539,7 +543,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
         const row = this.database.prepare(`SELECT ingress_id FROM (${intakeRows}) WHERE json_extract(record_json,'$.input.operationId')=? ORDER BY sequence LIMIT 1`).get(input.operationId)
         ingress = row ? this.read(String(row.ingress_id)) : null
         if (!ingress?.input || ingress.state !== 'claimed') return { ingress: null, authority: 'refused', code: 'INGRESS_CLAIM_UNAVAILABLE' }
-        if (ingress.kind === 'action') { this.assertService(); this.permissions.authorize(ingress); this.permissions.originalInput(ingress) }
+        if (ingress.kind === 'action') { this.assertService(ingress.connectionId); this.permissions.authorize(ingress); this.permissions.originalInput(ingress) }
         else this.authorize(ingress, ingress.input)
         return { ingress, authority: 'current' }
       })

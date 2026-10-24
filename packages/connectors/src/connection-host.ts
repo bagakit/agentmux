@@ -13,7 +13,7 @@ import type { ChannelMetadataChange, ChannelMetadataPort } from '@agentmux/core/
 import { createChannelMetadata } from './channel-metadata.js'
 import { credentialLookupFailure } from './credential-observation.js'
 import { AgentMuxError } from '@agentmux/core'
-import { parseConnectionConfig, parseConnectionObservation, parseConnectionParams, parseConnectionRecord, parseConnectionResult, parseConnectionServiceParams, parseConnectionServiceResult, parseConnectionServiceState, type ConnectionConfig, type ConnectionConfigureInput, type ConnectionInspectInput, type ConnectionInspectResult, type ConnectionObservation, type ConnectionOperation, type ConnectionPort, type ConnectionRecord, type ConnectionServiceState, type ConnectionServicePort, type ConnectionServiceConfigure, type ConnectionServiceOperation } from '@agentmux/core/connections'
+import { parseConnectionConfig, parseConnectionObservation, parseConnectionParams, parseConnectionRecord, parseConnectionResult, parseConnectionServiceParams, parseConnectionServiceResult, parseConnectionServiceState, type ConnectionConfig, type ConnectionConfigureInput, type ConnectionInspectInput, type ConnectionInspectResult, type ConnectionObservation, type ConnectionOperation, type ConnectionPort, type ConnectionRecord, type ConnectionServiceState, type ConnectionServicePort, type ConnectionServiceConfigure, type ConnectionServiceOperation, type ConnectionServiceSelector } from '@agentmux/core/connections'
 
 /** A Host-owned resolver. Never expose this port or its results through RPC/Renderer diagnostics. */
 export interface SecretPort {
@@ -80,7 +80,7 @@ export class ConnectionHost implements ConnectionPort {
       try { ownedDatabase?.close() } catch { /* Preserve the original initialization failure without exposing storage details. */ }
       throw new AgentMuxError('Connection configuration storage is unavailable. Existing Agents are retained.', 'CONNECTION_STORAGE_UNAVAILABLE')
     }
-    this.service = { get: async () => this.readService(), configure: async input => this.configureService(input), inspect: async input => {
+    this.service = { get: async input => this.readService(input), configure: async input => this.configureService(input), inspect: async input => {
       const parsed = parseConnectionServiceParams('connection.service.inspect', input)
       return this.serviceSafe(() => { const saved = this.storedOperation(parsed.operationId); return { operation: saved?.kind === 'service' ? saved.operation : null } })
     } }
@@ -127,7 +127,7 @@ export class ConnectionHost implements ConnectionPort {
     const config = parseConnectionConfig(JSON.parse(row.config_json as string)), revision = Number(row.revision), observed = this.observations.get(connectionId)
     let observation = !config.enabled ? disabled() : { ...(observed?.revision === revision ? observed.value : unknown()), ...(includeReceiver ? this.receiverObservation?.(connectionId, revision) : {}) }
     if (config.enabled && includeReceiver) {
-      try { if (!this.readService().enabled) observation = { ...observation, transport: { state: 'disabled' }, intake: { state: 'disabled' }, delivery: { state: 'disabled' } } }
+      try { if (!this.automaticTrafficEnabled(config.adapterId)) observation = { ...observation, transport: { state: 'disabled' }, intake: { state: 'disabled' }, delivery: { state: 'disabled' } } }
       catch { observation = { ...observation, transport: { state: 'unknown', reason: 'check-failed' }, intake: { state: 'unknown', reason: 'check-failed' }, delivery: { state: 'unknown', reason: 'check-failed' } } }
     }
     let initialSetup: ConnectionRecord['initialSetup']
@@ -142,21 +142,24 @@ export class ConnectionHost implements ConnectionPort {
   /** Synchronous exact configuration read for owners joining this same database transaction. */
   readConfiguration(connectionId: string): ConnectionRecord | null { return this.safe(() => this.read(connectionId, false)) }
   /** Current service policy, also read synchronously inside original intake/publication transactions. */
-  readService(): ConnectionServiceState {
+  readService(selector: ConnectionServiceSelector = {}): ConnectionServiceState {
+    const input = parseConnectionServiceParams('connection.service.get', selector)
     return this.serviceSafe(() => {
       if (this.closed) throw new Error('Original owner closed.')
       if (!this.serviceSchemaReady) {
-        this.database.exec('CREATE TABLE IF NOT EXISTS connection_service_policy (singleton INTEGER PRIMARY KEY CHECK(singleton=1), enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), revision INTEGER NOT NULL CHECK(revision>0));')
+        this.database.exec('CREATE TABLE IF NOT EXISTS connection_service_policy (singleton INTEGER PRIMARY KEY CHECK(singleton=1), enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), revision INTEGER NOT NULL CHECK(revision>0)); CREATE TABLE IF NOT EXISTS connection_adapter_service_policy (adapter_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), revision INTEGER NOT NULL CHECK(revision>0));')
         this.serviceSchemaReady = true
       }
-      const row = this.database.prepare('SELECT enabled,revision FROM connection_service_policy WHERE singleton=1').get()
-      if (!row) return { enabled: true, revision: 0 }
+      const row = input.adapterId === undefined ? this.database.prepare('SELECT enabled,revision FROM connection_service_policy WHERE singleton=1').get()
+        : this.database.prepare('SELECT enabled,revision FROM connection_adapter_service_policy WHERE adapter_id=?').get(input.adapterId)
+      if (!row) return { enabled: true, revision: 0, ...input }
       if (row.enabled !== 0 && row.enabled !== 1 || Number(row.revision) < 1) throw new Error('Original service policy is malformed.')
-      return parseConnectionServiceState({ enabled: row.enabled === 1, revision: Number(row.revision) })
+      return parseConnectionServiceState({ enabled: row.enabled === 1, revision: Number(row.revision), ...input })
     })
   }
-  assertServiceEnabled(): void {
-    if (!this.readService().enabled) throw new AgentMuxError('Connector service automatic traffic is disabled by its current policy. Existing applications, inputs and Agents are retained; enable the original service to continue.', 'CONNECTION_SERVICE_DISABLED')
+  automaticTrafficEnabled(adapterId: string): boolean { return this.readService().enabled && this.readService({ adapterId }).enabled }
+  assertServiceEnabled(adapterId: string): void {
+    if (!this.automaticTrafficEnabled(adapterId)) throw new AgentMuxError('Connector automatic traffic is disabled by its global or exact adapter policy. Existing applications, inputs and Agents are retained; inspect the original policy to continue.', 'CONNECTION_SERVICE_DISABLED')
   }
   private serviceSafe<T>(run: () => T): T {
     try { return run() } catch (error) {
@@ -194,10 +197,12 @@ export class ConnectionHost implements ConnectionPort {
           if (saved.kind !== 'service' || JSON.stringify(saved.input) !== JSON.stringify(input)) throw new AgentMuxError('The original configuration operation has different input or method. Inspect it without replacing its identity.', 'CONNECTION_OPERATION_CONFLICT')
           this.database.exec('COMMIT'); return saved.operation
         }
-        const current = this.readService()
+        const scope = input.adapterId === undefined ? {} : { adapterId: input.adapterId }
+        const current = this.readService(scope)
         if (current.revision !== input.expectedRevision) throw new AgentMuxError('Connector service policy changed. Read the same service before explicitly saving a new intent.', 'CONNECTION_REVISION_CONFLICT')
-        const operation: ConnectionServiceOperation = { operationId: input.operationId, expectedRevision: input.expectedRevision, status: 'configured', service: { enabled: input.service.enabled, revision: current.revision + 1 } }
-        this.database.prepare('INSERT INTO connection_service_policy (singleton,enabled,revision) VALUES (1,?,?) ON CONFLICT(singleton) DO UPDATE SET enabled=excluded.enabled, revision=excluded.revision').run(Number(operation.service.enabled), operation.service.revision)
+        const operation: ConnectionServiceOperation = { operationId: input.operationId, expectedRevision: input.expectedRevision, status: 'configured', service: { enabled: input.service.enabled, revision: current.revision + 1, ...scope } }
+        if (input.adapterId === undefined) this.database.prepare('INSERT INTO connection_service_policy (singleton,enabled,revision) VALUES (1,?,?) ON CONFLICT(singleton) DO UPDATE SET enabled=excluded.enabled, revision=excluded.revision').run(Number(operation.service.enabled), operation.service.revision)
+        else this.database.prepare('INSERT INTO connection_adapter_service_policy (adapter_id,enabled,revision) VALUES (?,?,?) ON CONFLICT(adapter_id) DO UPDATE SET enabled=excluded.enabled, revision=excluded.revision').run(input.adapterId, Number(operation.service.enabled), operation.service.revision)
         this.database.prepare('INSERT INTO connection_configuration_operation (operation_id,input_json,result_json) VALUES (?,?,?)').run(input.operationId, JSON.stringify(input), JSON.stringify(operation))
         this.database.exec('COMMIT'); return operation
       } catch (error) { try { this.database.exec('ROLLBACK') } catch { /* Inspect the same operation when commit acknowledgement is unknown. */ } throw error }

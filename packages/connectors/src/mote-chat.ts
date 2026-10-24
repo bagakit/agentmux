@@ -153,10 +153,14 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     const creator = same(configuration.creator, actor), total = creator ? null : configuration.values.strangerMessageLimit
     return { key, spaceId: configuration.target.spaceId, person: parseMoteChatPerson({ actor, creator, revision: 1, total, used: 0, remaining: total }) }
   }
+  private assertService(connectionId: string): void {
+    const connection = this.options.connections.readConfiguration(connectionId)
+    if (!connection) fail('MOTE_CHAT_CONNECTION_UNAVAILABLE', 'The original chat application is unavailable. Its retained messages and Agent identities are kept.')
+    this.options.connections.assertServiceEnabled(connection.config.adapterId)
+  }
   /** Called only for an authenticated, durably ACKed direct event before the original input claim. */
   async prepareIncoming(incoming: MoteChatIncoming): Promise<RoomBinding | null> {
     if (incoming.conversationKind !== 'direct' || !same(incoming.application, incoming.actor.application)) fail('MOTE_CHAT_SOURCE_MISMATCH', 'This original intake does not identify an authenticated direct conversation.')
-    this.options.connections.assertServiceEnabled()
     const saved = this.store.admission(incoming.application, incoming.externalMessageId)
     if (saved) {
       if (!same(saved.actor, incoming.actor) || saved.externalConversationId !== incoming.externalConversationId || saved.ingressId !== incoming.ingressId) fail('MOTE_CHAT_ADMISSION_CONFLICT', 'This original message already belongs to another chat admission. Keep its original intake identity.')
@@ -164,6 +168,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     }
     const configuration = this.store.route(incoming.application)
     if (!configuration) return null
+    this.assertService(configuration.values.connection!.connectionId)
     await this.options.assertTarget(configuration.target)
     const key = laneKey(configuration.target.spaceId, incoming), observed = this.store.latest(key)
     let activity: number | null = null
@@ -172,13 +177,13 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
       if (activity !== null && (!Number.isSafeInteger(activity) || activity < 0)) activity = null
     }
     const selected = this.store.transaction(() => {
-      this.options.connections.assertServiceEnabled()
       const duplicate = this.store.admission(incoming.application, incoming.externalMessageId)
       if (duplicate) return { generationId: duplicate.generationId }
       const current = this.store.route(incoming.application)
       if (!current || current.revision !== configuration.revision || !sameMotePreferencesTarget(current.target, configuration.target)) fail('MOTE_CHAT_ROUTE_CHANGED', 'This exact Mote chat route changed while preparing the message. The original intake is retained.')
       const connection = this.options.connections.readConfiguration(current.values.connection!.connectionId)
       if (!connection?.config.enabled || !same(connection.config.application, incoming.application)) fail('MOTE_CHAT_CONNECTION_UNAVAILABLE', 'The original chat application is unavailable. Its retained messages and Agent identities are kept.')
+      this.options.connections.assertServiceEnabled(connection.config.adapterId)
       const person = this.person(current, parseConnectionActor(incoming.actor))
       if (!person.person.creator && person.person.used >= person.person.total!) { this.store.savePerson(person); return { refused: true as const } }
       const now = this.now()
@@ -211,6 +216,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
   }
   private async createGeneration(id: string): Promise<RoomBinding> {
     let row = this.store.generation(id)!
+    this.assertService(row.connectionId)
     if (!this.active(row)) fail('MOTE_CHAT_ROUTE_DISABLED', 'This original Mote chat route is paused or its application is unavailable. Its saved conversations and messages are retained.')
     if (row.binding) return row.binding
     if (!row.prepared) {
@@ -227,12 +233,13 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
       this.store.transaction(() => { const current = this.store.generation(id)!; if (!current.prepared) this.store.saveGeneration({ ...current, prepared: JSON.parse(encode(plan)) }) })
       row = this.store.generation(id)!
     }
-    this.options.connections.assertServiceEnabled()
+    this.assertService(row.connectionId)
     if (!this.active(row)) fail('MOTE_CHAT_ROUTE_DISABLED', 'The original chat route was disabled before creation. Its reservation is retained.')
     let result: MoteChatCreatedAgent | null = null
     if (row.dispatched) result = await this.options.agents.inspect(structuredClone(row.prepared!))
     if (!result) {
       this.store.transaction(() => { const current = this.store.generation(id)!; this.store.saveGeneration({ ...current, dispatched: true }) })
+      this.assertService(row.connectionId)
       result = await this.options.agents.create(structuredClone(row.prepared!))
     }
     if (result.executionHostId !== row.generation.executionHostId || result.agentSessionId !== row.generation.agentSessionId) fail('MOTE_CHAT_CREATE_MISMATCH', 'The original creation did not return this exact Host and Session. The actual Agent is retained for inspection.')
@@ -270,9 +277,9 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
   publicationAuthority(bindingId: string, revision: number) {
     const binding = this.readExact(bindingId, revision), row = this.store.generationByBinding(bindingId)
     if (!binding || !row) return { binding, authorized: false, reason: 'missing' as const }
-    if (!this.options.connections.readService().enabled) return { binding, authorized: false, reason: 'service-disabled' as const }
     const connection = this.options.connections.readConfiguration(row.connectionId)
     if (!connection?.config.enabled || !same(connection.config.application, row.generation.application)) return { binding, authorized: false, reason: 'connection-disabled' as const }
+    if (!this.options.connections.automaticTrafficEnabled(connection.config.adapterId)) return { binding, authorized: false, reason: 'service-disabled' as const }
     return this.active(row) ? { binding, authorized: true } : { binding, authorized: false, reason: 'paused' as const }
   }
   readGrant(grantId: string, revision?: number) { const row = this.store.generationByGrant(grantId); return row?.grant && (revision === undefined || revision === row.grant.revision) ? { ...row.grant, state: this.active(row) ? 'active' as const : 'revoked' as const } : null }
