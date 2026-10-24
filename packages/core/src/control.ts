@@ -448,7 +448,7 @@ export type AgentMuxDemandDecision = {
   sourceSessionId: string | null
 }
 export type AgentMuxControlDemandListRequest = RequestBase & { operation: 'demand.list' }
-export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'demand.show'; demandId: string }
+export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'demand.show'; demandId: string; dispatchOperationId?: string }
 export type AgentMuxControlDemandCreateRequest = RequestBase & {
   operation: 'demand.create'
   /** Caller-held original identity allows reading an uncertain save without creating again. */

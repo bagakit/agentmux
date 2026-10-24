@@ -510,7 +510,8 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
   }
   if (source.operation === 'demand.show' || source.operation === 'demand.decision-log' || source.operation === 'demand.activity.inspect' || source.operation === 'demand.activity.read') {
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST') }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'),
+      ...(source.operation === 'demand.show' && source.dispatchOperationId !== undefined ? { dispatchOperationId: id(source.dispatchOperationId, 'Original Goal dispatch operation is invalid.', 'INVALID_CONTROL_REQUEST') } : {}) }
   }
   if (source.operation === 'demand.activity.append') {
     if (typeof source.kind !== 'string' || !source.kind.trim() || source.kind === 'name-change' || typeof source.message !== 'string' || !source.message.trim())
