@@ -10,7 +10,6 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const root = join(packageRoot, 'macos')
 const args = process.argv.slice(2)
 const sourceOnly = args.includes('--source-only')
-const osFixture = args.includes('--os-fixture')
 const option = name => {
   const index = args.indexOf(name)
   if (index < 0) return undefined
@@ -19,21 +18,20 @@ const option = name => {
 }
 if (args.includes('--help')) {
   process.stdout.write(`Usage: node packages/native-desktop/scripts/verify-native.mjs --source-only
-       node packages/native-desktop/scripts/verify-native.mjs --source [--os-fixture] [--scratch-path PATH]
+       node packages/native-desktop/scripts/verify-native.mjs --source [--scratch-path PATH]
 --source-only parses Swift syntax only; no SDK typecheck, test, build or UI.
---source runs real Swift tests/build, two nonempty test-killed mutants and the production Node client against native OS read dispatch.
---os-fixture additionally launches an isolated AppKit window, sends real input to that exact process/window and captures only its pixels.
+--source runs real Swift tests/build, two nonempty test-killed mutants and the production Node client against native OS dispatch.
+It launches an isolated AppKit window, sends real input to that exact process/window and captures only its pixels.
 No application assembly, signing, installation, permission prompting or user clipboard writes. A failed/unavailable operation fails the requested scope.
 `)
   process.exit(0)
 }
 for (let index = 0; index < args.length; index++) {
-  if (['--source', '--source-only', '--os-fixture'].includes(args[index])) continue
+  if (['--source', '--source-only'].includes(args[index])) continue
   if (args[index] === '--scratch-path') { option('--scratch-path'); index++; continue }
   throw new Error(`Unknown argument: ${args[index]}`)
 }
 if (sourceOnly === args.includes('--source')) throw new Error('Choose exactly one of --source-only and --source')
-if (sourceOnly && osFixture) throw new Error('--os-fixture requires --source')
 if (process.platform !== 'darwin') throw new Error('Native verification requires macOS')
 
 const assert = (condition, message) => { if (!condition) throw new Error(message) }
@@ -281,8 +279,7 @@ try {
       assert(permissions.source === 'macOS-preflight' && permissions.authoritativeForOperation === false, 'Permission readout lost its non-authoritative source')
       report.production = { state: 'passed', provider: hello.provider, instanceId: hello.instanceId,
         appCount: applications.apps.length, displayCount: displays.displays.length, permissions }
-      report.fixture = osFixture ? await verifyOSFixture(desktop, hello.instanceId, evidence, swiftArgs, pngFromBytes, pngBytes) : { state: 'not-requested' }
-      if (!osFixture) report.unverified.unshift('isolated fixture input/capture (requires --os-fixture)')
+      report.fixture = await verifyOSFixture(desktop, hello.instanceId, evidence, swiftArgs, pngFromBytes, pngBytes)
     } finally { await desktop.dispose() }
   }
   report.state = 'passed-requested-scope'
