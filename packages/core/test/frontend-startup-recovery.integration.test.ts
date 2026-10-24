@@ -25,7 +25,7 @@ if(args.includes('app-server')){
  server.on('connection',ws=>ws.on('message',bytes=>{const p=JSON.parse(String(bytes));if(!Object.hasOwn(p,'id'))return
  appendFileSync(${JSON.stringify(nativeRpc)},JSON.stringify({method:p.method})+'\\n')
  if(p.method==='turn/start'){appendFileSync(${JSON.stringify(native)},JSON.stringify(p)+'\\n');if(p.params.input[0].text.includes('UNKNOWN_INPUT'))return ws.close()}
- const thread={id:sid,sessionId:'same-loaded-object',canAcceptDirectInput:true}
+ const thread={id:sid,sessionId:'same-loaded-object',canAcceptDirectInput:true,status:{type:'idle'}}
  ws.send(JSON.stringify({jsonrpc:'2.0',id:p.id,result:p.method==='account/read'?{account:null,requiresOpenaiAuth:false}:p.method==='thread/read'?{thread}:p.method==='thread/start'||p.method==='thread/resume'?{thread,cwd:p.params.cwd,approvalPolicy:p.params.approvalPolicy,model:p.params.model,sandbox:{type:p.params.sandbox==='read-only'?'readOnly':p.params.sandbox==='workspace-write'?'workspaceWrite':'dangerFullAccess'}}:p.method==='turn/start'?{turn:{id:'native-turn'}}:{}}))}))
 }else{
  const index=existsSync(events)?readFileSync(events,'utf8').trim().split('\\n').length+1:1

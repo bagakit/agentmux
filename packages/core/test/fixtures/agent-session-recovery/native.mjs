@@ -28,7 +28,7 @@ if (args.includes('app-server')) {
       if (packet.method === 'initialize') return reply({})
       if (packet.method === 'account/read') return existsSync(join(root, 'account-failure'))
         ? failure(-32041, 'Private original account routing failure') : reply({ account: null, requiresOpenaiAuth: false })
-      const thread = { id: nativeId, sessionId: 'private-native-runtime', canAcceptDirectInput: true }
+      const thread = { id: nativeId, sessionId: 'private-native-runtime', canAcceptDirectInput: true, status: { type: 'idle' } }
       if (packet.method === 'thread/start' || packet.method === 'thread/resume') {
         while (existsSync(join(root, 'native-gate'))) await new Promise(resolve => setTimeout(resolve, 10))
         return reply({ thread, cwd: packet.params.cwd, model: packet.params.model ?? 'private-model',

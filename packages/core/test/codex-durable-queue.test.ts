@@ -10,9 +10,11 @@ import type { NativeProcessFile } from '../src/agent-native-process.js'
 import { runProcess } from '../src/process-runner.js'
 
 const os = vi.hoisted(() => ({ original: undefined as any, binary: undefined as any, stores: [] as NativeProcessFile[],
-  sourceChanged: false, queueChanged: false, helperChanged: false, helperStateChanged: false, birthChanged: false }))
-vi.mock('../src/providers/app-server-native-session.js', () => ({ locateAppServerNativeSession: async () =>
-  os.sourceChanged ? { ...os.original, id: 'foreign-thread' } : os.original }))
+  sourceChanged: false, multi: false, queueChanged: false, helperChanged: false, helperStateChanged: false, birthChanged: false }))
+vi.mock('../src/providers/app-server-native-session.js', () => ({ locateAppServerNativeSession: async (_context: unknown, _role: unknown, _scope: unknown, target?: { id: string; path?: string }) => {
+  if (os.multi && (!target || target.id !== os.original.id || target.path !== undefined && target.path !== os.original.file.path)) throw new Error('Multiple roots require the exact frozen target')
+  return os.sourceChanged ? { ...os.original, id: 'foreign-thread' } : os.original
+} }))
 vi.mock('../src/agent-native-process.js', () => ({
   nativeProcessExecutable: async () => os.binary,
   nativeProcessBirth: async (pid: number) => `kernel-generation-${pid}-${os.birthChanged ? 'changed' : 'original'}`,
@@ -27,7 +29,7 @@ const source = { providerId: 'codex', nativeSessionId: 'original-thread' }
 const correlation = createNativeInputCorrelation({ kind: 'prompt', agentSessionId: 'recipient', expectedRun: { runId: 'original-run' }, submissionId: 'original-notice' })
 
 async function fixture() {
-  os.sourceChanged = os.queueChanged = os.helperChanged = os.helperStateChanged = os.birthChanged = false
+  os.multi = os.sourceChanged = os.queueChanged = os.helperChanged = os.helperStateChanged = os.birthChanged = false
   const root = await mkdtemp(join(tmpdir(), 'amux-queue-contract-'))
   closes.push(async () => await rm(root, { recursive: true }))
   const executable = join(root, 'native executable'), path = join(root, 'rollout-original.jsonl'), trace = join(root, 'rpc.jsonl'), control = join(root, 'control.json')
@@ -60,6 +62,19 @@ it('uses the exact OS native binary and shared storage for a wrapper-owned Run w
   } })])
   expect(calls.every(row => ['initialize', 'initialized', 'thread/read', 'thread/queue/add'].includes(row.method))).toBe(true)
   expect(prepared.plan.actorId).not.toContain(f.root)
+})
+
+it('keeps the selected target for preparation and admission while unrelated main candidates remain open', async () => {
+  const f = await fixture(); os.multi = true
+  const result = await f.prepare().then(prepared => ({ prepared }), error => ({ error }))
+  expect(result, 'A qualified selected main remains usable while another main is open').not.toHaveProperty('error')
+  if (!('prepared' in result)) throw new Error('Missing selected native input preparation')
+  const prepared = result.prepared
+  await prepared.assertCurrent()
+  await expect(prepared.send('Selected original reference', { ...prepared.plan, clientCorrelation: correlation })).resolves.toMatchObject({ outcome: 'admitted' })
+  const calls = (await f.readTrace()).filter(row => row.method === 'thread/read' || row.method === 'thread/queue/add')
+  expect(calls.length).toBeGreaterThan(1)
+  expect(calls.every(row => row.params.threadId === source.nativeSessionId)).toBe(true)
 })
 
 it('uses the OS-bound original writer for an id-only saved native handle', async () => {

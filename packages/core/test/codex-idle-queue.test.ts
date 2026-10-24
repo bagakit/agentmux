@@ -19,6 +19,8 @@ async function fixture(options: { lostAck?: boolean; conflict?: 'client-id' | 'w
   const requests: Array<{ method: string; params: Record<string, any> }> = []
   const authorization: Array<string | undefined> = []
   const queued: unknown[] = []
+  const thread: { id: string; canAcceptDirectInput: boolean; status?: { type: string } } = {
+    id: source.nativeSessionId, canAcceptDirectInput: true, status: { type: options.active ? 'active' : 'idle' } }
   server.on('connection', (socket, request) => {
     authorization.push(request.headers.authorization)
     socket.on('message', data => {
@@ -27,7 +29,7 @@ async function fixture(options: { lostAck?: boolean; conflict?: 'client-id' | 'w
       const reply = (result: unknown) => socket.send(JSON.stringify({ jsonrpc: '2.0', id: value.id, result }))
       switch (value.method) {
         case 'initialize': return reply({})
-        case 'thread/read': return reply({ thread: { id: source.nativeSessionId, canAcceptDirectInput: true, status: { type: options.active ? 'active' : 'idle' } } })
+        case 'thread/read': return reply({ thread })
         case 'thread/queue/add': {
           if (options.invalid) return socket.send(JSON.stringify({ jsonrpc: '2.0', id: value.id, error: { code: -32600, message: 'Original actor rejected this queue input' } }))
           const item = { id: 'original-queue-item', clientUserMessageId: value.params.clientUserMessageId, input: value.params.input }; queued.push(item)
@@ -49,7 +51,7 @@ async function fixture(options: { lostAck?: boolean; conflict?: 'client-id' | 'w
     return result
   }
   const correlation = createNativeInputCorrelation({ kind: 'prompt', agentSessionId: 'recipient', expectedRun: { runId: 'original-run' }, submissionId: 'original-notification' })
-  return { prepare, correlation, requests, authorization, queued }
+  return { prepare, correlation, requests, authorization, queued, thread }
 }
 
 it.each([false, true])('sends only the exact frozen native queue input even when active=%s; never starts another queue item', async active => {
@@ -84,4 +86,35 @@ it('retains original manual start-or-steer and exact-turn steer semantics', asyn
   await expect(exact.send('Original turn reply', { ...exact.plan, clientCorrelation: f.correlation })).resolves.toEqual({ outcome: 'admitted', turnId: 'original-active-turn' })
   expect(f.queued).toHaveLength(0)
   expect(f.requests.filter(value => value.method.startsWith('turn/')).map(value => value.method)).toEqual(['turn/start', 'turn/steer'])
+})
+
+
+it.each(['notLoaded', 'unknown', 'missing'])('does not treat readable history with %s status as a loaded input target', async status => {
+  const f = await fixture()
+  if (status === 'missing') delete f.thread.status
+  else f.thread.status = { type: status }
+  await expect(f.prepare()).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
+  expect(f.requests.filter(value => value.method.startsWith('turn/') || value.method === 'thread/queue/add')).toEqual([])
+  // An observation failure does not close the actor or revoke its recovered input service.
+  f.thread.status = { type: 'idle' }
+  const prepared = await f.prepare()
+  await expect(prepared.send(prompt, { ...prepared.plan, clientCorrelation: f.correlation })).resolves.toMatchObject({ outcome: 'admitted' })
+})
+
+it.each(['queue-idle', 'start-or-steer', 'steer'] as const)('rechecks original loaded membership immediately before %s dispatch', async operation => {
+  const f = await fixture(), prepared = await f.prepare(operation === 'queue-idle', operation === 'steer' ? 'original-active-turn' : undefined)
+  const plan = { ...prepared.plan, clientCorrelation: f.correlation }
+  f.thread.status = { type: 'notLoaded' }
+  await expect(prepared.assertCurrent()).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
+  await expect(prepared.send(prompt, plan)).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
+  expect(f.requests.filter(value => value.method.startsWith('turn/') || value.method === 'thread/queue/add')).toEqual([])
+  expect(f.requests.filter(value => value.method === 'thread/read').every(value => value.params.threadId === source.nativeSessionId)).toBe(true)
+  f.thread.status = { type: 'idle' }
+  await expect(prepared.send(prompt, plan)).resolves.toMatchObject({ outcome: 'admitted' })
+})
+
+it('retains input eligibility for an explicitly loaded system-error thread', async () => {
+  const f = await fixture(); f.thread.status = { type: 'systemError' }
+  const prepared = await f.prepare(false)
+  await expect(prepared.send(prompt, { ...prepared.plan, clientCorrelation: f.correlation })).resolves.toMatchObject({ outcome: 'admitted' })
 })

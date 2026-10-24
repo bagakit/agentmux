@@ -35,7 +35,7 @@ if(args.includes('app-server')) {
   server.on('connection',(ws,req)=>{if(req.headers.authorization!=='Bearer '+process.env.AGENTMUX_CODEX_ACTOR_TOKEN)return ws.close()
     ws.on('message',bytes=>{const p=JSON.parse(String(bytes));if(!Object.hasOwn(p,'id'))return
       if(p.method==='turn/start') {appendFileSync(${JSON.stringify(nativeRequests)},JSON.stringify(p)+'\\n');if(p.params.input[0].text.includes('UNKNOWN_INPUT_MUST_REMAIN_ONCE'))return ws.close()}
-      ws.send(JSON.stringify({jsonrpc:'2.0',id:p.id,result:p.method==='thread/read'?{thread:{id:sid,sessionId:'same-loaded-object',canAcceptDirectInput:true}}:p.method==='turn/start'?{turn:{id:'confirmed-native-turn'}}:{}}))})})
+      ws.send(JSON.stringify({jsonrpc:'2.0',id:p.id,result:p.method==='thread/read'?{thread:{id:sid,sessionId:'same-loaded-object',canAcceptDirectInput:true,status:{type:'idle'}}}:p.method==='turn/start'?{turn:{id:'confirmed-native-turn'}}:{}}))})})
 } else {
   const reconnect=args.includes('resume')
   appendFileSync(events,JSON.stringify({type:'spawn',args,pid:process.pid})+'\\n')

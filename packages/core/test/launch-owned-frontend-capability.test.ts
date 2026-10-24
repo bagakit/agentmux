@@ -45,7 +45,7 @@ if(args.includes('app-server')) {
   const server=new NativeWebSocket.WebSocketServer({port:0,host:'127.0.0.1'})
   server.on('connection',(ws,req)=>{if(req.headers.authorization!=='Bearer '+process.env.AGENTMUX_CODEX_ACTOR_TOKEN)return ws.close()
     ws.on('message',bytes=>{const p=JSON.parse(String(bytes));if(!Object.hasOwn(p,'id'))return
-      ws.send(JSON.stringify({jsonrpc:'2.0',id:p.id,result:p.method==='thread/read'?{thread:{id:sid,sessionId:'same-native-object',canAcceptDirectInput:true}}:{}}))})})
+      ws.send(JSON.stringify({jsonrpc:'2.0',id:p.id,result:p.method==='thread/read'?{thread:{id:sid,sessionId:'same-native-object',canAcceptDirectInput:true,status:{type:'idle'}}}:{}}))})})
 } else {
   appendFileSync(${JSON.stringify(events)},JSON.stringify({args,pid:process.pid})+'\\n')
   process.stdin.setRawMode(true)
