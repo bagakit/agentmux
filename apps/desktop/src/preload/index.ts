@@ -374,7 +374,8 @@ const api: AgentMuxPreloadApi = {
     resetWiki: (workspaceId: string, topicId: string) =>
       ipcRenderer.invoke('scratch:resetWiki', workspaceId, topicId)
   },
-  goals: { execute: request => ipcRenderer.invoke('goals:execute', request) },
+  goals: { execute: request => ipcRenderer.invoke('goals:execute', request),
+    handoffDiscussion: input => ipcRenderer.invoke('goals:handoffDiscussion', input) },
   demands: {
     delegation: (method, input) => ipcRenderer.invoke('demands:delegation', method, input),
     onObservationIssue(listener) {

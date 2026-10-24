@@ -2,7 +2,7 @@ import { usePendingDeliveryLayout, type PendingDeliveryLayout } from '../lib/pen
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { useCallback, useMemo, useRef, useState, type ComponentProps, type ReactNode, type ReactElement } from 'react'
 import { retainActivityControls } from '../lib/retained-activity'
-import { useAppStore } from '../store'
+import { useAppStore, currentCoreSpatialGraph } from '../store'
 import { workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
 import { useSessionLinkOpening } from '../lib/session-link-opening'
@@ -50,7 +50,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
       reference.displayWorkspaceId, reference.groupId, reference.tabId, regionId])
   // Parsing belongs to the original Session resource; placement belongs to this proven display.
   const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(sessionId,
-    { ...origin, workspaceId: reference.displayWorkspaceId }),
+    { ...origin, workspaceId: reference.displayWorkspaceId }, currentCoreSpatialGraph),
   [sessionId, origin, reference.displayWorkspaceId])
   const fileContext = useAppStore(selectFileContext)
   const [service, setService] = useState<string | null>(null)
