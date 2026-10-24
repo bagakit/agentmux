@@ -246,6 +246,34 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     expect(editor(view.element).textContent).toContain('OLD_UNKNOWN_MESSAGE')
     expect(catalog).toHaveBeenCalled()
   })
+
+  it('interrupts the current working turn via signalAgent without retiring the Session/Run or losing a draft, and switches declared Provider posture via setAgentPosture', async () => {
+    const f = fixture(), current = f.sessions.get('session-original')!
+    f.sessions.set('session-original', { ...current, providerId: 'grok', semanticStatus: { state: 'working', source: 'native-hook', observedAt: Date.now() } })
+    const view = await originalSurface(f, 'session-original')
+    await click(button(view.element, 'Interrupt the current turn'))
+    expect(f.signalAgent).toHaveBeenCalledExactlyOnceWith('session-original', { runId: 'run-original' }, 'SIGINT')
+    await paste(view.element, 'Keep draft while interrupting')
+    expect(button(view.element, 'Send').disabled).toBe(false)
+    await click(button(view.element, 'Interrupt the current turn'))
+    expect(f.signalAgent).toHaveBeenCalledTimes(2)
+    expect(editor(view.element).textContent).toBe('Keep draft while interrupting')
+    expect(f.submit).not.toHaveBeenCalled()
+    const postureTrigger = view.element.querySelector<HTMLButtonElement>('.mobile-posture-picker button')!
+    expect(postureTrigger, 'Grok declares postureControl').not.toBeNull()
+    await click(postureTrigger)
+    const firstMode = view.element.querySelector<HTMLButtonElement>('.mobile-posture-menu__item')!
+    expect(firstMode).not.toBeNull()
+    await click(firstMode)
+    expect(f.setAgentPosture).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      agentSessionId: 'session-original',
+      expectedRun: { runId: 'run-original' }
+    }))
+    f.sessions.set('session-original', { ...f.sessions.get('session-original')!, run: { runId: 'changed-run' } })
+    await click(button(view.element, 'Interrupt the current turn'))
+    expect(f.signalAgent).toHaveBeenCalledTimes(2)
+    expect(view.element.textContent).toContain('原 Session 或 Run 已改变')
+  })
 })
 
 it.each([
