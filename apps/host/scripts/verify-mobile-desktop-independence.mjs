@@ -185,7 +185,7 @@ try {
   assert.ok(name)
   const goal = (await fixture.rpc.call('goal.create', { goalId: 'original-mobile-goal', title: 'Original Mobile Goal', description: 'Original authorized goal body.',
     status: 'backlog', operationId: 'original-mobile-goal-create', risk: 'low', confirmation: 'user' })).goal
-  phase('compiled-original-host-desktop-native', { owner, original, desktop: desktopBefore, graph: graphBefore, goal })
+  phase('compiled-original-host-desktop-native', { owner, original, inputReadiness: fixture.original.terminalPromptReadiness, desktop: desktopBefore, graph: graphBefore, goal })
   browser = await privateMobileBrowser(join(directory, 'browser'))
   const url = fixture.ready.origin + '#offer=' + Buffer.from(JSON.stringify(fixture.ready.offer)).toString('base64url')
   const loaded = await browser.action('open-original-mobile', openMobile, { url })
