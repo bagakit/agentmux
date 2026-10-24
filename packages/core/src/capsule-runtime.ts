@@ -1,4 +1,4 @@
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, parseAgentMuxErrorData, type AgentMuxErrorData } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 
 /** Core manages one service Run; the Capsule package alone owns page state. */
@@ -10,9 +10,16 @@ export const CAPSULE_RUNTIME_METHODS = {
 export type CapsuleRuntimeMethod = keyof typeof CAPSULE_RUNTIME_METHODS
 export type CapsuleRuntimeCommand = { operationId: string; expectedRevision: number }
 export type CapsuleRuntimeParamsMap = {
-  'capsule.runtime.inspect': Record<string, never>
+  'capsule.runtime.inspect': { operationId?: string }
   'capsule.runtime.start': CapsuleRuntimeCommand
   'capsule.runtime.stop': CapsuleRuntimeCommand & { expectedRun: { runId: string } | null }
+}
+export type CapsuleRuntimeOperation = {
+  operationId: string
+  kind: 'start' | 'stop'
+  phase: 'pending' | 'confirmed' | 'unknown' | 'superseded' | 'not_applied'
+  failure?: AgentMuxErrorData
+  firstFailure?: AgentMuxErrorData
 }
 export type CapsuleRuntimeObservation = {
   revision: number
@@ -22,8 +29,8 @@ export type CapsuleRuntimeObservation = {
   socketPath: string
   run: { hostId: 'local'; runId: string } | null
   runtime: { runtimeId: string; ownerInstanceId: string; pid: number } | null
-  operation: { operationId: string; kind: 'start' | 'stop'; phase: 'pending' | 'confirmed' | 'unknown' | 'superseded' } | null
-  issue: { code: string; message: string; recovery: string } | null
+  operation: CapsuleRuntimeOperation | null
+  issue: { code: string; message: string; recovery: string; retry?: 'start' | 'stop' } | null
 }
 export type CapsuleRuntimeResultMap = { [M in CapsuleRuntimeMethod]: CapsuleRuntimeObservation }
 export interface CapsuleRuntimePort {
@@ -33,8 +40,10 @@ export function isCapsuleRuntimeMethod(method: string): method is CapsuleRuntime
   return Object.hasOwn(CAPSULE_RUNTIME_METHODS, method)
 }
 export function parseCapsuleRuntimeParams<M extends CapsuleRuntimeMethod>(method: M, value: unknown): CapsuleRuntimeParamsMap[M] {
-  const p = rpcRecord(value, method.endsWith('.inspect') ? [] : method.endsWith('.stop')
+  const p = rpcRecord(value, method.endsWith('.inspect') ? ['operationId'] : method.endsWith('.stop')
     ? ['operationId', 'expectedRevision', 'expectedRun'] : ['operationId', 'expectedRevision'])
+  if (p.operationId !== undefined && (typeof p.operationId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(p.operationId)))
+    throw new AgentMuxError('Capsule runtime inspection requires an exact original operation ID.', 'INVALID_CONTROL_REQUEST')
   if (method !== 'capsule.runtime.inspect') {
     if (typeof p.operationId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(p.operationId) ||
       !Number.isSafeInteger(p.expectedRevision) || Number(p.expectedRevision) < 0)
@@ -58,8 +67,11 @@ export function parseCapsuleRuntimeResult(value: unknown): CapsuleRuntimeObserva
   if (p.run !== null) { const r = rpcRecord(p.run, ['hostId', 'runId'], code); if (r.hostId !== 'local' || !str(r.runId)) fail() }
   if (p.runtime !== null) { const r = rpcRecord(p.runtime, ['runtimeId', 'ownerInstanceId', 'pid'], code)
     if (!str(r.runtimeId) || !str(r.ownerInstanceId) || !Number.isSafeInteger(r.pid) || Number(r.pid) <= 0) fail() }
-  if (p.operation !== null) { const r = rpcRecord(p.operation, ['operationId', 'kind', 'phase'], code)
-    if (!str(r.operationId) || !['start', 'stop'].includes(String(r.kind)) || !['pending', 'confirmed', 'unknown', 'superseded'].includes(String(r.phase))) fail() }
-  if (p.issue !== null) { const r = rpcRecord(p.issue, ['code', 'message', 'recovery'], code); if (!str(r.code) || !str(r.message) || !str(r.recovery)) fail() }
+  if (p.operation !== null) { const r = rpcRecord(p.operation, ['operationId', 'kind', 'phase', 'failure', 'firstFailure'], code)
+    if (!str(r.operationId) || !['start', 'stop'].includes(String(r.kind)) || !['pending', 'confirmed', 'unknown', 'superseded', 'not_applied'].includes(String(r.phase))) fail()
+    if (r.failure !== undefined) parseAgentMuxErrorData(r.failure)
+    if (r.firstFailure !== undefined) parseAgentMuxErrorData(r.firstFailure)
+    if (r.phase === 'not_applied' && r.failure === undefined) fail() }
+  if (p.issue !== null) { const r = rpcRecord(p.issue, ['code', 'message', 'recovery', 'retry'], code); if (!str(r.code) || !str(r.message) || !str(r.recovery) || r.retry !== undefined && !['start', 'stop'].includes(String(r.retry))) fail() }
   return structuredClone(p) as CapsuleRuntimeObservation
 }

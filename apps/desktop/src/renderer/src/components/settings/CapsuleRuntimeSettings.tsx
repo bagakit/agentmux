@@ -21,6 +21,8 @@ export function CapsuleRuntimeSettings({ active, observed }: { active: boolean; 
     const operation = next.operation
     if (operation?.operationId === original.params.operationId && operation.kind === original.kind && operation.phase === 'confirmed') {
       setAttempt({ ...original, phase: 'confirmed', message: original.kind === 'start' ? 'The original service Start is confirmed.' : 'The original service Stop is confirmed.' })
+    } else if (operation?.operationId === original.params.operationId && operation.kind === original.kind && operation.phase === 'not_applied') {
+      setAttempt({ ...original, phase: 'failed', message: operation.failure?.message ?? 'The original service command was not applied. A new explicit command can try again.' })
     } else setAttempt({ ...original, phase: 'unknown', message: 'The original service command is still unconfirmed. Check its identity without repeating it.' })
   }
   async function inspect() {
@@ -28,7 +30,7 @@ export function CapsuleRuntimeSettings({ active, observed }: { active: boolean; 
     busy.current = true
     const original = attempt
     try {
-      const next = await api.capsuleRuntime.call('capsule.runtime.inspect', {})
+      const next = await api.capsuleRuntime.call('capsule.runtime.inspect', original?.phase === 'unknown' ? { operationId: original.params.operationId } : {})
       if (!mounted.current) return
       accept(next)
       if (original?.phase === 'unknown') reconcile(original, next)
@@ -58,13 +60,18 @@ export function CapsuleRuntimeSettings({ active, observed }: { active: boolean; 
     <header><span>Page service</span><small>Runs independently of the App and its management connection.</small></header>
     <div className="capsule-settings__actions"><span role="status">{value ? labels[value.phase] : issue ? 'Status unconfirmed' : 'Reading service status…'}</span>
       <button type="button" className="small-button" onClick={() => void inspect()}>{attempt?.phase === 'unknown' ? 'Check original service command' : 'Read service status'}</button>
-      {value ? value.desired === 'running'
+      {value?.issue?.retry === 'start' && !value.run
+        ? <button type="button" className="primary-button" disabled={locked} onClick={() => void submit('start')}>Try Start again</button>
+        : value ? value.desired === 'running'
         ? <button type="button" className="small-button" disabled={locked} onClick={() => void submit('stop')}>Stop service</button>
         : <button type="button" className="primary-button" disabled={locked} onClick={() => void submit('start')}>Start service</button> : null}
+      {value?.issue?.retry === 'stop' && value.run
+        ? <button type="button" className="small-button" disabled={locked} onClick={() => void submit('stop')}>Try Stop again</button> : null}
     </div>
     {value ? <details><summary>Service identity</summary><dl>
       {value.runtime ? <><dt>Runtime</dt><dd><code>{value.runtime.runtimeId}</code></dd><dt>Instance</dt><dd><code>{value.runtime.ownerInstanceId}</code></dd></> : null}
       {value.run ? <><dt>Run</dt><dd><code>{value.run.runId}</code></dd></> : null}
+      {value.operation?.firstFailure ? <><dt>Original failure</dt><dd>{value.operation.firstFailure.message}</dd></> : null}
       <dt>Service state</dt><dd>{value.stateDirectory}</dd><dt>Control socket</dt><dd>{value.socketPath}</dd>
     </dl></details> : null}
     {value?.desired === 'stopped' ? <p className="capsule-settings__hint">Pages, settings and drafts are retained. Start the service explicitly to serve them again.</p> : null}
