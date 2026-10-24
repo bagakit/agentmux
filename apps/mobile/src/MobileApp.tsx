@@ -11,6 +11,7 @@ import { MobileZoneWorkface } from './navigation/MobileZoneWorkface'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { MobileAgentCreate, type MobileAgentCreateTarget } from './navigation/MobileAgentCreate'
 import { MobileAgentActions } from './conversation/MobileAgentActions'
+import { recoverMobileAgent } from './conversation/mobile-agent-recovery'
 import { MobileAgentMenuContext, type MobileAgentMenuTarget } from './navigation/MobileAgentRow'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
 import { MobileTerminalViewer } from './terminal/MobileTerminalViewer'
@@ -72,6 +73,7 @@ export function MobileApp(props: MobileAppProps) {
   return <MobileNoticeProvider><MobileAppContent {...props} /></MobileNoticeProvider>
 }
 function MobileAppContent({ client, connection, platform, native = false, focusComposer = () => false, connectionPanel, webObservation }: MobileAppProps) {
+  const connected = connection.state === 'connected'
   const notices = useMobileNotices()
   const initial = useRef<ReturnType<typeof loadWorkface> | null>(null)
   initial.current ??= loadWorkface()
@@ -138,11 +140,20 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const [profileIdentity, setProfileIdentity] = useState<MobileObjectIdentity | null>(initial.current.presentation?.profile?.identity ?? null)
   const [profileSourcePath, setProfileSourcePath] = useState<string | null>(initial.current.presentation?.profile?.sourcePath ?? null)
   const navigationRevision = useRef(0)
+  const originalConnection = useRef({ client, connected }); originalConnection.current = { client, connected }
   const openSession = (id: string, identity: MobileObjectIdentity) => {
     navigationRevision.current += 1
     setObjectIdentity(identity); setShowGoalWork(false)
     setWorkface(value => ({ ...value, selectedSessionId: id, panel: 'conversation' }))
     setShowSession(true)
+  }
+  const openMainAgent = (id: string, identity: MobileObjectIdentity, hostId: string) => {
+    openSession(id, identity)
+    const revision = navigationRevision.current, source = client
+    if (!source || !connected) { setNotice('连接暂不可用；主 Agent 的原身份、历史与草稿保留，可连接后显式恢复。'); return }
+    void recoverMobileAgent({ client: source, agentSessionId: id, expectedHostId: hostId, mode: 'open',
+      isCurrent: () => originalConnection.current.client === source && originalConnection.current.connected && navigationRevision.current === revision,
+      onNotice: setNotice })
   }
   const openSource = (value: TopicKnowledgeSource) => {
     navigationRevision.current += 1
@@ -278,7 +289,6 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   }
 
 
-  const connected = connection.state === 'connected'
   const workspaceVisible = connected || hasConnected
   const label = connected ? '已连接' : connection.state === 'connecting' ? '连接中' : connection.state === 'disconnected' ? '连接中断' : '尚未连接'
   const primaryHeader = workspaceVisible && !showSession && !source
@@ -317,7 +327,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         <button className="mobile-secondary" onClick={() => setSheet('connection')}><ThemeObjectConnectionIcon size={16} />连接详情</button>
       </section>}
       {workspaceVisible && <>
-        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} sessions={sessions} openSession={openSession} openProfile={openProfile} onBackChange={registerSpatialBack}
+        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} sessions={sessions} openSession={openSession} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
           initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
         <div hidden={showSession || secondary !== 'topics' || Boolean(source && source.kind !== 'topic')}><MobileTopicsSurface rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (!source || source.kind === 'topic')} topicId={topicId}
           client={client} connected={connected} {...(topicsRoute.knowledge ? { initialKnowledge: topicsRoute.knowledge } : {})} onKnowledgeChange={updateKnowledgeReference}

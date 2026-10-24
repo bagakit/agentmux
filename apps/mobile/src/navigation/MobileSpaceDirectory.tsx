@@ -4,10 +4,11 @@ import { projectRailTree, projectGroupKey, railGroupAddress } from '@agentmux/cl
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 
 /** One shared Desktop tree algorithm; all members retain their original public identities. */
-export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, onSelect, renderIdentity, renderContents }: {
+export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, onSelect, renderIdentity, renderContents, renderPrimary }: {
   catalog: AgentMuxSpaceCatalog; home: 'mote' | 'space'; query: string; selectedSpaceId: string | null
   onSelect(space: AgentMuxSpaceFact | null): void
   renderIdentity(space: AgentMuxSpaceFact): ReactNode; renderContents(space: AgentMuxSpaceFact): ReactNode
+  renderPrimary?(space: AgentMuxSpaceFact): ReactNode
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(selectedSpaceId ? [selectedSpaceId] : []))
   const previousSelection = useRef(selectedSpaceId)
@@ -32,14 +33,24 @@ export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, on
     const members = new Map<string, string[]>()
     for (const binding of catalog.bindings) members.set(binding.zoneId, [...(members.get(binding.zoneId) ?? []), binding.spaceId])
     const counts = new Map<string, number>()
-    for (const tab of catalog.tabs) for (const id of tab.zoneId ? members.get(tab.zoneId) ?? [] : []) counts.set(id, (counts.get(id) ?? 0) + 1)
+    const moteAgents = new Map<string, Set<string>>()
+    const agentsByTab = new Map<string, { regionId: string; agentSessionId: string }[]>()
+    if (home === 'mote') for (const region of catalog.regions) if (region.kind === 'agent' && region.agentSessionId) {
+      const agents = agentsByTab.get(region.tabId) ?? []; agents.push({ regionId: region.regionId, agentSessionId: region.agentSessionId }); agentsByTab.set(region.tabId, agents)
+    }
+    for (const tab of catalog.tabs) for (const id of tab.zoneId ? members.get(tab.zoneId) ?? [] : []) {
+      if (home === 'mote') {
+        const agents = moteAgents.get(id) ?? new Set<string>()
+        for (const region of agentsByTab.get(tab.tabId) ?? []) if (tab.regionIds.includes(region.regionId)) agents.add(region.agentSessionId)
+        moteAgents.set(id, agents); counts.set(id, agents.size)
+      } else counts.set(id, (counts.get(id) ?? 0) + 1)
+    }
     return counts
-  }, [catalog.bindings, catalog.tabs])
+  }, [catalog.bindings, catalog.tabs, catalog.regions, home])
   const row = (space: AgentMuxSpaceFact, depth = 0) => {
     const open = expanded.has(space.spaceId)
     const hasChildren = (tabCounts.get(space.spaceId) ?? 0) > 0 || space.kind === 'mote' || folderBranches.has(space.spaceId)
-    return <li key={space.spaceId} className="mobile-space-node" data-space-id={space.spaceId} style={{ '--tree-depth': depth } as import('react').CSSProperties}>
-      <button type="button" className="mobile-space-row" aria-expanded={hasChildren ? open : undefined} onClick={() => {
+    const entry = <button type="button" className="mobile-space-row" aria-expanded={hasChildren ? open : undefined} onClick={() => {
         setExpanded(previous => { const next = new Set(previous); open ? next.delete(space.spaceId) : next.add(space.spaceId); return next })
         previousSelection.current = open ? null : space.spaceId
         onSelect(open ? null : space)
@@ -47,7 +58,9 @@ export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, on
         {hasChildren && <SemanticIcon name="navigation.disclosure" size={14} className="mobile-tree-chevron" />}{renderIdentity(space)}
         <strong>{space.name}</strong><small>{tabCounts.get(space.spaceId) ?? 0}</small>
       </button>
-      {open && <div role="group" aria-label={`${space.name} 的 Tabs`} className="mobile-space-children">{renderContents(space)}</div>}
+    return <li key={space.spaceId} className="mobile-space-node" data-space-id={space.spaceId} style={{ '--tree-depth': depth } as import('react').CSSProperties}>
+      {renderPrimary ? <div className="mobile-space-entry">{entry}{renderPrimary(space)}</div> : entry}
+      {open && <div role="group" aria-label={`${space.name} 的 ${home === 'mote' ? 'Profile 与 Agents' : 'Tabs'}`} className="mobile-space-children">{renderContents(space)}</div>}
     </li>
   }
   if (home === 'mote') return <ul className="mobile-space-tree mobile-session-list" aria-label="Mote 目录">{spaces.filter(matching).map(space => row(space))}</ul>
