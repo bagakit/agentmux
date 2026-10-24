@@ -386,7 +386,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
           if (signal.aborted) return null
           let status: number | undefined
           const response = await this.clients.withClient(target, credential, client => client.request<unknown>({
-            url: prepared.request.path, method: 'GET', params: { reaction_type: reaction.emojiType, page_size: 100, ...(token ? { page_token: token } : {}) },
+            url: prepared.request.path, method: 'GET', params: { reaction_type: reaction.emojiType, page_size: 50, ...(token ? { page_token: token } : {}) },
             validateStatus: value => { status = value; return true }, signal
           }), signal)
           const result = object(response), data = object(result?.data)
