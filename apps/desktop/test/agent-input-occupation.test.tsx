@@ -20,7 +20,7 @@ import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopC
 import { moteAgent, moteConfig } from './fixtures/mote-workface'
 import { observeAgent, type ContinuousProgressLoop } from '@agentmux/core'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
-import type { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store'
+import type { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 const initial = useAppStore.getState()
 const original = { ...moteAgent('rendered-worker', null), hostId: 'original-host',

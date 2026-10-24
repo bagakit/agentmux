@@ -47,7 +47,7 @@ vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ 
 import { ConfigStore } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
-import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
+import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 // Actual Runtime and Core admission, Store, input and Provider History execute. Only the
 // kernel transport and native Provider I/O are synthetic; no OS Run, App or install starts.

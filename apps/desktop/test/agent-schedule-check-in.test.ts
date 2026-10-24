@@ -4,9 +4,9 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { observeAgent, type AgentTimelineSnapshot, type AgentSessionHistoryPage, type ContinuousProgressLoop, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { DEFAULT_AGENT_SCHEDULE_CHECK_IN, AGENT_SCHEDULE_CHECK_IN_GUIDANCE } from '@agentmux/core/schedule'
-import { checkInHumanObservation, decideCheckIn, type CheckInObservation } from '../src/main/agent-schedule-check-in'
+import { checkInHumanObservation, decideCheckIn, type CheckInObservation } from '@agentmux/host/agent-schedule-check-in'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
-import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store'
+import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery'
 
 const at = (time: string) => Date.parse(time), day = at(_hygiene_fixtureIso(24138000000, "minute")), target = { hostId: 'local', agentSessionId: 'check-in-agent', providerId: 'generic', workspacePath: _hygiene_fixturePath("repo") }

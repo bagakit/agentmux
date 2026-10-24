@@ -80,7 +80,7 @@ it('Main reads original Files once, freezes the actual task text and reuses it a
   if (process.env.AGENTMUX_T004_EVIDENCE_DIR) {
     const directory = process.env.AGENTMUX_T004_EVIDENCE_DIR
     await mkdir(directory, { recursive: true })
-    const implementation = await readFile(resolve(import.meta.dirname, '../src/main/goal-delegation-materials.ts'), 'utf8')
+    const implementation = await readFile(resolve(import.meta.dirname, '../../host/src/goal-delegation-materials.ts'), 'utf8')
     await writeFile(join(directory, 'consumer-receipt.json'), JSON.stringify({ status: 'passed',
       implementationHash: createHash('sha256').update(implementation).digest('hex'),
       originalOperationId: prepared.operationId, originalMessageId: prepared.sourceMessageId,

@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { observeAgent } from '@agentmux/core'
 import { describe, expect, it } from 'vitest'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
-import type { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store'
+import type { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 describe('continuous progress provider delivery', () => {
   it('delivers only after authoritative readiness observation', async () => {

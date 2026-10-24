@@ -44,7 +44,7 @@ import { objectCliEnvironment } from '../../../packages/core/test/helpers/object
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-controller.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
-import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
+import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { registerIpc } from '../src/main/ipc.js'
 import { CONFIG_CHANGED_CHANNEL } from '../src/shared/contracts.js'
 
