@@ -6,18 +6,151 @@ struct NativeScreenSelectionError: Error {
     let message: String
 }
 
-/// This exact AppKit surface is shared by production capture and the bare
-/// preview. Its normal event loop leaves unrelated native queries available.
+/// Each display has its own AppKit window. All canvases project one original
+/// request's global AppKit selection and route events to that same coordinator.
 final class NativeScreenSelection: NSView {
-    private static var active: NativeScreenSelection?
+    private struct Presentation {
+        let coordinator: NativeSelectionCoordinator
+        let windows: [NSWindow]
+    }
+    private static var active: Presentation?
+    private let coordinator: NativeSelectionCoordinator
+    let viewport: NSRect
+    var selection: NativeSelectionState { coordinator.selection }
+    override var acceptsFirstResponder: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    init(frame: NSRect, allowEditing: Bool = false) {
+        viewport = frame
+        coordinator = NativeSelectionCoordinator(screenFrames: [frame], primaryTop: frame.maxY,
+            initialPoint: NSPoint(x: frame.midX, y: frame.midY), allowEditing: allowEditing)
+        super.init(frame: frame)
+        coordinator.register(self)
+    }
+    private init(viewport: NSRect, coordinator: NativeSelectionCoordinator) {
+        self.viewport = viewport
+        self.coordinator = coordinator
+        super.init(frame: NSRect(origin: .zero, size: viewport.size))
+        coordinator.register(self)
+    }
+    required init?(coder: NSCoder) { nil }
+
+    static func begin(allowEditing: Bool = false, completion: @escaping (Result<NativeSelectionChoice?, Error>) -> Void) throws {
+        guard active == nil else { throw NativeScreenSelectionError(code: "capture_busy", message: "the original native selection is still active") }
+        let screens = NSScreen.screens
+        guard let primary = screens.first else {
+            throw NativeScreenSelectionError(code: "display_unavailable", message: "macOS did not provide an active selection display")
+        }
+        let coordinator = NativeSelectionCoordinator(screenFrames: screens.map(\.frame), primaryTop: primary.frame.maxY,
+            initialPoint: NSEvent.mouseLocation, allowEditing: allowEditing, previousApp: NSWorkspace.shared.frontmostApplication,
+            completion: completion)
+        var windows: [NSWindow] = []
+        for screen in screens {
+            let window = NativeSelectionWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.backgroundColor = .clear
+            window.isOpaque = false
+            window.hasShadow = false
+            window.level = .screenSaver
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            window.contentView = NativeScreenSelection(viewport: screen.frame, coordinator: coordinator)
+            window.makeFirstResponder(window.contentView)
+            windows.append(window)
+        }
+        active = Presentation(coordinator: coordinator, windows: windows)
+        NotificationCenter.default.addObserver(coordinator, selector: #selector(NativeSelectionCoordinator.displayConfigurationChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        coordinator.refresh()
+        for window in windows { window.orderFront(nil) }
+        NSApp.activate(ignoringOtherApps: true)
+        let keyboardWindow = windows.first { $0.frame.contains(coordinator.initialPoint) } ?? windows.first
+        keyboardWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    fileprivate static func closePresentation(for coordinator: NativeSelectionCoordinator) {
+        guard let presentation = active, presentation.coordinator === coordinator else { return }
+        for window in presentation.windows {
+            window.orderOut(nil)
+            window.close()
+        }
+        active = nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.black.withAlphaComponent(0.28).setFill()
+        bounds.fill()
+        guard let global = selection.rectangle else { return }
+        let rect = global.offsetBy(dx: -viewport.minX, dy: -viewport.minY)
+        NSColor.clear.setFill()
+        rect.fill(using: .copy)
+        let border = NSBezierPath(rect: rect)
+        NSColor.black.withAlphaComponent(0.55).setStroke()
+        border.lineWidth = 3
+        border.stroke()
+        NSColor.white.setStroke()
+        border.lineWidth = 1
+        border.stroke()
+        for handle in NativeSelectionState.Handle.allCases {
+            guard let globalPoint = selection.point(for: handle) else { continue }
+            let point = NSPoint(x: globalPoint.x - viewport.minX, y: globalPoint.y - viewport.minY)
+            let dot = NSBezierPath(roundedRect: NSRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8), xRadius: 1.5, yRadius: 1.5)
+            NSColor.white.setFill()
+            dot.fill()
+            NSColor.black.withAlphaComponent(0.6).setStroke()
+            dot.lineWidth = 1
+            dot.stroke()
+        }
+    }
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .crosshair)
+        if let rect = selection.rectangle {
+            let visible = rect.offsetBy(dx: -viewport.minX, dy: -viewport.minY).intersection(bounds)
+            if !visible.isNull && !visible.isEmpty { addCursorRect(visible, cursor: .openHand) }
+        }
+        for handle in NativeSelectionState.Handle.allCases {
+            if let global = selection.point(for: handle) {
+                let point = NSPoint(x: global.x - viewport.minX, y: global.y - viewport.minY)
+                let visible = NSRect(x: point.x - 8, y: point.y - 8, width: 16, height: 16).intersection(bounds)
+                if !visible.isNull && !visible.isEmpty {
+                    let cursor: NSCursor = [.top, .bottom].contains(handle) ? .resizeUpDown : [.left, .right].contains(handle) ? .resizeLeftRight : .crosshair
+                    addCursorRect(visible, cursor: cursor)
+                }
+            }
+        }
+        if let frame = coordinator.toolbarFrame(in: self) { addCursorRect(frame, cursor: .arrow) }
+    }
+
+    private func globalPoint(_ event: NSEvent) -> NSPoint {
+        // A drag continues to arrive at its original down view even outside
+        // that window. A nil-window mouse event already uses screen coordinates.
+        event.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+    }
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        coordinator.pointerDown(globalPoint(event))
+    }
+    override func mouseDragged(with event: NSEvent) { coordinator.pointerDragged(globalPoint(event)) }
+    override func mouseUp(with event: NSEvent) { coordinator.pointerUp(globalPoint(event)) }
+    override func keyDown(with event: NSEvent) {
+        if !coordinator.handleKey(event) { super.keyDown(with: event) }
+    }
+    override func cancelOperation(_ sender: Any?) { coordinator.cancel() }
+}
+
+/// Request-level UI state only. Windows/canvases do not create another selection
+/// or completion. Weak canvas references avoid a controller/window/view cycle.
+@MainActor
+fileprivate final class NativeSelectionCoordinator: NSObject {
     private(set) var selection: NativeSelectionState
-    private var overlay: NSWindow?
-    private var previousApp: NSRunningApplication?
-    private var primaryTop: CGFloat = 0
-    private var globalOrigin = NSPoint.zero
-    private var screenFrames: [NSRect] = []
-    private var completion: ((Result<NativeSelectionChoice?, Error>) -> Void)?
+    let initialPoint: NSPoint
+    private var preferredPoint: NSPoint
+    private let primaryTop: CGFloat
+    private let screenFrames: [NSRect]
     private let allowEditing: Bool
+    private let previousApp: NSRunningApplication?
+    private var completion: ((Result<NativeSelectionChoice?, Error>) -> Void)?
+    private let views = NSHashTable<NativeScreenSelection>.weakObjects()
+    private var controlsViewport: NSRect?
     private let toolbar = NativeSelectionPanel(frame: .zero)
     private let dimensions = NativeSelectionPanel(frame: .zero)
     private let sizeLabel = NSTextField(labelWithString: "")
@@ -25,45 +158,26 @@ final class NativeScreenSelection: NSView {
     private let confirmButton = NativeSelectionButton(title: "完成", shortcut: "↵", primary: true)
     private let cancelButton = NativeSelectionButton(title: "取消", shortcut: "esc")
     private let editButton = NativeSelectionButton(title: "标注…", shortcut: "E", symbol: "pencil.tip.crop.circle")
-    override var acceptsFirstResponder: Bool { true }
 
-    init(frame: NSRect, allowEditing: Bool = false) {
-        selection = NativeSelectionState(bounds: NSRect(origin: .zero, size: frame.size))
+    init(screenFrames: [NSRect], primaryTop: CGFloat, initialPoint: NSPoint, allowEditing: Bool,
+         previousApp: NSRunningApplication? = nil, completion: ((Result<NativeSelectionChoice?, Error>) -> Void)? = nil) {
+        self.screenFrames = screenFrames
+        self.primaryTop = primaryTop
+        self.initialPoint = initialPoint
+        preferredPoint = initialPoint
         self.allowEditing = allowEditing
-        super.init(frame: frame)
+        self.previousApp = previousApp
+        self.completion = completion
+        selection = NativeSelectionState(bounds: screenFrames.reduce(NSRect.null) { $0.union($1) })
+        super.init()
         buildControls()
+    }
+    func register(_ view: NativeScreenSelection) {
+        views.add(view)
+        view.setAccessibilityHelp("拖动选择区域，拖动选区移动，拖动边角调整，方向键微调，Enter 完成，Esc 取消")
         refresh()
     }
-    required init?(coder: NSCoder) { nil }
-
-    static func begin(allowEditing: Bool = false, completion: @escaping (Result<NativeSelectionChoice?, Error>) -> Void) throws {
-        guard active == nil else { throw NativeScreenSelectionError(code: "capture_busy", message: "the original native selection is still active") }
-        guard let primary = NSScreen.screens.first else {
-            throw NativeScreenSelectionError(code: "display_unavailable", message: "macOS did not provide an active selection display")
-        }
-        let allScreens = NSScreen.screens.reduce(NSRect.null) { $0.union($1.frame) }
-        let window = NativeSelectionWindow(contentRect: allScreens, styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.backgroundColor = .clear
-        window.isOpaque = false
-        window.hasShadow = false
-        window.level = .screenSaver
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let view = NativeScreenSelection(frame: NSRect(origin: .zero, size: allScreens.size), allowEditing: allowEditing)
-        view.previousApp = NSWorkspace.shared.frontmostApplication
-        view.primaryTop = primary.frame.maxY
-        view.globalOrigin = allScreens.origin
-        view.screenFrames = NSScreen.screens.map { $0.frame.offsetBy(dx: -allScreens.minX, dy: -allScreens.minY) }
-        view.completion = completion
-        view.overlay = window
-        active = view
-        window.contentView = view
-        window.makeFirstResponder(view)
-        NotificationCenter.default.addObserver(view, selector: #selector(displayConfigurationChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
-        view.refresh()
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-    }
+    func toolbarFrame(in view: NativeScreenSelection) -> NSRect? { toolbar.superview === view ? toolbar.frame : nil }
 
     private func buildControls() {
         toolbar.identifier = NSUserInterfaceItemIdentifier("native-selection-toolbar")
@@ -88,63 +202,81 @@ final class NativeScreenSelection: NSView {
         confirmButton.toolTip = "完成截图 (Enter)"
         cancelButton.toolTip = "取消截图 (Esc)"
         editButton.toolTip = "标注截图 (E)"
-        setAccessibilityHelp("拖动选择区域，拖动选区移动，拖动边角调整，方向键微调，Enter 完成，Esc 取消")
         hint.font = .systemFont(ofSize: 12)
         hint.textColor = NSColor.white.withAlphaComponent(0.85)
         hint.alignment = .center
-        addSubview(hint)
         sizeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         sizeLabel.textColor = .white
         dimensions.addSubview(sizeLabel)
         dimensions.isPassive = true
-        addSubview(dimensions)
-        addSubview(toolbar)
     }
-
-    @objc private func confirm() {
-        complete(action: .capture)
-    }
+    @objc private func confirm() { complete(action: .capture) }
     @objc private func edit() {
         guard allowEditing else { return }
         complete(action: .edit)
     }
     private func complete(action: NativeSelectionCompletionAction) {
         guard selection.canConfirm, let rect = selection.rectangle else { return }
-        let global = rect.offsetBy(dx: globalOrigin.x, dy: globalOrigin.y)
-        finish(.success(NativeSelectionChoice(rectangle: NativeCaptureGeometry.quartzRect(appKitRect: global, primaryDisplayTop: primaryTop), completionAction: action)))
+        finish(.success(NativeSelectionChoice(rectangle: NativeCaptureGeometry.quartzRect(appKitRect: rect, primaryDisplayTop: primaryTop), completionAction: action)))
     }
-    @objc private func cancel() { finish(.success(nil)) }
-    @objc private func displayConfigurationChanged() {
+    @objc fileprivate func cancel() { finish(.success(nil)) }
+    @objc fileprivate func displayConfigurationChanged() {
         finish(.failure(NativeScreenSelectionError(code: "display_configuration_changed", message: "display geometry changed during the original selection; choose the region again")))
     }
-
     private func finish(_ result: Result<NativeSelectionChoice?, Error>) {
         guard let callback = completion else { return }
         completion = nil
         NotificationCenter.default.removeObserver(self)
-        overlay?.orderOut(nil)
-        overlay?.close()
-        overlay = nil
-        Self.active = nil
+        NativeScreenSelection.closePresentation(for: self)
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier {
             previousApp?.activate(options: [.activateIgnoringOtherApps])
         }
         callback(result)
     }
 
-    private func refresh() {
+    func pointerDown(_ point: NSPoint) { preferredPoint = point; selection.pointerDown(point); refresh() }
+    func pointerDragged(_ point: NSPoint) { selection.pointerDragged(point); refresh() }
+    func pointerUp(_ point: NSPoint) { selection.pointerUp(point); refresh() }
+    func handleKey(_ event: NSEvent) -> Bool {
+        let step: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1
+        switch event.keyCode {
+        case 53: cancel()
+        case 36, 76: confirm()
+        case 14 where event.modifierFlags.intersection([.command, .control, .option]).isEmpty: edit()
+        case 123: selection.nudge(dx: -step, dy: 0); refresh()
+        case 124: selection.nudge(dx: step, dy: 0); refresh()
+        case 125: selection.nudge(dx: 0, dy: -step); refresh()
+        case 126: selection.nudge(dx: 0, dy: step); refresh()
+        default: return false
+        }
+        return true
+    }
+
+    func refresh() {
         confirmButton.isEnabled = selection.canConfirm
         editButton.isEnabled = selection.canConfirm
         hint.stringValue = "拖动选择截图区域"
         hint.isHidden = selection.rectangle != nil
-        let screen = currentScreen()
+        let globalScreen = currentScreen()
+        guard let host = views.allObjects.first(where: { $0.viewport == globalScreen }) else { return }
+        if toolbar.superview !== host {
+            hint.removeFromSuperview()
+            dimensions.removeFromSuperview()
+            toolbar.removeFromSuperview()
+            host.addSubview(hint)
+            host.addSubview(dimensions)
+            host.addSubview(toolbar)
+        }
+        controlsViewport = globalScreen
+        let screen = NSRect(origin: .zero, size: globalScreen.size)
+        let localRectangle = selection.rectangle?.offsetBy(dx: -globalScreen.minX, dy: -globalScreen.minY)
         let buttons = allowEditing ? [cancelButton, editButton, confirmButton] : [cancelButton, confirmButton]
         let idealWidth: CGFloat = allowEditing ? 300 : 194
         let width = min(idealWidth, max(0, screen.width - 24))
         let stacked = width < idealWidth
         let height: CGFloat = stacked ? CGFloat(buttons.count) * 38 + 10 : 48
         var origin = NSPoint(x: screen.midX - width / 2, y: screen.minY + 28)
-        if let rect = selection.rectangle {
+        if let rect = localRectangle {
             origin = NSPoint(x: rect.midX - width / 2, y: rect.minY - height - 12)
             if origin.y < screen.minY + 12 { origin.y = rect.maxY + 12 }
         }
@@ -162,7 +294,7 @@ final class NativeScreenSelection: NSView {
             confirmButton.frame = NSRect(x: actualWidth - 94, y: 8, width: 86, height: 32)
         }
         dimensions.isHidden = selection.rectangle == nil
-        if let rect = selection.rectangle {
+        if let rect = localRectangle {
             let dimension: (CGFloat) -> String = { value in
                 if value > 0 && value < 0.01 { return "<0.01" }
                 return value.rounded() == value ? String(format: "%.0f", Double(value)) : String(format: "%.2f", Double(value))
@@ -174,76 +306,25 @@ final class NativeScreenSelection: NSView {
             sizeLabel.frame.origin = NSPoint(x: 10, y: 7)
             sizeLabel.frame.size.width = max(0, dimensions.bounds.width - 20)
         }
-        window?.invalidateCursorRects(for: self)
-        needsDisplay = true
+        for view in views.allObjects {
+            view.window?.invalidateCursorRects(for: view)
+            view.needsDisplay = true
+        }
     }
-
     private func currentScreen() -> CGRect {
         if let rect = selection.rectangle {
-            return screenFrames.max { a, b in
-                let left = a.intersection(rect), right = b.intersection(rect)
-                return (left.isNull ? 0 : left.width * left.height) < (right.isNull ? 0 : right.width * right.height)
-            } ?? bounds
-        }
-        let mouse = NSEvent.mouseLocation
-        return screenFrames.first { $0.contains(CGPoint(x: mouse.x - globalOrigin.x, y: mouse.y - globalOrigin.y)) } ?? screenFrames.first ?? bounds
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.withAlphaComponent(0.28).setFill()
-        bounds.fill()
-        guard let rect = selection.rectangle else { return }
-        NSColor.clear.setFill()
-        rect.fill(using: .copy)
-        let border = NSBezierPath(rect: rect)
-        NSColor.black.withAlphaComponent(0.55).setStroke()
-        border.lineWidth = 3
-        border.stroke()
-        NSColor.white.setStroke()
-        border.lineWidth = 1
-        border.stroke()
-        for handle in NativeSelectionState.Handle.allCases {
-            guard let point = selection.point(for: handle) else { continue }
-            let dot = NSBezierPath(roundedRect: NSRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8), xRadius: 1.5, yRadius: 1.5)
-            NSColor.white.setFill()
-            dot.fill()
-            NSColor.black.withAlphaComponent(0.6).setStroke()
-            dot.lineWidth = 1
-            dot.stroke()
-        }
-    }
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .crosshair)
-        if let rect = selection.rectangle { addCursorRect(rect, cursor: .openHand) }
-        for handle in NativeSelectionState.Handle.allCases {
-            if let point = selection.point(for: handle) {
-                let cursor: NSCursor = [.top, .bottom].contains(handle) ? .resizeUpDown : [.left, .right].contains(handle) ? .resizeLeftRight : .crosshair
-                addCursorRect(NSRect(x: point.x - 8, y: point.y - 8, width: 16, height: 16), cursor: cursor)
+            let areas = screenFrames.map { screen -> CGFloat in
+                let intersection = screen.intersection(rect)
+                return intersection.isNull ? 0 : intersection.width * intersection.height
             }
+            if let maximum = areas.max(), maximum > 0 {
+                if let controlsViewport, let index = screenFrames.firstIndex(of: controlsViewport), areas[index] == maximum { return controlsViewport }
+                if let index = areas.firstIndex(of: maximum) { return screenFrames[index] }
+            }
+            if let controlsViewport { return controlsViewport }
         }
-        addCursorRect(toolbar.frame, cursor: .arrow)
+        return screenFrames.first { $0.contains(preferredPoint) } ?? screenFrames.first ?? selection.bounds
     }
-    override func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(self)
-        selection.pointerDown(convert(event.locationInWindow, from: nil))
-        refresh()
-    }
-    override func mouseDragged(with event: NSEvent) { selection.pointerDragged(convert(event.locationInWindow, from: nil)); refresh() }
-    override func mouseUp(with event: NSEvent) { selection.pointerUp(convert(event.locationInWindow, from: nil)); refresh() }
-    override func keyDown(with event: NSEvent) {
-        let step: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1
-        switch event.keyCode {
-        case 53: cancel()
-        case 36, 76: confirm()
-        case 14 where event.modifierFlags.intersection([.command, .control, .option]).isEmpty: edit()
-        case 123: selection.nudge(dx: -step, dy: 0); refresh()
-        case 124: selection.nudge(dx: step, dy: 0); refresh()
-        case 125: selection.nudge(dx: 0, dy: -step); refresh()
-        case 126: selection.nudge(dx: 0, dy: step); refresh()
-        default: super.keyDown(with: event)
-        }
-    }
-    override func cancelOperation(_ sender: Any?) { cancel() }
 }
 
 /// Presentation only: keep AppKit's button action, keyboard and accessibility
