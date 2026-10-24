@@ -270,7 +270,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       const uploaded = operation.uploads?.at(-1)
       if (uploaded?.state !== 'confirmed' || !('imageKey' in uploaded)) feishuFailure('FEISHU_IMAGE_UPLOAD_UNCONFIRMED')
       card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: 'Shared image' } },
-        elements: [{ tag: 'img', img_key: feishuIdentity(uploaded.imageKey), alt: { tag: 'plain_text', content: 'Original conversation image' } }] }
+        elements: [{ tag: 'img', img_key: feishuIdentity(uploaded.imageKey), alt: { tag: 'plain_text', content: operation.payload.image.alt || 'Original conversation image' } }] }
     }
     if (card) {
       card.config = { ...object(card.config), summary: { content: cardSummary(card, operation) } }
