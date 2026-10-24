@@ -1,10 +1,11 @@
 import { MobileNotice } from '../notices/MobileNotice'
 import { mintObjectId } from '@agentmux/core/object-id'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { KnowledgeTopic, TopicCategory } from '@agentmux/core/control'
 import type { TopicsRpc } from './MobileTopicKnowledge'
+import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
 
@@ -42,19 +43,27 @@ function OrganizationEditor({ rpc, action, categories, onClose, onSaved }: {
   const [checked, setChecked] = useState(false)
   const [revision, setRevision] = useState(original.kind === 'category-rename' ? original.category.revision : null)
   const [spatialRevision, setSpatialRevision] = useState(original.kind === 'topic-move' ? original.topic.spatialRevision : 0)
+  const initialTitle = original.kind === 'category-rename' ? original.category.title : ''
+  const local = useRef({ title, destination, unknown, busy: false })
+  local.current.title = title; local.current.destination = destination; local.current.unknown = unknown
+  useMobileWebUpdateSafetyOwner(() => {
+    if (local.current.busy || local.current.unknown) return 'Topic 管理操作仍在进行或回执未确认；请先核对原操作，再更新网页。'
+    if (local.current.title !== initialTitle || local.current.destination) return 'Topic 管理草稿仅保留在当前页面；请先保存、清空或还原草稿，再更新网页。'
+    return null
+  })
   async function save() {
     if (busy || unknown) return
     if (original.kind === 'topic-move' ? !destination : !title.trim()) { setIssue('请选择准确目标或填写名称，原草稿保留。'); return }
     if (original.kind === 'category-rename' && !revision) { setUnknown(true); setIssue('分类内容 revision 未确认；可检查原分类后继续。其他 Topic 与工作面仍可用。'); return }
-    setBusy(true)
+    local.current.busy = true; setBusy(true)
     try {
       if (original.kind === 'category-create') await rpc('topic.category.create', { categoryId: newId, title: title.trim() })
       else if (original.kind === 'topic-create') await rpc('topic.create', { topicId: newId, categoryId: original.category.categoryId, title: title.trim() })
       else if (original.kind === 'category-rename') await rpc('topic.category.rename', { categoryId: original.category.categoryId, expectedRevision: revision!, title: title.trim() })
       else await rpc('topic.move', { topicId: original.topic.topicId, categoryId: destination, expectedRevision: spatialRevision })
       onSaved()
-    } catch (error) { setUnknown(true); setChecked(false); setIssue(`操作未确认：${error instanceof Error ? error.message : String(error)}。草稿与原身份保留，先检查原结果；不会自动重放。`) }
-    finally { setBusy(false) }
+    } catch (error) { local.current.unknown = true; setUnknown(true); setChecked(false); setIssue(`操作未确认：${error instanceof Error ? error.message : String(error)}。草稿与原身份保留，先检查原结果；不会自动重放。`) }
+    finally { local.current.busy = false; setBusy(false) }
   }
   async function inspect() {
     try {
@@ -74,9 +83,9 @@ function OrganizationEditor({ rpc, action, categories, onClose, onSaved }: {
   }
   return <form className="mobile-topic-editor" onSubmit={event => { event.preventDefault(); void save() }}>
     <h2>{{ 'category-create': '新建分类', 'topic-create': '新建 Topic', 'category-rename': '重命名分类', 'topic-move': '移动 Topic' }[original.kind]}</h2>
-    {original.kind === 'topic-move' ? <><p>{original.topic.title} · 原 Topic 整体移动，内容与执行身份保留。</p><label>目标分类<select aria-label="目标分类" value={destination} disabled={busy} onChange={event => setDestination(event.target.value)}>
+    {original.kind === 'topic-move' ? <><p>{original.topic.title} · 原 Topic 整体移动，内容与执行身份保留。</p><label>目标分类<select aria-label="目标分类" value={destination} disabled={busy} onChange={event => { local.current.destination = event.target.value; setDestination(event.target.value) }}>
       <option value="">选择分类</option>{categories.map(value => <option key={value.categoryId} value={value.categoryId}>{value.title}</option>)}</select></label></>
-      : <label>名称<TextInput aria-label="分类或 Topic 名称" maxLength={120} value={title} readOnly={busy} onChange={event => setTitle(event.target.value)} /></label>}
+      : <label>名称<TextInput aria-label="分类或 Topic 名称" maxLength={120} value={title} readOnly={busy} onChange={event => { local.current.title = event.target.value; setTitle(event.target.value) }} /></label>}
     {issue && <MobileNotice kind="feedback" identity={[issue]} className="mobile-topics-issue" role="status">{issue}</MobileNotice>}
     {unknown && <button type="button" onClick={() => { void inspect() }}>检查原操作结果</button>}
     {unknown && checked && <button type="button" onClick={() => { setUnknown(false); setChecked(false); setIssue('已采用检查结果；继续操作须明确确认保存。') }}>以检查结果为基准继续</button>}
