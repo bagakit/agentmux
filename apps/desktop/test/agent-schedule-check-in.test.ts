@@ -7,7 +7,7 @@ import { DEFAULT_AGENT_SCHEDULE_CHECK_IN, AGENT_SCHEDULE_CHECK_IN_GUIDANCE } fro
 import { checkInHumanObservation, decideCheckIn, type CheckInObservation } from '@agentmux/host/agent-schedule-check-in'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
-import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery'
+import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
 
 const at = (time: string) => Date.parse(time), day = at(_hygiene_fixtureIso(24138000000, "minute")), target = { hostId: 'local', agentSessionId: 'check-in-agent', providerId: 'generic', workspacePath: _hygiene_fixturePath("repo") }
 const policy = DEFAULT_AGENT_SCHEDULE_CHECK_IN

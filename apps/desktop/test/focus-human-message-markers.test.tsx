@@ -23,7 +23,7 @@ import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-con
 import { useAppStore } from '../src/renderer/src/store';
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts';
 import type { ContinuousProgressLoop } from '../../../packages/core/src/continuous-progress-scheduler.js';
-import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery';
+import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery';
 import { RuntimeController } from '../src/main/runtime-controller';
 const baseline = useAppStore.getState();
 const roots: Array<ReturnType<typeof createRoot>> = [];

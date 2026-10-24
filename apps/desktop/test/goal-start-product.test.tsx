@@ -11,7 +11,7 @@ import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-ser
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { isAgentMuxRpcMethod, AGENTMUX_RPC_NATIVE_METHODS } from '../../../packages/core/src/public-rpc'
 import { api } from '../src/renderer/src/lib/api'
-import { GoalStartResponsibilityOwner } from '../src/main/goal-start-responsibility'
+import { GoalStartResponsibilityOwner } from '@agentmux/host/goal-start-responsibility'
 import { GoalFiniteStartControl } from '../src/renderer/src/components/GoalFiniteStartControl'
 import { useAppStore } from '../src/renderer/src/store'
 

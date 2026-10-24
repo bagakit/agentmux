@@ -6,7 +6,7 @@ import { AgentMuxError, observeAgent, type AgentMuxClientEvent, type AgentMuxAge
 import { demandExecutionReferences, demandResponsibilityScope, openDemandStore } from '@agentmux/demand'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import type { GoalDelegationAuthority, GoalDelegationResult } from '@agentmux/core/goal-delegation'
-import { GoalPatrolOwner } from '../src/main/goal-patrol-owner'
+import { GoalPatrolOwner } from '@agentmux/host/goal-patrol-owner'
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const release of cleanup.splice(0).reverse()) await release(); vi.restoreAllMocks() })
 const person: GoalDelegationAuthority = { actor: { kind: 'user', id: 'person' } }

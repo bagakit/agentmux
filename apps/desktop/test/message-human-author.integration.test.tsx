@@ -23,7 +23,7 @@ import {
 } from '@agentmux/core'
 import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { assertManualPromptSenderTrusted } from '../src/main/ipc-sender-trust'
-import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery'
+import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'

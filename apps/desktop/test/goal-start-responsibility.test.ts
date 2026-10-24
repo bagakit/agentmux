@@ -8,7 +8,7 @@ import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import { openDemandStore } from '@agentmux/demand'
 import type { DemandDelegationAttention } from '@agentmux/demand/delegations'
 import type { DemandDispatchIntent } from '@agentmux/demand'
-import { GoalStartResponsibilityOwner } from '../src/main/goal-start-responsibility'
+import { GoalStartResponsibilityOwner } from '@agentmux/host/goal-start-responsibility'
 
 const cleanup: Array<() => void | Promise<unknown>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); vi.restoreAllMocks() })

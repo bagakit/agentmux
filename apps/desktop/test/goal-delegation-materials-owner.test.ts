@@ -7,7 +7,7 @@ import type { AgentMuxSpaceCatalog, FileReadParams } from '@agentmux/core'
 import type { GoalDelegationAuthority } from '@agentmux/core/goal-delegation'
 import { openDemandStore, type DemandDelegationIntent } from '@agentmux/demand'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
-import { GoalDelegationOwner } from '../src/main/goal-delegation-owner'
+import { GoalDelegationOwner } from '@agentmux/host/goal-delegation-owner'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 

@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient, AgentMuxControlServer, AgentMuxMemoryAgentSessionStore,
   hashAgentCapability, issueAgentCapability, type AgentMuxRpcResult } from '@agentmux/core'
 import { openDemandStore } from '@agentmux/demand'
-import { GoalDelegationOwner, type GoalDelegationCorePort } from '../src/main/goal-delegation-owner'
+import { GoalDelegationOwner, type GoalDelegationCorePort } from '@agentmux/host/goal-delegation-owner'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 
 const execute = promisify(execFile), cleanup: Array<() => Promise<unknown>> = []
