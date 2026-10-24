@@ -1,13 +1,15 @@
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar.js'
 import { SelectorPresence } from '../src/renderer/src/components/SelectorList.js'
+import { readStyleSheet } from './helpers/styles.js'
 import {
   PRESENCE_MARK_CORNERS,
   type PresenceMarkCorner
-} from '../src/renderer/src/lib/presence-mark-corner.js'
+} from '@agentmux/client-ui/presence-mark-corner'
 
 /**
  * 叠压头像簇里，「这个 Agent 在等你 / 出错了」必须看得见。
@@ -21,10 +23,12 @@ import {
  * 漂移，而漂移那天它自己不会响。每处扫描都先断言扫到了东西——扫到空内容是本仓既有的第三种白绿。
  */
 
-const STYLES = new URL('../src/renderer/src/styles/', import.meta.url)
+const STYLES = resolve(import.meta.dirname, '../src/renderer/src/styles')
 
 function sheet(name: string): string {
-  return readFileSync(new URL(name, STYLES), 'utf8')
+  return name === 'agent-avatar.css'
+    ? readStyleSheet('@agentmux/client-ui/styles/agent-avatar-face.css') + '\n' + readStyleSheet('./agent-avatar.css')
+    : readFileSync(resolve(STYLES, name), 'utf8')
 }
 
 /** 某条规则的声明体。找不到即 undefined，由调用处断言——静默返回空串会让后面每条判据恒真。 */
@@ -75,10 +79,14 @@ describe('叠压头像簇的角位分配', () => {
     expect(status, '注意力角标的规则没扫到').toBeDefined()
 
     // 9px 是 waiting/blocked/error 三态下 `.status__dot` 的实测尺寸，同样从样式表扫。
-    const dot = ruleBody(sheet('base.css'), '.status--waiting .status__dot, .status--blocked .status__dot')
-    expect(dot, '注意力状态点的规则没扫到').toBeDefined()
-    const markSize = px(dot!, 'width')
-    expect(markSize, '角标尺寸扫成了 null').not.toBeNull()
+    const markSizes = ['waiting', 'blocked'].map(state => {
+      const dot = ruleBody(sheet('base.css'), `.status--${state} .status__dot`)
+      expect(dot, `${state} 注意力状态点的规则没扫到`).toBeDefined()
+      const size = px(dot!, 'width')
+      expect(size, `${state} 角标尺寸扫成了 null`).not.toBeNull()
+      return size!
+    })
+    const markSize = Math.max(...markSizes)
 
     // 外伸量在记号自己的规则里，方位由 [data-corner] 翻译——所以横向落在哪一边，问的是分配表。
     const inset = px(status!, '--mark-inset')
@@ -135,7 +143,7 @@ describe('叠压头像簇的角位分配', () => {
     }
     // 四个角各有一条翻译规则，且译得对。整表遍历而不是挑一个——漏译一个角，下一次改分配就静默失位。
     for (const [corner, [vertical, horizontal]] of Object.entries(expectedEdges)) {
-      const body = ruleBody(avatarCss, `.agent-avatar [data-corner='${corner}']`)
+      const body = ruleBody(avatarCss, `:is(.agent-avatar, .agent-avatar__contour) [data-corner='${corner}']`)
       expect(body, `${corner} 没有翻译规则——把分配表指向这个角就会失位`).toBeDefined()
       expect(body).toMatch(new RegExp(`${vertical}:\\s*var\\(--mark-inset\\)`, 'u'))
       expect(body).toMatch(new RegExp(`${horizontal}:\\s*var\\(--mark-inset\\)`, 'u'))

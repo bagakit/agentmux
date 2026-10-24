@@ -1,15 +1,36 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar.js'
+import { readStyleSheet } from './helpers/styles.js'
+import { PRESENCE_MARK_CORNERS } from '@agentmux/client-ui/presence-mark-corner'
 
 const SOURCE = readFileSync(
-  new URL('../src/renderer/src/components/AgentEnamelFilter.tsx', import.meta.url),
+  resolve(import.meta.dirname, '../../../packages/client-ui/src/components/AgentEnamelFilter.tsx'),
   'utf8'
 )
 
 describe('Executor avatar badge icons', () => {
+  it('preserves the Desktop status/count wrapper and host identity mark around the shared face', () => {
+    const working = renderToStaticMarkup(createElement(AgentAvatar, {
+      label: 'Executor', providerId: 'codex', state: 'working', count: 3, appearance: { badge: 'shield' }
+    }))
+    expect(working).toContain('agent-avatar__status agent-avatar__status--working')
+    expect(working).toContain(`class="agent-avatar__status agent-avatar__status--working" data-corner="${PRESENCE_MARK_CORNERS.status}"`)
+    expect(working).toContain(`class="agent-avatar__count" data-corner="${PRESENCE_MARK_CORNERS.count}"`)
+    expect(working).toContain('style="width:14px;height:14px"')
+    const originalMark = renderToStaticMarkup(createElement(AgentAvatar, {
+      label: 'Mote', state: 'waiting', appearance: { tint: '#8ab4f8', badge: 'bolt' },
+      mark: createElement('span', { 'data-original-identity': true }, 'Mote')
+    }))
+    expect(originalMark).toContain('data-original-identity="true"')
+    expect(originalMark).toContain('data-avatar-badge="bolt"')
+    expect(originalMark).toContain('agent-avatar__status status__dot')
+    expect(originalMark).not.toContain('<filter')
+  })
+
   it('renders a fixed icon beside the Provider mark without badge text', () => {
     const markup = renderToStaticMarkup(createElement(AgentAvatar, {
       label: 'Executor', providerId: 'codex', state: 'running', appearance: { badge: 'shield' }
@@ -25,17 +46,16 @@ describe('Executor avatar badge icons', () => {
     expect(mark).not.toContain('>shield<')
   })
 
-  it('overlays a compact badge inside both provider marks', () => {
+  it('overlays the compact badge through the shared live avatar style owner', () => {
     // 只判尺寸与外伸量——**落角不归这条规则管**。叠压簇里那枚徽标的方位由
-    // lib/presence-mark-corner.ts 分配、由 `[data-corner]` 规则翻译，守在
+    // client-ui/presence-mark-corner 分配、由 `[data-corner]` 规则翻译，守在
     // selector-presence-mark-corners.test.tsx。在这里再钉一次方位，就是同一个事实两份真相，
     // 改分配表时这里会打出一条与产品决定相反的假红。
     const sheets = [
-      ['agent-avatar.css', '.agent-avatar__badge', 8, '--mark-inset'],
-      ['session-connecting.css', '.session-connecting__executor-badge', 9, 'top']
+      ['@agentmux/client-ui/styles/agent-avatar-face.css', '.agent-avatar__badge', 8, '--mark-inset']
     ] as const
     for (const [file, selector, size, inset] of sheets) {
-      const css = readFileSync(new URL('../src/renderer/src/styles/' + file, import.meta.url), 'utf8')
+      const css = readStyleSheet(file)
       // 先剥注释：规则头捕获的是上一个 `}` 之后的全部文本，注释留在里面会让 trim() 后的头对不上，
       // 于是这条规则"没扫到"、body 为 undefined，后面每条 toContain 都在 undefined 上恒假。
       const rules = [...css.replace(/\/\*[\s\S]*?\*\//gu, '').matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
