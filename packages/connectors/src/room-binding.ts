@@ -2,7 +2,7 @@ import { effectiveRoomGrant } from './effective-grant.js'
 import type { ConnectionMemberAccess, ConnectionEffectiveGrant, ConnectionEffectiveGrants, RoomBindingInheritInput } from '@agentmux/core/connections'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConversationCheckpointPage, type ConversationCheckpointPage, type ConversationRef } from '@agentmux/core/conversation'
-import { parseConnectionActor, parseConnectionGrant, parseRoomBinding, parseRoomBindingAuthority, parseRoomBindingOperation, parseRoomBindingParams, type ConnectionGrant, type RoomBinding, type RoomBindingAuthority, type RoomBindingBindInput, type RoomBindingCallContext, type RoomBindingGrantInput, type RoomBindingInspectInput, type RoomBindingListInput, type RoomBindingOperation, type RoomBindingPauseInput, type RoomBindingReadPort, type RoomBindingRelinkInput, type RoomBindingNoticeEvent, type RoomBindingNotice, type RoomBindingsPort, type RoomPublicationAuthority } from '@agentmux/core/connections'
+import { readRoomPublicationBinding, sameRoomPublication, parseConnectionActor, parseConnectionGrant, parseRoomBinding, parseRoomBindingAuthority, parseRoomBindingOperation, parseRoomBindingParams, type ConnectionGrant, type RoomBinding, type RoomBindingAuthority, type RoomBindingBindInput, type RoomBindingCallContext, type RoomBindingGrantInput, type RoomBindingInspectInput, type RoomBindingListInput, type RoomBindingOperation, type RoomBindingPauseInput, type RoomBindingReadPort, type RoomBindingRelinkInput, type RoomBindingNoticeEvent, type RoomBindingNotice, type RoomBindingsPort, type RoomPublicationAuthority } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { readRoomTarget, type RoomTargetOwner } from './room-target.js'
 
@@ -86,8 +86,8 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     const binding = this.readExact(bindingId, revision), current = this.readCurrent(bindingId)
     const result = (reason: NonNullable<RoomPublicationAuthority['reason']>): RoomPublicationAuthority => ({ binding, authorized: false, reason })
     if (!binding || !current) return result('missing')
-    if (current.revision !== revision) return result('binding-revised')
-    if (binding.state !== 'active') return result('paused')
+    if (!sameRoomPublication(binding, current)) return result('binding-revised')
+    if (current.state !== 'active') return result('paused')
     const connection = this.options.connections.readConfiguration(binding.connectionId)
     if (!connection?.config.enabled || !equal(connection.config.application, binding.application)) return result('connection-disabled')
     if (!this.options.connections.automaticTrafficEnabled(connection.config.adapterId)) return result('service-disabled')
@@ -103,12 +103,23 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     })
   }
   findGrant(input: { connectionId: string; externalConversationId: string; actor: ConnectionGrant['actor'] }): ConnectionGrant | null {
-    return this.safe(() => { const row = this.database.prepare("SELECT h.grant_id FROM room_grant_head h JOIN room_binding_head b ON b.binding_id=h.binding_id JOIN room_grant_revision r ON r.grant_id=h.grant_id AND r.revision=h.revision WHERE h.connection_id=? AND h.room_id=? AND h.actor_json=? AND b.connection_id=h.connection_id AND b.room_id=h.room_id AND b.revision=json_extract(r.snapshot_json,'$.bindingRevision')").get(input.connectionId, input.externalConversationId, JSON.stringify(parseConnectionActor(input.actor))); return row ? this.readGrant(String(row.grant_id)) : null })
+    return this.safe(() => {
+      const row = this.database.prepare('SELECT grant_id,binding_id FROM room_grant_head WHERE connection_id=? AND room_id=? AND actor_json=?').get(input.connectionId, input.externalConversationId, JSON.stringify(parseConnectionActor(input.actor)))
+      const grant = row ? this.readGrant(String(row.grant_id)) : null, binding = row ? this.readCurrent(String(row.binding_id)) : null
+      return grant && binding && this.grantBelongs(binding, grant) ? grant : null
+    })
   }
-  grants(bindingId: string, revision: number): ConnectionGrant[] { return this.bindingGrants(this.readExact(bindingId, revision)).filter(grant => grant.bindingRevision === revision) }
+  grants(bindingId: string, revision: number): ConnectionGrant[] { return this.bindingGrants(this.readExact(bindingId, revision)) }
+  private grantBelongs(binding: RoomBinding, grant: ConnectionGrant): boolean {
+    const original = grant.bindingRevision <= binding.revision ? this.readExact(grant.bindingId, grant.bindingRevision) : null
+    return !!original && sameRoomPublication(original, binding)
+  }
+  private publication(binding: RoomBinding): RoomBinding | null {
+    return readRoomPublicationBinding(this, binding)
+  }
   private bindingGrants(binding: RoomBinding | null): ConnectionGrant[] {
     if (!binding) return []
-    return this.safe(() => this.database.prepare('SELECT grant_id FROM room_grant_head WHERE connection_id=? AND room_id=? AND binding_id=?').all(binding.connectionId, binding.externalConversationId, binding.bindingId).map(row => this.readGrant(String(row.grant_id))!).filter(grant => grant.bindingRevision === binding.revision))
+    return this.safe(() => this.database.prepare('SELECT grant_id FROM room_grant_head WHERE connection_id=? AND room_id=? AND binding_id=?').all(binding.connectionId, binding.externalConversationId, binding.bindingId).map(row => this.readGrant(String(row.grant_id))!).filter(grant => this.grantBelongs(binding, grant)))
   }
   /** Head is authority; immutable history only explains a prior explicit decision. */
   private localHeads(binding: RoomBinding, actor?: ConnectionGrant['actor']): ConnectionGrant[] {
@@ -125,7 +136,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     const binding = this.readCurrent(bindingId)
     if (!binding || binding.revision !== revision || !equal(binding.application, actor.application)) return null
     const local = this.localDecision(binding, actor)
-    if (local) return local.bindingRevision === revision || local.state === 'revoked' ? effectiveRoomGrant(local) : null
+    if (local) return this.grantBelongs(binding, local) || local.state === 'revoked' ? effectiveRoomGrant(local) : null
     const grant = this.options.connections.applicationAccess.grants(binding.connectionId, actor)[0]
     return grant ? { actor: grant.actor, state: grant.state, capabilities: grant.capabilities, source: { kind: 'application', grantId: grant.grantId, revision: grant.revision } } : null
   }
@@ -134,7 +145,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     if (!binding || binding.revision !== revision) return { grants: [], issue: null }
     const local = this.localHeads(binding), actors = new Map(local.map(g => [JSON.stringify(g.actor), g.actor]))
     const grants: ConnectionEffectiveGrant[] = []
-    for (const actor of actors.values()) { const grant = this.localDecision(binding, actor)!; if (grant.bindingRevision === revision || grant.state === 'revoked') grants.push(effectiveRoomGrant(grant)) }
+    for (const actor of actors.values()) { const grant = this.localDecision(binding, actor)!; if (this.grantBelongs(binding, grant) || grant.state === 'revoked') grants.push(effectiveRoomGrant(grant)) }
     try {
       for (const g of this.options.connections.applicationAccess.grants(binding.connectionId)) if (!actors.has(JSON.stringify(g.actor))) grants.push({ actor: g.actor, state: g.state, capabilities: g.capabilities, source: { kind: 'application', grantId: g.grantId, revision: g.revision } })
       return { grants, issue: null }
@@ -151,7 +162,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     for (const g of this.options.connections.applicationAccess.grants(binding.connectionId)) remember(g.actor, false)
     return [...actors.values()].map(({ actor, previousDecision }) => {
       const grant = this.localDecision(binding, actor), effective = this.effectiveGrant(binding.bindingId, binding.revision, actor)
-      return { actor, local: grant ? { kind: grant.bindingRevision === binding.revision ? 'override' as const : 'review-required' as const, grant } : { kind: 'none' as const, previousDecision }, effective }
+      return { actor, local: grant ? { kind: this.grantBelongs(binding, grant) ? 'override' as const : 'review-required' as const, grant } : { kind: 'none' as const, previousDecision }, effective }
     })
   }
   readOperation(operationId: string): RoomBindingOperation | null { return this.safe(() => this.saved(operationId)?.operation ?? null) }
@@ -292,7 +303,19 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
       await this.region(input)
       const executionRuntimeId = this.options.executionRuntimeId?.(input.executionHostId)
       this.safe(() => this.connection(input))
-      const cut = await this.cut(input)
+      const before = this.readCurrent(input.bindingId)
+      if (before?.executionHostId === input.executionHostId && before.executionRuntimeId && !executionRuntimeId) refuse('ROOM_BINDING_TARGET_UNCONFIRMED')
+      const connection = this.connection(input)
+      const { executionRuntimeId: _runtime, inputTarget: _inputTarget, ...previousSubject } = before ?? {}
+      const candidate = before ? { ...previousSubject, connectionId: input.connectionId, application: connection.config.application,
+        externalConversationId: input.externalConversationId, executionHostId: input.executionHostId, ...(executionRuntimeId ? { executionRuntimeId } : {}),
+        agentSessionId: input.agentSessionId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}) } as RoomBinding : null
+      const continuous = !!before && before.state === 'active' && !before.publicationOrigin && before.scope.publication === 'future-shared-conversation' &&
+        sameRoomPublication(before, candidate!) && before.sourceCheckpoints.every(c => equal(c.source, input.expectedSource))
+      const original = continuous ? this.publication(before!) : null
+      if (continuous && !original) refuse('ROOM_BINDING_PUBLICATION_UNCONFIRMED')
+      const observedCut = await this.cut(input)
+      const cut = original ? { sourceCheckpoints: original.sourceCheckpoints, ...(original.sourceFrontier ? { sourceFrontier: original.sourceFrontier } : {}) } : observedCut
       await context.assertCurrent?.()
       await this.region(input)
       if (this.options.executionRuntimeId?.(input.executionHostId) !== executionRuntimeId) refuse('ROOM_BINDING_TARGET_CHANGED')
@@ -302,11 +325,10 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         const connection = this.connection(input), current = this.readCurrent(input.bindingId)
         if (!current || current.state === 'detached' || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
         this.conflicts(input, input.bindingId)
-        const { inputTarget: _previousInputTarget, regionAnchor: _previousRegionAnchor, executionRuntimeId: _previousRuntime, ...previous } = current
-        const binding: RoomBinding = { ...previous, revision: current.revision + 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}), executionHostId: input.executionHostId, ...(executionRuntimeId ? { executionRuntimeId } : {}), agentSessionId: input.agentSessionId, ...(input.regionAnchor ? { regionAnchor: input.regionAnchor } : {}), ...cut, authorizedBy: authority }
+        const { inputTarget: _previousInputTarget, regionAnchor: _previousRegionAnchor, executionRuntimeId: _previousRuntime, publicationBoundary: _previousBoundary, ...previous } = current
+        const binding: RoomBinding = { ...previous, revision: current.revision + 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}), executionHostId: input.executionHostId, ...(executionRuntimeId ? { executionRuntimeId } : {}), agentSessionId: input.agentSessionId, ...(input.regionAnchor ? { regionAnchor: input.regionAnchor } : {}), ...cut, ...(original ? { publicationBoundary: { revision: original.revision } } : {}), authorizedBy: authority }
         this.writeBinding(binding)
-        this.options.lifecycle?.retireBindingPending(current)
-        this.carryGrants(current, binding)
+        if (!original) { const previousPublication = this.publication(current); if (previousPublication) this.options.lifecycle?.retireBindingPending(previousPublication); this.carryGrants(current, binding) }
         const sameRoute = equal(current.application, binding.application) && current.externalConversationId === binding.externalConversationId && current.agentSessionId === binding.agentSessionId && current.executionHostId === binding.executionHostId && current.executionRuntimeId === binding.executionRuntimeId
         const notices = this.notices(input.operationId, sameRoute ? [{ binding, event: current.state === 'paused' ? 'resumed' : 'updated' }] : [{ binding: current, event: 'disconnected' }, { binding, event: 'connected' }])
         return this.finish({ operationId: input.operationId, action: 'relink', state: 'applied', binding, ...(notices ? { notices } : {}) })
@@ -327,7 +349,8 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         if (!current || current.state !== 'paused' || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
         const connection = this.options.connections.readConfiguration(current.connectionId)
         if (!connection?.config.enabled || !equal(connection.config.application, current.application)) refuse('ROOM_BINDING_CONNECTION_UNAVAILABLE')
-        const binding: RoomBinding = { ...current, state: 'active', revision: current.revision + 1, ...cut }
+        const { publicationBoundary: _previousBoundary, ...previous } = current
+        const binding: RoomBinding = { ...previous, state: 'active', revision: current.revision + 1, ...cut }
         this.writeBinding(binding); this.carryGrants(current, binding)
         const notices = this.notices(input.operationId, [{ binding, event: 'resumed' }])
         return this.finish({ operationId: input.operationId, action: 'resume', state: 'applied', binding, ...(notices ? { notices } : {}) })
@@ -347,7 +370,8 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         if (!current || current.state === 'detached' || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
         const binding: RoomBinding = { ...current, state: action === 'pause' ? 'paused' : 'detached', revision: current.revision + 1 }
         this.writeBinding(binding)
-        this.options.lifecycle?.retireBindingPending(current)
+        const previousPublication = this.publication(current)
+        if (previousPublication) this.options.lifecycle?.retireBindingPending(previousPublication)
         if (action === 'pause') this.carryGrants(current, binding)
         const notices = this.notices(input.operationId, [{ binding, event: action === 'pause' ? 'paused' : 'disconnected' }])
         return this.finish({ operationId: input.operationId, action, state: 'applied', binding, ...(notices ? { notices } : {}) })

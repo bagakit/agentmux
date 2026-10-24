@@ -52,13 +52,14 @@ export class ConversationActions implements PublicationPermissionsPort {
     return core.onEvent(event => { if (event.type === 'agent-session' && event.session.agentSessionId === binding.agentSessionId) wake() })
   }
   private grants(binding: RoomBinding, capability: 'permission' | 'answer' = 'permission', reading?: ConnectionEffectiveGrants): ConnectionEffectiveGrant[] {
-    return (reading ?? this.options.bindings.effectiveGrants(binding.bindingId, binding.revision)).grants
+    const current = this.options.bindings.readCurrent(binding.bindingId)
+    return (reading ?? this.options.bindings.effectiveGrants(binding.bindingId, current?.revision ?? binding.revision)).grants
       .filter(grant => grant.state === 'active' && grant.capabilities.includes(capability))
       .sort((a, b) => a.source.kind.localeCompare(b.source.kind) || a.source.grantId.localeCompare(b.source.grantId))
   }
   private current(reference: Reference, actor?: ConnectionGrant['actor'], unavailable?: () => void): ConnectionEffectiveGrant[] {
     const binding = this.options.bindings.readCurrent(reference.binding.bindingId)
-    if (!binding || binding.revision !== reference.binding.revision || binding.state !== 'active' || !same(binding.application, reference.binding.application) || binding.externalConversationId !== reference.binding.externalConversationId) return []
+    if (!binding || !this.options.bindings.publicationAuthority(reference.binding.bindingId, reference.binding.revision).authorized || binding.state !== 'active' || !same(binding.application, reference.binding.application) || binding.externalConversationId !== reference.binding.externalConversationId) return []
     return reference.grants.filter(g => !actor || same(g.actor, actor)).flatMap(original => {
       try {
         const current = this.options.bindings.effectiveGrant(binding.bindingId, binding.revision, original.actor)
@@ -72,7 +73,7 @@ export class ConversationActions implements PublicationPermissionsPort {
     if (!core?.agentSession) return failure('INGRESS_CORE_UNAVAILABLE')
     const session = core.agentSession(binding.agentSessionId), pending = session.pendingInteraction
     const requests = pending ? [pending.request, ...(pending.additionalRequests ?? [])] : []
-    const reading = this.options.bindings.effectiveGrants(binding.bindingId, binding.revision)
+    const reading = this.options.bindings.effectiveGrants(binding.bindingId, this.options.bindings.readCurrent(binding.bindingId)?.revision ?? binding.revision)
     if (reading.issue) unavailable?.()
     const grants = this.grants(binding, 'permission', reading)
     const questionProjections: string[] = []
@@ -233,7 +234,7 @@ export class ConversationActions implements PublicationPermissionsPort {
     this.initialize()
     let core: ReturnType<DurableIngressOptions['core']>, session: AgentMuxAgentSession | undefined
     try { core = this.options.core(binding.executionHostId); session = core?.agentSession?.(binding.agentSessionId) } catch { /* Keep public questions readable without granting a response route. */ }
-    const result = new Map<string, QuestionPublicationPayload>(), reading = this.options.bindings.effectiveGrants(binding.bindingId, binding.revision), grants = this.grants(binding, 'answer', reading)
+    const result = new Map<string, QuestionPublicationPayload>(), reading = this.options.bindings.effectiveGrants(binding.bindingId, this.options.bindings.readCurrent(binding.bindingId)?.revision ?? binding.revision), grants = this.grants(binding, 'answer', reading)
     for (const unit of units) for (const record of unit.records) {
       if (record.original.kind !== 'native' || !record.original.item.questionRequest || record.reference?.source.kind !== 'native') continue
       const item = record.original.item, questions = item.questionRequest!.questions

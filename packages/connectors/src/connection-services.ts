@@ -65,8 +65,8 @@ export async function createConnectionServices(options: { directory: string | un
         const secrets = new ConnectionSecrets(database)
         const connections = new ConnectionHost({ database, secrets, adapters })
         connections.onChannelMetadataChanged(relayMetadata)
-        const publicationStore = options.publication ? new PublicationStore(database) : undefined
-        const bindings = options.bindings ? new RoomBindingHost({ ...options.bindings, connections, ...(publicationStore ? { lifecycle: publicationStore } : {}) }) : undefined
+        const publicationStore: PublicationStore | undefined = options.publication ? new PublicationStore(database, { readExact: (id, revision) => bindings?.readExact(id, revision) ?? null }) : undefined
+        const bindings: RoomBindingHost | undefined = options.bindings ? new RoomBindingHost({ ...options.bindings, connections, ...(publicationStore ? { lifecycle: publicationStore } : {}) }) : undefined
         const moteChat = options.moteChat ? new MoteChatHost({ connections, agents: options.moteChat.agents, assertTarget: options.moteChat.assertTarget,
           ...(options.moteChat.assertReady ? { assertReady: options.moteChat.assertReady } : {}), ingress: () => ingress }) : undefined
         const routing = bindings && moteChat ? composeMoteChatBindings(bindings, moteChat) : bindings

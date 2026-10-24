@@ -2,7 +2,7 @@ import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { publicationMarkdown } from './publication-markdown.js'
 import { AgentMuxError, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
 import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationCheckpointPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationSourceRef, type ConversationCheckpointInput, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
-import { connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
+import { readRoomPublicationBinding, roomPublicationReference, connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { credentialLookupFailure } from './credential-observation.js'
 import { parsePreparedPublication } from './publication-wire.js'
@@ -42,7 +42,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
   private closed = false
   private readonly timer: ReturnType<typeof setInterval>
   constructor(private readonly options: PublicationHostOptions) {
-    this.store = options.store ?? new PublicationStore(options.connections.database)
+    this.store = options.store ?? new PublicationStore(options.connections.database, options.bindings)
     // Recovery probes only failed/closed/unconfirmed lanes. Healthy source reads are notification-driven.
     this.timer = setInterval(() => this.refresh(true), 5_000); this.timer.unref()
     this.refresh()
@@ -51,7 +51,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     if (this.closed) return
     this.refreshNotices()
     let active: RoomBinding[]
-    try { active = this.options.bindings.listActive() } catch { for (const lane of this.lanes.values()) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }; return }
+    try { active = this.options.bindings.listActive().flatMap(current => { const original = readRoomPublicationBinding(this.options.bindings, current); return original ? [original] : [] }) } catch { for (const lane of this.lanes.values()) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }; return }
     const current = new Map(active.map(binding => [binding.bindingId, binding]))
     for (const [id, lane] of this.lanes) {
       const authority = this.authority(lane.binding)
@@ -79,7 +79,9 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const lane = this.lanes.get(binding.bindingId)
     try {
       if (!this.authorized(binding) || this.options.connections.publicationAdapter(binding.connectionId)?.queryFeedback !== true) return
-      this.store.queueQueryReceived(binding, record)
+      const original = readRoomPublicationBinding(this.options.bindings, binding)
+      if (!original) { if (lane) lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }; return }
+      this.store.queueQueryReceived(original, record)
       if (lane) this.wake(lane)
     } catch {
       if (lane) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }
@@ -628,7 +630,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
   }
   observation(bindingId: string, revision: number): PublicationObservation {
     const lane = this.lanes.get(bindingId)
-    if (lane?.binding.revision === revision) return lane.observation.state === 'ready' || lane.observation.reason === 'effect-unconfirmed'
+    const requested = this.options.bindings.readExact(bindingId, revision)
+    if (requested && lane?.binding.revision === roomPublicationReference(requested).revision) return lane.observation.state === 'ready' || lane.observation.reason === 'effect-unconfirmed'
       ? this.effectObservation(lane.binding) ?? { ...lane.observation } : { ...lane.observation }
     if (this.closed) return { state: 'unknown', reason: 'not-started' }
     const authority = this.authority({ bindingId, revision })

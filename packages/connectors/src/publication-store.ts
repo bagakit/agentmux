@@ -10,11 +10,11 @@ import type { PublicationSpeaker } from './publication-speaker.js'
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication, type PublicationPreparer } from './publication-wire.js'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
-import { parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
+import { sameRoomPublication, type RoomBindingReadPort, parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
 import { parseConversationChangesPage, parseConversationUnit, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
-export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'sourceFrontier' | 'publicationOrigin' | 'scope'>
+export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'sourceFrontier' | 'publicationOrigin' | 'scope' | 'executionRuntimeId' | 'inputTarget' | 'publicationBoundary'>
 /** Exact original recipient, independent of current connection aliases and Binding generations. */
 export type PublicationContextRecipient = {
   application: PublicationBoundary['application']; externalConversationId: string; hostId: string; agentSessionId: string
@@ -165,7 +165,7 @@ function representationFragments(value: RepresentationPayload | QuestionRepresen
 }
 /** Connector-owned publication facts, not another Agent history or lifecycle. Borrows the Host database. */
 export class PublicationStore {
-  constructor(readonly database: DatabaseSync) {
+  constructor(readonly database: DatabaseSync, private readonly bindings?: Pick<RoomBindingReadPort, 'readExact'>) {
     database.exec(`
       CREATE TABLE IF NOT EXISTS connector_publication_frontier (
         binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, source_key TEXT NOT NULL,
@@ -460,12 +460,13 @@ export class PublicationStore {
     const r = unit.records.find(r => r.id === recordId), item = r?.original.kind === 'captured' ? r.original.item : undefined, author = item?.authorExternal
     if (!author || item?.publicContent !== 'confirmed' || item.kind !== 'user_message' || item.source !== 'user') return
     try {
+      if (!this.publicationMember(boundary, author.bindingId, author.bindingRevision)) return
       const row = this.database.prepare('SELECT record_json FROM connection_ingress_message WHERE domain=? AND app_id=? AND message_id=?')
         .get(boundary.application.domain, boundary.application.appId, author.externalMessageId)
       if (!row) return
       const ingress = JSON.parse(String(row.record_json))
       const target = ingress.group?.target
-      if (target && target.hostId === boundary.executionHostId && target.agentSessionId === boundary.agentSessionId && target.connectionId === boundary.connectionId && target.bindingId === boundary.bindingId && target.bindingRevision === boundary.revision &&
+      if (target && target.hostId === boundary.executionHostId && target.agentSessionId === boundary.agentSessionId && target.connectionId === boundary.connectionId && target.bindingId === boundary.bindingId && target.bindingRevision === author.bindingRevision &&
         r?.reference?.source.kind === 'captured' && r.reference.source.recordId === item.id && item.id === externalConversationRecordId(author) && ingress.body === item.content &&
         same(externalConversationAuthor(author), { kind: 'external', connectionId: target.connectionId, actor: ingress.actor, externalConversationId: ingress.externalConversationId, externalMessageId: ingress.externalMessageId, bindingId: target.bindingId, bindingRevision: target.bindingRevision, ...(target.authoritySource ? { authoritySource: target.authoritySource } : {}) })) {
         return { connectionId: boundary.connectionId, externalConversationId: boundary.externalConversationId, externalMessageId: author.externalMessageId }
@@ -479,11 +480,18 @@ export class PublicationStore {
       return { connectionId: boundary.connectionId, externalConversationId: boundary.externalConversationId, externalMessageId: author.externalMessageId }
     } catch { return }
   }
+  /** Original intake configuration stays intact; only its publication association is resolved. */
+  publicationMember(boundary: PublicationBoundary, bindingId: string, revision: number): boolean {
+    if (bindingId !== boundary.bindingId) return false
+    if (revision === boundary.revision) return true
+    const original = this.bindings?.readExact(bindingId, revision)
+    return !!original && sameRoomPublication(original, boundary)
+  }
   /** Complete units, exact gaps and their next read frontier commit in the original outbox transaction. */
   commitPage(boundary: PublicationBoundary, after: ConversationCheckpoint, value: ConversationChangesPage, authorized: () => boolean, options: PublicationPageOptions): void {
     const page = parseConversationChangesPage(value, { ...ref(boundary), checkpoint: after, limit: 100, maxBytes: value.budgetBytes })
     const units = options.units.map(unit => parseConversationUnit(unit, { hostId: page.sourceHostId, agentSessionId: boundary.agentSessionId }, page.scope))
-    const decisions = units.map(unit => ({ unit, plan: publicationContent(unit, boundary as RoomBinding, page.checkpoint, { resolved: options.resolvedText, origin: id => this.origin(boundary, unit, id), ...(options.speakers?.has(unit.event.id) ? { attributed: true } : {}) }) }))
+    const decisions = units.map(unit => ({ unit, plan: publicationContent(unit, boundary, page.checkpoint, { resolved: options.resolvedText, origin: id => this.origin(boundary, unit, id), ...(options.speakers?.has(unit.event.id) ? { attributed: true } : {}) }) }))
     const questionRecords = units.flatMap(unit => unit.records.flatMap(record => {
       const reference = record.reference
       if (record.original.kind !== 'native' || reference?.source.kind !== 'native') return []
@@ -755,7 +763,7 @@ export class PublicationStore {
     const event = gap.event
     const unit = parseConversationUnit(original, { hostId: gap.anchor.frontier.sourceHostId, agentSessionId: boundary.agentSessionId }, gap.anchor.frontier.frontier.scope)
     if (!unit.records.some(r => r.id === conversationRecordId(gap.part!.record) && r.revision === gap.part!.recordRevision)) return false
-    const plan = publicationContent(unit, boundary as RoomBinding, gap.anchor.frontier, { resolved: resolvedText, origin: id => this.origin(boundary, unit, id), selected: gap.part, ...(speaker ? { attributed: true } : {}) })
+    const plan = publicationContent(unit, boundary, gap.anchor.frontier, { resolved: resolvedText, origin: id => this.origin(boundary, unit, id), selected: gap.part, ...(speaker ? { attributed: true } : {}) })
     if (!plan.complete) return false
     return this.transaction(() => {
       if (!authorized()) throw new AgentMuxError('Original audience no longer authorizes this content.', 'PUBLICATION_NOT_AUTHORIZED')
@@ -890,7 +898,7 @@ export class PublicationStore {
           ? record.original.item.contentParts[part.selector.partIndex]?.contentEligibility
           : record.original.kind === 'captured' ? record.original.item.contentEligibility : undefined
         if (eligibility === 'private') { failures.push({ reason: 'private-content', part, frontier: original.frontier }); continue }
-        const plan = publicationContent(original.unit, boundary as RoomBinding, original.frontier, { resolved: original.resolved, origin: () => undefined, selected: part, ...(operation.speaker ? { attributed: true } : {}) })
+        const plan = publicationContent(original.unit, boundary, original.frontier, { resolved: original.resolved, origin: () => undefined, selected: part, ...(operation.speaker ? { attributed: true } : {}) })
         if (plan.excluded.some(value => publicationPartKey(value) === publicationPartKey(part))) {
           failures.push({ reason: 'outside-conversation-scope', part, frontier: original.frontier }); continue
         }

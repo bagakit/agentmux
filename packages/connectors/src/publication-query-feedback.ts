@@ -9,7 +9,7 @@ import type { PublicationBoundary, PublicationOperation, PublicationStore, Query
 export function queueQueryFeedback(store: PublicationStore, boundary: PublicationBoundary, query: ConnectionIngressMessage, stage: QueryFeedbackPayload['stage'], witness?: ConversationInputWitness, completion?: PublicationOperation['queryCompletion']): void {
   const target = query.group?.target
   if (query.conversationKind !== 'group' || query.state === 'refused' || !target ||
-    target.bindingId !== boundary.bindingId || target.bindingRevision !== boundary.revision || target.connectionId !== boundary.connectionId ||
+    !store.publicationMember(boundary, target.bindingId, target.bindingRevision) || target.connectionId !== boundary.connectionId ||
     target.hostId !== boundary.executionHostId || target.agentSessionId !== boundary.agentSessionId ||
     query.connectionId !== boundary.connectionId || query.externalConversationId !== boundary.externalConversationId || !isDeepStrictEqual(query.application, boundary.application)) return
   const identity = [boundary.bindingId, boundary.revision, query.ingressId, stage]
