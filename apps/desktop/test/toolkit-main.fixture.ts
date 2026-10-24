@@ -11,7 +11,7 @@ const fixture = vi.hoisted(() => ({ directory: process.env.AGENTMUX_TOOLKIT_EVID
   ipc: new (class { listeners = new Map<string, Set<Function>>() })(),
   packaged:false,appPath:undefined as string|undefined,
   rendererRequest: undefined as undefined | ((request: any) => void), rendererCancel: undefined as undefined | ((request: any) => void) }))
-vi.mock('electron', () => ({ app: { get isPackaged(){return fixture.packaged},getAppPath: () => fixture.appPath??process.cwd() + '/apps/desktop', getPath: () => fixture.directory, getAppMetrics: () => [] },
+vi.mock('electron', () => ({ app: Object.defineProperties(new EventEmitter(), Object.getOwnPropertyDescriptors({ get isPackaged(){return fixture.packaged},getAppPath: () => fixture.appPath??process.cwd() + '/apps/desktop', getPath: () => fixture.directory, getAppMetrics: () => [] })),
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => unknown) => fixture.handlers.set(channel, handler),
     removeHandler: (channel: string) => fixture.handlers.delete(channel),
     on: (channel: string, handler: Function) => { const values = fixture.ipc.listeners.get(channel) ?? new Set(); values.add(handler); fixture.ipc.listeners.set(channel, values) },
@@ -70,7 +70,7 @@ export async function oneCli(...args: string[]) {
   const c=cli(...args);await until(()=>expect(c.code).not.toBeUndefined())
   expect(c.code, c.stderr).toBe(0);const frames=c.frames();expect(frames).toHaveLength(1);return frames[0]
 }
-export async function nativeMain() {
+export async function nativeMain(options: { beforeRegister?(directory: string): Promise<void> } = {}) {
   const owned = await toolkitRuntime(), directory = owned.directory
   fixture.directory = directory
   fixture.handlers.clear();fixture.ipc.listeners.clear()
@@ -138,6 +138,7 @@ export async function nativeMain() {
     }
   })()
   cleanups.push(async()=>{await close()})
+  await options.beforeRegister?.(directory)
   dispose=await registerIpc({initialConfig:config,window:{setBackgroundColor:vi.fn(),id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,workbenchWindows:{setNativeOwner:()=>()=>{},windowForDocument:()=>({id:7})} as any,
     progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{ setNameAudit() {}, async normalizeDirectoryIdentities() {} } as any,workspaceFiles:{dispose:async()=>{}, read() { throw Error('Unrelated file read outside Toolkit fixture') }, listFiles() { throw Error('Unrelated file list outside Toolkit fixture') }} as any})
   expect(owned.activation.spawned).toBe(true)
