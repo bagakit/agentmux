@@ -71,6 +71,21 @@ Read the matching leaf help for the exact JSON input:
   can leave the original HTTP page available. Open never confirms Agent delivery.
 - amux capsule operation inspect --input FILE reads {operationId} without replaying it.
 
+To embed a saved page in an AgentMux Desktop conversation reply, write
+![Page title](amux://capsule/ORIGINAL_ID) in its own Markdown paragraph. Use the actual
+returned capsuleId. Several such references may share a paragraph; ordinary bare links
+and [labels](amux://capsule/ORIGINAL_ID) remain compact object links. Code stays literal.
+The Desktop reconnects an existing native page while its card is visible, retaining that
+document even if later service observation fails. A first display reads the original Capsule
+and displays an already-serving page in its original isolated/injected native container. Reading a reply never Starts a
+stopped/unconfigured service. Hide releases presentation resources through the original
+Browser owner; it does not delete the page or auto-Close a used document. Expand and
+Open in Browser provide larger reading surfaces. Injected page questions still require the
+person's explicit confirmation in trusted App chrome. Shared read-only/document readers and
+clients without this adapter keep the title/address. External native chat cards use their own
+formatters and do not execute this page syntax; include an ordinary Capsule object link when
+sharing there. A declaration confirms neither display nor permission.
+
 Isolated pages have no App theme or communication channel. Injected pages receive only
 the capabilities actually granted by their Host. Theme inheritance does not authorize
 messaging; neither mode exposes Electron, Node or arbitrary RPC. A page SDK can prepare a

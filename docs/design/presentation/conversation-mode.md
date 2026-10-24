@@ -4,6 +4,8 @@
 
 [输入与 Mailbox 容器](conversation-input.md) · [当前代码与接线](../../architecture/conversation.md) · [返回呈现入口](../agentmux-surface-density.md)
 
+明确 Capsule 内嵌按 [Capsule 对话卡呈现](local-page-hosting.md#对话卡中的有界页面)在正文原位置显示有界页面、模式与就近动作；普通对象链接保持行内。页面加载、停止、未知与可信待答局限准确卡片，不遮正常对话，不移动阅读位置或冒认作者。
+
 App 内的 InApp 沿本页共同对话表面呈现，含义见[同一 Session 的对话模式](../behavior/conversation-mode.md#范围与唯一归属)。同类内容在 Desktop、Mobile、Focus、Mailbox 与 Gallery 使用共同呈现；宿主的宽度、origin、权限和已确认资料由宿主提供。Mobile 的设备接入画面不作为 App 内对话模式的呈现。紧凑阅读是明确的组件选项，不把 Mailbox 的记录身份策略或视觉状态映射到普通对话。
 
 - [消息布局与身份密度](#消息布局与身份密度)
