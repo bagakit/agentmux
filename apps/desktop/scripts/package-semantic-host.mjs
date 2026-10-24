@@ -24,7 +24,7 @@ async function packageSource(app) {
 
 async function bootstrap(app) {
   const result = await exec(process.execPath, [script, '--bootstrap', core(app)], {
-    timeout: 10000, maxBuffer: 64 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+    maxBuffer: 64 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   })
   return JSON.parse(result.stdout)
 }
