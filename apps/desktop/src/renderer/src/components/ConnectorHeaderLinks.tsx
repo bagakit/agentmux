@@ -7,9 +7,10 @@ import { useConnectorRoomName } from '../lib/use-connector-room-name'
 import { SettingsNavigation } from './SettingsNavigation'
 import type { ChannelEntry } from './settings/settings-catalog'
 import { connectorDiagnosisKey, useConnectorGroupDiagnosis, type CheckedGroupDiagnosis } from '../lib/use-connector-group-diagnosis'
-import { connectorGroupStatus } from '../lib/connector-group-status'
+import { ConnectorProblemIcon, ConnectorTrafficSummary } from './ConnectorTrafficSummary'
+import { connectorGroupDiagnostics, connectorGroupSummary } from '../lib/connector-group-status'
 
-const ConnectionIcon = semanticIconComponent('object.connection')
+const ConnectionIcon = semanticIconComponent('object.connection'), UnknownIcon = semanticIconComponent('status.unknown'), LinkIcon = semanticIconComponent('object.connection'), RefreshIcon = semanticIconComponent('action.refresh'), DetailsIcon = semanticIconComponent('navigation.forward'), HostIcon = semanticIconComponent('object.host')
 type RoomName = ReturnType<typeof useConnectorRoomName>
 type Selection = { kind: 'binding'; binding: RoomBinding } | { kind: 'connect' | 'settings' | 'channel-settings' }
 type Props = {
@@ -35,14 +36,16 @@ function ChannelHeaderEntry({ channel, diagnosis, totalBindings, ...props }: Pro
   const trigger = useRef<HTMLButtonElement>(null), selected = useRef<Selection | null>(null), handingOff = useRef(false)
   const only = bindings.length === 1 ? bindings[0]! : null
   const name = useConnectorRoomName(only, props.nameVersion, visible, hostingTarget)
-  const status = (binding: RoomBinding) => {
-    const snapshot = diagnosis.entries[connectorDiagnosisKey(binding)]
-    return issue ? 'Status unknown' : snapshot?.report ? connectorGroupStatus(snapshot).label : binding.state === 'paused' ? 'Sharing paused' : syncEnabled === false ? 'Sync off' : connectorGroupStatus(snapshot).label
-  }
-  const statuses = bindings.map(status)
-  const state = issue || checking && !bindings.length && props.nameVersion === 0 ? 'unknown' : statuses.includes('Needs attention') ? 'attention' : statuses.some(value => value === 'Status unknown' || value === 'Not checked' || value === 'Checking…') ? 'unknown' :
-    !bindings.length ? 'unbound' : syncEnabled === false || statuses.includes('Sync off') ? 'off' : statuses.includes('Sharing paused') ? 'paused' : bindings.length ? 'linked' : 'unbound'
-  const label = state === 'unknown' ? checking ? 'Checking saved groups' : 'Status unknown' : state === 'attention' ? 'Needs attention' : state === 'off' ? 'Sync off' : state === 'paused' ? 'Sharing paused' : state === 'linked' ? 'Group linked' : 'No group linked'
+  const summaries = bindings.map(binding => connectorGroupSummary(diagnosis.entries[connectorDiagnosisKey(binding)]?.report ?? null))
+  const problems = summaries.flatMap(summary => summary.problems)
+  const onlyProblem = problems.find(problem => problem.tone === 'warning') ?? problems[0]
+  const unconfirmed = !!issue || checking && !bindings.length && props.nameVersion === 0
+  const unchecked = bindings.some(binding => !diagnosis.entries[connectorDiagnosisKey(binding)]?.report)
+  const state = unconfirmed ? 'unknown' : !bindings.length ? 'unbound' : problems.some(problem => problem.tone === 'warning') ? 'attention' :
+    unchecked ? 'unknown' : problems.some(problem => problem.kind === 'sync-off') ? 'off' : problems.some(problem => problem.kind === 'sharing-paused') ? 'paused' : 'linked'
+  const problemTitles = [...new Set(problems.map(problem => problem.title))]
+  const label = unconfirmed ? hostingTarget === null ? 'Hosting unconfirmed' : checking ? 'Checking saved groups' : 'Group check unavailable' :
+    !bindings.length ? 'No group linked' : problems.length ? problemTitles.slice(0, 2).join(' · ') + (problemTitles.length > 2 ? ` · +${problemTitles.length - 2}` : '') : unchecked ? 'Not checked' : 'Group linked'
   const summary = `${title} · ${label}${only ? ` · ${name.label}` : bindings.length ? ` · ${bindings.length} groups` : ''}`
   return <DropdownMenu.Root onOpenChange={open => {
     onMenuOpen(open)
@@ -56,20 +59,19 @@ function ChannelHeaderEntry({ channel, diagnosis, totalBindings, ...props }: Pro
   }}>
     <DropdownMenu.Trigger ref={trigger} className="agent-region-header__connector" data-channel-entry={channel?.adapterId ?? 'other'} data-channel-state={state}
       aria-label={summary} title={summary} aria-busy={checking || undefined} onPointerDown={event => event.stopPropagation()}>
-      <Icon size={15} /><span className="agent-region-header__connector-dot" aria-hidden="true" />
+      <Icon size={14} />{state !== 'unbound' ? <span className="agent-region-header__connector-marker" aria-hidden="true">{hostingTarget === null ? <HostIcon size={10} /> : onlyProblem ? <ConnectorProblemIcon kind={onlyProblem.kind} /> : unconfirmed || unchecked ? <UnknownIcon size={10} /> : <LinkIcon size={9} />}</span> : null}
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu connector-header-menu" align="end" side="bottom" sideOffset={6} collisionPadding={8}
       aria-label={`${title} connections`} onCloseAutoFocus={event => { if (handingOff.current) event.preventDefault(); handingOff.current = false }}>
-      <DropdownMenu.Label className="connector-header-menu__title">{title}<small>{label}</small></DropdownMenu.Label>
+      <DropdownMenu.Label className="connector-header-menu__title">{title}<small>{bindings.length ? `${bindings.length} group${bindings.length === 1 ? '' : 's'}` : label}</small></DropdownMenu.Label>
       {bindings.length ? bindings.map(binding => <GroupEntry key={binding.bindingId} binding={binding} hostingTarget={hostingTarget} visible={visible}
-        name={only ? name : undefined} status={status(binding)} snapshot={diagnosis.entries[connectorDiagnosisKey(binding)]}
+        name={only ? name : undefined} snapshot={diagnosis.entries[connectorDiagnosisKey(binding)]}
         onSelect={() => { selected.current = { kind: 'binding', binding } }} />)
-        : <p className="connector-header-menu__empty">{checking ? 'Checking this Agent’s saved groups…' : issue ? 'Saved groups could not be checked. Existing requests are kept.' : 'Connect this Agent’s conversation to a group.'}</p>}
+        : <p className="connector-header-menu__empty">{checking ? 'Checking this Agent’s saved groups…' : issue ? hostingTarget === null ? 'Bot hosting is unconfirmed. Check its original Host.' : 'Saved groups could not be checked. Existing requests are kept.' : 'Connect this Agent’s conversation to a group.'}</p>}
       {props.bindings.some(binding => !diagnosis.entries[connectorDiagnosisKey(binding)]) && totalBindings > diagnosis.limit ? <p className="connector-header-menu__empty">Only the first {diagnosis.limit} groups are checked here. Other groups are not checked; open their details.</p> : null}
-      {issue ? <p className="connector-header-menu__issue" role="status">{issue}</p> : null}
+      {issue ? <details className="connector-header-menu__diagnostics"><summary>{hostingTarget === null ? 'Bot hosting details' : 'Group check details'}</summary><p className="connector-header-menu__issue">{issue}</p></details> : null}
       <DropdownMenu.Separator className="tab-context-menu__separator" />
-      <DropdownMenu.Label className="connector-header-menu__title">Next step</DropdownMenu.Label>
-      {bindings.length ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={event => { event.preventDefault(); diagnosis.check() }}>Check group status</DropdownMenu.Item> : null}
+      {bindings.length ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={event => { event.preventDefault(); diagnosis.check() }}><RefreshIcon size={13} /><span>Check group status</span></DropdownMenu.Item> : null}
       <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => { selected.current = { kind: 'connect' } }}>{issue && !bindings.length ? 'Check bot hosting' : props.retainedSetup ? 'Open channel setup' : 'Connect a conversation'}</DropdownMenu.Item>
       {channel && navigation ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => { selected.current = { kind: 'channel-settings' } }}>Channel settings</DropdownMenu.Item> : null}
       {onSettings && hostingTarget ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => { selected.current = { kind: 'settings' } }}>Automatic sync settings</DropdownMenu.Item> : null}
@@ -77,18 +79,18 @@ function ChannelHeaderEntry({ channel, diagnosis, totalBindings, ...props }: Pro
   </DropdownMenu.Root>
 }
 
-function GroupEntry(props: { binding: RoomBinding; visible: boolean; hostingTarget?: ConnectionHostingTarget | null | undefined; name: RoomName | undefined; status: string; snapshot: CheckedGroupDiagnosis | undefined; onSelect(): void }) {
+function GroupEntry(props: { binding: RoomBinding; visible: boolean; hostingTarget?: ConnectionHostingTarget | null | undefined; name: RoomName | undefined; snapshot: CheckedGroupDiagnosis | undefined; onSelect(): void }) {
   const observedName = useConnectorRoomName(props.name ? null : props.binding, 0, props.visible, props.hostingTarget), name = props.name ?? observedName
-  const { binding, snapshot } = props, status = connectorGroupStatus(snapshot)
+  const { binding, snapshot } = props, status = connectorGroupDiagnostics(snapshot), summary = connectorGroupSummary(snapshot?.report ?? null)
   return <div className="connector-header-menu__group">
     <DropdownMenu.Item className="tab-context-menu__item connector-header-menu__item" onSelect={props.onSelect}
       title={`${name.label} · ${binding.application.appId} · ${binding.externalConversationId}`}
-      aria-label={`${name.label}; ${props.status}; ${binding.externalConversationId}; ${binding.connectionId}`}>
-      <span><strong>{name.label}</strong><small>{props.status} · {binding.application.appId}</small><small>Group {binding.externalConversationId}</small><small>Open group details →</small></span>
+      aria-label={`${name.label}; ${summary.problems.map(problem => problem.title).join('; ')}; ${binding.externalConversationId}; ${binding.connectionId}`}>
+      <span><strong>{name.label}</strong><small>{binding.application.appId} · {binding.externalConversationId}</small></span><span className="connector-header-menu__manage">Manage group<DetailsIcon size={13} /></span>
     </DropdownMenu.Item>
     <div className="connector-header-menu__traffic">
-      {[['Conversation → group', status.rows.find(([label]) => label === 'Platform requests')?.[1] ?? 'Not checked'], ['Group → Agent', status.rows.find(([label]) => label === 'Group → Agent')?.[1] ?? 'Not checked']].map(([label, text]) => <p key={label}><b>{label}</b><span>{text}</span></p>)}
-      <details className="connector-header-menu__diagnostics"><summary>Checked details{snapshot?.checkedAt ? ` · ${new Date(snapshot.checkedAt).toLocaleTimeString()}` : ''}</summary>
+      <ConnectorTrafficSummary summary={summary} />
+      <details className="connector-header-menu__diagnostics"><summary>{snapshot?.checking ? 'Checking… · ' : ''}Checked details{snapshot?.checkedAt ? ` · ${new Date(snapshot.checkedAt).toLocaleTimeString()}` : ''}</summary>
         <div className="connector-header-menu__snapshot">
           <small className="connector-header-menu__checked">{snapshot?.checking ? 'Checking… · ' : ''}{snapshot?.checkedAt ? <><time dateTime={new Date(snapshot.checkedAt).toISOString()}>Checked {new Date(snapshot.checkedAt).toLocaleTimeString()}</time> · {status.outcome}</> : 'Not checked'}</small>
           {status.rows.map(([label, text]) => <small key={label}><b>{label}</b> {text}</small>)}
