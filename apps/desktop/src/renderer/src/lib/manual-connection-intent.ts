@@ -1,5 +1,6 @@
 import type { ConnectionConfigureInput } from '@agentmux/core/connections'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
+import { restoredApplicationAccess, type ApplicationAccessContinuation } from './application-member-intent'
 
 export type ManualConnectionDraft = {
   view: 'library' | 'new' | 'edit' | 'saved'
@@ -16,6 +17,7 @@ export type ManualConnectionIntent = {
   draft: ManualConnectionDraft
   /** An empty credentialRef means the original credential operation remains unconfirmed. */
   pending?: ConnectionConfigureInput
+  applicationAccess?: ApplicationAccessContinuation
 }
 export const manualConnectionScope = (channel: ManualConnectionIntent['channel'], target: ConnectionHostingTarget | null) => JSON.stringify([channel, target?.hostId ?? null, target?.runtimeId ?? null])
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -53,7 +55,7 @@ export function restoredManualConnectionIntents(value: unknown): Record<string, 
       pending = { operationId: p.operationId, expectedRevision: p.expectedRevision as number | null, connection: {
         connectionId: c.connectionId, adapterId: c.adapterId, application: { domain: a.domain, appId: a.appId }, label: c.label, enabled: c.enabled, credentialRef: c.credentialRef } }
     }
-    result[key] = { channel: raw.channel, target, draft, ...(pending ? { pending } : {}) }
+    result[key] = { channel: raw.channel, target, draft, ...(pending ? { pending } : {}), ...(raw.applicationAccess ? { applicationAccess: restoredApplicationAccess(raw.applicationAccess) } : {}) }
   }
   return result
 }

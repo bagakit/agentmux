@@ -17,6 +17,7 @@ import { ChannelMetadataPanel } from './ChannelMetadataPanel'
 import { ConnectionProfilePanel } from './ConnectionProfilePanel'
 import { ConnectionSetupResult } from './ConnectionSetupResult'
 import { ConnectionIdentityFacts } from './ConnectionIdentityFacts'
+import { ApplicationMemberAccess } from './ApplicationMemberAccess'
 import { ConnectionIdentityRemoval, RetainedIdentityRemovals } from './ConnectionIdentityRemoval'
 import { ConnectionRequestTrace } from './ConnectionRequestTrace'
 import { ConnectionManagementSetup } from './ConnectionManagementSetup'
@@ -344,6 +345,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
       </> : current ? <>
         <header className="connector-setup__heading"><span className="connector-setup__mark"><GroupIcon size={22} /></span><div><h3 className="connector-editor-title">{current.config.label}</h3><p>{platform(current.config.application.domain)} bot application</p></div></header>
         {!localMoteCatalog ? <dl className="connector-identity"><div><dt>Application ID</dt><dd><code>{current.config.application.appId}</code></dd></div></dl> : <ConnectionIdentityFacts record={current} readings={identities} />}
+        <ApplicationMemberAccess key={JSON.stringify([hostingTarget, current.config.connectionId, current.config.application, current.revision])} record={current} hostingTarget={hostingTarget} active={active} intent={draft()} />
         <ChannelMetadataPanel connections={connections} key={JSON.stringify([current.config.connectionId, current.config.application])} connection={current} active={active} />
         {saveNotice ? <p className="settings-group-note" role="status">{saveNotice}</p> : null}
         {!manualOnly && (management.selectedId || management.supported || management.choices.length || management.catalog?.issue) ? <div className="connector-next-step"><div><strong>Bot setup</strong><p>Account, messages, permissions and publishing.</p></div><button className="primary-button" data-management-open onClick={() => { setView('management') }}>Manage setup</button></div> : null}

@@ -1,4 +1,5 @@
 import { restoredManualConnectionIntents, restoredManualConnectionSelections, manualConnectionScope, type ManualConnectionIntent } from "./lib/manual-connection-intent"
+import { emptyApplicationAccess, restoredApplicationAccess, type ApplicationAccessContinuation } from './lib/application-member-intent'
 import { restoreToolkitPresentations, updateToolkitPresentation, type ToolkitPresentations, type ToolkitPresentationPatch } from './lib/toolkit-presentation'
 import { isSessionRecoveryReplyUnconfirmed } from '../../shared/session-recovery-result'
 import { goalDiscussionTarget } from './lib/goal-discussion-recipient'
@@ -4394,7 +4395,10 @@ export async function retainManualConnectionIntent(intent: ManualConnectionInten
   const key = manualConnectionScope(intent.channel, intent.target)
   const parsed = restoredManualConnectionIntents({ [key]: intent })[key]
   if (!parsed) throw new Error("The original manual connection intent is invalid.")
-  const previous = useAppStore.getState().manualConnectionIntents[key]?.pending
+  const original = useAppStore.getState().manualConnectionIntents[key]
+  // Saved-view/configuration updates cannot replace independently retained member requests.
+  if (original?.applicationAccess) parsed.applicationAccess = original.applicationAccess
+  const previous = original?.pending
   if (previous && confirmedOperationId !== undefined && confirmedOperationId !== previous.operationId) throw new Error('The confirmed save belongs to another original request.')
   if (previous && confirmedOperationId === undefined) {
     if (!parsed.pending) parsed.pending = previous
@@ -4405,6 +4409,18 @@ export async function retainManualConnectionIntent(intent: ManualConnectionInten
   }
   useAppStore.setState(state => ({ manualConnectionIntents: { ...state.manualConnectionIntents, [key]: parsed } }))
   return await saveWorkbenchSelection(false)
+}
+/** Same Settings continuation owner and writer; these drafts never become access facts. */
+export async function retainManualApplicationAccess(intent: ManualConnectionIntent, update: (current: ApplicationAccessContinuation) => ApplicationAccessContinuation, flush = false): Promise<AgentMuxSpatialSave | undefined> {
+  const key = manualConnectionScope(intent.channel, intent.target)
+  const parsed = restoredManualConnectionIntents({ [key]: intent })[key]
+  if (!parsed) throw new Error('The original application settings target is required.')
+  useAppStore.setState(state => {
+    const original = state.manualConnectionIntents[key] ?? parsed
+    const applicationAccess = restoredApplicationAccess(update(original.applicationAccess ?? emptyApplicationAccess()))
+    return { manualConnectionIntents: { ...state.manualConnectionIntents, [key]: { ...original, applicationAccess } } }
+  })
+  if (flush) return await saveWorkbenchSelection(false)
 }
 /** Retain the exact submitted file input; this is neither a preference nor an effect journal. */
 export async function retainMoteConnectionSaveIntent(intent: MoteConnectionSaveIntent): Promise<AgentMuxSpatialSave> {

@@ -15,12 +15,12 @@ export function useConnectorCreatorInvitation(connection: ConnectionRecord | und
     if (!key || !connection) return
     let current = true
     void api.connections.call('connection.profile.get', { connectionId: connection.config.connectionId, expectedConnectionRevision: connection.revision }, hostingTarget ?? undefined)
-      .then(observation => { if (current) setRead({ key, observation }) })
+      .then(observation => { if (current) setRead({ key, observation: observation.connectionId === connection.config.connectionId && observation.connectionRevision === connection.revision && observation.application.domain === connection.config.application.domain && observation.application.appId === connection.config.application.appId ? observation : null }) })
       .catch(() => { if (current) setRead({ key, observation: null }) })
     return () => { current = false }
   }, [key])
   const observation = read?.key === key ? read.observation : null
-  const creator = observation?.creator ?? null
+  const creator = observation?.state === 'observed' ? observation.creator ?? null : null
   const included = choice?.key === key ? choice.include : true
   return { creator, included, member: included ? creator : null, pending: !!key && read?.key !== key,
     permissionRequired: observation?.reason === 'permission-required',

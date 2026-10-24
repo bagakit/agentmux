@@ -75,6 +75,7 @@
 .connector-member-row[data-member-state=dirty] .connector-member-row__identity > span { color: var(--green); }
 .connector-member-row__choices, .connector-member-row__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
 .connector-member-row__choices label { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.connector-member-row__choices { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
 .connector-member-row input { accent-color: var(--green); }
 .connector-member-row > details > small { display: block; color: var(--text-3); overflow-wrap: anywhere; }
 .connector-member-row > .agent-connector-disclosure > summary { padding-block: var(--sp-1); font-size: var(--fs-micro); }
