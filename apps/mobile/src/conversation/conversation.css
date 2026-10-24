@@ -97,6 +97,10 @@
 .mobile-posture-menu__item strong { font-weight: 550; }
 .mobile-posture-menu__item small { color: var(--text-3); font-size: 11px; }
 .mobile-posture-menu__item[data-tier='elevated'] strong { color: var(--amber); }
+.mobile-command-menu { min-width: 220px; gap: 6px; padding: 6px; }
+.mobile-command-menu input { width: 100%; min-height: 44px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); font-size: 16px; }
+.mobile-command-menu__list { max-height: min(32dvh, 220px); overflow-y: auto; display: grid; gap: 2px; }
+.mobile-command-menu__empty { margin: 4px 6px; font-size: 11px; color: var(--text-3); }
 .mobile-reading-action { align-self: center; padding: 4px 10px; border: 0; background: var(--surface-1); color: var(--text-muted); font-size: 11px; min-height: 44px; border-radius: 8px; }
 .mobile-reading-latest { position: sticky; top: 0; z-index: 1; }
 .mobile-send-status { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; min-width: 0; margin: 3px 4px 0; color: var(--text-muted); font-size: 11px; line-height: 1.4; }

@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import type { AgentPostureControl } from '@agentmux/core'
+import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
+import { TextInput } from '@agentmux/client-ui/input'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { ComposerLayoutToggle, type ComposerToolPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
 
@@ -26,15 +28,51 @@ export function MobilePosturePicker({ control, disabled, onSet }: {
   </span>
 }
 
+export function MobileCommandPicker({ commands, disabled, onSelect }: {
+  commands: readonly ComposerSuggestion[]
+  disabled?: boolean
+  onSelect(command: ComposerSuggestion): void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  if (!commands.length) return null
+  const normalized = query.trim().toLocaleLowerCase()
+  const matching = commands.filter(item => `${item.text} ${item.label ?? ''} ${item.description}`.toLocaleLowerCase().includes(normalized))
+  return <span className="mobile-posture-picker mobile-command-picker">
+    <button type="button" className="composer-tool" disabled={disabled} aria-label="Choose a command"
+      aria-expanded={open} title="Choose a command" onClick={() => setOpen(value => { if (value) setQuery(''); return !value })}>
+      <SemanticIcon name="object.subcommand" size={14} /><span className="composer-tool__label">Commands</span>
+    </button>
+    {open && !disabled ? <div role="menu" aria-label="Commands" className="mobile-posture-menu mobile-command-menu">
+      <TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder="查找命令…" aria-label="查找命令" />
+      <div className="mobile-command-menu__list">
+        {matching.map(item => <button key={item.id ?? item.text} type="button" role="menuitem" className="mobile-posture-menu__item"
+          title={item.description} onClick={() => { setOpen(false); setQuery(''); onSelect(item) }}>
+          <strong>{item.label ?? item.text}</strong>
+          {item.description ? <small>{item.description}</small> : null}
+        </button>)}
+        {!matching.length ? <p className="mobile-command-menu__empty" role="status">无匹配命令</p> : null}
+      </div>
+    </div> : null}
+  </span>
+}
+
 /** The same input layout control as Desktop; communication records have their own mailbox. */
-export function MobileMessageTools({ refresh, terminal, onInterrupt }: {
+export function MobileMessageTools({ refresh, terminal, onInterrupt, commands = [], onCommand, disabled }: {
   refresh(): void
   terminal?: (() => void) | undefined
   onInterrupt?: (() => void) | undefined
+  commands?: readonly ComposerSuggestion[]
+  onCommand?: ((command: ComposerSuggestion) => void) | undefined
+  disabled?: boolean | undefined
 }) {
   const [phase, setPhase] = useState<ComposerToolPhase>('collapsed')
   return <span className="composer-tools" data-mode={phase}><ComposerLayoutToggle phase={phase} onChange={setPhase} />
-    {onInterrupt && <button type="button" className="composer-tool" aria-label="Interrupt the current turn" title="Interrupt the current reply — keep this session" onClick={onInterrupt}><SemanticIcon name="action.stop" size={14} /></button>}
-    {phase !== 'collapsed' && <>{terminal && <button type="button" className="composer-tool" aria-label="查看终端" onClick={terminal}><SemanticIcon name="object.terminal" size={16} /></button>}<button type="button" className="composer-tool" aria-label="刷新原对话" onClick={refresh}><SemanticIcon name="action.refresh" size={16} /></button></>}
+    {onInterrupt && <button type="button" className="composer-tool" aria-label="Interrupt the current turn" title="Interrupt the current reply" onClick={onInterrupt}><SemanticIcon name="action.stop" size={14} /></button>}
+    {phase !== 'collapsed' && <>
+      {commands.length > 0 && onCommand ? <MobileCommandPicker commands={commands} {...(disabled !== undefined ? { disabled } : {})} onSelect={onCommand} /> : null}
+      {terminal && <button type="button" className="composer-tool" aria-label="查看终端" onClick={terminal}><SemanticIcon name="object.terminal" size={16} /></button>}
+      <button type="button" className="composer-tool" aria-label="刷新原对话" onClick={refresh}><SemanticIcon name="action.refresh" size={16} /></button>
+    </>}
   </span>
 }
