@@ -140,12 +140,25 @@ describe('Activity Zone and Tab projection', () => {
     original.name = 'User title'
     expect(project([session, sibling]).zones[0]!.tabs[0]!.label).toBe('User title')
     delete original.name
-    const sameSid = { ...sibling, id: session.id, label: 'Other identity', hostId: 'other-host' }
+    const sameSid = { ...sibling, id: session.id, label: 'Other identity', hostId: 'other-host', control: { ...sibling.control, hostId: 'other-host', agentSessionId: session.id } }
     original.regions.other = { ...original.regions.other, sessionId: sameSid.id }
     facts.regions[1]!.agentSessionId = sameSid.id
     sibling.hostId = sameSid.hostId
     const result = project([session, sameSid])
     expect(result.zones[0]!.tabs[0]!.label).toBe('Workbench')
     expect(result.zones[0]!.sessions).toEqual([session, sameSid])
+  })
+
+  it('joins a renderer alias to the public canonical SID through the exact original Session control', () => {
+    const canonical = agent('core-session'), presentation = { ...canonical, id: 'presentation-alias' }
+    const original = tab(presentation), facts = catalog([original], [location()])
+    facts.regions[0]!.agentSessionId = canonical.control.agentSessionId
+    const executionFor = vi.fn(() => ({ hostId: canonical.control.hostId }))
+    const result = buildActivitySpaces([presentation], facts, { [original.id]: original }, executionFor)
+    expect(result.zones[0]?.sessions).toEqual([presentation])
+    expect(result.unplaced).toEqual([])
+    expect(executionFor).toHaveBeenCalledExactlyOnceWith({ tabId: original.id, regionId: 'region', agentSessionId: canonical.control.agentSessionId })
+    facts.regions[0]!.agentSessionId = 'another-canonical-session'
+    expect(buildActivitySpaces([presentation], facts, { [original.id]: original }, executionFor).unplaced).toEqual([presentation])
   })
 })
