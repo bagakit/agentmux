@@ -324,6 +324,7 @@ class RpcClient implements AgentMuxRpcClient {
     let initial: unknown, outputCursor = typeof body.afterByte === 'number' ? body.afterByte : 0
     let reader: Reader | undefined, finalReader: Reader | undefined, opening: Promise<Reader> | undefined
     let unavailableTransport: AgentMuxError | undefined
+    let sharedDispatch: 'queued' | 'dispatched' | undefined
     let finished = false
     const abort = () => end(new AgentMuxError('RPC reader was cancelled; an admitted operation may still complete at its original owner.', 'CONTROL_CANCELLED'))
     signal?.addEventListener('abort', abort, { once: true })
@@ -344,9 +345,10 @@ class RpcClient implements AgentMuxRpcClient {
       if (!responseDelivered) {
         let failure = error ?? new AgentMuxError('RPC ended before its response.', 'CONTROL_PROTOCOL_ERROR')
         if (failure instanceof AgentMuxError && failure.code === 'CONTROL_CANCELLED') {
-          // Ending a reply reader cannot establish that the original owner did not apply it.
+          // Only this shared writer knows when the original request is still
+          // unwritten. Ending an already-dispatched reply reader stays unknown.
           failure = new AgentMuxError(failure.message, failure.code, failure.detail,
-            { disposition: 'unknown', confirmedInputBytes: null }, failure.logId)
+            { disposition: sharedDispatch === 'queued' ? 'not_applied' : 'unknown', confirmedInputBytes: null }, failure.logId)
         }
         if (isAgentMuxRpcDeviceMethod(method) && failure instanceof AgentMuxError) {
           failure = new AgentMuxError(failure.message + ' ' + deviceRecovery(), failure.code, failure.detail, failure.controlFailure, failure.logId, failure.creationFailure, failure.storageFailure)
@@ -421,7 +423,8 @@ class RpcClient implements AgentMuxRpcClient {
         try {
           if (route.endpoint.transport === 'ssh' && !(options.forwarding ?? this.forwarding)) {
             if (!route.ssh) route.ssh = new AgentMuxRpcSshTransport(agentMuxRpcSshArguments(route.endpoint), () => { delete route.ssh }, route.endpoint.socketPath)
-            opening = route.ssh.open(payload, receive, end, controller.signal, armDeadline)
+            sharedDispatch = 'queued'
+            opening = route.ssh.open(payload, receive, end, controller.signal, () => { sharedDispatch = 'dispatched'; armDeadline() })
           } else if (route.endpoint.transport === 'unix' && !(options.forwarding ?? this.forwarding)) {
             if (!route.unix) {
               const socket = createConnection({ path: route.endpoint.path })
@@ -437,7 +440,8 @@ class RpcClient implements AgentMuxRpcClient {
                 } })
               route.unix = channel
             }
-            opening = route.unix.open(payload, receive, end, controller.signal, armDeadline)
+            sharedDispatch = 'queued'
+            opening = route.unix.open(payload, receive, end, controller.signal, () => { sharedDispatch = 'dispatched'; armDeadline() })
           } else { armDeadline(); opening = openRequest(route.endpoint, payload, receive, end, controller.signal, this.relayKeyPair, options.forwarding ?? this.forwarding) }
           reader = await opening
         } catch (error) { end(transportError(error)); return }
