@@ -18,10 +18,15 @@ const cleanups: Array<() => Promise<unknown>> = []
 let root: string, worker: string
 const sid = '00000000-0000-4000-8000-000000000001'
 const mutations: Record<string, [string, string]> = {
+  'deadline-preflight': ["nativeConnection.request('account/read', { refreshToken: false }, { retainPending: true })", "nativeConnection.request('account/read', { refreshToken: false })"],
+  'drop-preflight-retry': ['if (nativeRequested || nativeSessionId || !live()) return Promise.resolve()', "if (initialization.phase === 'failed' || nativeRequested || nativeSessionId || !live()) return Promise.resolve()"],
   'repeat-unknown': ['if (nativeRequested || nativeSessionId || !live()) return Promise.resolve()', 'if (nativeSessionId || !live()) return Promise.resolve()'],
   'accept-old-frontend': ['frontend.frontendId === expectedId', 'true'],
   'carry-input': ["['resume', nativeSessionId!, ...plan.frontendArgs], frontend.frontendId", "['resume', nativeSessionId!, ...plan.frontendArgs, 'UNAUTHORIZED_INITIAL_INPUT'], frontend.frontendId"],
   'ignore-native-policy': ['expected.approvalPolicy !== undefined && prepared.approvalPolicy !== expected.approvalPolicy ||', '']
+}
+const rpcMutations: Record<string, [string, string]> = {
+  'deadline-initialize': ['options?.retainPendingInitialization ? { retainPending: true } : undefined', 'undefined']
 }
 beforeAll(async () => {
   root = await realpath(await mkdtemp(join(tmpdir(), 'amux-initialization-')))
@@ -30,33 +35,39 @@ beforeAll(async () => {
     bundle: true, platform: 'node', format: 'esm', target: 'node24',
     banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
     plugins: [{ name: 'bounded-observer-clock', setup(builder) {
-      builder.onLoad({ filter: /codex-managed-run\.ts$/ }, async ({ path }) => {
+      builder.onLoad({ filter: /codex-(managed-run|native-rpc)\.ts$/ }, async ({ path }) => {
         const original = await readFile(path, 'utf8')
         // Observation time only; keep the original request and every business fact unchanged.
         let contents = original.replace('const INITIALIZATION_OBSERVATION_MS = 8_000', 'const INITIALIZATION_OBSERVATION_MS = 1000')
         const mutation = process.env.AGENTMUX_CODEX_INITIALIZATION_MUTATION
-        if (mutation) {
-          const change = mutations[mutation]
-          if (!change || contents.split(change[0]).length !== 2) throw new Error('Initialization mutation must match one original implementation site: ' + mutation)
+        const change = mutation ? (path.endsWith('codex-managed-run.ts') ? mutations : rpcMutations)[mutation] : undefined
+        if (mutation && !mutations[mutation] && !rpcMutations[mutation]) throw new Error('Unknown initialization mutation: ' + mutation)
+        if (change) {
+          if (contents.split(change[0]).length !== 2) throw new Error('Initialization mutation must match one original implementation site: ' + mutation)
           contents = contents.replace(change[0], change[1])
         }
         if (process.env.AGENTMUX_CODEX_INITIALIZATION_LOADED) await appendFile(process.env.AGENTMUX_CODEX_INITIALIZATION_LOADED,
-          JSON.stringify({ path, mutation: mutation ?? null, originalSHA256: createHash('sha256').update(original).digest('hex'),
+          JSON.stringify({ path, mutation: change ? mutation : null, originalSHA256: createHash('sha256').update(original).digest('hex'),
             loadedSHA256: createHash('sha256').update(contents).digest('hex') }) + '\n')
         return { loader: 'ts', contents }
       })
     } }] })
 })
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
+afterEach(async () => {
+  const errors: unknown[] = []
+  for (const close of cleanups.splice(0).reverse()) { try { await close() } catch (error) { errors.push(error) } }
+  if (errors.length) throw new AggregateError(errors, 'Private initialization cleanup failed')
+})
 afterAll(async () => { if (root) await rm(root, { recursive: true, force: true }) })
 async function rows(path: string): Promise<any[]> { return await readFile(path, 'utf8').then(text => text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)), () => []) }
 
-async function fixture(options: { accountFailure?: boolean; nativeGate?: boolean; nativeError?: boolean; wrongPolicy?: boolean; resume?: boolean } = {}) {
+async function fixture(options: { accountFailure?: boolean; readGate?: 'initialize' | 'account/read'; nativeGate?: boolean; nativeError?: boolean; wrongPolicy?: boolean; resume?: boolean } = {}) {
   const directory = await realpath(await mkdtemp(join(root, 'case-')))
   const executable = join(directory, 'native'), log = join(directory, 'rpc.jsonl'), events = join(directory, 'frontends.jsonl'), heartbeat = join(directory, 'heartbeat.json')
-  const fail = join(directory, 'account-failure'), gate = join(directory, 'native-gate')
+  const fail = join(directory, 'account-failure'), gate = join(directory, 'native-gate'), readGate = join(directory, 'read-gate')
   if (options.accountFailure) await writeFile(fail, 'private preflight error')
   if (options.nativeGate) await writeFile(gate, 'hold original response')
+  if (options.readGate) await writeFile(readGate, 'hold original read response')
   await writeFile(executable, `#!/usr/bin/env node
 const {createRequire}=require('node:module');const {WebSocketServer}=createRequire(${JSON.stringify(import.meta.url)} )(${JSON.stringify(createRequire(import.meta.url).resolve('ws'))});
 const {appendFileSync,existsSync,writeFileSync}=require('node:fs');const args=process.argv.slice(2);
@@ -68,6 +79,7 @@ if(args.includes('app-server')){
  socket.on('message',async bytes=>{const r=JSON.parse(String(bytes));appendFileSync(${JSON.stringify(log)},JSON.stringify(r)+String.fromCharCode(10));if(!Object.hasOwn(r,'id'))return;
  const reply=result=>socket.send(JSON.stringify({jsonrpc:'2.0',id:r.id,result}));
  const error=(code,message)=>socket.send(JSON.stringify({jsonrpc:'2.0',id:r.id,error:{code,message}}));
+ if(r.method===${JSON.stringify(options.readGate ?? '')})while(existsSync(${JSON.stringify(readGate)}))await new Promise(resolve=>setTimeout(resolve,10));
  if(r.method==='initialize')return reply({});
  if(r.method==='account/read')return existsSync(${JSON.stringify(fail)})?error(-32041,'Private original account routing failure'):reply({account:null,requiresOpenaiAuth:false});
  if(r.method==='thread/start'||r.method==='thread/resume'){
@@ -111,9 +123,38 @@ if(args.includes('app-server')){
     catch (cause) { throw new Error(JSON.stringify({ latest, stderr, methods: (await rows(log)).map(row => row.method), exitCode: child.exitCode }), { cause }) }
     return latest!
   }
-  return { child, context, plan, log, events, heartbeat, fail, gate, directory, executable, wait,
+  return { child, context, plan, log, events, heartbeat, fail, gate, readGate, directory, executable, wait,
     current: () => latest!, stderr: () => stderr, methods: async () => (await rows(log)).map(row => row.method) }
 }
+
+it.runIf(process.platform === 'darwin').each(['initialize', 'account/read'] as const)('keeps the original slow %s response beyond ten seconds and automatically continues without a second request', async method => {
+  const f = await fixture({ readGate: method })
+  await expect.poll(() => f.methods()).toContain(method)
+  const original = await f.wait(value => value.initialization?.phase === 'unknown')
+  const before = JSON.parse(await readFile(f.heartbeat, 'utf8'))
+  expect(original.initialization?.failure?.step).toBe(method === 'initialize' ? 'connection' : 'preflight')
+  expect(original.initialization?.native).toEqual({ state: 'not-created' })
+  // Real wall time exceeds the former RPC deadline; only the observer clock is shortened.
+  await new Promise(resolve => setTimeout(resolve, 10_600))
+  expect(f.current().initialization?.phase).toBe('unknown')
+  const observed = await reconnectCodexTerminalFrontend(f.context, { operationId: 'same-slow-read', expectedFrontendId: original.frontendId,
+    target: { kind: 'initialization', lifecycleOperationId: 'original-lifecycle' } })
+  expect(observed.initialization?.phase).toBe('unknown')
+  expect((await f.methods()).filter(value => value === method)).toHaveLength(1)
+  expect((await f.methods()).filter(value => value === 'thread/start')).toHaveLength(0)
+  expect(await rows(f.events)).toHaveLength(0)
+  await rm(f.readGate)
+  // No reconnect/retry after releasing the response: the original actor receives it.
+  const ready = await f.wait(value => value.initialization?.phase === 'ready' && value.state === 'detached')
+  expect(ready.initialization?.native).toEqual({ state: 'confirmed', sessionId: sid })
+  expect(ready.initialization?.lifecycleOperationId).toBe(original.initialization?.lifecycleOperationId)
+  expect((await f.methods()).filter(value => value === 'initialize')).toHaveLength(1)
+  expect((await f.methods()).filter(value => value === 'account/read')).toHaveLength(1)
+  expect((await f.methods()).filter(value => value === 'thread/start')).toHaveLength(1)
+  expect((await f.methods()).some(value => ['turn/start', 'turn/steer', 'thread/queue/add'].includes(value))).toBe(false)
+  expect(JSON.parse(await readFile(f.heartbeat, 'utf8')).pid).toBe(before.pid)
+  expect(f.child.exitCode).toBeNull()
+}, 30_000)
 
 it.runIf(process.platform === 'darwin')('retains the original running backend after account failure and retries its exact initialization without any Prompt or duplicate native creation', async () => {
   const f = await fixture({ accountFailure: true })
