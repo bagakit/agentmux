@@ -1,5 +1,4 @@
 import { AgentMuxError, agentDiscoveryActivity, type AgentMuxAgentCreationInspection, type AgentMuxAgentSession, type AgentMuxClient } from '@agentmux/core'
-import { parseConversationCheckpointPage, type ConversationCheckpointPage, type ConversationRef } from '@agentmux/core/conversation'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { MoteChatTarget } from '@agentmux/core/mote-chat'
 import type { MoteChatAgentPort, MoteChatCreatedAgent, MoteChatPreparedLaunch } from '@agentmux/connectors'
@@ -16,7 +15,6 @@ export type MoteChatExecutorPort = {
 export type MoteChatAgentOptions = {
   resources: MoteChatResourcePort
   clients(): readonly { hostId: string; client: Core }[]
-  checkpoint(reference: ConversationRef): Promise<ConversationCheckpointPage>
   /** Existing embedding may provide its own original Executor/creation owner. No failure fallback. */
   executors?: MoteChatExecutorPort
 }
@@ -63,6 +61,7 @@ export function createMoteChatAgents(options: MoteChatAgentOptions): HostMoteCha
   function exact(prepared: MoteChatPreparedLaunch, session: AgentMuxAgentCreationInspection): AgentMuxAgentSession {
     const input = prepared.input
     if (session.kind !== 'agent') return failure('MOTE_CHAT_AGENT_RETIRED', 'This original Mote chat Agent was explicitly retired. Its history and exact creation remain available; it was not recreated.')
+    if ('forkSource' in input || 'nativeResumeSource' in input || session.forkedFrom) return failure('MOTE_CHAT_CREATE_MISMATCH', 'Private chat requires its original dedicated creation, not an imported or copied conversation. The original message and creation are retained.')
     if (session.agentSessionId !== input.agentSessionId || session.hostId !== 'local' && session.hostId !== prepared.executionHostId ||
       session.providerId !== input.providerId || session.executorId !== input.executorId || session.workspacePath !== input.workspacePath ||
       !input.createOperationId || session.creation?.createOperationId !== input.createOperationId) {
@@ -74,10 +73,7 @@ export function createMoteChatAgents(options: MoteChatAgentOptions): HostMoteCha
   }
   async function created(prepared: MoteChatPreparedLaunch, value: AgentMuxAgentCreationInspection): Promise<MoteChatCreatedAgent> {
     const session = exact(prepared, value)
-    const reference = { hostId: prepared.executionHostId, agentSessionId: session.agentSessionId }
-    // A missing native source is an observation of this already-created Session, never absence of creation.
-    const checkpoint = parseConversationCheckpointPage(await options.checkpoint(reference), reference)
-    return { executionHostId: reference.hostId, agentSessionId: reference.agentSessionId, checkpoint }
+    return { executionHostId: prepared.executionHostId, agentSessionId: session.agentSessionId }
   }
   return {
     assertTarget: async input => { await options.resources.read(input) },

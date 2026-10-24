@@ -31,6 +31,9 @@ export type RoomBinding = Omit<RoomBindingTarget, 'regionAnchor'> & {
   sourceCheckpoints: NativeConversationCheckpoint[]
   /** Frozen original source cuts accepted by this Binding revision, never discovery authorization. */
   sourceFrontier?: ConversationCheckpoint
+  /** Dedicated creation owner authorized this new conversation from its native beginning.
+   * Mutually exclusive with frozen cuts; ordinary group bind/relink cannot request it. */
+  publicationOrigin?: { createOperationId: string }
   authorizedBy: RoomBindingAuthority
 }
 export type RoomBindingBindInput = RoomBindingTarget & {

@@ -1,5 +1,4 @@
 import { AgentMuxError, spatialCatalog, type AgentMuxHeadlessRuntime, type AgentMuxSpatialStateStore } from '@agentmux/core'
-import type { PublicationConversationPort } from '@agentmux/connectors'
 import { createMoteChatAgents } from './mote-chat-agents.js'
 import { createMoteChatResources, readMoteConfiguredExecutor, readMoteResourceConfiguration } from './mote-resources.js'
 
@@ -8,8 +7,6 @@ export function createHostMoteChat(options: {
   configurationPath: string
   spatial: AgentMuxSpatialStateStore
   runtime(): AgentMuxHeadlessRuntime
-  publication: PublicationConversationPort
-  signal: AbortSignal
 }) {
   const resources = createMoteChatResources({
     configuration: resource => readMoteResourceConfiguration(options.configurationPath, resource),
@@ -21,7 +18,6 @@ export function createHostMoteChat(options: {
   }
   const agents = createMoteChatAgents({ resources,
     clients: () => [{ hostId: 'local', client: options.runtime().client }],
-    checkpoint: reference => options.publication.checkpoint(reference, options.signal),
     executors: {
       resolve: async (hostId, executorId, workspacePath) => {
         exact(hostId)

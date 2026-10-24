@@ -5,14 +5,12 @@ import { profileAgentContext } from '../shared/user-profile.js'
 import type { AppConfig } from '../shared/contracts.js'
 import type { ScratchTopics } from './scratch-topics.js'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
-import type { ConversationCheckpointPage, ConversationRef } from '@agentmux/core/conversation'
 import type { DesktopRuntimeClient } from './desktop-host.js'
 export type MoteChatAgentOptions = {
   config(): AppConfig
   catalog(): Promise<AgentMuxSpaceCatalog | null>
   topics: Pick<ScratchTopics, 'readForDirectory' | 'read' | 'prepareAgent'>
   clients(): readonly { hostId: string; client: DesktopRuntimeClient }[]
-  checkpoint(reference: ConversationRef): Promise<ConversationCheckpointPage>
 }
 export type DesktopMoteChatAgents = ReturnType<typeof createHostMoteChatAgents>
 /** Desktop supplies its original config owner; the resource and agent workflow are framework-free. */
@@ -22,7 +20,7 @@ export function createMoteChatAgents(options: MoteChatAgentOptions): DesktopMote
     const config = options.config(), found = config.workspaces.filter(workspace => workspace.id === target.workspaceId), profileContext = profileAgentContext(config.profile)
     return { workspace: found.length === 1 ? found[0]! : null, ...(profileContext ? { profileContext } : {}) }
   } })
-  return createHostMoteChatAgents({ resources, clients: options.clients, checkpoint: options.checkpoint, executors: {
+  return createHostMoteChatAgents({ resources, clients: options.clients, executors: {
     resolve: async (_hostId, executorId, workspacePath) => {
       const config = options.config(), executor = Object.hasOwn(config.executors, executorId) ? config.executors[executorId] : undefined
       if (!executor) throw new AgentMuxError('The original saved Mote Executor is unavailable.', 'MOTE_CHAT_EXECUTOR_UNAVAILABLE')
