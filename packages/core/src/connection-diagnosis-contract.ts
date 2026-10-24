@@ -11,7 +11,7 @@ export type ConnectionDiagnosisInput = ConnectionDiagnosisWindow & {
 }
 export type ConnectionDiagnosisReading<T> = { value: T | null; issue: 'read-unavailable' | 'target-unconfirmed' | null; retained?: true }
 export type ConnectionDiagnosisTarget = {
-  bindingId: string; bindingRevision: number; connectionId: string; domain: string; appId: string
+  bindingId: string; bindingRevision: number; publicationRevision: number; connectionId: string; domain: string; appId: string
   externalConversationId: string; executionHostId: string; agentSessionId: string
 }
 export type ConnectionDiagnosisAssociation = { sourceKey: string | null; recordKey: string | null; eventKey: string | null; partKey: string | null }

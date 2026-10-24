@@ -61,8 +61,9 @@ function sourceGap(value: unknown) {
     code, codeRecorded, association: association(g.association), sourceKind: nullable(g.sourceKind, value => member(value, ['captured', 'native', 'native-unavailable'] as const)) }
 }
 function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGroupDiagnosis {
-  const p = object(value, ['target', 'window', 'limit', 'adapterService', 'connection', 'binding', 'outgoing', 'incoming']), t = object(p.target, ['bindingId', 'bindingRevision', 'connectionId', 'domain', 'appId', 'externalConversationId', 'executionHostId', 'agentSessionId'])
-  const target = { bindingId: id(t.bindingId), bindingRevision: count(t.bindingRevision, 1), connectionId: id(t.connectionId), domain: text(t.domain), appId: text(t.appId), externalConversationId: text(t.externalConversationId), executionHostId: id(t.executionHostId), agentSessionId: id(t.agentSessionId) }
+  const p = object(value, ['target', 'window', 'limit', 'adapterService', 'connection', 'binding', 'outgoing', 'incoming']), t = object(p.target, ['bindingId', 'bindingRevision', 'publicationRevision', 'connectionId', 'domain', 'appId', 'externalConversationId', 'executionHostId', 'agentSessionId'])
+  const target = { bindingId: id(t.bindingId), bindingRevision: count(t.bindingRevision, 1), publicationRevision: count(t.publicationRevision, 1), connectionId: id(t.connectionId), domain: text(t.domain), appId: text(t.appId), externalConversationId: text(t.externalConversationId), executionHostId: id(t.executionHostId), agentSessionId: id(t.agentSessionId) }
+  if (target.publicationRevision > target.bindingRevision) return fail()
   if (target.executionHostId !== request.executionHostId || target.agentSessionId !== request.agentSessionId || request.bindingId && target.bindingId !== request.bindingId || request.bindingRevision && target.bindingRevision !== request.bindingRevision || p.limit !== connectionDiagnosisWindowLimit) return fail()
   const window = object(p.window, ['after', 'afterContent', 'beforeIngressId'])
   if (['after', 'afterContent', 'beforeIngressId'].some(key => window[key] !== request[key as keyof ConnectionDiagnosisInput])) return fail()
@@ -101,7 +102,8 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
       const bindingId = nullable(i.bindingId, id), bindingRevision = nullable(i.bindingRevision, value => count(value, 1)), targetConnectionId = nullable(i.targetConnectionId, id), inputOperationId = nullable(i.inputOperationId, id)
       const rowScope = member(i.scope, ['current-binding', 'other-binding', 'group-event'] as const)
       if (rowScope === 'group-event' ? bindingId !== null || bindingRevision !== null || targetConnectionId !== null || inputOperationId !== null : !bindingId || !bindingRevision || !targetConnectionId) return fail()
-      if (rowScope === 'current-binding' && (bindingId !== target.bindingId || bindingRevision !== target.bindingRevision || targetConnectionId !== target.connectionId)) return fail()
+      // The original owner proves membership; these bounds validate displayed provenance only.
+      if (rowScope === 'current-binding' && (bindingId !== target.bindingId || bindingRevision! < target.publicationRevision || bindingRevision! > target.bindingRevision || targetConnectionId !== target.connectionId)) return fail()
       const recording = nullable(i.recording, value => {
         const r = object(value, ['state', 'code']), state = member(r.state, ['recorded', 'unavailable', 'refused', 'not-started'] as const)
         if (i.kind !== 'message' || (state === 'recorded' || state === 'not-started') && r.code !== undefined || state === 'recorded' && !bindingId) return fail()

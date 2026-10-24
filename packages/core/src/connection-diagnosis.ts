@@ -3,14 +3,14 @@ import type { ConversationItemRef, ConversationRef } from './conversation.js'
 import type { ConnectionDeliveryGap } from './connection-delivery-contract.js'
 import type { ConnectionDelivery } from './connection-delivery-contract.js'
 import type { ConnectionIngressRecord } from './ingress-contract.js'
-import type { RoomBinding } from './room-binding-contract.js'
+import { roomPublicationReference, sameRoomPublication, type RoomBinding } from './room-binding-contract.js'
 import type { ConnectionPort } from './connections-contract.js'
 import { parseConnectionServiceResult } from './connection-service-codec.js'
 import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosisInput, type ConnectionDiagnosis, type ConnectionGroupDiagnosis, type ConnectionDiagnosisTarget, type ConnectionDiagnosisWindow, type ConnectionDiagnosisReading, type GroupDiagnosis } from './connection-diagnosis-contract.js'
 
 export const groupWindowLimit = connectionDiagnosisWindowLimit
 export function groupTarget(binding: RoomBinding) {
-  return { bindingId: binding.bindingId, bindingRevision: binding.revision, connectionId: binding.connectionId,
+  return { bindingId: binding.bindingId, bindingRevision: binding.revision, publicationRevision: roomPublicationReference(binding).revision, connectionId: binding.connectionId,
     domain: binding.application.domain, appId: binding.application.appId, externalConversationId: binding.externalConversationId,
     executionHostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
 }
@@ -22,7 +22,7 @@ async function reading<T>(work: () => Promise<T>): Promise<Reading<T>> {
 }
 const applicationMatches = (application: { domain: string; appId: string }, target: GroupTarget) => application.domain === target.domain && application.appId === target.appId
 export function deliveryMatches(delivery: ConnectionDelivery, target: GroupTarget) {
-  return delivery.bindingId === target.bindingId && delivery.bindingRevision === target.bindingRevision && delivery.target.connectionId === target.connectionId &&
+  return delivery.bindingId === target.bindingId && delivery.bindingRevision === target.publicationRevision && delivery.target.connectionId === target.connectionId &&
     delivery.target.externalConversationId === target.externalConversationId && applicationMatches(delivery.target.application, target)
 }
 export function deliveryFacts(delivery: ConnectionDelivery) {
@@ -57,7 +57,7 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
   const [connection, binding, outgoing, incoming] = await Promise.all([
     reading(() => owner.inspect({ connectionId: target.connectionId })),
     reading(() => owner.bindings!.inspect({ bindingId: target.bindingId })),
-    reading(() => owner.delivery!.list({ connectionId: target.connectionId, bindingId: target.bindingId, bindingRevision: target.bindingRevision, order: 'newest', limit: groupWindowLimit, ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}) })),
+    reading(() => owner.delivery!.list({ connectionId: target.connectionId, bindingId: target.bindingId, bindingRevision: target.publicationRevision, order: 'newest', limit: groupWindowLimit, ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}) })),
     reading(() => owner.ingress!.listAudience!({ application: { domain: target.domain, appId: target.appId }, externalConversationId: target.externalConversationId, limit: groupWindowLimit, ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }))
   ])
   const c = connection.value?.connection, b = binding.value?.binding
@@ -67,7 +67,7 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
     const value = parseConnectionServiceResult('connection.service.get', await owner.service!.get(input), input)
     return { adapterId: input.adapterId, enabled: value.enabled, revision: value.revision }
   }) : { value: null, issue: connection.issue ?? 'target-unconfirmed' }
-  const sameBinding = !!b && b.bindingId === target.bindingId && b.revision === target.bindingRevision && b.connectionId === target.connectionId &&
+  const sameBinding = !!b && b.bindingId === target.bindingId && b.revision === target.bindingRevision && roomPublicationReference(b).revision === target.publicationRevision && b.connectionId === target.connectionId &&
     b.externalConversationId === target.externalConversationId && applicationMatches(b.application, target) && b.executionHostId === target.executionHostId && b.agentSessionId === target.agentSessionId
   const rows = incoming.value?.ingresses.filter(ingress => ingressMatches(ingress, target)) ?? []
   const intake = await Promise.all(rows.map(async original => {
@@ -77,7 +77,11 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
     const ingress = valid ? observed : original, author = ingress.input?.author
     const frozen = ingress.kind !== 'action' ? ingress.group?.target : null
     const relation = author ? { bindingId: author.bindingId, bindingRevision: author.bindingRevision, connectionId: author.connectionId, hostId: ingress.input!.hostId, agentSessionId: ingress.input!.agentSessionId } : frozen
-    const current = !!relation && relation.bindingId === target.bindingId && relation.bindingRevision === target.bindingRevision && relation.connectionId === target.connectionId && relation.hostId === target.executionHostId && relation.agentSessionId === target.agentSessionId
+    const subject = !!relation && relation.bindingId === target.bindingId && relation.connectionId === target.connectionId && relation.hostId === target.executionHostId && relation.agentSessionId === target.agentSessionId
+    const originalBinding = subject && sameBinding && relation.bindingRevision !== target.bindingRevision
+      ? await reading(() => owner.bindings!.inspect({ bindingId: relation.bindingId, revision: relation.bindingRevision })) : null
+    // This is a historical association, not current permission or dispatch authority.
+    const current = subject && (relation.bindingRevision === target.bindingRevision || !!b && !!originalBinding?.value?.binding && sameRoomPublication(originalBinding.value.binding, b))
     const receipt = valid && current ? inspected.value?.inputReceipt : null
     const interaction = valid && current ? inspected.value?.interactionReceipt : null
     const waiting = receipt?.control.waiting
@@ -146,7 +150,7 @@ export function retainGroupDiagnosis(previous: GroupDiagnosis | null, next: Grou
 export function formatGroupDiagnosis(report: GroupDiagnosis) {
   const { target: t, service, adapterService, connection, binding, outgoing, incoming } = report, lines = [
     'Group diagnosis — bounded local observations, not an atomic history',
-    `Binding: ${t.bindingId} · revision ${t.bindingRevision}`, `Connection: ${t.connectionId} · ${t.domain} · ${t.appId}`,
+    `Binding: ${t.bindingId} · configuration ${t.bindingRevision} · publication ${t.publicationRevision}`, `Connection: ${t.connectionId} · ${t.domain} · ${t.appId}`,
     `Group: ${t.externalConversationId}`, `Agent: ${t.executionHostId} · ${t.agentSessionId}`, `Window limit: ${report.limit}`
   ]
   const section = (name: string, value: { issue: string | null; retained?: true }) => { if (value.issue) lines.push(`${name}: ${value.issue}${value.retained ? ' (earlier observed facts retained)' : ''}`) }
