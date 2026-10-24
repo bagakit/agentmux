@@ -47,7 +47,7 @@ vi.mock('@agentmux/connectors', async actual => ({ ...await actual<typeof import
 import '../src/preload/index'
 import { LocalExecutionHost } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
-import { FileReadOwner } from '../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { registerIpc } from '../src/main/ipc'
 import { DEFAULT_CONFIG } from '../src/main/config-store'

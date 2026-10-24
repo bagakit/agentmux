@@ -10,7 +10,7 @@ import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { saveSurveyToRecall, type SurveyRecallCapture as CaptureTarget } from '../src/renderer/src/lib/survey-recall-capture'
 import { SurveyRecallCapture } from '../src/renderer/src/components/SurveyRecallCapture'
-import { NOTES_WORKSPACE_ID } from '../src/shared/notes-library'
+import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { newNoteDocument } from '../src/shared/note-document'
 
 const dom = composerDOM()

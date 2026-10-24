@@ -11,7 +11,7 @@ import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
-import { topicContentSpaceId, topicContentZoneId } from '../src/shared/topic-categories'
+import { topicContentSpaceId, topicContentZoneId } from '@agentmux/host/topic-categories'
 
 const initial = useAppStore.getState()
 const folder = (id: string, name: string, path: string) => ({ id, name, path, hostId: 'local', kind: 'folder' as const })

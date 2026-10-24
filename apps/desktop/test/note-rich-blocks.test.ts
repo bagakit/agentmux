@@ -13,9 +13,9 @@ import { indexNoteReferences, prepareNoteWikiLinks, noteSemanticText } from '@ag
 import { noteKnowledge, projectNoteBlocks } from '@agentmux/client-ui/note/note-knowledge'
 import { deriveNoteCorpus } from '@agentmux/client-ui/note/note-corpus'
 import { readNoteDocument, serializeNoteDocument, type NoteDocument } from '../src/shared/note-document'
-import { NoteFileWriter } from '../src/main/note-file-writer'
+import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files'
-import { FileReadOwner } from '../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 
 const header = '---\nschema: agentmux.note.md.v1\nnote-id: rich-note\n---\n\n'
 function read(body: string): NoteDocument {

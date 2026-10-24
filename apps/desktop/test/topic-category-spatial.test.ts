@@ -10,10 +10,10 @@ import type { TopicCategory } from '@agentmux/core/control'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial, desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
-import { TopicSpatialOwner } from '../src/main/topic-spatial-owner'
+import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
 import { SCRATCH_WORKSPACE_ID, scratchTopicStorageRoots } from '../src/shared/scratch-topics'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
-import { categoriesFromSpatial, isKnowledgeTopicInBindings, topicContentZoneId, UNCLASSIFIED_TOPIC_CATEGORY_ID } from '../src/shared/topic-categories'
+import { categoriesFromSpatial, isKnowledgeTopicInBindings, topicContentZoneId, UNCLASSIFIED_TOPIC_CATEGORY_ID } from '@agentmux/host/topic-categories'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts'
 const { build } = createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('esbuild')
 const roots: string[] = []

@@ -52,7 +52,7 @@ vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dis
 import { RuntimeController } from '../src/main/runtime-controller'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { registerIpc } from '../src/main/ipc'
-import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '../src/shared/notes-library'
+import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '@agentmux/host/notes-library'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { executorDetectionKey, useAppStore, type NotificationEvent } from '../src/renderer/src/store'

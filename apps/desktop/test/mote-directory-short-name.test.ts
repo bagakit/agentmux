@@ -8,7 +8,7 @@ import { objectCliEnvironment } from '../../../packages/core/test/helpers/object
 import { createHash } from 'node:crypto'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
-import { FileReadOwner } from '../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { spatialSources } from '../src/shared/space-addresses'
 import { zoneFileResource } from '../src/shared/zone-file-resource'
 import { WorkspaceFiles } from '../src/main/workspace-files'

@@ -9,8 +9,8 @@ import { RuntimeController } from '../../../src/main/runtime-controller'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
 import { SpaceObjectImages } from '../../../src/main/space-object-images'
 import { WorkspaceFiles } from '../../../src/main/workspace-files'
-import { TopicKnowledgeOwner } from '../../../src/main/topic-knowledge'
-import { TopicSpatialOwner } from '../../../src/main/topic-spatial-owner'
+import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
+import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
 const [html, privateRoot, phase, preload, resultDirectory, nodeExecutable] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))

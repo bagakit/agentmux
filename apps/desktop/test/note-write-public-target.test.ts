@@ -1,7 +1,7 @@
 import { fixturePath as _historyFixturePath } from "../../../test/fixture-values.mjs"
 import { afterEach, expect, it, vi } from 'vitest'
 import { fileUploadRevision } from '@agentmux/core/files'
-import { FileReadOwner } from '../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import type { WorkspaceFileWriteInput, WorkspaceRecord } from '../src/shared/contracts'
 
 afterEach(() => vi.restoreAllMocks())

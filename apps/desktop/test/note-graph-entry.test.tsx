@@ -27,8 +27,8 @@ import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workben
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { newNoteDocument } from '../src/shared/note-document'
 import { WorkspaceFiles } from '../src/main/workspace-files'
-import { NoteFileWriter } from '../src/main/note-file-writer'
-import { NotebookObservationOwner } from '../src/main/notebook-observation-owner'
+import { NoteFileWriter } from '@agentmux/host/note-file-writer'
+import { NotebookObservationOwner } from '@agentmux/host/notebook-observation-owner'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 

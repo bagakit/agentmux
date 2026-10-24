@@ -1,7 +1,7 @@
 import { win32 as _hygiene_win32 } from "node:path"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
-import { NOTES_WORKSPACE_ID } from '../src/shared/notes-library'
+import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { SCRATCH_WORKSPACE_ID, type WorkspaceRecord } from '../src/shared/contracts'
 import {
   PROJECT_RAIL_MAX_DEPTH,

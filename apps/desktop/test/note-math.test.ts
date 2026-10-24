@@ -12,9 +12,9 @@ import { noteWikiInputExtension } from '@agentmux/client-ui/note/note-wiki-input
 import { indexNoteReferences, prepareNoteWikiLinks, noteSemanticText } from '@agentmux/client-ui/note/note-wikilinks'
 import { noteKnowledge, parseNoteFile } from '@agentmux/client-ui/note/note-knowledge'
 import { readNoteDocument, serializeNoteDocument, newNoteDocument, type NoteDocument } from '../src/shared/note-document'
-import { NoteFileWriter } from '../src/main/note-file-writer'
+import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files'
-import { FileReadOwner } from '../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 
 const header = '---\nschema: agentmux.note.md.v1\nnote-id: math-note\n---\n\n'
 function read(body: string): NoteDocument {
