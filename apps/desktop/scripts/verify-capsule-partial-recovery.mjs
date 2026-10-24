@@ -20,15 +20,15 @@ const inputs = [...tracked, suite, base, 'apps/desktop/scripts/verify-capsule-pa
 const sources = Object.fromEntries(await Promise.all(inputs.map(async file => [file, await readFile(join(root, file), 'utf8')])))
 const sha = value => createHash('sha256').update(value).digest('hex')
 const merge = `setQuestions(current => {
-        const known = new Map(current?.filter(question => question.capsuleId === capsuleId).map(question => [question.interactionId, question]))
-        for (const question of result.interactions) {
-          const previous = known.get(question.interactionId)
-          if (!previous || question.revision >= previous.revision) known.set(question.interactionId, question)
-        }
-        return [...known.values()]
-      })`
+          const known = new Map(current?.filter(question => question.capsuleId === capsuleId).map(question => [question.interactionId, question]))
+          for (const question of result.value.interactions) {
+            const previous = known.get(question.interactionId)
+            if (!previous || question.revision >= previous.revision) known.set(question.interactionId, question)
+          }
+          return [...known.values()]
+        })`
 const mutants = [
-  { id: 'destructive-list-replacement', from: merge, to: 'setQuestions(result.interactions)',
+  { id: 'destructive-list-replacement', from: merge, to: 'setQuestions(result.value.interactions)',
     test: 'keeps the original mounted form and unsaved answer through a real partial owner read while healthy questions update',
     failure: 'Partial interaction reads must preserve the original mounted reply form' },
   { id: 'lower-revision-replaces-confirmed', from: '!previous || question.revision >= previous.revision', to: 'true',
