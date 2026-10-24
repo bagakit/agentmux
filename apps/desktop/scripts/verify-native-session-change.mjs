@@ -92,7 +92,7 @@ try{
   if(/^(?:apps|packages)\//.test(relative)&&!relative.includes('/node_modules/'))consumed.set(relative,sha(await fs.readFile(actual)))
  }}
  const renderer=path.join(evidence,'renderer')
- await buildRenderer({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true',__TERMINAL_WHEEL_UMD_URL__:'"unused"'},esbuild:{jsx:'automatic'},resolve:{alias:aliases},plugins:[sourcePlugin],build:{target:'esnext',outDir:renderer,emptyOutDir:true,minify:false}})
+ await buildRenderer({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true',__TERMINAL_WHEEL_UMD_URL__:'"unused"'},esbuild:{jsx:'automatic'},resolve:{alias:aliases},plugins:[sourcePlugin],worker:{format:'es',plugins:()=>[sourcePlugin]},build:{target:'esnext',outDir:renderer,emptyOutDir:true,minify:false}})
  receipt.compiledRenderer=Object.fromEntries(consumed)
  for(const file of ['App.tsx','store.ts','components/SessionPane.tsx','components/AgentRegionHeader.tsx','components/AgentNativeSourceControls.tsx','components/TerminalView.tsx'])assert.ok(consumed.has('apps/desktop/src/renderer/src/'+file),'Current Renderer consumer compiled: '+file)
  for(const file of ['theme/icons.tsx','theme/runtime.ts','components/ConversationView.tsx'])assert.ok(consumed.has('packages/client-ui/src/'+file),'Current shared UI consumer compiled: '+file)
