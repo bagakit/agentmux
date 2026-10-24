@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '../../../../../shared/goals-preferences'
+import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { GoalsSettingsPane } from '../GoalsSettingsPane'

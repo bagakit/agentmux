@@ -3,8 +3,8 @@ import type { AppConfig, ComposerShortcut, GoalsCommonActionRef, GoalsCommonActi
 import { resolveComposerShortcuts } from '../../../shared/composer-shortcut-library'
 import { configuredExecutors, type ConfiguredExecutor } from './executors'
 import { GOAL_EXPLORATION_ACTIONS, goalExplorationNextText, type GoalExplorationProject } from './goals-entry-actions'
-import { resolveGoalsCommonActions } from '../../../shared/goals-preferences'
-export { DEFAULT_GOALS_COMMON_ACTIONS } from '../../../shared/goals-preferences'
+import { resolveGoalsCommonActions } from '@agentmux/host/goals-preferences'
+export { DEFAULT_GOALS_COMMON_ACTIONS } from '@agentmux/host/goals-preferences'
 
 export const commonActionKey = (ref: GoalsCommonActionRef): string => `${ref.kind}:${ref.id}`
 export const commonActionsDirectory = (config: AppConfig | null): GoalsCommonActionsConfig => resolveGoalsCommonActions(config?.goalsCommonActions)

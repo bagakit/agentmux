@@ -1,3 +1,4 @@
+import type { GoalsCommonActionsConfig } from '@agentmux/host/goals-preferences'
 import type { ComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import type { ThemeDocument } from '@agentmux/client-ui/theme'
 import type { WorkbenchWindowDocument } from './workbench-windows'
@@ -437,11 +438,7 @@ export type ComposerShortcut = {
   reactionIcon?: import('@agentmux/core/prompt-reaction').PromptReactionIcon
 }
 
-/** The directory owns order and visibility; a custom instruction stays in ComposerShortcut. */
-export type GoalsCommonActionRef =
-  | { kind: 'builtin'; id: 'understand' | 'ideas' | 'next' }
-  | { kind: 'prompt'; id: string }
-export type GoalsCommonActionsConfig = { items: GoalsCommonActionRef[]; collapsed: boolean }
+export type { GoalsCommonActionRef, GoalsCommonActionsConfig } from '@agentmux/host/goals-preferences'
 
 export type AppConfig = {
   version: typeof CONFIG_VERSION
@@ -455,7 +452,7 @@ export type AppConfig = {
   profile?: import('./user-profile').UserProfile
   focus?: import('./focus-preferences').FocusPreferences
   notes?: import('./notes-preferences').NotesPreferences
-  goals?: import('./goals-preferences').GoalsPreferences
+  goals?: import('@agentmux/host/goals-preferences').GoalsPreferences
   /** Authored continuity preferences; Core resolves defaults when a new recovery intent is admitted. */
   continuity?: Partial<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityPolicy>
   /** New-task form defaults only; saving preferences never creates or changes a task. */

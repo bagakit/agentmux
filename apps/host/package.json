@@ -185,6 +185,10 @@
     "./workspace-projects": {
       "types": "./dist/workspace-projects.d.ts",
       "import": "./dist/workspace-projects.js"
+    },
+    "./goals-preferences": {
+      "types": "./dist/goals-preferences.d.ts",
+      "import": "./dist/goals-preferences.js"
     }
   }
 }
