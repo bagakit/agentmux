@@ -38,3 +38,21 @@ Selection, focus and native input receipts are separate. Preserve current drafts
 unless navigation/input change was explicitly requested. Partial or unavailable discovery
 does not mean objects are absent; retain the original view and inspect its exact owner.
 For Agent/File/Browser opening or layout changes, read their module and the space module first.
+
+app mobile assets inspect --input FILE|- observes the exact original Host's active release,
+retained namespaces and bounded page reports. Use operationId to inspect one original activation,
+or client:{devicePrincipalId,documentId} from an actual loaded receipt for that exact page.
+No matching retained observation means not-retained, not that a page or device does not exist.
+app mobile assets activate --input FILE|- requires the current managed Agent's original Host,
+Session, Run and execution Workspace. candidatePath is a literal relative directory inside that
+Workspace; candidateDigest binds its complete mobile-release.json and actual immutable files.
+Supply the inspected expectedActiveRevision and retain the original operationId after any unknown
+reply. Inspect that operation; never replay it automatically. A changed active HTTP snapshot does
+not reload a phone or prove it loaded the release. Only the compiled page's authenticated loaded
+report supplies that fact. The page keeps both its compiled buildId and original content
+namespaceDigest. The root HTTP
+document redirects into that content-addressed namespace; reusing a build label cannot revive
+an older content namespace or prove that an older page loaded the current release.
+Active and previous namespaces are retained in this Host instance only; older namespaces
+explicitly become not-retained. Publication does not claim disk persistence,
+native App updates, Host restart or safe reload of drafts and selected images.

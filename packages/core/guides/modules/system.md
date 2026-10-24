@@ -26,6 +26,19 @@ so begin a new list. Unavailable or partial coverage does not mean the inbox is 
 The client route Host and each original notification subject Host are separate identities;
 this is one registered client document, not an archive of all windows or Hosts.
 
+The existing client.incident reader also retains finite mobile-web observations in its original
+Main archive. Use system diagnostics inspect --input FILE|- with a client.incident recent target
+and producer:{kind:"mobile-web",devicePrincipalId,documentId,buildId?,namespaceDigest?} copied from the original
+phone receipt; omit the producer selector for bounded archive discovery. Read an exact returned
+logId with its original archive authority. Build identity is the page's compilation, not the
+current HTTP manifest. Device identity is stamped by the authenticated forwarding chain and
+does not grant device administration. Partial space.ls observations record only presence of the
+original issue field, counts and bounded opaque Space references; inspect those original Spaces
+with their existing CLI for complete reasons. Connection observations retain their original typed
+boundary/state. Diagnostic admission remains unconfirmed until its original archive read says
+otherwise. Missing Main/archive or exhausted diagnostic budgets leave existing phone and Agent
+operations available; retry only the retained original diagnostic occurrence when appropriate.
+
 Metrics watch owns a reader; cancellation detaches that reader and never stops an Agent.
 diagnostics.host describes the local machine: CPU uses whole-machine capacity and a
 matching counter interval, separately from App/Run one-logical-core percentages. Physical
