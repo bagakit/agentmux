@@ -41,9 +41,13 @@ app.whenReady().then(async () => {
     await tap('[data-capture-control=' + JSON.stringify(selected) + ']', label)
   }
   const capture = async name => {
+    if (mode === 'parity-final' && !['focus-overview-phone', 'space-directory-430', 'focus-result-conversation-narrow', 'unknown-details-short-viewport', 'offline-retained-short'].includes(name)) return
     if (mode === 'source-recovery' && !['navigation-offline-source-restored-narrow', 'navigation-reconnected-source-narrow'].includes(name)) return
     await pause(120)
-    const facts = await read(`(()=>{const n=document.querySelector('.mobile-app'),e=document.querySelector('[contenteditable=true]');return {text:n.innerText,overlay:document.querySelector('[role=dialog]')?.innerText,overflow:n.scrollWidth>n.clientWidth,root:n.getBoundingClientRect().toJSON(),viewport:{width:innerWidth,height:innerHeight,visualHeight:visualViewport.height,top:visualViewport.offsetTop},selectedSession:document.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id'),editor:{text:e?.textContent,visible:!!e?.getClientRects().length,rect:e?.getBoundingClientRect().toJSON(),sameOriginal:e===window.originalCaptureEditor,focused:document.activeElement===e},...mobileProductScene.facts()}})()`)
+    win.webContents.invalidate()
+    await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+    await pause(40)
+    const facts = await read(`(()=>{const n=document.querySelector('.mobile-app'),e=document.querySelector('[contenteditable=true]');return {text:n.innerText,overlay:document.querySelector('[role=dialog]')?.innerText,overflow:n.scrollWidth>n.clientWidth,root:n.getBoundingClientRect().toJSON(),structure:Object.fromEntries(['.mobile-header','.mobile-main','.mobile-conversation-panel','.mobile-conversation','.mobile-conversation__connection','.mobile-conversation__reading'].map(selector=>{const n=document.querySelector(selector);return[selector,n?{rect:n.getBoundingClientRect().toJSON(),scrollTop:n.scrollTop,position:getComputedStyle(n).position,overflow:getComputedStyle(n).overflowY}:null]})),viewport:{width:innerWidth,height:innerHeight,visualHeight:visualViewport.height,top:visualViewport.offsetTop},selectedSession:document.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id'),editor:{text:e?.textContent,visible:!!e?.getClientRects().length,rect:e?.getBoundingClientRect().toJSON(),sameOriginal:e===window.originalCaptureEditor,focused:document.activeElement===e},...mobileProductScene.facts()}})()`)
     await fs.writeFile(path.join(evidence, name + '.png'), (await win.webContents.capturePage()).toPNG())
     result.images.push(name + '.png'); result.operations.push({ action: 'capture', name, ...facts })
     if (!baseline) assert.equal(facts.overflow, false, 'Actual mobile app does not overflow horizontally')
@@ -267,7 +271,7 @@ app.whenReady().then(async () => {
   } else gap('Visible Mote context did not expose the original goal/result action.')
   await resize(390, 844)
   await button('Focus', '.mobile-navigation')
-  await until('document.querySelector(".mobile-spatial-panel").textContent.includes("需要处理")')
+  await until('!!document.querySelector(".mobile-spatial-panel .mobile-session-list button")')
   await capture('focus-overview-phone')
   await resize(320, 760); await capture('focus-overview-narrow')
   await button('资料整理', '.mobile-spatial-panel')
@@ -345,6 +349,12 @@ app.whenReady().then(async () => {
   await read('mobileProductScene.reconnect()')
   await resize(390, 844)
   await capture('reconnected-original-draft-phone')
+  await button('当前对话操作'); await capture('agent-actions-phone')
+  await resize(320, 568); await capture('agent-actions-narrow-short')
+  await button('关闭面板'); await button('Focus', '.mobile-navigation')
+  await resize(390, 844); await button('新建 Agent'); await capture('agent-create-phone')
+  await resize(320, 568); await capture('agent-create-narrow-short')
+  await button('关闭新建 Agent')
   const calls = await read('mobileProductScene.facts().calls')
   assert.equal(calls.filter(call => call.method === 'sdk.submitAgentPrompt').length, 2, 'One normal explicit Send + one unknown Send without automatic replay')
   assert.equal(calls.filter(call => call.method === 'sdk.respondAgentInteraction').length, 1)
