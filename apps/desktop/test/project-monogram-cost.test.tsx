@@ -34,7 +34,7 @@ import type { Root } from 'react-dom/client'
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { appendFileSync } from 'node:fs'
 import { createClientUiRoot } from './helpers/client-ui-render'
-import { projectMonogram } from '../src/renderer/src/lib/project-monogram'
+import { projectMonogram } from '@agentmux/client-ui/project-monogram'
 import { ProjectIcon } from '../src/renderer/src/components/ProjectIcon'
 import { api } from '../src/renderer/src/lib/api'
 
