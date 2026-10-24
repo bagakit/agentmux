@@ -267,7 +267,10 @@ async function run() {
     await until('source button follows moved original Region', async () => (await facts()).tabs[movedSource.id]?.layout.activeRegionId === sourceLocation.regionId && main.isFocused())
     receipt.assertions.push({ label: 'source-return-follows-moved-region', original: sourceLocation, movedTabId: movedSource.id, facts: await facts() })
     await click(nativeWindow, '.workbench-window-toolbar button')
-    await until('Return moves the same child into original workspace', () => nativeWindow.isDestroyed() && browsers.windowForView(browsers.nativeOwner(child.id)!.view) === main)
+    await until('Return moves the same child into original workspace', () => {
+      const owner = browsers.nativeOwner(child.id)
+      return nativeWindow.isDestroyed() && owner && browsers.windowForView(owner.view) === main
+    })
     assert.equal(browsers.nativeOwner(child.id)!.view.webContents, originalChildContents)
     receipt.assertions.push({ label: 'return-preserves-native-page', childId: child.id, contentsId: originalChildContents.id, facts: await facts() })
     const sourceEntry = Object.values((await facts()).tabs).find((tab: any) => Object.values(tab.regions).some((region: any) => region.browserId === source.id)) as any
@@ -276,7 +279,8 @@ async function run() {
     another.nativeWindow.close()
     await until('native Close retires original child', () => !browsers.target(another.child.id) && another.nativeWindow.isDestroyed())
     await until('native Close removes only its original Region projection', async () => !Object.values((await facts()).tabs).some((tab: any) => Object.values(tab.regions).some((region: any) => region.browserId === another.child.id)))
-    assert.equal(browsers.nativeOwner(child.id)!.view.webContents, originalChildContents, 'Closing the second child preserves the returned first child')
+    assert.equal(originalChildContents.isDestroyed(), false, 'Closing the second child preserves the returned first native page while its Tab is hidden')
+    assert.equal(browsers.target(child.id)?.id, child.id, 'Closing the second child preserves the returned first Browser identity')
     receipt.assertions.push({ label: 'native-close-destroys-child', childId: another.child.id, facts: await facts() })
     const childTabToSave = Object.values((await facts()).tabs).find((tab: any) => Object.values(tab.regions).some((region: any) => region.browserId === child.id)) as any
     await js(`window.childrenUi.split(${JSON.stringify(childTabToSave.id)},${JSON.stringify(child.id)})`)
