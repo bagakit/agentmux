@@ -14,20 +14,25 @@ describe('original conversation observation recovery', () => {
   it('recovers the first failed native read and renders Hook replies in original order without resending', async () => {
     vi.useFakeTimers()
     const f = fixture()
-    f.readHistory.mockRejectedValueOnce(new Error('source not confirmed yet'))
     f.setTimeline({ agentSessionId: 'session-original', revision: 2, items: [
       { id: 'user', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 1, updatedAt: 1, title: 'Input', content: '大白话说的话？', authorHuman: true },
       { id: 'answer', agentSessionId: 'session-original', kind: 'assistant_message', status: 'complete', source: 'native-hook', createdAt: 2, updatedAt: 2, title: 'Reply', content: 'Agent 自己一直能正常干活。' },
       { id: 'next', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 3, updatedAt: 3, title: 'Input', content: '继续', authorHuman: true }
     ] })
+    const complete = await f.client.readAgentConversation({ hostId: 'local', agentSessionId: 'session-original' })
+    const captured = complete.items.filter(unit => unit.kind === 'item' && unit.item.records.every(record => record.original.kind === 'captured'))
+    const reads = vi.spyOn(f.client, 'readAgentConversation').mockResolvedValueOnce({ ...complete, items: captured,
+      coverage: complete.coverage.map(coverage => coverage.source.kind === 'native' ? { ...coverage, current: 'unavailable', gaps: [{ code: 'SOURCE_PENDING', message: 'source not confirmed yet' }] } : coverage),
+      window: { ...complete.window, itemCount: captured.length } })
     const view = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={createBrowserPlatform()} />)
     expect(view.element.textContent).toContain('Agent 自己一直能正常干活。')
-    const text = view.element.querySelector('.mobile-conversation__captured')!.textContent!
+    await click(view.element.querySelector<HTMLButtonElement>('[data-captured-reply-observation="answer"] button')!)
+    const text = view.element.querySelector('.conversation-native-thread')!.textContent!
     expect(text.indexOf('大白话')).toBeLessThan(text.indexOf('Agent 自己'))
     expect(text.indexOf('Agent 自己')).toBeLessThan(text.indexOf('继续'))
-    expect(f.client.observeSessionHistory).not.toHaveBeenCalled()
-    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
-    expect(f.client.observeSessionHistory).toHaveBeenCalledOnce()
+    expect(view.element.textContent).toContain('source not confirmed yet')
+    await click(button(view.element, '刷新原记录'))
+    expect(reads.mock.calls.length).toBeGreaterThan(1)
     expect(view.element.querySelector('[data-native-record-id="native-answer"]')).not.toBeNull()
     expect(f.submit).not.toHaveBeenCalled()
   })
@@ -35,7 +40,7 @@ describe('original conversation observation recovery', () => {
     const f = fixture(), late = deferred<any>(), dispose = vi.fn()
     vi.mocked(f.client.observeSessionHistory).mockReturnValueOnce(late.promise)
     const view = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={createBrowserPlatform()} />)
-    await act(async () => { f.emit({ type: 'agent-session', session: { ...f.client.agentSession('session-original'), run: { runId: 'next-run' } } }) })
+    await view.render(<MobileConversationSurface client={f.client} agentSessionId="other" connection={connected} platform={createBrowserPlatform()} />)
     await act(async () => { late.resolve({ source: history().source, dispose }) })
     expect(dispose).toHaveBeenCalledOnce()
     expect(f.client.observeSessionHistory).toHaveBeenCalledTimes(2)
@@ -46,11 +51,12 @@ describe('original conversation observation recovery', () => {
     const f = fixture(), old = deferred<ReturnType<typeof history>>(), freshRead = deferred<ReturnType<typeof history>>()
     f.readHistory.mockReturnValueOnce(old.promise).mockReturnValueOnce(freshRead.promise)
     const view = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={createBrowserPlatform()} />)
-    const next = { ...f.client.agentSession('session-original'), run: { runId: 'next-run' } }
+    const next = f.client.agentSession('other')
     f.sessions.set('session-original', next)
-    const fresh = { ...history(), source: { providerId: 'codex', nativeSessionId: 'fresh-source' }, items: [{ id: 'fresh', kind: 'assistant-message' as const, contentParts: [{ kind: 'text' as const, text: '新来源回复' }] }] }
+    const fresh = { ...history('other'), source: { providerId: 'codex', nativeSessionId: 'fresh-source' }, items: [{ id: 'fresh', kind: 'assistant-message' as const, contentParts: [{ kind: 'text' as const, text: '新来源回复' }] }] }
     f.setPage(fresh)
-    await act(async () => { f.emit({ type: 'agent-session', session: next }); old.resolve(history()) })
+    await view.render(<MobileConversationSurface client={f.client} agentSessionId="other" connection={connected} platform={createBrowserPlatform()} />)
+    await act(async () => old.resolve(history()))
     expect(f.client.observeSessionHistory).not.toHaveBeenCalled()
     expect(view.element.querySelector('[data-native-record-id="native-answer"]')).toBeNull()
     await act(async () => { freshRead.resolve(fresh) })
@@ -83,7 +89,8 @@ describe('original conversation observation recovery', () => {
     const current = { ...f.sessions.get('session-original')!, nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'foreign-source' } }
     f.sessions.set('session-original', current)
     await act(async () => f.emit({ type: 'agent-session', session: current }))
-    expect(view.element.textContent).toContain('original reading and drafts are retained')
+    await view.render(surface('connected', false)); await view.render(surface('connected'))
+    expect(view.element.textContent).toContain('The original conversation scope changed')
     expect(view.element.querySelector('[data-native-record-id="old-reading"]')).toBe(row)
     expect(view.element.querySelector('[data-native-record-id="foreign-reading"]')).toBeNull()
     expect(editor(view.element).textContent).toContain('with offline edits')
@@ -119,8 +126,9 @@ describe('original conversation observation recovery', () => {
     const view = await mount(surface('session-original', false))
     expect(read).not.toHaveBeenCalled()
     await view.render(surface('session-original', true))
+    await click(view.element.querySelector<HTMLButtonElement>('[data-native-record-id="original-image"] .conversation-progressive-body__placeholder button')!)
     await vi.waitFor(() => expect(read).toHaveBeenCalledExactlyOnceWith('session-original', {
-      source: original.source, recordId: 'original-image', partIndex: 0, expectedReference: reference }))
+      source: original.source, recordId: 'original-image', partIndex: 0, expectedReference: reference, representation: 'image' }))
     await paste(view.element, 'Original draft remains')
     await view.render(surface('session-original', false))
     const result = { agentSessionId: 'session-original', source: original.source, recordId: 'original-image', partIndex: 0, reference,
@@ -159,6 +167,7 @@ it('retains an image page at its original Host when another client reuses the Se
   Object.assign(a.client, { sessionHistoryResource: readA }); Object.assign(b.client, { sessionHistoryResource: readB })
   const surface = (client: typeof a.client) => <MobileConversationSurface client={client} agentSessionId="session-original" connection={connected} platform={createBrowserPlatform()} />
   const view = await mount(surface(a.client))
+  await click(view.element.querySelector<HTMLButtonElement>('[data-native-record-id="same-record"] .conversation-progressive-body__placeholder button')!)
   await vi.waitFor(() => expect(view.element.querySelector('.conversation-native-thread img')).not.toBeNull())
   expect(readA).toHaveBeenCalledOnce()
   await view.render(surface(b.client))
@@ -168,6 +177,8 @@ it('retains an image page at its original Host when another client reuses the Se
   expect(retained.getAttribute('data-message-id')).toContain('host-original')
   await paste(view.element, 'The new draft remains editable')
   await act(async () => pending.resolve(page))
+  await vi.waitFor(() => expect(view.element.querySelector('[data-native-record-id="same-record"] [data-message-id]')!.getAttribute('data-message-id')).toContain('host-other'))
+  await click(view.element.querySelector<HTMLButtonElement>('[data-native-record-id="same-record"] .conversation-progressive-body__placeholder button')!)
   await vi.waitFor(() => expect(readB).toHaveBeenCalledOnce())
   expect(view.element.querySelector('[data-native-record-id="same-record"] [data-message-id]')!.getAttribute('data-message-id')).toContain('host-other')
   expect(editor(view.element).textContent).toContain('The new draft remains editable')
