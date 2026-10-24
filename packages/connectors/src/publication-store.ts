@@ -413,19 +413,21 @@ export class PublicationStore {
     const page = parseConversationChangesPage(value, { ...ref(boundary), checkpoint: after, limit: 100, maxBytes: value.budgetBytes })
     const units = options.units.map(unit => parseConversationUnit(unit, { hostId: page.sourceHostId, agentSessionId: boundary.agentSessionId }, page.scope))
     const decisions = units.map(unit => ({ unit, plan: publicationContent(unit, boundary as RoomBinding, page.checkpoint, { resolved: options.resolvedText, origin: id => this.origin(boundary, unit, id) }) }))
-    const questionsRead = new Set(units.flatMap(unit => unit.records.flatMap(record => {
+    const questionRecords = units.flatMap(unit => unit.records.flatMap(record => {
       const reference = record.reference
       if (record.original.kind !== 'native' || reference?.source.kind !== 'native') return []
       const source = { providerId: reference.source.providerId, nativeSessionId: reference.source.nativeSessionId }
       return (record.original.item.questionRequest?.questions ?? []).flatMap(question => {
         const identity = conversationQuestionIdentity({ ...reference, source }, question.id)
-        return identity ? [encode(identity)] : []
+        return identity ? [{ question: identity, record: reference, recordRevision: record.revision }] : []
       })
-    })))
+    }))
+    const questionsRead = new Set(questionRecords.map(record => encode(record.question)))
     this.transaction(() => {
       if (!authorized()) throw new AgentMuxError('This exact Binding no longer authorizes publication.', 'PUBLICATION_NOT_AUTHORIZED')
       const row = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), 'unified')
       if (!row || !same(JSON.parse(String(row.checkpoint_json)), after)) throw new AgentMuxError('The retained publication frontier changed.', 'PUBLICATION_CHECKPOINT_CONFLICT')
+      for (const original of questionRecords) this.saveDecision(boundary, 'question-read-' + digest(original.question), 'current', { kind: 'question-read', ...original })
       for (const coverage of page.coverage) {
         const key = conversationSourceKey(coverage.source)
         const rows = this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved'").all(...scopeKey(boundary))
@@ -456,7 +458,16 @@ export class PublicationStore {
             const record = units.flatMap(unit => unit.records).find(record => record.id === conversationRecordId(original.record!))
             const targets = units.flatMap(unit => unit.event.relations.flatMap(relation => relation.kind === 'answers' && same(relation.from, original.record) ? [relation.question] : []))
             let witnesses: QuestionReadWitness[] = previous?.questionReads ?? []
-            if (record && targets.length && !witnesses.some(witness => witness.recordRevision === record.revision)) witnesses = [...witnesses, { recordRevision: record.revision, targets: [...new Map(targets.map(target => [encode(target), target])).values()], read: [] }]
+            if (record && targets.length && !witnesses.some(witness => witness.recordRevision === record.revision)) {
+              const originalTargets = [...new Map(targets.map(target => [encode(target), target])).values()]
+              const read = originalTargets.flatMap(target => {
+                const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision='current'")
+                  .get(...scopeKey(boundary), 'question-read-' + digest(target))
+                const accepted = row ? JSON.parse(String(row.decision_json)) : undefined
+                return accepted?.kind === 'question-read' && same(accepted.question, target) ? [encode(target)] : []
+              })
+              witnesses = [...witnesses, { recordRevision: record.revision, targets: originalTargets, read }]
+            }
             if (witnesses.length) {
               witnesses = acceptQuestionReads(witnesses, questionsRead)
               this.saveDecision(boundary, gap.gapId, revision, { kind: 'gap', state: questionReadsComplete(witnesses) ? 'resolved' : 'unresolved', sourceKey: key, gap, questionReads: witnesses })
