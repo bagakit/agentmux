@@ -148,7 +148,10 @@ export async function readOriginalContent(page, input) {
 }
 export async function editOriginalGoal(page, input) {
   await page.locator('.mobile-navigation [data-workface="goals"]').click()
-  await page.locator('.mobile-goals button').filter({ has: page.locator('strong', { hasText: input.title }) }).click()
+  const back = page.locator('.mobile-goals:visible').getByRole('button', { name: '返回目标列表', exact: true })
+  if (await back.isVisible()) await back.click()
+  const goal = page.locator('.mobile-goals button').filter({ has: page.locator('strong', { hasText: input.title }) })
+  await goal.waitFor({ state: 'visible' }); await goal.click()
   await page.getByRole('button', { name: '编辑目标正文', exact: true }).click()
   await page.getByRole('textbox', { name: '目标正文草稿', exact: true }).fill(input.description)
   await page.getByRole('button', { name: '保存正文', exact: true }).click()
