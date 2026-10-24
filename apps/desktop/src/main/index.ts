@@ -50,7 +50,7 @@ import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.
 import { windowSecurityWebPreferences } from './window-security.js'
 import { deliverContinuousProgress } from './continuous-progress-delivery.js'
 import { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
-import { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
+import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { installRecoverySeedBeforeLoad, summarizeRecoverySessionStore, summarizeRecoveryStorage } from './recovery-probe.js'
 
 const appIconPath = join(import.meta.dirname, '../../resources/icon.png')

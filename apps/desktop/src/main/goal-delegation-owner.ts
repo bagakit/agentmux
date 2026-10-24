@@ -1,6 +1,6 @@
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { isDeepStrictEqual } from 'node:util'
-import { prepareGoalDelegationMaterials } from './goal-delegation-materials.js'
+import { prepareGoalDelegationMaterials } from '@agentmux/host/goal-delegation-materials'
 import type { FileReadParams, FileReadResult } from '@agentmux/core/files'
 import { AgentMuxError } from '@agentmux/core'
 import { assertGoalDelegationSource, assertGoalDelegationReply, readGoalDelegationWireReport, goalDelegationReportBody } from '@agentmux/core/goal-delegation'
