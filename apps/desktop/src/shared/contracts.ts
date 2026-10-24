@@ -1736,8 +1736,8 @@ export type AgentMuxDesktopApi = {
     reconcileDispatch(reference: import('./goal-dispatch').GoalDispatchReference): Promise<import('@agentmux/demand').DemandReceipt>
     list(): Promise<import('@agentmux/demand').Demand[]>
     create(input: import('@agentmux/demand').CreateDemandInput, controlRequestId?: string): Promise<import('@agentmux/demand').DemandReceipt>
-    reconcilePmoCreation(intent: import('./goal-pmo-origin').GoalPmoIntent, hostId: string, agentSessionId: string, createOperationId: string): Promise<import('@agentmux/demand').DemandReceipt>
-    reconcilePmoInput(intent: import('./goal-pmo-origin').GoalPmoIntent, session: AgentSessionControl, operationId: string): Promise<import('@agentmux/demand').DemandReceipt>
+    reconcilePmoCreation(intent: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, hostId: string, agentSessionId: string, createOperationId: string): Promise<import('@agentmux/demand').DemandReceipt>
+    reconcilePmoInput(intent: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, session: AgentSessionControl, operationId: string): Promise<import('@agentmux/demand').DemandReceipt>
     update(id: string, patch: import('@agentmux/demand').UpdateDemandInput, controlRequestId?: string, expectedUpdatedAt?: number): Promise<import('@agentmux/demand').DemandReceipt>
     confirmAlignment(id: string, expectedRevision: number): Promise<import('@agentmux/demand').DemandReceipt>
     acceptGrounding(id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean, finish?: boolean): Promise<import('@agentmux/demand').DemandReceipt>
@@ -1867,7 +1867,7 @@ export type AgentMuxDesktopApi = {
     nativeHistoryPage(input: NativeAgentHistoryInput): Promise<NativeAgentHistoryResult>
     nativeHistoryResource(input: NativeAgentHistoryResourceInput): Promise<NativeAgentHistoryResourceResult>
     observeStorage(session: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation>
-    launchAgent(input: AgentLaunchInput, goalPmo?: import('./goal-pmo-origin').GoalPmoIntent): Promise<AgentLaunchResult>
+    launchAgent(input: AgentLaunchInput, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent): Promise<AgentLaunchResult>
     resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string>
     creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
@@ -1901,7 +1901,7 @@ export type AgentMuxDesktopApi = {
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
     recordDeliveryFailure(record: DeliveryAttempt): Promise<DeliveryAttemptLookup>
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('./goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference, inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt>
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference, inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt>
     replyQuestion(session: AgentSessionControl, input: SessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt>
     inputMailbox(session: SessionHistoryReference, options?: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'>): Promise<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxPage>
     inspectInput(session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): Promise<import('@agentmux/core').AgentInputSubmissionReceipt | null>

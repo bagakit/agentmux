@@ -1,11 +1,11 @@
 import type { AgentMuxControlRequest } from '@agentmux/core/control'
 import type { CreateDemandInput, UpdateDemandInput, DemandNameContext, DemandParticipationKind, DemandParticipationSource } from '@agentmux/demand'
-import type { AppConfig } from '../shared/contracts.js'
-import type { ScratchTopics } from './scratch-topics.js'
+import type { WorkspaceRecord } from './content-types.js'
+import type { ScratchTopics } from './mote-resources.js'
 
 /** Consume authenticated ingress facts; a name, content reference or focused Tab is not a source. */
 export async function admittedDemandParticipation(context: DemandNameContext, kind: DemandParticipationKind,
-  config: AppConfig, scratch: Pick<ScratchTopics, 'readForDirectory' | 'read'>): Promise<DemandParticipationSource | undefined> {
+  config: { workspaces: readonly WorkspaceRecord[] }, scratch: Pick<ScratchTopics, 'readForDirectory' | 'read'>): Promise<DemandParticipationSource | undefined> {
   if (!context.actor.verified || context.actor.kind !== 'agent' || !context.actor.id ||
       context.location.callerSessionId !== context.actor.id || !context.location.hostId) return undefined
   const source: DemandParticipationSource = { kind, agentSessionId: context.actor.id,

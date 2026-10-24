@@ -554,7 +554,7 @@ const api: AgentMuxPreloadApi = {
     nativeSessions: input => ipcRenderer.invoke('sessions:nativeSessions', input),
     nativeHistoryPage: input => ipcRenderer.invoke('sessions:nativeHistoryPage', input),
     nativeHistoryResource: input => ipcRenderer.invoke('sessions:nativeHistoryResource', input),
-    launchAgent: async (input: AgentLaunchInput, goalPmo?: import('../shared/goal-pmo-origin').GoalPmoIntent) => {
+    launchAgent: async (input: AgentLaunchInput, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent) => {
       let result: import('../shared/contracts').SessionAgentLaunchResult
       try { result = await (goalPmo === undefined ? ipcRenderer.invoke('sessions:launchAgent', input) : ipcRenderer.invoke('sessions:launchAgent', input, goalPmo)) }
       catch (error) { throw unconfirmedSessionAgentLaunch(input, error) }
