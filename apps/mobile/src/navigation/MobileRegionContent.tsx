@@ -46,15 +46,13 @@ function RegionContent({ client, connected = true, visible = true, showTitle = t
   const [issue, setIssue] = useState('')
   const [revision, refresh] = useState(0)
   const valueRef = useRef(value); valueRef.current = value
-  const attempted = useRef<{ client: AgentMuxHostedClient | null; revision: number } | null>(null)
   useEffect(() => {
     if (!visible || !onBackChange) return
     onBackChange(null)
     return () => onBackChange(null)
   }, [visible, onBackChange])
   useEffect(() => {
-    if (!visible || !connected || attempted.current && attempted.current.client === client && attempted.current.revision === revision) return
-    attempted.current = { client, revision }
+    if (!visible || !connected) return
     let disposed = false
     const read = async () => {
     try {
