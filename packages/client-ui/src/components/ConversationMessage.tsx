@@ -425,6 +425,7 @@ export function ConversationMessage({
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             : part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>
               <ConversationInputText visible={active} reveal={located} text={sessionHistoryTextForReading(part)} prefix={index === 0 ? prefix : null}
+                embedIdentity={messageId && (conversationSessionId || itemRef || nativeResourceRecord) ? JSON.stringify([executionHostId, conversationSessionId, recordSourceKey, messageId, index]) : undefined}
                 a2aReferenceScope={a2aReferenceScope} describeSpeaker={describeSpeaker}
                 inputContext={index === contextPartIndex ? inputContext : undefined} inputContextSource={inputContextSource}
                 inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
@@ -455,6 +456,7 @@ export function ConversationMessage({
               />
             ) : part.resourceType === 'text' && readHistoryResource && nativeResourceRecord ? (
               <ConversationResourceText sources={sources?.parts[index]} active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown} contentBoundary={hasQuestionAnswers ? 'body' : contentBoundary} {...(a2aNotificationId ? { a2aNotificationId } : {})}
+                embedIdentity={messageId ? JSON.stringify([executionHostId, conversationSessionId, recordSourceKey, messageId, index]) : undefined}
                 a2aReferenceScope={a2aReferenceScope} describeSpeaker={describeSpeaker}
                 inputContext={index === contextPartIndex ? inputContext : undefined} inputContextSource={inputContextSource}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />

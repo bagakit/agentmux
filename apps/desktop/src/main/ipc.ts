@@ -1,7 +1,7 @@
 import { sessionRecoveryOperationResult } from './session-recovery-operation'
 import { registerMoteChatIpc } from './mote-chat-ipc.js'
 import { callCapsuleFromApp } from './capsule-ipc.js'
-import { capsulePresentation, resolveCapsuleColdDocument } from './capsule-presentation.js'
+import { capsulePresentation, resolveCapsuleColdDocument, createCapsuleBrowserDocument } from './capsule-presentation.js'
 import { capsuleDocumentIpc } from './capsule-document-ipc.js'
 import { CapsuleReplyAuthority } from './capsule-reply-authority.js'
 import { AgentLearningAuthority } from './agent-learning-authority.js'
@@ -526,7 +526,8 @@ export async function registerIpc(args: {
       ? { browserId: id, workspaceId: saved.workspaceId, mode: 'private', profileId: null }
       : { browserId: id, workspaceId: saved.workspaceId, mode: 'normal', profileId: saved.profileId! }
   }
-  browsers.setPresentationWindowOwner((document, occurrence) => args.workbenchWindows.presentationWindow(document, occurrence))
+  browsers.setPresentationWindowOwner((document, occurrence) => 'kind' in occurrence
+    ? args.workbenchWindows.windowForDocument(document) : args.workbenchWindows.presentationWindow(document, occurrence))
   const nativeChrome = new NativeOverlayWindows(args.window, browsers, args.workbenchWindows)
   const releaseNativeWindowOwner = args.workbenchWindows.setNativeOwner({ beforeClosing: async window => {
     await browsers.returnWindow(window)
@@ -2054,13 +2055,8 @@ export async function registerIpc(args: {
   handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode, viewport?: BrowserViewport, capsuleId?: string, capsuleOpenOperationId?: string) => {
     const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, workspaceId)
     if (capsuleId !== undefined) {
-      if (mode === 'private' || rememberedProfileId !== undefined) throw new Error('Capsule storage belongs to its original page, independently of Browser user Profiles.')
-      const capsule = await capsuleClient.call('capsule.inspect', { capsuleId })
-      if (capsule.endpoint.status !== 'available') throw new Error(capsule.endpoint.issue.message)
-      const address = new URL(url), endpoint = new URL(capsule.endpoint.url)
-      if (address.origin !== endpoint.origin) throw new Error('The requested address is not the original Capsule endpoint.')
-      return await browsers.create(id, address.href, verifiedWorkspaceId, undefined, 'normal', viewport, {
-        capsule, capsuleOrigin: endpoint.origin, ...(capsuleOpenOperationId ? { capsuleOpenOperationIds: [capsuleOpenOperationId] } : {}) })
+      return await createCapsuleBrowserDocument({ inspect: capsuleId => capsuleClient.call('capsule.inspect', { capsuleId }), browsers },
+        { id, url, workspaceId: verifiedWorkspaceId, rememberedProfileId, mode, viewport, capsuleId, operationId: capsuleOpenOperationId })
     }
     if (capsuleOpenOperationId !== undefined) throw new Error('A Capsule open operation requires its original page identity.')
     if (mode !== 'private') await browserProfiles.initialize()

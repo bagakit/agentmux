@@ -13,6 +13,7 @@ import { InlineObjectLink } from './InlineObjectLink'
 import { openDesktopNoteLink } from '../lib/note-file-link'
 import { NoteImageResource } from './NoteImageResource'
 import { BrowserSelectionImage } from './BrowserSelectionImage'
+import { ConversationCapsule } from './ConversationCapsule'
 import { api } from '../lib/api'
 
 const DiagramFilePreview = lazy(() => import('./file-preview/DiagramFilePreview').then(module => ({ default: module.DiagramFilePreview })))
@@ -67,6 +68,7 @@ const desktopPlatform: ClientUiPlatform = {
     return result.message
   },
   renderObjectLink: reference => <InlineObjectLink {...reference} />,
+  renderCapsuleEmbed: input => <ConversationCapsule key={input.uri} {...input} />,
   openNoteLink: openDesktopNoteLink,
   renderNoteImage: input => <NoteImageResource {...input} />,
   renderBrowserSelectionImage: input => <BrowserSelectionImage {...input} />,

@@ -124,17 +124,20 @@ export class LatestBrowserBoundsSynchronizer {
   private draining = false
   private pending: BrowserBounds | null | undefined
   private applied: BrowserBounds | null | undefined
+  private pendingInputVisible: boolean | undefined
+  private appliedInputVisible: boolean | undefined
 
   constructor(
-    private readonly apply: (bounds: BrowserBounds | null) => Promise<void>,
+    private readonly apply: (bounds: BrowserBounds | null, inputVisible?: boolean) => Promise<void>,
     private readonly onError: (error: unknown) => void
   ) {}
 
-  observe(bounds: BrowserBounds | null): void {
+  observe(bounds: BrowserBounds | null, inputVisible?: boolean): void {
     if (this.disposed) return
     // 归一化与 main 侧共用一份判定（shared/browser-bounds.ts）：两层对"这个矩形能不能用"必须给同一个
     // 答案，只有拿到 null 之后做什么才分头处理——这一侧当作"隐藏"，main 侧抛错。
     this.pending = normalizeBrowserBounds(bounds)
+    this.pendingInputVisible = inputVisible
     void this.drain()
   }
 
@@ -149,10 +152,12 @@ export class LatestBrowserBoundsSynchronizer {
     try {
       while (!this.disposed && this.pending !== undefined) {
         const next = this.pending
+        const inputVisible = this.pendingInputVisible
         this.pending = undefined
-        if (sameBounds(this.applied, next)) continue
-        await this.apply(next)
+        if (sameBounds(this.applied, next) && inputVisible === this.appliedInputVisible) continue
+        await this.apply(next, inputVisible)
         this.applied = next
+        this.appliedInputVisible = inputVisible
       }
     } catch (error) {
       if (!this.disposed) this.onError(error)

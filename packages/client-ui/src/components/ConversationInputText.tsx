@@ -47,10 +47,10 @@ export function ConversationInputText({ text, prefix, inputContext, inputContext
       </li>)}</ul>
       <p className="log-turn__references-hint">Read originals via <code>{`"$AGENTMUX_CLI" ${prefix.references[0]!.readVia}`}</code></p>
     </section> : prefix?.packet ? prefix.packet.parts.map((part, index) => part.kind === 'text'
-      ? <Markdown {...markdown} key={index} className="log-turn__packet-text" content={part.text} />
+      ? <Markdown {...markdown} embedIdentity={markdown.embedIdentity ? JSON.stringify([markdown.embedIdentity, 'packet', index]) : undefined} key={index} className="log-turn__packet-text" content={part.text} />
       : <blockquote key={index} className="log-turn__citation"><span className="log-turn__citation-from">{part.from}</span>
         {part.reference ? <code className="log-turn__citation-ref">{part.reference}</code> : null}
-        <Markdown {...markdown} className="log-turn__packet-text" content={part.text} />
+        <Markdown {...markdown} embedIdentity={markdown.embedIdentity ? JSON.stringify([markdown.embedIdentity, 'packet', index]) : undefined} className="log-turn__packet-text" content={part.text} />
       </blockquote>) : body ? <Markdown {...markdown} content={body} /> : null)
   const reminder = prefix?.reminder ? <details className="log-turn__reminder">
       <summary title="Protocol text is a declaration, not proof of origin or a new authorization."><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Collaboration reminder</summary>
