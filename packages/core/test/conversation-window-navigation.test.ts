@@ -43,6 +43,59 @@ it('retains earlier navigation through changes and recovers evicted newer pages 
   expect((await complete(read, { ...ref, view: exact.window.view!, limit: 100 })).window.anchor).toEqual(anchor)
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
 })
+it.each(['native', 'captured'] as const)('recovers the original %s contribution when only the other source of its mixed page remains', async missing => {
+  const originals = missing === 'native' ? rows(2400) : rows(1).map(item => ({ ...item, timestamp: new Date(0).toISOString() }))
+  const f = await nativeHistoryFixture('claude', jsonl(originals)); closes.push(f.close)
+  // Both sources go through their actual original owners. Memory persistence
+  // keeps this adjacency case independent of thousands of individual disk writes.
+  const store = new AgentMuxMemoryAgentSessionStore(); await store.compareAndSwap(null, f.session)
+  const client = new AgentMuxClient({ store }); closes.push(() => client.dispose())
+  const capturedCount = missing === 'captured' ? 2400 : 1
+  for (let index = 0; index < capturedCount; index++) await store.applyTimelineMutation({ type: 'append', agentSessionId: f.session.agentSessionId,
+    item: { id: 'captured-' + index, agentSessionId: f.session.agentSessionId, kind: 'user_message', source: 'user', status: 'complete',
+      title: 'Original input', content: 'Original captured body ' + index, createdAt: index + 1, updatedAt: index + 1 } })
+  const ref = { hostId: 'local', agentSessionId: f.session.agentSessionId }, read = (input: ConversationTimelineReadInput) => client.readAgentConversation(input)
+  const input = { ...ref, limit: 100, maxBytes: 4 * 1024 * 1024 }
+  let first = await complete(read, input)
+  for (let index = 0; index < 2; index++) first = await complete(read, { ...input, cursor: first.window.navigation.older! })
+  const originalHead = first.units.flatMap(unit => unit.records)
+  const sourceIds = (snapshot: typeof first, kind: typeof missing) => snapshot.units.flatMap(unit => unit.records)
+    .filter(record => record.original.kind === kind).map(record => record.id)
+  const initialMissing = sourceIds(first, missing), survivor = sourceIds(first, missing === 'native' ? 'captured' : 'native')
+  expect(initialMissing).toHaveLength(300); expect(survivor).toHaveLength(1)
+  let snapshot = first
+  for (let index = 0; index < 21; index++) {
+    expect(snapshot.window.navigation.older).toBeTruthy()
+    snapshot = await complete(read, { ...input, cursor: snapshot.window.navigation.older! })
+    expect(snapshot.units.flatMap(unit => unit.records).length).toBeLessThanOrEqual(1200)
+    const values = sourceIds(snapshot, missing).map(id => Number(JSON.parse(id).at(-1).split('-').at(-1))).sort((a, b) => a - b)
+    expect(values).toEqual(Array.from({ length: values.length }, (_, offset) => values[0]! + offset))
+  }
+  const current = new Set(snapshot.units.flatMap(unit => unit.records).map(record => record.id))
+  expect(initialMissing.every(id => !current.has(id))).toBe(true)
+  expect(survivor.every(id => current.has(id))).toBe(true)
+  expect(snapshot.window.navigation.older).toBeNull()
+  expect(snapshot.window.navigation.newer, 'The surviving source cannot conceal the evicted source of its original page').toBeTruthy()
+  const nativeRead = vi.spyOn(client as unknown as { readSessionHistoryPage: AgentMuxClient['sessionHistoryPage'] }, 'readSessionHistoryPage')
+  for (let index = 0; snapshot.window.navigation.newer && index < 24; index++) {
+    snapshot = await complete(read, { ...input, cursor: snapshot.window.navigation.newer })
+    const values = sourceIds(snapshot, missing).map(id => Number(JSON.parse(id).at(-1).split('-').at(-1))).sort((a, b) => a - b)
+    expect(values.length).toBeGreaterThan(0)
+    expect(values).toEqual(Array.from({ length: values.length }, (_, offset) => values[0]! + offset))
+  }
+  const returned = new Map(snapshot.units.flatMap(unit => unit.records).map(record => [record.id, record]))
+  for (const record of originalHead) expect(returned.get(record.id)).toEqual(record)
+  expect(snapshot.window.navigation.newer).toBeNull()
+  expect(snapshot.window.navigation.older).toBeTruthy()
+  const projected = projectConversationWindow(snapshot)
+  const sequence = missing === 'native' ? projected.historyPage!.items.map(item => Number(item.id.slice('original-'.length)))
+    : projected.captured.items.map(item => Number(item.id.slice('captured-'.length)))
+  expect(sequence).toEqual([...sequence].sort((a, b) => a - b))
+  const calls = nativeRead.mock.calls.length
+  const retained = await complete(read, { ...input, view: snapshot.window.view! })
+  expect(retained.units).toEqual(snapshot.units); expect(nativeRead).toHaveBeenCalledTimes(calls)
+  expect(retained.window.navigation.newer).toBeNull()
+}, 60000)
 it('explicit previous source uses the original retained native binding through history, changes and exact watch', async () => {
   const f = await nativeHistoryFixture('claude', jsonl(rows(3))); closes.push(f.close)
   const currentPath = join(f.root, 'current.jsonl')
@@ -114,14 +167,16 @@ it('accounts for both immutable head and live versions when a Provider cannot re
   const capturedBody = 'original captured body '.padEnd(120 * 1024, 'c')
   for (let index = 0; index < 262; index++) await store.applyTimelineMutation({ type: 'append', agentSessionId: f.session.agentSessionId,
     item: { id: 'retained-' + index, agentSessionId: f.session.agentSessionId, kind: 'user_message', source: 'user', status: 'complete', title: 'Original input', content: capturedBody, createdAt: index, updatedAt: index } })
-  const originalPage = client.sessionHistoryPage.bind(client)
+  const reader = client as unknown as { readSessionHistoryPage: AgentMuxClient['sessionHistoryPage'] }
+  const originalPage = reader.readSessionHistoryPage.bind(client)
   // Omit only the optional replay capability. Native originals and their exact
   // changes cut still come from the real physical Provider read.
-  vi.spyOn(client, 'sessionHistoryPage').mockImplementation(async (...args) => { const { replayCursor: _replay, ...page } = await originalPage(...args); return page })
+  const physicalRead = vi.spyOn(reader, 'readSessionHistoryPage').mockImplementation(async (...args) => { const { replayCursor: _replay, ...page } = await originalPage(...args); return page })
   const ref = { hostId: 'local', agentSessionId: f.session.agentSessionId }, read = (input: ConversationTimelineReadInput) => client.readAgentConversation(input)
   let snapshot = await complete(read, { ...ref, limit: 100, maxBytes: 4 * 1024 * 1024 })
   while (snapshot.window.navigation.older) snapshot = await complete(read, { ...ref, cursor: snapshot.window.navigation.older, limit: 100, maxBytes: 4 * 1024 * 1024 })
   expect(snapshot.units, JSON.stringify(snapshot.coverage)).toHaveLength(263)
+  expect(physicalRead).toHaveBeenCalled()
   const originalHead = snapshot.units.flatMap(unit => unit.records).find(record => record.original.kind === 'native')!
   await appendFile(f.path, jsonl([{ ...data, message: { ...data.message, content: 'y'.repeat(body.length) } }]))
   const changed = await complete(input => client.readConversationChanges({ ...input, view: snapshot.window.view!, checkpoint: snapshot.window.checkpoint }), { ...ref, limit: 100, maxBytes: 4 * 1024 * 1024 })

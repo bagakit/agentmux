@@ -20,6 +20,7 @@ import { SessionActivityPresentation } from '../src/renderer/src/components/Sess
 import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
 import { conversationReadingAnchor, restoreConversationAnchor } from '../src/renderer/src/lib/session-conversation-window'
+import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 
 // Heavy paint/input leaves are isolated; both real callers, store, read owner and common body are mounted.
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ visible }: { visible: boolean }) => <div data-terminal-visible={String(visible)} /> }))
@@ -141,6 +142,15 @@ function markerGeometry(viewport: HTMLElement) {
  entry.getBoundingClientRect = () => rect(100 - viewport.scrollTop, 40)
  return entry
 }
+function growingEarlierReserve(viewport: HTMLElement, pixelsPerRecord = 2.5) {
+ const entry = markerGeometry(viewport)
+ let first = Number(ids()[0]!.slice('record-'.length))
+ // Happy DOM does not lay out the prepended originals. Model their readable
+ // extent from accepted source records, rather than stopping after a page count.
+ entry.getBoundingClientRect = () => rect(100 - viewport.scrollTop
+  - Math.max(0, first - Number(ids()[0]!.slice('record-'.length))) * pixelsPerRecord, 40)
+ return { reset: () => { first = Number(ids()[0]!.slice('record-'.length)) } }
+}
 async function scrollTo(viewport: HTMLElement, top: number) {
  await act(async () => { viewport.scrollTop = top; viewport.dispatchEvent(new Event('scroll')) })
 }
@@ -252,7 +262,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   const body = viewport.querySelector<HTMLElement>(`[data-native-record-id="${anchorId}"] .log-turn__body`)!, row = body.closest<HTMLElement>('[data-native-record-id]')!
   const trace = body.querySelector<HTMLDetailsElement>('[data-trace-kind="reasoning"]')!
   trace.open = true
-  row.getBoundingClientRect = () => rect(100 + (ids().length > originalIds.length ? 330 : 30) - viewport.scrollTop)
+  row.getBoundingClientRect = () => rect(100 + 30 + (ids().length - originalIds.length) * 2.5 - viewport.scrollTop)
   const text = [...body.querySelectorAll('p')].find(node => node.textContent === `Reply ${Number(anchorId.slice('record-'.length))}`)!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
   await scrollTo(viewport, 700)
@@ -281,7 +291,7 @@ describe('One Activity reading surface over public original-sequence windows', (
  it('continues a short visible earlier edge after the cursor advances without unbounded pulling and retries the original failed cursor', async () => {
   await writeEdgeHistory(2400)
   await render(compose())
-  const viewport = container.querySelector<HTMLElement>('.activity-feed')!; markerGeometry(viewport)
+  const viewport = container.querySelector<HTMLElement>('.activity-feed')!, reserve = growingEarlierReserve(viewport)
   await scrollTo(viewport, 700)
   const originalCount = ids().length, start = requests.length, firstPage = await promises[requests.map((request, index) => request.limit === 100 ? index : -1).reduce((last, index) => Math.max(last, index), -1)]!
   let release!: (page: AgentSessionHistoryPage) => void
@@ -306,7 +316,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   })
   // The edge remains visible: a new upward movement, rather than leaving an arbitrary zone,
   // may continue after the first cursor has genuinely advanced.
-  await scrollTo(viewport, 0); await flush()
+  reserve.reset(); await scrollTo(viewport, 0); await flush()
   expect(requests).toHaveLength(stable + 1); expect(requests.at(-1)!.cursor).toBe(cursor)
   expect(ids()).toEqual(retained); expect(container.textContent).toContain('Original scroll page unavailable')
   expect(conversationReadingAnchor(viewport), 'The known read-error notice cannot move the original visible record').toEqual({ kind: 'record', id: anchorId, offset: 20 })
@@ -324,6 +334,9 @@ describe('One Activity reading surface over public original-sequence windows', (
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!; markerGeometry(viewport)
   await scrollTo(viewport, 700)
   const start = requests.length, pageReads = requests.filter(request => request.cursor !== undefined).length
+  // Home selects the start of the default 24-hour ruler range. These originals
+  // are one hour apart, so its exact target is 24 records before the latest.
+  const rulerStartId = `record-${1199 - 24}`, publicStart = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   const targets: Element[] = []
   vi.mocked(Element.prototype.scrollIntoView).mockImplementation(function (this: Element) {
    targets.push(this)
@@ -340,9 +353,22 @@ describe('One Activity reading surface over public original-sequence windows', (
    await act(async () => slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }))); await flush()
   }
   expect(targets.length).toBeGreaterThan(0); expect(viewport.scrollTop).toBe(20)
-  expect(navigation === 'footnote' ? targets.at(-1)!.hasAttribute('data-md-footnote') : targets.at(-1)!.hasAttribute('data-native-record-id')).toBe(true)
+  if (navigation === 'footnote') expect(targets.at(-1)!.hasAttribute('data-md-footnote')).toBe(true)
+  else {
+   const target = targets.at(-1)! as HTMLElement
+   expect(target.dataset.nativeRecordId ?? target.dataset.deferredProcessId).toBe(rulerStartId)
+   expect(target.dataset.messageSourceKey).toBe(conversationMessageSourceKey(sid,
+    { kind: 'native', providerId: 'claude', nativeSessionId: native, recordId: rulerStartId }))
+   // A ruler seek may reveal this exact deferred body. It must never borrow the
+   // action as a demand for another source page or a different original record.
+   const detailReads = vi.mocked(api.conversation.readAgentConversation).mock.calls.slice(publicStart)
+   expect(detailReads.length).toBeGreaterThan(0)
+   expect(detailReads.every(([input]) => input.anchor?.record.source.recordId === rulerStartId && !input.cursor)).toBe(true)
+   expect(viewport.querySelector(`[data-native-record-id="${rulerStartId}"] .log-turn__body`)).not.toBeNull()
+  }
   await act(async () => viewport.dispatchEvent(new Event('scroll'))); await flush()
-  expect(requests).toHaveLength(start)
+  if (navigation === 'footnote') expect(requests).toHaveLength(start)
+  expect(requests.filter(request => request.cursor !== undefined)).toHaveLength(pageReads)
   expect(container.querySelector('.activity-feed__jump')).not.toBeNull()
   await appendFile(transcript, JSON.stringify({ ...record(1200), timestamp: new Date(_hygiene_fixtureTime(-37225600000) + 1200 * 3_600_000).toISOString() }) + '\n')
   await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid }))
@@ -410,7 +436,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(original.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
   expect(window.getSelection()!.toString()).toBe('Complete'); expect(viewport.scrollTop).toBe(1950)
  })
- it.each(['scroll', 'Home'] as const)('reads the original Newer token after %s returns to a bounded historical native tail and restores captured originals', async returning => {
+ it.each(['scroll', 'Home'] as const)('reads the original Newer token after %s returns to the unified historical tail and keeps captured originals accessible', async returning => {
   await writeEdgeHistory(2400)
   const captured: AgentTimelineItem[] = [{ id: 'captured-newer-input', agentSessionId: sid, kind: 'user_message', source: 'user',
    title: 'Original captured input', content: 'Captured tail stays available. '.repeat(500), status: 'complete', createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1) }]
@@ -420,33 +446,48 @@ describe('One Activity reading surface over public original-sequence windows', (
   // All sources share the Core window budget. A captured tail may leave this
   // frame with the newer native side; its durable source is not deleted.
   for (let n = 0; n < 12 && ids().at(-1) === 'record-2399'; n++) await click('Earlier')
-  const originalWindow = acceptedWindow(), newer = originalWindow.navigation.newer
-  expect(newer).toBeTypeOf('string'); expect(originalWindow.outside.newer).not.toBeNull()
+  const originalWindow = acceptedWindow()
+  expect(originalWindow.navigation.newer).toBeTypeOf('string'); expect(originalWindow.outside.newer).not.toBeNull()
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!; markerGeometry(viewport)
   Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 5000 })
   const tail = viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!
-  const nativeBottom = returning === 'Home' ? 150 : 1800
-  expect(tail).not.toBeNull(); tail.getBoundingClientRect = () => rect(100 + nativeBottom - viewport.scrollTop, 0)
+  const readingTail = viewport.querySelector<HTMLElement>('[data-conversation-reading-tail]')!
+  const nativeBottom = 1800, readingBottom = 5000
+  // The common reading tail includes captured originals. A native edge by
+  // itself cannot qualify newer paging before the user reaches that common end.
+  expect(tail).not.toBeNull(); expect(readingTail).not.toBeNull()
+  tail.getBoundingClientRect = () => rect(100 + nativeBottom - viewport.scrollTop, 0)
+  readingTail.getBoundingClientRect = () => rect(100 + readingBottom - viewport.scrollTop, 0)
   const nativeGroup = [...viewport.querySelectorAll<HTMLElement>('.wf-card--observation > .wf-head[aria-expanded="false"]')].at(-1)!
   expect(nativeGroup).toBeDefined()
-  nativeGroup.getBoundingClientRect = () => rect(100 + (returning === 'Home' ? 100 : 1730) - viewport.scrollTop, 40)
+  nativeGroup.getBoundingClientRect = () => rect(100 + (returning === 'Home' ? -200 : 1730) - viewport.scrollTop, 40)
   const last = Number(ids().at(-1)!.slice('record-'.length)); expect(last).toBeLessThan(2399)
   const auxiliary = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   await scrollTo(viewport, 1900); await scrollTo(viewport, 2000); await flush()
   expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(auxiliary)
   if (returning === 'Home') {
    // Home at an already clamped top has no scroll event to clear the previous auxiliary target.
-   await act(async () => { viewport.scrollTop = 0; viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })) })
+   // Its real earlier demand is allowed to settle before testing the reverse
+   // token. That page adds readable height; the old tail is not a visible anchor.
+   const first = Number(ids()[0]!.slice('record-'.length)), entry = viewport.querySelector<HTMLElement>('.activity-feed__reading')!
+   entry.getBoundingClientRect = () => rect(100 - viewport.scrollTop - (first - Number(ids()[0]!.slice('record-'.length))) * 7, 40)
+   await act(async () => { viewport.scrollTop = 0; viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })) }); await flush()
   } else await scrollTo(viewport, 1700)
+  const newer = acceptedWindow().navigation.newer
+  expect(newer).toBeTypeOf('string')
   const start = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   const completedBefore = readingReceipts.filter(page => page.window.complete).length
-  if (returning === 'Home') await act(async () => viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
-  else await scrollTo(viewport, 1750)
+  if (returning === 'Home') await act(async () => {
+   // Complete the user's return to the common tail before the next key demand.
+   viewport.scrollTop = 4750; viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+  })
+  else await scrollTo(viewport, 4750)
   await flush()
   const navigation = vi.mocked(api.conversation.readAgentConversation).mock.calls.slice(start)
   expect(navigation.length).toBeGreaterThan(0)
   const completed = readingReceipts.filter(page => page.window.complete).length - completedBefore
-  expect(completed).toBeGreaterThan(0); expect(completed).toBeLessThanOrEqual(3)
+  expect(completed).toBeGreaterThan(0); expect(completed).toBeLessThanOrEqual(12)
+  expect(acceptedWindow().navigation.newer, 'This compressed source reaches its original newer end within the finite demand').toBeNull()
   expect(navigation[0]![0].cursor).toBe(newer)
   expect(Number(ids().at(-1)!.slice('record-'.length))).toBeGreaterThan(last)
   const restored = viewport.querySelector<HTMLElement>('[data-submission-id="captured-newer-input"]')!
@@ -476,6 +517,8 @@ describe('One Activity reading surface over public original-sequence windows', (
   height = 1000
   await scrollTo(viewport, 1000); await flush()
   expect(ids()).toEqual(before); expect(requests).toHaveLength(start)
+  // Each completed 100-record source page supplies one 1000px viewport.
+  entry.getBoundingClientRect = () => rect(100 - viewport.scrollTop - (ids().length - before.length) * 10, 40)
   await scrollTo(viewport, 900); await flush()
   expect(requests).toHaveLength(start + 3); expect(ids()).toHaveLength(before.length + 300)
  })
@@ -1076,7 +1119,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   await writeEdgeHistory(2400)
   await render(compose())
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!
-  markerGeometry(viewport)
+  const reserve = growingEarlierReserve(viewport)
   const first = Number(ids()[0]!.slice('record-'.length)), before = requests.length
   await wheel(-200000, 0)
   expect(requests).toHaveLength(before + 3); expect(ids()[0]).toBe(`record-${first - 300}`)
@@ -1095,6 +1138,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   // A genuinely new wheel can leave and re-enter the edge for the next batch.
   await wheel(-100, 5000); expect(requests).toHaveLength(before + 3)
   // A single large input crosses into the prefetch edge without a second event.
+  reserve.reset()
   await wheel(-200000, 5000)
   // A synthetic wheel has no browser default scrolling. Complete the actual
   // physical edge movement before expecting layout feedback to spend demand.
@@ -1113,9 +1157,17 @@ describe('One Activity reading surface over public original-sequence windows', (
   const parent = [...thread.querySelectorAll<HTMLElement>('[data-conversation-process-members]')].find(node => processNativeRecordIds(node).includes('record-250'))!
   const head = parent.querySelector<HTMLButtonElement>('.wf-head')!
   await act(async () => head.click())
-  const row = parent.querySelector<HTMLElement>('[data-native-record-id="record-250"]')!
-  const step = row.querySelector<HTMLButtonElement>('[data-observation-step-id="record-250"]')!
-  await act(async () => step.click())
+  const deferred = parent.querySelector<HTMLElement>('[data-deferred-process-id="record-250"]')!
+  expect(deferred).not.toBeNull()
+  expect(deferred.querySelector('.log-turn__body')).toBeNull()
+  const step = deferred.querySelector<HTMLButtonElement>('[data-observation-step-id="record-250"]')!
+  const detailReadStart = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await act(async () => step.click()); await flush()
+  await vi.waitFor(() => expect(deferred.querySelector('[data-native-record-id="record-250"] .log-turn__body')).not.toBeNull())
+  const detailReads = vi.mocked(api.conversation.readAgentConversation).mock.calls.slice(detailReadStart)
+  expect(detailReads.length).toBeGreaterThan(0)
+  expect(detailReads.every(([input]) => input.anchor?.record.source.recordId === 'record-250' && !input.cursor)).toBe(true)
+  const row = deferred.querySelector<HTMLElement>('[data-native-record-id="record-250"]')!
   const body = row.querySelector<HTMLElement>('.log-turn__body')!
   const trace = body.querySelector<HTMLDetailsElement>('[data-trace-kind="reasoning"]')!
   await act(async () => { trace.open = true; trace.dispatchEvent(new Event('toggle')) })
@@ -1199,7 +1251,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   let release!: (page: AgentSessionHistoryPage) => void
   const page = await promises[requests.map((request, index) => request.limit === 100 ? index : -1).reduce((last, index) => Math.max(last, index), -1)]!, pending = new Promise<AgentSessionHistoryPage>(resolve => { release = resolve })
   nativePage.mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
-  const viewport = container.querySelector<HTMLElement>('.activity-feed')!; viewport.scrollTop = 0
+  const viewport = container.querySelector<HTMLElement>('.activity-feed')!; growingEarlierReserve(viewport); viewport.scrollTop = 0
   await act(async () => {
    viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }))
    viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }))
@@ -1265,12 +1317,17 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   await render(compose())
   const seedReads = requests.length, cursor = acceptedWindow().navigation.older
   const publicReads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
-  const currentIds = recent!.nativeHistoryPage!.items.map(item => item.id)
+  const recentOriginalIds = () => [...recent!.conversation.snapshot!.units].reverse().flatMap(unit =>
+   unit.records.flatMap(record => record.reference?.source.kind === 'native' ? [record.reference.source.recordId] : []))
+  expect(recent!.conversation.snapshot).not.toBeNull()
+  const currentIds = recentOriginalIds(), currentCompleteIds = recent!.nativeHistoryPage!.items.map(item => item.id)
   expect(currentIds.length).toBeGreaterThan(0); expect(currentIds.at(-1)).toBe('record-359')
+  expect(currentCompleteIds.length).toBeGreaterThan(0)
   await click('Earlier')
   expect(ids()).toEqual(Array.from({ length: 360 }, (_, n) => `record-${String(n).padStart(3, '0')}`))
   expect(new Set(ids()).size).toBe(360)
-  expect(recent!.nativeHistoryPage!.items.map(item => item.id)).toEqual(currentIds)
+  expect(recentOriginalIds()).toEqual(currentIds)
+  expect(recent!.nativeHistoryPage!.items.map(item => item.id)).toEqual(currentCompleteIds)
   expect(container.querySelectorAll('.activity-feed')).toHaveLength(1)
   expect(container.querySelector('.activity-feed__history-divider')?.textContent).toContain('以上是历史消息')
   expect(requests.slice(seedReads)).toHaveLength(1)
@@ -1476,6 +1533,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
  it('shows actual inline earlier loading without a second demand, keeps the old cursor on page2 failure and explicitly retries', async () => {
   await writeEdgeHistory(1200)
   await render(compose()); const before = ids(), oldBody = container.querySelector('[data-native-record-id="record-1193"] .log-turn__body')!, page = await promises[requests.map((request, index) => request.limit === 100 ? index : -1).reduce((last, index) => Math.max(last, index), -1)]!, start = requests.length
+  growingEarlierReserve(container.querySelector<HTMLElement>('.activity-feed')!)
   const countText = container.querySelector('.activity-ruler__count')!.textContent
   expect(countText).toMatch(/^\d+ records$/)
   const earlier = container.querySelector<HTMLButtonElement>('.activity-feed__reading button')!, slider = container.querySelector<HTMLElement>('[role="slider"]')!

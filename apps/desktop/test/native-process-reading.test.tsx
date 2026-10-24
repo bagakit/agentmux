@@ -45,6 +45,13 @@ async function open(id: string): Promise<HTMLElement> {
   expect(button.getAttribute('aria-expanded')).toBe('true')
   return element
 }
+async function openOriginal(element: HTMLElement): Promise<void> {
+  const details = element.querySelector<HTMLDetailsElement>('.wf-native-process__raw')!
+  expect(details).not.toBeNull()
+  expect(element.querySelector('.log-turn__body')).toBeNull()
+  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  expect(element.querySelector('.log-turn__body')).not.toBeNull()
+}
 beforeEach(() => {
   readGroups = new Set()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -120,7 +127,7 @@ it('keeps the complete original collaboration payload and its one message body r
   await show()
   const element = await open('collab-call')
   const original = element.querySelector<HTMLDetailsElement>('.wf-native-process__raw')!
-  expect(original).not.toBeNull(); original.open = true
+  expect(original).not.toBeNull(); await openOriginal(element)
   const item = current.items.find(item => item.id === 'collab-call')!
   const text = item.contentParts[0]
   expect(text?.kind).toBe('text')
@@ -143,6 +150,7 @@ it('keeps agent activity and unknown collaboration honest and readable', async (
   await act(async () => button.click())
   expect(unknown.textContent).toContain('State not recorded')
   expect(unknown.textContent).toContain('Exact unknown-state message')
+  await openOriginal(unknown)
   expect(unknown.querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBeNull()
 })
 
@@ -158,7 +166,7 @@ it('does not borrow another record time for a process whose own time is absent',
 it('retains the same raw body and Range when the process head is clipped', async () => {
   await show()
   const element = await open('agent-activity')
-  element.querySelector<HTMLDetailsElement>('.wf-native-process__raw')!.open = true
+  await openOriginal(element)
   const body = element.querySelector('.log-turn__body')!
   const text = body.querySelector('p')!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 1)
@@ -175,6 +183,7 @@ it('retains the same raw body and Range when the process head is clipped', async
 it('never merges already mounted groups after their intervening speech leaves the window', async () => {
   await show()
   const element = await open('unknown-call')
+  await openOriginal(element)
   const body = element.querySelector('.log-turn__body')!
   const page = { ...current, items: current.items.filter(item => item.kind === 'activity') }
   await show(page)
@@ -185,6 +194,7 @@ it('never merges already mounted groups after their intervening speech leaves th
 it('keeps previously read bodies mounted through record and whole-group disclosure', async () => {
   await show()
   const element = await open('agent-activity')
+  await openOriginal(element)
   const body = element.querySelector('.log-turn__body')!
   const step = element.querySelector<HTMLButtonElement>('[data-observation-step-id]')!
   await act(async () => step.click())

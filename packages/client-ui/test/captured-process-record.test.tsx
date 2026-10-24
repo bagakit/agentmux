@@ -94,6 +94,8 @@ it('opens a large original edit with a bounded preview and complete original Cop
   await render(<CapturedProcessRecord record={record} located />)
   expect(host.querySelectorAll('.log-diff__line')).toHaveLength(200)
   expect(host.querySelector('.log-diff__truncated')?.textContent).toBe('Diff truncated at 200 lines.')
+  expect(host.querySelector('[aria-label="Copy tool input"]')).toBeNull()
+  await act(async () => { const details = host.querySelector('details')!; details.open = true; details.dispatchEvent(new Event('toggle')) })
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Copy tool input"]')!.click())
   expect(copy.mock.calls).toHaveLength(1)
   expect(copy.mock.calls[0]?.[0] === item.toolInput).toBe(true)
