@@ -26,6 +26,11 @@ export interface WritableSecretPort extends SecretPort {
 }
 export interface ConnectionAdapter {
   readonly adapterId: string
+  /** Original Host configuration decides retention; this never authorizes platform calls. */
+  setClientRetention?(read: (connectionId: string) => boolean): void
+  /** Release cached clients only; already admitted requests retain their original lifetime. */
+  releaseConnection?(connectionId: string): void
+  close?(): void
   readonly channelProfiles?: ChannelProfileAdapter
   readonly profile?: import('./connection-profile-adapter.js').ConnectionProfileAdapter
   readonly setup?: import('./connection-setup-adapter.js').ConnectionSetupAdapter
@@ -89,6 +94,13 @@ export class ConnectionHost implements ConnectionPort {
     } }
     this.adapters = new Map((options.adapters ?? []).map(adapter => [adapter.adapterId, adapter]))
     if (this.adapters.size !== (options.adapters?.length ?? 0)) { if (!options.database) this.database.close(); throw new AgentMuxError('Connection adapter IDs must be unique.', 'INVALID_CONNECTION_DATA') }
+    for (const adapter of this.adapters.values()) try {
+      adapter.setClientRetention?.(connectionId => {
+        if (this.closed) return false
+        const current = this.readConfiguration(connectionId)?.config
+        return current?.enabled === true && current.adapterId === adapter.adapterId
+      })
+    } catch { process.emitWarning('A connection adapter could not attach its resource owner.', { code: 'CONNECTION_RESOURCE_OWNER_UNAVAILABLE' }) }
     this.metadata = createChannelMetadata(this, options.secrets, this.channelProfileAbort.signal, change => this.publishMetadata(change))
     const discovery = createRoomDiscovery(this, options.secrets)
     this.rooms = discovery.port; this.closeRoomDiscovery = discovery.close
@@ -252,6 +264,7 @@ export class ConnectionHost implements ConnectionPort {
         this.database.prepare('DELETE FROM connection_configuration WHERE connection_id=? AND revision=?').run(input.connectionId, input.expectedRevision)
         this.database.prepare('INSERT INTO connection_configuration_operation (operation_id,input_json,result_json) VALUES (?,?,?)').run(input.operationId, JSON.stringify({ deletion: input }), JSON.stringify(operation))
         this.database.exec('COMMIT'); this.observations.delete(input.connectionId)
+        this.releaseAdapterResources(this.adapters.get(current.config.adapterId), input.connectionId)
         return operation
       } catch (error) { try { this.database.exec('ROLLBACK') } catch { /* The same original deletion receipt remains the recovery target. */ } throw error }
     })
@@ -276,6 +289,9 @@ export class ConnectionHost implements ConnectionPort {
         this.database.prepare('INSERT INTO connection_configuration_operation (operation_id, input_json, result_json) VALUES (?, ?, ?)').run(input.operationId, JSON.stringify(input), JSON.stringify(operation))
         this.database.exec('COMMIT')
         this.observations.delete(connection.config.connectionId)
+        if (current && (!connection.config.enabled || current.config.credentialRef !== connection.config.credentialRef)) {
+          this.releaseAdapterResources(this.adapters.get(current.config.adapterId), connection.config.connectionId)
+        }
         return operation
       } catch (error) { try { this.database.exec('ROLLBACK') } catch { /* COMMIT may already have happened. Read the original operation. */ } throw error }
     })
@@ -392,5 +408,22 @@ export class ConnectionHost implements ConnectionPort {
     this.profileHost ??= new ConnectionProfileHost(this, this.options.secrets)
     return this.profileHost.unresolvedApplicationWrite(application, actor)
   }
-  close(): void { this.closed = true; this.channelProfileAbort.abort(); this.metadataListeners.clear(); this.profileHost?.close(); this.setupHost?.close(); this.enrollmentHost?.close(); this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
+  private releaseAdapterResources(adapter: ConnectionAdapter | undefined, connectionId?: string): void {
+    try {
+      if (connectionId === undefined) adapter?.close?.()
+      else adapter?.releaseConnection?.(connectionId)
+    } catch {
+      // Resource cleanup cannot change an already committed configuration/deletion receipt.
+      process.emitWarning('A connection adapter could not release its cached resources.', { code: 'CONNECTION_RESOURCE_RELEASE_FAILED' })
+    }
+  }
+  close(): void {
+    if (this.closed) return
+    this.closed = true; this.channelProfileAbort.abort(); this.metadataListeners.clear()
+    try { this.profileHost?.close(); this.setupHost?.close(); this.enrollmentHost?.close(); this.closeRoomDiscovery() }
+    finally {
+      for (const adapter of this.adapters.values()) this.releaseAdapterResources(adapter)
+      if (!this.options.database) this.database.close()
+    }
+  }
 }

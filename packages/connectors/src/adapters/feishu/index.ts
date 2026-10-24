@@ -44,7 +44,12 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   private readonly callback = new AsyncLocalStorage<Witness>()
   private readonly requests = new AsyncLocalStorage<AbortSignal | undefined>()
   private readonly clients = new Map<string, { application: string; credential: string; client: Client }>()
+  private closed = false
+  private clientRetention = (_connectionId: string) => true
   constructor(private readonly options: FeishuAdapterOptions = {}) {}
+  setClientRetention(read: (connectionId: string) => boolean): void { this.clientRetention = read }
+  releaseConnection(connectionId: string): void { this.clients.delete(connectionId) }
+  close(): void { this.closed = true; this.clientRetention = () => false; this.clients.clear() }
 
   private application(config: FeishuClientScope): void {
     if (!['open.feishu.cn', 'open.larksuite.com'].includes(config.application.domain)) feishuFailure('FEISHU_APPLICATION_INVALID')
@@ -83,7 +88,9 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
     if (cached?.application === application && cached.credential === credential) return cached.client
     try {
       const client = new Client({ appId: config.application.appId, appSecret: credential, domain: `https://${config.application.domain}`, appType: AppType.SelfBuild, httpInstance: this.http(), cache: new DefaultCache(), logger: safeLogger, loggerLevel: LoggerLevel.error })
-      this.clients.set(config.connectionId, { application, credential, client })
+      let retain = false
+      try { retain = !this.closed && this.clientRetention(config.connectionId) } catch { /* Only retention is unknown; the admitted call remains available. */ }
+      if (retain) this.clients.set(config.connectionId, { application, credential, client })
       return client
     } catch { return feishuFailure('FEISHU_CLIENT_UNAVAILABLE') }
   }
