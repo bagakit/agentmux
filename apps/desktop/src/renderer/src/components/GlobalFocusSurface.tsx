@@ -17,7 +17,9 @@ import { AgentTopologySummary } from './AgentTopologySummary'
 import { FocusProjectLanes, FocusRetainedProjects } from './FocusProjectLanes'
 import { FocusLaneGroups } from './FocusLaneGroups'
 import { useFocusProjectOrder } from '../lib/use-focus-project-order'
-import { focusLaneOrigins } from '../lib/focus-lane-origin'
+import { focusLaneOrigins, type FocusSourceType } from '../lib/focus-lane-origin'
+import { EMPTY_FOCUS_FILTERS, FOCUS_FILTER_STATES, focusMatchesProject, focusMatchesState, focusMatchesTypes, type FocusFilters as FocusFilterSelection } from '../lib/focus-filters'
+import { FocusFilters } from './FocusFilters'
 import { readSurveyPresentation } from '../lib/mobile-presentation'
 import { focusCardTrackHeight, type FocusLaneCounts, type FocusLaneMetrics } from '../lib/focus-lane-layout'
 import { resolveFocusReplyLines } from '../../../shared/focus-preferences'
@@ -28,7 +30,6 @@ import { createFocusGoalLinksSelector } from '../lib/focus-goal-links'
 import { FocusSearchLocations } from './FocusSearchLocations'
 import { focusSearchCatalog, focusSearchContextKey, searchFocus } from '../lib/focus-search'
 import { FocusSourceStatus } from './FocusSourceStatus'
-import * as FilterMenu from './HoverDropdownMenu'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
 import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
@@ -52,8 +53,6 @@ import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
-const ThemeActionFilterIcon = semanticIconComponent('action.filter')
-const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeObjectTeamIcon = semanticIconComponent('object.team')
 
 
@@ -190,17 +189,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }, [visible])
   useEffect(() => () => { useAppStore.getState().conversationRevealIntent?.complete({ kind: 'cancelled' }) }, [])
   const historySearch = useFocusHistorySearch(query, visible)
-  const [project, setProject] = useState('all')
-  const [bucketFilter, setBucketFilter] = useState<FocusBucket | 'all'>('all')
-  const [filtersOpen, setFiltersOpen] = useState(false)
-  useEffect(() => { if (!visible) setFiltersOpen(false) }, [visible])
+  const [filters, setFilters] = useState<FocusFilterSelection>(EMPTY_FOCUS_FILTERS)
   const [requestId, setRequestId] = useState<string | null>(null)
   const [historyWindowRequest, setHistoryWindowRequest] = useState<{ at: number; sequence: number }>()
   const [workspaceRatio, setWorkspaceRatio] = useState(0.618)
   const searchRef = useRef<HTMLInputElement | null>(null)
   const clearLocalFilters = () => {
     historySearch.retainForLocalQuery('')
-    setQuery(''); setProject('all'); setBucketFilter('all')
+    setQuery(''); setFilters(EMPTY_FOCUS_FILTERS)
     searchRef.current?.focus()
   }
   const closeWorkspace = () => { onCloseWorkspace?.(); searchRef.current?.focus() }
@@ -235,7 +231,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const survey = useAppStore(useShallow(state => ({ surveyCollectedZones: state.surveyCollectedZones, surveyOrganization: state.surveyOrganization, surveyExplorationNames: state.surveyExplorationNames })))
   const originContent = useAppStore(useShallow(state => ({ bindings: state.spaceZoneBindings, categories: state.topicCategories })))
   const surveyItems = useMemo(() => readSurveyPresentation({ ...survey, surveyZoneSelection: null, tabs }, navigationCatalog).items, [survey, tabs, navigationCatalog])
-  const laneMembership = JSON.stringify(allLanes.map(lane => [lane.id, lane.objectKind, lane.contextIds]))
+  const laneMembership = JSON.stringify(allLanes.map(lane => [lane.id, lane.hostId, lane.workspaceId, lane.projectWorkspaceId, lane.topicId, lane.objectKind, lane.contextIds]))
   const laneOrigins = useMemo(() => focusLaneOrigins(allLanes, navigationCatalog, tabs, surveyItems, originContent), [laneMembership, navigationCatalog, tabs, surveyItems, originContent])
   const retainedProjects = useMemo(() => deriveRetainedFocusProjects(executionHistory, allLanes, {
     timelines, sources: catalogue.sources, sourcesAvailable: catalogue.available
@@ -254,9 +250,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       .flatMap(context => { const lane = laneByContext.get(context.id); return lane ? [lane.id] : [] }) : [])
   const currentLaneId = currentContext ? laneByContext.get(currentContext.id)?.id ?? null
     : resourceLaneIds.size === 1 ? resourceLaneIds.values().next().value ?? null : null
-  const matching = executionRows.filter(row => (project === 'all' || (() => { const lane = laneByContext.get(row.id); return lane && focusProjectKey(lane.hostId, lane.projectId) === project })()) &&
-    searchResult.contextKeys.has(focusSearchContextKey(row.hostId, row.id, row.kind)))
-  const matched = matching.filter(row => bucketFilter === 'all' || row.bucket === bucketFilter)
+  const projectForRow = (row: typeof executionRows[number]) => { const lane = laneByContext.get(row.id); return lane ? focusProjectKey(lane.hostId, lane.projectId) : undefined }
+  const typesForRow = (row: typeof executionRows[number]): readonly FocusSourceType[] => {
+    const lane = laneByContext.get(row.id)
+    return lane ? laneOrigins.get(lane.id)?.contextTypes?.get(row.id) ?? ['unknown'] : ['unknown']
+  }
+  const searched = executionRows.filter(row => searchResult.contextKeys.has(focusSearchContextKey(row.hostId, row.id, row.kind)))
+  const matching = searched.filter(row => focusMatchesProject(projectForRow(row), filters.projects) && focusMatchesTypes(typesForRow(row), filters.types))
+  const matched = matching.filter(row => focusMatchesState(row, filters.states))
   const revealRow = revealedContext?.lane === 'execution' ? revealedContext.context : null
   const filtered = revealRow && !matched.includes(revealRow) ? [...matched, revealRow] : matched
   const revealOutsideFilters = Boolean(revealedContext && !matched.includes(revealedContext.context))
@@ -274,7 +275,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     rowsByLane.set(lane.id, rows)
   }
   const boardLanes = focusProjectLanes
-  const filteredRetainedProjects = retainedProjects.filter(item => (project === 'all' || item.key === project) && bucketFilter === 'all'
+  const filteredRetainedProjects = retainedProjects.filter(item => focusMatchesProject(item.key, filters.projects) && filters.states.length === 0 && focusMatchesTypes(['unknown'], filters.types)
     && searchResult.projectKeys.has(item.key))
   const recentProjects = filteredRetainedProjects.filter(item => item.recent)
   const pastProjects = filteredRetainedProjects.filter(item => !item.recent)
@@ -326,8 +327,16 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     for (const item of options) names.set(item.name, (names.get(item.name) ?? 0) + 1)
     return options.map(item => ({ ...item, name: names.get(item.name)! > 1 ? `${item.name} · ${hosts.get(item.hostId) || item.hostId}` : item.name }))
   }, [allLanes, retainedProjects, config?.hosts])
-  const filterSummary = `${projectOptions.find(option => option.id === project)?.name ?? 'All projects'} · ${bucketFilter === 'all' ? 'All states' : bucketMeta[bucketFilter].label}`
-  const filterCount = Number(project !== 'all') + Number(bucketFilter !== 'all')
+  // Facets reuse the same supplied observations, with only their own dimension
+  // excluded. No history reads, owner writes or unrelated-session queries.
+  const projectCounts = new Map<string, number>(), stateCounts = new Map<import('../lib/focus-filters').FocusStateFilter, number>(), typeCounts = new Map<FocusSourceType, number>()
+  for (const row of searched) {
+    const key = projectForRow(row), types = typesForRow(row)
+    const projectMatch = focusMatchesProject(key, filters.projects), typeMatch = focusMatchesTypes(types, filters.types), stateMatch = focusMatchesState(row, filters.states)
+    if (key && typeMatch && stateMatch) projectCounts.set(key, (projectCounts.get(key) ?? 0) + 1)
+    if (projectMatch && typeMatch) for (const state of FOCUS_FILTER_STATES) if (focusMatchesState(row, [state.id])) stateCounts.set(state.id, (stateCounts.get(state.id) ?? 0) + 1)
+    if (projectMatch && stateMatch) for (const type of types) typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1)
+  }
   const laneRows = (lane: typeof focusProjectLanes[number], heading: ReactNode) => {
     const rows = rowsByLane.get(lane.id) ?? []
     const groups = groupFocusContexts(rows)
@@ -367,31 +376,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search text, IDs or amux links" title="Filter names, activity, paths and original object IDs or links. Enter searches case-sensitive text in retained conversations." onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); historySearch.start() } }} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <button type="button" className="small-button focus-search-history-trigger" aria-label="Search retained conversation text" title="Search retained conversation text · Enter" disabled={!query.trim()} onClick={() => historySearch.start()}><ThemeActionSearchIcon size={13} /><span>History</span></button>
-          <FilterMenu.Root open={visible && filtersOpen} onOpenChange={setFiltersOpen}>
-            <FilterMenu.Trigger asChild><button type="button" className="focus-filter-trigger" aria-label="Focus filters" aria-description={filterSummary} title={filterSummary} data-active={filterCount > 0 ? 'true' : undefined}>
-              <ThemeActionFilterIcon size={14} aria-hidden="true" /><span className="focus-filter-trigger__summary">{filterSummary}</span>{filterCount ? <span className="focus-filter-trigger__count" aria-hidden="true">{filterCount}</span> : null}
-            </button></FilterMenu.Trigger>
-            <FilterMenu.Portal><FilterMenu.Content className="tab-context-menu focus-filter-menu" align="end" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => {
-              // Preserve a later deliberate focus; explicit Escape still returns to this trigger.
-              const focused = document.activeElement
-              if (focused instanceof HTMLElement && focused.isConnected && focused !== document.body
-                && !focused.closest('[hidden], [inert]') && event.target instanceof HTMLElement && !event.target.contains(focused)) event.preventDefault()
-            }}>
-              <FilterMenu.Label className="focus-filter-menu__label">Project</FilterMenu.Label>
-              <FilterMenu.RadioGroup className="focus-filter-menu__projects" aria-label="Focus project filter" value={project} onValueChange={setProject}>
-                {[{ id: 'all', name: 'All projects' }, ...projectOptions].map(option => <FilterMenu.RadioItem key={option.id} value={option.id} data-focus-project={option.id} className="tab-context-menu__item focus-filter-menu__item">
-                  <span className="focus-filter-menu__check"><FilterMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></FilterMenu.ItemIndicator></span><span>{option.name}</span>
-                </FilterMenu.RadioItem>)}
-              </FilterMenu.RadioGroup>
-              <FilterMenu.Separator className="tab-context-menu__separator" />
-              <FilterMenu.Label className="focus-filter-menu__label">State</FilterMenu.Label>
-              <FilterMenu.RadioGroup aria-label="Focus state filter" value={bucketFilter} onValueChange={value => setBucketFilter(value as FocusBucket | 'all')}>
-                {[{ id: 'all', label: 'All states' }, ...buckets.map(bucket => ({ id: bucket, label: `${bucketMeta[bucket].label} · ${matchingGroups[bucket].length}` }))].map(option => <FilterMenu.RadioItem key={option.id} value={option.id} data-focus-state={option.id} className="tab-context-menu__item focus-filter-menu__item">
-                  <span className="focus-filter-menu__check"><FilterMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></FilterMenu.ItemIndicator></span><span>{option.label}</span>
-                </FilterMenu.RadioItem>)}
-              </FilterMenu.RadioGroup>
-            </FilterMenu.Content></FilterMenu.Portal>
-          </FilterMenu.Root>
+          <FocusFilters value={filters} onChange={setFilters} visible={visible} onClear={clearLocalFilters} onHistory={() => historySearch.start()} historyAvailable={Boolean(trimmedQuery)}
+            options={{ projects: projectOptions.map(option => ({ ...option, count: projectCounts.get(option.id) ?? 0 })), states: stateCounts, types: typeCounts }} />
           <FocusSourceStatus sourceError={catalogue.error} loading={catalogue.loading} laneErrors={hierarchyErrors}
             onRetrySources={catalogue.refresh} onRetryLanes={refreshHierarchy} visible={visible} />
         </div>
@@ -445,10 +431,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       {executionRows.length === 0 && retainedProjects.length === 0 ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
           <WorkbenchPresentationContext.Provider value={cardPresentation}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined}>
-            {hasBoardLanes ? <FocusProjectLanes visible={visible} origins={laneOrigins} lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={project} currentLaneId={currentLaneId} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
+            {hasBoardLanes ? <FocusProjectLanes visible={visible} origins={laneOrigins} lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={currentLaneId} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 ? <p className="focus-project-lanes__empty">
               <span>No contexts match these local filters.</span>
-              {query || project !== 'all' || bucketFilter !== 'all' ? <button type="button" className="focus-project-lanes__clear" onClick={clearLocalFilters}>Clear filters</button> : null}
+              {query || filters.projects.length || filters.states.length || filters.types.length ? <button type="button" className="focus-project-lanes__clear" onClick={clearLocalFilters}>Clear filters</button> : null}
             </p> : null}
           </div></WorkbenchPresentationContext.Provider>
           <FocusRetainedProjects projects={pastProjects} total={retainedProjects.filter(item => !item.recent).length} onRead={readProjectHistory} />

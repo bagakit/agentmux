@@ -3,12 +3,18 @@ import type { FocusProjectLane } from './focus-project-lanes'
 import type { WorkbenchTab } from './workbench-tabs'
 import type { SpaceZoneBindings } from '../../../shared/space-addresses'
 import type { TopicCategory } from '@agentmux/core/control'
+import { isScratchWorkspaceId } from '../../../shared/contracts'
+
+export const FOCUS_SOURCE_TYPES = ['project', 'topic', 'mote', 'survey', 'unknown'] as const
+export type FocusSourceType = typeof FOCUS_SOURCE_TYPES[number]
 
 export type FocusLaneOrigin = {
   kind: 'project' | 'topic' | 'mote' | 'survey' | 'mixed' | 'unknown'
   label: string
   locations: readonly string[]
   addresses: readonly string[]
+  /** Per-Context source membership; display kind remains a single heading treatment. */
+  contextTypes?: ReadonlyMap<string, readonly FocusSourceType[]>
 }
 
 /** A disposable join of original spatial facts, never a content/identity registry.
@@ -51,8 +57,27 @@ export function focusLaneOrigins(lanes: readonly FocusProjectLane[], catalog: Ag
   return new Map(lanes.map(lane => {
     const zones = new Set(lane.contextIds.flatMap(id => [...(zonesBySession.get(id) ?? [])]))
     // Topic content identity remains usable when its Session has no open view.
-    if (lane.topicId) for (const zone of objectZones.get(JSON.stringify([lane.hostId, lane.topicId])) ?? []) zones.add(zone)
-    if (lane.topicId) for (const zone of contentZones.get(JSON.stringify([lane.hostId, lane.workspaceId, lane.topicId])) ?? []) zones.add(zone)
+    const contentObjectZones = new Set<string>()
+    if (lane.topicId) for (const zone of objectZones.get(JSON.stringify([lane.hostId, lane.topicId])) ?? []) contentObjectZones.add(zone)
+    if (lane.topicId) for (const zone of contentZones.get(JSON.stringify([lane.hostId, lane.workspaceId, lane.topicId])) ?? []) contentObjectZones.add(zone)
+    for (const zone of contentObjectZones) zones.add(zone)
+    const contextTypes = new Map<string, readonly FocusSourceType[]>()
+    for (const id of lane.contextIds) {
+      const memberZones = new Set(zonesBySession.get(id) ?? [])
+      // A content object's exact Zone belongs to its Contexts even without an open
+      // view. Ordinary Project lane members never borrow another Session's Zones.
+      for (const zone of contentObjectZones) memberZones.add(zone)
+      const projectKnown = !lane.topicId && (Boolean(lane.projectWorkspaceId && !isScratchWorkspaceId(lane.projectWorkspaceId))
+        || [...memberZones].some(zone => (bound.get(zone) ?? []).some(space => space.hostId === lane.hostId && space.kind === 'folder' && space.projectId !== null)))
+      const primary: FocusSourceType = lane.topicId
+        ? lane.objectKind === 'topic' || lane.objectKind === 'mote' ? lane.objectKind : 'unknown'
+        : projectKnown ? 'project' : 'unknown'
+      const types: FocusSourceType[] = [primary]
+      // Survey is an additional display relationship, including for an unknown
+      // content classification; it cannot establish or erase that classification.
+      if ([...memberZones].some(zone => explorations.has(zone))) types.push('survey')
+      contextTypes.set(id, types)
+    }
     const locations = new Map<string, string>()
     for (const zone of zones) for (const space of bound.get(zone) ?? []) {
       if (space.hostId === lane.hostId && (categoryIds.has(space.spaceId) || (lane.objectKind === 'mote' && space.kind === 'folder'))) locations.set(space.spaceId, space.name)
@@ -67,6 +92,6 @@ export function focusLaneOrigins(lanes: readonly FocusProjectLane[], catalog: Ag
       : lane.topicId ? 'unknown' : allSurvey ? 'survey' : surveyed.length ? 'mixed' : 'project'
     const label = kind === 'topic' ? 'Topic' : kind === 'mote' ? 'Mote' : kind === 'survey' ? 'Survey' : kind === 'mixed' ? 'Project · Survey' : kind === 'unknown' ? 'Source unknown' : 'Project'
     return [lane.id, { kind, label, locations: locations.size ? [...locations.values()] : kind === 'topic' ? ['Location unknown'] : [],
-      addresses: [...locations].map(([id, name]) => `${name} · ${id}`) }]
+      addresses: [...locations].map(([id, name]) => `${name} · ${id}`), contextTypes }]
   }))
 }
