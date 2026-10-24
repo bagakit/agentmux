@@ -137,7 +137,7 @@ import {
   type AgentPromptTransportQualification,
   type AgentPromptProtocolInputBoundary
 } from './prompt-submission.js'
-import { CTXMUX_COMMIT, CTXMUX_VERSION, CtxmuxRunAdapter, type CtxmuxAdapterAttachment, type CtxmuxAdapterEvent, type CtxmuxAdapterRun, type CtxmuxAdapterStopOperation } from './ctxmux-run-adapter.js'
+import { CTXMUX_COMMIT, CTXMUX_VERSION, CtxmuxRunAdapter, type CtxmuxAdapterAttachment, type CtxmuxAdapterEvent, type CtxmuxAdapterRun, type CtxmuxAdapterStopOperation, type CtxmuxEndpointObservation } from './ctxmux-run-adapter.js'
 import { supportedCtxmuxArtifactPlatform } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
 import { parseSessionHistoryResourceOptions, SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
@@ -719,6 +719,7 @@ export class AgentMuxClient {
   private reconnecting = false
   private reconnectGeneration = 0
   private reconnectController: AbortController | null = null
+  private reconnectEndpoint: (CtxmuxEndpointObservation & { only: boolean }) | undefined
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private runtimeConnecting: Promise<void> | null = null
   private connecting: Promise<void> | null = null
@@ -1074,11 +1075,17 @@ export class AgentMuxClient {
 
   private async connectRequested(): Promise<void> {
     const recovering = this.reconnectController !== null
+    const endpoint = this.reconnectEndpoint
     const observationNeeded = this.connectionNeedsObservation || !this.connected || !this.kernel.isConnected()
     this.cancelReconnect()
     const epoch = this.connectionEpoch
     const generation = this.reconnectGeneration
     try {
+      if (endpoint) {
+        await this.kernel.connect({ refreshEndpointForRun: endpoint.runId })
+        this.assertConnectionEpoch(epoch)
+        if (endpoint.only) return
+      }
       await this.connectOnce(epoch)
       this.assertConnectionEpoch(epoch)
       if (recovering) await this.finishReconnect(epoch, generation)
@@ -1086,7 +1093,7 @@ export class AgentMuxClient {
         observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
         evidence: { source: 'run-process', observedAt: Date.now() } })
     } catch (error) {
-      if (recovering && epoch === this.connectionEpoch && generation === this.reconnectGeneration) this.scheduleSlowReconnect(epoch)
+      if (recovering && epoch === this.connectionEpoch && generation === this.reconnectGeneration) this.scheduleSlowReconnect(epoch, !endpoint?.only, endpoint)
       throw error
     }
   }
@@ -1156,9 +1163,6 @@ export class AgentMuxClient {
           }
         })
       })
-      // 掉线检测的接线：kernel 探到实时连接断了（wire 传输失败，或 daemon 关流却没交代 run 下场），
-      // 就在这里驱动整套「置 disconnected → 有界重连 → 恢复真相」。这不是某个 run 的语义错误，故与
-      // onError 分居两处。
       this.unsubscribeConnectionLost = this.kernel.onConnectionLost(() => this.handleConnectionLost(epoch))
       this.assertConnectionEpoch(epoch)
       if (!this.kernel.isConnected()) throw new AgentMuxError('Runtime connection changed during admission.', 'CTXMUX_DISCONNECTED')
@@ -1392,20 +1396,52 @@ export class AgentMuxClient {
   private async reconnectLoop(epoch: number): Promise<void> {
     const controller = this.reconnectController!
     const generation = this.reconnectGeneration
+    const endpointOnly = this.reconnectEndpoint?.only === true
     const result = await runBoundedReconnect({
       signal: controller.signal,
-      attempt: () => this.connectOnce(epoch),
+      attempt: () => this.reconnectAttempt(epoch, controller.signal, endpointOnly),
       sleep: (ms) => this.reconnectSleep(ms, controller.signal)
     })
     if (controller.signal.aborted || epoch !== this.connectionEpoch) return
-    if (result.kind === 'reconnected') await this.finishReconnect(epoch, generation)
-    else if (result.kind === 'exhausted') this.scheduleSlowReconnect(epoch)
+    if (result.kind === 'reconnected') {
+      if (endpointOnly) this.finishEndpointReconnect(epoch, generation)
+      else await this.finishReconnect(epoch, generation)
+    } else if (result.kind === 'exhausted') this.scheduleSlowReconnect(epoch, !endpointOnly)
+  }
+
+  private async reconnectAttempt(epoch: number, signal: AbortSignal, endpointOnly: boolean): Promise<void> {
+    const endpoint = this.reconnectEndpoint
+    if (endpoint) {
+      await this.kernel.reobserveConnection(endpoint.runId, signal)
+      if (!endpointOnly && this.reconnectEndpoint === endpoint) this.reconnectEndpoint = undefined
+    }
+    if (!endpointOnly) await this.connectOnce(epoch)
+  }
+
+  private observeRuntimeEndpoint(epoch: number, observation: CtxmuxEndpointObservation): void {
+    if (epoch !== this.connectionEpoch) return
+    this.reconnectEndpoint = { ...observation, only: this.reconnectController ? this.reconnectEndpoint?.only ?? false : true }
+    if (this.reconnectController) return
+    this.reconnectController = new AbortController()
+    this.reconnecting = true
+    void this.reconnectLoop(epoch)
+  }
+
+  private finishEndpointReconnect(epoch: number, generation: number): void {
+    if (epoch !== this.connectionEpoch || generation !== this.reconnectGeneration) return
+    this.cancelReconnect()
   }
 
   private async finishReconnect(epoch: number, generation: number): Promise<void> {
     const current = (): boolean => epoch === this.connectionEpoch && generation === this.reconnectGeneration
     if (!current()) return
     try {
+      const endpoint = this.reconnectEndpoint
+      if (endpoint) {
+        await this.kernel.reobserveConnection(endpoint.runId, this.reconnectController?.signal)
+        if (!current()) return
+        if (this.reconnectEndpoint === endpoint) this.reconnectEndpoint = undefined
+      }
       await this.republishLiveRunState(current)
     } catch (error) {
       if (!current()) return
@@ -1440,11 +1476,12 @@ export class AgentMuxClient {
   }
 
   /** One transport attempt per interval after the fast window, without repeating whole fast windows or UI notices. */
-  private scheduleSlowReconnect(epoch: number, notify = true): void {
+  private scheduleSlowReconnect(epoch: number, notify = true, endpoint = this.reconnectEndpoint): void {
     this.cancelReconnect()
     if (epoch !== this.connectionEpoch) return
     const controller = new AbortController()
     this.reconnectController = controller
+    this.reconnectEndpoint = endpoint
     this.reconnecting = true
     if (notify) this.publisher.publish({ type: 'connection-state', state: 'retrying',
       observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
@@ -1454,8 +1491,13 @@ export class AgentMuxClient {
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null
         if (controller.signal.aborted || epoch !== this.connectionEpoch) return
-        void this.connectOnce(epoch).then(async () => {
-          if (!controller.signal.aborted && epoch === this.connectionEpoch) await this.finishReconnect(epoch, generation)
+        const endpointOnly = endpoint?.only === true
+        const attempt = this.reconnectAttempt(epoch, controller.signal, endpointOnly)
+        void attempt.then(async () => {
+          if (!controller.signal.aborted && epoch === this.connectionEpoch) {
+            if (endpointOnly) this.finishEndpointReconnect(epoch, generation)
+            else await this.finishReconnect(epoch, generation)
+          }
         }, () => {
           if (!controller.signal.aborted && epoch === this.connectionEpoch) schedule()
         })
@@ -1469,6 +1511,7 @@ export class AgentMuxClient {
     this.reconnectGeneration += 1
     this.reconnectController?.abort()
     this.reconnectController = null
+    this.reconnectEndpoint = undefined
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
     this.reconnecting = false
@@ -9597,7 +9640,21 @@ export class AgentMuxClient {
   }
 
   private acceptKernelEvent(event: CtxmuxAdapterEvent): void {
+    if (event.type === 'endpoint-unconfirmed') {
+      this.observeRuntimeEndpoint(this.connectionEpoch, event)
+      return
+    }
     const agentSession = this.registry.findByRun(runRef(event.runId))
+    if (event.type === 'attachment-state') {
+      const observation = { type: 'attachment-state' as const, run: runRef(event.runId),
+        afterByte: event.afterByte, ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),
+        evidence: { source: 'run-process' as const, observedAt: Date.now(), run: runRef(event.runId) } }
+      this.publisher.publish(event.state === 'unavailable' ? { ...observation, state: 'unavailable', diagnostic: {
+        code: event.error.code,
+        message: `${event.error.message} Live output observation stopped; current Run termination is unconfirmed. Refresh this output observation; the original Run and input operation are retained.`
+      } } : { ...observation, state: 'restored' })
+      return
+    }
     if (event.type === 'service') {
       this.publisher.publishRunService(runRef(event.runId), event.nativeService, event.observedAt, agentSession?.agentSessionId)
       return

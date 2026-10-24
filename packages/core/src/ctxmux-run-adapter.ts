@@ -15,6 +15,7 @@ import {
   CtxmuxClient,
   CtxmuxCommandError,
   CtxmuxProtocolError,
+  CtxmuxRuntimeIdentityMismatchError,
   CtxmuxUnsupportedCapabilityError,
   PROTOCOL_VERSION,
   RUNTIME_CAPABILITY_NATIVE_RECOVERABLE_INPUT,
@@ -190,6 +191,11 @@ export type CtxmuxAdapterEvent =
   | CtxmuxAdapterGapEvent
   | CtxmuxAdapterResizedEvent
   | { type: 'service'; runId: string; nativeService: AgentMuxNativeService; observedAt: number }
+  | ({ type: 'attachment-state'; runId: string; afterByte: number } &
+    ({ state: 'unavailable'; error: AgentMuxError } | { state: 'restored' }))
+  | ({ type: 'endpoint-unconfirmed' } & CtxmuxEndpointObservation)
+
+export type CtxmuxEndpointObservation = { runId: string; error: AgentMuxError }
 
 export type CtxmuxAdapterObservationEvent =
   | CtxmuxAdapterEvent
@@ -223,6 +229,13 @@ type LiveAttachment = {
   view: AgentMuxRunAttachmentView
   /** Last raw byte published by this process, not a Renderer parse acknowledgement. */
   publishedThroughByte: number
+  /** Up to three already-published bytes seed a fresh UTF-8 decoder at a continuation cut. */
+  decodeSeed: Uint8Array
+  unavailable?: AgentMuxError
+}
+
+function decodeSeed(previous: Uint8Array, next: Uint8Array): Uint8Array {
+  return next.byteLength >= 3 ? next.slice(-3) : Uint8Array.from([...previous.slice(next.byteLength - 3), ...next])
 }
 
 /** Only this private seam translates the SDK's Gap facts into public Core data. */
@@ -846,6 +859,8 @@ export class CtxmuxRunAdapter {
     return this.ownership
   }
   private readonly attachments = new Map<string, LiveAttachment>()
+  private readonly attachmentOpenings = new Map<string, symbol>()
+  private stopDaemonExitObservation: (() => void) | undefined
 
   private eventListener: ((event: CtxmuxAdapterEvent) => void) | null = null
   private errorListener: ((error: AgentMuxError, runId?: string) => void) | null = null
@@ -894,11 +909,8 @@ export class CtxmuxRunAdapter {
   }
 
   /**
-   * 通知「与 daemon 的实时连接断了」。单 daemon 语义下，任何一个 attachment 的传输失败、或 daemon
-   * 优雅关流却没交代 run 下场，都意味着我们与 daemon 的实时通道没了——这是唯一的连接，不是某个 run
-   * 的局部错误。listener 由 client 装，用来置 `connected=false`、发 disconnected、排重连。
-   *
-   * 与 {@link onError}（一个 run 的语义错误）分居两处：连接断了要驱动整套重连，一个 run 出错不该。
+   * Runtime recovery is separate from one Attachment's independent observation.
+   * Only evidence covering the current connection generation may invalidate it.
    */
   onConnectionLost(listener: () => void): () => void {
     this.connectionLostListener = listener
@@ -928,12 +940,16 @@ export class CtxmuxRunAdapter {
     this.connectionLostListener?.()
   }
 
-  async connect(): Promise<void> {
-    if (this.client !== null) return
+  async connect(options?: { refreshEndpointForRun?: string }): Promise<void> {
+    if (this.client !== null && !options?.refreshEndpointForRun) return
+    const previousClient = this.client, previousRuntime = this.runtime
     const diagnosticsClient = new CtxmuxClient({ socketPath: this.socketPath })
+    const observeRuntime = () => options?.refreshEndpointForRun
+      ? this.readRuntimeEndpoint(options.refreshEndpointForRun, previousRuntime)
+      : diagnosticsClient.runtimeInfo()
     let runtime: RuntimeIdentity | null = null
     try {
-      runtime = await diagnosticsClient.runtimeInfo()
+      runtime = await observeRuntime()
       assertAgentMuxRuntimeCompatibility(runtime)
     } catch (error) {
       // A failed handshake does not prove death. A live activation also survives a caller's
@@ -973,7 +989,7 @@ export class CtxmuxRunAdapter {
       try { await observeDaemonActivation(activation) } catch (error) { observationError = error }
       try {
         // Readiness/receipt failure cannot withhold a compatible listener that is now serving.
-        runtime = await diagnosticsClient.runtimeInfo()
+        runtime = await observeRuntime()
         assertAgentMuxRuntimeCompatibility(runtime)
       } catch (error) {
         if (runtime !== null) throw error
@@ -983,6 +999,8 @@ export class CtxmuxRunAdapter {
     if (runtime === null) {
       throw new AgentMuxError('CtxMux did not report its daemon instance.', 'CTXMUX_OWNER_IDENTITY_UNPROVEN')
     }
+    if (previousRuntime && previousRuntime.runtimeId !== runtime.runtimeId) throw new AgentMuxError(
+      'The endpoint does not confirm the original durable Runtime. Its existing readers and references were retained.', 'RUNTIME_OWNER_MISMATCH')
     // An already-private namespace needs no filesystem mutation to reconnect.
     // Otherwise retain the existing same-user/private-directory permission boundary.
     const namespace = await stat(dirname(this.socketPath))
@@ -1008,21 +1026,71 @@ export class CtxmuxRunAdapter {
         ))
       }
     }
+    let ownership: 'owned' | 'unverified'
     try {
       await verifyOwnerReceipt(this.socketPath, this.stateDirectory, runtime)
-      this.ownership = 'owned'
+      ownership = 'owned'
     } catch (error) {
       // Ownership controls cleanup authority, never protocol compatibility or access to Runs.
       if (error instanceof AgentMuxError && error.code === 'CTXMUX_OWNER_IDENTITY_UNPROVEN') {
-        this.ownership = 'unverified'
+        ownership = 'unverified'
       } else throw error
     }
+    if (this.client !== previousClient || this.runtime !== previousRuntime) throw new AgentMuxError(
+      'The original Runtime connection was superseded while its endpoint was being confirmed.', 'CONTROL_CANCELLED')
+    this.acceptRuntime(runtime, ownership)
+  }
+
+  private acceptRuntime(runtime: RuntimeIdentity, ownership: 'owned' | 'unverified' | null): void {
+    this.ownership = ownership
+    if (isDeepStrictEqual(this.runtime, runtime)) return
+    this.stopDaemonExitObservation?.()
+    this.stopDaemonExitObservation = undefined
     this.runtime = runtime
     this.client = new CtxmuxClient({
       socketPath: this.socketPath,
       expectedRuntimeIdentity: runtime,
       requiredCapabilities: REQUIRED_RUNTIME_CAPABILITIES
     })
+    // The original child exit is an authoritative owner-wide fact. A reader/socket
+    // observation failure is not; external owners retain their exact refresh path.
+    const activation = daemonActivations.get(this.socketPath)
+    if (activation?.daemonInstanceId === runtime.daemonInstanceId) {
+      const client = this.client
+      const exited = () => { if (this.client === client) this.markConnectionLost() }
+      activation.child.once('exit', exited)
+      this.stopDaemonExitObservation = () => activation.child.off('exit', exited)
+      if (activation.child.exitCode !== null || activation.child.signalCode !== null) exited()
+    }
+  }
+
+  /** Reconfirm this endpoint using one exact Run's disposable public observation.
+   * Failure keeps the original dispatch fence and every established reader. */
+  async reobserveConnection(runId: string, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
+    const client = this.requireClient(), previous = this.runtime
+    const runtime = await this.readRuntimeEndpoint(runId, previous)
+    signal?.throwIfAborted()
+    if (this.client !== client || this.runtime !== previous) throw new AgentMuxError(
+      'The original Runtime observation was superseded.', 'CONTROL_CANCELLED')
+    assertAgentMuxRuntimeCompatibility(runtime)
+    if (previous?.runtimeId !== runtime.runtimeId) throw new AgentMuxError(
+      'The endpoint does not confirm the original durable Runtime. Its existing readers and references were retained.', 'RUNTIME_OWNER_MISMATCH')
+    this.acceptRuntime(runtime, previous.daemonInstanceId === runtime.daemonInstanceId ? this.ownership : 'unverified')
+  }
+
+  private async readRuntimeEndpoint(runId: string, previous: RuntimeIdentity | null): Promise<RuntimeIdentity> {
+    const diagnostic = new CtxmuxClient({ socketPath: this.socketPath,
+      ...(previous ? { expectedRuntimeIdentity: previous } : {}),
+      foregroundObservationTimeoutMs: DAEMON_CONNECT_OBSERVATION_MS })
+    try { return (await diagnostic.observeForeground({ runId })).runtime }
+    catch (error) {
+      // The pinned dispatch handshake precedes this exact Run read. A missing Run
+      // cannot erase that identity confirmation or hold endpoint recovery forever.
+      if (error instanceof CtxmuxRuntimeIdentityMismatchError) return error.actual
+      if (previous && error instanceof CtxmuxProtocolError && error.code === 'run_not_found') return previous
+      throw error
+    }
   }
 
   /** One exact Run, optional observation capability; never a connection or input prerequisite. */
@@ -1049,6 +1117,9 @@ export class CtxmuxRunAdapter {
 
   /** A failed wire/setup keeps exact-Run continuation; it never persists output state. */
   resetConnection(): void {
+    this.stopDaemonExitObservation?.()
+    this.stopDaemonExitObservation = undefined
+    this.attachmentOpenings.clear()
     for (const [runId, owner] of this.attachments) {
       owner.attachment?.close()
       this.attachments.set(runId, { ...owner, attachment: null, token: Symbol(runId) })
@@ -1257,15 +1328,33 @@ export class CtxmuxRunAdapter {
     if (this.hasAttachment(runId) && !replace) {
       throw new AgentMuxError('This client already owns an Attachment for the Run.', 'ATTACHMENT_EXISTS')
     }
+    const client = this.requireClient(), opening = Symbol(runId)
+    this.attachmentOpenings.set(runId, opening)
+    let attachment: Attachment | undefined
     try {
-      const attachment = await this.openAttachment(runId, afterByte, view)
-      const decoder = new TextDecoder()
+      attachment = await this.openAttachment(runId, afterByte, view)
+      if (this.client !== client || this.attachmentOpenings.get(runId) !== opening) {
+        throw new AgentMuxError('The original Attachment observation was superseded; its Run was retained.', 'CONTROL_CANCELLED')
+      }
+      const previous = this.attachments.get(runId)
+      const seed = view === 'raw' && previous?.view === view && previous.attachment === null &&
+        previous.unavailable && previous.publishedThroughByte === afterByte &&
+        attachment.snapshot.replay.first_available_byte <= afterByte ? previous.decodeSeed : new Uint8Array()
+      const decoder = new TextDecoder('utf-8', { ignoreBOM: afterByte - seed.byteLength > 0 })
+      decoder.decode(seed, { stream: true })
       const snapshot = this.projectAttachment(attachment.snapshot, afterByte, decoder)
       // Record the offered snapshot before synchronous publication can lose the connection.
       // No second queue: the SDK attachment owns all bytes until its pump starts.
       const token = Symbol(runId)
-      const previous = this.attachments.get(runId)
-      if (!replace) this.attachments.set(runId, { attachment, token, view, publishedThroughByte: snapshot.run.latestOutputBytes })
+      let nextSeed = seed
+      for (const chunk of attachment.snapshot.replay.chunks) nextSeed = decodeSeed(nextSeed, chunk.data)
+      const next = { attachment, token, view, publishedThroughByte: snapshot.run.latestOutputBytes, decodeSeed: nextSeed }
+      if (!replace) {
+        this.attachments.set(runId, next)
+        // pump first awaits its iterator. Synchronous validation/publication still precedes
+        // live delivery, while a superseding opening cannot leave an installed, unpumped owner.
+        void this.pump(runId, token, attachment, decoder)
+      }
       try { beforeLive?.(snapshot) } catch (error) {
         if (this.attachments.get(runId)?.token === token) this.attachments.delete(runId)
         try { await attachment.detach() } catch (cleanupError) {
@@ -1275,18 +1364,29 @@ export class CtxmuxRunAdapter {
         throw error
       }
       // Open and validate first: a failed refresh must leave the original live owner intact.
-      if (replace) this.attachments.set(runId, { attachment, token, view, publishedThroughByte: snapshot.run.latestOutputBytes })
-      if (this.attachments.get(runId)?.token === token) {
+      if (this.client !== client || this.attachmentOpenings.get(runId) !== opening) {
+        throw new AgentMuxError('The original Attachment observation changed during publication; its Run was retained.', 'CONTROL_CANCELLED')
+      }
+      if (replace) {
+        this.attachments.set(runId, next)
         void this.pump(runId, token, attachment, decoder)
-      } else {
-        attachment.close()
       }
       if (previous?.attachment) {
         try { await previous.attachment.detach() } catch { previous.attachment.close() }
       }
+      if (this.client !== client || this.attachmentOpenings.get(runId) !== opening) throw new AgentMuxError(
+        'The original Attachment observation changed while releasing its predecessor; its Run was retained.', 'CONTROL_CANCELLED')
+      if (previous?.unavailable && this.attachments.get(runId)?.attachment === attachment) this.eventListener?.({
+        type: 'attachment-state', state: 'restored', runId, afterByte: snapshot.run.latestOutputBytes
+      })
       return snapshot
     } catch (error) {
+      if (attachment && this.attachments.get(runId)?.attachment !== attachment) attachment.close()
+      if (this.client === client && error instanceof CtxmuxRuntimeIdentityMismatchError) this.eventListener?.({
+        type: 'endpoint-unconfirmed', runId, error: translateCtxmuxError(error) })
       throw translateCtxmuxError(error)
+    } finally {
+      if (this.attachmentOpenings.get(runId) === opening) this.attachmentOpenings.delete(runId)
     }
   }
 
@@ -1446,6 +1546,7 @@ export class CtxmuxRunAdapter {
   }
 
   async detach(runId: string): Promise<void> {
+    this.attachmentOpenings.delete(runId)
     const live = this.attachments.get(runId)
     if (!live) return
     this.attachments.delete(runId)
@@ -1556,7 +1657,8 @@ export class CtxmuxRunAdapter {
     attachment: Attachment,
     decoder: TextDecoder
   ): Promise<void> {
-    let threw = false
+    const sourceClient = this.client
+    let failure: AgentMuxError | undefined
     let sawTerminalEvent = false
     try {
       for await (const event of attachment.events()) {
@@ -1565,24 +1667,31 @@ export class CtxmuxRunAdapter {
         // Record the delivered range before synchronous callbacks can reset/replace this owner.
         if (event.type === 'output') {
           const current = this.attachments.get(runId)
-          if (current?.token === token) current.publishedThroughByte = event.chunk.end_byte
+          if (current?.token === token) {
+            current.publishedThroughByte = event.chunk.end_byte
+            current.decodeSeed = decodeSeed(current.decodeSeed, event.chunk.data)
+          }
         }
         this.emitRunEvent(runId, decoder, event)
       }
     } catch (error) {
-      threw = true
-      if (this.attachments.get(runId)?.token === token) this.errorListener?.(translateCtxmuxError(error), runId)
+      failure = translateCtxmuxError(error)
     } finally {
       const stillOwned = this.attachments.get(runId)?.token === token
-      // 这条流怎么结束的，决定了要不要对账。分类是纯函数（ctxmux-stream-end），三种结局：
-      // - detached：我们自己换/删了 attachment，什么都不做。
-      // - run-exited：发过终结事件、干净结束，退出已如实发出，无需再做。
-      // - connection-lost：抛错（wire 断），或 daemon 优雅关流却没交代 run 下场（历史缺陷：旧 pump
-      //   在这一支只删 attachment、不发任何东西，run 永远停在最后状态）。两者都判连接丢失，交给
-      //   markConnectionLost 驱动整套重连去问 daemon 真相，而不是在此刻瞎猜这个 run 死没死。
-      const end = classifyStreamEnd({ threw, sawTerminalEvent, stillOwned })
-      if (end === 'connection-lost') this.markConnectionLost()
-      else if (stillOwned) this.attachments.delete(runId)
+      const end = classifyStreamEnd({ sawTerminalEvent, stillOwned })
+      if (end === 'observation-unavailable') {
+        const current = this.attachments.get(runId)!
+        current.attachment = null
+        current.unavailable = failure ?? new AgentMuxError('This output observation ended without a terminal Run fact.', 'CTXMUX_ATTACHMENT_UNCONFIRMED')
+        attachment.close()
+        const opening = this.attachmentOpenings.get(runId)
+        this.eventListener?.({ type: 'attachment-state', state: 'unavailable', runId,
+          afterByte: current.publishedThroughByte, error: current.unavailable })
+        if (this.client === sourceClient && this.attachments.get(runId) === current &&
+          this.attachmentOpenings.get(runId) === opening) this.eventListener?.({ type: 'endpoint-unconfirmed', runId, error: current.unavailable })
+      } else if (stillOwned) {
+        this.attachments.delete(runId)
+      }
     }
   }
 
