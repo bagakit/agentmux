@@ -4,7 +4,7 @@ import { ScratchTopics as ScratchTopicResources, type ScratchWorkspace as Worksp
 export type { PreparedScratchAgentTopic } from '@agentmux/host/mote-resources'
 import { MOTE_AVATAR_OUTPUT_MAX_BYTES, type MoteAvatarInput, type MoteAvatarRef, type MoteAvatarImage } from '../shared/mote-avatars.js'
 import { decodeObjectAvatar, previewObjectAvatar, objectAvatarPng } from './object-avatar-image.js'
-import { readObjectAvatarFile, saveObjectAvatarFile } from './object-avatar-files.js'
+import { readObjectAvatarFile, saveObjectAvatarFile } from '@agentmux/host/object-avatar-files'
 import { migrateTopicDirectories } from './scratch-directory-maintenance.mjs'
 import { normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, type DirectoryIdentityWriteOptions } from './scratch-directory-identity.mjs'
 import { resolveScratchTopicDirectory, scratchStorageTopicIds, scratchIdentityContext, scratchDirectoryIdentity, scratchDirectoryAddress } from './scratch-topic-directories.js'

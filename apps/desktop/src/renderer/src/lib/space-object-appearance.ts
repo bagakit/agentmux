@@ -1,4 +1,4 @@
-import type { SpaceObjectImageTarget } from '../../../shared/object-avatars'
+import type { SpaceObjectImageTarget } from '@agentmux/host/object-avatars'
 import { type MoteAvatarTarget } from '../../../shared/mote-avatars'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import type { TopicCategory } from '@agentmux/core/control'

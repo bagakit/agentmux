@@ -790,4 +790,4 @@ const api: AgentMuxPreloadApi = {
 contextBridge.exposeInMainWorld('agentmux', api)
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
 
-import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from '../shared/object-avatars.js'
+import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from '@agentmux/host/object-avatars'

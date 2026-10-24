@@ -1,9 +1,9 @@
 import { nativeImage, type NativeImage } from 'electron'
 import { lstat, realpath } from 'node:fs/promises'
 import { AVATAR_OUTPUT_MAX_BYTES, requireSpaceObjectImageTarget, type ObjectAvatarInput,
-  type ObjectAvatarImage, type ObjectAvatarRef, type SpaceObjectAppearance, type SpaceObjectImageTarget } from '../shared/object-avatars.js'
+  type ObjectAvatarImage, type ObjectAvatarRef, type SpaceObjectAppearance, type SpaceObjectImageTarget } from '@agentmux/host/object-avatars'
 import { decodeObjectAvatar, objectAvatarPng, previewObjectAvatar } from './object-avatar-image.js'
-import { readObjectAvatarFile, saveObjectAvatarFile } from './object-avatar-files.js'
+import { readObjectAvatarFile, saveObjectAvatarFile } from '@agentmux/host/object-avatar-files'
 import { projectAppearance } from './project-appearance.js'
 
 /** A small client presentation port: identity and resource permission stay with the original owner. */

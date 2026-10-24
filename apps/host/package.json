@@ -22,6 +22,22 @@
     "esbuild": "^0.25.0"
   },
   "exports": {
+    "./object-avatars": {
+      "types": "./dist/object-avatars.d.ts",
+      "import": "./dist/object-avatars.js"
+    },
+    "./object-avatar-files": {
+      "types": "./dist/object-avatar-files.d.ts",
+      "import": "./dist/object-avatar-files.js"
+    },
+    "./mote-avatar-state": {
+      "types": "./dist/mote-avatar-state.d.ts",
+      "import": "./dist/mote-avatar-state.js"
+    },
+    "./mote-avatar-read": {
+      "types": "./dist/mote-avatar-read.d.ts",
+      "import": "./dist/mote-avatar-read.js"
+    },
     "./file-upload-owner": {
       "types": "./dist/file-upload-owner.d.ts",
       "import": "./dist/file-upload-owner.js"
