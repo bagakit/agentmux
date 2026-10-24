@@ -268,6 +268,7 @@ const events: AgentMuxMessageEvent[] = [
   { sequence: 5, kind: 'dispatch-open', at: now - 5000, messages: [refs[0]!] },
   { sequence: 6, kind: 'message', at: now - 4000, messages: [refs[3]!] }
 ]
+for (const ref of refs.slice(4)) events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'message', at: now - 3500, messages: [ref] })
 const denseSenders = extraSessions.slice(0, 88).filter(session => session.workspacePath === projects[0]!.path).slice(0, 12)
 const densePeers = extraSessions.slice(singletonProjects.length, 88).filter(session => session.workspacePath !== projects[0]!.path && session.processState === 'running').slice(0, 12)
 if (denseSenders.length !== 12 || densePeers.length !== 12) throw Error('The declared cross-area collaboration input must be nonempty and complete')
@@ -345,7 +346,8 @@ Object.assign(window, { graphCapture: {
     denseCommunication: denseRefs.map(ref => ({ messageId: ref.messageId, sender: JSON.stringify([hostId, ref.senderSessionId]), recipient: JSON.stringify([hostId, ref.recipientSessionId]) })),
     expectedInitialAgentKeys: [...initialSessions.map(session => JSON.stringify([session.hostId, session.kind === 'agent' ? session.control.agentSessionId : session.id])), ...retired.map(source => JSON.stringify([source.hostId, source.agentSessionId]))],
     projectAreaId: projectSpace, projectAreaNodeId: collaborationAreaNode(projectSpace), retainedSubjects: retired.map(source => ({ hostId: source.hostId, agentSessionId: source.agentSessionId, workspacePath: source.history?.workspacePath })),
-    initialCanonicalAgents: initialSessions.length + retired.length, permanentEmptyAreas: emptyProjects.length, initialSnapshotMembers: initialSessions.length } },
+    initialCanonicalAgents: initialSessions.length + retired.length, permanentEmptyAreas: emptyProjects.length,
+    emptyAreaNodeIds: emptyProjects.map(project => collaborationAreaNode(directoryIdentity(project.hostId!, project.path))), initialSnapshotMembers: initialSessions.length } },
   clearFocusForEntry() { useAppStore.getState().focusExecutionSession(null, undefined, { navigate: false }) },
   rememberBody() {
     originalBody = document.querySelector('.collaboration-evidence .composer-mailbox__detail .log-turn__body')
