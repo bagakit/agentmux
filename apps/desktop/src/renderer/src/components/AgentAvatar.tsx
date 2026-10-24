@@ -13,10 +13,7 @@ import { sessionPresentationById } from '../lib/session-presentation'
 import { observeAgentSession } from '../lib/agent-observation'
 import { attentionAccentFor } from '../lib/attention-event'
 import { PRESENCE_MARK_CORNERS } from '@agentmux/client-ui/presence-mark-corner'
-import { AgentAvatarBadgeIcon } from './AgentAvatarBadgeIcon'
 import { AgentAvatarFace as AgentAvatarArtwork } from '@agentmux/client-ui/components/AgentAvatarFace'
-import { AgentEnamelFilterDefinition } from '@agentmux/client-ui/components/AgentEnamelFilter'
-import { AgentProviderArtwork } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { SettingsNavigation } from './SettingsNavigation'
 import { SemanticIcon } from './semantic-icons'
@@ -57,33 +54,6 @@ function AgentAvatarFace({ provider, displayState, avatar, count, size, mark, ti
       : attention !== null || displayState === 'disconnected' ? <span className="agent-avatar__status status__dot" data-corner={PRESENCE_MARK_CORNERS.status} aria-hidden="true" /> : null}
     {count && count > 1 ? <span className="agent-avatar__count" data-corner={PRESENCE_MARK_CORNERS.count} aria-hidden="true">{count}</span> : null}
   </>
-}
-
-/** Static projection of this same face: no status, count, disclosure or identity lookup. */
-export function AgentAvatarStaticArtwork({ providerId, appearance, colors, renderRaster }: {
-  providerId?: AgentProviderId | undefined
-  appearance?: AgentAvatarAppearance | undefined
-  colors: { mark: string; enamel: string; badge: string; badgeBackground: string }
-  renderRaster(source: string, size: number): ReactNode
-}) {
-  const filterId = 'browser-avatar-enamel'
-  const corner = PRESENCE_MARK_CORNERS.badge
-  const badgeX = corner.endsWith('left') ? 5 : 13
-  const badgeY = corner.startsWith('top') ? 5 : 13
-  return <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="-2 -2 22 22"
-    color={colors.mark} aria-hidden="true">
-    {appearance?.tint ? <defs><AgentEnamelFilterDefinition id={filterId} tint={appearance.tint} backingColor={colors.enamel} /></defs> : null}
-    <g {...(appearance?.tint ? { filter: `url(#${filterId})` } : {})}>
-      <g transform="translate(2 2)"><AgentProviderArtwork {...(providerId === undefined ? {} : { providerId })}
-        size={14} renderRaster={renderRaster} /></g>
-      {appearance?.badge ? <g data-avatar-badge={appearance.badge}>
-        <circle cx={badgeX} cy={badgeY} r="3.5" fill={colors.badgeBackground} stroke={colors.enamel} strokeWidth="1" />
-        <g transform={`translate(${badgeX - 3} ${badgeY - 3})`} color={colors.badge}>
-          <AgentAvatarBadgeIcon badge={appearance.badge} size={6} />
-        </g>
-      </g> : null}
-    </g>
-  </svg>
 }
 
 /** Every Executor surface shares its artwork, state marker and hover/focus disclosure here. */

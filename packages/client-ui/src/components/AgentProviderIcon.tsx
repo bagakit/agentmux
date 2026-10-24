@@ -5,13 +5,15 @@ import {
   type BuiltInAgentProviderId
 } from '@agentmux/core/provider-id'
 import { SemanticIcon } from '../theme/icons.js'
+import type { SemanticIconId } from '../theme/icon-catalog.js'
 import type { ReactNode } from 'react'
-const hermesIconUrl = new URL('../../src/assets/agent-icons/hermes.png', import.meta.url).href
-const traexIconUrl = new URL('../../src/assets/agent-icons/traex.png', import.meta.url).href
-const grokIconUrl = new URL('../../src/assets/agent-icons/grok.png', import.meta.url).href
-const geminiIconUrl = new URL('../../src/assets/agent-icons/gemini.png', import.meta.url).href
-const antigravityIconUrl = new URL('../../src/assets/agent-icons/antigravity.png', import.meta.url).href
-const cursorIconUrl = new URL('../../src/assets/agent-icons/cursor.png', import.meta.url).href
+const agentIcon = (file: string, source: string) => ({ source, resource: '@agentmux/client-ui/agent-icons/' + file })
+const hermesIcon = agentIcon('hermes.png', new URL('../../src/assets/agent-icons/hermes.png', import.meta.url).href)
+const traexIcon = agentIcon('traex.png', new URL('../../src/assets/agent-icons/traex.png', import.meta.url).href)
+const grokIcon = agentIcon('grok.png', new URL('../../src/assets/agent-icons/grok.png', import.meta.url).href)
+const geminiIcon = agentIcon('gemini.png', new URL('../../src/assets/agent-icons/gemini.png', import.meta.url).href)
+const antigravityIcon = agentIcon('antigravity.png', new URL('../../src/assets/agent-icons/antigravity.png', import.meta.url).href)
+const cursorIcon = agentIcon('cursor.png', new URL('../../src/assets/agent-icons/cursor.png', import.meta.url).href)
 
 /**
  * 展示名。取值层在 Core 的 node-free `agent-provider-id.ts`（那张表由
@@ -107,29 +109,30 @@ function DroidIcon({ size }: { size: number }) {
  * `providerId ? <Icon/> : null`（于是缺失时整枚标记消失，留一个无法解释的空位），要么传 `''`
  * 之类的假值把「不存在」编码成一个合法值。两种都是把同一个判断复制到调用处。
  */
-export function AgentProviderArtwork({ providerId, size = 14, renderRaster }: {
+export function AgentProviderArtwork({ providerId, size = 14, renderRaster, renderSemantic }: {
   providerId?: AgentProviderId; size?: number
   /** Static SVG projections inline the same bundled raster; callers cannot supply a source URL. */
-  renderRaster?: (source: string, size: number) => ReactNode
+  renderRaster?: (source: string, size: number, resource: string) => ReactNode
+  renderSemantic?: (name: SemanticIconId, size: number) => ReactNode
 }) {
-  const raster = (source: string) => renderRaster ? renderRaster(source, size)
+  const raster = ({ source, resource }: ReturnType<typeof agentIcon>) => renderRaster ? renderRaster(source, size, resource)
     : <img src={source} width={size} height={size} alt="" draggable={false} />
   let icon: ReactNode
   switch (providerId) {
     case 'codex': icon = <CodexIcon size={size} />; break
     case 'claude': icon = <ClaudeIcon size={size} />; break
-    case 'traex': icon = raster(traexIconUrl); break
-    case 'hermes': icon = raster(hermesIconUrl); break
+    case 'traex': icon = raster(traexIcon); break
+    case 'hermes': icon = raster(hermesIcon); break
     case 'pi': icon = <PiIcon size={size} />; break
-    case 'grok': icon = raster(grokIconUrl); break
-    case 'gemini': icon = raster(geminiIconUrl); break
-    case 'antigravity': icon = raster(antigravityIconUrl); break
-    case 'cursor': icon = raster(cursorIconUrl); break
+    case 'grok': icon = raster(grokIcon); break
+    case 'gemini': icon = raster(geminiIcon); break
+    case 'antigravity': icon = raster(antigravityIcon); break
+    case 'cursor': icon = raster(cursorIcon); break
     case 'kimi': icon = <KimiIcon size={size} />; break
     case 'droid': icon = <DroidIcon size={size} />; break
     case 'copilot': icon = <CopilotIcon size={size} />; break
     case 'opencode': icon = <OpenCodeIcon size={size} />; break
-    default: icon = <SemanticIcon name="object.agent" size={size} strokeWidth={1.8} />
+    default: icon = renderSemantic ? renderSemantic('object.agent', size) : <SemanticIcon name="object.agent" size={size} strokeWidth={1.8} />
   }
   return icon
 }

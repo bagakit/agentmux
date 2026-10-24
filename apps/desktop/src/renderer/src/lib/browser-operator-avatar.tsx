@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { AgentProviderId } from '@agentmux/core'
 import type { AgentAvatarAppearance } from '../../../shared/contracts'
-import { AgentAvatarStaticArtwork } from '../components/AgentAvatar'
+import { AgentAvatarStaticArtwork } from '@agentmux/client-ui/components/AgentAvatarStaticArtwork'
 
 export type BrowserOperatorAvatarColors = {
   mark: string
