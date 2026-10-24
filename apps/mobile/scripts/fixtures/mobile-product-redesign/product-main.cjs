@@ -63,6 +63,10 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
   }
+  if (mode === 'floating-tools') {
+    await require('./floating-tools.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
+    result.passed = true; return
+  }
   if (mode === 'conversation-spacing') {
     await require('./conversation-spacing.cjs')({ win, read, until, resize, tap, button, capture, result })
     result.passed = true; return

@@ -18,6 +18,10 @@ const loadedSource = {}
 try {
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'floating-background': { file: 'apps/mobile/src/conversation/conversation.css', before: '.mobile-conversation__floating-tools { display: flex;', after: '.mobile-conversation__floating-tools { background: var(--surface-1); display: flex;' },
+    'floating-reading-overlap': { file: 'apps/mobile/src/conversation/conversation.css', before: '.mobile-conversation__floating-tools { display: flex;', after: '.mobile-conversation__floating-tools { transform: translateY(44px); display: flex;' },
+    'floating-blank-row': { file: 'apps/mobile/src/conversation/conversation.css', before: '.mobile-conversation__reader { position: relative;', after: '.mobile-conversation__reader { margin-top: 44px; position: relative;' },
+    'floating-focus-clipped': { file: 'apps/mobile/src/conversation/conversation.css', before: '.mobile-session-tool-slot .mobile-conversation__floating-tools > button:focus-visible { outline-offset: -3px; }', after: '.mobile-session-tool-slot .mobile-conversation__floating-tools > button:focus-visible { outline-offset: 2px; }' },
     'spacing-sender-row': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: 'sourceLabelsInDetails detailsOnlyMetadata coverageSummary=', after: 'sourceLabelsInDetails coverageSummary=' },
     'spacing-tools-overlay': { file: 'apps/mobile/src/conversation/conversation.css', before: 'position: relative; align-self: flex-end; flex: none; margin-inline-end: 8px; display: flex; align-items: center; isolation: isolate; pointer-events: none;', after: 'position: absolute; inset-inline-end: 8px; bottom: 4px; display: flex; align-items: center; isolation: isolate; pointer-events: none;' },
     'focus-oversize': { file: 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx', before: '<FocusStateMark kind={row.stateMark} presenceUnknown={row.presenceUnknown} />', after: '<FocusStateMark kind={row.stateMark} presenceUnknown={row.presenceUnknown} size={16} />' },
@@ -61,6 +65,24 @@ try {
         if (args.path !== path.join(root, variant.file)) return
         loadedSource[variant.file] = sha(source)
         return { contents: source, loader: variant.file.endsWith('.css') ? 'css' : 'tsx', resolveDir: path.dirname(args.path) }
+      })
+    } })
+  }
+  if (process.argv.includes('--floating-tools')) {
+    const file = 'apps/mobile/scripts/fixtures/mobile-product-redesign/product-entry.tsx', original = await fs.readFile(path.join(root, file), 'utf8')
+    const edits = [
+      { before: '  const [webUpdateScene, setWebUpdateScene] = useState(false)\n', after: '  const [webUpdateScene, setWebUpdateScene] = useState(false)\n  const [nativeHeaderScene, setNativeHeaderScene] = useState(false)\n' },
+      { before: '  Object.assign(window, { mobileProductScene: {\n', after: '  Object.assign(window, { mobileProductScene: {\n    setNativeHeaderScene,\n' },
+      { before: 'platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null}', after: 'platform={platform} native={nativeHeaderScene} webObservation={webUpdateScene ? webUpdateObservation : null}' }
+    ]
+    let source = original
+    for (const edit of edits) { assert.equal(source.split(edit.before).length - 1, 1, 'Private native fixture injection anchor is unique'); source = source.replace(edit.before, edit.after) }
+    receipt.fixtureOverride = { file, purpose: 'Only this controlled product scenario toggles the native header prop', originalSha256: sha(original), sha256: sha(source) }
+    overrides.push({ name: 'private-native-header-fixture', setup(plugin) {
+      plugin.onLoad({ filter: /product-entry\.tsx$/ }, args => {
+        if (args.path !== path.join(root, file)) return
+        loadedSource[file] = sha(source)
+        return { contents: source, loader: 'tsx', resolveDir: path.dirname(args.path) }
       })
     } })
   }
@@ -131,14 +153,18 @@ try {
     assert.equal(receipt.source[receipt.sourceOverride.file], receipt.sourceOverride.originalSha256, 'Mutation targets an actual nonempty production input')
     receipt.source[receipt.sourceOverride.file] = receipt.sourceOverride.sha256
   }
+  if (receipt.fixtureOverride) {
+    assert.equal(receipt.source[receipt.fixtureOverride.file], receipt.fixtureOverride.originalSha256, 'Private fixture injection targets original input')
+    receipt.source[receipt.fixtureOverride.file] = receipt.fixtureOverride.sha256
+  }
   receipt.loadedSource = loadedSource
   receipt.virtualInputs = Object.fromEntries(Object.entries(built.metafile.inputs).filter(([name]) => name.startsWith('(disabled):') || name.startsWith('<define:')))
-  for (const name of ['capture-ui.mjs', 'product-main.cjs', ...(process.argv.includes('--attachment-upload-exit') ? ['attachment-upload-exit.cjs'] : []), ...(process.argv.includes('--attachment-selection') ? ['attachment-selection.cjs'] : []), ...(process.argv.includes('--focus-state') ? ['focus-state.cjs'] : []), ...(process.argv.includes('--conversation-spacing') ? ['conversation-spacing.cjs'] : []), ...(process.argv.includes('--web-update') ? ['web-update.cjs'] : []), ...(process.argv.includes('--goal-recovery') ? ['goal-recovery.cjs'] : []), ...(process.argv.includes('--goal-exit') ? ['goal-exit.cjs'] : []), ...(process.argv.includes('--chat-start') ? ['chat-start.cjs'] : []), ...(process.argv.includes('--conversation-controls') ? ['conversation-controls.cjs'] : []), ...(process.argv.includes('--conversation-density') ? ['conversation-density.cjs'] : []), ...(process.argv.includes('--conversation-density-hit') ? ['conversation-density-hit.cjs'] : []), ...(process.argv.includes('--conversation-attachments') ? ['conversation-attachments.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
+  for (const name of ['capture-ui.mjs', 'product-main.cjs', ...(process.argv.includes('--floating-tools') ? ['floating-tools.cjs'] : []), ...(process.argv.includes('--attachment-upload-exit') ? ['attachment-upload-exit.cjs'] : []), ...(process.argv.includes('--attachment-selection') ? ['attachment-selection.cjs'] : []), ...(process.argv.includes('--focus-state') ? ['focus-state.cjs'] : []), ...(process.argv.includes('--conversation-spacing') ? ['conversation-spacing.cjs'] : []), ...(process.argv.includes('--web-update') ? ['web-update.cjs'] : []), ...(process.argv.includes('--goal-recovery') ? ['goal-recovery.cjs'] : []), ...(process.argv.includes('--goal-exit') ? ['goal-exit.cjs'] : []), ...(process.argv.includes('--chat-start') ? ['chat-start.cjs'] : []), ...(process.argv.includes('--conversation-controls') ? ['conversation-controls.cjs'] : []), ...(process.argv.includes('--conversation-density') ? ['conversation-density.cjs'] : []), ...(process.argv.includes('--conversation-density-hit') ? ['conversation-density-hit.cjs'] : []), ...(process.argv.includes('--conversation-attachments') ? ['conversation-attachments.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   for (const file of ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileAttachments.tsx', 'apps/mobile/src/platform/native/device.ts', 'apps/mobile/src/recovery/device-workface.ts', 'apps/mobile/src/conversation/MobileConversationSurface.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  const subset = ['attachment-upload-exit', 'attachment-selection', 'focus-state', 'conversation-spacing', 'web-update', 'goal-recovery', 'goal-exit', 'chat-start', 'conversation-controls', 'conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  const subset = ['floating-tools', 'attachment-upload-exit', 'attachment-selection', 'focus-state', 'conversation-spacing', 'web-update', 'goal-recovery', 'goal-exit', 'chat-start', 'conversation-controls', 'conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
   if (subset) receipt.captureSubset = subset
   receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, ...(subset ? [subset] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
@@ -153,9 +179,10 @@ try {
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   for (const [file, digest] of Object.entries(loadedSource)) {
     assert.equal(digest, receipt.source[file], 'Captured byte identity matches the actual compiled source input: ' + file)
-    if (file !== receipt.sourceOverride?.file) assert.equal(sha(await fs.readFile(path.join(root, file))), digest, 'Source retained through actual product capture: ' + file)
+    if (file !== receipt.sourceOverride?.file && file !== receipt.fixtureOverride?.file) assert.equal(sha(await fs.readFile(path.join(root, file))), digest, 'Source retained through actual product capture: ' + file)
   }
   if (receipt.sourceOverride) assert.equal(sha(await fs.readFile(path.join(root, receipt.sourceOverride.file))), receipt.sourceOverride.originalSha256, 'Private mutation never changes the shared source')
+  if (receipt.fixtureOverride) assert.equal(sha(await fs.readFile(path.join(root, receipt.fixtureOverride.file))), receipt.fixtureOverride.originalSha256, 'Private fixture injection never changes the shared source')
   if (receipt.restoredRenderer) {
     assert.notEqual(receipt.renderer.environment.pid, receipt.restoredRenderer.environment.pid, 'Fresh OS process owns the restored product')
     receipt.renderer.images.push(...receipt.restoredRenderer.images)
