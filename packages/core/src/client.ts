@@ -4856,7 +4856,7 @@ export class AgentMuxClient {
         createdAt: preparedCreation?.createdAt ?? now,
         updatedAt: preparedCreation?.updatedAt ?? now,
         creation: { createOperationId, ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}), initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested',
-          intentDigest, ...(createdBy ? { createdBy, createdRun: runRef(run.runId) } : {}),
+          intentDigest, ...(createdBy ? { createdBy } : {}), createdRun: runRef(run.runId),
           ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}), ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}),
           ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
         ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
@@ -4999,7 +4999,7 @@ export class AgentMuxClient {
         createOperationId,
         ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}),
         intentDigest,
-        ...(createdBy ? { createdBy, createdRun: runRef(run.runId) } : {}),
+        ...(createdBy ? { createdBy } : {}), createdRun: runRef(run.runId),
         ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}),
         ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}),
         initialPrompt: input.prompt?.trim() ? (promptConfirmed ? 'confirmed' : 'unconfirmed') : 'not-requested',
@@ -5088,7 +5088,7 @@ export class AgentMuxClient {
     const initialInput = bindInitialInput(seed.initialInput, seed.agentSessionId, runRef(run.runId))
     const session: AgentMuxStoredAgentSession = { ...structuredClone(seed), run: runRef(run.runId), retiredRuns: [],
       ...(initialInput ? { initialInput } : {}), creation: { ...seed.creation!, ...(initialInput?.key ? { initialInputKey: initialInput.key } : {}),
-        ...(seed.creation?.createdBy ? { createdRun: runRef(run.runId) } : {}) } }
+        createdRun: runRef(run.runId) } }
     let committed: AgentMuxStoredAgentSession | null = null
     try { committed = await this.registry.commitLifecycle(reservation, session) }
     catch (error) {
