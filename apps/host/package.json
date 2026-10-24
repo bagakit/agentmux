@@ -165,6 +165,14 @@
     "./content-owner": {
       "types": "./dist/content-owner.d.ts",
       "import": "./dist/content-owner.js"
+    },
+    "./settings-resource-read": {
+      "types": "./dist/settings-resource-read.d.ts",
+      "import": "./dist/settings-resource-read.js"
+    },
+    "./theme-observation": {
+      "types": "./dist/theme-observation.d.ts",
+      "import": "./dist/theme-observation.js"
     }
   }
 }

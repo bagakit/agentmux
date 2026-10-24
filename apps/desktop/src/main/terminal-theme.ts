@@ -1,7 +1,7 @@
 import { DEFAULT_THEME_ID, resolveTheme, workspaceTerminalPalette } from '@agentmux/client-ui/theme'
 import type { AppearanceConfig } from '../shared/contracts.js'
 import { configValuesEqual } from '../shared/config-edit.js'
-import { terminalPalette } from '../shared/terminal-palettes.js'
+import { terminalPalette } from '@agentmux/client-ui/theme'
 
 /** Main answers OSC queries using its host brightness fact when no Renderer is attached. */
 export function terminalPaletteForAppearance(appearance: AppearanceConfig, prefersDark: boolean) {

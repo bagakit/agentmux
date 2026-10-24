@@ -2,12 +2,16 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { DEFAULT_THEME_ID, getThemeCatalog } from '@agentmux/client-ui/theme'
 import type { AgentMuxAppearanceObservation, AgentMuxAppearanceObservationPort, AgentMuxControlSettingsResourceFields } from '@agentmux/core'
 import { AgentMuxError } from '@agentmux/core'
-import type { AppConfig } from '../shared/contracts.js'
-import { terminalPalette } from '../shared/terminal-palettes.js'
-import { configValuesEqual } from '../shared/config-edit.js'
-import type { ConfigOwner } from './config-owner.js'
+import type { AppAppearanceId, TerminalThemeId } from '@agentmux/client-ui/theme'
+import { terminalPalette } from '@agentmux/client-ui/theme'
+import { isDeepStrictEqual } from 'node:util'
+export type ThemeConfiguration = { appearance: { themeId?: string; appAppearance?: AppAppearanceId; terminalTheme: TerminalThemeId; customThemes?: Record<string, unknown> } }
+export type ThemeConfigurationReader = {
+  inspect<T>(capture: (current: ThemeConfiguration) => T): Promise<T>
+  subscribe(listener: (saved: ThemeConfiguration, previous: ThemeConfiguration) => void, onFailure?: (error: Error) => void): () => void
+}
 
-function projection(config: AppConfig) {
+function projection(config: ThemeConfiguration) {
   const requested = config.appearance.themeId ?? DEFAULT_THEME_ID
   const custom = config.appearance.customThemes ?? {}
   const catalog = getThemeCatalog(Object.hasOwn(custom, requested) ? { [requested]: custom[requested] } : {})
@@ -21,17 +25,17 @@ function projection(config: AppConfig) {
     ])]
   }
 }
-function relevantChanged(next: AppConfig, previous: AppConfig): boolean {
+function relevantChanged(next: ThemeConfiguration, previous: ThemeConfiguration): boolean {
   const a = next.appearance, b = previous.appearance
   if (a.themeId !== b.themeId || a.appAppearance !== b.appAppearance || a.terminalTheme !== b.terminalTheme) return true
   const id = a.themeId ?? DEFAULT_THEME_ID
-  return !configValuesEqual(a.customThemes?.[id], b.customThemes?.[id])
+  return !isDeepStrictEqual(a.customThemes?.[id], b.customThemes?.[id])
 }
 
 /** Per-reader derived snapshots, not another config truth or a durable event log. */
-export function themeObservation(owner: ConfigOwner): AgentMuxAppearanceObservationPort {
+export function themeObservation(owner: ThemeConfigurationReader): AgentMuxAppearanceObservationPort {
   return { subscribe: async (onSnapshot, onEnd, signal) => {
-    let closed = false, started = false, delivering = false, revision = 0
+    let closed = false, started = false, delivering = false, revision = 0, failed = false
     const sourceId = mintObjectId()
     let release: (() => void) | undefined, latest: AgentMuxAppearanceObservation | undefined
     const dispose = () => { if (closed) return; closed = true; latest = undefined; release?.(); signal.removeEventListener('abort', dispose) }
@@ -50,9 +54,19 @@ export function themeObservation(owner: ConfigOwner): AgentMuxAppearanceObservat
     try {
       const initial = await owner.inspect(config => {
         if (signal.aborted || closed) throw new AgentMuxError('Appearance reader was cancelled; saved themes and healthy Runs are preserved.', 'CONTROL_CANCELLED')
+        let confirmed = config
         release = owner.subscribe((saved, previous) => {
-          if (closed || !relevantChanged(saved, previous)) return
+          confirmed = saved
+          if (closed || !failed && !relevantChanged(saved, previous)) return
+          failed = false
           latest = { sourceId, revision: ++revision, ...projection(saved) }
+          void pump()
+        }, error => {
+          if (closed) return
+          failed = true
+          const retained = projection(confirmed)
+          latest = { sourceId, revision: ++revision, ...retained, issues: [...retained.issues,
+            { id: 'original-appearance-observation', message: error.message }] }
           void pump()
         })
         return { sourceId, revision, ...projection(config) } as AgentMuxAppearanceObservation

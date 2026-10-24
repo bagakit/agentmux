@@ -1,3 +1,5 @@
+import { createHostSettingsResourceRead } from './settings-resource-read.js'
+import { createHostAppearanceObservation } from './host-appearance.js'
 import { createHostContent } from './content-owner.js'
 import { createHostSnapshotObservation } from './snapshot-observation.js'
 import { createHostSpatialPresentation } from './spatial-presentation.js'
@@ -90,6 +92,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const service = {
     spatialState,
     ...content,
+    ...(configurationPath ? { settingsResources: createHostSettingsResourceRead(configurationPath), appearance: createHostAppearanceObservation(configurationPath) } : {}),
     snapshot: createHostSnapshotObservation(configurationPath, spatialState),
     spatialPresentation: createHostSpatialPresentation({ ...(configurationPath ? { configurationPath } : {}), clients: () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])] }),
     mobileAssets,
@@ -195,6 +198,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     // is never displaced or adopted by speculative workflow probes.
     const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
     runtime = await startHeadlessAgentMux({ store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
+      ...(options.connections?.clients ? { coreClients: options.connections.clients } : {}),
       ...(options.providers ? { providers: options.providers } : {}), service,
       forwardingPeer: { authoritySocketPath: desktopPath, bindAuthority: async principal => principal.kind === 'device'
         ? await (await authorityReady).bindForwardedDevice(principal) : undefined },
