@@ -1,3 +1,5 @@
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+import { createHash } from 'node:crypto'
 import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, mkdir, readFile, writeFile, rm, truncate } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -247,4 +249,30 @@ describe('exact native recorded image through the original public Core owner',()
   forwardRpc.mockResolvedValueOnce({...remote,hostId:'local',reference:'another'} as never)
   await expect(service.call('agent.history.resource',input)).rejects.toMatchObject({code:'CONTROL_PROTOCOL_ERROR'})
  })
+})
+
+
+describe('original Markdown image nodes through the resource boundary', () => {
+  it('reads direct and reference images, rejects code and changed text without reading another caller path', async () => {
+    const h = await fixture()
+    const text = `![one](${h.image})\n![two][diagram]\n\n[diagram]: ${h.data}\n\n` + '`![code](' + h.image + ')`' + '\n```md\n![code](' + h.image + ')\n```\n\\![escaped](' + h.image + ')'
+    h.entries.push({ turnId: 'markdown-turn', item: { type: 'agentMessage', id: 'markdown-record', text } }); await h.save()
+    const request = { ...h.request, recordId: 'markdown-record', turnId: 'markdown-turn', representation: 'image' as const,
+      markdownImage: { index: 0, textSha256: createHash('sha256').update(text).digest('hex') } }
+    expect((await h.client.sessionHistoryResource('image-session', request)).result).toMatchObject({ status: 'read', dataBase64: png.toString('base64') })
+    expect((await h.client.sessionHistoryResource('image-session', { ...request, expectedReference: h.data,
+      markdownImage: { ...request.markdownImage, index: 1 } })).result).toMatchObject({ status: 'read', dataBase64: png.toString('base64') })
+    await expect(h.client.sessionHistoryResource('image-session', { ...request, markdownImage: { ...request.markdownImage, index: 2 } })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH' })
+    await expect(h.client.sessionHistoryResource('image-session', { ...request, expectedReference: join(h.home, 'unrecorded.png') })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH' })
+    const server = new AgentMuxControlServer({ coreClients: () => [{ hostId: 'local', client: h.client }] }, join(h.home, 'markdown.sock'))
+    await server.start(); closes.push(() => server.stop())
+    const inputFile = join(h.home, 'markdown-read.json')
+    await writeFile(inputFile, JSON.stringify({ hostId: 'local', agentSessionId: 'image-session', ...request }))
+    const receipt = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'agent', 'history', 'resource', '--input', inputFile], objectCliEnvironment(h.home))
+    expect(receipt.code, receipt.stderr).toBe(0)
+    expect(JSON.parse(receipt.stdout).result.result).toMatchObject({ status: 'read', dataBase64: png.toString('base64') })
+    h.entries.at(-1)!.item.text = text + ' revised'; await h.save()
+    await expect(h.client.sessionHistoryResource('image-session', request)).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH' })
+    expect((await loadAgentSessions(h.store))[0]!.run).toEqual({ runId: 'original-healthy-run' })
+  })
 })
