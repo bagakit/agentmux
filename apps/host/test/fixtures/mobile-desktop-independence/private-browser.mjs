@@ -125,7 +125,14 @@ export async function readOriginalContent(page, input) {
   if (await row.count() !== 1) throw Error('One original workspace is required')
   if (await row.locator('button.mobile-space-row').getAttribute('aria-expanded') !== 'true') await row.locator('button.mobile-space-row').click()
   await row.getByRole('button', { name: input.fileName, exact: false }).click()
-  await page.getByText(input.body, { exact: true }).waitFor()
+  try { await page.getByText(input.body, { exact: true }).waitFor() }
+  catch (error) {
+    const observed = await page.evaluate(() => ({
+      panels: Array.from(document.querySelectorAll('.mobile-spatial-panel')).map(panel => ({ visible: Boolean(panel.getClientRects().length), text: panel.innerText, html: panel.outerHTML })),
+      record: JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1'))
+    })).catch(observation => ({ unavailable: observation.message }))
+    throw new Error(error.message + '; original Mobile content observation=' + JSON.stringify(observed))
+  }
   return { body: await page.locator('.mobile-spatial-panel').innerText(),
     presentation: await page.evaluate(() => JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1')).presentation) }
 }
