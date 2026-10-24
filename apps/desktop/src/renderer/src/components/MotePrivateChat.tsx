@@ -32,7 +32,8 @@ export function MotePrivateChat({ scope, active, reference, onOpenPath }: { scop
   return <MotePrivateChatPanel key={JSON.stringify(target)} scope={scope} target={target} active={active} reference={reference} onOpenPath={onOpenPath} />
 }
 
-function MotePrivateChatPanel({ scope, target, active, reference, onOpenPath }: { scope: MoteWorkfaceScope; target: ReturnType<typeof moteConnectionTarget>; active: boolean; reference?: WorkbenchProjectionSelection | null | undefined; onOpenPath(path: string): Promise<unknown> }) {
+function MotePrivateChatPanel({ scope, target: initialTarget, active, reference, onOpenPath }: { scope: MoteWorkfaceScope; target: ReturnType<typeof moteConnectionTarget>; active: boolean; reference?: WorkbenchProjectionSelection | null | undefined; onOpenPath(path: string): Promise<unknown> }) {
+  const target = useRef(initialTarget).current
   const settings = useContext(SettingsNavigation)
   const retainedDraft = useRef(target ? Object.values(useAppStore.getState().moteChatIntents).find(intent => intent.method === 'space.mote.chat.configure' && sameMotePreferencesTarget(intent.input.target, target)) : undefined).current
   const openingValues = retainedDraft?.method === 'space.mote.chat.configure' ? retainedDraft.input.values : MOTE_CHAT_DEFAULT_VALUES
