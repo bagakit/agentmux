@@ -15,7 +15,7 @@ const input: MoteChatDiagnosisInput = { target: { spaceId: 'private-mote', zoneI
   expectedResource: { hostId: 'original-host', workspaceId: 'private-workspace', workspacePath: fixturePath('private-mote-home') } } }
 const stage = { state: 'ready' as const }
 const inputObservation = (overrides: Partial<MoteChatDiagnosisIntake['input']> = {}): MoteChatDiagnosisIntake['input'] => ({
-  status: null, observation: 'not-started', controlState: null, receiptObservation: null, waiting: null, preparationReason: null, failureCode: null, ...overrides
+  status: null, observation: 'not-started', controlState: null, receiptObservation: null, waiting: null, preparationReason: null, failureCode: null, runtime: null, ...overrides
 })
 const diagnosis = (): MoteChatDiagnosis => ({
   targetKey: moteChatDiagnosisKey(input.target), limit: 5,
@@ -121,7 +121,11 @@ it('reuses exact safe waiting combinations while separating receipt ownership fr
     { ...original, failureCode: 'PRIVATE_EXCEPTION_CODE' },
     { ...original, failureCode: { code: 'AGENT_INTERACTION_PENDING' } },
     { ...original, preparationReason: 'native-busy', failureCode: 'AGENT_INTERACTION_PENDING' },
-    { ...original, preparationReason: 'private-code' }, { ...original, gateId: 'private gate' }
+    { ...original, preparationReason: 'private-code' }, { ...original, gateId: 'private gate' },
+    { ...original, runtime: { target: 'original', state: 'running', exitCode: 1 } },
+    { ...original, runtime: { target: 'original', state: 'exited', exitCode: 0, runId: 'private-run' } },
+    { ...original, runtime: { target: 'guessed', state: 'exited', exitCode: null } },
+    { ...original, runtime: { target: 'original', state: 'dead', exitCode: null } }
   ]
   for (const value of malformed) {
     const bad = { ...report, incoming: { rows: [{ ...row, input: value }], more: false } }
