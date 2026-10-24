@@ -6,12 +6,13 @@ import { ScratchTopics, readOriginalMoteConfiguration, type ScratchWorkspace } f
 import { AVATAR_EDGE, isObjectAvatarRef } from './object-avatars.js'
 import { readObjectAvatarFile, objectAvatarImageSize, assertObjectAvatarSize } from './object-avatar-files.js'
 import { readMoteAvatarOperation, savedMoteAvatarSnapshot } from './mote-avatar-state.js'
+import { rasterizeStaticAvatar, savedMoteAvatarDrawing } from './static-avatar.js'
 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const unconfirmed = (): never => { throw new AgentMuxError(
   'The original local Mote avatar resource is unconfirmed. Its saved appearance, files and existing conversations are retained.', 'MOTE_AVATAR_SOURCE_UNCONFIRMED') }
 
-/** Read the original saved PNG only; generation, editing and series remain with their existing owner. */
+/** Read the original saved choice; generation, editing and series remain with their existing owner. */
 export function createHostMoteAvatarRead(options: { configurationPath: string }) {
   const topics = new ScratchTopics()
   async function configuration(target: MoteAvatarTarget) {
@@ -23,9 +24,11 @@ export function createHostMoteAvatarRead(options: { configurationPath: string })
     const appearance = raw.appearance ?? {}
     if (!record(appearance) || appearance.spaceObjectIcons !== undefined && !record(appearance.spaceObjectIcons) ||
       appearance.spaceObjectIconRevisions !== undefined && !record(appearance.spaceObjectIconRevisions)) return unconfirmed()
-    return { workspace, current: savedMoteAvatarSnapshot(appearance as {
+    const snapshot = savedMoteAvatarSnapshot(appearance as {
       spaceObjectIcons?: Record<string, unknown>; spaceObjectIconRevisions?: Record<string, unknown>
-    }, target.objectKey) }
+    }, target.objectKey)
+    const drawing = savedMoteAvatarDrawing(snapshot.choice, appearance)
+    return { workspace, drawing, current: drawing ? savedMoteAvatarSnapshot(appearance, target.objectKey, drawing) : snapshot }
   }
   return { async read(raw: MoteAvatarTarget, operationId?: string): Promise<MoteAvatarRead> {
     const target = parseMoteAvatarTarget(raw), original = await configuration(target)
@@ -37,11 +40,13 @@ export function createHostMoteAvatarRead(options: { configurationPath: string })
     }
     const choice = original.current.choice
     const ref = isMoteAvatarSeriesChoice(choice) ? choice.image : isObjectAvatarRef(choice) ? choice : undefined
-    if (!ref) {
+    if (!ref && !original.drawing) {
       throw new AgentMuxError('This saved appearance has no immutable PNG available to the Node Host. Its original choice and existing editor are retained; text delivery remains available.', 'MOTE_AVATAR_SOURCE_UNAVAILABLE')
     }
     try {
-      const png = await readObjectAvatarFile(directory, ref), size = objectAvatarImageSize(png, 'image/png')
+      const rendered = original.drawing ? await rasterizeStaticAvatar(original.drawing, AVATAR_EDGE) : undefined
+      const png = rendered ? Buffer.from(rendered.dataUrl.slice('data:image/png;base64,'.length), 'base64') : await readObjectAvatarFile(directory, ref!)
+      const size = objectAvatarImageSize(png, 'image/png')
       assertObjectAvatarSize(size)
       if (size.width !== AVATAR_EDGE || size.height !== AVATAR_EDGE) throw new Error('The saved avatar is not its original 256 pixel PNG crop.')
       const after = await configuration(target)
