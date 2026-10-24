@@ -420,10 +420,10 @@ export function NewTabSurface({
         <ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />
       </> : null}
       {sections.agents === 'expanded' ? <div className="launch-surface__footer">
-        <div className="launcher-primary-actions"><LauncherResumePicker workspace={workspace} disabled={busy !== null} />
-          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionStartIcon size={13} />}{busy === 'agent' ? 'Launching…' : 'Launch'}</button>
-        </div>
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
+        <div className="launcher-primary-actions"><LauncherResumePicker workspace={workspace} disabled={busy !== null} />
+          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busy === 'agent' ? 'Launching…' : 'Launch'}</button>
+        </div>
       </div> : null}
       {host?.kind === 'ssh' && inventory && inventory.state !== 'ready' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: inventory.state === 'checking' ? 'Checking agents on this host' : 'Host Executor discovery failed', mode: `${host?.label ?? workspace?.hostId}: ${inventory.detail ?? 'Current inventory is unknown.'} Previously read configurations remain selectable.`,
