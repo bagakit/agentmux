@@ -38,7 +38,7 @@ export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { requ
     if (previous.digest !== digest) throw new AgentMuxError('This operation belongs to another original spatial creation intent.', 'SPACE_REQUEST_CONFLICT')
     const original = graph.regions.find(region => region.tabId === previous.address.tabId && region.regionId === previous.address.regionId)
     const zone = graph.zones.find(zone => zone.zoneId === previous.address.zoneId)
-    if (!original || original.kind !== 'agent' || original.agentSessionId !== previous.agentSessionId ||
+    if (previous.agentSessionId !== input.agentSessionId || !original || original.kind !== 'agent' || original.agentSessionId !== previous.agentSessionId ||
         JSON.stringify(previous.execution) !== JSON.stringify(input.execution) || !zone || zone.hostId !== previous.execution.hostId ||
         zone.directoryPath !== previous.execution.workspacePath || zone.workspaceId !== previous.execution.workspaceId) throw new AgentMuxError(
       'The exact admitted spatial binding or execution resource changed. Keep the original operation and inspect its Core Session.', 'SPACE_TARGET_CHANGED')

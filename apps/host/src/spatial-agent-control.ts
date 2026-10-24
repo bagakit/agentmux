@@ -87,6 +87,8 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       // Unknown is not absence. This permits recording only the spatial intent;
       // the original Core same-SID/operation claim alone decides any start.
     }
+    const platformContext = await options.agentMuxContext?.(request)
+    context.signal?.throwIfAborted(); await context.assertCurrent?.()
     const admission = await options.spatial.admitAgentOpen({ request, agentSessionId, execution, regionResource: regionDescriptor({ agentSessionId, execution }, 'launching') })
     try {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
@@ -100,7 +102,6 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
         prepared = await topics.prepareAgent({ id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspace.path }, original.id, { providerId: executor.providerId, sessionId: agentSessionId })
         if (prepared.absolutePath !== execution.workspacePath) throw new AgentMuxError('The original Topic directory changed. Its admitted identity is retained.', 'SPACE_RESOURCE_UNKNOWN')
       }
-      const platformContext = await options.agentMuxContext?.(request)
       const note = [prepared?.prompt, platformContext, configuredProfileAgentContext(raw.profile)].filter(Boolean).join('\n\n')
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       await client.createAgentWithDelivery({ providerId: executor.providerId, executorId: request.content.executorId,
