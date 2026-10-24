@@ -1,5 +1,5 @@
-import type { ComposerSuggestion } from '../components/AgentComposer'
-import { encodeSemanticReference } from './composer-semantic-reference'
+import type { ComposerSuggestion } from '../components/AgentComposer.js'
+import { encodeSemanticReference } from './composer-semantic-reference.js'
 
 /** The presentation fields of the original Settings Prompt; clients never own a second library. */
 export type ComposerPrompt = { id: string; keyword: string; label: string; body: string; providerId?: string }
