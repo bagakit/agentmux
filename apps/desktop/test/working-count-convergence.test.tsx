@@ -75,8 +75,8 @@ it('matches complete Focus grouping without reading conversation bodies across e
   } finally { clock.mockRestore() }
 })
 it('the product projection delegates turn work rather than copying a literal status comparison', () => {
-  const source = ts.createSourceFile('focus-context.ts', readFileSync(new FileURL('../src/renderer/src/lib/focus-context.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
-  const owner = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'focusBucketForSession')
+  const source = ts.createSourceFile('focus-context.ts', readFileSync(new FileURL('../../../packages/client-ui/src/lib/agent-presentation.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
+  const owner = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'agentPresentationBucket')
   expect(owner).toBeTruthy()
   const calls: string[] = []
   const visit = (node: ts.Node) => { if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) calls.push(node.expression.text); node.forEachChild(visit) }

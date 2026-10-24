@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { SelectorPresence } from '../src/renderer/src/components/SelectorList.js'
-import { AGENT_DISPLAY_STATES } from '../src/renderer/src/lib/attention-vocabulary.js'
+import { AGENT_DISPLAY_STATES } from '@agentmux/client-ui/attention-vocabulary'
 import { allStyleRules } from './helpers/styles.js'
 
 /**

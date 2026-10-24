@@ -224,14 +224,6 @@ const DELIBERATE: ReadonlyArray<{
       '删了这个导出，那两道守卫就只能手抄两个名字，Core 加一个会上色的 category 时它们静默漏测。'
   },
   {
-    module: 'lib/attention-vocabulary.ts',
-    name: 'AGENT_DISPLAY_STATES',
-    kind: 'test-only',
-    premise:
-      '全部 Agent 显示状态的 SSOT，从 NEEDS_YOU_BY_STATE 的键派生。八个测试用它逐状态驱动用例，' +
-      '不手抄状态清单——手抄正是「新状态恰好在它新增时漏测」的入口。删了它，那些穷举测试就失去全集。'
-  },
-  {
     module: 'lib/browser-toolbar.ts',
     name: 'withBrowserToolbarItem',
     kind: 'test-only',
@@ -338,7 +330,7 @@ const DELIBERATE: ReadonlyArray<{
  * 余量时才开火，买到的是运气而非封闭性，还随代码库长大静默失效。加一条豁免必须同时改这个数字，于是每次
  * 增减都在 review 里显形；下面「每条豁免逐条有效」的自检杀「同数换条」那一侧，两条合起来才封住这张表。
  */
-const DELIBERATE_COUNT = 15
+const DELIBERATE_COUNT = 14
 
 const exemptionKey = (module: string, name: string): string => `${module}#${name}`
 const EXEMPT = new Set(DELIBERATE.map((entry) => exemptionKey(entry.module, entry.name)))

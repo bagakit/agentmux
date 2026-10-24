@@ -12,7 +12,7 @@ import {
   attentionAccentFor,
   type AttentionCategory
 } from '../src/renderer/src/lib/attention-event.js'
-import { AGENT_DISPLAY_STATES } from '../src/renderer/src/lib/attention-vocabulary.js'
+import { AGENT_DISPLAY_STATES } from '@agentmux/client-ui/attention-vocabulary'
 import type { AgentSessionSnapshot } from '../src/shared/contracts.js'
 // `allStyles` 只给那条自检用（证明剥注释真的剥掉了东西）；所有判「规则在不在场」的断言走 `allStyleRules`。
 import { allStyleRules, allStyles } from './helpers/styles.js'

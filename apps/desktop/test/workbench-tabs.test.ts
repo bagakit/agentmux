@@ -1,17 +1,8 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
-import {
-  addWorkbenchRegion,
-  agentDisplayName,
-  createWorkbenchTab,
-  firstPromptFromTimeline,
-  renameWorkbenchTab,
-  tabDisplayName,
-  type AgentNameFacts,
-  type AgentWorkbenchSurface,
-  type WorkbenchTab
-} from '../src/renderer/src/lib/workbench-tabs.js'
+import { addWorkbenchRegion, agentDisplayName, createWorkbenchTab, renameWorkbenchTab, tabDisplayName, type AgentNameFacts, type AgentWorkbenchSurface, type WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { regionIds, workbenchRegionBounds } from '@agentmux/layout'
 
 /**
