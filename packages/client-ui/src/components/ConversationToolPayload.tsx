@@ -23,17 +23,18 @@ function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, c
   const [view, setView] = useState({ text, sourceIdentity, formatted: false })
   if (view.text !== text || view.sourceIdentity !== sourceIdentity) setView({ text, sourceIdentity, formatted: false })
   const formatted = view.text === text && view.sourceIdentity === sourceIdentity && view.formatted
-  const readable = useMemo(() => {
+  const validJson = useMemo(() => {
     try {
       // Validate strict JSON without using the parsed values to reconstruct its tokens.
       JSON.parse(text)
-      return applyEdits(text, format(text, undefined, { tabSize: 2, insertSpaces: true, eol: '\n' }))
-    } catch { return null }
+      return true
+    } catch { return false }
   }, [text])
+  const readable = useMemo(() => formatted && validJson ? applyEdits(text, format(text, undefined, { tabSize: 2, insertSpaces: true, eol: '\n' })) : text, [text, formatted, validJson])
   return <>
     <div className="conversation-detail-actions">
       {callId ? <span className="conversation-tool-trace__identity">Call <code>{callId}</code></span> : null}
-      {readable !== null ? <button type="button" className="conversation-tool-trace__format" aria-label="Format JSON"
+      {validJson ? <button type="button" className="conversation-tool-trace__format" aria-label="Format JSON"
         aria-pressed={formatted} title="Format JSON for reading; copying keeps the original text"
         onClick={() => setView({ text, sourceIdentity, formatted: !formatted })}>Format JSON</button> : null}
       {text.length > 0 ? <ContentCopyButton text={text} identity={identity} label={copyLabel} /> : null}

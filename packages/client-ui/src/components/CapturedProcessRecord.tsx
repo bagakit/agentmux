@@ -1,3 +1,4 @@
+import { ConversationRetainedDetails } from './ConversationRetainedDetails.js'
 import { ConversationBodyWorkContext, ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
 import { ConversationSourceLabels } from './ConversationSourceLabels.js'
 import { useEffect, useId, useMemo, useState } from 'react'
@@ -14,14 +15,14 @@ import { parseUnifiedDiff, toolEditDiff } from '../lib/conversation-tool-diff.js
 import { ConversationToolDiff } from './ConversationToolDiff.js'
 
 /** Rendering of an already classified Core process/interaction; no input or permission authority. */
-export function CapturedProcessRecord({ record, disclosure, located = false, workspaceRoot = '', origin = Number.NaN }: {
-  record: ConversationRecord; disclosure?: ConversationProcessProps['disclosure']; located?: boolean; workspaceRoot?: string; origin?: number
+export function CapturedProcessRecord({ record, disclosure, bodyOnly = false, located = false, workspaceRoot = '', origin = Number.NaN }: {
+  record: ConversationRecord; bodyOnly?: boolean; disclosure?: ConversationProcessProps['disclosure']; located?: boolean; workspaceRoot?: string; origin?: number
 }) {
   const [localOpen, setOpen] = useState(false), [presented, setPresented] = useState(false)
   const bodyId = useId()
   const item = record.original.kind === 'captured' ? record.original.item : null
   const title = useMemo(() => item ? stepTitle(item.title, item.toolName, item.toolInput, workspaceRoot) : '', [item, workspaceRoot])
-  const expanded = located || ((item ? disclosure?.steps.get(item.id) : undefined) ?? localOpen)
+  const expanded = bodyOnly || located || ((item ? disclosure?.steps.get(item.id) : undefined) ?? localOpen)
   const shown = expanded || presented
   useEffect(() => { if (located) { setOpen(true); setPresented(true) } }, [located])
   useEffect(() => { if (expanded) setPresented(true) }, [expanded])
@@ -36,14 +37,15 @@ export function CapturedProcessRecord({ record, disclosure, located = false, wor
   }, [project, item?.toolInput])
   if (!item) return null
   const heavy = [item.content, item.toolInput, item.toolOutput].some(text => text !== undefined && needsProgressiveText(text))
+  const body = shown ? <ConversationProgressiveBody heavy={heavy} reveal={located} reading={reading}>
+    <ConversationBodyWorkContext.Provider value={null}><CapturedProcessBody record={record} item={item} project={project} /></ConversationBodyWorkContext.Provider>
+  </ConversationProgressiveBody> : null
+  if (bodyOnly) return body
   return <div className="wf-native-process" data-message-source-key={conversationMessageSourceKey(record.agentSessionId, record.source)} data-captured-process-id={item.id} data-conversation-role={record.role}>
     <RecordedToolRow className={`log-row log-row--${item.kind}`} observation={{ id: item.id, title, source: <ConversationSourceLabels sources={record.sources?.fields[item.toolInput !== undefined ? 'toolInput' : 'content'] ?? record.sources?.main} />, persistentSource: true, status: item.status,
       recordedTime: describeActivityRecordTime(item.createdAt, item.createdAt, origin) }} icon={<SemanticIcon name={item.kind === 'tool_call' ? 'conversation.tool-call' : item.kind === 'permission' ? 'status.permission' : 'object.activity'} size={12} />}
       expanded={expanded} controls={bodyId} onToggle={() => { if (!expanded) setPresented(true); setOpen(!expanded); disclosure?.onStepExpandedChange(item.id, !expanded) }} />
-    <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>{shown ?
-      <ConversationProgressiveBody heavy={heavy} reveal={located} reading={reading}>
-        <ConversationBodyWorkContext.Provider value={null}><CapturedProcessBody record={record} item={item} project={project} /></ConversationBodyWorkContext.Provider>
-      </ConversationProgressiveBody> : null}</div>
+    <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>{body}</div>
   </div>
 }
 
@@ -59,9 +61,9 @@ function CapturedProcessBody({ record, item, project }: { record: ConversationRe
         if (text === undefined || text.length === 0) return null
         const payload = <><ConversationSourceLabels sources={record.sources?.fields[index === 1 ? 'toolInput' : index === 2 ? 'toolOutput' : 'content']} /><ConversationToolPayload text={text} identity={sourceIdentity} sourceIdentity={sourceIdentity} copyLabel={index === 1 ? 'Copy tool input' : index === 2 ? 'Copy tool output' : 'Copy recorded content'} /></>
         return diff && (index === 1 || index === 0 && item.toolInput === undefined)
-          ? <details key={index}><summary>{index === 1 ? 'Original tool input' : 'Original recorded content'}</summary>{payload}</details>
+          ? <ConversationRetainedDetails key={index} summary={index === 1 ? 'Original tool input' : 'Original recorded content'}>{() => payload}</ConversationRetainedDetails>
           : <div key={index} className="conversation-tool-trace__payload">{payload}</div>
-      }) : <details><summary>Original record details</summary><ConversationToolPayload text={JSON.stringify(item, null, 2)} identity={sourceIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy original record" /></details>}
+      }) : <ConversationRetainedDetails summary="Original record details">{() => <ConversationToolPayload text={JSON.stringify(item, null, 2)} identity={sourceIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy original record" />}</ConversationRetainedDetails>}
   </>
 }
 

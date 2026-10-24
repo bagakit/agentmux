@@ -10,7 +10,7 @@ export type ConversationProcessMember = { id: string; sources: readonly Conversa
 
 function processMembers(records: readonly ConversationRecord[]): ConversationProcessMember[] {
   return records.map(record => {
-    const originals = record.records?.flatMap(source => source.reference ? [source.reference] : [])
+    const originals = (record.deferred?.records ?? record.records)?.flatMap(source => source.reference ? [source.reference] : [])
     const primary = conversationItemRef(record)
     return { id: record.id, sources: originals?.length ? originals : primary ? [primary] : [] }
   })
@@ -89,10 +89,10 @@ export function ConversationRecordSequence({ records, sequence, sourceKey, rende
     })
   }, [records, sourceKey])
   // Metrics belong to exact native records; this is a leaf adaptation, never ordering.
-  const metrics = projectConversationMetrics(records.flatMap(record => record.original.kind === 'native' ? [record.original.item] : []))
+  const metrics = projectConversationMetrics(records.flatMap(record => record.original.kind === 'native' ? [record.original.item] : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? [record.original.item.item] : []))
   const renderOne = (record: ConversationRecord, wrapBody?: (body: ReactNode) => ReactNode,
     disclosure?: NonNullable<ConversationProcessProps['disclosure']>, showDiagnostic = true, showMetrics = true) => {
-    const item = record.original.kind === 'native' ? record.original.item : undefined
+    const item = record.original.kind === 'native' ? record.original.item : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? record.original.item.item : undefined
     return <Fragment key={conversationPresentationKey(record)}>{renderRecord(record, wrapBody, disclosure)}
       {showMetrics && item && metrics.has(item.id) ? <ConversationMetrics observation={metrics.get(item.id)!} /> : null}
       {showDiagnostic && item?.metricsDiagnostic ? <p className="conversation-metrics__notice" role="status">{item.metricsDiagnostic.message}</p> : null}
@@ -108,8 +108,8 @@ export function ConversationRecordSequence({ records, sequence, sourceKey, rende
       {(() => {
         const disclosure = disclosureFor(row.records)
         if (!renderProcess) return row.entries.map(entry => entry.kind === 'record' ? renderOne(entry.record, undefined, disclosure) : renderAnchor(entry.insertion.key))
-        const observed = row.records.flatMap(record => record.original.kind === 'native' && metrics.has(record.rawId) ? [metrics.get(record.rawId)!] : [])
-        const summary = observed.length === 1 && row.records.every(record => record.original.kind === 'native') ? observed[0] : undefined
+        const observed = row.records.flatMap(record => record.source.kind === 'native' && metrics.has(record.rawId) ? [metrics.get(record.rawId)!] : [])
+        const summary = observed.length === 1 && row.records.every(record => record.source.kind === 'native') ? observed[0] : undefined
         return renderProcess({ id: row.id, records: row.records,
           renderRecord: (record, wrapBody) => renderOne(record, wrapBody, disclosure, false, !summary),
           entries: row.entries.map(entry => entry.kind === 'record' ? entry : { kind: 'anchor', key: entry.insertion.key, content: renderAnchor(entry.insertion.key) }),

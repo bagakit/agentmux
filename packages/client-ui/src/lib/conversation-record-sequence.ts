@@ -48,9 +48,10 @@ export function projectConversationRecordSequence(
     insert(key)
     if (beforeRecordId === key) { flush(); rows.push({ kind: 'boundary' }) }
     if (record.role === 'process') {
-      const turn = record.original.kind === 'native' && record.original.item.turnId !== undefined
+      const native = record.original.kind === 'native' ? record.original.item : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? record.original.item.item : undefined
+      const turn = native?.turnId !== undefined
         ? JSON.stringify([record.sourceHostId, record.source.kind === 'native' ? record.source.providerId : undefined,
-          record.source.kind === 'native' ? record.source.nativeSessionId : undefined, record.original.item.turnId]) : undefined
+          record.source.kind === 'native' ? record.source.nativeSessionId : undefined, native.turnId]) : undefined
       const prior = previous.get(key)
       // Never combine two already mounted parents. A retained member owns its group.
       if (knownTurn !== undefined && turn !== undefined && knownTurn !== turn

@@ -1,3 +1,6 @@
+import { conversationProcessWitness, deferConversationProcessRecord, isCompleteConversationRecord, type ConversationDeferredRecord, type ConversationReadRecord } from './conversation-process-detail.js'
+export { isCompleteConversationRecord } from './conversation-process-detail.js'
+export type { ConversationProcessPart, ConversationProcessHeader, ConversationDeferredRecord, ConversationReadRecord } from './conversation-process-detail.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { normalizeSessionHistoryPage } from './session-history.js'
@@ -26,8 +29,8 @@ export type ConversationCheckpoint = ConversationRef & { sourceHostId: string; f
 export type ConversationVersionedAnchor = { record: ConversationItemRef; revision: string; frontier: ConversationCheckpoint }
 export type ConversationTimelineReadInput = ConversationRef & { limit?: number; cursor?: string; maxBytes?: number; record?: ConversationItemRef; anchor?: ConversationVersionedAnchor; view?: string; nativeSource?: { providerId: string; nativeSessionId: string };
   /** Older expansion must retain every accepted contribution or leave the original view unchanged. */
-  preserveCurrent?: boolean }
-export type ConversationUnit = { event: ConversationEvent; records: readonly ConversationSourceRecord[] }
+  preserveCurrent?: boolean; processDetails?: 'deferred' }
+export type ConversationUnit = { event: ConversationEvent; records: readonly ConversationReadRecord[] }
 export type ConversationUnitEntry = JsonReadEntry<ConversationUnit>
 export type ConversationWindowBoundary = { record: ConversationItemRef; revision: string }
 /** A complete replacement of one backend-owned accepted window, never an append delta. */
@@ -36,11 +39,11 @@ export type ConversationReadWindow = { id: string; revision: number; itemCount: 
   outside: { older: ConversationWindowBoundary | null; newer: ConversationWindowBoundary | null };
   navigation: { older: string | null; newer: string | null } }
 export type AgentConversationReadPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; coverage: readonly ConversationSourceCoverage[];
-  order: ConversationTimeline['order'] & { direction: 'newest-first' }; items: readonly ConversationUnitEntry[]; nextCursor: string | null; budgetBytes: number; window: ConversationReadWindow }
+  order: ConversationTimeline['order'] & { direction: 'newest-first' }; items: readonly ConversationUnitEntry[]; nextCursor: string | null; budgetBytes: number; window: ConversationReadWindow; processDetails?: 'deferred' }
 export type ConversationCheckpointPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; checkpoint: ConversationCheckpoint; coverage: readonly ConversationSourceCoverage[] }
 /** Native position only; captured sources retain their current independent cut. Reading grants no sharing authority. */
 export type ConversationCheckpointInput = ConversationRef & { nativePosition?: 'beginning' }
-export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string }
+export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string; processDetails?: 'deferred' }
 export type ConversationChangesPage = AgentConversationReadPage & { checkpoint: ConversationCheckpoint; more: boolean }
 export type ConversationWatchInput = ConversationRef & { view?: string }
 export type ConversationViewReleaseInput = ConversationRef & { view: string }
@@ -90,7 +93,7 @@ function ownParsedPage<T extends AgentConversationReadPage>(page: T): T {
 export function consumeConversationWindowPage(page: AgentConversationReadPage, pending?: ConversationWindowAssembly):
   { kind: 'pending'; pending: ConversationWindowAssembly } | { kind: 'complete'; snapshot: ConversationWindowSnapshot } {
   const validated = ConversationPageOwner.owns(page)
-  const scopeKey = JSON.stringify([page.hostId, page.sourceHostId, page.agentSessionId, page.scope, page.window.anchor])
+  const scopeKey = JSON.stringify([page.hostId, page.sourceHostId, page.agentSessionId, page.scope, page.window.anchor, page.processDetails])
   if (pending && (pending.scopeKey !== scopeKey || pending.windowId !== page.window.id || pending.revision !== page.window.revision || pending.itemCount !== page.window.itemCount)) return bad('A window fragment belongs to another original scope or revision.')
   const units = [...(pending?.units ?? [])]
   const eventIds = new Set(pending?.eventIds), recordIds = new Set(pending?.recordIds)
@@ -100,6 +103,7 @@ export function consumeConversationWindowPage(page: AgentConversationReadPage, p
     if (consumed.kind === 'pending') { fragment = consumed.pending; continue }
     const unit = validated && entry.kind === 'item' ? entry.item
       : parseConversationUnit(consumed.value, { hostId: page.sourceHostId, agentSessionId: page.agentSessionId }, page.scope)
+    if (page.processDetails !== 'deferred' && unit.records.some(record => !isCompleteConversationRecord(record))) return bad('Deferred process body was not requested.')
     if (entry.kind === 'fragment' && entry.itemId !== unit.event.id || eventIds.has(unit.event.id) || unit.records.some(record => recordIds.has(record.id))) return bad('The replacement window repeats an event or original contribution.')
     eventIds.add(unit.event.id); for (const record of unit.records) recordIds.add(record.id)
     fragment = undefined; units.push(unit); length += bytes(unit)
@@ -111,9 +115,9 @@ export function consumeConversationWindowPage(page: AgentConversationReadPage, p
   }
   if (fragment || units.length !== page.window.itemCount || !page.window.view) return bad('The replacement window is incomplete.')
   if (page.window.anchor && units.flatMap(unit => unit.records).some(record => !same(record.reference, page.window.anchor!.record) || record.revision !== page.window.anchor!.revision)) return bad('The exact-anchor window contains another original record or version.')
-  const originals = units.flatMap(unit => unit.records), contexts = units.flatMap(unit => unit.event.inputAdoption ? [unit.event.inputAdoption] : [])
+  const originals = units.flatMap(unit => unit.records).filter(isCompleteConversationRecord), contexts = units.flatMap(unit => unit.event.inputAdoption ? [unit.event.inputAdoption] : [])
   const adoption = conversationInputAdoptionEdges(originals, { witnesses: contexts.flatMap(context => context.witnesses), ...(contexts.some(context => context.unconfirmed) ? { unconfirmed: true } : {}) })
-  for (const unit of units) for (const record of unit.records) if (record.original.kind === 'captured' && conversationInputKey(record) && !record.original.item.conversation?.sameEvent) {
+  for (const unit of units) for (const record of unit.records) if (isCompleteConversationRecord(record) && record.original.kind === 'captured' && conversationInputKey(record) && !record.original.item.conversation?.sameEvent) {
     const target = adoption.targets.get(record.id), actual = unit.event.relations.find(relation => relation.kind === 'same-event' && conversationRecordId(relation.from) === record.id)
     if (target ? !actual || actual.kind !== 'same-event' || !same(target, actual.to) : actual !== undefined) return bad('Native adoption contradicts the complete accepted window or its retained counterevidence.')
   }
@@ -213,15 +217,20 @@ export function parseConversationVersionedAnchor(value: unknown, ref: Conversati
   if (!/^[a-f0-9]{64}$/u.test(revision)) return bad()
   return { record: itemRef(p.record, frontier.frontier, frontier.frontier.scope), revision, frontier }
 }
-function options(value: Record<string, unknown>): { limit?: number; maxBytes?: number; cursor?: string; view?: string } {
+function options(value: Record<string, unknown>): { limit?: number; maxBytes?: number; cursor?: string; view?: string; processDetails?: 'deferred' } {
+  if (value.processDetails !== undefined && value.processDetails !== 'deferred') return bad('Unknown process detail representation.', 'INVALID_CONTROL_REQUEST')
+  return { ...(value.processDetails === undefined ? {} : { processDetails: 'deferred' as const }), ...optionValues(value) }
+}
+function optionValues(value: Record<string, unknown>) {
   return { ...(value.limit === undefined ? {} : { limit: integer(value.limit, 1, 100) }),
     ...(value.maxBytes === undefined ? {} : { maxBytes: integer(value.maxBytes, 4096, CONVERSATION_MAX_READ_BYTES) }),
     ...(value.cursor === undefined ? {} : { cursor: text(value.cursor, 131_072) }),
     ...(value.view === undefined ? {} : { view: text(value.view, 131_072) }) }
 }
 export function parseConversationTimelineReadInput(value: unknown): ConversationTimelineReadInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'record', 'anchor', 'view', 'nativeSource', 'preserveCurrent'])
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'record', 'anchor', 'view', 'nativeSource', 'preserveCurrent', 'processDetails'])
   const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
+  if (p.processDetails !== undefined && (p.record !== undefined || p.anchor !== undefined)) return bad('Exact original detail reads require complete records.')
   if (p.record !== undefined && (p.anchor !== undefined || p.view !== undefined || p.nativeSource !== undefined)) return bad('An exact current record cannot be combined with another read mode.')
   if (p.preserveCurrent !== undefined && typeof p.preserveCurrent !== 'boolean') return bad('Window preservation must be a boolean.')
   if (p.preserveCurrent && (p.cursor === undefined || p.record !== undefined || p.anchor !== undefined || p.view !== undefined || p.nativeSource !== undefined)) return bad('Window preservation requires the original older cursor and its wire continuations.')
@@ -231,7 +240,7 @@ export function parseConversationTimelineReadInput(value: unknown): Conversation
     ...(p.anchor === undefined ? {} : { anchor: parseConversationVersionedAnchor(p.anchor, ref) }) }
 }
 export function parseConversationChangesInput(value: unknown): ConversationChangesInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes', 'view'])
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes', 'view', 'processDetails'])
   const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
   const checkpoint = parseConversationCheckpoint(p.checkpoint, ref)
   return { ...ref, checkpoint, ...options(p) }
@@ -275,6 +284,25 @@ function selector(value: unknown): import('./conversation-stream.js').Conversati
 function revision(value: unknown): string { const result = text(value); return /^[a-f0-9]{64}$/u.test(result) ? result : bad() }
 /** Validate complete units only. Fragments never acquire event semantics. */
 export function parseConversationUnit(value: unknown, ref: ConversationRef, accepted: ConversationScope): ConversationUnit {
+  const p = rpcRecord(value, ['event', 'records'], 'CONTROL_PROTOCOL_ERROR')
+  if (!Array.isArray(p.records) || !p.records.length) return bad()
+  if (!p.records.some(value => rpcRecord(rpcRecord(value).original).kind === 'deferred')) return parseCompleteConversationUnit(value, ref, accepted)
+  if (bytes(value) > CONVERSATION_MAX_UNIT_BYTES || p.records.length > CONVERSATION_MAX_WINDOW_RECORDS) return bad()
+  const summaries = p.records.map(value => {
+    const r = rpcRecord(value, ['id', 'reference', 'revision', 'order', 'original', 'summaryRevision'], 'CONTROL_PROTOCOL_ERROR')
+    const original = rpcRecord(r.original, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR')
+    if (original.kind !== 'deferred' || conversationRevision(original.item) !== revision(r.summaryRevision)) return bad('Process summary representation changed.')
+    return r as ConversationDeferredRecord
+  })
+  let witnesses: ConversationSourceRecord[]
+  try { witnesses = summaries.map(conversationProcessWitness) } catch { return bad('Invalid process summary metadata.') }
+  const complete = parseCompleteConversationUnit({ event: p.event, records: witnesses }, ref, accepted, new Map(summaries.map(record => [record.id, record.revision])))
+  if (complete.event.role !== 'process' || complete.records.some(record => conversationRecordRole(record) !== 'process')) return bad('Only original process records may defer their bodies.')
+  const normalized = complete.records.map(deferConversationProcessRecord)
+  if (!same(normalized, summaries)) return bad('Process summary omitted or changed original typed metadata.')
+  return { event: complete.event, records: normalized }
+}
+function parseCompleteConversationUnit(value: unknown, ref: ConversationRef, accepted: ConversationScope, deferredVersions?: ReadonlyMap<string, string>): { event: ConversationEvent; records: ConversationSourceRecord[] } {
   if (bytes(value) > CONVERSATION_MAX_UNIT_BYTES) return bad()
   const p = rpcRecord(value, ['event', 'records'], 'CONTROL_PROTOCOL_ERROR')
   if (!Array.isArray(p.records) || !p.records.length || p.records.length > CONVERSATION_MAX_WINDOW_RECORDS) return bad()
@@ -296,7 +324,7 @@ export function parseConversationUnit(value: unknown, ref: ConversationRef, acce
       if (!accepted.sources.some(s => s.kind === 'captured' && s.epoch === epoch) || item.id !== reference.source.recordId || item.agentSessionId !== ref.agentSessionId || !same(original.item, item)) return bad()
       result = { id, reference, revision: version, order: { kind: 'captured-stream', epoch, firstSequence: integer(order.firstSequence, 1) }, original: { kind: 'captured', item } }
     }
-    if (conversationRevision(result.original.item) !== version) return bad('Original conversation record version changed.')
+    if (deferredVersions?.get(id) !== version && conversationRevision(result.original.item) !== version) return bad('Original conversation record version changed.')
     if (result.original.item.conversation?.adoptedInput && !conversationNativeInputWitness(result)?.key) return bad('The native adoption does not belong to this original record.')
     return result
   })
@@ -412,8 +440,9 @@ export function parseConversationUnit(value: unknown, ref: ConversationRef, acce
   return { event: { ...event, revision: version }, records }
 }
 function basePage(value: unknown, input: ConversationTimelineReadInput, changes = false): AgentConversationReadPage {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'coverage', 'order', 'items', 'nextCursor', 'budgetBytes', 'window', ...(changes ? ['checkpoint', 'more'] : [])], 'CONTROL_PROTOCOL_ERROR')
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'coverage', 'order', 'items', 'nextCursor', 'budgetBytes', 'window', 'processDetails', ...(changes ? ['checkpoint', 'more'] : [])], 'CONTROL_PROTOCOL_ERROR')
   if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || p.budgetBytes !== (input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES) || bytes(value) > Number(p.budgetBytes) || !Array.isArray(p.items) || p.items.length > (input.limit ?? 30)) return bad()
+  if (p.processDetails !== input.processDetails) return bad('The process detail representation changed during reading.')
   const accepted = scope(p.scope), source = { hostId: text(p.sourceHostId), agentSessionId: input.agentSessionId }, order = rpcRecord(p.order, ['basis', 'crossSource', 'direction'], 'CONTROL_PROTOCOL_ERROR')
   if (input.record && input.record.hostId !== source.hostId || input.nativeSource && !accepted.sources.some(source => source.kind === 'native' && source.providerId === input.nativeSource!.providerId && source.nativeSessionId === input.nativeSource!.nativeSessionId) ||
       input.anchor && (input.anchor.frontier.sourceHostId !== source.hostId || !same(input.anchor.frontier.frontier.scope, accepted))) return bad('The read returned another explicitly selected original source.')
@@ -427,6 +456,7 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
     if (offsetBytes >= totalBytes) return bad()
     return { kind: 'fragment' as const, itemId: text(entry.itemId, 131_072), encoding: 'json-utf8-base64' as const, sha256: revision(entry.sha256), offsetBytes, totalBytes, dataBase64: entry.dataBase64 }
   })
+  if (p.processDetails !== 'deferred' && items.some(entry => entry.kind === 'item' && entry.item.records.some(record => !isCompleteConversationRecord(record)))) return bad('Deferred process body was not requested.')
   const w = rpcRecord(p.window, ['id', 'revision', 'itemCount', 'complete', 'view', 'replay', 'checkpoint', 'outside', 'navigation', 'anchor'], 'CONTROL_PROTOCOL_ERROR')
   const checkpoint = parseConversationCheckpoint(w.checkpoint, input)
   if (typeof w.complete !== 'boolean' || (w.complete ? typeof w.view !== 'string' : w.view !== null) ||
@@ -447,7 +477,7 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
     ...(anchor ? { anchor } : {}), complete: w.complete, view: w.view === null ? null : text(w.view, 131_072), replay: text(w.replay, 131_072), checkpoint,
     outside: { older: boundary(outside.older), newer: boundary(outside.newer) },
     navigation: { older: navigationCursor(navigation.older), newer: navigationCursor(navigation.newer) } }
-  return { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: source.hostId, scope: accepted, coverage: coverage(p.coverage, source, accepted), order: order as AgentConversationReadPage['order'], items, nextCursor: p.nextCursor === null ? null : text(p.nextCursor, 131_072), budgetBytes: Number(p.budgetBytes), window }
+  return { hostId: input.hostId, agentSessionId: input.agentSessionId, ...(input.processDetails ? { processDetails: input.processDetails } : {}), sourceHostId: source.hostId, scope: accepted, coverage: coverage(p.coverage, source, accepted), order: order as AgentConversationReadPage['order'], items, nextCursor: p.nextCursor === null ? null : text(p.nextCursor, 131_072), budgetBytes: Number(p.budgetBytes), window }
 }
 export function parseConversationReadPage(value: unknown, input: ConversationTimelineReadInput): AgentConversationReadPage { return basePage(value, input) }
 export function parseConversationChangesPage(value: unknown, input: ConversationChangesInput): ConversationChangesPage {

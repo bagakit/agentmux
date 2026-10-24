@@ -113,7 +113,7 @@ export function useConversationRecordLayout<T extends ConversationPresentationFr
       canPresent: (candidate, options) => {
         if (!active) return true
         const boundary = candidate.records.find(record => conversationPresentationKey(record) === options?.beforeRecordId
-          || record.original.kind === 'native' && record.rawId === options?.beforeRecordId)
+          || record.source.kind === 'native' && record.rawId === options?.beforeRecordId)
         const next = projectConversationRecordSequence(candidate.records, sourceKey, accepted.sequence.groups,
           boundary ? conversationPresentationKey(boundary) : undefined, anchors)
         pendingReason.current = protection(root.current, accepted.placements, placements(candidate, next), options?.preserveAnchor !== false && !geometry?.following())

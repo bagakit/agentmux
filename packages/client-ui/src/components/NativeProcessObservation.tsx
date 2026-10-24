@@ -1,3 +1,4 @@
+import { ConversationRetainedDetails } from './ConversationRetainedDetails.js'
 import { NATIVE_CONVERSATION_SOURCE } from '../lib/conversation-sources.js'
 import type { AgentSessionHistoryItem, AgentSessionHistorySource } from '@agentmux/core'
 import { conversationPresentationKey } from '../lib/conversation-record-sequence.js'
@@ -9,7 +10,7 @@ import { SemanticIcon } from '../theme/icons.js'
 import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow, RecordedAgentRow as WorkflowAgentRow, type WorkflowObservationStatus, type WorkflowRecordedTime } from './WorkflowObservation.js'
 import { ConversationMetricsDetails, ConversationMetricsInline, conversationMetricsLabel } from './ConversationMetrics.js'
 
-function recordedStatus(item: AgentSessionHistoryItem): WorkflowObservationStatus | undefined {
+function recordedStatus(item: Pick<AgentSessionHistoryItem, 'collaboration'>): WorkflowObservationStatus | undefined {
   const collaboration = item.collaboration
   if (collaboration?.kind !== 'operation') return undefined
   return collaboration.status === 'completed' ? 'complete' : collaboration.status
@@ -39,7 +40,8 @@ function recordSpan(from: number, to: number, origin?: number): WorkflowRecorded
 
 function groupRecordTime(records: ConversationProcessProps['records']): WorkflowRecordedTime | undefined {
   let first: number | undefined, last = -Infinity
-  for (const { original } of records) {
+  for (const record of records) {
+    const original = record.original.kind === 'deferred' ? record.original.item : record.original
     const from = original.kind === 'native' ? original.item.startedAt : original.item.createdAt
     if (from === undefined) return undefined
     const to = original.kind === 'native' ? original.item.completedAt ?? from : original.item.updatedAt
@@ -57,9 +59,9 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
   useEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
   const layout = entries
   const records = sourceRecords.filter(record => record.role !== 'observation')
-  const items = sourceRecords.flatMap(record => record.original.kind === 'native' ? [record.original.item] : [])
+  const items = sourceRecords.flatMap(record => record.original.kind === 'native' ? [record.original.item] : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? [{ ...record.original.item.item, ...(record.original.item.collaboration ? { collaboration: record.original.item.collaboration } : {}) }] : [])
   const anchored = layout.some(entry => entry.kind === 'anchor' || entry.record.role === 'observation')
-  const nativeOnly = records.every(record => record.original.kind === 'native')
+  const nativeOnly = records.every(record => record.source.kind === 'native')
   const states = items.map(recordedStatus)
   const recordedStepStatus = states.includes('failed') ? 'failed' : states.includes('running') ? 'running'
     : states.includes('interrupted') ? 'interrupted'
@@ -81,21 +83,22 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
         <NativeProcessStep item={item} {...(first?.startedAt === undefined ? {} : { origin: first.startedAt })}
           {...(disclosure?.steps.get(key) === undefined ? {} : { expanded: disclosure.steps.get(key)! })}
           {...(disclosure ? { onExpandedChange: (open: boolean) => disclosure.onStepExpandedChange(key, open) } : {})}>{body}</NativeProcessStep>)
-        : renderRecord(record) : null}</div>
+        : renderRecord(record, undefined, disclosure) : null}</div>
     })}
   </WorkflowCard>{items.map(item => item.metricsDiagnostic
     ? <p key={item.id} className="conversation-metrics__notice" role="status">{item.metricsDiagnostic.message}</p> : null)}</div>
 }
 
-function NativeProcessStep({ item, origin, children, expanded: controlledExpanded, onExpandedChange }: {
+export function NativeProcessStep({ item, origin, children, bodyOnly = false, expanded: controlledExpanded, onExpandedChange }: {
   item: AgentSessionHistoryItem
+  bodyOnly?: boolean
   origin?: number
   children: ReactNode
   expanded?: boolean
   onExpandedChange?: (expanded: boolean) => void
 }) {
   const [localExpanded, setExpanded] = useState(false)
-  const expanded = controlledExpanded ?? localExpanded
+  const expanded = bodyOnly || (controlledExpanded ?? localExpanded)
   const [readOnce, setReadOnce] = useState(expanded)
   useEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
   const bodyId = useId()
@@ -117,10 +120,10 @@ function NativeProcessStep({ item, origin, children, expanded: controlledExpande
     onExpandedChange?.(!expanded)
   }
   return <div className="wf-native-process" data-native-step-id={item.id}>
-    <WorkflowToolRow observation={{ id: item.id, title, source: NATIVE_CONVERSATION_SOURCE, persistentSource: true,
+    {!bodyOnly ? <WorkflowToolRow observation={{ id: item.id, title, source: NATIVE_CONVERSATION_SOURCE, persistentSource: true,
       ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
       className="log-row" icon={collaboration ? <SemanticIcon name="object.collaboration" size={12} /> : <SemanticIcon name={call ? 'conversation.tool-call' : item.contentParts.some(part => part.kind === 'tool-result') ? 'conversation.tool-result' : 'object.activity'} size={12} />}
-      expanded={expanded} controls={bodyId} onToggle={toggle} />
+      expanded={expanded} controls={bodyId} onToggle={toggle} /> : null}
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>
       {expanded || readOnce ? <>
         {collaboration?.kind === 'operation' ? <>
@@ -150,7 +153,7 @@ function NativeProcessStep({ item, origin, children, expanded: controlledExpande
           <div><dt>Recorded event</dt><dd>{collaboration.event}</dd></div>
           {collaboration.path === undefined ? null : <div><dt>Native agent path</dt><dd><code>{collaboration.path}</code></dd></div>}
         </dl> : null}
-        {collaboration ? <details className="wf-native-process__raw"><summary>Original record</summary>{children}</details> : children}
+        {collaboration ? <ConversationRetainedDetails className="wf-native-process__raw" summary="Original record">{() => children}</ConversationRetainedDetails> : children}
       </> : null}
     </div>
   </div>
