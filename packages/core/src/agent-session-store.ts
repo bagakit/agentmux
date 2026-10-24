@@ -513,6 +513,20 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
+function canSupersedeRestartWithStop(
+  current: AgentMuxLifecycleReservation,
+  requested: AgentMuxLifecycleReservation
+): boolean {
+  // prepareResume is the durable boundary before Start. Replacing only an
+  // unprepared restart under this same Store transaction also fences a late
+  // original prepareResume by its old reservationId; close never starts a Run.
+  return requested.kind === 'stop' && current.kind === 'resume' && Boolean(current.restart) &&
+    current.reservationId !== requested.reservationId &&
+    !current.preparedSession && current.agentSessionId === requested.agentSessionId &&
+    current.expectedRun.runId === requested.expectedRun.runId &&
+    (current.ownerId === requested.ownerId || current.ownerReleased === true || !processIsAlive(current.ownerPid))
+}
+
 function retiredRuns(value: unknown, current: AgentMuxRunRef): AgentMuxRunRef[] {
   if (!Array.isArray(value)) {
     throw new AgentMuxError('retiredRuns is invalid.', 'INVALID_AGENT_SESSION_STORE')
@@ -2498,7 +2512,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
 
   async reserveLifecycle(value: AgentMuxLifecycleReservation): Promise<void> {
     const reservation = lifecycleReservation(value)
-    if (this.reservations.has(reservation.agentSessionId)) {
+    const current = this.reservations.get(reservation.agentSessionId)
+    if (current && !canSupersedeRestartWithStop(current, reservation)) {
       throw new AgentMuxError('Agent Session already has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
     }
     assertReservationPrecondition(
@@ -3103,7 +3118,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await this.enqueue(async () => {
       const reservation = lifecycleReservation(value)
       const document = await this.read()
-      if (document.reservations.some((item) => item.agentSessionId === reservation.agentSessionId)) {
+      const current = document.reservations.find(item => item.agentSessionId === reservation.agentSessionId)
+      if (current && !canSupersedeRestartWithStop(current, reservation)) {
         throw new AgentMuxError('Agent Session already has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
       }
       assertReservationPrecondition(
@@ -3113,7 +3129,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       )
       await this.write({
         ...document,
-        reservations: [...document.reservations, reservation]
+        reservations: current
+          ? document.reservations.map(item => item.agentSessionId === reservation.agentSessionId ? reservation : item)
+          : [...document.reservations, reservation]
       })
     })
   }

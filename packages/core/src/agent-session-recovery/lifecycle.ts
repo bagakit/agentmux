@@ -114,14 +114,20 @@ export class AgentSessionRunLifecycle {
         reservation = await this.ports.sessions.registry.reserveRestart(input.agentSessionId, input.expectedRun, operation,
           { requestDigest: digest, request: frozen, nativeTarget: structuredClone(canonical.nativeHandle), stopOperation })
       }
-      if (!prior) {
+      {
         const observedAt = Date.now()
-        const admitted: AgentMuxContinuityOperation = { operationId: input.operationId, agentSessionId: input.agentSessionId,
+        const admitted: AgentMuxContinuityOperation = { ...prior, operationId: input.operationId, agentSessionId: input.agentSessionId,
           action: 'restart', trigger: 'manual', policy: normalizeAgentContinuityPolicy(), previousRun: { ...input.expectedRun },
           nativeTarget: structuredClone(reservation.restart!.nativeTarget), requestDigest: digest,
-          admittedAt: observedAt, observedAt, rechecks: 0, kind: 'starting', reason: 'restart-stopping',
+          admittedAt: prior?.admittedAt ?? observedAt, observedAt, rechecks: 0, kind: 'starting', reason: 'restart-stopping',
           evidence: { kind: 'run-unknown', observedAt, message: 'The original explicit restart was admitted.' },
           recoveryInputs: { reminder: '', continuation: '' } }
+        // Explicit continuation reasserts this transaction's phase under its
+        // claimed reservation; an old generic observer cannot own its retry.
+        delete admitted.nextActionAt
+        delete admitted.supervision
+        delete admitted.error
+        delete admitted.errorCode
         const recorded = await this.ports.sessions.updateExactAgentSession(input.agentSessionId, input.expectedRun, session => ({ ...session,
           continuity: admitted, continuityOperations: { ...session.continuityOperations, [input.operationId]: admitted }, updatedAt: Math.max(session.updatedAt + 1, observedAt) }))
         this.ports.events.publishSession(recorded)

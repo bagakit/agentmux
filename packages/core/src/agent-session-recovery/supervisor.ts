@@ -99,14 +99,14 @@ export class AgentSessionContinuitySupervisor {
     for (const session of sessions) {
       this.observe(session, true)
       for (const operation of Object.values(session.continuityOperations ?? {})) {
-        if (!operation.supervision && !operation.intentOperationId && operation.nextActionAt !== undefined) this.schedule(operationInput(operation), operation)
+        if (!operation.action && !operation.supervision && !operation.intentOperationId && operation.nextActionAt !== undefined) this.schedule(operationInput(operation), operation)
       }
     }
   }
 
   observe(session: AgentMuxStoredAgentSession, retryObservation = false): void {
     if (this.disposed) return
-    const roots = Object.values(session.continuityOperations ?? {}).filter(op => op.supervision &&
+    const roots = Object.values(session.continuityOperations ?? {}).filter(op => !op.action && op.supervision &&
       (!terminal(op.supervision.phase) || retryObservation && op.supervision.phase === 'paused' &&
         ['runtime-unverified', 'provider-unverified', 'exit-outcome-unverified', 'original-operation-unconfirmed'].includes(op.supervision.reason)))
     const live = new Set(roots.map(op => op.operationId))
@@ -122,7 +122,7 @@ export class AgentSessionContinuitySupervisor {
   }
 
   schedule(input: AgentMuxAgentContinuityInput, receipt: AgentMuxContinuityOperation): void {
-    if (this.disposed) return
+    if (this.disposed || receipt.action) return
     const rootId = receipt.intentOperationId ?? (receipt.supervision ? receipt.operationId : undefined)
     if (rootId) {
       const roots = this.roots.get(input.agentSessionId) ?? new Set<string>(); roots.add(rootId); this.roots.set(input.agentSessionId, roots)
