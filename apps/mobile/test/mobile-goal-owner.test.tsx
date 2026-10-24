@@ -52,7 +52,7 @@ async function mount(initialContext?: import('../src/recovery/presentation-route
   const openSession = vi.fn()
   const render = async (visible = true) => { await act(async () => root.render(<MobileGoalsSurface client={client} visible={visible} connected={true} openSession={openSession} {...(initialContext ? { initialContext } : {})} />)) }
   await render()
-  const buttons = (text: string) => [...element.querySelectorAll('button')].filter(button => button.textContent === text && !button.closest('[hidden]'))
+  const buttons = (text: string) => [...element.querySelectorAll('button')].filter(button => (button.getAttribute('aria-label') ?? button.textContent) === text && !button.closest('[hidden]'))
   const click = async (text: string) => { const button = buttons(text)[0]; expect(button, text).toBeDefined(); await act(async () => { button!.click() }) }
   const wait = async (text: string) => { await vi.waitFor(async () => { await act(async () => {}); expect(element.textContent).toContain(text) }) }
   return { element, forwardRpc, render, click, wait, buttons, openSession, root, client }
