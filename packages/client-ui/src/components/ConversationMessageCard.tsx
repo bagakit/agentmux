@@ -7,18 +7,19 @@ type MessageCardSlots = {
   badges: ReactNode
   time: ReactNode
   actions: ReactNode
+  feedback?: ReactNode
   details: ReactNode
   metadata: ReactNode
 }
 type MessageCardBody = { renderBody(contentId?: string): ReactNode }
 
 /** Card chrome does not own record identity, body readers, copying or source details. */
-function MessageCardFrame({ avatar, heading, badges, time, actions, details, metadata, children }: MessageCardSlots & { heading: ReactNode; children: ReactNode }) {
+function MessageCardFrame({ avatar, heading, badges, time, actions, feedback, details, metadata, children }: MessageCardSlots & { heading: ReactNode; children: ReactNode }) {
   return <>
     <span className="log-turn__node" aria-hidden="true">{avatar}</span>
     <div className="log-turn__head">
-      <div className="log-turn__title">{heading}{badges}</div>
-      {time}{actions}{details}
+      <div className="log-turn__identity"><div className="log-turn__title">{heading}{badges}</div>{time}</div>
+      {actions}{details}{feedback}
     </div>
     {metadata}{children}
   </>

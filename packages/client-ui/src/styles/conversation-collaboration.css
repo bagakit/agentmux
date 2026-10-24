@@ -39,5 +39,4 @@
   .log-turn__collaboration-toggle { flex-wrap: wrap; }
   .log-turn__collaboration-path { flex: 1 1 100%; order: 1; padding-inline-start: 20px; white-space: normal; overflow-wrap: anywhere; }
   .log-turn__collaboration-recipient { margin-inline-start: auto; max-width: 55%; white-space: normal; overflow-wrap: anywhere; }
-  .log-turn[data-native-collaboration] > .log-turn__head > .log-turn__time { padding-inline-start: 20px; }
 }
