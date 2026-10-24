@@ -1,9 +1,10 @@
 import { defineConfig } from 'vitest/config'
 import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
-import original from './connection-owner-consumer.config.mts'
+import original from './static-avatar-consumer.config.mts'
 
 const variants = {
+  'card-version-coupling': ['packages/connectors/src/adapters/feishu/reaction.ts', "if (request.method !== 'POST'", "if (prepared.renderVersion !== 'feishu-conversation-v6' || request.method !== 'POST'"],
   'turn-correlation-lost': ['packages/connectors/src/publication-query-feedback.ts', "AND json_extract(operation_json,'$.queryTurn.turnId')=?", 'AND ? IS NOT NULL'],
   'default-dispatch-disconnected': ['packages/connectors/src/connection-services.ts', 'permissions: ingress.permissions, queryFeedback: true', 'permissions: ingress.permissions']
 } as const
