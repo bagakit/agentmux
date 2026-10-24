@@ -8,20 +8,21 @@ import { DesktopClientUiProvider } from '../../../src/renderer/src/components/De
 import { MobileConversationSurface } from '../../../../mobile/src/conversation/MobileConversationSurface'
 import { createBrowserPlatform } from '../../../../mobile/src/platform/browser'
 import { api } from '../../../src/renderer/src/lib/api'
-import scene from 'virtual:a2a-primary-scene'
+import inputScene from 'virtual:a2a-primary-scene'
 import '../../../src/renderer/src/styles/index.css'
 import './surface.css'
 
-const calls: Array<{ reference: unknown; messageId: string }> = []
+let scene = inputScene.scenarios?.idle ?? inputScene
+const calls: Array<{ reference: unknown; messageId: string; notificationId?: string }> = []
 const pending: Array<{ messageId: string; resolve(value: unknown): void; reject(error: Error): void }> = []
 const copied: string[] = []
 const draft = '保留这份尚未发送的草稿。'
-const read = async (reference: unknown, messageId: string) => {
-  calls.push({ reference, messageId })
+const read = async (reference: unknown, messageId: string, notificationId?: string) => {
+  calls.push({ reference, messageId, notificationId })
   return new Promise((resolve, reject) => pending.push({ messageId, resolve, reject }))
 }
 api.ui.writeClipboardText = async text => { copied.push(text) }
-api.sessions.readMessage = async (reference, messageId) => ({ hostId: reference.hostId, message: await read(reference, messageId) as typeof scene.original })
+api.sessions.readMessage = async (reference, messageId, notificationId) => ({ hostId: reference.hostId, message: await read(reference, messageId, notificationId) as typeof scene.original })
 const reader = {
   readAgentConversation: async () => structuredClone(scene.page),
   readConversationChanges: async () => structuredClone(scene.page),
@@ -32,7 +33,7 @@ Object.assign(api.conversation, reader)
 const mobileClient = {
   ...reader, agentSession: () => scene.session, agentSessions: () => [scene.session], runtimeOwnerIdentity: () => null,
   catalog: () => [], onEvent: () => () => {}, statusAgent: async () => { throw Error('No Runtime in the private reading scene') },
-  readMessage: ({ messageId }: { messageId: string }) => read(scene.reference, messageId)
+  readMessage: ({ messageId, notificationId }: { messageId: string; notificationId?: string }) => read(scene.reference, messageId, notificationId)
 } as unknown as AgentMuxHostedClient
 const platform = createBrowserPlatform({ clipboard: { writeText: async text => { copied.push(text) } } })
 const root = createRoot(document.getElementById('root')!)
@@ -59,8 +60,9 @@ anchorHost.innerHTML = '<header class="recent-focus__header"><span>原协作记�
 document.body.append(anchorHost)
 Object.assign(window, { a2aPrimaryReading: {
   ready: true,
-  seed(surface: 'desktop' | 'mobile' | 'focus', theme: 'dark' | 'light', generation: number) {
+  seed(surface: 'desktop' | 'mobile' | 'focus', theme: 'dark' | 'light', generation: number, variant = 'idle') {
     if (pending.length) throw Error('Do not discard an unsettled private original read')
+    scene = inputScene.scenarios?.[variant] ?? inputScene
     calls.length = 0; copied.length = 0; updateThemeSelection({ appAppearance: theme })
     anchorHost.hidden = surface !== 'focus'
     // Product chrome explicitly sets display:flex; the private anchor must not cover another reader's input.

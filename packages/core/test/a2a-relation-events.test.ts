@@ -116,7 +116,7 @@ it('latest notifications preserve one original event and only this participant r
   await f.queue.prepareNotification({ notificationId: 'notice', agentSessionId: 'recipient',
     condition: { expectedRun: { runId: 'run-recipient' }, afterSubmissionId: null } })
   const page = await f.rpc.call('message.events', { latest: true, limit: 1 })
-  expect(page.events).toHaveLength(1); expect(page.events[0]).toMatchObject({ kind: 'a2a-notification', at: null })
+  expect(page.events).toHaveLength(1); expect(page.events[0]).toMatchObject({ kind: 'a2a-notification', at: expect.any(Number) })
   expect(page.events[0]!.messages.map(ref => ref.messageId)).toEqual(['mine'])
 })
 

@@ -1,6 +1,7 @@
 const { app, BrowserWindow } = require('electron')
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path'), crypto = require('node:crypto')
 const [html, privateRoot, evidence] = process.argv.slice(2)
+const metadata = process.argv.includes('--metadata')
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const receipt = { schema: 'agentmux.a2a-primary-reading-render.v1', passed: false, captureOnly: true, aestheticReview: 'not-performed', frames: [], scenarios: [], operations: [], userRunTouched: false, consoleErrors: [] }
 let win
@@ -31,11 +32,12 @@ async function frame(name) {
   receipt.frames.push({ file, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length })
 }
 async function scenario(surface, theme, width, generation) {
-  receipt.stage = { surface, theme, width, action: 'seed' }
+  const variant = theme === 'dark' ? width === 960 ? 'idle' : 'steer' : width === 960 ? 'legacy' : 'unconfirmed'
+  receipt.stage = { surface, theme, width, ...(metadata ? { variant } : {}), action: 'seed' }
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height: 850, deviceScaleFactor: 1, mobile: false })
-  const source = await evaluate(`a2aPrimaryReading.seed(${JSON.stringify(surface)},${JSON.stringify(theme)},${generation})`)
+  const source = await evaluate(`a2aPrimaryReading.seed(${JSON.stringify(surface)},${JSON.stringify(theme)},${generation},${JSON.stringify(variant)})`)
   await waitFor('a2aPrimaryReading.facts().pending===2')
-  const edge = theme === 'dark' && width === 360
+  const edge = !metadata && theme === 'dark' && width === 360
   if (edge) {
     receipt.stage.action = 'focus-existing-draft'
     await click(`document.querySelector('[aria-label="Unsent draft"]')`)
@@ -53,12 +55,27 @@ async function scenario(surface, theme, width, generation) {
   await waitFor(`document.querySelectorAll('[data-a2a-original-message-id]').length===2`); await painted()
   const facts = await evaluate('a2aPrimaryReading.facts()')
   assert.equal(facts.draft, source.draft); if (edge) assert.equal(facts.draftFocused, true, 'Successful read preserves existing draft focus')
-  assert.deepEqual(facts.calls, [...source.messages.map(message => ({ reference: source.reference, messageId: message.messageId })), ...(edge ? [{ reference: source.reference, messageId: source.messageId }] : [])])
+  assert.deepEqual(facts.calls, [...source.messages.map(message => ({ reference: source.reference, messageId: message.messageId, notificationId: source.notificationId })), ...(edge ? [{ reference: source.reference, messageId: source.messageId, notificationId: source.notificationId }] : [])])
   const card = await evaluate(`(()=>{const n=${notice},o=${original},c=o.querySelector('.log-turn'),r=c.getBoundingClientRect();return{count:document.querySelectorAll('[data-a2a-original-message-id]').length,text:o.textContent,bubble:c.dataset.messageBubble,compact:c.dataset.compact,relation:c.dataset.speakerRelation,systemHead:!!n.querySelector(':scope > .log-turn__head'),left:r.left,right:r.right,width:r.width,scrollWidth:c.scrollWidth,clientWidth:c.clientWidth}})()`)
   assert.equal(card.count, 2); assert.equal(card.bubble, 'true'); assert.equal(card.compact, undefined); assert.equal(card.relation, 'other-agent'); assert.equal(card.systemHead, false)
   assert.ok(card.text.includes('原始协作消息')); assert.ok(card.left >= 0 && card.right <= width + 1 && card.width > 100)
   assert.ok(card.scrollWidth <= card.clientWidth + 1, 'Original card fits the actual consumer')
+  if (metadata) {
+    const timing = await evaluate(`${original}.querySelector('.conversation-a2a-timing').textContent`)
+    assert.ok(timing.includes('发送'))
+    assert.ok(timing.includes(variant === 'steer' ? '立即通知' : '空闲后通知'))
+    assert.ok(timing.includes(variant === 'legacy' ? '通知时间未记录' : variant === 'unconfirmed' ? '通知待核实' : '通知确认'))
+    receipt.operations.push({ kind: 'read-exact-notification-metadata', variant, timing })
+  }
   await frame(`${surface}-${theme}-${width}-original`)
+  if (metadata && theme === 'dark' && width === 360) {
+    await click(`${original}.querySelector('[aria-label="Message details"]')`)
+    await waitFor(`${original}.querySelector('.conversation-a2a-metadata')`)
+    const detail = await evaluate(`${original}.querySelector('.conversation-a2a-metadata').textContent`)
+    assert.ok(detail.includes(source.notificationId)); assert.ok(detail.includes('通知准备'))
+    assert.ok(detail.includes('不代表 Agent 已阅读'))
+    await frame(`${surface}-${theme}-${width}-metadata-details`)
+  }
   if (edge) {
     for (const message of source.messages) {
       await click(`document.querySelector('[data-a2a-original-message-id="${message.messageId}"] [aria-label="Copy message"]')`)
@@ -83,7 +100,7 @@ async function scenario(surface, theme, width, generation) {
     assert.deepEqual(evidence, { copies: 1, pre: 3, cards: 0, total: 2 })
     await frame(`${surface}-${theme}-${width}-sources`)
   }
-  receipt.scenarios.push({ surface, theme, width, exactCalls: facts.calls, card, failureAndRetry: edge, sourceJsonWithoutMessageDuplication: edge })
+  receipt.scenarios.push({ surface, theme, width, ...(metadata ? { variant } : {}), exactCalls: facts.calls, card, failureAndRetry: edge, sourceJsonWithoutMessageDuplication: edge })
 }
 app.whenReady().then(async () => {
   try {
@@ -95,7 +112,7 @@ app.whenReady().then(async () => {
     await waitFor('window.a2aPrimaryReading?.ready')
     let generation = 0
     for (const surface of ['desktop', 'mobile', 'focus']) for (const theme of ['dark', 'light']) for (const width of [960, 360]) await scenario(surface, theme, width, ++generation)
-    assert.equal(receipt.frames.length, 18); assert.deepEqual(receipt.consoleErrors, []); receipt.passed = true
+    assert.equal(receipt.frames.length, metadata ? 15 : 18); assert.deepEqual(receipt.consoleErrors, []); receipt.passed = true
   } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; if (win) await frame('failure').catch(() => {}) }
   finally { await fs.writeFile(path.join(evidence, 'render.json'), JSON.stringify(receipt, null, 2) + '\n'); win?.destroy(); app.exit(receipt.passed ? 0 : 1) }
 })

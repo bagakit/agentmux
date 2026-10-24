@@ -16,7 +16,7 @@ export const primaryReadingMutations = [
   { name: 'focus-author-caption', path: 'apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx',
     before: "const system = speaker?.role === 'system'", after: "const system = message?.kind === 'system-message'" },
   { name: 'mobile-loses-original-reader', path: 'apps/mobile/src/conversation/MobileConversationSurface.tsx',
-    before: 'return client.readMessage({ messageId })', after: 'return null' },
+    before: 'return client.readMessage({ messageId, ...(notificationId === undefined ? {} : { notificationId }) })', after: 'return null' },
   { name: 'original-recipient-unchecked', path: 'packages/client-ui/src/components/ConversationA2AReferences.tsx',
     before: 'envelope.recipientSessionId !== scope.agentSessionId ||', after: 'false ||' },
   { name: 'original-annotation-owner-lost', path: 'packages/client-ui/src/components/ConversationMessage.tsx',

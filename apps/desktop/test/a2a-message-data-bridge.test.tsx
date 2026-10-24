@@ -23,7 +23,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     off: (channel: string, listener: Function) => bridge.listeners.get(channel)?.delete(listener) }, webFrame: { getZoomFactor: () => 1 },
   app: { once: vi.fn(), getPath: () => bridge.directory, getAppPath: () => join(process.cwd(), 'apps/desktop'), isPackaged: false },
   ipcMain: { handle: (channel: string, handler: Function) => bridge.handlers.set(channel, handler), removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
+  globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(), AgentMuxControlServer: class { async start() {} async stop() {} } }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-retired-journal.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
@@ -149,8 +149,8 @@ it('the visible bounded hook reaches the original SDK through production Rendere
       content={renderAgentMuxMessageReferences([{ senderSessionId: 'sender', messageId: 'incoming' }])} /></DesktopClientUiProvider>
     await act(async () => render.render(notice))
     await vi.waitFor(() => expect(container!.querySelector('[data-a2a-original-message-id="incoming"]')?.textContent).toContain(body.trimEnd()))
-    expect(bodyRead).toHaveBeenCalledExactlyOnceWith({ messageId: 'incoming' })
-    expect(bridge.invoke).toHaveBeenCalledWith('sessions:message', reference, 'incoming')
+    expect(bodyRead).toHaveBeenCalledExactlyOnceWith({ messageId: 'incoming', notificationId: 'original-platform-notice' })
+    expect(bridge.invoke).toHaveBeenCalledWith('sessions:message', reference, 'incoming', 'original-platform-notice')
     expect(container!.querySelector('[data-a2a-original-message-id="incoming"] .conversation-protocol')).toBeNull()
     expect(await queue.readJournal()).toEqual([...original, expect.objectContaining({ kind: 'message', envelope: expect.objectContaining({ messageId: 'new-undelivered', body }) })])
     expect(connect).not.toHaveBeenCalled(); for (const control of controls) expect(control).not.toHaveBeenCalled()
@@ -162,7 +162,7 @@ it('the visible bounded hook reaches the original SDK through production Rendere
       content={renderAgentMuxMessageReferences([{ senderSessionId: 'sender', messageId: 'incoming' }])} /></DesktopClientUiProvider>))
     await vi.waitFor(() => expect(container!.querySelector('.conversation-a2a-originals__pending')?.textContent).toContain('Host could not be confirmed'))
     expect(container!.querySelector('[data-a2a-original-message-id]')).toBeNull()
-    expect(wrongHost).toHaveBeenCalledExactlyOnceWith(reference, 'incoming'); wrongHost.mockRestore()
+    expect(wrongHost).toHaveBeenCalledExactlyOnceWith(reference, 'incoming', 'same-original-platform-notice'); wrongHost.mockRestore()
     // Explicit UI notification crosses the registered trusted bridge into the actual Core journal.
     const notificationOriginal = { messageId: 'manual-reference', operationId: 'manual-source-operation', createdAt: 3,
       sender: { kind: 'agent-session' as const, agentSessionId: 'sender' }, recipient: { kind: 'agent-session' as const, agentSessionId: 'child-a' },

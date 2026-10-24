@@ -306,7 +306,7 @@ describe('original A2A broadcast and participant events', () => {
       expect(receiverNotice.messages.map(ref => ref.messageId).sort()).toEqual(['msg-other', 'msg-own'])
       expect(senderNotice.messages.map(ref => ref.messageId)).toEqual(['msg-own'])
       expect(receiverNotice.sequence).toBe(senderNotice.sequence)
-      expect(outgoing.events.at(-1)).toMatchObject({ kind: 'a2a-notification-result', notificationId: 'notice', state: 'unconfirmed', at: null })
+      expect(outgoing.events.at(-1)).toMatchObject({ kind: 'a2a-notification-result', notificationId: 'notice', state: 'unconfirmed', at: expect.any(Number) })
       expect(JSON.stringify(outgoing)).not.toContain('original body')
     } finally { await h.close() }
   })
