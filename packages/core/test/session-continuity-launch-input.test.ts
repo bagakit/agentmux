@@ -39,7 +39,8 @@ async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; lo
     ? { ...h.run(id), state: { type: 'exited', code: 0, signal: null } } : currentRun())
   core.kernel.list = vi.fn(async () => options.noRun ? [] : started.length ? [currentRun()] : [])
   core.kernel.start = vi.fn(async (spec: any) => {
-    if (options.failedStart) throw new AgentMuxError('Start rejected before creating a Run', 'CTXMUX_START_REJECTED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+    if (options.failedStart) throw new AgentMuxError('Start rejected before creating a Run', 'CTXMUX_START_REJECTED', undefined, undefined, undefined,
+      { operationId: spec.operationKey, disposition: 'not_applied' })
     started.push(spec)
     if (options.lostStart) throw new AgentMuxError('Start applied; original ACK lost', 'CTXMUX_START_UNKNOWN', undefined, { disposition: 'unknown', confirmedInputBytes: null })
     return currentRun()
@@ -166,13 +167,50 @@ it('keeps the original launch proof after a lost lifecycle commit ACK and a new 
 it('allows a distinct explicit intent after a confirmed not-applied Start without replaying the old input', async () => {
   const h = await fixture()
   try {
-    h.core.kernel.start.mockRejectedValueOnce(new AgentMuxError('Original Start was not applied', 'START_REJECTED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 }))
+    h.core.kernel.start.mockImplementationOnce(async (spec: any) => { throw new AgentMuxError('Original Start was not applied', 'START_REJECTED', undefined, undefined, undefined,
+      { operationId: spec.operationKey, disposition: 'not_applied' }) })
     expect((await h.client.ensureAgentContinuity(h.request)).kind).toBe('pending')
     expect(h.op()!.launchInput?.state).toBe('not-applied')
     const next = { ...h.request, operationId: 'explicit-new-op', input: { ...fresh, submissionId: 'explicit-new-input', prompt: 'Explicit new body' } }
     expect((await h.client.ensureAgentContinuity(next)).kind).toBe('resumed')
     expect(h.started).toHaveLength(1); expect(h.started[0].args).toContain(composeAgentResumePrompt(next.input.prompt, next.input.agentMuxNote).text)
     expect(h.core.kernel.input).not.toHaveBeenCalled()
+  } finally { await h.close() }
+})
+
+it.each(['foreign-operation', 'input-receipt', 'unknown-start'] as const)('keeps frozen continuity input unknown for a %s creation failure', async kind => {
+  const h = await fixture()
+  try {
+    h.core.kernel.start.mockImplementationOnce(async (spec: any) => { throw new AgentMuxError('Original Start has no exact negative receipt', 'START_UNCONFIRMED', undefined,
+      kind === 'input-receipt' ? { disposition: 'not_applied', confirmedInputBytes: 0 } : undefined, undefined,
+      kind === 'input-receipt' ? undefined : { operationId: kind === 'foreign-operation' ? 'another-start' : spec.operationKey,
+        disposition: kind === 'unknown-start' ? 'unknown' : 'not_applied' }) })
+    expect((await h.client.ensureAgentContinuity(h.request)).kind).toBe('pending')
+    expect(h.op()!.launchInput).toMatchObject({ state: 'unknown', input: fresh })
+    const packet = h.op()!.launchInput!
+    expect((await h.store.loadResumeCorrelation('recipient', packet.lifecycleOperationId))?.preparedSession).toBeDefined()
+    expect((await h.client.ensureAgentContinuity(h.request)).kind).toBe('pending')
+    expect(h.core.kernel.start).toHaveBeenCalledTimes(1)
+    expect(h.core.kernel.input).not.toHaveBeenCalled(); expect(h.core.kernel.stop).not.toHaveBeenCalled()
+    expect((await h.store.readMetadata('recipient'))!.run).toEqual(h.request.expectedRun)
+  } finally { await h.close() }
+})
+
+it('keeps admitted deferred input unknown when its error carries a creation receipt', async () => {
+  const h = await fixture({ postLaunch: true })
+  try {
+    const input = h.core.kernel.input
+    h.core.kernel.input = vi.fn(async (...args: any[]) => {
+      await input(...args)
+      throw new AgentMuxError('The input result is unknown despite an unrelated Start receipt', 'INPUT_UNCONFIRMED', undefined, undefined, undefined,
+        { operationId: h.started[0].operationKey, disposition: 'not_applied' })
+    })
+    await h.client.ensureAgentContinuity(h.request)
+    expect(h.op()!.launchInput?.state).toBe('unknown')
+    await h.client.ensureAgentContinuity(h.request)
+    expect(h.op()!.launchInput?.state).toBe('unknown')
+    expect(h.started).toHaveLength(1); expect(h.core.kernel.input).toHaveBeenCalledTimes(1)
+    expect(h.core.kernel.stop).not.toHaveBeenCalled()
   } finally { await h.close() }
 })
 
