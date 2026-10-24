@@ -37,6 +37,7 @@ import {
   type RuntimeIdentity
 } from '@ctxmux/sdk'
 import { AgentMuxError } from './errors.js'
+import { parseCreationRuntime, type AgentMuxCreationRuntime } from './terminal-creation-retirement.js'
 import { withCtxmuxStartupDiagnostic } from './ctxmux-startup-diagnostic.js'
 import { projectRunStorageFacts, projectStorageFailure, type AgentMuxRunStorageFacts } from './run-storage-observation.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
@@ -1287,6 +1288,42 @@ export class CtxmuxRunAdapter {
   async inspectCreation(operationKey: string): Promise<CtxmuxAdapterRun | null> {
     const run = await this.originalCreationRun(operationKey)
     return run === null ? null : this.projectRun(run)
+  }
+
+  creationRuntimeIdentity(): AgentMuxCreationRuntime {
+    const identity = this.identity()
+    return { runtimeId: this.runtime!.runtimeId, instanceId: identity.daemonInstanceId,
+      buildIdentity: identity.buildIdentity, protocolVersion: identity.protocolVersion }
+  }
+
+  /** Retire only an exact original key; retained Runs must match the whole frozen request. */
+  async retirePreparedStart(request: RunSpec, operationKey: string, expected: AgentMuxCreationRuntime): Promise<
+    { runtime: AgentMuxCreationRuntime } & ({ outcome: 'retired' } | { outcome: 'retained'; run: CtxmuxAdapterRun })> {
+    if (parseCreationRuntime(expected).runtimeId !== this.creationRuntimeIdentity().runtimeId || request.env.AGENTMUX_LIFECYCLE_OPERATION_ID !== operationKey)
+      throw new AgentMuxError('The original creation Runtime or prepared launch changed. Its Run was preserved.', 'TERMINAL_CREATION_RUNTIME_MISMATCH')
+    try {
+      const { runtime, retirement } = await this.requireClient().retireCreation(createOperationKey(operationKey))
+      if (runtime.runtimeId !== expected.runtimeId)
+        throw new AgentMuxError('The creation retirement came from another Runtime.', 'TERMINAL_CREATION_RUNTIME_MISMATCH')
+      const identity = { runtimeId: runtime.runtimeId, instanceId: runtime.daemonInstanceId, buildIdentity: runtime.buildId, protocolVersion: runtime.protocolGeneration }
+      if (retirement.outcome === 'retired') return { runtime: identity, outcome: 'retired' }
+      if (!isDeepStrictEqual(retirement.run.spec, request)) throw new AgentMuxError(
+        'The retained creation does not match its complete frozen launch. The Run was preserved.', 'TERMINAL_CREATION_UNCONFIRMED')
+      return { runtime: identity, outcome: 'retained', run: this.projectRun(retirement.run) }
+    } catch (error) { throw translateCtxmuxError(error) }
+  }
+
+  /** Read an existing fence across owner replacement, without repeating the retirement action. */
+  async observePreparedStartRetirement(operationKey: string, expected: AgentMuxCreationRuntime): Promise<{
+    runtime: AgentMuxCreationRuntime; outcome: 'retired' | 'not_retired'
+  }> {
+    if (parseCreationRuntime(expected).runtimeId !== this.creationRuntimeIdentity().runtimeId)
+      throw new AgentMuxError('The original creation belongs to another persistent Runtime.', 'TERMINAL_CREATION_RUNTIME_MISMATCH')
+    try {
+      const { runtime, observation } = await this.requireClient().observeCreationRetirement(createOperationKey(operationKey))
+      if (runtime.runtimeId !== expected.runtimeId) throw new AgentMuxError('The creation fence came from another persistent Runtime.', 'TERMINAL_CREATION_RUNTIME_MISMATCH')
+      return { runtime: { runtimeId: runtime.runtimeId, instanceId: runtime.daemonInstanceId, buildIdentity: runtime.buildId, protocolVersion: runtime.protocolGeneration }, outcome: observation.outcome }
+    } catch (error) { throw translateCtxmuxError(error) }
   }
 
   private async originalCreationRun(operationKey: string): Promise<RunInfo | null> {
