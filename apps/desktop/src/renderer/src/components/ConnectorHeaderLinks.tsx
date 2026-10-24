@@ -63,7 +63,7 @@ function ChannelHeaderEntry({ channel, diagnosis, totalBindings, ...props }: Pro
   const problemTitles = [...new Set(problems.map(problem => problem.title))]
   const label = unconfirmed ? hostingTarget === null ? 'Hosting unconfirmed' : checking ? 'Checking saved groups' : 'Group check unavailable' :
     !bindings.length ? 'No group linked' : problems.length ? problemTitles.slice(0, 2).join(' · ') + (problemTitles.length > 2 ? ` · +${problemTitles.length - 2}` : '') : unchecked ? 'Not checked' : 'Group linked'
-  const summary = `${title} · ${label}${only ? ` · ${name.label}` : bindings.length ? ` · ${bindings.length} groups` : ''}`
+  const summary = `Conversation sync · ${title} · ${label}${only ? ` · ${name.label}` : bindings.length ? ` · ${bindings.length} groups` : ''}`
   return <DropdownMenu.Root onOpenChange={open => {
     onMenuOpen(open)
     if (!open && selected.current && trigger.current) {
@@ -79,8 +79,8 @@ function ChannelHeaderEntry({ channel, diagnosis, totalBindings, ...props }: Pro
       <Icon size={12} />{state !== 'unbound' ? <span className="agent-region-header__connector-marker" aria-hidden="true">{hostingTarget === null ? <HostIcon size={10} /> : onlyProblem ? <ConnectorProblemIcon kind={onlyProblem.kind} /> : unconfirmed || unchecked ? <UnknownIcon size={10} /> : <LinkIcon size={9} />}</span> : null}
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu connector-header-menu" align="end" side="bottom" sideOffset={2} collisionPadding={8}
-      aria-label={`${title} connections`} onCloseAutoFocus={event => { if (handingOff.current) event.preventDefault(); handingOff.current = false }}>
-      <DropdownMenu.Label className="connector-header-menu__title">{title}<small>{bindings.length ? `${bindings.length} group${bindings.length === 1 ? '' : 's'}` : label}</small></DropdownMenu.Label>
+      aria-label={`Conversation sync · ${title}`} onCloseAutoFocus={event => { if (handingOff.current) event.preventDefault(); handingOff.current = false }}>
+      <DropdownMenu.Label className="connector-header-menu__title">Conversation sync<small>{title}{bindings.length ? ` · ${bindings.length} group${bindings.length === 1 ? '' : 's'}` : ''}</small></DropdownMenu.Label>
       {bindings.length ? bindings.map(binding => <GroupEntry key={binding.bindingId} binding={binding} hostingTarget={hostingTarget} visible={visible}
         name={only ? name : undefined} snapshot={diagnosis.entries[connectorDiagnosisKey(binding)]}
         identityLabel={bindings.length > 1 ? bindings.some(other => other !== binding && other.externalConversationId.endsWith(binding.externalConversationId.slice(-8))) ? binding.externalConversationId : '…' + binding.externalConversationId.slice(-8) : undefined}
@@ -89,7 +89,7 @@ function ChannelHeaderEntry({ channel, diagnosis, totalBindings, ...props }: Pro
       {props.bindings.some(binding => !diagnosis.entries[connectorDiagnosisKey(binding)]?.report) && totalBindings > diagnosis.limit ? <p className="connector-header-menu__empty">Only the first {diagnosis.limit} groups are checked here. Other groups are not checked; open their details.</p> : null}
       {issue ? <details className="connector-header-menu__diagnostics"><summary>{hostingTarget === null ? 'Bot hosting details' : 'Group check details'}</summary><p className="connector-header-menu__issue">{issue}</p></details> : null}
       <DropdownMenu.Separator className="tab-context-menu__separator" />
-      <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => { selected.current = { kind: 'connect' } }}>{issue && !bindings.length ? 'Check bot hosting' : props.retainedSetup ? 'Open channel setup' : 'Connect a conversation'}</DropdownMenu.Item>
+      <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => { selected.current = { kind: 'connect' } }}>{issue && !bindings.length ? 'Check bot hosting' : props.retainedSetup ? 'Open channel setup' : 'Connect a group'}</DropdownMenu.Item>
       {channel && navigation ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => { selected.current = { kind: 'channel-settings' } }}>Channel settings</DropdownMenu.Item> : null}
       {!channel && onSettings && hostingTarget ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => { selected.current = { kind: 'settings' } }}>Automatic sync settings</DropdownMenu.Item> : null}
     </DropdownMenu.Content></DropdownMenu.Portal>
@@ -100,11 +100,14 @@ function GroupEntry(props: { binding: RoomBinding; visible: boolean; hostingTarg
   const observedName = useConnectorRoomName(props.name ? null : props.binding, 0, props.visible, props.hostingTarget), name = props.name ?? observedName
   const { binding, snapshot } = props, status = connectorGroupDiagnostics(snapshot), summary = connectorGroupSummary(snapshot?.report ?? null)
   const action = connectorGroupAction(summary, binding.state)
+  const fullConversation = binding.scope.publication === 'future-shared-conversation'
+  const scope = fullConversation ? 'Conversation messages' : 'Agent replies only'
+  const scopeDescription = fullConversation ? 'Includes new user messages and public Agent replies.' : 'Includes public Agent replies and questions. Messages you write in AgentMux are excluded.'
   return <div className="connector-header-menu__group">
     <DropdownMenu.Item className="tab-context-menu__item connector-header-menu__item" onSelect={() => props.onSelect()}
       title={`${name.label} · ${binding.application.appId} · ${binding.externalConversationId}`}
-      aria-label={`${name.label}; ${summary.problems.map(problem => problem.title).join('; ')}; ${binding.externalConversationId}; ${binding.connectionId}`}>
-      <span><strong>{name.label}</strong>{props.identityLabel ? <small>Group {props.identityLabel}</small> : null}</span><DetailsIcon size={13} />
+      aria-label={`${name.label}; ${scope}; ${summary.problems.map(problem => problem.title).join('; ')}; ${binding.externalConversationId}; ${binding.connectionId}`}>
+      <span><strong>{name.label}</strong><small title={scopeDescription}>{scope}</small>{props.identityLabel ? <small>Group {props.identityLabel}</small> : null}</span><DetailsIcon size={13} />
     </DropdownMenu.Item>
     <div className="connector-header-menu__traffic">
       <ConnectorTrafficSummary summary={summary} compact />

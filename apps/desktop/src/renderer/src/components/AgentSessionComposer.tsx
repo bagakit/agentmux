@@ -72,7 +72,6 @@ export function AgentSessionComposer({
   onRevealMessage,
   onOpenTerminal,
   mailboxOrigin,
-  inputContext,
   visible = true
 }: {
   pendingLayout?: PendingDeliveryLayout | undefined
@@ -86,7 +85,6 @@ export function AgentSessionComposer({
   onOpenTerminal?(): void
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
-  inputContext?: ReactNode
   visible?: boolean
 }) {
   useObservedConsumerCommit('composer', visible)
@@ -292,7 +290,7 @@ export function AgentSessionComposer({
       onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
     {fileReferencesOpen && workspace && visible ? <ComposerFileReferences key={attachmentScope} workspace={workspace}
       onClose={() => setFileReferencesOpen(false)} onSelect={path => { void attachments.referencePaths([path]) }} /> : null}
-    <AgentComposer surfaceRef={composerRef} key={sessionId} active={visible} aboveInput={<>{pending}{inputContext}</>} mailbox={mailbox}
+    <AgentComposer surfaceRef={composerRef} key={sessionId} active={visible} aboveInput={pending} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
