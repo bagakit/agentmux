@@ -97,10 +97,11 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId })
   current.current = { client, agentSessionId }
-  const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput,
+  const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput, preparing, preparationIssue,
     historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused } = useMobilePromptController({ local, client, agentSessionId,
       session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   const attachmentControls = useRef<MobileAttachmentControls>(null)
+  const [hasPendingAttachments, setHasPendingAttachments] = useState(false)
   const insertion = useRef<ComposerInsertionHandle>(null)
   const currentActivity = connection.state === 'connected' && reading.activity?.semantic === 'active'
   const retainedActivity = currentAgentSemanticStatus(reading.session?.semanticStatus)
@@ -424,6 +425,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       <div className="mobile-conversation__composer">
         <AgentComposer insertionRef={insertion} aboveInput={<MobileAttachments client={client} session={session ?? null}
           connected={connection.state === 'connected' && !reading.disconnected} controls={attachmentControls}
+          onPendingContentChange={setHasPendingAttachments}
           promptOperationId={attempt?.operationId ?? null} promptConfirmed={attempt?.phase === 'confirmed'}
           insert={async (resolve, original) => {
             const originalClient = current.current.client, selectedId = current.current.agentSessionId
@@ -454,7 +456,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             <MobilePosturePicker control={postureControl} disabled={!available} onSet={modeId => { void changePosture(modeId) }} />
           } : {})}
           {...(postureControl && available && !reading.activity ? { feedback: <MobileNotice identity={[session?.run.runId]} className="composer-feedback" role="status">Run 状态未确认；模式切换由原服务核验。</MobileNotice> } : {})}
-          primaryAction={isWorking && !draft.trim() ? 'stop' : 'send'}
+          primaryAction={isWorking && !draft.trim() && !hasPendingAttachments ? 'stop' : 'send'}
           {...(isWorking && available ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})}
           mailbox={<MobileMailbox key={historyConnection.current.generation} client={client} session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
           {...(reading.projection ? { inputs: reading.projection.inputs } : {})}
@@ -470,12 +472,17 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           }}
           reading={readingProps}
           {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
-          onChange={setDraft} {...(attempt?.phase !== 'sending' ? { onSubmit: () => void submit(), onQueue: () => void submit(false) } : {})}
+          hasPendingContent={hasPendingAttachments}
+          onChange={setDraft} {...(attempt?.phase !== 'sending' && !preparing ? {
+            onSubmit: () => void submit(true, undefined, draftKey, attachmentControls.current?.captureForSend()),
+            onQueue: () => void submit(false, undefined, draftKey, attachmentControls.current?.captureForSend())
+          } : {})}
           onAttach={onAttach ?? (() => { void attachmentControls.current?.choose() })}
           onPasteImage={file => { void attachmentControls.current?.stageFile(file) }}
           onDropFiles={files => { void attachmentControls.current?.stageFiles(files) }}
           {...(readPastedImage ? { readPastedImage } : {})}
           />
+        {preparationIssue ? <MobileNotice identity={[agentSessionId,preparationIssue]} role="status">{preparationIssue}</MobileNotice> : null}
         {attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}
         {retainedAttempts.length ? <details className="mobile-retained-prompts"><summary>保留的原消息 ({retainedAttempts.length})</summary>
           {retainedAttempts.map(renderPromptAttempt)}
