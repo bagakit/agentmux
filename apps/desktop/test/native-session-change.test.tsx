@@ -90,7 +90,7 @@ async function mainOwner(){
  const controller=new RuntimeController(new AgentMuxMemoryAgentSessionStore(),async()=>{throw new Error('Unexpected host creation')})
  const client={connect:vi.fn().mockResolvedValue(undefined),sessionHistorySources:vi.fn().mockResolvedValue([{agentSessionId:control.agentSessionId,history:{providerId:'codex',executorId:'private',workspacePath:_hygiene_fixturePath("private")}}]),sessionHistoryPage:vi.fn().mockResolvedValue(page()),confirmAgentNativeSession:vi.fn().mockResolvedValue({session:core(),confirmation,persisted:true,current:false})}
  ;(controller as any).hosts.set('local',{client,config:{id:'local',kind:'local',label:'Private'},historyObservationDisposers:new Set()})
- const config:AppConfig={...await api.config.get(),executors:{private:{providerId:'codex',command:_hygiene_fixturePath("trusted/native"),args:['--trusted'],env:{PRIVATE:'trusted'}}}}
+ const config:AppConfig={...await api.config.get(),executors:{private:{label:'Private',injectAgentMuxGuide:false,providerId:'codex',command:_hygiene_fixturePath("trusted/native"),args:['--trusted'],env:{PRIVATE:'trusted'}}}}
  return{controller,client,config}
 }
 it('Main forwards only page/source options with its trusted executor and never connects a Run to read',async()=>{
