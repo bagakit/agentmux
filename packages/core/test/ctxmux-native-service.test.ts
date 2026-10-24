@@ -101,10 +101,15 @@ it('keeps both native Run attachments live while delivering ordered raw output s
 
 it.each(['unknown', 'not_applied'] as const)('preserves the public input %s disposition without silently replaying uncertain input', async disposition => {
   const h = await fixture()
-  h.sdk.recoverableInput.mockRejectedValue(new CtxmuxCommandError('io', 'input write failed', disposition))
+  h.sdk.recoverableInput.mockRejectedValue(new CtxmuxCommandError('io', 'input write failed', disposition, undefined, null, {
+    storage_failure: { stage: 'append', sqlite_primary_code: 10, sqlite_extended_code: 778,
+      system_errno: 28, transaction_outcome: 'unknown' }
+  }))
   await expect(h.client.writeTerminal({ runId: 'other-run' }, {
     ownerInstanceId: 'owner', operationId: 'operation', expectedByte: 5, data: 'abcdef'
-  })).rejects.toMatchObject({ code: 'CTXMUX_io', detail: disposition })
+  })).rejects.toMatchObject({ code: 'CTXMUX_io', detail: disposition,
+    storageFailure: { stage: 'append', sqlitePrimaryCode: 10, sqliteExtendedCode: 778,
+      systemErrno: 28, transactionOutcome: 'unknown' } })
   expect(h.sdk.recoverableInput).toHaveBeenCalledOnce()
   expect(h.inner.kernel.hasAttachment('other-run')).toBe(true)
 })

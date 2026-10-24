@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient as DefaultClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import type { AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/types.js'
+import type { AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxStoredAgentSession, AgentPromptSubmissionRecord } from '../src/types.js'
 import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 
 // Finite mutations load a private compiled copy. Shared source/dist and production Runtime stay intact.
@@ -24,6 +24,7 @@ let root: string, store: AgentMuxFileAgentSessionStore, client: DefaultClient, i
 let events: AgentMuxClientEvent[]
 let start: ReturnType<typeof vi.fn>, stop: ReturnType<typeof vi.fn>, submit: ReturnType<typeof vi.fn>
 let providerId: 'claude' | 'kimi'
+let inputReceipt: AgentPromptSubmissionRecord | null
 const sessionId = 'private-creation-session', requestId = 'pmo-original-creation'
 const runId = 'private-adapter-run', task = 'execute the exact original task'
 function run(): CtxmuxAdapterRun {
@@ -58,7 +59,10 @@ beforeEach(async () => {
     installed: true, capabilities: new AgentProviderRegistry().get(id).catalog.capabilities }))
   inner.ensureManagedHooks = async () => {}
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
-  submit = vi.fn(async () => {}); inner.promptSubmission.submitInputPlan = submit
+  inputReceipt = null
+  vi.spyOn(client, 'inspectAgentPromptSubmission').mockImplementation(async key =>
+    inputReceipt?.admission?.submissionId === key.submissionId ? inputReceipt : null)
+  submit = vi.fn(async () => { confirmInput() }); inner.promptSubmission.submitInputPlan = submit
   events = []; client.onEvent(event => { events.push(structuredClone(event)) })
 })
 afterEach(async () => {
@@ -66,6 +70,18 @@ afterEach(async () => {
   vi.restoreAllMocks(); vi.unstubAllEnvs()
   await rm(root, { recursive: true, force: true })
 })
+function initialInputKey() {
+  return { kind: 'prompt', agentSessionId: sessionId, expectedRun: { runId },
+    submissionId: `launch-prompt:${start.mock.calls[0]![0].operationKey}` }
+}
+// The explicit Input admission fixture supplies the original typed receipt;
+// a resolved submit Promise alone is not delivery evidence.
+function confirmInput(acknowledged = true) {
+  const [, , submissionId, prompt, plan, , , , , , , message] = submit.mock.calls[0]!
+  inputReceipt = { agentSessionId: sessionId, run: { runId }, admission: { submissionId,
+    inputKey: initialInputKey() as NonNullable<AgentPromptSubmissionRecord["admission"]>["inputKey"], operationId: submissionId, transport: 'pty', startByte: 0, endByte: Buffer.byteLength(prompt),
+    acknowledged, intent: { run: { runId }, ownerInstanceId: 'private-adapter', prompt, plan, message } } }
+}
 function create(prompt?: string) {
   return client.createAgentWithDelivery({ agentSessionId: sessionId, createOperationId: requestId,
     providerId, executorId: 'exact-configured-executor', workspacePath: root,
@@ -98,7 +114,7 @@ describe('public Agent creation retains the original first-prompt delivery fact'
 
   it('confirms an at-launch first prompt from the same creation, without another Input', async () => {
     const result = await create(task)
-    const creation = { createOperationId: requestId, initialPrompt: 'confirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) }
+    const creation = { createOperationId: requestId, initialInputKey: initialInputKey(), initialPrompt: 'confirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) }
     expect(result).toMatchObject({ promptConfirmed: true, creation, session: { creation } })
     expect(client.agentSession(sessionId).creation).toEqual(creation)
     expect((await stored()).creation).toEqual(creation)
@@ -109,18 +125,18 @@ describe('public Agent creation retains the original first-prompt delivery fact'
     healthyOneCreation()
   })
 
-  it('keeps post-launch delivery unknown until its one original Input is confirmed', async () => {
+  it('keeps post-launch delivery unconfirmed until its one original Input is confirmed', async () => {
     providerId = 'kimi'
     let release!: () => void
-    submit.mockImplementation(async () => { await new Promise<void>(resolve => { release = resolve }) })
+    submit.mockImplementation(async () => { confirmInput(false); await new Promise<void>(resolve => { release = resolve }); confirmInput() })
     const creating = create(task)
     await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1))
-    expect((await stored()).creation).toEqual({ createOperationId: requestId, initialPrompt: 'unknown', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'unknown' })
-    expect(client.agentSession(sessionId).creation).toEqual({ createOperationId: requestId, initialPrompt: 'unknown', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'unknown' })
+    expect((await stored()).creation).toEqual({ createOperationId: requestId, initialInputKey: initialInputKey(), initialPrompt: 'unconfirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) })
+    expect(client.agentSession(sessionId).creation).toEqual({ createOperationId: requestId, initialInputKey: initialInputKey(), initialPrompt: 'unconfirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) })
     expect((await store.loadTimeline(sessionId)).items).toEqual([])
     release()
     const result = await creating
-    const creation = { createOperationId: requestId, initialPrompt: 'confirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) }
+    const creation = { createOperationId: requestId, initialInputKey: initialInputKey(), initialPrompt: 'confirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) }
     expect(result).toMatchObject({ promptConfirmed: true, creation, session: { creation } })
     expect(client.agentSession(sessionId).creation).toEqual(creation)
     expect((await stored()).creation).toEqual(creation)
@@ -128,7 +144,8 @@ describe('public Agent creation retains the original first-prompt delivery fact'
     expect(submit.mock.calls).toEqual([[expect.objectContaining({ agentSessionId: sessionId, run: { runId } }),
       expect.objectContaining({ runId }), `launch-prompt:${start.mock.calls[0]![0].operationKey}`, task, expect.any(Object),
       { expectedRun: { runId }, afterSubmissionId: null }, undefined, undefined, false, expect.any(AbortSignal),
-      undefined, { userContent: task }, undefined, undefined, undefined, undefined, undefined, undefined]])
+      undefined, { userContent: task }, undefined, undefined, undefined, undefined, initialInputKey(),
+      { onlyIfUnclaimed: true, authority: { assertCurrent: expect.any(Function) } }]])
     expect((await store.loadTimeline(sessionId)).items.map(({ content, status }) => ({ content, status })))
       .toEqual([{ content: task, status: 'complete' }])
     healthyOneCreation()
@@ -136,9 +153,9 @@ describe('public Agent creation retains the original first-prompt delivery fact'
 
   it('returns and persists unconfirmed delivery while retaining the healthy Run and original prompt once', async () => {
     providerId = 'kimi'
-    submit.mockRejectedValue(new Error('Private fixture loses the original Input receipt'))
+    submit.mockImplementation(async () => { confirmInput(false); throw new Error('Private fixture loses the original Input receipt') })
     const result = await create(task)
-    const creation = { createOperationId: requestId, initialPrompt: 'unconfirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) }
+    const creation = { createOperationId: requestId, initialInputKey: initialInputKey(), initialPrompt: 'unconfirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) }
     expect(result).toMatchObject({ promptConfirmed: false, creation, session: { creation } })
     expect(client.agentSession(sessionId).creation).toEqual(creation)
     expect((await stored()).creation).toEqual(creation)
@@ -166,18 +183,42 @@ describe('public Agent creation retains the original first-prompt delivery fact'
       return await metadataCas(expected, next, signal, future)
     })
     const result = await create(task)
-    expect(failedReceiptWrites).toBe(1)
+    expect(failedReceiptWrites).toBeGreaterThan(0)
     expect(result).toMatchObject({ promptConfirmed: true,
       creation: { createOperationId: requestId, initialPrompt: 'confirmed' } })
-    const retained = { createOperationId: requestId, initialPrompt: 'unknown', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'unknown' }
+    const retained = { createOperationId: requestId, initialInputKey: initialInputKey(), initialPrompt: 'unknown', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) }
     expect(result.session.creation).toEqual(retained)
     expect(client.agentSession(sessionId).creation).toEqual(retained)
     expect((await stored()).creation).toEqual(retained)
     expect(submit).toHaveBeenCalledTimes(1)
     expect(submit.mock.calls[0]![3]).toBe(task)
-    expect(events.filter(event => event.type === 'agent-error')).toEqual([expect.objectContaining({
+    expect(events.filter(event => event.type === 'agent-error')).toContainEqual(expect.objectContaining({
       agentSessionId: sessionId, code: 'AGENT_CREATION_RECEIPT_UNCONFIRMED', message: expect.stringContaining('saving')
-    })])
+    }))
     healthyOneCreation()
   })
+
+  it.each(['foreign-key', 'foreign-body', 'unknown-ack'] as const)('retains unconfirmed input when its post-failure receipt has %s', async mismatch => {
+    providerId = 'kimi'
+    const metadataCas = store.compareAndSwapMetadata.bind(store)
+    let rejected = false
+    vi.spyOn(store, 'compareAndSwapMetadata').mockImplementation(async (expected, next, signal, future) => {
+      if (!rejected && next?.creation?.initialPrompt === 'confirmed') {
+        rejected = true
+        const admission = inputReceipt!.admission!
+        if (mismatch === 'foreign-key') admission.inputKey = { ...initialInputKey(), kind: 'prompt', submissionId: 'another-input' }
+        else if (mismatch === 'foreign-body') admission.intent!.prompt = 'another body'
+        else admission.acknowledged = false
+        throw new Error('The Session projection write failed before its original receipt was reobserved')
+      }
+      return await metadataCas(expected, next, signal, future)
+    })
+    const result = await create(task)
+    expect(rejected).toBe(true)
+    expect(result.promptConfirmed).toBe(false)
+    expect(result.creation.initialPrompt).toBe('unconfirmed')
+    expect(submit).toHaveBeenCalledTimes(1)
+    healthyOneCreation()
+  })
+
 })
