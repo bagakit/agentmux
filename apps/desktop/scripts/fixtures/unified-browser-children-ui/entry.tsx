@@ -45,7 +45,10 @@ const facts = () => ({ ...projectPersistedWorkbench(state()), loading: state().l
   },
   promote(tabId: string, regionId: string) { state().promoteRegionToTab('repo', tabId, regionId); return facts() },
   split(tabId: string, regionId: string) { return state().splitRegion('repo', tabId, regionId, 'right') },
-  close(tabId: string, regionId: string) { return state().closeRegion('repo', tabId, regionId) },
+  closeTab(tabId: string) {
+    const current = state(), group = current.layouts.repo.groups.find(group => group.tabOrder.includes(tabId))!
+    return current.closeTab('repo', group.id, tabId)
+  },
   async flush() { await prepareRendererUpdate(); await boundary.request('flush'); return facts() },
   theme(mode: 'light' | 'dark') { updateThemeSelection({ ...setup.config.appearance, appAppearance: mode }) },
   ready: true
