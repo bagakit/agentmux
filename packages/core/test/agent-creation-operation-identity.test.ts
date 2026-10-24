@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path'
 import { build, transform } from 'esbuild'
 import ts from 'typescript'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentMuxClient, hostAgentCreationIntent } from '../src/client.js'
+import { AgentMuxClient as DefaultClient, hostAgentCreationIntent } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation } from '../src/agent-session-store.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import { issueAgentCapability, hashAgentCapability } from '../src/agent-capability.js'
@@ -20,6 +20,10 @@ import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import type { AgentMuxHostedRpcPort } from '../src/hosted-client-contract.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import runtimeControllerSource from '../../../apps/desktop/src/main/runtime-controller.ts?raw'
+
+type AgentMuxClient = DefaultClient
+const AgentMuxClient: typeof DefaultClient = process.env.AGENTMUX_TEST_CREATION_CLIENT
+  ? (await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_CREATION_CLIENT)).AgentMuxClient : DefaultClient
 
 const roots: string[] = [], clients: AgentMuxClient[] = []
 afterEach(async () => {
@@ -120,7 +124,8 @@ it('returns the original initial-message creation without repeating start or inp
   for (let retry = 0; retry < 2; retry++) {
     await expect(f.client.createAgentWithDelivery(request)).resolves.toMatchObject({ session: { agentSessionId: oldId, run: session().run } })
   }
-  expect(start).not.toHaveBeenCalled(); expect(input).not.toHaveBeenCalled(); expect(reserve).not.toHaveBeenCalled()
+  expect(start).not.toHaveBeenCalled(); expect(input).not.toHaveBeenCalled()
+  expect(reserve).not.toHaveBeenCalled()
   expect(await f.queue.listAfter()).toHaveLength(1)
 })
 
@@ -135,7 +140,8 @@ it('reconciles a prepared old target creation on repeated requests without anoth
   await f.store.releaseReopenOwner(pending.ownerId)
   const inner = target as any; await inner.registry.load('local')
   const originalRun = { runId: 'original-started-run', lifecycleOperationId: pending.operationId, workspacePath: fixturePath("private-workspace"), program: '/bin/sh', args: [], pid: process.pid, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0, nativeService: null }
-  vi.spyOn(inner.kernel, 'list').mockResolvedValue([originalRun])
+  const observation = vi.spyOn(inner.kernel, 'inspectCreation').mockResolvedValue(originalRun)
+  const inventory = vi.spyOn(inner.kernel, 'list').mockRejectedValue(new Error('Unrelated inventory is unavailable'))
   const start = vi.spyOn(inner.kernel, 'start').mockRejectedValue(new Error('must not start again'))
   const input = vi.spyOn(inner.kernel, 'input').mockRejectedValue(new Error('must not input again'))
   inner.hookServer.isRunning = () => true; inner.hookServer.createBinding = () => ({ bindRun: async () => {}, close: async () => {} })
@@ -146,6 +152,35 @@ it('reconciles a prepared old target creation on repeated requests without anoth
     expect(receipt.promptConfirmed).toBe(false)
   }
   expect(start).not.toHaveBeenCalled(); expect(input).not.toHaveBeenCalled()
+  expect(observation).toHaveBeenCalledExactlyOnceWith(pending.operationId); expect(inventory).not.toHaveBeenCalled()
+})
+
+it('isolates original creation observation failures across stale FileStore owners without reading inventory', async () => {
+  const f = await fixture(), pending = [reservation('unknown-original', 'unknown-operation'), reservation('healthy-original', 'healthy-operation')]
+  for (const item of pending) {
+    await f.store.reserveLifecycle(item)
+    const { run: _run, retiredRuns: _retired, ...seed } = session(item.agentSessionId, item.agentSessionId === 'unknown-original' ? 'unknown-operation' : 'healthy-operation')
+    await f.store.prepareCreate(item, { ...seed, creation: { ...seed.creation!, initialPrompt: 'unknown', agentMuxContext: 'unknown', intentDigest: 'd'.repeat(64) } })
+  }
+  await f.store.releaseReopenOwner(pending[0]!.ownerId)
+  const cold = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(join(f.root, 'sessions.json')) }); clients.push(cold)
+  const inner = cold as any; await inner.registry.load('local')
+  const inventory = vi.spyOn(inner.kernel, 'list').mockRejectedValue(new Error('Unrelated inventory unavailable'))
+  const observation = vi.spyOn(inner.kernel, 'inspectCreation').mockImplementation(async (key: unknown) => {
+    if (key === pending[0]!.operationId) throw new Error('Original operation observation unavailable')
+    return { runId: 'healthy-original-run', lifecycleOperationId: key, workspacePath: fixturePath("private-workspace"),
+      program: '/bin/sh', args: [], pid: process.pid, state: { type: 'running' }, cols: 80, rows: 24,
+      latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0, nativeService: null }
+  })
+  const start = vi.spyOn(inner.kernel, 'start'), input = vi.spyOn(inner.kernel, 'input'), stop = vi.spyOn(inner.kernel, 'stop')
+  inner.hookServer.isRunning = () => true; inner.hookServer.createBinding = () => ({ bindRun: async () => {}, close: async () => {} })
+  await expect(inner.recoverStaleLifecycles()).resolves.toBeUndefined()
+  expect((await f.store.readMetadata('healthy-original'))?.run).toEqual({ runId: 'healthy-original-run' })
+  expect(await f.store.readMetadata('unknown-original')).toBeNull()
+  expect((await f.store.loadCreationCorrelation('unknown-original'))?.operationId).toBe(pending[0]!.operationId)
+  expect(await f.store.loadCreationCorrelation('healthy-original')).toBeNull()
+  expect(observation.mock.calls.map(call => call[0])).toEqual(pending.map(item => item.operationId))
+  expect(inventory).not.toHaveBeenCalled(); expect(start).not.toHaveBeenCalled(); expect(input).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
 })
 
 it('only derives a fresh identity when both original owners confirm no binding', async () => {

@@ -20,6 +20,7 @@ async function bind(path) {
   inputs.set(absolute, hash)
 }
 for (const path of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/continuity-attempt.ts', 'packages/core/src/agent-session-recovery/lifecycle.ts', 'packages/core/src/agent-session-recovery/reconciliation.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/agent-session-registry.ts', 'packages/core/src/agent-session-store.ts',
+  'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/test/hook-postcommit-observation.vitest.config.mts',
   'packages/core/test/durable-local-creation.test.ts', 'packages/core/test/durable-local-creation.config.mts',
   'packages/core/test/agent-creation-delivery-fact.test.ts', 'packages/core/test/agent-start-failure-recovery.test.ts',
   'packages/core/test/agent-creation-operation-identity.test.ts', 'packages/core/test/agent-creation-operation-identity.config.mts',
@@ -27,7 +28,8 @@ for (const path of ['packages/core/src/client.ts', 'packages/core/src/agent-sess
   'packages/core/scripts/verify-durable-local-creation.mjs',
   `packages/core/vendor/ctxmux/${process.platform}-${process.arch}/manifest.json`,
   `packages/core/vendor/ctxmux/${process.platform}-${process.arch}/bin/ctxmuxd`]) await bind(path)
-const alias = {}
+if (process.env.AGENTMUX_TEST_CTXMUXD) await bind(process.env.AGENTMUX_TEST_CTXMUXD)
+const alias = process.env.CTXMUX_TEST_SDK_SOURCE ? { '@ctxmux/sdk': resolve(process.env.CTXMUX_TEST_SDK_SOURCE) } : {}
 for (const name of await readdir(join(root, 'packages'))) {
   const manifest = join(root, 'packages', name, 'package.json')
   let pkg; try { pkg = JSON.parse(await readFile(manifest, 'utf8')) } catch { continue }
@@ -39,8 +41,18 @@ for (const name of await readdir(join(root, 'packages'))) {
     try { await stat(path); alias[key === '.' ? pkg.name : pkg.name + key.slice(1)] = path } catch {}
   }
 }
+// This generated public export has no TypeScript source file and must outrank the package alias.
+alias['@agentmux/identity/runtime-source'] = join(root, 'packages/identity/dist/runtime-source.js')
 const variants = [
   { name: 'candidate' },
+  { name: 'stale-query-uses-unrelated-inventory', path: 'packages/core/src/client.ts',
+    from: 'try { await this.completePreparedCreate(reservation, await this.kernel.inspectCreation(reservation.operationId)) }',
+    to: 'try { await this.completePreparedCreate(reservation, (await this.kernel.list()).find(run => run.lifecycleOperationId === reservation.operationId) ?? null) }',
+    target: 'isolates original creation observation failures', expected: 'AssertionError' },
+  { name: 'one-original-observation-aborts-neighbors', path: 'packages/core/src/client.ts',
+    from: 'try { await this.completePreparedCreate(reservation, await this.kernel.inspectCreation(reservation.operationId)) }\n        catch (error) { this.publisher.publish',
+    to: 'try { await this.completePreparedCreate(reservation, await this.kernel.inspectCreation(reservation.operationId)) }\n        catch (error) { throw error; this.publisher.publish',
+    target: 'isolates original creation observation failures', expected: 'promise rejected' },
   { name: 'mint-another-session', path: 'packages/core/src/client.ts',
     from: "input.agentSessionId ?? await this.resolveAgentCreationSessionId(createOperationId)", to: 'input.agentSessionId ?? mintAgentSessionId()',
     target: 'prepares the immutable ordinary creation', expected: 'expected undefined' },
@@ -55,8 +67,8 @@ const variants = [
     to: '        if (!persisted) {\n          await this.retireUncommittedRun(run.runId)\n          throw error\n          try {\n            const canonical = (await this.store.readMetadata(agentSessionId))',
     target: 'keeps acknowledged native work', expected: 'to not have property "error"' },
   { name: 'claim-foreign-start', path: 'packages/core/src/client.ts',
-    from: 'const seed = reservation.preparedCreation, candidates = runs.filter(run => run.lifecycleOperationId === reservation.operationId)',
-    to: 'const seed = reservation.preparedCreation, candidates = runs',
+    from: '!seed || !run || run.lifecycleOperationId !== reservation.operationId || run.workspacePath !== seed.workspacePath',
+    to: '!seed || !run || run.workspacePath !== seed.workspacePath',
     target: 'does not replace or claim foreign lifecycle', expected: 'promise resolved' },
   { name: 'ignore-frozen-intent', path: 'packages/core/src/agent-session-store.ts',
     from: "current.kind !== 'create' || current.operationId !== operationId || current.preparedCreation?.creation?.intentDigest !== intentDigest",
@@ -85,25 +97,15 @@ try {
     const file = join(packageRoot, 'dist', variant.name + '.mjs'), report = join(attempt, variant.name + '.json')
     let transformed = false
     const compiled = await build({ stdin: { contents: 'export * from "./packages/core/src/index.ts"', resolveDir: root, loader: 'ts' },
-      outfile: file, bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external', alias, metafile: true,
+      outfile: file, bundle: true, platform: 'node', format: 'esm', target: 'node24', alias, metafile: true,
       logLevel: 'warning', plugins: [{ name: 'existing-dependencies', setup(plugin) {
         plugin.onResolve({ filter: /^[^./]/ }, async args => {
-          if (isBuiltin(args.path) || alias[args.path]) return null
-          const resolver = createRequire(args.importer || join(root, 'packages/core/package.json'))
-          let entry
-          try { entry = resolver.resolve(args.path) } catch (error) {
-            const parts = args.path.split('/'), name = args.path.startsWith('@') ? parts.splice(0, 2).join('/') : parts.shift()
-            for (const directory of resolver.resolve.paths(name) ?? []) {
-              try {
-                const manifest = join(directory, name, 'package.json'), pkg = JSON.parse(await readFile(manifest, 'utf8'))
-                const shape = pkg.exports?.[parts.length ? './' + parts.join('/') : '.'], value = typeof shape === 'string' ? shape : shape?.import
-                if (!value) continue
-                entry = resolve(dirname(manifest), value); await stat(entry); await bind(manifest); break
-              } catch {}
-            }
-            if (!entry) throw error
-          }
-          await bind(entry); return { path: entry, external: true }
+          if (isBuiltin(args.path) || alias[args.path] || args.pluginData?.resolvingDependency) return null
+          const resolved = await plugin.resolve(args.path, { kind: args.kind, importer: args.importer,
+            resolveDir: args.resolveDir, pluginData: { resolvingDependency: true } })
+          assert.equal(resolved.errors.length, 0, 'Dependency resolution failed: ' + args.path)
+          await bind(resolved.path)
+          return { path: resolved.path, external: true }
         })
       } }, ...(variant.from ? [{ name: 'loaded-' + variant.name, setup(plugin) {
         plugin.onLoad({ filter: /\.ts$/ }, async args => {
@@ -135,7 +137,7 @@ try {
       failed: tests.numFailedTests, total: assertions.filter(test => test.status !== 'pending').length, semanticRed,
       bundleSha256: sha(await readFile(file)), failures: failed.map(test => ({ name: test.fullName, messages: test.failureMessages })) })
     await save()
-    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 41 && tests.success, 'Actual nonempty creation baseline failed: ' + report)
+    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 42 && tests.success, 'Actual nonempty creation baseline failed: ' + report)
     else assert.ok(semanticRed, 'Loaded mutation did not produce its business failure: ' + variant.name)
   }
   for (const path of inputs.keys()) await bind(path)

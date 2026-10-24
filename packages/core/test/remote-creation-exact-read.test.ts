@@ -210,14 +210,16 @@ describe.each(['memory', 'file'] as const)('exact creation reads through the %s 
     await f.store.prepareCreate(reservation, seed)
     await f.store.releaseReopenOwner(reservation.ownerId)
     f.inner.connected = true; vi.spyOn(f.inner.kernel, 'isConnected').mockReturnValue(true)
-    vi.spyOn(f.inner.kernel, 'list').mockResolvedValue([{ runId: original.run.runId, lifecycleOperationId: op,
+    const observation = vi.spyOn(f.inner.kernel, 'inspectCreation').mockResolvedValue({ runId: original.run.runId, lifecycleOperationId: op,
       workspacePath: original.workspacePath, program: '/bin/sh', args: [], pid: process.pid, state: { type: 'running' },
-      cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0, nativeService: null }])
+      cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0, nativeService: null })
+    const inventory = vi.spyOn(f.inner.kernel, 'list').mockRejectedValue(new Error('Unrelated Runtime observation failed'))
     f.inner.hookServer.isRunning = () => true
     f.inner.hookServer.createBinding = () => ({ bindRun: async () => {}, close: async () => {} })
     const catalogue = f.forbidCatalogue()
     expect(await f.client.inspectAgentCreation(original.agentSessionId)).toMatchObject({ run: original.run, creation: original.creation })
     expect(catalogue).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+    expect(observation).toHaveBeenCalledExactlyOnceWith(op); expect(inventory).not.toHaveBeenCalled()
   })
 
   it('uses the same exact reader for the existing durable fork creation before requiring a parent', async () => {

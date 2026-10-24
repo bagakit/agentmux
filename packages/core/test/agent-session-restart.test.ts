@@ -33,7 +33,7 @@ async function fixture(ended = false, native = true, resumable = true, fatal = f
   await mkdir(runtime); await mkdir(state)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', runtime); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', state)
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
-  const daemon = spawn(resolve(import.meta.dirname, '../vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
+  const daemon = spawn(process.env.AGENTMUX_TEST_CTXMUXD ?? resolve(import.meta.dirname, '../vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
     ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
   let error = ''; daemon.stderr!.on('data', bytes => { error += String(bytes) })
   cleanups.push(async () => { if (daemon.exitCode === null && daemon.signalCode === null) { const exited = once(daemon, 'exit'); daemon.kill('SIGTERM'); await exited }; await rm(root, { recursive: true, force: true }) })
@@ -120,7 +120,9 @@ it('reconciles an applied Start with lost reply without another Start or success
   const f = await fixture(); let actual: any
   f.start.mockImplementationOnce(async (input: any) => { actual = await f.nativeStart(input); throw new core.AgentMuxError('Private original Start ACK lost', 'CONTROL_UNAVAILABLE') })
   await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
+  const inventory = vi.spyOn(f.inner.kernel, 'list').mockRejectedValue(new Error('Unrelated inventory unavailable'))
   expect(await f.client.inspectAgentRestart(f.request)).toMatchObject({ phase: 'starting', newRun: { runId: actual.runId } })
+  expect(inventory).not.toHaveBeenCalled()
   await f.client.dispose(); const second = await f.reader()
   await expect(f.restart(second)).resolves.toMatchObject({ run: { runId: actual.runId } }); await f.invariants(second)
 })
@@ -192,13 +194,14 @@ it('rejects a second owner while the original Stop is executing and prevents ano
   await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESTART_OWNER_DISPOSED' })
   release(); await first; await disposal; await f.invariants(second)
 })
-it('a distinct process recovers the original interrupted restart without retiring its Session', async () => {
-  const f = await fixture()
-  f.stop.mockImplementationOnce(async (operation: any) => { await f.nativeStop(operation); throw new Error('Original private Stop reply lost') })
-  await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESTART_UNCONFIRMED' })
+it.each(['Stop', 'Start'] as const)('a distinct process recovers the original interrupted restart after lost %s reply without retiring its Session', async stage => {
+  const f = await fixture(); let originalSuccessor: any
+  if (stage === 'Stop') f.stop.mockImplementationOnce(async (operation: any) => { await f.nativeStop(operation); throw new Error('Original private Stop reply lost') })
+  else f.start.mockImplementationOnce(async (input: any) => { originalSuccessor = await f.nativeStart(input); throw new core.AgentMuxError('Original private Start reply lost', 'CONTROL_UNAVAILABLE') })
+  await expect(f.restart()).rejects.toMatchObject({ code: stage === 'Stop' ? 'AGENT_RESTART_UNCONFIRMED' : 'AGENT_RESUME_UNCONFIRMED' })
   await f.client.dispose()
-  const entry = process.env.AGENTMUX_TEST_RESTART_ENTRY ?? new URL('../dist/index.js', import.meta.url).href
-  const code = `import * as core from ${JSON.stringify(entry)};const program=${JSON.stringify(program)};const provider=${provider.toString()};const store=new core.AgentMuxFileAgentSessionStore(${JSON.stringify(f.storePath)});const client=new core.AgentMuxClient({store,providers:[provider()]});Object.defineProperty(client.hookServer,'port',{value:0});await client.connect();try{const session=await client.restartAgent(${JSON.stringify(f.request)});console.log(JSON.stringify({pid:process.pid,session,inspection:await client.inspectAgentRestart(${JSON.stringify(f.request)})}))}finally{await client.dispose()}`
+  const entry = process.env.AGENTMUX_TEST_RESTART_CHILD_ENTRY ?? process.env.AGENTMUX_TEST_RESTART_ENTRY ?? new URL('../dist/index.js', import.meta.url).href
+  const code = `import * as core from ${JSON.stringify(entry)};const program=${JSON.stringify(program)};const provider=${provider.toString()};const store=new core.AgentMuxFileAgentSessionStore(${JSON.stringify(f.storePath)});const client=new core.AgentMuxClient({store,providers:[provider()]});Object.defineProperty(client.hookServer,'port',{value:0});await client.connect();client.kernel.list=async()=>{throw Error('Original operation must not read unrelated inventory')};try{const session=await client.restartAgent(${JSON.stringify(f.request)});console.log(JSON.stringify({pid:process.pid,session,inspection:await client.inspectAgentRestart(${JSON.stringify(f.request)})}))}finally{await client.dispose()}`
   const child = spawn(process.execPath, ['--input-type=module', '-e', code], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
   let stdout = '', stderr = ''; child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value })
   cleanups.push(async () => { if (child.exitCode === null && child.signalCode === null) { const ended = once(child, 'exit'); child.kill('SIGTERM'); await ended } })
@@ -208,8 +211,10 @@ it('a distinct process recovers the original interrupted restart without retirin
   expect(result.pid).not.toBe(process.pid)
   expect(result.session.agentSessionId).toBe(f.original.agentSessionId); expect(result.session.nativeHandle).toEqual(f.original.nativeHandle)
   expect(result.inspection).toMatchObject({ phase: 'restarted', newRun: result.session.run })
+  if (originalSuccessor) { expect(result.session.run.runId).toBe(originalSuccessor.runId) }
   const second = await f.reader()
   expect((await f.restart(second)).run).toEqual(result.session.run)
+  if (originalSuccessor) expect((await second.inner.kernel.status(originalSuccessor.runId)).pid).toBe(originalSuccessor.pid)
   expect((await second.client.listRuns()).filter((run: any) => run.state === 'running')).toHaveLength(2)
   expect(await second.store.readRetiredAgentSession(f.original.agentSessionId)).toBeNull()
 })
@@ -225,8 +230,10 @@ it('keeps an original Start with mismatching launch evidence unknown instead of 
   const f = await fixture(); let actual: any
   f.start.mockImplementationOnce(async (input: any) => { actual = await f.nativeStart(input); throw new core.AgentMuxError('Original private Start ACK lost', 'CONTROL_UNAVAILABLE') })
   await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
-  const listing = f.nativeList
-  vi.spyOn(f.inner.kernel, 'list').mockImplementation(async () => (await listing()).map((run: any) => run.runId === actual.runId ? { ...run, args: ['foreign-native-target'] } : run))
+  const observation = f.inner.kernel.inspectCreation.bind(f.inner.kernel)
+  vi.spyOn(f.inner.kernel, 'inspectCreation').mockImplementation(async (key: unknown) => {
+    const run = await observation(key); return run?.runId === actual.runId ? { ...run, args: ['foreign-native-target'] } : run
+  })
   expect(await f.client.inspectAgentRestart(f.request)).toMatchObject({ phase: 'unconfirmed', canRetry: false })
   await expect(f.restart()).rejects.toMatchObject({ code: 'AGENT_RESTART_CONFLICT' })
   expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).toHaveBeenCalledTimes(1)

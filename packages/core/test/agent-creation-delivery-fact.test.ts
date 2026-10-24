@@ -131,8 +131,12 @@ describe('public Agent creation retains the original first-prompt delivery fact'
     submit.mockImplementation(async () => { confirmInput(false); await new Promise<void>(resolve => { release = resolve }); confirmInput() })
     const creating = create(task)
     await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1))
-    expect((await stored()).creation).toEqual({ createOperationId: requestId, initialInputKey: initialInputKey(), initialPrompt: 'unconfirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) })
-    expect(client.agentSession(sessionId).creation).toEqual({ createOperationId: requestId, initialInputKey: initialInputKey(), initialPrompt: 'unconfirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) })
+    // The original receipt observer persists its projection before publishing the
+    // in-memory snapshot. Holding Input does not await that separate metadata turn.
+    await vi.waitFor(async () => {
+      expect((await stored()).creation).toEqual({ createOperationId: requestId, initialInputKey: initialInputKey(), initialPrompt: 'unconfirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) })
+      expect(client.agentSession(sessionId).creation).toEqual({ createOperationId: requestId, initialInputKey: initialInputKey(), initialPrompt: 'unconfirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) })
+    })
     expect((await store.loadTimeline(sessionId)).items).toEqual([])
     release()
     const result = await creating
