@@ -72,9 +72,8 @@ export function MobileCommandPicker({ commands, disabled, onSelect, onOpenChange
 }
 
 /** The same input layout control as Desktop; communication records have their own mailbox. */
-export function MobileMessageTools({ refresh, terminal, onInterrupt, commands = [], onCommand, skills, disabled, onCommandsOpenChange, commandsLoading, commandsIssue, retryCommands }: {
+export function MobileMessageTools({ refresh, onInterrupt, commands = [], onCommand, skills, disabled, onCommandsOpenChange, commandsLoading, commandsIssue, retryCommands }: {
   refresh(): void
-  terminal?: (() => void) | undefined
   onInterrupt?: (() => void) | undefined
   commands?: readonly ComposerSuggestion[]
   onCommand?: ((command: ComposerSuggestion) => void) | undefined
@@ -89,7 +88,6 @@ export function MobileMessageTools({ refresh, terminal, onInterrupt, commands = 
     {onCommand ? <MobileCommandPicker commands={commands} {...(disabled !== undefined ? { disabled } : {})} onSelect={onCommand} onOpenChange={onCommandsOpenChange} loading={commandsLoading} issue={commandsIssue} retry={retryCommands} /> : null}
     {phase !== 'collapsed' && <>
       {skills}
-      {terminal && <button type="button" className="composer-tool" aria-label="查看终端" onClick={terminal}><SemanticIcon name="object.terminal" size={16} /></button>}
       <button type="button" className="composer-tool" aria-label="刷新原对话" onClick={refresh}><SemanticIcon name="action.refresh" size={16} /></button>
     </>}
   </span>

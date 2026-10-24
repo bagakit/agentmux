@@ -30,6 +30,7 @@ import { MobileSpatialNavigation, type MobileSpatialContext } from './navigation
 import { readMobileHome, saveMobileHome, type MobileHome, type MobilePrimaryWorkface } from './navigation/home-preference'
 import { MobileGoalWork } from './navigation/MobileGoalWork'
 import { MobileMoteProfile } from './navigation/MobileMoteProfile'
+import { mobileChatStart } from './navigation/chat-start'
 import { useMobileBack } from './navigation/useMobileBack'
 import { retainObjectReference, type MobilePresentationRoute, type MobileTopicsRoute, type MobileGoalsContext, type MobileKnowledgeReference } from './recovery/presentation-route'
 import type { MobileTopicSourceContentReference } from './topics/source-reference'
@@ -49,7 +50,6 @@ const ThemeActionMenuIcon = semanticIconComponent('action.menu')
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeNavigationSurveyIcon = semanticIconComponent('navigation.survey')
-const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 
 type Workface = Navigation
 
@@ -82,7 +82,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const [hasConnected, setHasConnected] = useState(connection.state === 'connected' || initial.current.workface.selectedSessionId !== null || initial.current.presentation !== undefined)
   const hostAppearance = useHostAppearance(client, connection.state)
   useEffect(() => { if (connection.state === 'connected') setHasConnected(true) }, [connection.state])
-  const [workface, setWorkface] = useState<Workface>(initial.current.workface)
+  const [workface, setWorkface] = useState<Workface>(() => ({ ...initial.current!.workface, panel: 'conversation' }))
   const [canPersist, setCanPersist] = useState(initial.current.issue === null)
   const initialHome = useRef(readMobileHome())
   const initialPrimary = initial.current.presentation?.primary ?? initialHome.current.home
@@ -129,10 +129,26 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     if (!client?.forwardRpc) return Promise.reject(new Error('连接暂不可用，原工作面保留。'))
     return client.forwardRpc(method, params)
   }, [client])
-  const [showSession, setShowSession] = useState(initial.current.presentation?.showSession ?? (initial.current.workface.selectedSessionId !== null && initial.current.workface.panel !== 'sessions'))
-  const [showGoalWork, setShowGoalWork] = useState(initial.current.presentation?.showGoalWork ?? false)
+  const [showSession, setShowSession] = useState(true)
+  const [showGoalWork, setShowGoalWork] = useState(false)
+  const [recentMoteSpaceId, setRecentMoteSpaceId] = useState(initial.current.presentation?.recentMoteSpaceId ?? initial.current.presentation?.identity?.mote?.spaceId ?? null)
+  const startupProfile = useRef(initial.current.presentation?.profile ?? null)
+  const goalReturn = useRef<{ trigger: HTMLButtonElement; sessionId: string | null } | null>(null)
+  useEffect(() => {
+    if (showGoalWork || !goalReturn.current) return
+    const original = goalReturn.current
+    goalReturn.current = null
+    if (!showSession || original.sessionId !== workface.selectedSessionId || workface.panel === 'terminal') return
+    const document = original.trigger.ownerDocument, focused = document.activeElement
+    const frame = document.defaultView?.requestAnimationFrame(() => {
+      if (original.trigger.isConnected && !original.trigger.closest('[hidden], [inert]') && document.activeElement === focused)
+        original.trigger.focus({ preventScroll: true })
+    })
+    return () => { if (frame !== undefined) document.defaultView?.cancelAnimationFrame(frame) }
+  }, [showGoalWork, showSession, workface.selectedSessionId, workface.panel])
   const closeSession = () => {
     setShowSession(false); setShowGoalWork(false)
+    if (startupProfile.current) { setSheet('identity'); startupProfile.current = null }
     if (secondary === 'goals' && goalsContext.discussion?.agentSessionId === workface.selectedSessionId)
       setGoalsContext(value => ({ ...value, discussion: null }))
   }
@@ -143,6 +159,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const originalConnection = useRef({ client, connected }); originalConnection.current = { client, connected }
   const openSession = (id: string, identity: MobileObjectIdentity) => {
     navigationRevision.current += 1
+    if (identity.mote) setRecentMoteSpaceId(identity.mote.spaceId)
     setObjectIdentity(identity); setShowGoalWork(false)
     setWorkface(value => ({ ...value, selectedSessionId: id, panel: 'conversation' }))
     setShowSession(true)
@@ -180,7 +197,11 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     }).catch(error => setNotice(error instanceof Error ? error.message : String(error)))
   }
   const sessionTitle = objectIdentity?.name ?? null
-  const [sheet, setSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | null>(initial.current.presentation?.profile ? 'identity' : null)
+  const [sheet, updateSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | null>(null)
+  const setSheet = useCallback((value: typeof sheet) => {
+    if (value !== null) navigationRevision.current += 1
+    updateSheet(value)
+  }, [])
   const menuSource = () => {
     const runtime = client?.runtimeOwnerIdentity?.(), { recordId, host } = getDeviceWorkface().snapshotIdentity()
     return JSON.stringify([runtime?.runtimeId, runtime?.ownerInstanceId, recordId, host?.hostId, host?.origin])
@@ -199,6 +220,8 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const createAgent = (target: MobileAgentCreateTarget) => { setCreateTarget(target); setSheet('create') }
   const openProfile = (identity: MobileObjectIdentity) => {
     navigationRevision.current += 1
+    if (identity.mote) setRecentMoteSpaceId(identity.mote.spaceId)
+    startupProfile.current = null
     setProfileIdentity(identity); setProfileSourcePath(null); setSheet('identity')
   }
   const [profileBack, setProfileBack] = useState<(() => void) | null>(null)
@@ -233,6 +256,32 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const backRef = useRef(requestBack)
   backRef.current = requestBack
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
+  const [chatStartIssue, setChatStartIssue] = useState<string | null>(null)
+  const [chatStartRevision, retryChatStart] = useState(0)
+  const chatStartDone = useRef(initial.current.workface.selectedSessionId !== null)
+  const chatStartExpectedRevision = useRef(0)
+  useEffect(() => {
+    if (chatStartDone.current || !client?.forwardRpc || !connected || !canPersist || navigationRevision.current !== chatStartExpectedRevision.current) return
+    let disposed = false
+    const revision = navigationRevision.current, owner = client.runtimeOwnerIdentity?.(), recordId = getDeviceWorkface().recordIdentity()
+    const isCurrent = () => {
+      const currentOwner = client.runtimeOwnerIdentity?.()
+      return !disposed && navigationRevision.current === revision && getDeviceWorkface().recordIdentity() === recordId &&
+        owner?.runtimeId === currentOwner?.runtimeId && owner?.ownerInstanceId === currentOwner?.ownerInstanceId
+    }
+    void client.forwardRpc('space.ls', { target: {}, presentation: true }).then(result => {
+      if (!isCurrent()) return
+      const target = mobileChatStart(result.catalog, recentMoteSpaceId)
+      setChatStartIssue(target.issue)
+      if (target.identity) setObjectIdentity(target.identity)
+      if (!target.sessionId) return
+      chatStartDone.current = true
+      setHome('mote'); setSecondary(null)
+      setWorkface(value => ({ ...value, selectedSessionId: target.sessionId, panel: 'conversation' }))
+      setShowSession(true); setShowGoalWork(false)
+    }).catch(error => { if (isCurrent()) setChatStartIssue(error instanceof Error ? error.message : String(error)) })
+    return () => { disposed = true }
+  }, [client, connected, canPersist, recentMoteSpaceId, chatStartRevision])
   const [sessionRevision, setRevision] = useState(0)
   const { selected, projectionError } = useMemo(() => {
     try { return { selected: client && workface.selectedSessionId ? client.agentSession(workface.selectedSessionId) : undefined, projectionError: null } }
@@ -263,14 +312,16 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const retainTopics = initial.current.presentation?.topics !== undefined || topicsRoute.context.categoryId !== null || topicId !== null
     || topicsRoute.context.mode !== 'discussion' || topicsRoute.sources.length > 0
   const presentation: MobilePresentationRoute = { primary: secondary ?? home, showSession, showGoalWork, ...(retainTopics ? { topics: topicsRoute } : {}),
+    ...(recentMoteSpaceId ? { recentMoteSpaceId } : {}),
     ...(initial.current.presentation?.goals || goalsContext.goalId !== null ? { goals: goalsContext } : {}),
     ...(initial.current.presentation?.survey !== undefined || surveyContext.zoneId !== null ? { survey: surveyContext } : {}),
     ...(initial.current.presentation?.spatial !== undefined || spatialContext.spaceId !== null ? { spatial: spatialContext } : {}),
     identity: retainObjectReference(objectIdentity), profile: sheet === 'identity' && profileIdentity
-      ? { identity: retainObjectReference(profileIdentity)!, sourcePath: profileSourcePath } : null }
+      ? { identity: retainObjectReference(profileIdentity)!, sourcePath: profileSourcePath } : startupProfile.current }
   const presentationBytes = JSON.stringify(presentation)
   const savedPresentation = useRef(JSON.stringify(initial.current.presentation ?? presentation))
   useEffect(() => {
+    if (!chatStartDone.current && navigationRevision.current === 0) return
     if (workface === initial.current?.workface && savedPresentation.current === presentationBytes) return
     try {
       void getDeviceWorkface().updatePresentation(workface, JSON.parse(presentationBytes) as MobilePresentationRoute, navigationRecord.current!.recordId).then(() => { savedPresentation.current = presentationBytes }).catch(() => { setNotice('这台设备暂时无法保存导航位置。地址与导航仅临时采用；当前阅读和 Mac 上的原会话仍保留，原存储记录尚未覆盖。') })
@@ -295,6 +346,12 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const primaryHeader = workspaceVisible && !showSession && !source
   const sessionBackLabel = showGoalWork && workface.panel === 'terminal' ? '返回终端' : showGoalWork || workface.panel === 'terminal' ? '返回对话' : `返回 ${pageName}`
   const menuButton = <button className="mobile-settings-button" onClick={() => setSheet(workspaceVisible ? 'settings' : 'connection')} aria-label={workspaceVisible ? '手机设置与连接' : '连接你的 Mac'}><ThemeActionMenuIcon size={18} />{workspaceVisible && <small>菜单</small>}<span className="mobile-status-dot" aria-label={label} /></button>
+  const terminalToggle = <button type="button" className="mobile-icon-button mobile-session-view-toggle"
+    aria-label={workface.panel === 'terminal' && !showGoalWork ? '查看对话' : '查看终端'}
+    title={workface.panel === 'terminal' && !showGoalWork ? '查看对话' : '查看终端'}
+    onClick={() => { navigationRevision.current += 1; setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' && !showGoalWork ? 'conversation' : 'terminal' })) }}>
+    {workface.panel === 'terminal' && !showGoalWork ? <ThemeObjectConversationIcon size={18} /> : <ThemeObjectTerminalIcon size={18} />}
+  </button>
 
   const exposed = sheet === null
   const moteConversation = showSession && objectIdentity?.mote && home === 'mote' && secondary === null
@@ -311,14 +368,14 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         {objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={28} visible={exposed} /></button>
           : <MobileIdentity identity={objectIdentity ?? { name: sessionTitle ?? '原会话', project: pageName }} session={selected} client={client} connected={connected} size={24} visible={exposed} />}
         <span className="mobile-session-title">{sessionTitle ?? selected?.providerId ?? '原会话'}</span>
-        <button className="mobile-icon-button" aria-label={showGoalWork ? '返回原对话' : '目标与结果'} aria-pressed={showGoalWork} onClick={() => setShowGoalWork(value => !value)}><ThemeObjectGoalIcon size={18} /></button>
+        {terminalToggle}
         <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={18} /></button>
         {native && selected && !showGoalWork && workface.panel !== 'terminal' && <button className="mobile-icon-button" aria-label="撰写消息" onClick={() => { if (!focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。') }}><ThemeActionComposeIcon size={17} /></button>}
       </div> : <>
         {workspaceVisible && showSession ? <button className="mobile-icon-button" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={20} /></button> : <span className="mobile-header-spacer" />}
         {showSession && objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={38} visible={exposed} /></button>
           : <div className="mobile-brand"><img className="mobile-brand-icon" src={brandIcon} width={24} height={24} alt="" /><span>AgentMux</span></div>}
-        {showSession ? <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></button> : <span className="mobile-header-spacer" />}
+        {showSession ? <div className="mobile-session-header-actions">{terminalToggle}<button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></button></div> : <span className="mobile-header-spacer" />}
       </>}
     </header>}
     <main className="mobile-main" tabIndex={-1}>
@@ -329,6 +386,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       </section>}
       {workspaceVisible && <>
         <div hidden={showSession || secondary !== null}><MobileSpatialNavigation onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} openSession={openSession} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
+          recentMoteSpaceId={recentMoteSpaceId} onSelectMote={id => { navigationRevision.current += 1; setRecentMoteSpaceId(id) }}
           initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
         <div hidden={showSession || secondary !== 'topics' || Boolean(source && source.kind !== 'topic')}><MobileTopicsSurface rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (!source || source.kind === 'topic')} topicId={topicId}
           client={client} connected={connected} {...(topicsRoute.knowledge ? { initialKnowledge: topicsRoute.knowledge } : {})} onKnowledgeChange={updateKnowledgeReference}
@@ -355,9 +413,17 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         <MobileGoalWork client={client} agentSessionId={workface.selectedSessionId} connected={connected} visible={exposed && workspaceVisible && showSession && showGoalWork} />
       </section>
       <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel === 'terminal'}>
-        {!workface.selectedSessionId && <p className="mobile-spatial-empty">从 {pageName} 选择已有 Agent。</p>}
+        {!workface.selectedSessionId && <div className="mobile-chat-start">
+          <ThemeObjectConversationIcon size={24} /><h1>继续对话</h1>
+          <p>{chatStartIssue ?? '正在找回原对话…'}</p>
+          <div><button type="button" className="mobile-text-button" onClick={() => openPrimaryWorkface('mote')}>选择 Mote</button>
+            <button type="button" className="mobile-text-button" onClick={() => openPrimaryWorkface('focus')}>已有对话</button>
+            {objectIdentity?.mote && <button type="button" className="mobile-text-button" onClick={() => openProfile(objectIdentity)}>查看 Profile</button>}
+            {chatStartIssue && <button type="button" className="mobile-text-button" onClick={() => { chatStartExpectedRevision.current = navigationRevision.current; retryChatStart(value => value + 1) }}>重新核对</button>}</div>
+        </div>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
-          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))} openHttpLink={openBrowserHttpLink} />
+          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))}
+            onShowGoals={trigger => { goalReturn.current = { trigger, sessionId: workface.selectedSessionId }; setShowGoalWork(true) }} openHttpLink={openBrowserHttpLink} />
         </div>
       </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel !== 'terminal'}>
         <MobileTerminalViewer terminalPalette={hostAppearance.terminalPalette} client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} inputActive={exposed} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
@@ -376,7 +442,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
             <button className="mobile-menu-row" aria-current={secondary === 'survey' ? 'page' : undefined} onClick={() => { navigationRevision.current += 1; setSecondary('survey'); setShowSession(false); setSheet(null) }}><ThemeNavigationSurveyIcon size={20} /><span>Survey<small>研究与笔记</small></span></button>
           </nav>
           <div className="mobile-drawer-settings">
-          <label className="mobile-home-select">默认主页<select aria-label="连接后的默认主页" value={defaultHome} onChange={event => {
+          <label className="mobile-home-select">默认目录<select aria-label="退出对话后的默认目录" value={defaultHome} onChange={event => {
             const value = event.target.value as MobilePrimaryWorkface
             try { saveMobileHome(value); setDefaultHome(value); setHomeIssue(null) }
             catch { setHomeIssue('默认主页未保存；原设置和草稿保留。') }
@@ -401,8 +467,6 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         </> : sheet === 'actions' ? <>
           <Dialog.Description id="mobile-sheet-description">{sessionTitle ?? '原 Agent'} · {objectIdentity?.project ?? '项目未确认'}</Dialog.Description>
           {workface.selectedSessionId && <MobileAgentActions client={client} agentSessionId={workface.selectedSessionId} connected={connected} copyText={platform.copyText} />}
-          <button className="mobile-menu-row" onClick={() => { setShowGoalWork(value => !value); setSheet(null) }}><ThemeObjectGoalIcon size={18} /><span>{showGoalWork ? '返回原对话' : '目标与结果'}</span></button>
-          <button className="mobile-menu-row" onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })); setSheet(null) }}>{workface.panel === 'terminal' ? <ThemeObjectConversationIcon size={18} /> : <ThemeObjectTerminalIcon size={18} />}<span>{workface.panel === 'terminal' ? '查看对话' : '查看终端'}</span></button>
         </> : <>
           <Dialog.Description id="mobile-sheet-description">连接同一私网里的 Mac。Agent 与会话由 Mac 管理。</Dialog.Description>
           <p>Mac：{location.origin} · {label}</p>

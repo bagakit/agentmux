@@ -55,11 +55,22 @@
 .mobile-space-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px; }
 .mobile-space-entry .mobile-space-row { min-width: 0; min-height: 44px; padding: 5px 4px; gap: 8px; }
 .mobile-mote-quick-open { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 0 6px; color: var(--green); background: transparent; font-size: 11px; white-space: nowrap; }
-.mobile-mote-profile-action { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 6px 4px; background: transparent; text-align: left; }
-.mobile-mote-profile-action > span { display: grid; gap: 2px; flex: 1; min-width: 0; }
-.mobile-mote-profile-action strong { font-size: 12px; font-weight: 550; }
-.mobile-mote-profile-action small { font-size: 11px; color: var(--text-3); }
-.mobile-mote-profile-action > svg { color: var(--text-3); flex: none; }
+.mobile-mote-profile-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 44px; min-height: 44px; padding: 0 6px; background: transparent; color: var(--text-2); font-size: 12px; }
+.mobile-mote-rail { display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-inline: contain; padding: 2px 0 8px; scrollbar-width: thin; }
+.mobile-mote-choice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; flex: 0 0 72px; min-height: 68px; padding: 8px 5px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; color: var(--text-2); }
+.mobile-mote-choice > span:last-child { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.mobile-mote-choice[aria-pressed='true'] { background: var(--surface-2); border-color: var(--line); color: var(--text); }
+.mobile-mote-choice:hover { background: var(--surface-1); }
+.mobile-mote-selected > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; border-bottom: 1px solid var(--line); }
+.mobile-mote-selected > header h2 { min-width: 0; margin: 0; font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-mote-selected > header > div { display: flex; align-items: center; flex: none; }
+.mobile-mote-selected .mobile-mote-contents { padding-top: 2px; }
+.mobile-chat-start { display: grid; place-items: center; gap: 10px; padding: 28px 18px; margin: auto; text-align: center; color: var(--text-2); }
+.mobile-chat-start > svg { color: var(--text-3); }
+.mobile-chat-start h1 { margin: 0; font-size: 18px; font-weight: 550; }
+.mobile-chat-start p { margin: 0; font-size: 13px; line-height: 1.6; }
+.mobile-chat-start > div { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 12px; }
+.mobile-chat-start button { min-height: 44px; }
 .mobile-mote-agents-heading { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
 .mobile-mote-agents-heading h3 { margin: 0; color: var(--text-3); font-size: 11px; font-weight: 550; }
 

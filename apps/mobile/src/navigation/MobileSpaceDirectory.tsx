@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AgentMuxSpaceCatalog, AgentMuxSpaceFact } from '@agentmux/core/control'
 import { projectRailTree, projectGroupKey, railGroupAddress } from '@agentmux/client-ui/project-rail-tree'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { isPrimaryMoteSpace } from '@agentmux/core/mote-preferences'
 
-/** One shared Desktop tree algorithm; all members retain their original public identities. */
-export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, onSelect, renderIdentity, renderContents, renderPrimary }: {
+/** Horizontal Mote choices and the shared Desktop Space tree retain original public identities. */
+export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, onSelect, renderIdentity, renderContents, renderPrimary, renderProfile }: {
   catalog: AgentMuxSpaceCatalog; home: 'mote' | 'space'; query: string; selectedSpaceId: string | null
   onSelect(space: AgentMuxSpaceFact | null): void
   renderIdentity(space: AgentMuxSpaceFact): ReactNode; renderContents(space: AgentMuxSpaceFact): ReactNode
   renderPrimary?(space: AgentMuxSpaceFact): ReactNode
+  renderProfile?(space: AgentMuxSpaceFact): ReactNode
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(selectedSpaceId ? [selectedSpaceId] : []))
   const previousSelection = useRef(selectedSpaceId)
@@ -33,23 +35,14 @@ export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, on
     const members = new Map<string, string[]>()
     for (const binding of catalog.bindings) members.set(binding.zoneId, [...(members.get(binding.zoneId) ?? []), binding.spaceId])
     const counts = new Map<string, number>()
-    const moteAgents = new Map<string, Set<string>>()
-    const agentsByTab = new Map<string, { regionId: string; agentSessionId: string }[]>()
-    if (home === 'mote') for (const region of catalog.regions) if (region.kind === 'agent' && region.agentSessionId) {
-      const agents = agentsByTab.get(region.tabId) ?? []; agents.push({ regionId: region.regionId, agentSessionId: region.agentSessionId }); agentsByTab.set(region.tabId, agents)
-    }
-    for (const tab of catalog.tabs) for (const id of tab.zoneId ? members.get(tab.zoneId) ?? [] : []) {
-      if (home === 'mote') {
-        const agents = moteAgents.get(id) ?? new Set<string>()
-        for (const region of agentsByTab.get(tab.tabId) ?? []) if (tab.regionIds.includes(region.regionId)) agents.add(region.agentSessionId)
-        moteAgents.set(id, agents); counts.set(id, agents.size)
-      } else counts.set(id, (counts.get(id) ?? 0) + 1)
+    if (home === 'space') for (const tab of catalog.tabs) for (const id of tab.zoneId ? members.get(tab.zoneId) ?? [] : []) {
+      counts.set(id, (counts.get(id) ?? 0) + 1)
     }
     return counts
-  }, [catalog.bindings, catalog.tabs, catalog.regions, home])
+  }, [catalog.bindings, catalog.tabs, home])
   const row = (space: AgentMuxSpaceFact, depth = 0) => {
     const open = expanded.has(space.spaceId)
-    const hasChildren = (tabCounts.get(space.spaceId) ?? 0) > 0 || space.kind === 'mote' || folderBranches.has(space.spaceId)
+    const hasChildren = (tabCounts.get(space.spaceId) ?? 0) > 0 || folderBranches.has(space.spaceId)
     const entry = <button type="button" className="mobile-space-row" aria-expanded={hasChildren ? open : undefined} onClick={() => {
         setExpanded(previous => { const next = new Set(previous); open ? next.delete(space.spaceId) : next.add(space.spaceId); return next })
         previousSelection.current = open ? null : space.spaceId
@@ -60,10 +53,27 @@ export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, on
       </button>
     return <li key={space.spaceId} className="mobile-space-node" data-space-id={space.spaceId} style={{ '--tree-depth': depth } as import('react').CSSProperties}>
       {renderPrimary ? <div className="mobile-space-entry">{entry}{renderPrimary(space)}</div> : entry}
-      {open && <div role="group" aria-label={`${space.name} 的 ${home === 'mote' ? 'Profile 与 Agents' : 'Tabs'}`} className="mobile-space-children">{renderContents(space)}</div>}
+      {open && <div role="group" aria-label={`${space.name} 的 Tabs`} className="mobile-space-children">{renderContents(space)}</div>}
     </li>
   }
-  if (home === 'mote') return <ul className="mobile-space-tree mobile-session-list" aria-label="Mote 目录">{spaces.filter(matching).map(space => row(space))}</ul>
+  if (home === 'mote') {
+    const primaries = spaces.filter(isPrimaryMoteSpace)
+    const selected = selectedSpaceId ? spaces.find(space => space.spaceId === selectedSpaceId)
+      : primaries.length === 1 ? primaries[0] : undefined
+    const shown = spaces.filter(matching)
+    return <div className="mobile-mote-directory">
+      <nav className="mobile-mote-rail" aria-label="切换 Mote">{shown.map(space => <button type="button" key={space.spaceId}
+        className="mobile-mote-choice" data-space-id={space.spaceId} aria-pressed={selected?.spaceId === space.spaceId}
+        aria-label={`选择 Mote · ${space.name}`} title={space.name} onClick={() => onSelect(space)}>
+        {renderIdentity(space)}<span>{space.name}</span>
+      </button>)}</nav>
+      {!shown.length && <p className="mobile-spatial-empty">没有匹配的 Mote。</p>}
+      {selected ? <section className="mobile-mote-selected" aria-label={selected.name} data-space-id={selected.spaceId}>
+        <header><h2 title={selected.name}>{selected.name}</h2><div>{renderPrimary?.(selected)}{renderProfile?.(selected)}</div></header>
+        {renderContents(selected)}
+      </section> : spaces.length > 0 && <p className="mobile-spatial-empty">选择一位 Mote，继续主对话或查看资料。</p>}
+    </div>
+  }
   const hosts = [...new Set(folders.map(group => group.hostId))]
   return <div className="mobile-space-directory">
     {(catalog.projectGroups ?? []).map(group => {

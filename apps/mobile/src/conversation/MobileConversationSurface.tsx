@@ -46,11 +46,12 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   platform: ClientUiPlatform
   onAttach?: () => void
   onShowTerminal?: () => void
+  onShowGoals?: (trigger: HTMLButtonElement) => void
   visible?: boolean
   displayName?: string
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, visible = true, displayName,
+export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, onShowGoals, visible = true, displayName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const conversationPlatform = useMemo(() => ({ ...platform,
     readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
@@ -373,6 +374,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           return <div key={index}>{typeof item.value !== 'string' && <p>原请求记录保留，请核对回执。</p>}<pre>{body}</pre><button type="button" onClick={() => { void platform.copyText(body, error => setCopyNotice(errorMessage(error))) }}>复制这份保全内容</button></div>
         })}
       </details>}
+      <div className="mobile-conversation__reader">
       <div ref={feed} className="mobile-conversation__reading" onScroll={event => {
         const node = event.currentTarget
         const programmatic = consumeProgrammaticReadingScroll(node)
@@ -409,6 +411,24 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             {...(onShowTerminal && pageClient === client ? { onOpenQuestionTerminal: onShowTerminal } : {})}
             {...(reading.page ? nativeReadingProps : readingProps)} />
         </> : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
+      </div>
+        <div className="mobile-conversation__floating-tools" role="group" aria-label="对话工具">
+          {onShowGoals && <button type="button" className="mobile-conversation__goal" aria-label="目标与结果" title="目标与结果" onClick={event => onShowGoals(event.currentTarget)}><SemanticIcon name="object.goal" size={18} /></button>}
+          <MobileMailbox key={historyConnection.current.generation} client={client} session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
+          {...(reading.projection ? { inputs: reading.projection.inputs } : {})}
+          {...(reading.projection?.timeline.reference?.hostId ? { sourceHostId: reading.projection.timeline.reference.hostId } : {})}
+          refresh={() => { void reading.refresh() }} historyScope={historyScope} readHistory={readInputHistory} visible={visible}
+          onHistoryFill={fillHistoryMessage} onHistoryCopy={copyHistoryMessage} localEntries={historyLocalEntries}
+          promptAttempts={sessionAttempts} diagnostics={diagnostics}
+          onHistoryFillLocal={entry => {
+            if (currentHistory.current.scope !== historyScope || current.current.client !== client || current.current.agentSessionId !== agentSessionId)
+              throw new Error('已切换 Agent，原正文和当前草稿保留。')
+            if (!insertion.current) throw new Error('原编辑器已关闭，正文和草稿保留。')
+            insertion.current.replace(entry.text)
+          }}
+          reading={readingProps}
+          {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />
+        </div>
       </div>
       {(jump || reading.newerAvailable || reading.olderWindow) && <button className="mobile-reading-action mobile-reading-latest" onClick={() => {
         follow.current = initFollowState(); presentationIntent.current++; setJump(false)
@@ -453,7 +473,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             }, { separate: true })
           }} />}
           commands={commandSuggestions} promptKeywords={mobileCommands.promptKeywords} references={agentReferences}
-          tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal}
+          tools={<MobileMessageTools refresh={() => { void reading.refresh() }}
             key={JSON.stringify([historyScope, session?.providerId])}
             commands={commandSuggestions} onCommand={item => { void insertSuggestion(item) }}
             onCommandsOpenChange={setCommandMenuOpen} commandsLoading={mobileCommands.loading}
@@ -467,20 +487,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           {...(postureControl && available && !reading.activity ? { feedback: <MobileNotice identity={[session?.run.runId]} className="composer-feedback" role="status">Run 状态未确认；模式切换由原服务核验。</MobileNotice> } : {})}
           primaryAction={isWorking && !draft.trim() && !hasPendingAttachments ? 'stop' : 'send'}
           {...(isWorking && available ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})}
-          mailbox={<MobileMailbox key={historyConnection.current.generation} client={client} session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
-          {...(reading.projection ? { inputs: reading.projection.inputs } : {})}
-          {...(reading.projection?.timeline.reference?.hostId ? { sourceHostId: reading.projection.timeline.reference.hostId } : {})}
-          refresh={() => { void reading.refresh() }} historyScope={historyScope} readHistory={readInputHistory} visible={visible}
-          onHistoryFill={fillHistoryMessage} onHistoryCopy={copyHistoryMessage} localEntries={historyLocalEntries}
-          promptAttempts={sessionAttempts} diagnostics={diagnostics}
-          onHistoryFillLocal={entry => {
-            if (currentHistory.current.scope !== historyScope || current.current.client !== client || current.current.agentSessionId !== agentSessionId)
-              throw new Error('已切换 Agent，原正文和当前草稿保留。')
-            if (!insertion.current) throw new Error('原编辑器已关闭，正文和草稿保留。')
-            insertion.current.replace(entry.text)
-          }}
-          reading={readingProps}
-          {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
+          value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
           hasPendingContent={hasPendingAttachments}
           onChange={setDraft} {...(attempt?.phase !== 'sending' && !preparing ? {
             onSubmit: () => void submit(true, undefined, draftKey, attachmentControls.current?.captureForSend()),

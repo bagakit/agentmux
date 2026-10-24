@@ -1,5 +1,6 @@
 .mobile-conversation__connection, .mobile-conversation__notice, .mobile-conversation__empty { margin: 0; line-height: 1.5; color: var(--text-muted); overflow-wrap: anywhere; padding: 0 12px; font-size: 11px; }
-.mobile-conversation__reading { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding-bottom: 4px; }
+.mobile-conversation__reader { position: relative; display: flex; flex: 1; min-height: 52px; }
+.mobile-conversation__reading { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding-bottom: 52px; }
 .mobile-conversation__captured { display: flex; flex-direction: column; min-width: 0; }
 .mobile-conversation__interaction { max-height: 35%; overflow: auto; padding: 0 14px; }
 .mobile-conversation__interaction > p { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -70,6 +71,11 @@
 .mobile-conversation .conversation-native-thread { border: 0; background: transparent; padding: 0; }
 .mobile-conversation .log-turn { border: 0; }
 .mobile-conversation__composer { flex-shrink: 0; padding: 0 6px 4px; border-top: 0; }
+.mobile-conversation__floating-tools { position: absolute; inset-inline-end: 8px; bottom: 4px; display: flex; align-items: center; isolation: isolate; pointer-events: none; }
+.mobile-conversation__floating-tools::before { content: ''; position: absolute; z-index: -1; inset: 4px 0; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--elev-1); pointer-events: none; }
+.mobile-conversation__floating-tools > button { display: grid; place-items: center; width: 44px; min-width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--radius); color: var(--text-2); background: transparent; pointer-events: auto; }
+.mobile-conversation__floating-tools > button:is(:hover, :focus-visible, [data-state='open']) { color: var(--text); background: var(--surface-2); }
+.mobile-conversation__floating-tools .mobile-message-tools__trigger i { right: 10px; bottom: 10px; }
 .mobile-app .mobile-conversation__composer { padding-bottom: max(4px,env(safe-area-inset-bottom)); }
 .mobile-app .mobile-message-tools__trigger { border-radius: 50%; background: transparent; }
 .mobile-conversation { --conversation-message-action-size: 44px; min-height: 0; height: 100%; display: flex; flex-direction: column; gap: 2px; }
