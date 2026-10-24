@@ -10,7 +10,7 @@ import type { PublicationAdapter } from './publication-adapter.js'
 import { publicationEffectContext, publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
 import { isConversationPublicationPart, publicationPartKey } from './publication-content.js'
 import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation, type QuestionPublicationPayload } from './publication-store.js'
-import { readPublicationA2A, publicationNotifications, type PublicationA2A, type PublicationOriginalMessagePort } from './publication-a2a.js'
+import { readPublicationA2A, publicationMessageTargets, type PublicationA2A, type PublicationOriginalMessagePort } from './publication-a2a.js'
 import { publicationSpeaker, type PublicationSpeaker, type PublicationSpeakerDetails, type PublicationSpeakerReader } from './publication-speaker.js'
 
 /** Borrow original exact Core reads and the shared Provider observation. No transcript paths or second watcher. */
@@ -275,7 +275,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const resolvedText = await this.resolve(reference, ordered, signal, binding, adapter)
       const speakers = await this.speakers(reference, ordered, signal)
       const originals = binding.scope.publication === 'future-shared-conversation'
-        ? new Map(ordered.map(unit => [unit.event.id, publicationNotifications(unit, binding.sourceFrontier).map(target => ({ notificationId: target.notificationId, record: target.record, revision: target.revision, ...(target.startUnconfirmed ? { startUnconfirmed: true as const } : {}), ...(target.part ? { part: target.part } : {}), messages: [], unavailable: true }))])) : new Map()
+        ? new Map(ordered.map(unit => [unit.event.id, publicationMessageTargets(unit, binding.sourceFrontier).map(target => ({ key: target.key, ...(target.notificationId ? { notificationId: target.notificationId } : {}), record: target.record, revision: target.revision, ...(target.startUnconfirmed ? { startUnconfirmed: true as const } : {}), ...(target.part ? { part: target.part } : {}), messages: [], unavailable: true }))])) : new Map()
       const questions = adapter.questionActions ? this.options.permissions?.questions?.(binding, ordered) : undefined
       this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, originals, ...(this.options.queryFeedback && adapter.queryFeedback ? { queryFeedback: true } : {}), fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) } : {}), ...(questions ? { questions } : {}) })
       after = page.checkpoint; lane.view = page.window.view!; lane.viewId = page.window.id; lane.read = { after }

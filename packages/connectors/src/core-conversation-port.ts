@@ -20,7 +20,7 @@ export function createPublicationConversationPort(clients: () => readonly { host
     },
     message: async (reference, messageId, notificationId, signal) => {
       signal.throwIfAborted()
-      const result = await original(reference.hostId).readMessage({ messageId, notificationId })
+      const result = await original(reference.hostId).readMessage({ messageId, ...(notificationId ? { notificationId } : {}) })
       signal.throwIfAborted()
       return result
     },
