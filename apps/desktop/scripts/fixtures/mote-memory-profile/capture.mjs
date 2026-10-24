@@ -3,16 +3,18 @@ import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { runProbeProcess } from '../../probe-process.mjs'
+import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
-const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
+const privateChat = process.argv.includes('--private-chat')
+const fixture = privateChat ? path.resolve(import.meta.dirname, '../mote-private-chat-history') : import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
-const directory = path.join(root, `.local/state/mote-memory-profile/capture-${globalThis.crypto.randomUUID()}`), compiled = path.join(directory, 'compiled')
+const directory = path.join(root, `${privateChat ? '.local/channel-protocol/T-037' : '.local/state/mote-memory-profile'}/capture-${globalThis.crypto.randomUUID()}`), compiled = path.join(directory, 'compiled')
 
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
-const receipt = { passed: false, captureOnly: true, captureSubset: 'memory-profile-original-editor', aestheticReview: 'not-performed', source: {}, images: {},
-  boundary: 'Original Profile/Editor/NewTabSurface/Store and Desktop styles in an isolated Electron Renderer. Controlled filesystem/history/Goal API replies, synthetic exact Session reference and no configured Executor; no live user App/Run, Core native lifecycle, model, package or install claim.' }
+const receipt = { passed: false, captureOnly: true, captureSubset: privateChat ? 'private-chat-profile-original-input-reader' : 'memory-profile-original-editor', aestheticReview: 'not-performed', source: {}, images: {},
+  boundary: privateChat ? 'Original Profile/Editor/NewTabSurface/Store and Desktop styles in an isolated Electron Renderer. Controlled API replies and exact original input receipt; no live user App/Run, Core native lifecycle, model, package or install claim.'
+    : 'Original Profile/Editor/NewTabSurface/Store and Desktop styles in an isolated Electron Renderer. Controlled filesystem/history/Goal API replies, synthetic exact Session reference and no configured Executor; no live user App/Run, Core native lifecycle, model, package or install claim.' }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
   const alias = { ...radixOverlayAliases }
@@ -59,8 +61,9 @@ try {
     format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [clientSources, workers],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-raw:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
-  for (const name of ['capture.mjs', 'renderer-main.cjs']) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
-  for (const file of ['apps/desktop/src/renderer/src/components/MoteMemory.tsx', 'apps/desktop/src/renderer/src/components/MoteFirstCooperation.tsx', 'apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', 'apps/desktop/src/renderer/src/components/FileSurfaceView.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
+  for (const file of [import.meta.filename, path.join(fixture, 'renderer-main.cjs')]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
+  for (const file of (privateChat ? ['MotePrivateChat.tsx', 'MoteChatActivity.tsx', 'MoteChatPeople.tsx', 'MoteChatHistory.tsx', 'OriginalInputWaitingControl.tsx', 'MoteDetailsPanel.tsx'].map(name => 'apps/desktop/src/renderer/src/components/' + name)
+    : ['apps/desktop/src/renderer/src/components/MoteMemory.tsx', 'apps/desktop/src/renderer/src/components/MoteFirstCooperation.tsx', 'apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', 'apps/desktop/src/renderer/src/components/FileSurfaceView.tsx'])) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="entry.css"></head><body><div id="root"></div><script type="module" src="entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
@@ -76,6 +79,12 @@ try {
   receipt.passed = true
 } catch (error) { receipt.error = { message: error.message, stack: error.stack } }
 receipt.compiled = Object.fromEntries(await Promise.all((await fs.readdir(compiled)).map(async file => [file, sha(await fs.readFile(path.join(compiled, file)))])))
+if (privateChat) {
+  const group = receipt.process?.originalPid
+  if (group && (await listProbeProcesses(group, directory)).length) await stopProbeProcesses(group, directory)
+  receipt.cleanup = { remaining: group ? await listProbeProcesses(group, directory) : [] }
+  if (!receipt.cleanup.remaining.length) { await fs.rm(path.join(directory, 'userData'), { recursive: true, force: true }); receipt.cleanup.privateProfileRemoved = true }
+}
 await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
 await fs.rm(compiled, { recursive: true, force: true })
 console.log(path.relative(root, path.join(directory, 'receipt.json')))
