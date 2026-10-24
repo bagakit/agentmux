@@ -2,6 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "./fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { constants as fsConstants } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 
@@ -54,18 +55,23 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
   const run = async label => {
     await writeFile(join(copy, 'current-load.json'), JSON.stringify(observedSource ? { file: join(copy, observedSource), load: join(evidence, `${label}-loaded.json`) } : null))
     const args = ['exec', 'vitest', 'run', ...tests, '--config', join(copy, 'vitest.mutation.config.mts'), '--maxWorkers=1']
-    const result = await new Promise((yes, no) => {
-      const child = spawn('pnpm', args, { cwd: copy, env: { ...process.env, pnpm_config_verify_deps_before_run: 'false' }, stdio: ['ignore', 'pipe', 'pipe'] })
-      let output = ''
-      child.stdout.on('data', bytes => { output += bytes }); child.stderr.on('data', bytes => { output += bytes })
-      child.on('error', no); child.on('close', (code, signal) => yes({ code, signal, output }))
-    })
+    const cache = await mkdtemp(join(copy, 'run-cache-'))
+    let result
+    try {
+      result = await new Promise((yes, no) => {
+        const child = spawn('pnpm', args, { cwd: copy, env: { ...process.env, TMPDIR: cache, TEMP: cache, TMP: cache, pnpm_config_verify_deps_before_run: 'false' }, stdio: ['ignore', 'pipe', 'pipe'] })
+        let output = ''
+        child.stdout.on('data', bytes => { output += bytes }); child.stderr.on('data', bytes => { output += bytes })
+        child.on('error', no); child.on('close', (code, signal) => yes({ code, signal, output }))
+      })
+    } finally { await rm(cache, { recursive: true, force: true }) }
     await writeFile(join(evidence, `${label}.log`), result.output)
     return { ...result, log: `${label}.log` }
   }
   try {
     await mkdir(evidence, { recursive: true })
-    for (const file of ['package.json', 'tsconfig.base.json', 'vitest.setup.ts']) await cp(join(root, file), join(copy, file))
+    // Request filesystem copy-on-write; private inodes and byte verification stay unchanged.
+    for (const file of ['package.json', 'tsconfig.base.json', 'vitest.setup.ts']) await cp(join(root, file), join(copy, file), { mode: fsConstants.COPYFILE_FICLONE })
     await symlink(join(root, 'node_modules'), join(copy, 'node_modules'))
     const packageDirectories = ['packages/core', 'packages/layout', 'packages/demand', 'packages/client-ui', 'packages/git', 'apps/host']
     for (const directory of packageDirectories) {
@@ -73,7 +79,7 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
       await mkdir(destination, { recursive: true })
       for (const entry of await readdir(join(root, directory))) {
         if (['node_modules', 'vendor'].includes(entry)) continue
-        await cp(join(root, directory, entry), join(destination, entry), { recursive: true })
+        await cp(join(root, directory, entry), join(destination, entry), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
       }
       if (directory !== 'apps/host') await symlink(join(root, directory, 'node_modules'), join(destination, 'node_modules'))
     }
@@ -86,7 +92,7 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
     for (const directory of packageDirectories) await symlink(join(copy, directory), join(hostModules, '@agentmux', directory.split('/')[1]))
     const desktop = join(copy, 'apps/desktop')
     await mkdir(desktop, { recursive: true })
-    for (const file of ['src', 'resources', 'package.json', 'tsconfig.json']) await cp(join(root, 'apps/desktop', file), join(desktop, file), { recursive: true })
+    for (const file of ['src', 'resources', 'package.json', 'tsconfig.json']) await cp(join(root, 'apps/desktop', file), join(desktop, file), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
     await mkdir(join(desktop, 'node_modules/@agentmux'), { recursive: true })
     for (const entry of await readdir(join(root, 'apps/desktop/node_modules'))) {
       if (entry !== '@agentmux') await symlink(join(root, 'apps/desktop/node_modules', entry), join(desktop, 'node_modules', entry))
@@ -97,7 +103,7 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
 import { readFileSync, writeFileSync } from 'node:fs'; import { createHash } from 'node:crypto';
 export default defineConfig({ ...owning, resolve: { ...owning.resolve, conditions: ['browser', 'import', 'default'] }, ssr: { ...owning.ssr, noExternal: ['@agentmux/client-ui'], resolve: { conditions: ['browser', 'import', 'default'] } }, define: { ...owning.define, __AGENTMUX_WEB_PREVIEW__: 'true' },
 plugins: [...(owning.plugins ?? []), { name: 'actual-private-source-load', enforce: 'pre', transform(source, id) { const target = JSON.parse(readFileSync(${JSON.stringify(join(copy, 'current-load.json'))}, 'utf8')); if (target && id === target.file) writeFileSync(target.load, JSON.stringify({ file: id, sha256: createHash('sha256').update(source).digest('hex') })); } }],
-test: { ...owning.test, server: { deps: { inline: ['@agentmux/client-ui'] } }, include: ${JSON.stringify(tests)}, setupFiles: [${JSON.stringify(join(copy, 'vitest.setup.ts'))}] } });\n`)
+test: { ...owning.test, server: { ...owning.test?.server, sourcemap: false, deps: { inline: ['@agentmux/client-ui'] } }, include: ${JSON.stringify(tests)}, setupFiles: [${JSON.stringify(join(copy, 'vitest.setup.ts'))}] } });\n`)
     assert.ok(mutations.length > 0, 'A mutation verification must select actual cases.')
     const baseline = await run('baseline-green')
     assert.equal(baseline.code, 0, baseline.output)
