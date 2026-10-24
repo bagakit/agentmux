@@ -8,6 +8,8 @@ import ImageIO
 import AgentMuxNativeMacOSCore
 import ScreenCaptureKit
 
+UnixSocketPathSafety.initializePrivateCreationMask()
+
 private let providerName = "agentmux-native-macos"
 private let providerVersion = "1.0.0"
 private let providerProtocolVersion = 1
