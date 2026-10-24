@@ -11,6 +11,7 @@ import { MobileZoneWorkface } from './navigation/MobileZoneWorkface'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { MobileAgentCreate, type MobileAgentCreateTarget } from './navigation/MobileAgentCreate'
 import { MobileAgentActions } from './conversation/MobileAgentActions'
+import { MobileAgentMenuContext, type MobileAgentMenuTarget } from './navigation/MobileAgentRow'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
 import { MobileTerminalViewer } from './terminal/MobileTerminalViewer'
 import { useHostAppearance } from './appearance/useHostAppearance'
@@ -165,7 +166,21 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     }).catch(error => setNotice(error instanceof Error ? error.message : String(error)))
   }
   const sessionTitle = objectIdentity?.name ?? null
-  const [sheet, setSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'create' | 'notices' | null>(initial.current.presentation?.profile ? 'identity' : null)
+  const [sheet, setSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | null>(initial.current.presentation?.profile ? 'identity' : null)
+  const menuSource = () => {
+    const runtime = client?.runtimeOwnerIdentity?.(), owner = getDeviceWorkface(), host = owner.snapshot().record.host
+    return JSON.stringify([runtime?.runtimeId, runtime?.ownerInstanceId, owner.recordIdentity(), host?.hostId, host?.origin])
+  }
+  const [rowMenu, setRowMenu] = useState<{ client: typeof client; target: MobileAgentMenuTarget; source: string } | null>(null)
+  const [menuIssue, setMenuIssue] = useState('')
+  const openAgentMenu = useCallback((target: MobileAgentMenuTarget) => { setRowMenu({ client, target, source: menuSource() }); setMenuIssue(''); setSheet('agent') }, [client])
+  const menuTarget = rowMenu?.client === client ? rowMenu?.target : null
+  const validateMenuSource = useCallback(() => {
+    if (rowMenu && rowMenu.client === client && rowMenu.source === menuSource() && (!rowMenu.target.beforeAction || rowMenu.target.beforeAction())) return true
+    setMenuIssue('原菜单的 Host 或工作面来源已变化；原身份链接仍可复制。请关闭菜单，核对原来源后重新打开。')
+    return false
+  }, [rowMenu, client])
+  useEffect(() => { if (sheet === 'agent' && !menuTarget) setSheet(null) }, [sheet, menuTarget])
   const [createTarget, setCreateTarget] = useState<MobileAgentCreateTarget>({})
   const createAgent = (target: MobileAgentCreateTarget) => { setCreateTarget(target); setSheet('create') }
   const openProfile = (identity: MobileObjectIdentity) => {
@@ -275,7 +290,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const serviceNotices = [...new Set([notice, projectionError, hostAppearance.issue,
     !conversationVisible ? connection.issue ?? (hasConnected && !connected ? connection.message : null) : null
   ].filter((message): message is string => Boolean(message)))]
-  return <MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><div className="mobile-app" data-connection={connection.state} data-drawer={sheet === 'settings' ? 'open' : 'closed'} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
+  return <MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><div className="mobile-app" data-connection={connection.state} data-drawer={sheet === 'settings' ? 'open' : 'closed'} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
     {!primaryHeader && <header className={`mobile-header${workspaceVisible && showSession && !moteConversation ? ' mobile-header--session' : ''}`}>
       {workspaceVisible && showSession && !moteConversation ? <div className="mobile-session-toolbar">
         <button type="button" className="mobile-session-origin" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={16} /><span>{pageName}</span></button>
@@ -339,7 +354,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: '原 Agent', project: '项目未确认' })} />
     <Dialog.Root open={sheet !== null && sheet !== 'create'} onOpenChange={open => { if (!open) setSheet(null) }}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : 'mobile-sheet'} aria-describedby="mobile-sheet-description">
-        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></Dialog.Close></div>
+        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></Dialog.Close></div>
         {sheet === 'settings' ? <>
           <Dialog.Description id="mobile-sheet-description">工作面与手机设置</Dialog.Description>
 
@@ -363,6 +378,11 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           <MobileMoteProfile identity={profileIdentity} client={client} copyText={platform.copyText} visible={sheet === 'identity'} sourcePath={profileSourcePath} onSourceChange={setProfileSourcePath} onBackChange={registerProfileBack} onOpenGoals={id => {
             openSession(id, profileIdentity); setShowGoalWork(true); setSheet(null)
           }} />
+        </> : sheet === 'agent' && menuTarget ? <>
+          <Dialog.Description id="mobile-sheet-description">{menuTarget.identity.project}</Dialog.Description>
+          {menuIssue && <MobileNotice owner={client} identity={[menuTarget.agentSessionId, menuIssue]} role="status">{menuIssue}</MobileNotice>}
+          <MobileAgentActions key={menuTarget.agentSessionId} client={client} agentSessionId={menuTarget.agentSessionId} connected={connected} copyText={platform.copyText} beforeAction={validateMenuSource} />
+          <button className="mobile-menu-row" onClick={() => { if (validateMenuSource()) { openSession(menuTarget.agentSessionId, menuTarget.identity); setSheet(null) } }}><ThemeObjectConversationIcon size={18} /><span>打开原对话</span></button>
         </> : sheet === 'actions' ? <>
           <Dialog.Description id="mobile-sheet-description">{sessionTitle ?? '原 Agent'} · {objectIdentity?.project ?? '项目未确认'}</Dialog.Description>
           {workface.selectedSessionId && <MobileAgentActions client={client} agentSessionId={workface.selectedSessionId} connected={connected} copyText={platform.copyText} />}
@@ -379,5 +399,5 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         </>}
       </Dialog.Content></Dialog.Portal>
     </Dialog.Root>
-  </div></MobileNoticeScope>
+  </div></MobileNoticeScope></MobileAgentMenuContext.Provider>
 }

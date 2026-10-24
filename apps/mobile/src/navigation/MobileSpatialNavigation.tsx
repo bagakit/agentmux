@@ -16,6 +16,7 @@ import { MobileRegionContent } from './MobileRegionContent'
 import type { MobileHome } from './home-preference'
 import { MobileSpaceDirectory } from './MobileSpaceDirectory'
 import { MobileDirectoryNotice } from './MobileDirectoryNotice'
+import { MobileAgentRow } from './MobileAgentRow'
 import './navigation.css'
 
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
@@ -120,11 +121,11 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     const candidates = context === undefined ? locations(session.agentSessionId) : []
     const providerId = row?.providerId || session.providerId
     const providerMark = providerId ? <AgentProviderIcon providerId={providerId} size={22} /> : <SemanticIcon name="object.agent" size={22} />
-    return <li key={key}><button onClick={() => openSession(session.agentSessionId, object)}>
+    return <li key={key} className="mobile-agent-row"><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} onOpen={() => openSession(session.agentSessionId, object)}>
       <span className="mobile-executor-avatar">{row?.avatar?.tint ? <AgentEnamelFilter id={`${avatarFilterId}-${session.agentSessionId}`} tint={row.avatar.tint} className="mobile-executor-mark">{providerMark}</AgentEnamelFilter> : providerMark}{row?.avatar?.badge && ['spark', 'bolt', 'shield', 'flame'].includes(row.avatar.badge) && <small aria-label={row.avatar.badge}><AgentAvatarBadgeIcon badge={row.avatar.badge as AgentAvatarBadge} size={8} /></small>}</span>
       <span className="mobile-session-copy"><span className="mobile-session-project">{object.project}</span><strong>{object.name !== '名称未确认' ? object.name : tabName || object.name}</strong>{tabName && tabName !== object.name && object.name !== '名称未确认' && <small className="mobile-session-location">{tabName}</small>}{row && <small className="mobile-session-recap" title={row.recap ? `${row.recap.source} · ${row.recap.text}` : row.detail}>{row.recap?.text ?? '暂无已确认摘要'}</small>}{context && <small className="mobile-session-location" title={`${context.displayWorkspaceId} / ${context.groupId}`}>{context.displayWorkspaceId} · {context.groupId}</small>}</span>
       <span className="mobile-session-state" data-state={status}>{row?.stateMark && <FocusStateMark kind={row.stateMark} presenceUnknown={row.presenceUnknown} size={16} />}<span>{row?.stateLabel ?? { working: '执行中', waiting: '等待输入', blocked: '需要处理', done: '已完成', error: '出错', exited: '已结束', starting: '启动中', running: '状态未确认', disconnected: '断开' }[status] ?? '状态未确认'}</span><small>{row?.providerId ?? session.providerId ?? '元信息未确认'}</small></span>
-    </button>{candidates.length > 1 && <details className="mobile-session-locations"><summary>{candidates.length} 个原展示位置</summary>{candidates.map(place => <button type="button" key={JSON.stringify(place)} onClick={() => openSession(session.agentSessionId, identity(session, place))}>
+    </MobileAgentRow>{candidates.length > 1 && <details className="mobile-session-locations"><summary>{candidates.length} 个原展示位置</summary>{candidates.map(place => <button type="button" key={JSON.stringify(place)} onClick={() => openSession(session.agentSessionId, identity(session, place))}>
       {spaces.find(value => value.spaceId === place.spaceId)?.name ?? 'Space 未确认'} · {catalog?.tabs.find(value => value.tabId === place.tabId)?.name ?? 'Tab'} · {place.displayWorkspaceId} / {place.groupId}
     </button>)}</details>}</li>
   }

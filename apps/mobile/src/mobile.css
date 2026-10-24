@@ -269,6 +269,18 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-executor-avatar small { position: absolute; right: -1px; bottom: -1px; display: grid; place-items: center; background: var(--surface-0); border-radius: 50%; width: 10px; height: 10px; }
 .mobile-executor-mark { display: flex; }
 .mobile-executor-mark-filters { position: absolute; width: 0; height: 0; }
+.mobile-agent-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.mobile-agent-row > .mobile-agent-row__open { min-width: 0; width: 100%; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.mobile-agent-row > :not(button) { grid-column: 1 / -1; }
+.mobile-agent-row > .mobile-agent-row__more { width: 44px; height: 44px; min-width: 44px; padding: 0; color: var(--text-3); }
+.mobile-agent-usage__details { padding-inline: 8px; }
+.mobile-agent-usage__heading { display: flex; align-items: center; justify-content: space-between; color: var(--text-3); font-size: 11px; }
+.mobile-agent-usage h3 { margin: 8px 0 4px; font-size: 12px; font-weight: 550; }
+.mobile-agent-usage p { color: var(--text-3); font-size: 11px; line-height: 1.5; margin: 4px 0; }
+.mobile-agent-usage dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; gap: 6px; }
+.mobile-agent-usage dt { color: var(--text-3); font-size: 10px; }
+.mobile-agent-usage dd { margin: 2px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.mobile-agent-usage__source { overflow-wrap: anywhere; }
 .mobile-header { align-items: center; justify-content: space-between; grid-row: 1; padding-top: max(8px, env(safe-area-inset-top)); display: grid; grid-template-columns: 44px minmax(0,1fr) 44px; padding-inline: 12px; gap: 6px; padding-block: 4px; min-height: 44px; padding: max(0px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); }
 .mobile-brand { display: flex; align-items: center; font-weight: 600; justify-self: center; font-size: 13px; gap: 6px; letter-spacing: -.25px; }
 .mobile-settings-button { position: relative; display: grid; place-items: center; color: var(--text-2); width: 44px; height: 44px; border-radius: var(--radius); background: transparent; box-shadow: none; }
