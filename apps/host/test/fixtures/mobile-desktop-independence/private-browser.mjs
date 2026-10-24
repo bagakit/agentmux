@@ -135,7 +135,10 @@ export async function browserState(page, input) {
 }
 export async function readOriginalContent(page, input) {
   await page.locator('.mobile-navigation [data-workface="space"]').click()
+  const back = page.locator('.mobile-spatial-panel:visible').getByRole('button', { name: '返回空间内容', exact: true })
+  if (await back.isVisible()) await back.click()
   const row = page.locator('[data-space-id]').filter({ has: page.locator('button.mobile-space-row strong', { hasText: input.workspaceName }) })
+  await row.waitFor({ state: 'visible' })
   if (await row.count() !== 1) throw Error('One original workspace is required')
   if (await row.locator('button.mobile-space-row').getAttribute('aria-expanded') !== 'true') await row.locator('button.mobile-space-row').click()
   await row.getByRole('button', { name: input.fileName, exact: false }).click()
