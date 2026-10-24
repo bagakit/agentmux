@@ -4,8 +4,8 @@ import { mkdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs
 import { join, resolve } from 'node:path'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { ScratchTopics } from '../../desktop/src/main/scratch-topics.js'
-import { TopicKnowledgeOwner } from '../../desktop/src/main/topic-knowledge.js'
-import { TopicSpatialOwner } from '../../desktop/src/main/topic-spatial-owner.js'
+import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
+import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
 import { learningBehaviorFixture } from './agent-learning-behavior-fixture.js'
 
 vi.mock('electron', () => ({ nativeImage: {} }))

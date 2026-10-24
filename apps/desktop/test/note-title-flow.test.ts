@@ -10,10 +10,10 @@ import { AgentMuxControlServer, connectAgentMuxRpc, type ExecutionHost } from '@
 import { AgentMuxNotebookStore, AgentMuxNotesStorage, type NotebookWrite } from '@agentmux/core/notebook-store'
 import { readNoteMarkdownHeader, rewriteNoteMarkdownTitle } from '@agentmux/core/note-format'
 import { noteTitleEventId, type NoteTitlePort } from '@agentmux/core/note-title'
-import { NoteTitleFileWriter } from '../src/main/note-title-file-writer.js'
-import { NoteFileWriter } from '../src/main/note-file-writer.js'
+import { NoteTitleFileWriter } from '@agentmux/host/note-title-file-writer'
+import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
-import { NotebookObservationOwner } from '../src/main/notebook-observation-owner.js'
+import { NotebookObservationOwner } from '@agentmux/host/notebook-observation-owner'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 const roots:string[]=[],servers:AgentMuxControlServer[]=[],children:ReturnType<typeof spawn>[]=[],fileOwners:WorkspaceFiles[]=[]
@@ -38,7 +38,7 @@ async function titleProcessBundle(root:string):Promise<string>{
   await symlink(resolve('apps/desktop/node_modules'),join(root,'node_modules'),'dir')
   const source=`import {AgentMuxNotebookStore} from '@agentmux/core/notebook-store';
 import {WorkspaceFiles} from './apps/desktop/src/main/workspace-files.ts';
-import {NoteTitleFileWriter} from './apps/desktop/src/main/note-title-file-writer.ts';
+import {NoteTitleFileWriter} from '@agentmux/host/note-title-file-writer';
 const [catalog,workspaceJSON,inputJSON,actorJSON,paused]=process.argv.slice(2),workspace=JSON.parse(workspaceJSON),files=new WorkspaceFiles(()=>({kind:'local'}));
 let writer;const store=new AgentMuxNotebookStore(catalog,undefined,{title:{inspect:id=>writer.inspect(id),current:(id,r)=>writer.current(workspace,id,r),write:async intent=>{if(paused==='yes'){process.send({phase:'writing'});await new Promise(ok=>process.once('message',ok));}return writer.write(workspace,intent);}}});writer=new NoteTitleFileWriter(files,store);
 process.send({phase:'ready'});await new Promise(ok=>process.once('message',ok));

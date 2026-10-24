@@ -13,7 +13,7 @@ import type { WorkspaceRecord } from '../src/shared/contracts'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { parseMoteQuickMode, serializeMoteQuickMode } from '../src/shared/mote-quick-mode'
 import { DEFAULT_MOTE_BEHAVIOR, parseMoteBehaviorDocument, serializeMoteBehaviorDocument } from '../src/shared/mote-behavior'
-import { FileReadOwner } from '../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 
 const cleanups: Array<() => Promise<unknown>> = []
 const { build } = createRequire(resolve(import.meta.dirname, '../../../packages/core/package.json'))('esbuild') as {

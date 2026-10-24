@@ -12,12 +12,12 @@ import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { WorkspaceFiles } from '../src/main/workspace-files'
-import { NoteFileWriter } from '../src/main/note-file-writer'
-import { FileReadOwner } from '../src/main/file-read-owner'
-import { NoteSharedUndoOwner } from '../src/main/note-shared-undo-owner'
-import { NoteSharedFileDeleteOwner } from '../src/main/note-shared-file-delete-owner'
-import { noteShareRange, noteShareSiblingRange } from '../src/shared/note-share-range'
-import { NoteSharedBlockOwner } from '../src/main/note-shared-block-owner'
+import { NoteFileWriter } from '@agentmux/host/note-file-writer'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
+import { NoteSharedUndoOwner } from '@agentmux/host/note-shared-undo-owner'
+import { NoteSharedFileDeleteOwner } from '@agentmux/host/note-shared-file-delete-owner'
+import { noteShareRange, noteShareSiblingRange } from '@agentmux/client-ui/note/note-share-range'
+import { NoteSharedBlockOwner } from '@agentmux/host/note-shared-block-owner'
 import { noteKnowledge, resolveNoteBlock } from '@agentmux/client-ui/note/note-knowledge'
 import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
 import type { WorkspaceRecord } from '../src/shared/contracts'
@@ -41,7 +41,7 @@ async function fixture() {
     workspace: id => workspaces.find(item => item.id === id),
     files: { writeSharedUndo: writer.writeSharedUndo.bind(writer), read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), history: writer.history.bind(writer), write: writer.write.bind(writer), createShared: writer.createShared.bind(writer) } })
   const deletion = new NoteSharedFileDeleteOwner(files, metadata)
-  const makeUndo = (afterStage?: ConstructorParameters<typeof NoteSharedUndoOwner>[0]['afterStage']) => new NoteSharedUndoOwner({ files, workspaces: () => workspaces, target: port.targetForNote.bind(port), read: port.read.bind(port), write: port.write.bind(port), writeInverse: port.writeSharedInverse.bind(port), history: query => metadata.readHistory(query), operation: id => metadata.readHistoryOperation(id), lease: metadata.runWithWriteLease.bind(metadata), delete: (resource, input, context) => deletion.delete(workspaces.find(w => w.id === resource.workspaceId)!, input, context), ...(afterStage ? { afterStage } : {}) })
+  const makeUndo = (afterStage?: ConstructorParameters<typeof NoteSharedUndoOwner>[0]['afterStage']) => new NoteSharedUndoOwner({ files, workspaces: async () => ({ workspaces, complete: true }), target: port.targetForNote.bind(port), read: port.read.bind(port), write: port.write.bind(port), writeInverse: port.writeSharedInverse.bind(port), history: query => metadata.readHistory(query), operation: id => metadata.readHistoryOperation(id), lease: metadata.runWithWriteLease.bind(metadata), delete: (resource, input, context) => deletion.delete(workspaces.find(w => w.id === resource.workspaceId)!, input, context), ...(afterStage ? { afterStage } : {}) })
   const undo = makeUndo()
   const makeOwner = (afterStage?: ConstructorParameters<typeof NoteSharedBlockOwner>[0]['afterStage'], undoOwner = undo) => new NoteSharedBlockOwner({ undo: undoOwner, files: {read:port.read.bind(port),write:port.write.bind(port),createShared:port.createShared.bind(port),writeInverse:port.writeSharedInverse.bind(port)}, historyOperation: metadata.readHistoryOperation.bind(metadata), withWriteLease: metadata.runWithWriteLease.bind(metadata), ...(afterStage ? { afterStage } : {}) })
   shared = makeOwner()

@@ -20,7 +20,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { api } from '../src/renderer/src/lib/api'
 import { WorkspaceFiles } from '../src/main/workspace-files'
-import { NoteFileWriter } from '../src/main/note-file-writer'
+import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { NoteReader } from '@agentmux/client-ui/components/NoteReader'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 const dom = composerDOM(), path = 'original.note.md', key = documentKey('workspace', path)

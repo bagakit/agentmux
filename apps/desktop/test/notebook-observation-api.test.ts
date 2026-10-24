@@ -13,7 +13,7 @@ import { assertSenderTrusted, senderTrust, type PrivilegedChannel } from '../src
 import { createPreloadNotebookObservation } from '../src/preload/notebook-observation'
 import { createRendererNotebookObservation } from '../src/renderer/src/lib/notebook-observation-api'
 import { noteContentMatchesGraph, type NotebookObservationPreloadApi } from '../src/shared/notebook-observation'
-import { NoteTitleFileWriter } from '../src/main/note-title-file-writer'
+import { NoteTitleFileWriter } from '@agentmux/host/note-title-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'

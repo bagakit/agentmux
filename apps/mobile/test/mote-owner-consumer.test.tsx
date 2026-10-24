@@ -24,7 +24,7 @@ import { scratchTopicDirectoryName } from '../../desktop/src/shared/scratch-topi
 import { createWorkbenchTab } from '../../desktop/src/renderer/src/lib/workbench-tabs'
 import { executeSpatialControl, selectSpatialCatalog, spatialCatalog } from '../../desktop/src/renderer/src/lib/space-agent-control'
 import { readMotePresentation, readAgentPresentation, readSpatialAppearance } from '../../desktop/src/renderer/src/lib/mobile-presentation'
-import { FileReadOwner } from '../../desktop/src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { MobileSpatialNavigation } from '../src/navigation/MobileSpatialNavigation'
 import { MobileMoteProfile } from '../src/navigation/MobileMoteProfile'
 import { MobileIdentity, type MobileObjectIdentity } from '../src/navigation/MobileIdentity'

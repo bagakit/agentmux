@@ -350,7 +350,7 @@ it('keeps original memory available across actual private client process restart
 it('starts with blank Mote defaults, then carries public Files corrections across actual Core discussions', async () => {
   const { AgentMuxControlServer } = await import('../../../packages/core/src/public-rpc-server')
   const { connectAgentMuxRpc } = await import('../../../packages/core/src/public-rpc-client')
-  const { FileReadOwner } = await import('../src/main/file-read-owner'), { WorkspaceFiles } = await import('../src/main/workspace-files')
+  const { FileReadOwner } = await import('@agentmux/host/file-read-owner'), { WorkspaceFiles } = await import('../src/main/workspace-files')
   const { DEFAULT_MOTE_SOUL } = await import('../src/shared/scratch-topics')
   const { DEFAULT_MOTE_BEHAVIOR } = await import('../src/shared/mote-behavior')
   const h = await fixture(), mote = await h.owner.ensureMote(h.workspace, 'launcher:public-memory')

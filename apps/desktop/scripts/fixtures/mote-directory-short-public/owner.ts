@@ -16,7 +16,7 @@ import { refreshSettingsExecutor } from '../../../src/main/settings-executor-ref
 import { ConfigOwner } from '../../../src/main/config-owner'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
 import { WorkspaceFiles } from '../../../src/main/workspace-files'
-import { FileReadOwner } from '../../../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { observeClientRpcSnapshot } from '../../../src/main/rpc-client-observations'
 import { scratchIdentityContext } from '../../../src/main/scratch-topic-directories'
 import { retainDirectoryIdentity, moteDirectoryName, SCRATCH_DIRECTORY_IDENTITY_PATH } from '../../../src/main/scratch-directory-identity.mjs'

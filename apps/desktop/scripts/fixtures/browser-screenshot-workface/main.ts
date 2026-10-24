@@ -12,7 +12,7 @@ import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 import { BrowserRefLedgerStore } from '../../../src/main/browser-ref-ledger-store'
 import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces'
 import { WorkspaceFiles } from '../../../src/main/workspace-files'
-import { FileReadOwner } from '../../../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import type { WorkspaceRecord } from '../../../src/shared/contracts'
 
 const root = process.env.AGENTMUX_SCREENSHOT_PROBE_ROOT!, out = process.env.AGENTMUX_SCREENSHOT_PROBE_OUT!

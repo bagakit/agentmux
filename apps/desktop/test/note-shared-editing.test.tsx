@@ -10,12 +10,12 @@ import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import { computeNoteLiveMerge } from '@agentmux/client-ui/note/note-live-merge.worker'
 import { noteHistoryRevision } from '@agentmux/core/note-history'
 import { WorkspaceFiles } from '../src/main/workspace-files'
-import { NoteFileWriter } from '../src/main/note-file-writer'
-import { FileReadOwner } from '../src/main/file-read-owner'
-import { NoteSharedBlockOwner } from '../src/main/note-shared-block-owner'
-import { NoteSharedUndoOwner } from '../src/main/note-shared-undo-owner'
-import { NoteSharedFileDeleteOwner } from '../src/main/note-shared-file-delete-owner'
-import { NotebookObservationOwner } from '../src/main/notebook-observation-owner'
+import { NoteFileWriter } from '@agentmux/host/note-file-writer'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
+import { NoteSharedBlockOwner } from '@agentmux/host/note-shared-block-owner'
+import { NoteSharedUndoOwner } from '@agentmux/host/note-shared-undo-owner'
+import { NoteSharedFileDeleteOwner } from '@agentmux/host/note-shared-file-delete-owner'
+import { NotebookObservationOwner } from '@agentmux/host/notebook-observation-owner'
 import { NoteFileSurfaceView } from '../src/renderer/src/components/NoteFileSurfaceView'
 import { NoteVersionHistory } from '../src/renderer/src/components/NoteVersionHistory'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
@@ -40,7 +40,7 @@ class NoteWorker extends NoteSnapshotTestWorker {
 }
 beforeEach(() => vi.stubGlobal('Worker', NoteWorker))
 afterEach(async () => { await dom.render(null); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.unstubAllGlobals(); useNotebookLibrary.setState({ state: null, issue: null }) })
-async function fixture(count = 2, undoAfterStage?: import('../src/main/note-shared-undo-owner').NoteSharedUndoPorts['afterStage']) {
+async function fixture(count = 2, undoAfterStage?: import('@agentmux/host/note-shared-undo-owner').NoteSharedUndoPorts['afterStage']) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-note-shared-ui-')))
   cleanups.push(() => rm(root, { recursive: true, force: true }))
   const workspace = { id: 'notes', hostId: 'local', name: 'Notes', path: root, kind: 'folder' as const }, birth = directoryIdentity('local', root), zoneId = homeZoneId(birth)
@@ -63,7 +63,7 @@ async function fixture(count = 2, undoAfterStage?: import('../src/main/note-shar
   const publicFiles = new FileReadOwner({ share: { share: (params, context) => sharing.share(params, context), undoShare: (params, context) => sharing.undoShare(params, context), inspectShare: (params, context) => sharing.inspectShare(params, context) }, catalog: async () => ({ zones: [{ zoneId, workspaceId: workspace.id, hostId: 'local', kind: 'directory', directoryPath: root }], bindings: [{ zoneId, spaceId: birth }] }) as never,
     workspace: id => id === workspace.id ? workspace : undefined, files: { read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), history: writer.history.bind(writer), write: writer.write.bind(writer), writeSharedUndo: writer.writeSharedUndo.bind(writer), createShared: writer.createShared.bind(writer) } })
   const deletion = new NoteSharedFileDeleteOwner(files, metadata)
-  const undo = new NoteSharedUndoOwner({ files, workspaces: () => [workspace], target: publicFiles.targetForNote.bind(publicFiles), read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles), history: metadata.readHistory.bind(metadata), operation: metadata.readHistoryOperation.bind(metadata), lease: metadata.runWithWriteLease.bind(metadata), delete: (resource, input, context) => deletion.delete(workspace, input, context), ...(undoAfterStage ? { afterStage: undoAfterStage } : {}) })
+  const undo = new NoteSharedUndoOwner({ files, workspaces: async () => ({ workspaces: [workspace], complete: true }), target: publicFiles.targetForNote.bind(publicFiles), read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles), history: metadata.readHistory.bind(metadata), operation: metadata.readHistoryOperation.bind(metadata), lease: metadata.runWithWriteLease.bind(metadata), delete: (resource, input, context) => deletion.delete(workspace, input, context), ...(undoAfterStage ? { afterStage: undoAfterStage } : {}) })
   sharing = new NoteSharedBlockOwner({ undo, files: { read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), createShared: publicFiles.createShared.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles) }, historyOperation: metadata.readHistoryOperation.bind(metadata), withWriteLease: metadata.runWithWriteLease.bind(metadata) })
   const inFlight = new Set<Promise<unknown>>()
   const track = <T,>(promise: Promise<T>) => { inFlight.add(promise); void promise.then(() => inFlight.delete(promise), () => inFlight.delete(promise)); return promise }

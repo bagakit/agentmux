@@ -8,7 +8,7 @@ import { createRequire } from 'node:module'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { fileUploadRevision, FILE_IMPORT_MAX_BYTES, parseFileImportParams, type FileImportParams } from '../../../packages/core/src/public-rpc-files'
-import { FileReadOwner } from '../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 const { build } = createRequire(resolve('packages/core/package.json'))('esbuild')

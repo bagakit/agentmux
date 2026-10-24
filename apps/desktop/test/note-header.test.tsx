@@ -18,7 +18,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { newNoteDocument, readNoteDocument } from '../src/shared/note-document'
 import { noteKnowledge } from '../src/renderer/src/lib/note-knowledge'
 import { composerDOM } from './helpers/composer-dom-fixture'
-import { NoteTitleFileWriter } from '../src/main/note-title-file-writer'
+import { NoteTitleFileWriter } from '@agentmux/host/note-title-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 

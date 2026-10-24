@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxError, type AgentMuxSpaceCatalog, type FileReadParams, type FileReadResult } from '@agentmux/core'
 import { prepareGoalDelegationMaterials } from '../src/main/goal-delegation-materials'
-import { FileReadOwner } from '../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 

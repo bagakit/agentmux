@@ -9,8 +9,8 @@ import { computeNoteLiveMerge } from '@agentmux/client-ui/note/note-live-merge.w
 import { MobileRegionContent } from '../src/navigation/MobileRegionContent'
 import { MobileSurveySurface } from '../src/survey/MobileSurveySurface'
 import { readSurveyPresentation } from '../../desktop/src/renderer/src/lib/mobile-presentation'
-import { FileReadOwner } from '../../desktop/src/main/file-read-owner'
-import { NoteFileWriter } from '../../desktop/src/main/note-file-writer'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
+import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { parseFileReadResult } from '../../../packages/core/src/public-rpc-files'
 import { parseSpaceControlSuccessReceipt } from '../../../packages/core/src/space-control-parser'
 

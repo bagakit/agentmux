@@ -13,7 +13,7 @@ import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-contro
 import { projectWorkbenchProjection, resolveWorkbenchZone, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../../../src/renderer/src/lib/workbench-projection'
 import { surveyResolvedZoneSelection, surveySelectReference } from '../../../src/renderer/src/lib/survey-workface'
 import type { WorkbenchViewTargets } from '../../../src/renderer/src/lib/workbench-presentation'
-import { NOTES_WORKSPACE_ID } from '../../../src/shared/notes-library'
+import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import '../../../src/renderer/src/styles/index.css'
 
 // Transport replacement only: page creation, binding, registration, navigation, document

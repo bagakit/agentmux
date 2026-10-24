@@ -30,7 +30,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { noteSummaryCases, noteSummaryContent } from './helpers/note-summary-fixture'
-import { noteBlockFingerprint } from '../src/shared/note-share-range'
+import { noteBlockFingerprint } from '@agentmux/client-ui/note/note-share-range'
 import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
 
 const dom = composerDOM(), scope = { kind: 'notebook', notebookId: 'quick-notes' } as const

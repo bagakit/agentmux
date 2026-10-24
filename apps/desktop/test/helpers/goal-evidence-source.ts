@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AgentMuxSpaceCatalog, FileReadParams } from '@agentmux/core'
 import { captureGoalFileEvidence } from '@agentmux/core/goal-evidence'
-import { FileReadOwner } from '../../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { WorkspaceFiles } from '../../src/main/workspace-files'
 import type { WorkspaceRecord } from '../../src/shared/contracts'
 

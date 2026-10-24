@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { AgentMuxControlServer, AgentMuxFileAgentSessionStore, connectAgentMuxRpc, type AgentMuxSpaceCatalog } from '@agentmux/core'
 import { startAgentMuxHost } from '../../../../host/src/host'
-import { FileReadOwner } from '../../../src/main/file-read-owner'
+import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { WorkspaceFiles } from '../../../src/main/workspace-files'
 import type { WorkspaceRecord } from '../../../src/shared/contracts'
 

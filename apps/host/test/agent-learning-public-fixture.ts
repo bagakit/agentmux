@@ -9,8 +9,8 @@ import { ScratchTopics } from '../src/mote-resources.js'
 import { directoryIdentity, homeZoneId, SCRATCH_WORKSPACE_ID } from '../src/mote-model.js'
 import { learningCore } from './agent-learning-fixture.js'
 import type { AgentLearningOperation, AgentLearningTarget } from '@agentmux/core/agent-learning'
-import { TopicKnowledgeOwner } from '../../desktop/src/main/topic-knowledge.js'
-import { TopicSpatialOwner } from '../../desktop/src/main/topic-spatial-owner.js'
+import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
+import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
 import { WorkspaceFiles } from '../../desktop/src/main/workspace-files.js'
 
 vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
