@@ -41,7 +41,7 @@ export type ConnectionDeliveryReference = ConversationItemRef | { hostId: string
 export type ConnectionDeliveryState = 'pending' | 'dispatching' | 'unknown' | 'confirmed' | 'not-applied' | 'cancelled' | 'superseded'
 export type ConnectionDeliveryReceiptReason = 'effect-unconfirmed' | 'platform-rejected' | 'adapter-unavailable' | 'platform-unavailable' | 'rate-limited' | 'thread-unavailable' | 'unsupported-format'
 export type ConnectionDeliveryReason = ConnectionDeliveryReceiptReason | 'binding-revised' | 'original-speech-withdrawn' | 'outside-conversation-scope' | 'private-content' | 'public-content-unconfirmed' | 'version-unavailable'
-export type ConnectionDeliveryMapping = { messageId: string; threadId?: string }
+export type ConnectionDeliveryMapping = { messageId: string; threadId?: string; reactionId?: string }
 /** Original platform outcome remains separate from the operation's current queue fate. */
 export type ConnectionDeliveryReceipt =
   | { state: 'confirmed'; mapping: ConnectionDeliveryMapping }
@@ -63,6 +63,8 @@ export type ConnectionDelivery = {
   reason?: ConnectionDeliveryReason
   receipt?: ConnectionDeliveryReceipt
   event?: ConnectionDeliveryEvent
+  /** Milestone on the original external query, not another authored message. */
+  queryFeedback?: { stage: 'received' | 'started' | 'completed'; ingressId: string; messageId: string }
   relay?: ConnectionDeliveryRelay
   /** Resource upload is distinct from the original chat-message effect. No bytes or platform asset key are exposed. */
   resourceUpload?: { kind: 'image' | 'file'; part: ConversationContentRef; attempt: number; state: 'pending' | 'dispatching' | 'unknown' | 'confirmed' }

@@ -200,7 +200,7 @@ export type * from './conversation-stream.js'
 export { conversationValuesEqual, conversationRevision, conversationRecordId, conversationInvocationId,
   conversationRecordRelations, conversationRecordRole, conversationRecordAuthor, conversationEventAuthor,
   conversationSourceKey, conversationTailComesAfter, conversationInvocationFacts, conversationInvocationMembers,
-  conversationSameEventTarget, conversationEventCoalesces, conversationInputKey, conversationInputWitnessKey,
+  conversationSameEventTarget, conversationEventCoalesces, conversationInputKey, conversationInputIdentity, conversationInputWitnessKey,
   conversationNativeInputWitness, conversationInputAdoptionEdges, conversationRecordAnchors,
   projectConversationStream } from './conversation-stream.js'
 export { projectConversationTimeline } from './conversation-timeline.js'
