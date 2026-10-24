@@ -348,6 +348,11 @@ process.stdin.on('data', (data) => {
       renderGeneration += 1
       writeDiagnostic(`codex-submit:${submitted}:accepted`)
       if (submitted === 'exit') process.exit(0)
+      if (nativeRecordDescriptor !== undefined) writeSync(nativeRecordDescriptor, `${JSON.stringify({
+        timestamp: new Date().toISOString(), type: 'response_item', payload: {
+          type: 'message', role: 'user', content: [{ type: 'input_text', text: submitted }]
+        }
+      })}\n`)
       tuiReady = false
       nativeTurnGeneration += 1
       writeNativeBoundary('task_started')
