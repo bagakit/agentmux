@@ -8,7 +8,7 @@ export function createCollaborationLayoutWorker() { return new Worker(new URL('.
 
 /** Disposable map geometry. Structural placement and new-path demand have separate invalidation. */
 export function useCollaborationLayout(input: CollaborationLayoutInput, active: boolean, readingAnchor: { current: string | null }) {
-  const structure = JSON.stringify([input.areas.map(area => [area.id, [...area.members].sort(), area.folded]).sort(), [...input.nodes].sort((a, b) => a.id.localeCompare(b.id))])
+  const structure = JSON.stringify([input.areas.map(area => [area.id, area.parentId ?? null, [...area.members].sort(), area.folded]).sort(), [...input.nodes].sort((a, b) => a.id.localeCompare(b.id))])
   const topology = JSON.stringify(input.connections.map(edge => [edge.id, edge.source, edge.target, edge.kind]))
   const [retry, setRetry] = useState(0), [arrange, setArrange] = useState(0)
   const [boxes, setBoxes] = useState<ReadonlyMap<string, CollaborationLayoutBox>>(new Map())

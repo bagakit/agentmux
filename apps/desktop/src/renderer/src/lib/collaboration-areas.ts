@@ -4,8 +4,8 @@ import { originalTopicAddress, topicSpatialAddress } from '../../../shared/space
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { collaborationSubjectKey, type CollaborationArea } from './agent-collaboration'
 import { createWorkspaceAgentListSelector, type WorkspaceAgentExecutionResolver, type WorkspaceAgentScopeState, type WorkspaceAgentList, type WorkspaceAgentSources } from './workspace-agent-scope'
-import { projectRailNavigation, workspaceProjectId } from './workspace-projects'
-import { folderSpaceIconTarget, topicSpaceIconTarget } from './space-object-appearance'
+import { projectRailNavigation, projectRailTree, workspaceProjectId } from './workspace-projects'
+import { categorySpaceIconTarget, folderSpaceIconTarget, topicSpaceIconTarget } from './space-object-appearance'
 import { scratchTopicsForConfig, scratchTopicKind } from './scratch-topic-snapshots'
 
 export type CollaborationAreaRequest = { workspaceId: string; choice: AgentMuxDesktopSpaceSelection | null }
@@ -37,9 +37,10 @@ export function createCollaborationAreasSelector(resolve: WorkspaceAgentExecutio
       return select({ ...state, workbenchSpaceSelection: choice }, workspace, state.sessions, sources)
     }
     const { scratch, projects } = projectRailNavigation(state.config?.workspaces ?? [])
+    const parents = new Map(projectRailTree(projects).flatMap(group => group.nodes.map(node => [node.project.id, node.parentId] as const)))
     for (const project of projects) {
       const lists = project.workspaces.map(workspace => list('workspace:' + workspace.id, workspace, null))
-      areas.push({ id: project.id, name: project.name, kind: 'project', iconTarget: folderSpaceIconTarget(project),
+      areas.push({ id: project.id, name: project.name, kind: 'project', parentId: parents.get(project.id), iconTarget: folderSpaceIconTarget(project),
         workspaceId: project.preferredWorkspaceId, hostId: project.hostId, ...areaMembers(lists),
         issue: [...new Set(lists.flatMap(value => value.issue ? [value.issue] : []))].join(' ') || null })
     }
@@ -52,6 +53,10 @@ export function createCollaborationAreasSelector(resolve: WorkspaceAgentExecutio
       if (workspace.id !== SCRATCH_WORKSPACE_ID && (!request.choice?.spaceId || request.choice.spaceId === workspaceProjectId(workspace)) && !request.choice?.topicId) current = [workspaceProjectId(workspace)]
     }
     if (scratch) {
+      for (const category of state.topicCategories ?? []) if (category.hostId === scratch.hostId) {
+        areas.push({ id: category.spaceId, name: category.title, kind: 'category', iconTarget: categorySpaceIconTarget(category),
+          workspaceId: scratch.id, hostId: category.hostId, members: [], issue: category.readError ?? null })
+      }
       const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)
       const byTopic = new Map(topics?.map(topic => [topic.id, topic]))
       const ids = new Set([...byTopic.keys(), ...Object.values(state.spaceZoneBindings).flatMap(binding => binding.workspaceId === scratch.id && binding.topicId ? [binding.topicId] : [])])
@@ -65,6 +70,7 @@ export function createCollaborationAreasSelector(resolve: WorkspaceAgentExecutio
         const kind = source && state.spaceZoneBindings[source.zoneId]?.contentKind || scratchTopicKind(id, topics)
         const iconTarget = topic ? topicSpaceIconTarget(scratch, topic, state.spaceZoneBindings) : null
         const area: CollaborationArea = { id: value.key, name: value.title, kind: kind === 'unknown' ? 'unplaced' : kind,
+          ...(kind === 'topic' && areas.some(area => area.kind === 'category' && area.id === display?.spaceId) ? { parentId: display!.spaceId } : {}),
           ...(iconTarget ? { iconTarget } : {}), workspaceId: scratch.id, hostId: scratch.hostId,
           ...areaMembers([value]), issue: value.issue }
         areas.push(area)
