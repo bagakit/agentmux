@@ -232,10 +232,10 @@ it('reads a missing operation without prepare, submit, message body read or jour
   const f = await fixture(), before = await f.queue.readJournal()
   const prepare = vi.spyOn(f.queue, 'prepareNotification'), body = vi.spyOn(f.queue, 'readByMessageId')
   const result = await f.rpc.call('message.notify.inspect', { hostId: 'local', operationId: 'not-recorded' })
-  expect(result).toEqual({ hostId: 'local', notification: null, input: null })
+  expect(result).toEqual({ hostId: 'local', notification: null, inputOrigin: null, input: null })
   expect(await f.queue.readJournal()).toEqual(before); expect(prepare).not.toHaveBeenCalled(); expect(body).not.toHaveBeenCalled()
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled()
-  await expect(f.managed.call('message.notify.inspect', { hostId: 'local', operationId: 'not-recorded' })).resolves.toEqual({ hostId: 'local', notification: null, input: null })
+  await expect(f.managed.call('message.notify.inspect', { hostId: 'local', operationId: 'not-recorded' })).resolves.toEqual({ hostId: 'local', notification: null, inputOrigin: null, input: null })
   await expect(f.rpc.call('message.notify.inspect', { hostId: 'another-host', operationId: 'not-recorded' })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
 })
 
@@ -298,11 +298,12 @@ it('reads whole-input native not-applied as a copy while keeping the original pe
 
 it('validates the public read receipt Host, operation and platform producer rather than accepting a same-name ordinary ACK', async () => {
   const f = await fixture(); await f.append('codec'); await f.resume()
-  const result = await f.rpc.call('message.notify', { hostId: 'local', operationId: 'codec-op', messageIds: ['codec'] })
+  await f.rpc.call('message.notify', { hostId: 'local', operationId: 'codec-op', messageIds: ['codec'] })
+  const result = await f.rpc.call('message.notify.inspect', { hostId: 'local', operationId: 'codec-op' })
   const input = { hostId: 'local', operationId: 'codec-op' }
   expect(() => parseRpcNativeResult('message.notify.inspect', result, input)).not.toThrow()
   for (const changed of [{ ...result, hostId: 'elsewhere' }, { ...result, notification: { ...result.notification, notificationId: 'another-op' } },
-    { ...result, notification: null }]) expect(() => parseRpcNativeResult('message.notify.inspect', changed, input)).toThrow()
+    { ...result, notification: null }, { ...result, inputOrigin: undefined }, { ...result, inputOrigin: { queueId: 'original', incarnation: 'original', sequence: -1 } }]) expect(() => parseRpcNativeResult('message.notify.inspect', changed, input)).toThrow()
   const ordinary = structuredClone(result.input!)
   if (!ordinary.admission?.intent) throw new Error('Missing the original notification input intent')
   ordinary.admission.intent.message = { userContent: 'ordinary' }
