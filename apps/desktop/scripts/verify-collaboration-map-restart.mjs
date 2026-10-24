@@ -113,6 +113,16 @@ const sourceAliases = [
   { find: /^@agentmux\/host\/host-configuration$/, replacement: path.join(root, 'apps/host/src/host-configuration.ts') },
   { find: /^@agentmux\/layout$/, replacement: path.join(root, 'packages/layout/src/index.ts') },
 ]
+// The Desktop also consumes Host pure subpaths. Resolve its declared exports from
+// this candidate rather than the independently changing shared workspace dist.
+const hostManifest = JSON.parse(await fs.readFile(path.join(root, 'apps/host/package.json'), 'utf8'))
+for (const [key, value] of Object.entries(hostManifest.exports)) {
+  const target = typeof value === 'string' ? value : value.import
+  const source = path.join(root, 'apps/host', target.replace(/^\.\/dist\//, 'src/').replace(/\.js$/, '.ts'))
+  assert.ok((await fs.stat(source)).isFile(), 'The declared Host export must have its exact candidate source: ' + key)
+  const specifier = '@agentmux/host' + (key === '.' ? '' : key.slice(1))
+  sourceAliases.push({ find: new RegExp('^' + specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement: source })
+}
 const clientManifest = JSON.parse(await fs.readFile(path.join(root, 'packages/client-ui/package.json'), 'utf8'))
 for (const [key, value] of Object.entries(clientManifest.exports).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)) {
   const target = typeof value === 'string' ? value : value.browser ?? value.types ?? value.import
