@@ -98,7 +98,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId })
   current.current = { client, agentSessionId }
-  const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput, preparing, preparationIssue,
+  const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue,
     historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused } = useMobilePromptController({ local, client, agentSessionId,
       session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   const attachmentControls = useRef<MobileAttachmentControls>(null)
@@ -430,7 +430,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         <AgentComposer insertionRef={insertion} aboveInput={<MobileAttachments client={client} session={session ?? null}
           connected={connection.state === 'connected' && !reading.disconnected} controls={attachmentControls}
           onPendingContentChange={setHasPendingAttachments}
-          promptOperationId={attempt?.operationId ?? null} promptConfirmed={attempt?.phase === 'confirmed'}
+          promptOperationId={attempt?.operationId ?? null} confirmedPrompt={confirmedAttachmentPrompt}
+          onSendBodyOnly={sendBodyOnly}
+          bodyOnlyDisabled={!draft.trim() || attempt?.phase === 'sending'}
           insert={async (resolve, original) => {
             const originalClient = current.current.client, selectedId = current.current.agentSessionId
             const selected = selectedId ? originalClient?.agentSession(selectedId) : null

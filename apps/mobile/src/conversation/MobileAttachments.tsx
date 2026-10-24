@@ -6,7 +6,7 @@ import type { AgentMuxAgentSession } from '@agentmux/core'
 import { FILE_UPLOAD_MAX_BYTES, parseFileUploadParams, type FileUploadIdentity } from '@agentmux/core/files'
 import { localAttachmentFromBlob, pickLocalAttachment, type LocalAttachment, type LocalAttachmentFile } from '../platform/native/device'
 import { getDeviceWorkface } from '../recovery/device-workface'
-import { fileUploadScopeMatches, uploadFromReceipt, type MobileFileUpload } from './attachments'
+import { draftIncludesUpload, fileUploadIntentKey, fileUploadScopeMatches, uploadFromReceipt, type ConfirmedAttachmentPrompt, type MobileFileUpload } from './attachments'
 import { errorMessage } from './delivery'
 import { appendNamedFileReference } from '@agentmux/client-ui/composer-file-reference'
 import type { MobilePromptPreparation } from './use-mobile-prompt-controller'
@@ -20,13 +20,14 @@ export type MobileAttachmentControls = {
 type SelectionTarget = { runtimeId: string; hostId: string; sessionId: string; runId: string; recordId: string | null }
 type Props = {
   client: AgentMuxHostedClient | null; session: AgentMuxAgentSession | null; connected: boolean;
-  promptOperationId: string | null; promptConfirmed: boolean;
+  promptOperationId: string | null; confirmedPrompt: ConfirmedAttachmentPrompt | null;
+  onSendBodyOnly?(): void; bodyOnlyDisabled?: boolean;
   controls: Ref<MobileAttachmentControls>; insert(resolve: () => Promise<string | null>, original: MobileFileUpload): Promise<void>;
   pickFile?: () => Promise<LocalAttachment | null>
   onPendingContentChange?: (pending: boolean) => void
 }
 /** A local selection and one original Host receipt, beside the maintained shared Composer. */
-export function MobileAttachments({ client, session, connected, promptOperationId, promptConfirmed, controls, insert, pickFile = pickLocalAttachment, onPendingContentChange }: Props) {
+export function MobileAttachments({ client, session, connected, promptOperationId, confirmedPrompt, onSendBodyOnly, bodyOnlyDisabled, controls, insert, pickFile = pickLocalAttachment, onPendingContentChange }: Props) {
   const [uploads, setUploads] = useState<MobileFileUpload[]>(() => (getDeviceWorkface().snapshot().record.fileUploads ?? []).map(item =>
     item.phase === 'sending' ? { ...item, phase: 'unknown', issue: '原上传回执尚未确认；核对同一操作，不会自动重传。' } : item))
   const [notice, setNotice] = useState<string | null>(null), [readingCount, setReadingCount] = useState(0)
@@ -36,7 +37,8 @@ export function MobileAttachments({ client, session, connected, promptOperationI
   const bytes = useRef(new Map<string, LocalAttachment>())
   const latestUploads = useRef(uploads)
   const reading = useRef(0)
-  const busy = useRef(new Set<string>())
+  const busy = useRef(new Map<string, { client: AgentMuxHostedClient | null; recordId: string | null; intent: string; claimedForSend: boolean; result: Promise<MobileFileUpload | null> }>())
+  const [, updateActivity] = useState(0)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, session, connected, promptOperationId })
@@ -71,9 +73,9 @@ export function MobileAttachments({ client, session, connected, promptOperationI
     } catch (error) { setNotice(errorMessage(error)) }
   }
   useEffect(() => {
-    if (!promptConfirmed || !session) return
-    for (const upload of uploads) if (upload.phase === 'inserted' && upload.identity.agentSessionId === session.agentSessionId) remove(upload)
-  }, [promptConfirmed, promptOperationId])
+    if (!confirmedPrompt) return
+    for (const upload of uploads) if (upload.phase === 'inserted' && fileUploadScopeMatches(upload, confirmedPrompt.source) && upload.path && draftIncludesUpload(confirmedPrompt.body, upload.path)) remove(upload)
+  }, [confirmedPrompt?.operationId, confirmedPrompt?.body, confirmedPrompt?.source.runtimeId, confirmedPrompt?.source.hostId, confirmedPrompt?.source.sessionId, confirmedPrompt?.source.runId])
 
   function selectionTarget(): SelectionTarget | null {
     const { client, session } = current.current
@@ -135,48 +137,64 @@ export function MobileAttachments({ client, session, connected, promptOperationI
     await retain({ ...upload, phase: 'inserted' })
     bytes.current.delete(upload.identity.operationId)
   }
-  async function act(upload: MobileFileUpload, inspectOnly: boolean, insertIntoDraft = true): Promise<MobileFileUpload | null> {
+  function act(upload: MobileFileUpload, inspectOnly: boolean, insertIntoDraft = true): Promise<MobileFileUpload | null> {
     const id = upload.identity.operationId
-    if (busy.current.has(id)) return null
-    const originalClient = current.current.client, originalScope = scope(), originalPrompt = current.current.promptOperationId
-    busy.current.add(id)
-    let requested = false, confirmed: MobileFileUpload | null = null
-    try {
-      if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(id) ?? null)) throw new Error('设备工作面已被替换；原附件仍保留，本次不上传或插入。')
-      if (!current.current.connected || !originalClient?.forwardRpc) throw new Error('原 Mac 当前未连接；附件和草稿保留，可连接后再试。')
-      if (upload.runtimeId !== originalScope.runtimeId || upload.identity.hostId !== originalScope.hostId || upload.identity.agentSessionId !== originalScope.sessionId) throw new Error('当前连接不属于原附件的 Mac 与 Session；本次未上传或重传。')
-      if (upload.phase === 'uploaded') { if (insertIntoDraft) await add(upload); return upload }
-      if (!inspectOnly && !fileUploadScopeMatches(upload, originalScope)) throw new Error('原 Run 已变化；本次未上传，原文件仍保留。')
-      const file = bytes.current.get(id)
-      if (!inspectOnly && !file) throw new Error('本次设备选择已结束；原上传记录保留，可先核对原操作。')
-      await retain({ ...upload, phase: 'sending' }, true)
-      requested = true
-      let inserted = false
-      const request = async () => {
-        const response = inspectOnly ? await originalClient.forwardRpc!('file.upload.inspect', upload.identity)
-          : await originalClient.forwardRpc!('file.upload', { ...upload.identity, dataBase64: file!.dataBase64 })
-        confirmed = uploadFromReceipt(upload, response); await retain(confirmed)
+    const existing = busy.current.get(id), recordId = getDeviceWorkface().recordIdentity(), intent = fileUploadIntentKey(upload)
+    if (existing) {
+      if (existing.client !== current.current.client || existing.recordId !== recordId || existing.intent !== intent || !fileUploadScopeMatches(upload, scope())) {
+        const issue = '原上传仍属于另一客户端、工作面或目标；本次未上传、插入或发送，可核对原操作。'
+        const { path: _path, ...original } = upload
+        setNotice(issue); return Promise.resolve({ ...original, phase: 'error', issue })
+      }
+      if (!insertIntoDraft) existing.claimedForSend = true
+      return existing.result
+    }
+    const flight = { client: current.current.client, recordId, intent, claimedForSend: !insertIntoDraft, result: null as unknown as Promise<MobileFileUpload | null> }
+    const run = async (): Promise<MobileFileUpload | null> => {
+      const originalClient = current.current.client, originalScope = scope(), originalPrompt = current.current.promptOperationId
+      let requested = false, confirmed: MobileFileUpload | null = null
+      try {
+        if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(id) ?? null)) throw new Error('设备工作面已被替换；原附件仍保留，本次不上传或插入。')
+        if (!current.current.connected || !originalClient?.forwardRpc) throw new Error('原 Mac 当前未连接；附件和草稿保留，可连接后再试。')
+        if (upload.runtimeId !== originalScope.runtimeId || upload.identity.hostId !== originalScope.hostId || upload.identity.agentSessionId !== originalScope.sessionId) throw new Error('当前连接不属于原附件的 Mac 与 Session；本次未上传或重传。')
+        if (upload.phase === 'uploaded' && !inspectOnly) { if (insertIntoDraft) await add(upload); return upload }
+        if (!inspectOnly && !fileUploadScopeMatches(upload, originalScope)) throw new Error('原 Run 已变化；本次未上传，原文件仍保留。')
+        const file = bytes.current.get(id)
+        if (!inspectOnly && !file) throw new Error('本次设备选择已结束；原上传记录保留，可先核对原操作。')
+        await retain({ ...upload, phase: 'sending' }, true)
+        requested = true
+        let inserted = false
+        const request = async () => {
+          const response = inspectOnly ? await originalClient.forwardRpc!('file.upload.inspect', upload.identity)
+            : await originalClient.forwardRpc!('file.upload', { ...upload.identity, dataBase64: file!.dataBase64 })
+          confirmed = uploadFromReceipt(upload, response); await retain(confirmed)
+          return confirmed
+        }
+        // Capture the maintained editor's bookmark before the asynchronous request. Its
+        // transaction mapping keeps later typing without copying or replacing the draft.
+        if (insertIntoDraft && fileUploadScopeMatches(upload, originalScope)) {
+          await insert(async () => {
+            const original = await request()
+            if (flight.claimedForSend || getDeviceWorkface().recordIdentity() !== (recordIds.current.get(id) ?? null) || original.phase !== 'uploaded' || !fileUploadScopeMatches(original, scope()) || originalPrompt !== current.current.promptOperationId) return null
+            inserted = true; return original.path!
+          }, upload)
+        } else await request()
+        if (inserted && confirmed) {
+          await retain({ ...(confirmed as MobileFileUpload), phase: 'inserted' }); bytes.current.delete(id)
+        }
         return confirmed
+      } catch (error) {
+        const retained = confirmed as MobileFileUpload | null
+        const failed: MobileFileUpload = retained?.phase === 'uploaded' ? { ...retained, issue: errorMessage(error) }
+          : { ...upload, phase: requested ? 'unknown' : upload.phase, issue: errorMessage(error) }
+        await retain(failed)
+        return failed
       }
-      // Capture the maintained editor's bookmark before the asynchronous request. Its
-      // transaction mapping keeps later typing without copying or replacing the draft.
-      if (insertIntoDraft && fileUploadScopeMatches(upload, originalScope)) {
-        await insert(async () => {
-          const original = await request()
-          if (getDeviceWorkface().recordIdentity() !== (recordIds.current.get(id) ?? null) || original.phase !== 'uploaded' || !fileUploadScopeMatches(original, scope()) || originalPrompt !== current.current.promptOperationId) return null
-          inserted = true; return original.path!
-        }, upload)
-      } else await request()
-      if (inserted && confirmed) {
-        await retain({ ...(confirmed as MobileFileUpload), phase: 'inserted' }); bytes.current.delete(id)
-      }
-      return confirmed
-    } catch (error) {
-      const retained = confirmed as MobileFileUpload | null
-      await retain(retained?.phase === 'uploaded' ? { ...retained, issue: errorMessage(error) }
-        : { ...upload, phase: requested ? 'unknown' : upload.phase, issue: errorMessage(error) })
-      return null
-    } finally { busy.current.delete(id) }
+    }
+    flight.result = run().finally(() => { if (busy.current.get(id) === flight) { busy.current.delete(id); if (mounted.current) updateActivity(value => value + 1) } })
+    busy.current.set(id, flight)
+    if (mounted.current) updateActivity(value => value + 1)
+    return flight.result
   }
   function captureForSend(): MobilePromptPreparation | null {
     const originalClient = current.current.client, originalScope = scope(), originalRecord = getDeviceWorkface().recordIdentity()
@@ -184,8 +202,10 @@ export function MobileAttachments({ client, session, connected, promptOperationI
     const wasReading = reading.current > 0
     if (!selected.length && !wasReading) return null
     const confirmed: MobileFileUpload[] = []
+    let cancelled = false
     const originalSelection = selected.every(upload => recordIds.current.get(upload.identity.operationId) === originalRecord && fileUploadScopeMatches(upload, originalScope))
     const assertOriginal = () => {
+      if (cancelled) throw new Error('本次已明确选择仅发送正文；原上传和附件仍保留。')
       const now = scope()
       if (!mounted.current || current.current.client !== originalClient || getDeviceWorkface().recordIdentity() !== originalRecord ||
           !originalSelection || now.sessionId !== originalScope.sessionId || now.runId !== originalScope.runId || now.runtimeId !== originalScope.runtimeId || now.hostId !== originalScope.hostId) {
@@ -193,6 +213,7 @@ export function MobileAttachments({ client, session, connected, promptOperationI
       }
     }
     return {
+      cancel() { cancelled = true },
       async prepare(body) {
         assertOriginal()
         if (wasReading) throw new Error('所选附件仍在读取；正文和选择保留，读取完成后再发送。')
@@ -200,10 +221,10 @@ export function MobileAttachments({ client, session, connected, promptOperationI
           assertOriginal()
           const result = await act(upload, upload.phase === 'unknown' || upload.phase === 'sending', false)
           assertOriginal()
-          if (result?.phase !== 'uploaded' || !result.path) throw new Error('附件尚未确认保存在原 Mac；本次消息没有发送。正文和附件保留，可核对原上传后再发送。')
+          if (result?.phase !== 'uploaded' || !result.path) throw new Error(`附件未就绪；本次消息没有发送。${result?.issue ?? '原上传结果尚未确认。'} 可在附件详情核对原操作，或明确仅发送正文。`)
           confirmed.push(result)
         }
-        return confirmed.reduce((text, upload) => appendNamedFileReference(text, upload.path!, upload.identity.name), body)
+        return confirmed.reduce((text, upload) => draftIncludesUpload(body, upload.path!) ? text : appendNamedFileReference(text, upload.path!, upload.identity.name), body)
       },
       async commit() {
         assertOriginal()
@@ -225,21 +246,24 @@ export function MobileAttachments({ client, session, connected, promptOperationI
     {readingCount > 0 && <p className="mobile-attachment-notice"><SemanticIcon name="status.loading" size={13} animation="spin" />读取所选附件…</p>}
     {visible.map(upload => {
       const image = upload.identity.mimeType.startsWith('image/'), file = bytes.current.get(upload.identity.operationId)
-      const busy = upload.phase === 'sending', unknown = upload.phase === 'unknown', ready = upload.phase === 'uploaded'
-      const canRemove = !busy && !unknown
+      const inFlight = busy.current.has(upload.identity.operationId), busyUpload = upload.phase === 'sending' || inFlight, unknown = upload.phase === 'unknown', ready = upload.phase === 'uploaded'
+      const canRemove = !busyUpload && !unknown
       return <div className="mobile-attachment" data-phase={upload.phase} key={upload.identity.operationId}>
         {image && file ? <img className="mobile-attachment-preview" alt="" src={`data:${file.mimeType};base64,${file.dataBase64}`} />
           : <span className="mobile-attachment-icon">{image ? <SemanticIcon name="object.image" size={19} /> : <SemanticIcon name="object.file" size={19} />}</span>}
-        <div className="mobile-attachment-copy"><strong title={upload.identity.name}>{upload.identity.name}</strong>
-          <small>{upload.identity.byteLength < 1024 ? `${upload.identity.byteLength} B` : `${(upload.identity.byteLength / 1024).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} KB`} · {busy ? '正在核对原 Host…' : unknown ? '回执待核对' : ready ? '已在原 Mac' : '仅在这台设备'}</small>
-          {upload.issue && <MobileNotice identity={[upload.identity.operationId,upload.phase,upload.issue]} role="status">{upload.issue}</MobileNotice>}</div>
-        {!busy && <button type="button" className="mobile-icon-button" aria-label={ready ? `将 ${upload.identity.name} 加入消息` : unknown ? `核对 ${upload.identity.name} 原上传` : `上传并加入 ${upload.identity.name}`}
+        <div className="mobile-attachment-copy"><details className="mobile-attachment-details"><summary aria-label={`${upload.identity.name} 原上传详情`}><strong title={upload.identity.name}>{upload.identity.name}</strong>
+          <small>{upload.identity.byteLength < 1024 ? `${upload.identity.byteLength} B` : `${(upload.identity.byteLength / 1024).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} KB`} · {busyUpload ? '正在核对原上传…' : unknown ? '回执待核对' : ready ? '已在原 Mac' : '仅在这台设备'}</small></summary>
+          <p>操作 <code>{upload.identity.operationId}</code></p><p>Host <code>{upload.identity.hostId}</code> · Agent <code>{upload.identity.agentSessionId}</code> · Run <code>{upload.identity.expectedRun.runId}</code></p>{upload.issue && <p>{upload.issue}</p>}{upload.phase !== 'selected' && !busyUpload && !unknown && <button type="button" className="mobile-text-button" onClick={() => { void act(upload, true, false) }}>核对 {upload.identity.name} 原上传</button>}</details>
+          {upload.issue && <MobileNotice identity={[upload.identity.operationId,upload.phase,upload.issue]} role="status">{upload.issue.split('\n')[0]}</MobileNotice>}
+          </div>
+        {!busyUpload && <button type="button" className="mobile-icon-button" aria-label={ready ? `将 ${upload.identity.name} 加入消息` : unknown ? `核对 ${upload.identity.name} 原上传` : `上传并加入 ${upload.identity.name}`}
           title={ready ? '加入消息' : unknown ? '核对原上传' : '上传并加入消息'} onClick={() => { void act(upload, unknown) }}>
           {ready ? <SemanticIcon name="action.confirm" size={17} /> : unknown ? <SemanticIcon name="action.refresh" size={17} /> : <SemanticIcon name="action.upload" size={17} />}</button>}
-        {busy && <SemanticIcon name="status.loading" size={17} animation="spin" aria-label="上传回执待确认" />}
+        {busyUpload && <SemanticIcon name="status.loading" size={17} animation="spin" aria-label="上传回执待确认" />}
         {canRemove && <button type="button" className="mobile-icon-button" aria-label={`移除 ${upload.identity.name} 本地引用`} onClick={() => remove(upload)}><SemanticIcon name="action.close" size={15} /></button>}
       </div>
     })}
+    {visible.length > 0 && onSendBodyOnly && <button type="button" className="mobile-text-button" disabled={bodyOnlyDisabled} onClick={onSendBodyOnly}>本次仅发送正文</button>}
     {notice && <MobileNotice identity={[session?.agentSessionId,notice]} className="mobile-attachment-notice" role="status">{notice}</MobileNotice>}
   </div>
 }
