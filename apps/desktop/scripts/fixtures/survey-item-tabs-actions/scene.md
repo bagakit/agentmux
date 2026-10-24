@@ -1,0 +1,9 @@
+# Survey item tabs and actions
+
+This scene uses the real App, GlobalSurveySurface, SurveyZoneItem, SurveyItemOptions, Store and complete product CSS. It runs against the maintained typed preview API in one private Electron user-data namespace. SessionPane PTY/Agent painting, EditorPane painting and unused diff painting are isolated; no user Session, Run, profile or application installation is controlled. Browser page content is the original preview implementation.
+
+The scene follows [Survey behavior](../../../../../docs/design/behavior/knowledge-workflows.md#survey临时-zone-工作面与知识入口), [Survey presentation](../../../../../docs/design/presentation/spaces-and-layout.md#survey-与-recall-呈现) and [independent visual review](../../../../../docs/design/behavior/shared-rules.md#agent-主观审美的端到端验证).
+
+Two explicitly collected research Zones include several real Store Tabs and typed Browser snapshots. The current first Zone has two pages with distinct fixture favicons, a mixed Agent/File Tab with a real split layout, and a file Tab. The second is initially unselected and has its own page and Launcher. Trusted CDP mouse/key events select an exact Tab, disclose add/settings/context menus, create a new Tab for the noncurrent Zone and close only its Survey reference. The receipt captures selection, original Session/Run/draft, original Tab identities, created Tab target, control-operation counts and all source hashes.
+
+Capture wide/narrow navigation, add and settings menus, second-row context retargeting, collapsed keyboard menu, and close. The capture does not sign aesthetic acceptance; an independent reviewer must actually open every PNG and record a justified result in private evidence. Native Browser, PTY, external CLI, restart and installed application behavior remain outside this Renderer probe.
