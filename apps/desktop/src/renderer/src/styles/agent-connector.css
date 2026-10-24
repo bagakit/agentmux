@@ -1,10 +1,10 @@
-.agent-connector-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(760px, calc(100vw - 24px)); display: flex; flex-direction: column; max-height: calc(100dvh - 24px); overflow: hidden; }
+.agent-connector-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(880px, calc(100vw - 24px)); display: flex; flex-direction: column; max-height: calc(100dvh - 24px); overflow: hidden; }
 .agent-connector-dialog__header { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
 .agent-connector-dialog__header > div { min-width: 0; }
 .agent-connector-dialog__header h2 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 600; line-height: 1.4; letter-spacing: -.015em; }
 .agent-connector-identity { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
 .agent-connector-identity > svg, .agent-connector-dialog__header > button { flex: none; }
-.agent-connector-dialog__body { display: flex; flex-direction: column; gap: var(--sp-5); min-height: 0; padding: var(--sp-5) var(--sp-6); overflow: auto; overflow-wrap: anywhere; }
+.agent-connector-dialog__body { display: flex; flex-direction: column; gap: var(--sp-4); min-height: 0; padding: var(--sp-5) var(--sp-6); overflow: auto; overflow-wrap: anywhere; }
 .agent-connector-room-choice { display: grid; gap: var(--sp-3); min-width: 0; }
 .agent-connector-room-choice > .selection-field { width: 100%; min-width: 0; }
 .agent-connector-room-choice > .selection-field .selection-field__choice { min-width: 0; white-space: normal; }
@@ -17,8 +17,7 @@
 .agent-connector-person small { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .agent-connector-person > button { flex: none; }
 .agent-connector-link-actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
-.agent-connector-source { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; padding-inline: var(--sp-3); font-size: var(--fs-body); }
-.agent-connector-source__label { flex: none; color: var(--text-3); font-size: var(--fs-meta); }
+.agent-connector-source { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; padding: var(--sp-3) 0 0; font-size: var(--fs-body); }
 .agent-connector-source__identity { display: grid; gap: var(--sp-1); min-width: 0; margin-right: auto; }
 .agent-connector-source__identity strong { font-weight: 500; color: var(--text-2); overflow-wrap: anywhere; }
 .agent-connector-source__identity small, .agent-connector-group-identity small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; overflow-wrap: anywhere; }
@@ -54,12 +53,13 @@
 .agent-connector-group { margin: 0; color: var(--text); overflow-wrap: anywhere; }
 
 .agent-connector-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); min-width: 0; padding-inline: var(--sp-3); }
-.agent-connector-status > div { display: grid; gap: var(--sp-1); min-width: 0; margin-right: auto; }
+.agent-connector-status > div:not(.agent-connector-saved):not(.agent-connector-link-actions) { display: grid; gap: var(--sp-1); min-width: 0; margin-right: auto; }
 .agent-connector-status strong { color: var(--text); font-size: var(--fs-body); font-weight: 500; }
 .agent-connector-status span { color: var(--text-3); font-size: var(--fs-meta); }
 .agent-connector-status > p { flex-basis: 100%; }
 .agent-connections__error { margin: var(--sp-3) 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; user-select: text; }
 
+.agent-connector-checked { display: block; margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); }
 .agent-connector-section-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
 .agent-connector-service { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-left: 2px solid var(--text-3); background: var(--surface-1); }
 .agent-connector-service > strong { color: var(--text); font-size: var(--fs-meta); font-weight: 500; }
@@ -69,11 +69,6 @@
 .agent-connector-audiences { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .agent-connector-audiences button { text-align: left; overflow-wrap: anywhere; }
 .agent-connector-audiences button[aria-pressed=true] { border-color: var(--green); color: var(--text); }
-.agent-connector-directions { display: grid; flex-basis: 100%; gap: var(--sp-3); margin: 0; padding-block: var(--sp-3); border-block: 1px solid var(--line-soft); }
-.agent-connector-directions > div { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: var(--sp-3); }
-.agent-connector-directions dt { color: var(--text-2); font-size: var(--fs-meta); }
-.agent-connector-directions dd { display: grid; gap: var(--sp-1); margin: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.5; }
-.agent-connector-directions dd span { color: var(--text-3); }
 .agent-connector-disconnect { display: grid; flex-basis: 100%; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .agent-connector-creator-access { display: grid; justify-items: start; gap: var(--sp-2); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line-soft); }
 .agent-connector-creator-access small { color: var(--text-3); font-size: var(--fs-micro); }
@@ -101,18 +96,48 @@
 .agent-connector-task { padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); }
 .agent-connector-task > h3 { font-size: var(--fs-body); }
 .agent-connector-dialog__footer .primary-button { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding-inline: var(--sp-5); }
-.agent-connector-dialog__body > .agent-connector-status { padding: var(--sp-4); border-left: 2px solid var(--green); background: var(--surface-1); }
+.agent-connector-dialog__body > .agent-connector-status { padding: 0; }
 .agent-connector-room-overview { display: grid; gap: var(--sp-3); min-width: 0; }
 .agent-connector-room-overview .agent-connector-section-title { align-items: flex-start; }
 .agent-connector-room-overview .agent-connector-group { font-size: var(--fs-title); font-weight: 600; line-height: 1.4; }
 .agent-connector-room-overview .agent-connector-section-title > button { display: inline-flex; align-items: center; flex: none; gap: var(--sp-2); }
 .agent-connector-room-metadata { display: flex; flex-wrap: wrap; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-micro); }
 .agent-connector-room-metadata > span { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
-.agent-connector-section-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; gap: var(--sp-4); }
+.agent-connector-section-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: start; gap: var(--sp-4); }
 .agent-connector-section { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--surface-1); }
-.agent-connector-section > h3, .agent-connector-section .agent-connector-fields > h3 { font-size: var(--fs-body); font-weight: 600; }
+.agent-connector-section > h3, .agent-connector-section .agent-connector-fields > h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: var(--fs-body); font-weight: 600; }
+
+.agent-connector-group-selection[data-bound] { gap: var(--sp-3); padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: linear-gradient(120deg, color-mix(in srgb, var(--green) 5%, var(--surface-1)), var(--surface-1)); }
+.agent-connector-group-selection[data-bound] .agent-connector-group { font-size: 20px; letter-spacing: -.025em; }
+.agent-connector-group-selection[data-bound] .agent-connector-application { border-top: 1px solid var(--line-soft); padding-top: var(--sp-2); }
+.agent-connector-room-refresh { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--line-soft); }
+.agent-connector-room-refresh:hover { background: var(--surface-2); }
+.agent-connector-saved { display: flex; align-items: center; gap: var(--sp-2); margin-right: auto; color: var(--text-3); }
+.agent-connector-saved > svg { flex: none; }
+.agent-connector-section-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+.agent-connector-section-nav > button { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: var(--sp-1) var(--sp-2); align-items: center; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: transparent; color: var(--text-2); text-align: left; font: inherit; font-size: var(--fs-meta); cursor: pointer; }
+.agent-connector-section-nav > button > svg { grid-row: span 2; color: var(--text-3); }
+.agent-connector-section-nav > button small { color: var(--text-3); font-size: var(--fs-micro); }
+.agent-connector-section-nav > button:hover { border-color: var(--line); background: var(--surface-1); }
+.agent-connector-section-nav > button:focus-visible, .agent-connector-dialog [data-connection-section]:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; }
+.agent-connector-dialog [data-connection-section] { scroll-margin-block: var(--sp-3); }
+.agent-connector-section-stack { display: grid; align-content: start; gap: var(--sp-4); min-width: 0; }
+.agent-connector-section-grid > .agent-connector-section-stack:only-child { grid-column: 1 / -1; }
+.agent-connector-dialog .connector-service-control { margin: 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: transparent; }
+.agent-connector-dialog .connector-service-control__heading { gap: var(--sp-3); }
+.agent-connector-dialog .connector-service-control__heading h3 { font-size: var(--fs-meta); }
+.agent-connector-dialog .connector-service-control .settings-group-note { font-size: var(--fs-micro); }
+.agent-connector-dialog .connector-service-control__setting { flex-wrap: wrap; }
+.agent-connector-dialog .connector-service-control__refresh { padding-inline: var(--sp-2); }
+.agent-connector-dialog .agent-connector-disclosure > summary > svg { vertical-align: middle; margin-inline-end: var(--sp-2); }
+.agent-connector-dialog .agent-connector-section .agent-connector-check { padding: var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-2); }
+.agent-connector-dialog .agent-connector-section .agent-connector-check input { margin-block: 2px; }
+.agent-connector-dialog [aria-label="Group delivery"] { padding-block: var(--sp-2); }
+
 @media (max-width: 620px) {
   .agent-connector-section-grid { grid-template-columns: minmax(0, 1fr); }
+  .agent-connector-section-nav > button { padding: var(--sp-3) var(--sp-2); }
+  .agent-connector-section-nav > button small { display: none; }
   .agent-connector-room-overview .agent-connector-section-title { flex-wrap: wrap; }
 }
 @media (max-width: 420px) {

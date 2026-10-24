@@ -1,9 +1,12 @@
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { BotConfirmationCode } from './BotConfirmationCode'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { RoomLinkOperation } from '@agentmux/core/connections'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
+
+const JoinIcon = semanticIconComponent('object.link')
 
 /** Joining and Agent access remain separate facts; this view never guesses the local person's account. */
 export function ConnectorRoomJoinLink({ submitted, operation, pending, prominent, canContinue, onCreate, onInspect, onContinue, onRegenerate, initialOpen = false }: {
@@ -34,7 +37,7 @@ export function ConnectorRoomJoinLink({ submitted, operation, pending, prominent
     catch (error) { setFeedback(presentError(error)) }
   }
   const body = <div className="agent-connector-fields">
-    <p className="agent-connector-note">Open a join link in your chat application to request entry. Your own membership is not verified here; the group may require approval.</p>
+    <p className="agent-connector-note">Create a link or code to open this group in your chat app. Group approval may still be required.</p>
     <p className="agent-connector-note">Joining and permission to use this Agent are separate.</p>
     {!submitted ? <button className="small-button" disabled={pending} onClick={onCreate}>Create join link</button>
       : <><p role="status" className="agent-connector-note">{link ? expired ? 'This join link has expired' : 'Join link ready' : operation?.state === 'refused' ? 'Join link could not be created' : canContinue ? 'Join link has not been sent' : 'Join link result not confirmed'}</p>
@@ -49,7 +52,7 @@ export function ConnectorRoomJoinLink({ submitted, operation, pending, prominent
       </>}
     {feedback ? <p role="status" className="agent-connector-note">{feedback}</p> : null}
   </div>
-  return prominent ? <section className="agent-connector-fields" aria-label="Joining this group"><h3>Join this group</h3>{body}</section>
+  return prominent ? <section className="agent-connector-fields" aria-label="Joining this group"><h3><JoinIcon size={16} />Join this group</h3>{body}</section>
     : <details ref={disclosure} className="agent-connector-disclosure" aria-label="Joining this group"><summary>Join this group</summary>{body}</details>
 }
 
