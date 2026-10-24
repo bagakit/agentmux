@@ -141,8 +141,6 @@
 
 
 /* Creation has one clear leading action. */
-.toolkit-workbench__toolbar > button, .toolkit-workbench__empty > .toolkit-workbench__create { min-height: 32px; padding: var(--sp-3) var(--sp-4); }
-.toolkit-workbench .toolkit-workbench__create:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 @container toolkit-settings (width > 660px) {
   .toolkit-workbench[data-creation-empty='true'] .toolkit-workbench__toolbar > .toolkit-workbench__create { color: var(--text-2); background: transparent; box-shadow: none; font-weight: 560; }
   .toolkit-workbench[data-creation-empty='true'] .toolkit-workbench__toolbar > .toolkit-workbench__create:hover:not(:disabled) { color: var(--text); background: var(--wash-3); }
