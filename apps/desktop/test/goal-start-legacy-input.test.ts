@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { AgentMuxClient, AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
 import { openDemandStore } from '@agentmux/demand'
-import { GoalStartResponsibilityOwner, type GoalStartRuntimePort } from '../src/main/goal-start-responsibility'
+import { GoalStartResponsibilityOwner, type GoalStartRuntimePort } from '@agentmux/host/goal-start-responsibility'
 
 it('keeps the actual legacy Session-owner admission without a source key unknown and preserves its original receipt, data and healthy Run', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'goal-start-legacy-'))

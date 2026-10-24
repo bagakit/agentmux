@@ -7,7 +7,7 @@ import { observeAgent, type AgentMuxAgentRuntimeStatus, type AgentMuxClientEvent
 import { demandExecutionReferences, demandResponsibilityScope, openDemandStore, type Demand, type DemandProgress } from '@agentmux/demand'
 import { GOAL_IDLE_GRACE_MS, goalResponsibilityBasis, observeGoalExecution } from '@agentmux/core/goal-responsibility'
 import type { GoalDelegationResult } from '@agentmux/core/goal-delegation'
-import { GoalResponsibilityOwner } from '../src/main/goal-responsibility-owner'
+import { GoalResponsibilityOwner } from '@agentmux/host/goal-responsibility-owner'
 
 const cleanup: Array<() => void | Promise<unknown>> = []
 afterEach(async () => { vi.useRealTimers(); for (const release of cleanup.splice(0).reverse()) await release(); vi.restoreAllMocks() })

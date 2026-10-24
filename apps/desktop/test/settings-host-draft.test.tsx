@@ -13,7 +13,7 @@ import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
-import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery'
+import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
 import { CONFIG_CHANGED_CHANNEL, type AppConfig } from '../src/shared/contracts'
 import type { ScratchTopics } from '../src/main/scratch-topics'
 import type { WorkspaceFiles } from '../src/main/workspace-files'

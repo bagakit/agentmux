@@ -19,7 +19,7 @@ import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-
 import { nextCalendarOccurrence } from '@agentmux/core/schedule-calendar'
 import { privateTracker } from './helpers/continuous-progress-tracker'
 import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment'
-import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery.js'
+import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
 
 vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("private/unused-electron-storage") } }))
 vi.mock('@agentmux/core', async originalModule => process.env.AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT

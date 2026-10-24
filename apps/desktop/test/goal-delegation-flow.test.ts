@@ -9,7 +9,7 @@ import { AgentMuxClient, AgentMuxControlServer, AgentMuxError, AgentMuxFileAgent
   hashAgentCapability, issueAgentCapability, type AgentMuxRun } from '@agentmux/core'
 import { openDemandStore } from '@agentmux/demand'
 import type { DemandDelegationIntent, DemandDelegationReportInput } from '@agentmux/demand/delegations'
-import { GoalDelegationOwner, type GoalDelegationCorePort } from '../src/main/goal-delegation-owner'
+import { GoalDelegationOwner, type GoalDelegationCorePort } from '@agentmux/host/goal-delegation-owner'
 import { goalEvidenceSource } from './helpers/goal-evidence-source'
 
 const execute = promisify(execFile), cleanup: Array<() => Promise<unknown>> = []

@@ -2,7 +2,7 @@ import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { expect, it, vi } from 'vitest'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY, observeAgent, AgentMuxError, type ContinuousProgressLoop } from '@agentmux/core'
-import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery'
+import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
 const signal = new AbortController().signal
 const loop: ContinuousProgressLoop = { loopId: 'l', hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: _hygiene_fixturePath("w"), intervalMs: 10, prompt: 'next',
   nextCheckAt: _tailFixtureEpoch(0, 0, 0), status: 'active', pendingCompletion: { prompt: 'next', agentMuxNote: AGENTMUX_AGENT_MESSAGING_ENTRY,

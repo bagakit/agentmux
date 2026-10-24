@@ -7,8 +7,8 @@ import { observeAgent, type AgentMuxClientEvent, type AgentMuxRun, type Continuo
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import { openDemandStore } from '@agentmux/demand'
 import type { DemandDelegationAttention, DemandDelegationIntent } from '@agentmux/demand/delegations'
-import { GoalDelegationAttentionOwner } from '../src/main/goal-delegation-attention'
-import type { GoalDelegationOwner } from '../src/main/goal-delegation-owner'
+import { GoalDelegationAttentionOwner } from '@agentmux/host/goal-delegation-attention'
+import type { GoalDelegationOwner } from '@agentmux/host/goal-delegation-owner'
 
 const cleanup: Array<() => void | Promise<unknown>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); vi.restoreAllMocks() })
