@@ -25,6 +25,8 @@ const otherRun = '71a0b623-8d58-4a82-90c2-7b616330b562'
 const wireFacts: RunStorageObservation = {
   run_id: originalRun, latest_output_bytes: 140, memory_first_available_byte: 87,
   persistence: { first_failure: 'maintenance COMMIT requires recovery: database or disk is full',
+    storage_failure: { stage: 'maintenance', sqlite_primary_code: 13, sqlite_extended_code: 13,
+      system_errno: 28, transaction_outcome: 'unknown' },
     actor_stopped: false, queued_append_commands: 3, offered_output_bytes: 120, committed_output_bytes: 110 },
   policy: { run_output_bytes: 4194304, hot_output_bytes: 1073741824, durable_run_output_bytes: 4194304,
     durable_replay_bytes: 268435456, database_bytes: 402653184, wal_checkpoint_bytes: 8388608,
@@ -33,6 +35,8 @@ const wireFacts: RunStorageObservation = {
 const projected = {
   memory: { firstAvailableByte: 87, latestOutputByte: 140 },
   persistence: { firstFailure: wireFacts.persistence!.first_failure, actorStopped: false,
+    storageFailure: { stage: 'maintenance', sqlitePrimaryCode: 13, sqliteExtendedCode: 13,
+      systemErrno: 28, transactionOutcome: 'unknown' },
     queuedAppendCommands: 3, offeredByte: 120, confirmedByte: 110 },
   policy: { memoryPerRunBytes: 4194304, memorySharedBytes: 1073741824, replayPerRunBytes: 4194304,
     replaySharedBytes: 268435456, databaseBytes: 402653184, walCheckpointBytes: 8388608,
@@ -234,7 +238,7 @@ describe('exact storage owner through public Core, Hosted, RPC and compiled CLI'
   it('uses the original Hosted public method over actual Unix RPC without acquiring attachments or mutating Sessions', async () => {
     const f = await owner()
     const identity: AgentMuxRuntimeOwnerIdentity = { runtimeId: 'private-storage-host', ownerInstanceId: 'private-storage-host-epoch',
-      protocolVersion: 1, processId: process.pid, ctxmux: f.client.runtimeIdentity(), availability: 'connected' }
+      protocolVersion: 2, processId: process.pid, ctxmux: f.client.runtimeIdentity(), availability: 'connected' }
     const hosted = new AgentMuxHostedRuntimeService(f.client, join(f.root, 'sessions.json'), () => identity)
     closes.push(() => hosted.dispose())
     const endpoint = await publicEndpoint(f.coreClients, () => hosted)

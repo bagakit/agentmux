@@ -63,9 +63,16 @@ const variants = [
     to: "current.kind !== 'create' || current.operationId !== operationId",
     target: 'rejects a changed body', expected: 'promise resolved' },
   { name: 'lose-confirmed-not-applied', path: 'packages/core/src/client.ts',
-    from: "if (!(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {\n          throw new AgentMuxError(`Agent start is unconfirmed.",
-    to: "if (true) {\n          throw new AgentMuxError(`Agent start is unconfirmed.",
-    target: 'releases only unused preparation', expected: 'not_applied' }
+    from: "if (!(error instanceof AgentMuxError && error.creationFailure?.operationId === lifecycleOperationId &&\n          error.creationFailure.disposition === 'not_applied')) {",
+    to: "if (true) {",
+    target: 'releases only unused preparation', expected: 'not_applied' },
+  { name: 'trust-foreign-creation-receipt', path: 'packages/core/src/client.ts',
+    from: 'error.creationFailure?.operationId === lifecycleOperationId &&',
+    to: 'error.creationFailure !== undefined &&',
+    target: 'retains original creation when the negative receipt belongs to another-operation', expected: 'AGENT_CREATION_UNCONFIRMED' },
+  { name: 'lose-confirmed-input-on-projection-failure', path: 'packages/core/src/client.ts',
+    from: 'const inputConfirmed = observedInputConfirmed ||', to: 'const inputConfirmed =',
+    target: 'returns the actual Input confirmation and leaves durable unknown', expected: 'promptConfirmed' }
 ]
 const receipt = { schema: 'agentmux.durable-local-creation-proof.v1', passed: false, sourceStable: false, results: [],
   scope: { actual: 'Private Native Runtime + live child processes + FileStore/Core creation/public SDK; existing delivery and fatal regression owners',
@@ -114,6 +121,7 @@ try {
     if (variant.target) args.push('-t', variant.target)
     const result = await new Promise((yes, no) => {
       const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, AGENTMUX_TEST_DURABLE_CREATE_ENTRY: pathToFileURL(file).href,
+        AGENTMUX_TEST_CREATION_CLIENT: pathToFileURL(file).href, AGENTMUX_POST_START_ENTRY: pathToFileURL(file).href,
         ...(variant.from ? { AGENTMUX_TEST_DURABLE_CREATE_MUTANT: variant.name } : {}) }, stdio: ['ignore', 'pipe', 'pipe'] })
       let text = ''; child.stdout.on('data', d => { text += d }); child.stderr.on('data', d => { text += d })
       child.once('error', no); child.once('close', (code, signal) => yes({ code, signal, text }))
@@ -127,7 +135,7 @@ try {
       failed: tests.numFailedTests, total: assertions.filter(test => test.status !== 'pending').length, semanticRed,
       bundleSha256: sha(await readFile(file)), failures: failed.map(test => ({ name: test.fullName, messages: test.failureMessages })) })
     await save()
-    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 32 && tests.success, 'Actual nonempty creation baseline failed: ' + report)
+    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 41 && tests.success, 'Actual nonempty creation baseline failed: ' + report)
     else assert.ok(semanticRed, 'Loaded mutation did not produce its business failure: ' + variant.name)
   }
   for (const path of inputs.keys()) await bind(path)

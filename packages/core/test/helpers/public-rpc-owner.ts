@@ -25,7 +25,8 @@ export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose
   const root = await mkdtemp(fixturePath("tmp/amx-rpc-owner-")), store = new Store(join(root, 'sessions.json'))
   const facts = sessionFacts?.(root) ?? {}
   const capability = issueAgentCapability()
-  for (const [key] of Object.entries(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
+  // Keep harness entry selection so a private compiled CLI is actually consumed.
+  for (const [key] of Object.entries(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   for (const agentSessionId of ids) {

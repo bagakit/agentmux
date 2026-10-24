@@ -168,8 +168,23 @@ it('releases only unused preparation when preparation or Start is authoritativel
   await expect(f.create()).rejects.toThrow('Controlled preparation unavailable')
   expect(f.start).not.toHaveBeenCalled(); expect(await f.store.loadCreationCorrelation(f.sid)).toBeNull()
   prepare.mockRestore()
-  f.start.mockRejectedValueOnce(new core.AgentMuxError('Controlled Start not applied', 'CONTROL_UNAVAILABLE', undefined, { disposition: 'not_applied', confirmedInputBytes: null }))
-  await expect(f.create()).rejects.toMatchObject({ controlFailure: { disposition: 'not_applied' } })
+  f.start.mockImplementationOnce(async (input: { operationKey: string }) => {
+    throw new core.AgentMuxError('Controlled Start not applied', 'CONTROL_UNAVAILABLE', undefined, undefined, undefined,
+      { operationId: input.operationKey, disposition: 'not_applied' })
+  })
+  await expect(f.create()).rejects.toMatchObject({ creationFailure: { disposition: 'not_applied' } })
   expect(await f.store.loadCreationCorrelation(f.sid)).toBeNull(); expect(await f.store.readMetadata(f.sid)).toBeNull()
   expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
+})
+
+it.each(['another-operation', 'input-receipt'] as const)('retains original creation when the negative receipt belongs to %s', async mismatch => {
+  const f = await fixture()
+  f.start.mockImplementationOnce(async () => {
+    throw new core.AgentMuxError('Unrelated negative receipt', 'CTXMUX_io', undefined,
+      mismatch === 'input-receipt' ? { disposition: 'not_applied', confirmedInputBytes: null } : undefined,
+      undefined, mismatch === 'another-operation' ? { operationId: 'another-operation', disposition: 'not_applied' } : undefined)
+  })
+  await expect(f.create()).rejects.toMatchObject({ code: 'AGENT_CREATION_UNCONFIRMED', creationFailure: { disposition: 'unknown' } })
+  expect(await f.store.loadCreationCorrelation(f.sid)).not.toBeNull()
+  expect(f.start).toHaveBeenCalledOnce(); expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
 })
