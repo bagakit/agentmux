@@ -387,7 +387,7 @@ it('Launcher recommends active objects while its explicitly selected archived Mo
   await act(async () => content!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
   let release!: () => void
   app.ensureMote.mockImplementationOnce(() => new Promise(resolve => { release = () => resolve(catalog[1]!) }))
-  const request = button('Create with Mote', launcher!), drafts = useAppStore.getState().agentComposerDrafts
+  const request = button('Discuss with Mote', launcher!), drafts = useAppStore.getState().agentComposerDrafts
   await moteClick(request)
   expect(button('Submitting…', launcher!).disabled).toBe(true)
   await act(async () => { release() }); await settleMoteApp()
