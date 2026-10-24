@@ -1,7 +1,7 @@
 .mote-identity-motion { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; --mote-ambient-delay: 0ms; --mote-gaze-x: 0px; --mote-gaze-y: 0px; --mote-head-turn: 0deg; --mote-brow-lift: 0px; --mote-mouth-shift: 0px; }
 /* Keep the original SVG slot and visible overflow when its motion carrier
    participates in flex/grid layout. Articulation lives inside that slot. */
-.mote-identity-motion:has(svg.mote-face) { display: inline-block; }
+.mote-identity-motion:has(svg:is(.mote-face, .mote-silhouette-art)) { display: inline-block; }
 .mote-identity-motion > .space-object-icon { display: contents; }
 .mote-face__eyes, .mote-face__gaze, .mote-face__head, .mote-face__mouth, .mote-face__brows { transform-box: fill-box; transform-origin: center; }
 .mote-identity-motion[data-mote-expression="thinking"] .mote-face__brows,
