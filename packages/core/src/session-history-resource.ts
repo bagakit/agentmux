@@ -5,8 +5,8 @@ import type { AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceRea
 
 export const SESSION_HISTORY_IMAGE_MAX_BYTES = 16 * 1024 * 1024
 // Bounded raster decode memory, matching the existing Browser screenshot budget.
-const MAX_PIXELS = 32 * 1024 * 1024
-const MAX_DIMENSION = 16_384
+export const SESSION_HISTORY_IMAGE_MAX_PIXELS = 32 * 1024 * 1024
+export const SESSION_HISTORY_IMAGE_MAX_DIMENSION = 16_384
 const MAX_REFERENCE_CHARS = Math.ceil(SESSION_HISTORY_IMAGE_MAX_BYTES / 3) * 4 + 128
 export type AgentSessionHistoryResourceParams = AgentSessionHistoryResourceRequest & { hostId: string; agentSessionId: string }
 export type AgentSessionHistoryResourceResult = AgentSessionHistoryResourceReadResult & { hostId: string }
@@ -96,7 +96,7 @@ export function imageBytes(bytes: Uint8Array, maxBytes: number, declaredMime?: s
   if (!bytes.length || bytes.length > maxBytes) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_TOO_LARGE', 'The recorded image is empty or exceeds this read’s byte budget. Its reference is kept.')
   const image = imageHeader(bytes)
   if (!image || declaredMime !== undefined && declaredMime !== image.mimeType) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'The recorded bytes are not a supported PNG, JPEG, GIF or WebP image. Its reference is kept.')
-  if (image.width < 1 || image.height < 1 || image.width > MAX_DIMENSION || image.height > MAX_DIMENSION || image.width * image.height > MAX_PIXELS)
+  if (image.width < 1 || image.height < 1 || image.width > SESSION_HISTORY_IMAGE_MAX_DIMENSION || image.height > SESSION_HISTORY_IMAGE_MAX_DIMENSION || image.width * image.height > SESSION_HISTORY_IMAGE_MAX_PIXELS)
     return unavailable('AGENT_SESSION_HISTORY_RESOURCE_DECODE_BUDGET', 'The recorded image exceeds the 16384 pixel side or 32 megapixel decode budget. Its reference is kept.')
   return { status: 'read', mimeType: image.mimeType, dataBase64: encodeBase64(bytes), byteLength: bytes.length, width: image.width, height: image.height }
 }
