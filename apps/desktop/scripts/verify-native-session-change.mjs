@@ -70,7 +70,8 @@ async function controls(){
  const mutations=[]
  for(const mutation of [
   {name:'wrong-candidate',file,before:'candidateNativeHandle: structuredClone(candidate)',after:'candidateNativeHandle: structuredClone(old)',test:'keeps the chosen Run member'},
-  {name:'removed-confirm',file,before:'event.preventDefault(); void confirm()',after:'event.preventDefault(); void Promise.resolve()',test:'offers each verified Run member'}
+  {name:'removed-confirm',file,before:'event.preventDefault(); void confirm()',after:'event.preventDefault(); void Promise.resolve()',test:'offers each verified Run member'},
+  {name:'removed-menu-focus',file,before:'?.querySelector<HTMLElement>(\'[data-native-source-check]\')?.focus()',after:'?.querySelector<HTMLElement>(\'[data-native-source-check]\')',test:'keeps keyboard focus'}
  ])mutations.push(await execute(mutation.name,mutation))
  assert.deepEqual(await hashes([...owned,...testFiles]),sources,'Controls source did not change during the run')
  const result={passed:true,sources,positive,mutations}
