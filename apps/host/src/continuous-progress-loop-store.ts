@@ -10,7 +10,7 @@ import { isAgentSchedule, parseGoalContinuationLoop, parseScheduleRecord } from 
 
 const FILE = 'continuous-progress-loops.json'
 
-/** Durable main-process storage for loop configuration; renderer never owns scheduler truth. */
+/** Durable Host storage for loop configuration; renderer never owns scheduler truth. */
 export class ContinuousProgressLoopStore {
   private writes: Promise<void> = Promise.resolve()
   constructor(private readonly path: string) {}

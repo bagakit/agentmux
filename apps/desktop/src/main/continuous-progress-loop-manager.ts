@@ -2,10 +2,10 @@ import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, type ContinuousProgressLoop, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
 import { parseScheduleRpcParams, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { nextCalendarOccurrence, latestCalendarOccurrence } from '@agentmux/core/schedule-calendar'
-import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord } from './continuous-progress-task-source.js'
-import type { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
+import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord } from '@agentmux/host/continuous-progress-task-source'
+import type { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE } from '@agentmux/core/schedule'
-import { decideCheckIn, type CheckInObservation } from './agent-schedule-check-in.js'
+import { decideCheckIn, type CheckInObservation } from '@agentmux/host/agent-schedule-check-in'
 
 export type LoopTickOutcome = 'sent' | 'skipped' | 'unknown'
 export type LoopTickHandler = (loop: ContinuousProgressLoop, operationId: string, isCurrent: () => boolean, signal: AbortSignal) => Promise<LoopTickOutcome>

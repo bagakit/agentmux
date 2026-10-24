@@ -18,12 +18,14 @@
     "@agentmux/relay": "workspace:*",
     "yaml": "2.9.0",
     "fs-native-extensions": "1.5.1",
-    "@agentmux/client-ui": "workspace:*"
+    "@agentmux/client-ui": "workspace:*",
+    "luxon": "3.7.2"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "@types/luxon": "3.7.6"
   },
   "exports": {
     "./object-avatars": {
@@ -189,6 +191,26 @@
     "./goals-preferences": {
       "types": "./dist/goals-preferences.d.ts",
       "import": "./dist/goals-preferences.js"
+    },
+    "./agent-schedule-check-in": {
+      "types": "./dist/agent-schedule-check-in.d.ts",
+      "import": "./dist/agent-schedule-check-in.js"
+    },
+    "./continuous-progress-loop-store": {
+      "types": "./dist/continuous-progress-loop-store.d.ts",
+      "import": "./dist/continuous-progress-loop-store.js"
+    },
+    "./continuous-progress-task-source": {
+      "types": "./dist/continuous-progress-task-source.d.ts",
+      "import": "./dist/continuous-progress-task-source.js"
+    },
+    "./goal-delegation-materials": {
+      "types": "./dist/goal-delegation-materials.d.ts",
+      "import": "./dist/goal-delegation-materials.js"
+    },
+    "./goal-role-input": {
+      "types": "./dist/goal-role-input.d.ts",
+      "import": "./dist/goal-role-input.js"
     }
   }
 }

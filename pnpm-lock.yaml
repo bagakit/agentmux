@@ -289,10 +289,16 @@ importers:
       fs-native-extensions:
         specifier: 1.5.1
         version: 1.5.1
+      luxon:
+        specifier: 3.7.2
+        version: 3.7.2
       yaml:
         specifier: 2.9.0
         version: 2.9.0
     devDependencies:
+      '@types/luxon':
+        specifier: 3.7.6
+        version: 3.7.6
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
