@@ -36,6 +36,7 @@ import { useMobilePromptController } from './use-mobile-prompt-controller'
 import { useMobileInteractionController } from './use-mobile-interaction-controller'
 import './conversation.css'
 import { DELIVERY_DISMISSAL_STORAGE, MobileNotice, MobileNoticeScope, useMobileNotices } from '../notices/MobileNotice'
+import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 
 export type { MobileConnection } from './use-hosted-conversation'
 export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
@@ -100,8 +101,15 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const current = useRef({ client, agentSessionId })
   current.current = { client, agentSessionId }
   const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue,
-    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused } = useMobilePromptController({ local, client, agentSessionId,
+    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation } = useMobilePromptController({ local, client, agentSessionId,
       session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
+  useMobileWebUpdateSafetyOwner(() => {
+    if (local.saveIssue || local.recordChanged || local.hasUnconfirmedSave) return '草稿或原操作尚未确认保存在设备；请先恢复设备存储并保存，再更新网页。'
+    if (hasAnyPreparation() || [...local.attempts.values(), ...local.responses.values(), ...local.questions.values()].some(item => item.phase === 'sending')) {
+      return '原消息或答复仍在发送；请等待回执，再更新网页。'
+    }
+    return null
+  })
   const attachmentControls = useRef<MobileAttachmentControls>(null)
   const [hasPendingAttachments, setHasPendingAttachments] = useState(false)
   const insertion = useRef<ComposerInsertionHandle>(null)

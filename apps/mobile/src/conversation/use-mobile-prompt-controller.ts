@@ -471,7 +471,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
   return { draftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput,
     confirmedAttachmentPrompt,
     sendBodyOnly: () => submit(true, undefined, draftKey, undefined, true),
-    preparing: preparingKeys.current.has(draftKey), preparationIssue: preparationIssue?.client === client && preparationIssue.sessionId === agentSessionId ? preparationIssue.message : null,
+    preparing: preparingKeys.current.has(draftKey), hasAnyPreparation: () => preparingKeys.current.size > 0, preparationIssue: preparationIssue && preparationIssue.client === client && preparationIssue.sessionId === agentSessionId ? preparationIssue.message : null,
     historyLocalEntries, retainedAttempts, sessionAttempts: allAttempts,
     promptWasRefused: (original: PromptAttempt) => originalPromptRefused(session, agentSessionId, original, client?.runtimeOwnerIdentity?.()?.runtimeId) }
 }

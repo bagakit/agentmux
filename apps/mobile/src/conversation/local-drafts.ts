@@ -68,12 +68,13 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
   const drafts = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new SessionIntents<ResponseAttempt>(), questions = new SessionIntents<MobileQuestionReplyAttempt>(), questionDrafts = new Map<string, AgentSessionHistoryQuestionAnswer[]>()
   const owner = getDeviceWorkface(storage)
   const state = { drafts, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, recordChanged: false,
-    get saveIssue() { return owner.snapshot().issue } }
+    get saveIssue() { return owner.snapshot().issue },
+    get hasUnconfirmedSave() { return saveRevision !== durableRevision } }
   let baseline: DraftRecord = { version: 1, drafts: [], attempts: [], responses: [] }
   let durableBaseline = baseline
   let originalRecord: DeviceWorkface = owner.snapshot().record
   let recordId: string | null = null
-  let saveRevision = 0
+  let saveRevision = 0, durableRevision = 0
   try {
     const snapshot = owner.snapshot()
     if (snapshot.issue) {
@@ -175,7 +176,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
         }
       }
       durableBaseline = saved
-      if (revision === saveRevision) baseline = saved
+      if (revision === saveRevision) { baseline = saved; durableRevision = revision }
       state.canSave = true
       state.recordChanged = false
       state.notice = state.conflicts.length ? '另一页面已更新同一条记录；原请求和两份正文均保留。请核对保全内容，不会自动重投。' : null

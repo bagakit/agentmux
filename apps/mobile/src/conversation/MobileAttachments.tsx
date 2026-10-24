@@ -10,6 +10,7 @@ import { draftIncludesUpload, fileUploadIntentKey, fileUploadScopeMatches, uploa
 import { errorMessage } from './delivery'
 import { appendNamedFileReference } from '@agentmux/client-ui/composer-file-reference'
 import type { MobilePromptPreparation } from './use-mobile-prompt-controller'
+import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 
 export type MobileAttachmentControls = {
   choose(): Promise<void>
@@ -38,6 +39,12 @@ export function MobileAttachments({ client, session, connected, promptOperationI
   const latestUploads = useRef(uploads)
   const reading = useRef(0)
   const busy = useRef(new Map<string, { client: AgentMuxHostedClient | null; recordId: string | null; intent: string; claimedForSend: boolean; result: Promise<MobileFileUpload | null> }>())
+  useMobileWebUpdateSafetyOwner(() => {
+    if (pickerOpen.current || reading.current > 0) return '附件仍在选择或读取；请等待完成，再更新网页。'
+    if (busy.current.size) return '原附件操作仍在进行；请等待回执，再更新网页。'
+    if (bytes.current.size) return '所选附件仅保存在当前页面；请先上传并加入消息，或移除附件，再更新网页。'
+    return null
+  })
   const [, updateActivity] = useState(0)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
