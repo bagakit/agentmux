@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { withInteractionOperation } from './fixtures/interaction-client.js'
 import { fixtureEpoch as _liveTailFixtureEpoch } from "./helpers/fixture-values.js"
 import { fixturePath } from './helpers/fixture-values.js'
@@ -517,6 +520,73 @@ describe('Claude terminal takeover completion', () => {
       expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toEqual(original)
       expect(h.writes).toEqual([])
     } finally { await h.client.dispose() }
+  })
+
+  it.each([true, false])('settles only the matching request admitted before a completion CAS retry (same call: %s)', async sameCall => {
+    const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-interaction-cas-'))
+    vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(privateRoot, 'messages.ndjson'))
+    vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(privateRoot, 'state'))
+    vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(privateRoot, 'runtime'))
+    try {
+      const reader = await connectedClient(undefined, 'claude', nativeSessionId)
+      const writer = await connectedClient(undefined, 'claude', nativeSessionId, reader.store)
+      const completionReceipt = 'completion-before-concurrent-request'
+      const compare = reader.store.compareAndSwapMetadata.bind(reader.store)
+      const reload = vi.spyOn(reader.state.registry, 'load')
+      let inserted = false, attempts = 0, stale = 0
+      const exchange = vi.spyOn(reader.store, 'compareAndSwapMetadata').mockImplementation(async (previous, next, signal) => {
+        if (next?.hookReceipt?.id === completionReceipt) {
+          attempts++
+          if (!inserted) {
+            inserted = true
+            await questionHook(writer.client, 'concurrent-question', {
+              tool_use_id: sameCall ? 'native-question-call' : 'another-native-call'
+            })
+          }
+        }
+        try { return await compare(previous, next, signal) }
+        catch (error) {
+          if (error instanceof AgentMuxError && error.code === 'STALE_AGENT_SESSION') stale++
+          throw error
+        }
+      })
+      const provider = reader.client.providers.get('claude'), plan = provider.planPromptInput
+      provider.planPromptInput = prompt => ({ kind: 'single-phase', data: prompt + '\r' })
+      try {
+        await questionHook(reader.client, completionReceipt, { hook_event_name: 'PostToolUse' })
+        expect(inserted).toBe(true)
+        // Activity publication may commit metadata too; the completion must at least retry its real CAS.
+        expect(attempts).toBeGreaterThanOrEqual(2)
+        expect(stale).toBe(1)
+        expect(reload).toHaveBeenCalledTimes(1)
+        const stored = (await loadAgentSessions(reader.store))[0]!
+        expect(stored.nativeInteractionEnds?.calls[JSON.stringify(['question', 'native-question-call'])])
+          .toMatchObject({ hookReceiptId: completionReceipt })
+        const submit = () => reader.client.submitAgentPrompt({ agentSessionId: AGENT_SESSION_ID,
+          operationId: 'explicit-prompt-after-cas', expectedRun: { runId: RUN_ID }, afterSubmissionId: null,
+          prompt: 'Continue', execution: 'default', allowUncertainTurn: true })
+        if (sameCall) {
+          expect(stored.pendingInteraction).toBeUndefined()
+          await submit()
+          expect(reader.writes).toEqual(['Continue\r'])
+        } else {
+          expect(stored.pendingInteraction?.request).toMatchObject({
+            id: 'concurrent-question', nativeToolCallId: 'another-native-call'
+          })
+          await expect(submit()).rejects.toMatchObject({ code: 'AGENT_INTERACTION_PENDING' })
+          expect(reader.writes).toEqual([])
+        }
+        expect(writer.writes).toEqual([])
+        expect(reader.client.agentSession(AGENT_SESSION_ID)).toMatchObject({ agentSessionId: AGENT_SESSION_ID, run: { runId: RUN_ID } })
+      } finally {
+        provider.planPromptInput = plan
+        exchange.mockRestore(); reload.mockRestore()
+        await writer.client.dispose(); await reader.client.dispose()
+      }
+    } finally {
+      vi.unstubAllEnvs()
+      await rm(privateRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+    }
   })
 
   it('keeps two reports without a native call identity unconfirmed instead of merging by question text', async () => {
