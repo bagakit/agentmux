@@ -6,6 +6,7 @@ import { DEFAULT_AGENT_SCHEDULE_CHECK_IN } from '@agentmux/core/schedule'
 import { ContinuousProgressControl } from '../../../src/renderer/src/components/ContinuousProgressControl'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import '../../../src/renderer/src/styles/tokens.css'
@@ -14,6 +15,7 @@ import '../../../src/renderer/src/styles/agent.css'
 import './ui-scene.css'
 
 const target = { hostId: 'local', agentSessionId: 'private-calendar-agent', providerId: 'codex', workspacePath: _hygiene_fixturePath("private/design-project") }
+mountThemeRuntime(window, { appAppearance: 'dark' })
 const session = { id: 'display-region', kind: 'agent' as const, ...target, label: 'Design partner', executorId: 'codex', promptSubmissionPredecessor: null, agentSessionUpdatedAt: 1, createdAt: 1, updatedAt: 1, latestOutputBytes: 0, processState: 'running' as const, status: { state: 'idle' as const, source: 'native-protocol' as const, observedAt: 1 }, capabilities: { terminal: true as const, timeline: 'complete-events' as const, permission: 'observe' as const, providerResume: true, replyCorrelation: 'none' as const }, control: { kind: 'agent' as const, hostId: target.hostId, agentSessionId: target.agentSessionId, run: { runId: 'private-run' } } }
 let schedule: ContinuousProgressLoop = { ...target, loopId: 'saved-calendar', intervalMs: 60000, prompt: '明早一起看一下设计方案：先问我今天最需要确认的一件事。\n保留本会话中的决定，不要替我承诺未确认的进度。', calendar: { kind: 'daily', timezone: 'Asia/Shanghai', time: _hygiene_fixtureClock(9, 0), policies: { gap: 'skip', fold: 'earlier', monthEnd: 'clamp', overdue: 'latest' } }, status: 'active', revision: 1, creationOperationId: 'private-original', futureIntentId: 'saved-calendar-1', nextCheckAt: Date.parse(_hygiene_fixtureIso(24195600000, "minute")) }
 if (new URLSearchParams(location.search).has('checkin')) schedule = { ...schedule, checkIn: structuredClone(DEFAULT_AGENT_SCHEDULE_CHECK_IN), checkInState: { lastClaimAt: Date.parse(_hygiene_fixtureIso(24109200000, "minute")), budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1, unanswered: { humanId: 'confirmed-human', humanCreatedAt: Date.parse(_hygiene_fixtureIso(24022800000, "minute")), claimAt: Date.parse(_hygiene_fixtureIso(24109200000, "minute")) } }, lastOutcome: 'sent', lastDecision: 'Host accepted the original future message; a new Agent turn is not yet confirmed.' }
@@ -41,8 +43,8 @@ function Scene() {
   return <DesktopClientUiProvider><main className="schedule-scene"><header>Design partner <span>Progress</span></header><div className="schedule-scene__body"><ContinuousProgressControl session={session} /></div><footer><label>Manual message<ComposerTextarea aria-label="Manual message" value={draft} onValueChange={setDraft} /></label></footer></main></DesktopClientUiProvider>
 }
 createRoot(document.getElementById('root')!).render(<Scene />)
-Object.assign(window, { scheduleScene: { operations, outcome: (outcome: 'unknown' | 'skipped') => {
+Object.assign(window, { scheduleScene: { operations, theme: (appearance: 'light' | 'dark') => updateThemeSelection({ appAppearance: appearance }), outcome: (outcome: 'unknown' | 'skipped') => {
   if (outcome === 'unknown') schedule = { ...schedule, lastOutcome: outcome, status: 'paused', checkInState: { lastClaimAt: Date.parse(_hygiene_fixtureIso(24109200000, "minute")), budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1, unanswered: { humanId: 'confirmed-human', humanCreatedAt: Date.parse(_hygiene_fixtureIso(24022800000, "minute")), claimAt: Date.parse(_hygiene_fixtureIso(24109200000, "minute")) } }, lastDecision: 'The original follow-up operation is unconfirmed. Inspect before any retry.' }
   else { const { unanswered: _, ...state } = schedule.checkInState!; schedule = { ...schedule, lastOutcome: outcome, status: 'active', checkInState: state, lastDecision: 'This follow-up was not delivered. The original due occurrence remains available.' } }
-  listeners.forEach(listener => listener(schedule))
+  listeners.forEach(listener => listener(schedule)); document.dispatchEvent(new Event('visibilitychange'))
 } } })

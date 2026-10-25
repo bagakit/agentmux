@@ -19,6 +19,14 @@ The bounded `--empty-mutation` mode first changes only the imported owner styles
 
 The script prints a private receipt directory. `compilation.json` records the actual imported source and style hashes; `render.json` records runtime identity, nonempty operations and screenshot hashes. `review.md` links the complete images for an independent visual review. Capture and geometry success do not certify aesthetic quality. These controlled Renderer scenes do not certify a live Host, native CLI delivery, installed application or durable Session recovery, and never operate user Sessions.
 
+The bounded Automation workface can be captured independently:
+
+```sh
+node apps/desktop/scripts/verify-message-tool-workspace.mjs --automation
+```
+
+It opens the original Mailbox and Automation entry in the same production workbench with a controlled paused continuous-progress loop and a minute-based schedule. At light 640, dark 320 and a short dark 320 Region it captures the unified list, hit-tests the original paused-loop control without activating it, fills a minute-form draft and hit-tests its Save without submitting. Back, reopening and Escape retain the same form nodes, unsent automation and manual drafts, pending input order, terminal instance and geometry. The original schedule and progress API ports are private fixture data; no live user Session or automatic operation is touched. The resulting twelve complete screenshots require independent visual review. Static screenshots do not prove animation behavior, a live Host, native input or delivery.
+
 The explicit notification slice is exercised with:
 
 ```sh

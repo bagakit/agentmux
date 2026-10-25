@@ -178,8 +178,18 @@ afterEach(async () => {
 })
 const target = () => ({ hostId: session.hostId, agentSessionId: session.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath })
 async function create() { return await api.continuousProgress.create(target(), 60_000, 'continue the assigned work') }
+async function showProgressForm() {
+  await act(async () => {
+    const panel = container.querySelector<HTMLDetailsElement>('.automation-create')!
+    panel.open = true; panel.dispatchEvent(new Event('toggle'))
+    const type = container.querySelector<HTMLSelectElement>('[aria-label="Automation type"]')!
+    type.value = 'progress'; type.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
 async function click(label: string) {
   const button = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`); expect(button).not.toBeNull()
+  const details = button!.closest('details')
+  if (details && !details.open) await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
   await vi.waitFor(() => expect(button!.disabled).toBe(false))
   const action = vi.spyOn(api.continuousProgress, 'action'), before = action.mock.calls.length
   await act(async () => {
@@ -191,7 +201,8 @@ async function click(label: string) {
 it('mounts the existing Composer leaf and real create/pause/resume/check/stop routes, with no second target work', async () => {
   const mailbox = container.querySelector<HTMLElement>('.composer-mailbox')!; expect(mailbox).not.toBeNull()
   const page = mailbox.querySelector<HTMLElement>('[role="region"][aria-label="Automation settings"]')!; expect(page.hidden).toBe(false)
-  const form = page.querySelector('[data-progress-details="interval"] form'); expect(form).not.toBeNull()
+  await showProgressForm()
+  const form = page.querySelector('form[aria-label="Continuous progress setup"]'); expect(form).not.toBeNull()
   const textarea = form!.querySelector<HTMLTextAreaElement>('textarea')!
   await act(async () => {
     textarea.focus()
@@ -234,14 +245,20 @@ it('saved defaults reach both original Composer creation routes and durable task
   const mailbox = container.querySelector<HTMLElement>('.composer-mailbox')!, opened = new Event('toggle')
   Object.defineProperty(opened, 'newState', { value: 'open' }); await act(async () => mailbox.dispatchEvent(opened))
   await act(async () => mailbox.querySelector<HTMLButtonElement>('[aria-label="Automation"]')!.click())
-  const progress = container.querySelector<HTMLElement>('[data-progress-details="interval"]')!, form = progress.querySelector<HTMLFormElement>('form')!
+  await showProgressForm()
+  const progress = container.querySelector<HTMLElement>('.calendar-schedules')!, form = progress.querySelector<HTMLFormElement>('form[aria-label="Continuous progress setup"]')!
   expect(form.querySelector<HTMLInputElement>('input[type="number"]')!.value).toBe('7')
   expect(form.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Continue the precise saved task')
   expect(manager.list()).toEqual([]); expect(writes).toEqual([])
   await act(async () => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
   await vi.waitFor(() => expect(manager.list().find(loop => !loop.calendar)).toMatchObject({ ...target(), intervalMs: 420000, prompt: 'Continue the precise saved task' }))
-  const calendar = container.querySelector<HTMLElement>('.calendar-schedules')!, details = calendar.querySelector<HTMLDetailsElement>('details')!
-  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  const calendar = container.querySelector<HTMLElement>('.calendar-schedules')!
+  await act(async () => {
+    const type = calendar.querySelector<HTMLSelectElement>('[aria-label="Automation type"]')!
+    type.value = 'schedule'; type.dispatchEvent(new Event('change', { bubbles: true }))
+    const timing = calendar.querySelector<HTMLSelectElement>('[aria-label="Arrangement timing"]')!
+    timing.value = 'calendar'; timing.dispatchEvent(new Event('change', { bubbles: true }))
+  })
   const topic = calendar.querySelector<HTMLTextAreaElement>('textarea')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(topic, 'One explicit calendar question'); topic.dispatchEvent(new Event('input', { bubbles: true })); calendar.querySelector<HTMLInputElement>('[aria-label="Enable quiet follow-up"]')!.click() })
   expect(calendar.textContent).toContain('2h silence')
@@ -263,8 +280,8 @@ it('saved defaults reach both original Composer creation routes and durable task
     await api.continuousProgress.action(target(), original.loopId, 'stop', original, 'stop-original-defaults-loop')
     document.dispatchEvent(new Event('visibilitychange'))
   })
-  await vi.waitFor(() => expect(progress.querySelector<HTMLTextAreaElement>('form textarea')?.value).toBe('A later new task default'))
-  expect(progress.querySelector<HTMLInputElement>('form input[type="number"]')!.value).toBe('11')
+  await vi.waitFor(() => expect(progress.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')?.value).toBe('A later new task default'))
+  expect(progress.querySelector<HTMLInputElement>('form[aria-label="Continuous progress setup"] input[type="number"]')!.value).toBe('11')
   expect(manager.list().find(loop => loop.loopId === original.loopId)).toMatchObject({ status: 'stopped', intervalMs: 420000, prompt: 'Continue the precise saved task' })
   expect(manager.list().find(loop => loop.calendar)?.checkIn?.dailyBudget).toBe(2)
   expect(manager.list()).toHaveLength(2); expect(writes).toEqual([])
@@ -273,8 +290,9 @@ it('keeps an unconfirmed continuation composition through an independent loop no
   const existing = await create()
   const stopped = await api.continuousProgress.action(target(), existing.loopId, 'stop', existing, 'stop-original-composition-loop')
   await act(async () => document.dispatchEvent(new Event('visibilitychange')))
-  await vi.waitFor(() => expect(container.querySelector('[data-progress-details="interval"] form')).not.toBeNull())
-  const form = container.querySelector<HTMLFormElement>('[data-progress-details="interval"] form')!
+  await showProgressForm()
+  await vi.waitFor(() => expect(container.querySelector('form[aria-label="Continuous progress setup"]')).not.toBeNull())
+  const form = container.querySelector<HTMLFormElement>('form[aria-label="Continuous progress setup"]')!
   const textarea = form.querySelector<HTMLTextAreaElement>('textarea')!
   expect(textarea).not.toBeNull()
   const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
@@ -369,7 +387,8 @@ it('keeps a late create result on its original workspace while the same Session 
   const originalSave = store.save.bind(store)
   const save = vi.spyOn(store, 'save').mockImplementationOnce(async loops => { await blocked; await originalSave(loops) })
   try {
-  const form = container.querySelector('[data-progress-details="interval"] form')!
+  await showProgressForm()
+  const form = container.querySelector('form[aria-label="Continuous progress setup"]')!
   const textarea = form.querySelector<HTMLTextAreaElement>('textarea')!
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'original target prompt')
@@ -383,7 +402,7 @@ it('keeps a late create result on its original workspace while the same Session 
     useAppStore.setState({ sessions: [other] })
     root.render(<AgentSessionComposer sessionId={other.id} />)
   })
-  const next = container.querySelector('[data-progress-details="interval"] form')!
+  const next = container.querySelector('form[aria-label="Continuous progress setup"]')!
   const nextText = next.querySelector<HTMLTextAreaElement>('textarea')!
   expect(nextText.value).toBe('')
   await act(async () => {
@@ -405,7 +424,8 @@ it('binds an explicit real Tracker through the mounted leaf and IPC, keeping don
   const sourceRoot = join(directory, 'private-tracker'); await mkdir(sourceRoot)
   const tracker = await privateTracker(sourceRoot), binding = await tracker.create('mounted-source')
   await tracker.run('start-task', '--feature', binding.ownerId, '--task', 'T-001')
-  const form = container.querySelector('[data-progress-details="interval"] form')!; expect(form).not.toBeNull()
+  await showProgressForm()
+  const form = container.querySelector('form[aria-label="Continuous progress setup"]')!; expect(form).not.toBeNull()
   const checkbox = form.querySelector<HTMLInputElement>('input[type="checkbox"]')!; expect(checkbox).not.toBeNull()
   await act(async () => checkbox.click())
   async function type(selector: string, value: string) {
