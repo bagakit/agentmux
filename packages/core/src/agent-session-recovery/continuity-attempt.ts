@@ -173,7 +173,7 @@ export async function performAgentContinuity(
   const priorFailure = rolledBackResumeFailure(current ?? undefined, input.operationId)
   if (priorFailure) throw priorFailure
   const now = Date.now(), policy = prior?.policy ?? normalizeAgentContinuityPolicy(input.policy)
-  const receipt: AgentMuxContinuityOperation = prior ? structuredClone(prior) : {
+  let receipt: AgentMuxContinuityOperation = prior ? structuredClone(prior) : {
     operationId: input.operationId, agentSessionId: input.agentSessionId, trigger: input.trigger ?? 'manual',
     ...(input.timingOverride ? { timingOverride: input.timingOverride } : {}), policy,
     previousRun: { ...input.expectedRun }, admittedAt: now, observedAt: now, rechecks: 0,
@@ -230,7 +230,13 @@ export async function performAgentContinuity(
       // cannot claim that it carried this input; unknown starts stay unknown.
       receipt.launchInput.state = 'not-applied'
     }
-    if (result.kind === 'resumed') receipt.newRun = { ...result.run }
+    if (result.kind === 'resumed') {
+      if (!sameRun(receipt.newRun ?? receipt.previousRun, result.run)) {
+        delete receipt.initializationRecovery
+        delete receipt.frontendReconnect
+      }
+      receipt.newRun = { ...result.run }
+    }
     if (result.kind === 'pending' && result.nextActionAt !== undefined) receipt.nextActionAt = result.nextActionAt
     if (result.kind === 'pending' && current && !receipt.intentOperationId && !receipt.supervision && !['manual', 'input'].includes(receipt.trigger)) {
       if (current.nativeHandle?.kind === 'provider' && current.nativeHandle.providerId === current.providerId) receipt.nativeTarget = structuredClone(current.nativeHandle)
@@ -339,24 +345,31 @@ export async function performAgentContinuity(
       'The original frontend reconnection completed. This ended Run needs a new explicit recovery operation.', 'AGENT_CONTINUITY_SUPERSEDED', undefined,
       { disposition: 'not_applied', confirmedInputBytes: null })
     // A prior start with no receipt is observation-only. Never dispatch another start or old input.
-    if (!prior?.frontendReconnect && !prior?.initializationRecovery && (prior?.kind === 'starting' || prior?.reason === 'operation-unconfirmed')) {
+    if (prior?.kind === 'starting' || prior?.reason === 'operation-unconfirmed') {
       const lifecycleId = agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId)
+      let startUnconfirmed = !prior.frontendReconnect && !prior.initializationRecovery
       try {
         const reservation = await ports.sessions.store.loadResumeCorrelation(input.agentSessionId, lifecycleId)
         if (reservation?.preparedSession) {
+          // Old-Run frontend/initialization observations cannot hide this operation's
+          // durable Start. Reconcile its existing Run before considering another launch.
+          startUnconfirmed = true
           const recovered = await lifecycle.completePreparedResume(reservation, await ports.runtime.kernel.inspectCreation(reservation.operationId))
           if (recovered) { current = ports.sessions.registry.get(input.agentSessionId); return record({ kind: 'resumed', session: ports.events.projectSession(current),
             previousRun: { ...input.expectedRun }, run: { ...current.run }, evidence: { kind: 'provider-native', providerId: current.providerId,
               nativeSessionId: current.nativeHandle!.sessionId, previousRun: evidence } }, recovered.continuity?.reason ?? prior.reason) }
         }
       } catch (error) {
+        startUnconfirmed = true
         const known = await recordKnownSupervisedStart(error)
         if (known) return known
         receipt.error = error instanceof Error ? error.message : String(error)
       }
-      if (prior) receipt.rechecks++
-      return pending('operation-unconfirmed', evidence,
-        receipt.rechecks < policy.recheckMaxAttempts ? now + policy.recheckIntervalMs : undefined)
+      if (startUnconfirmed) {
+        receipt.rechecks++
+        return pending('operation-unconfirmed', evidence,
+          receipt.rechecks < policy.recheckMaxAttempts ? now + policy.recheckIntervalMs : undefined)
+      }
     }
     if (receipt.intentOperationId) {
       const root = current.continuityOperations?.[receipt.intentOperationId]
@@ -615,7 +628,7 @@ export async function performAgentContinuity(
     current = await reconciler.observeResumedInterruption(ports.sessions.registry.get(input.agentSessionId))
     // Re-read the accepted attempt so record cannot overwrite its separately observed evidence.
     const completed = current.continuityOperations?.[receipt.operationId]
-    if (completed) Object.assign(receipt, structuredClone(completed))
+    if (completed) receipt = structuredClone(completed)
     return record({ kind: 'resumed', session: ports.events.projectSession(current), previousRun: { ...input.expectedRun }, run: { ...session.run },
       evidence: { kind: 'provider-native', providerId: decision.nativeHandle.providerId,
         nativeSessionId: decision.nativeHandle.sessionId, previousRun: decision.evidence } }, receipt.reason)

@@ -610,6 +610,10 @@ export class AgentSessionRunLifecycle {
       }
       if (continuity?.operationId === input.operationId && continuity.kind === 'starting') {
         next.continuity = { ...continuity, kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
+        // Initialization/front-end recovery controls the previous Run's actor.
+        // The successor has its own actor; carrying these controls rejects its commit.
+        delete next.continuity.initializationRecovery
+        delete next.continuity.frontendReconnect
         if (run.acceptedInputBytes !== null) next.continuity.resumedInputBoundary = { initialInputByte: run.acceptedInputBytes }
         if (restartReservation) { delete next.continuity.errorCode; delete next.continuity.error }
         bindContinuityLaunchInput(next.continuity, next.run)
@@ -858,6 +862,8 @@ export class AgentSessionRunLifecycle {
       'terminalOutputChannel', 'semanticStatus', 'pendingInteraction', 'recoveryActivity'] as const) delete next[key]
     if (prepared.continuity) {
       next.continuity = { ...structuredClone(prepared.continuity), kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
+      delete next.continuity.initializationRecovery
+      delete next.continuity.frontendReconnect
       const launched = next.continuity.launchInput
       if (launched && (!launched.launchPlan || launched.launchPlan.program !== run.program ||
           launched.launchPlan.argsDigest !== createHash('sha256').update(JSON.stringify(run.args)).digest('base64url'))) {
