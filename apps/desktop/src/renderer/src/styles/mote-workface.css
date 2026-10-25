@@ -359,3 +359,7 @@
 .mote-ideas__knowledge > summary::-webkit-details-marker { display: none; }
 .mote-ideas__knowledge > summary > span { flex: 1; }
 .mote-ideas__knowledge[open] > .topic-knowledge-panel { min-height: 280px; max-height: 480px; border-top: 1px solid var(--line); }
+
+/* A retained service notice uses real space without pushing the original Composer below its workface. */
+.workbench-context-frame { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; }
+.workbench-context-frame > .workspace-workbench { flex: 1; height: auto; }

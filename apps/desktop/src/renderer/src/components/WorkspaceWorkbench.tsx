@@ -338,7 +338,7 @@ function SortableWorkbenchTab({
     const currentTabIds = tabIds.filter((tabId) => group.tabOrder.includes(tabId) &&
       !motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tabId))
     if (currentTabIds.length !== tabIds.length && tabIds.some(tabId => motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tabId)))
-      useAppStore.getState().reportError(new Error('The default conversation stays open here. Unset it in this Mote’s Profile → Quick mode to close it; its Agent is unchanged.'), { kind: 'indeterminate' })
+      useAppStore.getState().reportError(new Error('The main Agent conversation stays open here. Unset it in this Mote’s Profile → Quick mode to close it; its Agent is unchanged.'), { kind: 'indeterminate' })
     if (currentTabIds.length === 0 || closing) return
     const dirtyCount = new Set(currentTabIds.flatMap((tabId) => {
       const candidate = tabsById[tabId]
@@ -502,14 +502,14 @@ function SortableWorkbenchTab({
             tabIndex={0}
             className="workbench-tab__close"
             aria-label={`Close ${displayName}`}
-            title={motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tab.id) ? 'Default conversation · unset in Profile to close' : `Close ${displayName}`}
+            title={motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tab.id) ? 'Main Agent · unset in Profile to close' : `Close ${displayName}`}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => void requestClose(event)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') void requestClose(event as never)
             }}
           >
-            {motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tab.id) ? <ThemeActionPinIcon size={11} aria-label="Default conversation" /> : <ThemeActionCloseIcon size={11} />}
+            {motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tab.id) ? <ThemeActionPinIcon size={11} aria-label="Main Agent" /> : <ThemeActionCloseIcon size={11} />}
           </span>
         </button>
       </WorkbenchTabContextMenu>
@@ -845,7 +845,7 @@ function WorkbenchRegionContent({
     const pinned = browserPresentation.surface === 'mote' ? actualDefaults.conversation : browserPresentation.surface ? undefined : mote?.defaultConversation
     if (pinned && pinned.tabId === tab.id && pinned.regionId === node.regionId && groupId &&
       motePinnedTab(pinned, browserPresentation.reference?.displayWorkspaceId ?? tab.workspaceId, groupId, tab.id)) {
-      reportError(new Error('The default conversation stays open here. Unset it in this Mote’s Profile → Quick mode before closing its Region.'), { kind: 'indeterminate' }); return
+      reportError(new Error('The main Agent conversation stays open here. Unset it in this Mote’s Profile → Quick mode before closing its Region.'), { kind: 'indeterminate' }); return
     }
     if (dirty) setConfirmingClose(true)
     else void closeRegion(tab.workspaceId, tab.id, node.regionId)

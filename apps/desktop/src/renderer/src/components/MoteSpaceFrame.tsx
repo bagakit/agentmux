@@ -88,7 +88,7 @@ function MoteSpaceActions({ scope, active, section, onDiscussion }: {
     {primary.conversation ? !atPrimary ? <button type="button" className="mote-space-frame__primary" onClick={returnToPrimary}>Return to main Agent</button> : null
       : <button type="button" className="mote-space-frame__primary" onClick={event => edit(event.currentTarget)}>{primary.issue ? 'Review main Agent' : 'Choose main Agent'}</button>}
     <MoteFirstCooperation scope={scope} disclosure />
-    {issue || primary.issue ? <p className="mote-details__issue mote-space-frame__issue" role="status">{issue || primary.issue}
+    {issue ? <p className="mote-details__issue mote-space-frame__issue" role="status">{issue}
       {primary.conversation ? <button type="button" className="small-button" onClick={event => edit(event.currentTarget)}>Review main Agent</button> : null}
     </p> : null}
     {editing ? <MoteQuickModeDialog scope={scope} onOpenPath={path => openMoteMaterial(scope, path)} onClose={() => setEditing(false)}

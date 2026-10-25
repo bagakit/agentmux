@@ -1,0 +1,11 @@
+.mote-primary-return { flex: 0 0 auto; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); line-height: 1.4; padding: 3px 7px; white-space: nowrap; cursor: pointer; }
+.mote-primary-return:hover, .mote-primary-return:focus-visible { color: var(--text); background: var(--surface-3); border-color: var(--line); }
+
+
+/* Mote-wide actions stay outside individual Group tab strips. */
+.mote-floating-actions { flex: 0 0 auto; min-height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding: 2px 6px; border-bottom: 1px solid var(--line-soft); }
+.mote-floating-actions > .mote-primary-return { margin-right: auto; }
+.mote-workface .pane-group { container-type: inline-size; container-name: mote-pane; }
+@container mote-pane (max-width: 360px) {
+  .pane-action-group--split > .pane-action:not(.pane-action--split-menu) { display: none; }
+}

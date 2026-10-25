@@ -22,9 +22,9 @@ export function MoteWorkface({ workspaceId, topicId, floating = false, visible =
     selectTab: (tabId: string, groupId: string) => onTabSelect ? onTabSelect(tabId, groupId) : useAppStore.getState().activateTab(workspaceId, groupId, tabId, 'local')
   } : null, [scope, floating, onTabSelect, workspaceId, defaults.conversation])
   const issue = scope?.issue ?? defaults.issue
-  const notice = issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+  const notice = issue ? <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['mote-context', scope?.workspace.hostId, workspaceId, topicId ?? scope?.topic.id]), id: 'mote-context', occurrence: issue, cause: 'mote-context-observation', visible }} notice={{ kind: 'indeterminate', notice: {
     step: 'Mote context read incomplete', mode: issue, restore: 'Retry this Mote context. Its original Agents and drafts remain available.' } }} /> : null
-  if (!floating) return <MoteWorkfaceContext.Provider value={context}>{notice}{children}</MoteWorkfaceContext.Provider>
+  if (!floating) return <MoteWorkfaceContext.Provider value={context}><div className="workbench-context-frame">{notice}{children}</div></MoteWorkfaceContext.Provider>
   return <MoteWorkfaceContext.Provider value={context}>
     <div className="mote-workface" data-mote-workface={scope?.topic.id}>
       {notice}

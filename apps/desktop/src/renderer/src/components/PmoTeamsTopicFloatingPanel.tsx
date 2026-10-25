@@ -1,3 +1,4 @@
+import '../styles/mote-primary-agent.css'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -7,7 +8,7 @@ import { MOTE_SOUL_PATH, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicL
 import { homeZoneId, spatialSources } from '../../../shared/space-addresses'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
-import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
+import { scratchMoteTopics, scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { keepPmoTeamsTopicFloatingPreview, leavePmoTeamsTopicFloatingPreview, pinPmoTeamsTopicFloating,
   createPmoTeamsTopicTargetSelector, requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen, PMO_FLOATING_TAB_SLOT_PREFIX,
   readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState, pmoTeamsTopicFloatingTargetTopicId,
@@ -33,6 +34,7 @@ import { MoteRenameDialog } from './MoteRenameDialog'
 import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
 import { primaryMoteHasBot } from '../lib/primary-mote-executor'
+import { moteDefaultConversation, moteConversationReference, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { workbenchZoneUnplacedGroupId, workbenchProjectionLocationsMatchOwner, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import type { MoteWorkbenchProjectionResult } from '../lib/mote-workbench-projection'
@@ -119,20 +121,23 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   onRename(topic: ScratchTopicSnapshot): void; onAvatar(target: SpaceIconTarget): void; onOpenSpace(topicId: string, tabId: string | undefined, intent?: 'space' | 'persona'): void
 }) {
   const recent = useAppStore(state => state.recentMoteAgents[topic.id])
+  const primary = topic.quickMode?.status === 'saved' ? topic.quickMode.defaults.conversation : undefined
+  const entry = primary ?? recent
   const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector({ open: false, preview: false,
-    targetTopicId: topic.id, targetTabId: selected ? savedTabId : recent?.tabId }), [topic.id, selected, savedTabId, recent])
+    targetTopicId: topic.id, targetTabId: selected ? savedTabId : entry?.tabId }), [topic.id, selected, savedTabId, entry])
   const tabId = useAppStore(selectTab)
   const tab = useAppStore(state => {
     const candidate = tabId ? state.tabs[tabId] : undefined
     return candidate?.workspaceId === SCRATCH_WORKSPACE_ID && candidate.topicId === topic.id ? candidate : undefined
   })
-  const selectedReference = selected ? reference : recent
+  const selectedReference = selected ? reference : entry
   const regionId = selectedReference ? selectedReference.tabId === tabId ? selectedReference.regionId : undefined
     : selectedReference === null ? undefined : tab?.layout.activeRegionId
   const rawRegion = regionId ? tab?.regions[regionId] : undefined
   const observedSession = useAppStore(state => rawRegion?.kind === 'agent' ? sessionPresentationById(state.sessions).get(rawRegion.sessionId) : undefined)
   const identityIssue = pmoTeamsTopicFloatingAgentIssue({ open: false, preview: false,
-    reference: selectedReference, targetAgent: selected ? targetAgent : recent },
+    reference: selectedReference, targetAgent: selected ? targetAgent : primary
+      ? { hostId: primary.hostId, sessionId: primary.sessionId, presentationSessionId: observedSession?.id ?? primary.sessionId } : recent },
     tab, observedSession)
   const region = identityIssue ? undefined : rawRegion, session = identityIssue ? undefined : observedSession
   const workspace = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))
@@ -274,6 +279,9 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   const panelRef = useRef<HTMLDivElement>(null)
   const menuContainer = useCallback(() => panelRef.current, [])
   const selectedMote = motes.find(topic => topic.id === target.topicId)
+  const primary = useMoteDefaultConversation(selectedMote, SCRATCH_WORKSPACE_ID, visible).conversation
+  const atPrimary = primary && target.tabId === primary.tabId && target.region?.regionId === primary.regionId &&
+    floating.reference?.displayWorkspaceId === primary.displayWorkspaceId && floating.reference?.groupId === primary.groupId
   const floatingRef = useRef(floating); floatingRef.current = floating
   const spaceActionRef = useRef<AbortController | null>(null)
   const [preparationAttempt, setPreparationAttempt] = useState(0)
@@ -720,11 +728,14 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       !target.tabId && discussionChoices.length === 0 && !motes.some(topic => topic.id === target.topicId) ?
         <div role="status" className="workbench-restore-notice" data-workbench-pending-owner>Original Mote retained · Topic directory is still being confirmed</div> :
         <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} floating visible={visible} recoverOnOpen={floating.open && !target.identityIssue} reference={floating.reference} conversationEntry={target.identityIssue ? undefined : floating.conversationEntry} onTabSelect={selectDiscussion}>
-        <WorkspaceWorkbench workspaceId={projectionState?.projection?.displayWorkspaceId ?? SCRATCH_WORKSPACE_ID}
-          topicId={target.topicId} topicIsolation="bound-only" viewOwnership="projection"
-          projection={projectionState?.projection ?? undefined} viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX}
-          retainedTabId={target.tabId} visible={visible} interactiveResize={false}
-          onTabSelect={selectDiscussion} onRecoverTab={tabId => selectDiscussion(tabId, undefined, undefined, true)} presentationAction={<>
+        <div className="mote-floating-actions" aria-label="Mote controls">
+            {primary && !atPrimary ? <button type="button" className="mote-primary-return" aria-label="Return to main Agent"
+              title="Continue with this Mote’s main Agent" onClick={() => {
+                const state = useAppStore.getState(), currentTopic = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)?.find(topic => topic.id === target.topicId) ?? selectedMote
+                const current = currentTopic && moteDefaultConversation(state, currentTopic, SCRATCH_WORKSPACE_ID).conversation
+                if (!current) { reportError(new Error('The main Agent’s original location is unconfirmed. Its identity and the current work are kept.')); return }
+                requestPmoTeamsTopicFloatingOpen({ targetTopicId: target.topicId, targetTabId: current.tabId, reference: moteConversationReference(current) })
+              }}>Main Agent</button> : null}
             <MoteContextStatus scope={JSON.stringify(['mote-context', scratch?.hostId, scratch?.path, target.topicId, target.tabId, capturedContextReference(floating.reference)])}
               visible={visible} failures={contextFailures} pending={failure => (failure.step === 'open-space' ? spaceOpening : preparation)?.state === 'pending'}
               identityIssue={target.identityIssue ?? null} projection={projectionState}
@@ -733,7 +744,12 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
               locationName={(reference, index) => (useAppStore.getState().config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? 'Workspace') + ' · 位置 ' + (index + 1)} />
             {profileTrigger}
             <button type="button" className="pane-action"
-            aria-label="Open in Space" title="Open current Mote in Space" onClick={() => openSpace()}><ThemeActionOpenExternalIcon size={14} /></button></>} /></MoteWorkface>}
+            aria-label="Open in Space" title="Open current Mote in Space" onClick={() => openSpace()}><ThemeActionOpenExternalIcon size={14} /></button></div>
+        <WorkspaceWorkbench workspaceId={projectionState?.projection?.displayWorkspaceId ?? SCRATCH_WORKSPACE_ID}
+          topicId={target.topicId} topicIsolation="bound-only" viewOwnership="projection"
+          projection={projectionState?.projection ?? undefined} viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX}
+          retainedTabId={target.tabId} visible={visible} interactiveResize={false}
+          onTabSelect={selectDiscussion} onRecoverTab={tabId => selectDiscussion(tabId, undefined, undefined, true)} /></MoteWorkface>}
       </MoteProfilePopover>}
     </div>
     </div>

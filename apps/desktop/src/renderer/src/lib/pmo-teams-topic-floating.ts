@@ -1,7 +1,7 @@
 import type { MoteRecentAgent } from './mote-quick-preferences'
 import { sessionPresentationById } from './session-presentation'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { moteDefaultConversation, moteConversationReference } from './mote-quick-preferences'
+import { moteConversationReference } from './mote-quick-preferences'
 import { useSyncExternalStore } from 'react'
 import { groupIds, type WorkspaceLayout } from '@agentmux/layout'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
@@ -167,13 +167,23 @@ export function floatingMoteDefaultSelection(floating: PmoTeamsTopicFloatingStat
   const workspace = current.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   const topics = scratchTopicsForWorkspace(current.scratchTopicSnapshots, workspace)
   const topic = topics?.find(item => item.id === topicId)
+  const primary = topic?.quickMode?.status === 'saved' ? topic.quickMode.defaults.conversation : undefined
+  if (primary) {
+    const session = current.sessions.find(session => session.control.kind === 'agent' &&
+      session.control.hostId === primary.hostId && session.control.agentSessionId === primary.sessionId)
+    // Keep the saved identity even when its location/Run cannot yet be observed.
+    // Daily entry must not silently substitute the last member or a new occupant.
+    return { ...floating, targetTopicId: topicId, targetTabId: primary.tabId,
+      reference: moteConversationReference(primary), targetAgent: { hostId: primary.hostId,
+        sessionId: primary.sessionId, presentationSessionId: session?.id ?? primary.sessionId } }
+  }
+  if (topic?.quickMode?.status === 'unconfirmed') return { ...floating, targetTopicId: topicId,
+    targetTabId: null, reference: null, targetAgent: undefined }
   const recent = current.recentMoteAgents[topicId]
   if (recent) return { ...floating, targetTopicId: topicId, targetTabId: recent.tabId,
     reference: moteConversationReference(recent), targetAgent: { hostId: recent.hostId, sessionId: recent.sessionId, presentationSessionId: recent.presentationSessionId } }
   if (floating.targetTabId) return floating
-  const preferred = topic ? moteDefaultConversation(current, topic, SCRATCH_WORKSPACE_ID) : {}
-  return preferred.conversation && !preferred.issue ? { ...floating, targetTopicId: topicId, targetTabId: preferred.conversation.tabId,
-    reference: moteConversationReference(preferred.conversation) } : floating
+  return floating
 }
 
 /** Capture a first confirmed local choice once; unknown saved addresses stay verbatim. */
@@ -188,7 +198,14 @@ function initialFloatingSelection(floating: PmoTeamsTopicFloatingState): PmoTeam
   if (Object.hasOwn(floating, 'reference') && floating.reference !== undefined) return next
   const regionId = tab.layout.activeRegionId
   if (!tab.regions[regionId]) return next
-  if (floating.targetTabId === undefined) return next
+  if (floating.targetTabId === undefined) {
+    const layout = current.layouts[SCRATCH_WORKSPACE_ID]
+    const group = layout?.groups.find(group => group.id === layout.activeGroupId && groupIds(layout.root).includes(group.id))
+    if (group?.activeTabId === tab.id && group.tabOrder.includes(tab.id)) return { ...next, reference: {
+      displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: group.id, tabId: tab.id, regionId
+    } }
+    return next
+  }
   const references = Object.entries(current.layouts).flatMap(([displayWorkspaceId, layout]) => {
     const visible = new Set(groupIds(layout.root))
     return layout.groups.filter(group => visible.has(group.id) && group.tabOrder.includes(tab.id))
@@ -214,7 +231,7 @@ export function pmoTeamsTopicFloatingAgentIssue(floating: PmoTeamsTopicFloatingS
   const region = tab?.id === floating.reference.tabId ? tab.regions[floating.reference.regionId] : undefined
   if (!region || region.kind !== 'agent' || region.sessionId !== floating.targetAgent.presentationSessionId || session?.control.kind === 'agent' &&
     (session.control.hostId !== floating.targetAgent.hostId || session.control.agentSessionId !== floating.targetAgent.sessionId))
-    return 'The last visited Agent is not confirmed at its original location. Its identity and work are kept; inspect the original Tab to continue.'
+    return 'The selected Agent is not confirmed at its original location. Its identity and work are kept; inspect the original Tab to continue.'
   return null
 }
 

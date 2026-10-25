@@ -43,6 +43,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparation'
 import { submitWithPreparationRetry, type PromptPreparationRetryProgress } from './lib/prompt-preparation-retry'
 import { moteDefaultExecutor, moteDefaultConversation, recentMoteAgentsAfterVisit, restoredRecentMoteAgents, type MoteRecentAgent } from './lib/mote-quick-preferences'
+import { firstMoteAgentScope, establishFirstMoteAgent } from './lib/mote-primary-agent'
 import { showMoteConversation } from './lib/mote-conversation-mode'
 import { goalPmoOperation, type GoalPmoIntent, type GoalPmoReceipt } from '@agentmux/host/goal-pmo-origin'
 import { executeGlobalGoalPatrol } from './lib/goal-global-patrol'
@@ -8832,8 +8833,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const parent = { ...address, workspaceId: workspace.id, topicId, tabId: null, groupId: null, regionId: null }
       if (!targetTabId) {
         const preferred = moteDefaultConversation(current, snapshot, workspace.id)
-        if (preferred.conversation && !preferred.issue) return { ...resolveDesktopSpaceSelection(current, catalog, {
+        if (preferred.conversation) return { ...resolveDesktopSpaceSelection(current, catalog, {
           ...address, ...preferred.conversation }), topicId }
+        if (preferred.issue) return parent
       }
       const held = current.workbenchSpaceSelection
       const layout = current.layouts[workspace.id]
@@ -9033,7 +9035,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Metadata refresh is not another navigation or permission to create a Tab.
     if (revealedExistingWorkface) {
       const preferred = !options?.tabId ? moteDefaultConversation(get(), snapshot, workspace.id) : {}
-      const fresh = preferred.issue ? undefined : preferred.conversation
+      const fresh = preferred.conversation
       const prior = known?.quickMode?.status === 'saved' ? known.quickMode.defaults.conversation : undefined
       if (fresh && JSON.stringify(fresh) !== JSON.stringify(prior)) {
         const choice = selectObject(get(), snapshot)
@@ -9732,6 +9734,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw new Error('Scratch Agent View has an invalid Topic identity')
     }
     const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
+    const firstMote = !pmo && launcher ? firstMoteAgentScope(resourceWorkspace, scratchTopicId) : null
     // Capture the exact unsent inputs used by this request. Contextual launches can use the
     // same Region without consuming its other draft; late replies cannot clear newer edits.
     const originalPrompt = state.agentComposerDrafts[regionId]
@@ -9914,6 +9917,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (priorFailure && get().notificationEvents.includes(priorFailure)) {
         set(current => settleNotificationRecords(current, [priorFailure]))
       }
+      if (firstMote) void establishFirstMoteAgent(firstMote, { displayWorkspaceId: displayWorkspaceId!, groupId: tabGroupId, tabId, regionId },
+        { hostId: result.created.hostId, sessionId: result.created.agentSessionId }).catch(error => get().reportError(error, {
+          kind: 'indeterminate', summary: 'The Agent and its input are available. Main Agent setup is unconfirmed; inspect MOTE.md or choose the original Agent in Profile.',
+          subject: { kind: 'agent', hostId: result.created.hostId, agentSessionId: result.created.agentSessionId, run: result.created.run },
+          event: { source: 'mote-primary-agent', key: createOperationId, object: { kind: 'region', id: regionId, hostId: result.created.hostId, workspaceId: workspace.id } }
+        }))
     } catch (error) {
       const ownerFailure = error as { controlFailure?: import('@agentmux/core').AgentMuxControlFailure } | null
       if (dispatchStarted && (creationObserved || ownerFailure?.controlFailure?.disposition !== 'not_applied')) {
