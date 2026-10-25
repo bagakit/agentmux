@@ -20,7 +20,7 @@ export async function qualifyCodexExecutionExecutable(command: string, options: 
   // Stable CLI version protocol, not a screen/readiness heuristic. Only this
   // native release has qualified environment and exec-server transport contracts.
   const version = await runProcess(executable, ['--version'], { ...(options.workspacePath === undefined ? {} : { cwd: options.workspacePath }), env: options.env, timeoutMs: 2_000, maxOutputBytes: 4096 }).catch(() => null)
-  if (!version || version.exitCode !== 0 || version.stderr || version.stdout.trim() !== 'codex-cli 0.165.0') throw new Error('The selected native executable is not qualified for this tool execution helper')
+  if (!version || version.exitCode !== 0 || version.stdout.trim() !== 'codex-cli 0.165.0') throw new Error('The selected native executable is not qualified for this tool execution helper')
   return executable
 }
 
