@@ -5,6 +5,11 @@ import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../../../..')
 const edits: Record<string, [string, string, string]> = {
   'initial-binding': ['packages/core/src/client.ts', 'current.nativeHandle || !normalized.nativeHandle ? current : { ...current, nativeHandle: normalized.nativeHandle }, nativeActivity)) return current', 'current, nativeActivity)) return current'],
+  'child-transition': ['packages/core/src/client.ts', "provider.hook.nativeSessionTransition?.(eventName, payload) === true &&\n      !nativeHookHasSubagentSubject(provider.hook, eventName, payload)", 'provider.hook.nativeSessionTransition?.(eventName, payload) === true'],
+  'history-source': ['packages/core/src/client.ts', "nativeTargetSourceUnconfirmed(session) && session.nativeSourceObservation?.state !== 'unknown'", 'nativeTargetSourceUnconfirmed(session)'],
+  'hook-source': ['packages/core/src/client.ts', 'if (live?.runId === session.run.runId) live.invalidated = true\n        await this.invalidateRecoveryActivity(next,', 'if (false) live.invalidated = true\n        await this.invalidateRecoveryActivity(next,'],
+  'history-conflict': ['packages/core/src/client.ts', "code !== 'AGENT_NATIVE_IDENTITY_AMBIGUOUS' && value.nativeSourceObservation &&", 'false && value.nativeSourceObservation &&'],
+  'hook-conflict': ['packages/core/src/client.ts', "state === 'unknown' && current.nativeSourceObservation && sameRun(current.nativeSourceObservation.run, current.run) &&", 'false && current.nativeSourceObservation && sameRun(current.nativeSourceObservation.run, current.run) &&'],
   'main-turn': ['packages/core/src/client.ts', 'event.nativeTurnId !== previous.event.nativeTurnId', 'false'],
   'child-turn': ['packages/core/src/hook-normalizer.ts', 'previous.nativeTurnId !== identity.nativeTurnId', 'false'],
   'child-source': ['packages/core/src/client.ts', 'agentSubagentActivityUnconfirmed(session.run.runId, previousActivity?.runId === session.run.runId ? previousActivity.event.sourceId : undefined)', 'false'],

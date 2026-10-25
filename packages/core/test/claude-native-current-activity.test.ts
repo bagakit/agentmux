@@ -1,10 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
+import { writeFile } from 'node:fs/promises'
 import { activityCertaintyClient } from './fixtures/activity-certainty-client.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { agentTurnCompletionIdentity } from '../src/agent-session-identity.js'
+import type { AgentProvider } from '../src/agent-provider.js'
 
 const closes: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close() })
@@ -21,6 +23,14 @@ async function start(h: Awaited<ReturnType<typeof harness>>, sequence = 1, turnI
 }
 async function end(h: Awaited<ReturnType<typeof harness>>, sequence = 2, turnId = 'native-turn-1', reason = 'answer') {
   await h.hook('turn.complete', `end-${sequence}`, native(sequence, turnId, { reason, isAborted: reason === 'aborted' }))
+}
+
+async function attachTranscript(h: Awaited<ReturnType<typeof harness>>) {
+  const transcript = join(h.directory, 'native-main.jsonl')
+  await writeFile(transcript, JSON.stringify({type:'user',sessionId:'native-main',isSidechain:false,
+    uuid:'original-user',message:{role:'user',content:'Original input'}})+'\n')
+  await h.hook('PreToolUse', 'main-transcript', {session_id:'native-main',transcript_path:transcript})
+  return transcript
 }
 
 it.each(['answer', 'refusal', 'error', 'aborted'])('native %s end confirms current idle without manufacturing task success or readiness', async reason => {
@@ -95,6 +105,8 @@ it('source gap and a genuine semantic claim consume idle; raw ACK does not act a
     h.run.acceptedInputBytes = input.expectedByte + Buffer.byteLength(input.data)
     return {run:h.run,appliedByteRange:{startByte:input.expectedByte,endByte:h.run.acceptedInputBytes}}
   }
+  kernel.openInput = async (runId: string) => ({run:h.run,waitWritable:async()=>{},
+    input:(data:string)=>kernel.input(runId,{expectedByte:h.run.acceptedInputBytes,data})})
   await h.client.writeAgent({agentSessionId:'native-activity',expectedRun:{runId:h.run.runId},data:'draft',source:'user'})
   expect(h.client.agentSession('native-activity').currentActivity).toEqual(before)
   await h.hook('AgentMuxActivityUnavailable', 'source-gap', { session_id: 'native-main', sourceId: 'native-source', sequence: 3, reason: 'source-changed' })
@@ -115,7 +127,7 @@ it('real public service and compiled inspect preserve the live fact and strict e
   await start(h); await end(h)
   const server = new AgentMuxControlServer({ socketPath: join(h.directory, 'activity.sock'), coreClients: () => [{ hostId: 'local', client: h.client }] })
   await server.start(); closes.push(() => server.stop())
-  const result = await runCompiledObjectCli(['--endpoint', `unix:${server.path}`, 'agent', 'inspect', '--session', 'native-activity'], objectCliEnvironment(h.directory))
+  const result = await runCompiledObjectCli(['--endpoint', `unix:${server.path}`, 'agent', 'inspect', '--session', 'native-activity'], objectCliEnvironment(h.directory), '', 60_000)
   expect(result.code, result.stderr).toBe(0)
   const value = JSON.parse(result.stdout).result
   expect(value.status.observation.semantic).toBe('idle')
@@ -126,6 +138,81 @@ it('real public service and compiled inspect preserve the live fact and strict e
     const broken = structuredClone(value); corrupt(broken.status.session.currentActivity)
     expect(() => parseRpcNativeResult('agent.inspect', broken, params)).toThrow()
   }
+})
+
+it('an unavailable history source observation preserves qualified live activity through public inspect', async () => {
+  const h = await harness('history-source-observation')
+  await attachTranscript(h)
+  await start(h)
+  const active = h.client.agentSession('history-source-observation').currentActivity
+  const page = await h.client.sessionHistoryPage('history-source-observation', {refreshNativeSource:true,limit:10})
+  expect(page.source.nativeSessionId).toBe('native-main')
+  await expect(h.client.sessionHistoryPage('history-source-observation',{refreshNativeSource:true,requireCurrentSource:true,limit:10})).rejects.toThrow()
+  const status = await h.client.statusAgent('history-source-observation')
+  expect(status.session.nativeSourceObservation).toMatchObject({state:'unknown',reason:'current-main-unconfirmed',run:{runId:h.run.runId}})
+  expect(status.session.currentActivity).toEqual(active)
+  expect(status.observation).toMatchObject({semantic:'active',readiness:'ready'})
+
+  const server = new AgentMuxControlServer({socketPath:join(h.directory,'history-source.sock'),coreClients:()=>[{hostId:'local',client:h.client}]})
+  await server.start(); closes.push(()=>server.stop())
+  const result = await runCompiledObjectCli(['--endpoint',`unix:${server.path}`,'agent','inspect','--session','history-source-observation'],objectCliEnvironment(h.directory), '', 60_000)
+  expect(result.code,result.stderr).toBe(0)
+  expect(JSON.parse(result.stdout).result.status.observation.semantic).toBe('active')
+  await end(h)
+  expect((await h.client.statusAgent('history-source-observation')).observation.semantic).toBe('idle')
+  expect(h.client.agentSession('history-source-observation').nativeSourceObservation?.state).toBe('unknown')
+  await start(h,3,'next-native-turn')
+  expect((await h.client.statusAgent('history-source-observation')).observation.semantic).toBe('active')
+})
+
+it('an unavailable Hook source witness invalidates old activity while a new qualified turn can recover', async () => {
+  const h = await harness('hook-source-witness')
+  await start(h)
+  await h.hook('SessionStart','unconfirmed-clear',{session_id:'native-main',source:'clear'})
+  expect(h.client.agentSession('hook-source-witness').nativeSourceObservation).toMatchObject({state:'unknown',reason:'native-witness-unavailable'})
+  expect((await h.client.statusAgent('hook-source-witness')).observation.semantic).toBe('unknown')
+  await end(h)
+  expect((await h.client.statusAgent('hook-source-witness')).observation.semantic).toBe('unknown')
+  await start(h,3,'next-native-turn')
+  expect((await h.client.statusAgent('hook-source-witness')).observation.semantic).toBe('active')
+  await end(h,4,'next-native-turn')
+  expect((await h.client.statusAgent('hook-source-witness')).observation.semantic).toBe('idle')
+})
+
+it.each([{agent_id:'child-session'},{extra:{agent_id:'child-session'}}])('a declared child SessionStart cannot invalidate main activity (%j)', async child => {
+  const h = await harness('child-session-start')
+  await start(h)
+  const before = h.client.agentSession('child-session-start').currentActivity
+  await h.hook('SessionStart','child-session-start',{session_id:'native-main',source:'startup',...child})
+  expect(h.client.agentSession('child-session-start').currentActivity).toEqual(before)
+  expect(h.client.agentSession('child-session-start').nativeSourceObservation).toBeUndefined()
+  expect((await h.client.statusAgent('child-session-start')).observation.semantic).toBe('active')
+})
+
+it.each(['changed','ambiguous'] as const)('a %s native source still withholds current activity', async state => {
+  const h = await harness(`conflicting-source-${state}`)
+  const transcript = await attachTranscript(h)
+  await start(h)
+  const original = {kind:'provider' as const,providerId:'claude',sessionId:'native-main',transcriptPath:transcript}
+  const foreign = {...original,sessionId:'foreign-main',transcriptPath:join(h.directory,'foreign-main.jsonl')}
+  const provider = h.client.providers.get('claude') as AgentProvider & Required<Pick<AgentProvider,'discoverNativeSession'>>
+  const discover = vi.spyOn(provider,'discoverNativeSession').mockResolvedValue(state==='changed'
+    ? {handle:foreign,assertCurrent:async()=>{}}
+    : {candidates:[original,foreign].map(handle=>({handle,assertPresent:async()=>{}}))})
+  h.run.pid = 1234
+  try {
+    await h.client.sessionHistoryPage(`conflicting-source-${state}`,{refreshNativeSource:true,limit:10})
+  } finally {discover.mockRestore();h.run.pid=null}
+  const conflict = h.client.agentSession(`conflicting-source-${state}`)
+  expect(conflict.nativeSourceObservation?.state).toBe(state)
+  expect((await h.client.statusAgent(`conflicting-source-${state}`)).observation.semantic).toBe('unknown')
+  await h.client.sessionHistoryPage(`conflicting-source-${state}`,{refreshNativeSource:true,limit:10})
+  expect(h.client.agentSession(`conflicting-source-${state}`).nativeSourceObservation).toEqual(conflict.nativeSourceObservation)
+  expect(h.client.agentSession(`conflicting-source-${state}`).observedNativeHandle).toEqual(conflict.observedNativeHandle)
+  await h.hook('SessionStart','failed-source-recheck',{session_id:'native-main',source:'resume'})
+  await start(h,3,'later-native-turn')
+  expect(h.client.agentSession(`conflicting-source-${state}`).nativeSourceObservation).toEqual(conflict.nativeSourceObservation)
+  expect((await h.client.statusAgent(`conflicting-source-${state}`)).observation.semantic).toBe('unknown')
 })
 
 

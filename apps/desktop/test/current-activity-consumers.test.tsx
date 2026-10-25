@@ -2,6 +2,8 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, expect, it, vi } from 'vitest'
+import { join } from 'node:path'
+import { writeFile } from 'node:fs/promises'
 import type { AgentMuxAgentSession } from '../../../packages/core/src/types.js'
 import { decideContinuousProgress } from '../../../packages/core/src/continuous-progress.js'
 import { activityCertaintyClient } from '../../../packages/core/test/fixtures/activity-certainty-client.js'
@@ -68,6 +70,34 @@ it('Main and same-state Session events carry current active to idle without rewr
   const unconfirmed = apply(idle, core)
   expect(unconfirmed.currentActivity).toBeUndefined()
   expect(observeAgentSession(unconfirmed, now).semantic).toBe('active')
+})
+
+it('real Core activity survives an auxiliary source failure through Main, Renderer and Focus', async () => {
+  const id = 'live-source-failure-consumer'
+  const h = await activityCertaintyClient(id,'claude')
+  cleanup.push(h.close)
+  const transcript = join(h.directory,'native-main.jsonl')
+  await writeFile(transcript,JSON.stringify({type:'user',sessionId:'native-main',isSidechain:false,
+    uuid:'original-input',message:{role:'user',content:'Original input'}})+'\n')
+  await h.hook('PreToolUse','main-transcript',{session_id:'native-main',transcript_path:transcript})
+  await h.hook('turn.start','native-start',{session_id:'native-main',sourceId:'native-source',sequence:1,turnId:'native-turn'})
+  await h.client.sessionHistoryPage(id,{refreshNativeSource:true,limit:10})
+  const kernel = Reflect.get(h.client,'kernel')
+  kernel.list = async () => [h.run]
+  kernel.identity = () => ({buildIdentity:'private',protocolVersion:1,daemonInstanceId:'private'})
+  const config = await api.config.get()
+  const main = new RuntimeController(h.store,async()=>h.client)
+  main.commit(await main.prepare(config)); cleanup.push(async()=>main.dispose())
+  const session = (await main.snapshot(config)).sessions.find(item=>item.id===id) as Extract<SessionSnapshot,{kind:'agent'}>
+  expect(session.nativeSourceObservation?.state).toBe('unknown')
+  const select = createFocusProjectionSelector()
+  const input = {sessions:[session],timelines:{},agentNames:{},config,scratchTopicSnapshots:{}}
+  expect(select(input).contexts[0]).toMatchObject({bucket:'working',activitySemantic:'active'})
+  await h.hook('turn.complete','native-end',{session_id:'native-main',sourceId:'native-source',sequence:2,
+    turnId:'native-turn',reason:'answer',isAborted:false})
+  const next = projectRuntimeEvent({sessions:[session],timelines:{},pendingAgentLaunches:{},tabs:{},layouts:{},viewModes:{}},
+    {type:'core',hostId:'local',event:{type:'agent-session',session:h.client.agentSession(id)}}).state.sessions
+  expect(select({...input,sessions:next}).contexts[0]).toMatchObject({bucket:'idle',activitySemantic:'idle',stateLabel:'Idle'})
 })
 
 it('current idle stays separate from an old result and an absent native activity source', async () => {
