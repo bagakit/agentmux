@@ -29,7 +29,7 @@ it('actual SDK and Axios send the exact frozen native card bytes with a stable o
   const body = JSON.parse(prepared.request.body!), card = JSON.parse(body.content), node = feishuCardElements(card)[1]
   expect(body.receive_id).toBe(original.target.externalConversationId); expect(body.uuid).toMatch(/^[A-Za-z0-9_-]{43}$/u)
   expect(card.header).toBeUndefined(); expect(feishuCardElements(card)[0].text.content).toBe('Unknown author')
-  expect(node.tag).toBe('markdown'); expect(node.content).toContain('原文'); expect(node.content).toContain('` <at user_id="all"> `')
+  expect(node.tag).toBe('markdown'); expect(node.content).toContain('原文'); expect(node.content).toContain('`<at user_id="all">`')
   const sent = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', new AbortController().signal)
   expect(sent).toEqual({ state: 'confirmed', mapping: { messageId: 'platform-message-1', threadId: 'original-platform-thread' } })
   const create = nativeResponses.mock.calls.findIndex(([request]) => request.url?.endsWith('/open-apis/im/v1/messages'))
@@ -53,7 +53,7 @@ it.each([undefined, 'progress', 'final'] as const)('represents original public %
   expect(card.body.elements[0]).toMatchObject({ background_style: 'bg-white', columns: [{ padding: phase === 'progress' ? '6px 12px 6px 12px' : phase === 'final' ? '10px 12px 10px 12px' : '8px 12px 8px 12px' }] })
   expect(elements[0].text.content).toContain('Unknown author')
   expect(elements[1]).toMatchObject({ tag: 'markdown', content: expect.stringContaining('Original public message') })
-  expect(elements[1].content).toContain('` <at user_id="all"> `')
+  expect(elements[1].content).toContain('`<at user_id="all">`')
   expect(elements[1].text_size).toBe(phase === 'progress' ? 'notation' : undefined)
 })
 
@@ -67,7 +67,7 @@ it('delivers, replaces and inspects compact progress through the native SDK with
   expect(JSON.stringify(prepared)).toBe(frozen)
   const card = JSON.parse(JSON.parse(f.remote.messageCalls()[0]!.body).content)
   expect(card.header).toBeUndefined(); expect(feishuCardElements(card)[1].content).toContain('正在检查群消息的投递链路。')
-  expect(feishuCardElements(card)[1].content).toContain('` <at user_id="all"> `')
+  expect(feishuCardElements(card)[1].content).toContain('`<at user_id="all">`')
   expect(card.config.summary.content.length).toBeGreaterThanOrEqual(8); expect(Array.from(card.config.summary.content)).toHaveLength(60)
   const updated = f.publisher.prepare(operation({ operationId: 'original-progress-update', mapping: created.mapping,
     payload: { kind: 'speech', phase: 'progress', text: text + '\n原请求已确认，继续处理。' } }))
@@ -273,7 +273,7 @@ it('bounds the actual double-encoded request without silently clipping complete 
   expect((await f.publisher.dispatch(prepared, original.target, 'fixture-credential', new AbortController().signal)).state).toBe('confirmed')
   expect(f.remote.messageCalls()[0]!.body).toBe(prepared.request.body)
   expect(feishuCardElements(JSON.parse(JSON.parse(f.remote.messageCalls()[0]!.body).content))[1].text.content).toBe(text)
-  expect(() => f.publisher.prepare(operation({ payload: { kind: 'speech', text: '\u0000'.repeat(8_192) } }))).toThrowError(expect.objectContaining({ code: 'FEISHU_PUBLICATION_REQUEST_TOO_LARGE' }))
+  expect(() => f.publisher.prepare(operation({ payload: { kind: 'speech', text: '\u0000'.repeat(8_192), presentationContext: { before: '', after: '', literal: true } } }))).toThrowError(expect.objectContaining({ code: 'FEISHU_PUBLICATION_REQUEST_TOO_LARGE' }))
   const question = f.publisher.prepare(operation({ payload: { kind: 'speech', text: '', questions: [{ id: 'opaque-original-question', prompt: 'Choose an original option', options: [{ id: 'opaque-option', label: 'Original option' }], acceptsText: true }] } }))
   const rendered = feishuCardElements(JSON.parse(JSON.parse(question.request.body!).content))[1].content
   expect(rendered).toContain('Choose an original option'); expect(rendered).toContain('Original option')
