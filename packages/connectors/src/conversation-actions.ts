@@ -297,8 +297,18 @@ export class ConversationActions implements PublicationPermissionsPort {
     const core = this.options.core(binding.executionHostId), session = core?.agentSession?.(binding.agentSessionId)
     if (!session) return
     const database = this.options.connections.database
-    const rows = database.prepare("SELECT operation_json,state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND json_extract(operation_json,'$.payload.kind')='question' AND ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? GROUP BY projection_id) AND json_extract(operation_json,'$.payload.status') IN ('pending','unconfirmed') ORDER BY ordinal LIMIT 100")
-      .all(binding.bindingId, binding.revision, binding.bindingId, binding.revision)
+    // Later answers and withdrawals mask old candidates, including non-Question
+    // successors. Bound the result only after checking the original projection.
+    const rows = database.prepare(`SELECT candidate.operation_json,candidate.state
+      FROM connector_publication_operation candidate INDEXED BY connector_publication_question_candidate
+      WHERE candidate.binding_id=? AND candidate.binding_revision=?
+        AND json_extract(candidate.operation_json,'$.payload.kind')='question'
+        AND json_extract(candidate.operation_json,'$.payload.status') IN ('pending','unconfirmed')
+        AND NOT EXISTS (SELECT 1 FROM connector_publication_operation successor
+          WHERE successor.binding_id=candidate.binding_id AND successor.binding_revision=candidate.binding_revision
+            AND successor.projection_id=candidate.projection_id AND successor.ordinal>candidate.ordinal)
+      ORDER BY candidate.ordinal LIMIT 100`)
+      .all(binding.bindingId, binding.revision)
     for (const row of rows) {
       const operation = { ...JSON.parse(String(row.operation_json)), state: row.state } as PublicationOperation
       if (operation.payload.kind !== 'question' || !operation.payload.actionRef) continue
