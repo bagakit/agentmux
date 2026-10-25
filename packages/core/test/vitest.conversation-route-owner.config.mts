@@ -6,6 +6,8 @@ import original from '../../../vitest.config.ts'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, [string, string, string]> = {
+  'service-inspect-reparse': ['packages/core/src/public-rpc-service.ts', 'parseConversationReadPageForWindow(page, request)', "(await import('./conversation-changes.js')).parseConversationReadPage(page, request)"],
+  'service-changes-reparse': ['packages/core/src/public-rpc-service.ts', 'parseConversationChangesPageForWindow(page, request)', "(await import('./conversation-changes.js')).parseConversationChangesPage(page, request)"],
   'reader-copy': ['packages/core/src/conversation-reader.ts', 'return parsed\n  } finally { releaseRead() }', 'return structuredClone(parsed)\n  } finally { releaseRead() }'],
   'copy-items': ['packages/core/src/conversation-changes.ts', "key === 'items' && retainItems ? value : immutablePageValue(value)", 'immutablePageValue(value)'],
   'borrow-source': ['packages/core/src/conversation-changes.ts', 'source.hostId === original.sourceHostId && ', ''],
