@@ -8,6 +8,7 @@ const popoverClarity = process.argv.includes('--popover-clarity')
 const questionValidation = process.argv.includes('--question-validation')
 const refusalClarity = process.argv.includes('--refusal-clarity')
 const groupActivityActions = process.argv.includes('--group-activity-actions')
+const groupClarity = process.argv.includes('--group-clarity')
 const groupDetails = process.argv.includes('--group-details')
 const connectorDetails = process.argv.includes('--connector-details-modern')
 const entityOverview = process.argv.includes('--entity-overview')
@@ -20,7 +21,7 @@ let win
 app.whenReady().then(async () => {
   try {
     win = new BrowserWindow({ width: 1380, height: 980, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
-    await win.loadFile(html, { query: { 'header-status': '1', ...(groupDetails ? { 'group-details': '1' } : {}), ...(connectorDetails ? { 'connector-details-modern': '1' } : {}), ...(entityOverview ? { 'entity-overview': '1' } : {}), ...(inputRecovery ? { 'input-recovery': '1' } : {}), ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(questionValidation ? { 'question-validation': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}), ...(statusPriority ? { 'status-priority': '1' } : {}) } })
+    await win.loadFile(html, { query: { 'header-status': '1', ...(groupDetails ? { 'group-details': '1' } : {}), ...(groupClarity ? { 'group-clarity': '1' } : {}), ...(connectorDetails ? { 'connector-details-modern': '1' } : {}), ...(entityOverview ? { 'entity-overview': '1' } : {}), ...(inputRecovery ? { 'input-recovery': '1' } : {}), ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(questionValidation ? { 'question-validation': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}), ...(statusPriority ? { 'status-priority': '1' } : {}) } })
     const { read, until, settle, click, press } = nativeRendererInput(win, result.interactions, '')
     const region = '[data-workbench-region-id="channel-preview-region"]'
     const entry = adapter => region + ' [data-channel-entry="' + adapter + '"]'
@@ -94,11 +95,14 @@ app.whenReady().then(async () => {
         await click(scenario === 'healthy' && !off ? '[data-connection-action="overview"]' : '.connector-header-menu__item')
         await until(exists(dialog + ' .connector-group-details'))
         await until('document.querySelector(' + JSON.stringify(dialog + ' .connector-traffic-summary') + ')?.textContent.includes(' + JSON.stringify(scenario === 'healthy' ? 'No recent requests' : 'Source reading unconfirmed') + ')')
-        win.setContentSize(width, 980); await until('innerWidth===' + width); await settle()
+        win.setContentSize(width, groupClarity && width < 500 ? 844 : 980); await until('innerWidth===' + width); await settle()
         assert.equal(await read('document.querySelector(' + JSON.stringify(tab('overview')) + ').getAttribute("aria-selected")'), 'true')
         assert.ok(await read('document.querySelector(".agent-connector-dialog__body").scrollTop < 20'), 'Default entry keeps group identity at the top')
       }
       const dismiss = async () => { await click('[aria-label="Close group setup"]'); await until('!document.querySelector(' + JSON.stringify(dialog) + ')'); assert.equal(await read('document.activeElement?.dataset.channelEntry'), 'feishu') }
+      if (groupClarity) {
+        await require('./clarity-scene.cjs')({ win, read, until, click, settle, capture, details, dismiss, tab, member, result })
+      } else {
       await details('healthy', 'dark', 1380)
       await capture('group-overview-wide-dark'); await dismiss()
       await details('mixed', 'light', 520)
@@ -128,8 +132,9 @@ app.whenReady().then(async () => {
       await click(dialog + ' .connector-delivery-details__originals > summary')
       await read('document.querySelector(".agent-connector-dialog__body").scrollTop=0')
       await capture('group-stale-recovery-wide-light')
+      }
       if (!process.argv.includes('--skip-reference')) {
-        await dismiss(); await open('feishu'); await click(action('Channel settings'))
+        await dismiss(); win.setContentSize(1380, 980); await until('innerWidth===1380'); await read('window.channelEntryProof.setTheme("light")'); await open('feishu'); await click(action('Channel settings'))
         await until(exists('[data-settings-group-toggle="mote"]'))
         if (await read('document.querySelector(\'[data-settings-group-toggle="mote"]\').getAttribute("aria-expanded")!=="true"')) await click('[data-settings-group-toggle="mote"]')
         await click('[data-settings-target="mote"]'); await until(exists('[data-settings-pane="mote"] .settings-mote')); await settle()

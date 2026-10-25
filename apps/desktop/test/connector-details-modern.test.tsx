@@ -6,6 +6,7 @@ vi.mock('react-resizable-panels', async () => { const { createRequire } = await 
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Controlled terminal rendering</div> }))
 vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
 import { connectorJourneyFixture } from './fixtures/connector-journey'
+import { recordedGroupBinding } from '../../../packages/connectors/test/fixtures/recorded-room-binding'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { copyConnectorIdentity } from './helpers/connector-identity-copy'
@@ -50,6 +51,16 @@ it('opens View group details at the group overview from the actual channel menu 
   expect(dialog().querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Overview')
   expect(scroll.mock.instances.some(node => (node as unknown as HTMLElement).dataset.connectionSection === 'activity')).toBe(false)
   await wait(() => expect(dialog().querySelector('.connector-group-details__identity')?.textContent).toContain('Original collaboration group'))
+  const relationship = () => dialog().querySelector<HTMLElement>('[aria-label="Current conversation and group relationship"]')!
+  expect(relationship().textContent).toContain('Original Mote Agent')
+  expect(relationship().textContent).toContain('This conversation')
+  expect(relationship().textContent).toContain('via Bot')
+  expect(relationship().closest('.agent-connector-dialog__body')).toBeNull()
+  const description = document.getElementById(dialog().closest('[role="dialog"]')!.getAttribute('aria-describedby')!)
+  expect(description).not.toBeNull()
+  expect(relationship().contains(description)).toBe(true)
+  expect(dialog().querySelector('.connector-group-details__header .connector-group-details__configuration')).not.toBeNull()
+  expect(dialog().querySelector('.connector-delivery-details > .connector-group-details__configuration')).toBeNull()
   const overview = dialog().querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')!
   await act(async () => { overview.focus(); overview.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
   expect(document.activeElement?.textContent).toBe('Member access')
@@ -61,12 +72,49 @@ it('opens View group details at the group overview from the actual channel menu 
   expect(joining.hidden).toBe(false)
   expect(joining.textContent).toContain('Joining and permission to use this Agent are separate.')
   expect(joining.textContent).toContain('Create join link')
+  expect(relationship().textContent).toContain('Original Mote Agent')
   await section('sharing')
   expect(dialog().querySelector<HTMLElement>('[data-connection-panel="sharing"]')!.hidden).toBe(false)
   expect(dialog().querySelector<HTMLElement>('[aria-label="Group input scope"]')?.dataset.value).toBe(binding.scope.input)
+  const audiences = dialog().querySelector<HTMLElement>('[aria-label="Connected audiences"]')!
+  expect(audiences).not.toBeNull()
+  expect(audiences.closest('details:not([open]),[hidden]')).toBeNull()
+  expect(audiences.textContent).toContain('Original collaboration group')
+  expect(audiences.textContent).toContain('AgentMux App')
+  const boundaries = dialog().querySelector<HTMLElement>('[aria-label="Context and sharing boundaries"]')!
+  expect(boundaries.closest('details:not([open]),[hidden]')).toBeNull()
+  expect(relationship().textContent).toContain('Original Mote Agent')
   expect(writes()).toBe(before)
   await f.button('Close')
   await wait(() => expect(document.activeElement).toBe(trigger()))
+  expect(writes()).toBe(before)
+}, 30_000)
+
+it('keeps configured paused replies-only relation and audiences visible across all four original tabs', async () => {
+  const input = { ...f.original.input, operationId: 'recorded-clarity-bind', connectionId: f.config.connectionId, bindingId: 'original-dialog', externalConversationId: 'oc_original_dialog', scope: { ...f.original.input.scope, publication: 'future-native-user-facing' as const }, inputTarget: { kind: 'native-conversation' as const, source: f.original.input.expectedSource } }
+  const saved = recordedGroupBinding(f.services.database!, input, await f.original.checkpoint({ hostId: input.executionHostId, agentSessionId: input.agentSessionId }), f.config.application, { kind: 'user', id: 'original-owner' })
+  expect(saved.state).toBe('applied')
+  if (saved.state !== 'applied') throw Error('The original saved replies-only binding must exist')
+  const binding = saved.binding
+  const paused = await f.forward('connection.binding.pause', { operationId: 'clarity-pause', bindingId: binding.bindingId, expectedRevision: binding.revision }, f.hostingTarget)
+  expect(paused.state).toBe('applied')
+  await open()
+  await wait(() => expect(dialog().querySelector('.connector-group-details__identity')?.textContent).toContain('Original collaboration group'))
+  const before = writes()
+  for (const name of ['overview', 'members', 'sharing', 'joining']) {
+    await section(name)
+    const header = dialog().querySelector<HTMLElement>('.connector-group-details__header')!
+    expect(header.textContent).toContain('Original Mote Agent')
+    expect(header.textContent).toContain('Original collaboration group')
+    expect(header.textContent).toContain('Configured · Paused · Agent replies only')
+    expect(header.closest('.agent-connector-dialog__body')).toBeNull()
+  }
+  await section('sharing')
+  const audiences = dialog().querySelector<HTMLElement>('[aria-label="Connected audiences"]')!
+  expect(audiences.closest('details:not([open]),[hidden]')).toBeNull()
+  expect(audiences.querySelectorAll('[data-sharing-audience]')).toHaveLength(1)
+  expect(audiences.textContent).toContain('AgentMux App')
+  expect(dialog().querySelector('[data-partial-sharing]')?.textContent).toContain('Resume two-way sync')
   expect(writes()).toBe(before)
 }, 30_000)
 
@@ -121,7 +169,8 @@ it('routes off-state recovery to the exact original service and bot without enab
   await wait(() => expect(traffic().textContent).toContain('Automatic sync is off'))
   await f.button('Review automatic sync')
   expect(document.activeElement).toBe(dialog().querySelector('[data-connection-section="sync"]'))
-  expect(dialog().querySelector<HTMLDetailsElement>('.connector-delivery-details__originals')!.open).toBe(true)
+  expect(dialog().querySelector('[data-connection-section="sync"]')!.closest('details')).toBeNull()
+  expect(dialog().querySelector<HTMLDetailsElement>('.connector-delivery-details__originals')!.open).toBe(false)
   expect(writes()).toBe(before)
   await f.button('Open channel settings')
   expect(f.settings).toHaveBeenCalledWith(expect.objectContaining({ hostingTarget: f.hostingTarget, hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, connection: expect.objectContaining({ connectionId: binding.connectionId, application: binding.application }) }))
@@ -255,6 +304,6 @@ it('starts with compact saved member rows, preserves a dirty editor across discl
   expect(traffic().querySelector('[data-direction="incoming"]')?.textContent).not.toContain('Earlier check:')
   expect(row().querySelector('[data-member-save]')).not.toBeNull()
   expect(writes()).toBe(before)
-  expect(dialog().querySelectorAll('[data-connection-panel="sharing"] h3')).toHaveLength(0)
+  expect([...dialog().querySelectorAll('[data-connection-panel="sharing"] h3')].map(node => node.textContent)).toEqual(['Connected audiences', 'Context and sharing boundaries'])
   expect(dialog().querySelectorAll('[data-connection-panel="joining"] h3')).toHaveLength(0)
 }, 30_000)
