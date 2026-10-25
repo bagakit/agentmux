@@ -1203,6 +1203,9 @@ export class AgentMuxClient {
     const epoch = this.connectionEpoch
     const generation = this.reconnectGeneration
     try {
+      // Explicit retry also reaches optional provenance observation on a healthy
+      // Native connection; it does not restart Session or semantic recovery.
+      if (this.connected && this.kernel.isConnected()) await this.kernel.connect()
       if (endpoint) {
         await this.kernel.connect({ refreshEndpointForRun: endpoint.runId })
         this.assertConnectionEpoch(epoch)

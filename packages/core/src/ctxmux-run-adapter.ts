@@ -52,6 +52,7 @@ import {
   CTXMUX_MANIFEST_SHA256,
   supportedCtxmuxArtifactPlatform,
   ctxmuxArtifactSource,
+  ctxmuxOwnerReceiptPath,
   defaultCtxmuxSocketPath,
   defaultCtxmuxStateDirectory
 } from './runtime-paths.js'
@@ -546,7 +547,7 @@ async function verifyOwnerReceipt(
   runtime: RuntimeIdentity
 ): Promise<void> {
   try {
-    const path = join(dirname(socketPath), 'owner.json')
+    const path = ctxmuxOwnerReceiptPath(socketPath, runtime, CTXMUX_MANIFEST_SHA256)
     const metadata = await stat(path)
     const receipt: unknown = JSON.parse(await readFile(path, 'utf8'))
     const manifest = await readArtifactManifest()
@@ -574,7 +575,7 @@ async function writeOwnerReceipt(
   stateDirectory: string,
   runtime: RuntimeIdentity
 ): Promise<void> {
-  const path = join(dirname(socketPath), 'owner.json')
+  const path = ctxmuxOwnerReceiptPath(socketPath, runtime, CTXMUX_MANIFEST_SHA256)
   const temporaryPath = join(dirname(path), `.owner-${process.pid}-${mintObjectId()}.json`)
   try {
     await writeFile(
@@ -599,11 +600,9 @@ type ArtifactActivation = {
   receiptFailure?: AgentMuxError
   /** The exact instance whose product receipt this launch has durably recorded. */
   receiptInstanceId?: string
+  receiptWrite?: Promise<void>
 }
 const artifactActivations = new Map<string, ArtifactActivation>()
-// A previous child's in-flight rename must finish before a new child's receipt.
-// Runtime availability never waits for this product-file publication queue.
-const ownerReceiptWrites = new Map<string, { entry: ArtifactActivation; promise: Promise<void> }>()
 
 function activateArtifact(artifacts: VerifiedArtifacts, socketPath: string, stateDirectory: string,
   signal: AbortSignal): ArtifactActivation {
@@ -641,10 +640,8 @@ async function recordActivationReceipt(entry: ArtifactActivation, socketPath: st
   selected: RuntimeActivation): Promise<void> {
   if (!selected.spawned || entry.receiptInstanceId === selected.runtime.daemonInstanceId) return
   assertAgentMuxRuntimeCompatibility(selected.runtime)
-  const previous = ownerReceiptWrites.get(socketPath)
-  if (previous?.entry === entry) return await previous.promise
+  if (entry.receiptWrite) return await entry.receiptWrite
   const writing = (async () => {
-    await previous?.promise.catch(() => {})
     if (artifactActivations.get(socketPath) !== entry || selected.observation.childExit) return
     try {
       await writeOwnerReceipt(entry.artifacts, socketPath, entry.stateDirectory, selected.runtime)
@@ -658,9 +655,9 @@ async function recordActivationReceipt(entry: ArtifactActivation, socketPath: st
       throw entry.receiptFailure
     }
   })()
-  ownerReceiptWrites.set(socketPath, { entry, promise: writing })
+  entry.receiptWrite = writing
   try { await writing }
-  finally { if (ownerReceiptWrites.get(socketPath)?.promise === writing) ownerReceiptWrites.delete(socketPath) }
+  finally { if (entry.receiptWrite === writing) delete entry.receiptWrite }
 }
 
 function activationDiagnostic(observation: RuntimeActivationObservation): AgentMuxError | undefined {
