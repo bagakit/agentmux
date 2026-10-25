@@ -1282,8 +1282,8 @@ export type AgentMuxAgentSession = {
     notApplied?: boolean
     uncertainTurn?: boolean
   } & (
-    { transport?: 'pty'; startByte: number; endByte: number; native?: never } |
-    { transport: 'native'; startByte?: never; endByte?: never;
+    { transport?: 'pty'; startByte: number; endByte: number; chunks?: AgentTerminalInputChunkState[]; native?: never } |
+    { transport: 'native'; startByte?: never; endByte?: never; chunks?: never;
       native: { plan: AgentNativePromptInputPlan; outcome: 'claimed' | 'admitted' | 'not-applied' | 'unknown'; turnId?: string; queuedSubmissionId?: string; errorCode?: number } }
   )
   terminalPromptSubmission?: AgentTerminalPromptSubmissionState
@@ -1471,6 +1471,14 @@ export type AgentTerminalInputPhaseState = {
   acknowledged: boolean
   /** Original Native owner rejected this immutable phase after its range was occupied. */
   notApplied?: true
+  /** Exact immutable transport claims, persisted before any chunk is dispatched. */
+  chunks?: AgentTerminalInputChunkState[]
+}
+
+export type AgentTerminalInputChunkState = {
+  operationId: string
+  inputByteRange: { startByte: number; endByte: number }
+  acknowledged: boolean
 }
 
 export type AgentTerminalPromptSubmissionState = {

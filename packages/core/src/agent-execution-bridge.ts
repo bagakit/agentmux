@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { ClientFrame } from '@ctxmux/sdk'
-import { CTXMUX_MAX_FRAME_BYTES as MAX_FRAME_BYTES } from './ctxmux-run-adapter.js'
+import { inputChunkBytes, retainedInputFits } from './recoverable-input-frame.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentMuxClientEvent, AgentMuxRunDataEvent, AgentMuxRunInputOperation, AgentMuxNativeService, AgentMuxRunState } from './types.js'
 import { AgentMuxError } from './errors.js'
@@ -30,26 +29,6 @@ export interface AgentExecutionBridgeState {
   pending?: { source: Side; sourceStartByte: number; sourceEndByte: number; digest: string; operation: Omit<AgentMuxRunInputOperation, 'data'>; chunk?: { offset: number; bytes: number } }
 }
 
-// The public recoverableInput wire contract encodes each byte as a JSON number:
-// at most three digits plus a comma. Reserve its exact identity envelope and the
-// largest legal cursor; the bound applies to transport chunks, never native frames.
-function inputEnvelopeBytes(runId: string, operation: Omit<AgentMuxRunInputOperation, 'data'>, expectedByte: number): number {
-  const envelope: ClientFrame = { type: 'request', request: { type: 'recoverable_input', operation: {
-    daemon_instance: operation.ownerInstanceId, operation_key: operation.operationId, id: runId,
-    expected_byte: expectedByte, data: [] } } }
-  return Buffer.byteLength(JSON.stringify(envelope))
-}
-function inputChunkBytes(runId: string, operation: Omit<AgentMuxRunInputOperation, 'data'>): number {
-  const bytes = Math.floor((MAX_FRAME_BYTES - inputEnvelopeBytes(runId, operation, Number.MAX_SAFE_INTEGER)) / 4)
-  if (bytes < 1) throw new AgentMuxError('The original Input identity exceeds the Runtime transport frame budget.', 'EXECUTION_INPUT_SIZE_UNCONFIRMED')
-  return bytes
-}
-function retainedInputFits(runId: string, operation: Omit<AgentMuxRunInputOperation, 'data'>, data: Uint8Array): boolean {
-  if (data.byteLength > MAX_FRAME_BYTES) return false
-  let bytes = inputEnvelopeBytes(runId, operation, operation.expectedByte) - 1
-  for (const value of data) bytes += value < 10 ? 2 : value < 100 ? 3 : 4
-  return bytes <= MAX_FRAME_BYTES
-}
 const chunkOperationId = (binding: string, side: Side, endByte: number, offset: number): string =>
   createHash('sha256').update(JSON.stringify([binding, side, endByte, offset])).digest('hex')
 
