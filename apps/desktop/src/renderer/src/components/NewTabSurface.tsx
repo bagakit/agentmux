@@ -20,7 +20,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useLauncherInputs } from '../lib/launcher-inputs'
 import { EMPTY_LAUNCH_OPTION_SELECTION } from '../lib/launcher-option-draft'
 import { useComposerAttachments } from '../lib/use-composer-attachments'
-import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
+import { expandSemanticReferences, parseComposerDraft } from '@agentmux/client-ui/composer-semantic-reference'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
 import { warmLauncherId, warmTerminalForLauncher, warmTerminalPreview } from '../lib/warm-terminal-preview'
@@ -122,6 +122,8 @@ export function NewTabSurface({
     ? `zone:${JSON.stringify([creationTarget.zoneId, creationTarget.displayWorkspaceId, tabGroupId])}`
     : warmLauncherId({ tabGroupId, regionId })
   const { prompt, setPrompt, names, setName, optionsByProvider, selectOption } = useLauncherInputs(regionId, launcherId)
+  const promptDisplayText = useMemo(() => parseComposerDraft(prompt).map(part =>
+    'text' in part ? part.text : part.reference.label).join(''), [prompt])
   const [optionsExpanded, setOptionsExpanded] = useState(false)
   const [fileReferencesOpen, setFileReferencesOpen] = useState(false)
   useEffect(() => { if (!motionActive) setOptionsExpanded(false) }, [motionActive])
@@ -463,7 +465,7 @@ export function NewTabSurface({
 
       {sections.agents !== 'hidden' ? <div className="launcher-agents-head">
         {sections.agents === 'collapsed' ? <button type="button" className="launcher-agent-entry" aria-label="Expand Agents" onClick={() => setSection('agents', 'expanded')}>
-          <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={prompt}>{prompt ? prompt.split('\n')[0] : 'Start a task'}</small></span><ThemeNavigationDisclosureIcon size={14} />
+          <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={promptDisplayText}>{prompt ? promptDisplayText.split('\n')[0] : 'Start a task'}</small></span><ThemeNavigationDisclosureIcon size={14} />
         </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong></span>}
         <span className="launcher-section-actions">
           {sections.agents === 'collapsed' ? <LauncherResumePicker workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} /> : null}
