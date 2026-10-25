@@ -131,8 +131,6 @@ function terminalWrite(terminal: Terminal, data: string | Uint8Array): Promise<v
 
 const MAX_PENDING_OUTPUT_EVENTS = 256
 const MAX_PENDING_OUTPUT_BYTES = 512 * 1024
-/** Upper bound on how long a hidden terminal's received live bytes wait before they are parsed. */
-export const HIDDEN_LIVE_OUTPUT_WINDOW_MS = 500
 
 /**
  * 搜索的三个开关。字形沿用终端搜索的通用惯例（Aa 大小写、.* 正则、ab| 全词），
@@ -285,8 +283,6 @@ export function TerminalView({
   fontSizeRef.current = fontSize
   const visibleRef = useRef(visible)
   visibleRef.current = visible
-  // A hidden terminal's live output drains on a bounded window; becoming visible drains it at once.
-  const liveVisibilityDrainRef = useRef<(() => void) | null>(null)
   // canControlRun 随 processState 翻转，但 attach effect 不能依赖它——否则同 runId 的
   // 状态跳变（exit/interrupt/recovery）会整块拆/重建 xterm 并回放 scrollback，造成卡顿闪屏。
   // 用 ref 让输入 guard / resize gate 跨状态保持响应，同时不触发 effect 重挂。
@@ -563,7 +559,6 @@ export function TerminalView({
     webglVisibilityRef.current?.(visible)
     viewportRef.current?.setVisible(visible)
     initialObservationVisibilityRef.current?.(visible)
-    if (visible) liveVisibilityDrainRef.current?.()
     if (!visible || !terminal) return
     // Restore after the synchronizer's first visibility frame as well: fit/resize can otherwise
     // move xterm's DOM viewport before the user sees the reactivated Region.
@@ -1025,7 +1020,6 @@ export function TerminalView({
     let outputTail = Promise.resolve()
     const liveOutputQueue = new TerminalLiveOutputQueue()
     let liveDrain: Promise<void> | null = null
-    let hiddenDrainTimer: ReturnType<typeof setTimeout> | null = null
     const pending: RuntimeEvent[] = []
     let pendingBytes = 0
     let latestObservedOutputBytes = session.latestOutputBytes
@@ -1549,18 +1543,6 @@ export function TerminalView({
         liveOutputQueue.admit(output)
       }
       if (liveDrain || observationPending) return
-      // A hidden terminal still parses every byte, but not one task per Agent status redraw: dozens of
-      // hidden TUIs would otherwise flood this Renderer with parse tasks that compete with the visible
-      // terminal's keys. Its queue keeps collecting within the same 2 MiB bound (overflow is recovered
-      // from Runtime history) and drains on a bounded window, or at once when it becomes visible.
-      if (output && !visibleRef.current) {
-        hiddenDrainTimer ??= setTimeout(() => { hiddenDrainTimer = null; scheduleLiveOutputDrain() }, HIDDEN_LIVE_OUTPUT_WINDOW_MS)
-        return
-      }
-      startLiveDrain()
-    }
-    const startLiveDrain = (): void => {
-      if (hiddenDrainTimer !== null) { clearTimeout(hiddenDrainTimer); hiddenDrainTimer = null }
       const drain = drainLiveOutput()
       liveDrain = drain
       outputTail = drain
@@ -1572,13 +1554,6 @@ export function TerminalView({
         if (!disposed && liveOutputQueue.length > 0) scheduleLiveOutputDrain()
       }).catch(() => {})
     }
-    /** Becoming visible, or any reader that waits on `outputTail`, parses deferred hidden bytes first. */
-    const flushDeferredLiveOutput = (): void => {
-      if (disposed || liveDrain || observationPending || liveOutputQueue.length === 0) return
-      startLiveDrain()
-    }
-    liveVisibilityDrainRef.current = flushDeferredLiveOutput
-
     const accept = (event: RuntimeEvent): void => {
       const output = outputForSession(event, session)
       const core = event.event
@@ -1814,7 +1789,6 @@ export function TerminalView({
             throw new Error('Session facts did not confirm this original Run. The original Region is kept.')
           }
         }
-        flushDeferredLiveOutput()
         await observeRead(outputTail, observationLifetime.signal)
         if (disposed) return
         const readingBuffer = terminal.buffer.active
@@ -1989,8 +1963,6 @@ export function TerminalView({
     })
     return () => {
       disposed = true
-      if (hiddenDrainTimer !== null) clearTimeout(hiddenDrainTimer)
-      if (liveVisibilityDrainRef.current === flushDeferredLiveOutput) liveVisibilityDrainRef.current = null
       // Pending requests retain this marker; an Error created here would also retain its old effect stack.
       observationLifetime.abort(Symbol('retired-terminal-observation'))
       let disposalFailure: { error: unknown } | undefined
