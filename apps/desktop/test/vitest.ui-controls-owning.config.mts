@@ -11,4 +11,10 @@ const aliases = Object.entries(manifest.exports).map(([key, value]) => ({
   find: '@agentmux/host' + key.slice(1),
   replacement: resolve(host, (value as { import: string }).import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
 }))
-export default defineConfig({ ...owning, resolve: { ...owning.resolve, alias: [...aliases, ...owning.resolve!.alias as []] } })
+const capsule = resolve(import.meta.dirname, '../../../packages/capsule')
+const capsuleManifest = JSON.parse(readFileSync(resolve(capsule, 'package.json'), 'utf8'))
+const capsuleAliases = Object.entries(capsuleManifest.exports).map(([key, value]) => ({
+  find: new RegExp('^@agentmux/capsule' + (key === '.' ? '' : key.slice(1)) + '$'),
+  replacement: resolve(capsule, (value as { import: string }).import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
+}))
+export default defineConfig({ ...owning, resolve: { ...owning.resolve, alias: [...aliases, ...capsuleAliases, ...owning.resolve!.alias as []] } })
