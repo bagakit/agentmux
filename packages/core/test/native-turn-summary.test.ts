@@ -8,8 +8,11 @@ import { AgentMuxFileAgentSessionStore, normalizeAgentSession } from '../src/age
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
+import { consumeConversationWindowPage, projectConversationWindow, type AgentConversationReadPage } from '../src/conversation.js'
 import { normalizeSessionHistoryPage, SESSION_HISTORY_MAX_PAGE_BYTES } from '../src/session-history.js'
 import { extractTurnUsage, parseTurnUsage } from '../src/agent-usage-transcript.js'
+import { decodeClaudeUsage } from '../src/providers/claude-usage.js'
+import { decodeCodexUsage } from '../src/providers/codex-usage.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxStoredAgentSession, AgentSessionHistoryItem } from '../src/types.js'
@@ -19,6 +22,12 @@ afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) awai
 const jsonl = (rows: unknown[]) => rows.map(row => JSON.stringify(row)).join('\n') + '\n'
 const nativeSessionId = 'original-native-summary'
 const source = { providerId: 'codex', nativeSessionId }
+function conversationItems(page: AgentConversationReadPage): AgentSessionHistoryItem[] {
+  const read = consumeConversationWindowPage(page)
+  expect(read.kind).toBe('complete')
+  if (read.kind !== 'complete') throw Error('The bounded native summary window must be complete')
+  return projectConversationWindow(read.snapshot).records.flatMap(record => record.original.kind === 'native' ? [record.original.item] : [])
+}
 const event = (id: string, turnId: string | undefined, type: string, extra = {}) => ({ type: 'event_msg',
   payload: { id, type, ...(turnId === undefined ? {} : { turn_id: turnId }), ...extra } })
 // Real rollout schema: token_usage_record is a top-level record type, not an event_msg payload type.
@@ -47,7 +56,10 @@ async function fixture(providerId: 'codex' | 'claude', rows: unknown[] = []) {
     agentSessionId: session.agentSessionId, expectedRun: session.run, operationId: 'original-stop', expiresAt: Date.now() + 60000,
     stopOperation: { daemonInstance: 'no-runtime', operationKey: 'original-stop', runId: session.run.runId } }
   await store.reserveLifecycle(reservation); await store.commitLifecycle(reservation, null)
-  const beforeStore = await readFile(storePath), client = new AgentMuxClient({ store })
+  const beforeSessions = await store.load()
+  const beforeRetirement = await store.readRetiredAgentSession(session.agentSessionId)
+  const beforeHistory = await store.readHistorySource(session.agentSessionId)
+  const client = new AgentMuxClient({ store })
   cleanups.push(() => client.dispose())
   const kernel = (client as unknown as { kernel: CtxmuxRunAdapter }).kernel
   const controls = ['start', 'input', 'stop', 'resize', 'attach', 'status'].map(name => vi.spyOn(kernel, name as 'start'))
@@ -60,7 +72,9 @@ async function fixture(providerId: 'codex' | 'claude', rows: unknown[] = []) {
   const cli = (args: string[], input = '') => runCompiledObjectCli(['--endpoint', `unix:${server.path}`, ...args], objectCliEnvironment(root), input)
   return { root, path, storePath, store, session, client, reference, rpc, cli,
     async unchanged() {
-      expect(await readFile(storePath)).toEqual(beforeStore)
+      expect(await store.load()).toEqual(beforeSessions)
+      expect(await store.readRetiredAgentSession(session.agentSessionId)).toEqual(beforeRetirement)
+      expect(await store.readHistorySource(session.agentSessionId)).toEqual(beforeHistory)
       expect(connect).not.toHaveBeenCalled()
       for (const control of controls) expect(control).not.toHaveBeenCalled()
     } }
@@ -73,7 +87,7 @@ it('preserves exact native turn snapshots, duration, response phase and public C
     usage('usage-final', 'turn-one', 110, 220, 339),
     event('complete', 'turn-one', 'task_complete', { duration_ms: 12345 }),
     event('other-turn', 'turn-two', 'task_complete', { duration_ms: 98765 }),
-    event('interrupted', 'turn-three', 'turn_aborted'),
+    event('interrupted', 'turn-three', 'turn_aborted', { reason: 'interrupted' }),
     event('orphan', undefined, 'task_complete', { duration_ms: 77 }),
     event('response-count', 'turn-one', 'token_count', { info: { last_token_usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 } } })])
   const bytes = await readFile(f.path), page = await f.client.sessionHistoryPage(f.session.agentSessionId)
@@ -85,25 +99,27 @@ it('preserves exact native turn snapshots, duration, response phase and public C
   expect(byId.get('answer')?.metrics).toBeUndefined()
   expect(byId.get('usage-early')?.metrics).toEqual({ scope: 'turn', usage: { inputTokens: 10, outputTokens: 20, totalTokens: 39, cachedInputTokens: 4, reasoningOutputTokens: 5 } })
   expect(byId.get('usage-final')?.metrics).toEqual({ scope: 'turn', usage: { inputTokens: 110, outputTokens: 220, totalTokens: 339, cachedInputTokens: 4, reasoningOutputTokens: 5 } })
-  expect(byId.get('complete')).toMatchObject({ turnId: 'turn-one', metrics: { scope: 'turn', durationMs: 12345, status: 'completed' } })
-  expect(byId.get('other-turn')?.metrics).toEqual({ scope: 'turn', durationMs: 98765, status: 'completed' })
-  expect(byId.get('interrupted')?.metrics).toEqual({ scope: 'turn', status: 'interrupted' })
+  expect(byId.get('complete')).toMatchObject({ turnId: 'turn-one', turnOutcome: { status: 'completed' }, metrics: { scope: 'turn', durationMs: 12345 } })
+  expect(byId.get('other-turn')).toMatchObject({ turnOutcome: { status: 'completed' }, metrics: { scope: 'turn', durationMs: 98765 } })
+  expect(byId.get('interrupted')?.turnOutcome).toEqual({ status: 'interrupted' })
+  expect(byId.get('interrupted')?.metrics).toBeUndefined()
   expect(byId.get('orphan')?.metrics).toBeUndefined()
   expect(byId.get('orphan')?.metricsDiagnostic?.code).toBe('NATIVE_HISTORY_METRICS_UNAVAILABLE')
   expect(JSON.parse((byId.get('complete')!.contentParts[0] as { text: string }).text).duration_ms).toBe(12345)
   const input = { ...f.reference, source: 'native' as const, limit: 30 }
-  for (const method of ['agent.history', 'agent.conversation.inspect'] as const) {
-    const read = await f.rpc.call(method, input)
-    expect(read.nativeSource).toEqual(source)
-    expect(read.items.map(entry => entry.kind === 'item' ? entry.item : null)).toEqual(page.items)
-  }
+  const history = await f.rpc.call('agent.history', input)
+  expect(history.nativeSource).toEqual(source)
+  expect(history.items.map(entry => entry.kind === 'item' ? entry.item : null)).toEqual(page.items)
+  const conversation = await f.rpc.call('agent.conversation.inspect', { ...f.reference, limit: 30 })
+  expect(conversationItems(conversation)).toEqual(page.items)
   const context = await f.rpc.call('agent.context', f.reference)
   expect(context.native?.items).toEqual(page.items)
-  for (const command of [['agent', 'history'], ['agent', 'conversation', 'inspect']]) {
-    const output = await f.cli([...command, '--host', 'local', '--session', f.session.agentSessionId, '--source', 'native'])
-    expect(output.code, output.stdout + output.stderr).toBe(0)
-    expect(JSON.parse(output.stdout).result.items.map((entry: { item: AgentSessionHistoryItem }) => entry.item)).toEqual(page.items)
-  }
+  const historyOutput = await f.cli(['agent', 'history', '--host', 'local', '--session', f.session.agentSessionId, '--source', 'native'])
+  expect(historyOutput.code, historyOutput.stdout + historyOutput.stderr).toBe(0)
+  expect(JSON.parse(historyOutput.stdout).result.items.map((entry: { item: AgentSessionHistoryItem }) => entry.item)).toEqual(page.items)
+  const conversationOutput = await f.cli(['agent', 'conversation', 'inspect', '--host', 'local', '--session', f.session.agentSessionId])
+  expect(conversationOutput.code, conversationOutput.stdout + conversationOutput.stderr).toBe(0)
+  expect(conversationItems(JSON.parse(conversationOutput.stdout).result)).toEqual(page.items)
   const output = await f.cli(['agent', 'context', '--host', 'local', '--session', f.session.agentSessionId])
   expect(output.code, output.stdout + output.stderr).toBe(0)
   expect(JSON.parse(output.stdout).result.native.items).toEqual(page.items)
@@ -124,22 +140,24 @@ it('keeps native append snapshots scoped and bounded across original change curs
   await appendFile(f.path, partialComplete)
   const first = await f.rpc.call('agent.conversation.changes', { ...f.reference, checkpoint: original.checkpoint, limit: 1 })
   expect(first.items).toHaveLength(1)
-  expect(first.items[0]).toMatchObject({ id: 'new-usage', turnId: 'new-turn', metrics: { scope: 'turn', usage: { inputTokens: 71, outputTokens: 8, totalTokens: 82 } } })
-  const unfinished = await f.rpc.call('agent.conversation.changes', { ...f.reference, checkpoint: first.checkpoint })
+  const firstItems = conversationItems(first)
+  expect(firstItems[0]).toMatchObject({ id: 'new-usage', turnId: 'new-turn', metrics: { scope: 'turn', usage: { inputTokens: 71, outputTokens: 8, totalTokens: 82 } } })
+  const unfinished = await f.rpc.call('agent.conversation.changes', { ...f.reference, checkpoint: first.window.checkpoint })
   expect(unfinished.items).toEqual([])
-  expect(unfinished.checkpoint).toEqual(first.checkpoint)
+  expect(unfinished.window.checkpoint).toEqual(first.window.checkpoint)
   await appendFile(f.path, '\n')
-  const next = await f.rpc.call('agent.conversation.changes', { ...f.reference, checkpoint: unfinished.checkpoint })
-  expect(next.items).toMatchObject([{ id: 'new-complete', turnId: 'new-turn', metrics: { scope: 'turn', durationMs: 321, status: 'completed' } }])
-  expect((await f.rpc.call('agent.conversation.changes', { ...f.reference, checkpoint: next.checkpoint })).items).toEqual([])
+  const next = await f.rpc.call('agent.conversation.changes', { ...f.reference, checkpoint: unfinished.window.checkpoint })
+  const nextItems = conversationItems(next)
+  expect(nextItems).toMatchObject([{ id: 'new-complete', turnId: 'new-turn', turnOutcome: { status: 'completed' }, metrics: { scope: 'turn', durationMs: 321 } }])
+  expect((await f.rpc.call('agent.conversation.changes', { ...f.reference, checkpoint: next.window.checkpoint })).items).toEqual([])
   const latestPage = await f.client.sessionHistoryPage(f.session.agentSessionId, { limit: 1 })
-  expect(latestPage.items).toEqual(next.items)
+  expect(latestPage.items).toEqual(nextItems)
   expect(latestPage.items[0]!.metrics?.usage).toBeUndefined()
   const older = await f.client.sessionHistoryPage(f.session.agentSessionId, { cursor: latestPage.nextCursor!, limit: 1 })
-  expect(older.items).toEqual(first.items)
-  const output = await f.cli(['agent', 'conversation', 'changes', '--input', '-'], JSON.stringify(original))
+  expect(older.items).toEqual(firstItems)
+  const output = await f.cli(['agent', 'conversation', 'changes', '--input', '-'], JSON.stringify({ ...f.reference, checkpoint: original.checkpoint }))
   expect(output.code, output.stdout + output.stderr).toBe(0)
-  expect(JSON.parse(output.stdout).result.items).toEqual([...first.items, ...next.items])
+  expect(conversationItems(JSON.parse(output.stdout).result)).toEqual([...firstItems, ...nextItems])
   await f.unchanged()
 })
 
@@ -158,7 +176,8 @@ it('retains physical record identities from the actual id-less Codex usage and c
   expect(page.items.map(item => item.id)).toEqual(expectedIds)
   expect(page.items.map(item => item.turnId)).toEqual(['exact-native-turn', 'exact-native-turn', 'exact-native-turn', undefined])
   expect(page.items[0]!.metrics).toEqual({ scope: 'turn', usage: { inputTokens: 42, cachedInputTokens: 9, outputTokens: 17, reasoningOutputTokens: 8, totalTokens: 59 } })
-  expect(page.items[1]!.metrics).toEqual({ scope: 'turn', durationMs: 1234, status: 'completed' })
+  expect(page.items[1]!.metrics).toEqual({ scope: 'turn', durationMs: 1234 })
+  expect(page.items[1]!.turnOutcome).toEqual({ status: 'completed' })
   expect(page.items[2]!.metrics).toBeUndefined()
   expect(page.items[2]!.metricsDiagnostic?.code).toBe('NATIVE_HISTORY_METRICS_SOURCE_UNCONFIRMED')
   expect(JSON.parse((page.items[2]!.contentParts[0] as { text: string }).text).thread_id).toBe('different-native-source')
@@ -181,23 +200,24 @@ it('retains Claude response usage and original mixed parts without fabricating a
   const page = await f.client.sessionHistoryPage(f.session.agentSessionId)
   expect(page.items[0]!.metrics).toEqual({ scope: 'response', usage: { inputTokens: 9, outputTokens: 11, cachedInputTokens: 4 } })
   expect(page.items[0]!.turnId).toBeUndefined()
-  expect(page.items[0]!.contentParts).toEqual([{ kind: 'reasoning', text: 'Recorded reasoning' }, { kind: 'text', text: 'Exact response' },
-    { kind: 'tool-call', callId: 'original-call', name: 'inspect', input: '{"path":"original"}' }])
+  expect(page.items[0]!.contentParts).toEqual([{ kind: 'reasoning', text: 'Recorded reasoning', contentEligibility: 'public' }, { kind: 'text', text: 'Exact response', contentEligibility: 'public' },
+    { kind: 'tool-call', callId: 'original-call', name: 'inspect', input: '{"path":"original"}', contentEligibility: 'public' }])
   expect(page.items[1]).toMatchObject({ id: 'response-two', turnId: 'explicit-native-user', metrics: { scope: 'response', usage: { inputTokens: 90, outputTokens: 110 } } })
   expect(page.items[2]!.metrics).toBeUndefined()
   expect(page.items[2]!.metricsDiagnostic?.code).toBe('NATIVE_HISTORY_METRICS_UNAVAILABLE')
   expect(page.items[2]!.contentParts).toEqual(page.items[0]!.contentParts)
-  const output = await f.cli(['agent', 'conversation', 'inspect', '--host', 'local', '--session', f.session.agentSessionId, '--source', 'native'])
+  const output = await f.cli(['agent', 'conversation', 'inspect', '--host', 'local', '--session', f.session.agentSessionId])
   expect(output.code, output.stdout + output.stderr).toBe(0)
-  expect(JSON.parse(output.stdout).result.items.map((entry: { item: AgentSessionHistoryItem }) => entry.item)).toEqual(page.items)
+  expect(conversationItems(JSON.parse(output.stdout).result)).toEqual(page.items)
   await f.unchanged()
 })
 
 it('keeps malformed optional metadata out of authority and retains valid fields and real zero', () => {
   const body = { id: 'original-record', turnId: 'exact-turn', kind: 'activity' as const, contentParts: [{ kind: 'text' as const, text: 'Original body' }] }
-  const read = (metrics: unknown) => normalizeSessionHistoryPage(source, { source, items: [{ ...body, metrics }], nextCursor: null }, 1).items[0]!
-  const value = read({ scope: 'turn', durationMs: -1, usage: { inputTokens: 0, outputTokens: 'unknown', totalTokens: 17 }, status: 'completed' })
-  expect(value.metrics).toEqual({ scope: 'turn', status: 'completed', usage: { inputTokens: 0, totalTokens: 17 } })
+  const read = (metrics: unknown) => normalizeSessionHistoryPage(source, { source, items: [{ ...body, metrics, turnOutcome: { status: 'completed' } }], nextCursor: null }, 1).items[0]!
+  const value = read({ scope: 'turn', durationMs: -1, usage: { inputTokens: 0, outputTokens: 'unknown', totalTokens: 17 } })
+  expect(value.turnOutcome).toEqual({ status: 'completed' })
+  expect(value.metrics).toEqual({ scope: 'turn', usage: { inputTokens: 0, totalTokens: 17 } })
   expect(value.metricsDiagnostic?.code).toBe('NATIVE_HISTORY_METRICS_UNAVAILABLE')
   expect(value.contentParts).toEqual(body.contentParts)
   expect(read({ scope: 'session', durationMs: 12 }).metrics).toBeUndefined()
@@ -208,7 +228,7 @@ it('keeps malformed optional metadata out of authority and retains valid fields 
   const input = { hostId: 'local', agentSessionId: 'original-agent', source: 'native' as const }
   const wire = { ...input, revision: 'a'.repeat(64), availability: 'available', order: 'chronological-page', budgetBytes: 65536,
     nativeSource: source, nextCursor: null, items: [{ kind: 'item', item: { ...body, metrics: { scope: 'response', durationMs: -1 } } }] }
-  const parsed = parseRpcNativeResult('agent.conversation.inspect', wire, input) as unknown as { items: Array<{ item: AgentSessionHistoryItem }> }
+  const parsed = parseRpcNativeResult('agent.history', wire, input) as unknown as { items: Array<{ item: AgentSessionHistoryItem }> }
   expect(parsed.items[0]!.item.contentParts).toEqual(body.contentParts)
   expect(parsed.items[0]!.item.metrics).toBeUndefined()
   expect(parsed.items[0]!.item.metricsDiagnostic?.code).toBe('NATIVE_HISTORY_METRICS_UNAVAILABLE')
@@ -216,10 +236,10 @@ it('keeps malformed optional metadata out of authority and retains valid fields 
 
 it('labels existing Hook samples as response scope and preserves unknown old persisted scope', async () => {
   const sample = { inputTokens: 2, outputTokens: 5, totalTokens: 7, observedAt: _newTailFixtureEpoch(0, 0, 1234) }
-  const codex = extractTurnUsage({ kind: 'native-transcript', transcriptFormat: 'codex-rollout' }, jsonl([
+  const codex = extractTurnUsage(decodeCodexUsage, jsonl([
     event('one-response', 'exact-turn', 'token_count', { info: { last_token_usage: { input_tokens: 2, output_tokens: 5, total_tokens: 7 }, model_context_window: 100 } })]), 1234)
   expect(codex).toEqual({ ...sample, scope: 'response', context: { usedTokens: 7, capacityTokens: 100 } })
-  expect(extractTurnUsage({ kind: 'native-transcript', transcriptFormat: 'claude-jsonl' }, jsonl([
+  expect(extractTurnUsage(decodeClaudeUsage, jsonl([
     { type: 'assistant', message: { usage: { input_tokens: 2, output_tokens: 5 } } }]), 1234)).toEqual({ ...sample, scope: 'response' })
   expect(parseTurnUsage(sample)).toEqual(sample)
   expect(parseTurnUsage({ ...sample, scope: 'response' })).toEqual({ ...sample, scope: 'response' })
