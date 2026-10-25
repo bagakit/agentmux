@@ -95,7 +95,7 @@ Desktop、Mobile 与其他阅读位置使用同一过程行、披露、载荷与
 
 ## 原生结果的共同消费
 
-结果的目标链路使用现有 Provider、Core 读取／归并和原持久 owner：Provider 对同一原生记录一次解释其 `turnOutcome`，当前状态与历史读取复用该解码；Core 保留原 item/ref、turn 和 `same-event` 关系，再独立判断是否更新当前活动。结果类型及公开摘要唯一见[原生结果协议](../specs/conversation-protocol.md#native-request-and-turn-outcomes)，不在客户端引入 occurrence Store、错误扫描器或第二套 Reader。metrics 只表达计量，不能再为完成反馈提供另一种结果。
+结果链路使用现有 Provider、Core 读取／归并和原持久 owner：Provider 对同一原生记录一次解释其 `turnOutcome`，当前状态与历史读取复用该解码；Core 保留原 item/ref、turn 和 `same-event` 关系，再独立判断是否更新当前活动。结果类型及公开摘要唯一见[原生结果协议](../specs/conversation-protocol.md#native-request-and-turn-outcomes)，不在客户端引入 occurrence Store、错误扫描器或第二套 Reader。metrics 只表达计量，不能再为完成反馈提供另一种结果。
 
 共同阅读适配将 accepted record 的 `turnOutcome` 原样交给共享结果卡。卡片只决定摘要、详情、复制和定位布局；Desktop、Mobile、History 和 Focus 宿主不解析原生错误，不因自己的当前状态或过程折叠删去历史结果。deferred 阅读先保结果与有限摘要，完整原载荷沿原精确读取取得；当前服务提示的收口不改变历史卡的身份和内容。阅读位置、选区、焦点与草稿仍由原呈现事务保护。
 
