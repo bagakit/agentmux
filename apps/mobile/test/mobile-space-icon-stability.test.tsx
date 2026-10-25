@@ -4,7 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, deferred, fixture, mount, mounted } from './conversation-fixture'
+import { button, click, deferred, fixture, mount, mounted, waitForElement } from './conversation-fixture'
+
+// Dynamic directory module loading is part of this correctness journey.
+vi.setConfig({ testTimeout: 30000 })
 
 beforeEach(async () => {
   localStorage.clear()
@@ -43,10 +46,12 @@ it.each(['image', 'error'] as const)('keeps the original Space %s and avoids a r
     { primary: 'space', showSession: false, showGoalWork: false, identity: null, profile: null })
   const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原 Host' }} platform={createBrowserPlatform()} native />)
   await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
+  await waitForElement(view.element, '.mobile-space-row')
   const icon = () => view.element.querySelector<HTMLImageElement>('.mobile-space-row .mobile-space-icon img')
   const notice = () => [...document.querySelectorAll<HTMLElement>('.mobile-avatar-notice')].find(node => !node.closest('[hidden]'))
   if (outcome === 'image') await vi.waitFor(() => expect(icon()?.getAttribute('src')).toBe(image))
   else await vi.waitFor(() => expect(notice()?.textContent).toContain('原空间外观读取失败'))
+  expect(view.element.querySelector('.mobile-space-row [data-space-icon-fallback]') !== null).toBe(outcome === 'error')
   expect(inspections).toBe(1)
   const originalDirectories = directories
   await act(async () => document.dispatchEvent(new Event('visibilitychange')))

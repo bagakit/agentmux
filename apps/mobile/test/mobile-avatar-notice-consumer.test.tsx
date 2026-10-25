@@ -4,7 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { button, click, deferred, editor, fixture, mount, mounted, paste, waitForElement } from './conversation-fixture'
+
+// First-use deferred panels are awaited as product state, not a latency oracle.
+vi.setConfig({ testTimeout: 30000 })
 
 const sid = 'session-original', spaceId = 'original-space'
 const context = { spaceId, zoneId: 'original-zone', workspaceId: 'original-workspace', displayWorkspaceId: 'original-workspace', groupId: 'original-group', tabId: 'original-tab', regionId: 'original-region' }
@@ -73,7 +76,7 @@ it.each(['mote', 'space'] as const)('%s original failure is readable, dismissibl
   const view = await open(kind, f)
   await paste(view.element, '原草稿完整保留')
   const originalEditor = editor(view.element), run = f.client.agentSession(sid).run.runId
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   const trigger = notice().querySelector<HTMLElement>('summary')!
   trigger.focus()
   expect(document.activeElement).toBe(trigger)
@@ -109,7 +112,7 @@ it.each(['mote', 'space'] as const)('%s original failure is readable, dismissibl
 it.each(['mote', 'space'] as const)('%s missing original appearance stays unknown and an unsuccessful explicit retry keeps its notice', async kind => {
   const f = originalClient(kind, async () => ({ catalog: { ...emptyCatalog, appearance: [{ spaceId: 'other-space', preset: 'project' }] } }))
   await open(kind, f)
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   const item = await reveal()
   expect(item.textContent).toContain('尚未确认')
   const before = (f.client.forwardRpc as any).mock.calls.filter(([name, params]: any[]) => name === f.method && params?.target?.spaceId === spaceId).length
@@ -126,7 +129,7 @@ it.each(['mote', 'space'] as const)('%s ignores a late old Host observation afte
   const view = await open(kind, old)
   await vi.waitFor(() => expect(old.client.forwardRpc).toHaveBeenCalledWith(old.method, { target: { spaceId }, presentation: true }))
   await view.render(view.surface(next.client))
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   const item = await reveal()
   expect(item.textContent).toContain('新 Host 的原对象读取失败')
   await act(async () => pending.resolve({ catalog: { ...emptyCatalog, appearance: [appearance] } }))
@@ -147,7 +150,7 @@ it.each(['mote', 'space'] as const)('%s healthy original appearance does not cre
   expect(document.querySelector('button button')).toBeNull()
 })
 
-it('keeps same-name Space failures from different Hosts separate and retries only the selected original object', async () => {
+it('groups same-name Space failures into one notice and retries only the selected original object', async () => {
   const f = fixture()
   const spaces = [
     { spaceId: 'space-A', name: '同名项目', kind: 'folder', hostId: 'host-A', directoryPath: fixturePath('a'), projectId: null },
@@ -171,29 +174,34 @@ it('keeps same-name Space failures from different Hosts separate and retries onl
     { primary: 'space', showSession: false, showGoalWork: false, identity: null, profile: null })
   const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} native />)
   await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
-  const summaries = () => [...document.querySelectorAll<HTMLElement>('summary')].filter(node => node.textContent?.includes('头像外观未确认'))
-  await vi.waitFor(() => expect(summaries()).toHaveLength(2))
-  for (const summary of summaries()) {
-    await act(async () => {
-      summary.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
-      summary.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }))
-      summary.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
-      summary.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter' }))
-    })
-    await click(summary)
-  }
-  const item = (id: string) => [...document.querySelectorAll<HTMLElement>('.mobile-notice')].find(node => node.textContent?.includes(`原对象 ${id} 的完整读取失败`))!
+  await waitForElement(view.element, '.mobile-space-row')
+  const summaries = () => [...document.querySelectorAll<HTMLElement>('.mobile-avatar-notice > .mobile-notice__body > details > summary')]
+  await vi.waitFor(() => expect(summaries()).toHaveLength(1))
+  expect(summaries()[0]!.textContent).toBe('2 个图标外观未确认')
+  const summary = summaries()[0]!
+  await act(async () => {
+    summary.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
+    summary.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }))
+    summary.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }))
+    summary.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter' }))
+  })
+  await click(summary)
+  const item = (id: string) => [...document.querySelectorAll<HTMLElement>('.mobile-avatar-notice__item')].find(node => node.textContent?.includes(`原对象 ${id} 的完整读取失败`))!
   expect(item('space-A')).toBeDefined(); expect(item('space-B')).toBeDefined()
   expect(document.querySelector('button button')).toBeNull()
+  expect(document.querySelector('[role=dialog]')).toBeNull()
   expect(view.element.querySelectorAll('.mobile-space-children')).toHaveLength(0)
-  await click(button(item('space-A'), '收起提醒'))
-  expect(item('space-A')).toBeUndefined(); expect(item('space-B')).toBeDefined()
+  expect(document.querySelectorAll('.mobile-avatar-notice .mobile-notice__dismiss')).toHaveLength(1)
+  expect(view.element.querySelectorAll('.mobile-space-row [data-space-icon-fallback]')).toHaveLength(2)
   failures.delete('space-B')
   const before = (f.client.forwardRpc as any).mock.calls.length
   await click(button(item('space-B'), '重新读取头像'))
   await vi.waitFor(() => expect(item('space-B')).toBeUndefined())
   const reads = (f.client.forwardRpc as any).mock.calls.slice(before).filter(([name]: any[]) => name === 'space.inspect')
   expect(reads).toEqual([['space.inspect', { target: { spaceId: 'space-B' }, presentation: true }]])
+  expect(item('space-A')).toBeDefined()
+  await click(button(document.querySelector<HTMLElement>('.mobile-avatar-notice')!, '收起提醒'))
+  expect(summaries()).toHaveLength(0)
   await click(button(view.element, '手机设置与连接'))
   await click(button(document.body, '提醒与诊断'))
   await click(button(document.body, '恢复已收起提醒'))
@@ -213,13 +221,13 @@ it('does not show the old Mote Host and Run failure while the new original obser
     return pending.promise
   })
   await open(kind, f)
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   expect((await reveal()).textContent).toContain('旧 Host 头像原失败')
   await act(async () => f.emit({ type: 'agent-session', session: { ...f.sessions.get(sid)!, hostId: 'host-other', run: { runId: 'run-other' } } } as any))
   await vi.waitFor(() => expect(calls).toBeGreaterThan(1))
   expect([...document.querySelectorAll('summary')].some(node => node.textContent?.includes('头像外观未确认'))).toBe(false)
   await act(async () => pending.reject(Error('新 Host 头像原失败')))
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   expect((await reveal()).textContent).toContain('新 Host 头像原失败')
   expect(document.body.textContent).not.toContain('旧 Host 头像原失败')
   expect(f.client.agentSession(sid).run.runId).toBe('run-other')
@@ -250,11 +258,12 @@ it('does not carry an old Mote observation failure into a different selected Ses
   }) as any
   await getDeviceWorkface().updatePresentation({ selectedSessionId: sid, hostUrl: '', panel: 'conversation' }, presentation('mote'))
   const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} native />)
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   expect((await reveal()).textContent).toContain('旧会话头像失败')
   first = false
   await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
-  await vi.waitFor(() => expect(view.element.textContent).toContain('另一个会话'))
+  await waitForElement(view.element, '.mobile-agent-row__open')
+  expect(view.element.textContent).toContain('另一个会话')
   const row = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-agent-row__open')].find(value => value.textContent?.includes('另一个会话'))!
   expect(row).toBeDefined()
   await click(row)
@@ -262,7 +271,7 @@ it('does not carry an old Mote observation failure into a different selected Ses
   expect(document.body.textContent).not.toContain('旧会话头像失败')
   expect([...document.querySelectorAll('summary')].filter(node => !node.closest('[hidden]') && node.textContent?.includes('头像外观未确认'))).toHaveLength(0)
   await act(async () => pending.reject(Error('新会话头像失败')))
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   expect((await reveal()).textContent).toContain('新会话头像失败')
   expect(f.submit).not.toHaveBeenCalled()
 })
@@ -272,7 +281,7 @@ it.each(['mote', 'space'] as const)('%s does not transfer a batched old-owner re
   const next = originalClient(kind, async () => ({ catalog: { ...emptyCatalog, appearance: [appearance] } }))
   next.sessions.set(sid, { ...next.sessions.get(sid)!, hostId: 'host-other', run: { runId: 'run-other' } })
   const view = await open(kind, old)
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   const item = await reveal(), retry = button(item, '重新读取头像')
   const oldReads = (old.client.forwardRpc as any).mock.calls.filter(([name, params]: any[]) => name === old.method && params?.target?.spaceId === spaceId).length
   const root = mounted.find(value => value.element === view.element)!.root
@@ -306,7 +315,7 @@ it('retains the confirmed original Mote image when its Run changes and the new o
   await vi.waitFor(() => expect(image()?.getAttribute('src')).toBe(imageUrl))
   fail = true
   await act(async () => f.emit({ type: 'agent-session', session: { ...f.sessions.get(sid)!, run: { runId: 'run-next' } } } as any))
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   expect(image()?.getAttribute('src')).toBe(imageUrl)
   expect((await reveal()).textContent).toContain('新 Run 头像观察未知')
   expect(f.client.agentSession(sid).run.runId).toBe('run-next')
@@ -333,7 +342,7 @@ it('never shows one Host’s confirmed Mote image as the same-named original on 
   await vi.waitFor(() => expect(next.client.forwardRpc).toHaveBeenCalledWith('space.ls', { target: { spaceId }, presentation: true }))
   expect(image()).toBeNull()
   await act(async () => pending.reject(Error('新 Host 头像观察未知')))
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   expect(image()).toBeNull()
   expect((await reveal()).textContent).toContain('新 Host 头像观察未知')
   expect(old.submit).not.toHaveBeenCalled(); expect(next.submit).not.toHaveBeenCalled()
@@ -355,7 +364,8 @@ it('explicitly retries a Space appearance issue even when the original appearanc
     { primary: 'space', showSession: false, showGoalWork: false, identity: null, profile: null })
   const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} native />)
   await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(view.element, '.mobile-space-row')
+  await waitForElement(document, '.mobile-avatar-notice')
   const item = await reveal()
   expect(item.textContent).toContain('原保存图标外观读取失败')
   expect((f.client.forwardRpc as any).mock.calls.filter(([name]: any[]) => name === 'space.inspect')).toHaveLength(0)
@@ -369,7 +379,7 @@ it('explicitly retries a Space appearance issue even when the original appearanc
 it('retains a Space icon failure across an Agent Run change without a second static observation', async () => {
   const f = originalClient('space', async () => { throw Error('原空间图标观察失败') })
   await open('space', f)
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   expect((await reveal()).textContent).toContain('原空间图标观察失败')
   const reads = (f.client.forwardRpc as any).mock.calls.filter(([name, params]: any[]) => name === 'space.inspect' && params?.target?.spaceId === spaceId).length
   await act(async () => f.emit({ type: 'agent-session', session: { ...f.sessions.get(sid)!, run: { runId: 'run-next' } } } as any))
@@ -400,7 +410,7 @@ it.each([
   await getDeviceWorkface().updatePresentation({ selectedSessionId: sid, hostUrl: '', panel: 'conversation' },
     { ...initial, identity: { ...initial.identity, name: '不同的 Agent 会话名', mote: { spaceId, ...(moteName ? { name: moteName } : {}) } } })
   await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} native />)
-  await vi.waitFor(() => expect(notice()).toBeDefined())
+  await waitForElement(document, '.mobile-avatar-notice')
   const item = notice(), summary = item.querySelector('summary')!
   expect(summary.textContent).toBe(`头像外观未确认 · ${expected}`)
   expect(summary.textContent).not.toContain('不同的 Agent 会话名')
