@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile, chmod } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { dirname, resolve } from 'node:path'
+import { dirname, resolve, delimiter } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mutations, tests } from './fixtures/cross-host-execution-checks.mjs'
 
 const repository = resolve(import.meta.dirname, '../../..')
+async function buildEnvironment(output) {
+  // Use the maintained build (including the pinned SDK bundle and native helper),
+  // but resolve its two pnpm exec tools locally without invoking an installer.
+  const bin = resolve(output, 'build-tools'); await mkdir(bin)
+  const script = resolve(bin, 'tools.mjs')
+  await writeFile(script, `import {execFileSync} from 'node:child_process';\nconst [action,tool,...args]=process.argv.slice(2);\nconst commands=${JSON.stringify({ tsc: resolve(repository, 'packages/core/node_modules/typescript/bin/tsc'), esbuild: resolve(repository, 'packages/core/node_modules/esbuild/bin/esbuild') })};\nif(action!=='exec'||!Object.hasOwn(commands,tool))throw new Error('Unqualified build tool request');\nexecFileSync(process.execPath,[commands[tool],...args],{stdio:'inherit'});\n`)
+  const quote = value => "'" + value.replaceAll("'", "'\\''") + "'"
+  const shim = resolve(bin, 'pnpm')
+  await writeFile(shim, '#!/bin/sh\nexec ' + quote(process.execPath) + ' ' + quote(script) + ' "$@"\n')
+  await chmod(shim, 0o700)
+  return { PATH: bin + delimiter + (process.env.PATH ?? '') }
+}
 async function manifest(paths) {
   const values = {}
   const visit = async path => {
@@ -89,7 +101,7 @@ export async function main(args) {
   const options = parseArgs(args), output = options.output ?? resolve(repository, '.tmp/cross-host-execution-core', `run-${Date.now()}-${process.pid}`)
   const native = ['verify-native-execution-helpers', 'verify-execution-binding', 'verify-native-agent-control']
   const relayMutants = 'packages/core/scripts/verify-agent-control-mutants.mjs'
-  const buildArgs = ['packages/core/node_modules/typescript/bin/tsc', '--build', 'packages/core/tsconfig.build.json', '--force']
+  const buildArgs = ['packages/core/scripts/build.mjs']
   if (options.plan) return console.log(JSON.stringify({ mode: 'plan-only', buildArgs, tests, mutations: options.mutations ? mutations.map(value => value.id) : [], relayMutants: options.mutations ? relayMutants : null, native, output, actualMachines: 1 }))
   await mkdir(dirname(output), { recursive: true }); await mkdir(output)
   const report = { passed: false, scope: 'Local Core/CLI/native qualification; no real two-machine or UI acceptance', tests: [], mutations: [], native: [] }
@@ -99,9 +111,12 @@ export async function main(args) {
     for (const file of tests) await readFile(resolve(repository, file))
     for (const name of native) await readFile(resolve(repository, `packages/core/scripts/${name}.mjs`))
     if (options.mutations) await readFile(resolve(repository, relayMutants))
-    const sourcePaths = ['packages/core/src', 'packages/core/tsconfig.build.json', 'packages/core/tsconfig.json', 'tsconfig.base.json',
+    const sourcePaths = ['packages/core/src', 'packages/core/scripts/build.mjs', 'packages/core/scripts/clean-build.mjs',
+      'packages/core/scripts/generate-guides.mjs', 'packages/core/scripts/check-guides.mjs', 'packages/core/native',
+      'packages/core/guides',
+      'packages/core/tsconfig.build.json', 'packages/core/tsconfig.json', 'tsconfig.base.json',
       'packages/core/package.json', 'pnpm-lock.yaml']
-    const source = await manifest(sourcePaths), built = await run(buildArgs)
+    const source = await manifest(sourcePaths), built = await run(buildArgs, await buildEnvironment(output))
     await writeFile(resolve(output, 'build.log'), built.stdout + built.stderr)
     assert(built.code === 0 && built.signal === null, 'Exact Core candidate build failed')
     assert.deepEqual(await manifest(sourcePaths), source, 'Core source changed during compilation; candidate is unconfirmed')
