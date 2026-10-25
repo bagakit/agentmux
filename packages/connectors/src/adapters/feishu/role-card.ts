@@ -1,4 +1,6 @@
 import { feishuReplyCard } from './reply-card.js'
+import { feishuReplyFooter } from './reply-footer.js'
+import type { ReplyPublicationMetadata } from '../../publication-reply-metadata.js'
 
 /** Already-attributed display facts. The original Publication owner qualifies names and uploaded keys. */
 export type FeishuRoleSpeaker = {
@@ -14,6 +16,7 @@ export type FeishuRoleCardOptions = {
   /** Qualified original A2A association, never inferred from speaker text. */
   incoming?: boolean
   status?: string
+  replyMetadata?: ReplyPublicationMetadata
 }
 const roles: Record<FeishuRoleSpeaker['kind'], string> = {
   agent: 'Agent', human: 'User · via amux', external: 'External message', mixed: 'Mixed authors', unknown: 'Unknown author'
@@ -48,6 +51,7 @@ export function feishuRoleCard(text: string, speaker: Readonly<FeishuRoleSpeaker
     text: { tag: 'plain_text', content: options.status, text_size: 'notation', text_color: 'grey' } })
   if (options.fragment && options.fragment.count > 1) body.elements.push({ tag: 'div', text_size: 'notation',
     text: { tag: 'plain_text', content: `${options.fragment.ordinal + 1}/${options.fragment.count}` } })
+  if (options.replyMetadata) body.elements.push(...feishuReplyFooter(options.replyMetadata))
   const elements: Record<string, unknown>[] = []
   let content: Record<string, unknown>[] = []
   const flush = () => {
