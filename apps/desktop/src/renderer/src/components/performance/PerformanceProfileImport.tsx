@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { analyseV8Profile, parseV8ProfileBytes, summariseV8Profile, RENDERER_V8_PROFILE_MAX_BYTES,
+import { analyseV8Profile, parseV8ProfileBytes, summariseV8Profile, V8_PROFILE_MAX_BYTES,
   type V8ProfileAnalysis, type V8ProfileArtifactSource } from '@agentmux/core/control'
 import { PerformanceProfileView } from './PerformanceProfileView'
 import { downloadPerformanceBlob, downloadPerformanceJSON } from './performance-export'
@@ -22,8 +22,8 @@ export const PerformanceProfileImport = memo(function PerformanceProfileImport()
   const clear = () => { cancelRead(); setBusy(false); setImported(null); setError(null) }
   const importFile = (file: File) => {
     if (pending.current) return
-    if (file.size > RENDERER_V8_PROFILE_MAX_BYTES) {
-      setError({ name: file.name, reason: `Select a profile up to ${RENDERER_V8_PROFILE_MAX_BYTES / 1048576} MiB.` }); return
+    if (file.size > V8_PROFILE_MAX_BYTES) {
+      setError({ name: file.name, reason: `Select a profile up to ${V8_PROFILE_MAX_BYTES / 1048576} MiB.` }); return
     }
     const request = { reader: new FileReader() }, reader = request.reader
     pending.current = request; setBusy(true); setError(null)
@@ -57,7 +57,7 @@ export const PerformanceProfileImport = memo(function PerformanceProfileImport()
       } finally { finish() }
     }
     // Limit the actual read as well as the selected File metadata.
-    try { reader.readAsArrayBuffer(file.slice(0, RENDERER_V8_PROFILE_MAX_BYTES + 1)) }
+    try { reader.readAsArrayBuffer(file.slice(0, V8_PROFILE_MAX_BYTES + 1)) }
     catch { failRead() }
   }
   const report = useMemo(() => imported ? summariseV8Profile({ data: imported.analysis, reason: null }, imported.source) : null, [imported])
