@@ -369,3 +369,62 @@ it('preserves typed original input status without inventing a missing speaker sn
   expect(JSON.stringify(prepared)).toBe(frozen)
   expect(f.remote.messageCalls().map(call => call.method)).toEqual(['POST', 'GET', 'PATCH', 'GET'])
 })
+
+const nativeWidthCases: Array<[string, Partial<PublicationOperation>, 'fill' | undefined]> = [
+  ['human-short', { speaker: { kind: 'human', name: '示例用户' }, payload: { kind: 'speech', text: '宽度预览 · 就按这个方向继续。' } }, 'fill'],
+  ['human-long', { speaker: { kind: 'human', name: '示例用户' }, payload: { kind: 'speech', text: '宽度预览 · 完整长消息\n\n**请保留清楚的段落和原文。**\n\n' +
+    '群里和 App 应当能接上同一段对话。状态要说明这条消息到了哪一步；有问题时，直接告诉我能做什么。\n\n'.repeat(4) +
+    '```ts\nconst originalMessage = "完整保留";\n```' } }, 'fill'],
+  ['human-table', { speaker: { kind: 'human', name: '示例用户' }, payload: { kind: 'speech', text: '宽度预览 · 请保留完整表格\n\n| 内容 | 关注点 |\n| :--- | :--- |\n| 用户发言 | 正文与原作者 |\n| 提问答案 | 原问题与提交结果 |\n\n表格后的原话也完整保留。' } }, 'fill'],
+  ['agent-progress', { speaker: { kind: 'agent', name: '示例 Agent' }, payload: { kind: 'speech', phase: 'progress', text: '宽度预览 · 正在核对这条消息的原始回执。' } }, undefined],
+  ['a2a', { speaker: { kind: 'agent', name: '示例协作者' }, originalMessage: { messageId: 'width-original-peer-message', senderSessionId: 'width-original-peer' },
+    payload: { kind: 'speech', text: '宽度预览 · 原协作来信保持完整。' } }, undefined],
+  ['question', { speaker: { kind: 'agent', name: '示例 Agent' }, payload: { kind: 'question', text: '宽度预览 · 原问题保持独立布局。', status: 'pending', actionRef: 'width-original-action',
+    questions: [{ id: 'width-original-question', prompt: '优先检查哪一项？', options: [{ id: 'width-original-option', label: '原消息回执' }], acceptsText: true }] } }, undefined]
+]
+it.each(nativeWidthCases)('delivers native available width for %s through the original SDK payload', async (name, fields, expectedWidth) => {
+  const f = await fixture(), original = operation(fields), frozen = JSON.stringify(original), signal = new AbortController().signal
+  const prepared = f.publisher.prepare(original), receipt = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal)
+  expect(receipt.state).toBe('confirmed')
+  if (receipt.state !== 'confirmed') throw Error('Native width card was not confirmed by the controlled platform')
+  expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+  const calls = f.remote.messageCalls()
+  expect(calls.map(call => call.method)).toEqual(['POST', 'GET'])
+  expect(calls[0]!.body).toBe(prepared.request.body)
+  const card = JSON.parse(JSON.parse(calls[0]!.body).content), elements = feishuCardElements(card)
+  expect(card.config.width_mode).toBe(expectedWidth)
+  expect(card.header).toBeUndefined(); expect(card.schema).toBe('2.0')
+  expect(JSON.stringify(original)).toBe(frozen)
+  expect(elements[0].text?.content ?? elements[1].text.content).toContain(fields.speaker!.name)
+  if (name === 'human-table') {
+    expect(card.body.elements.map((element: { tag: string }) => element.tag)).toEqual(['column_set', 'table', 'column_set'])
+    expect(JSON.stringify(card.body)).toContain('表格后的原话也完整保留')
+  }
+  if (name === 'agent-progress') expect(card.body.elements[0].columns[0].padding).toBe('6px 12px 6px 12px')
+  if (name === 'a2a') expect(card.body.elements[0].background_style).toBe('peer-surface')
+  if (name === 'question') expect(elements.filter((element: { tag: string }) => element.tag === 'form')).toHaveLength(1)
+  if (process.env.AGENTMUX_NATIVE_WIDTH_OUTPUT) {
+    await mkdir(process.env.AGENTMUX_NATIVE_WIDTH_OUTPUT, { recursive: true })
+    await writeFile(join(process.env.AGENTMUX_NATIVE_WIDTH_OUTPUT, name + '.json'), JSON.stringify(card, null, 2))
+    await writeFile(join(process.env.AGENTMUX_NATIVE_WIDTH_OUTPUT, name + '-receipt.json'), JSON.stringify({ originalOperationId: original.operationId,
+      receipt, frozenUnchanged: JSON.stringify(original) === frozen, calls }, null, 2))
+  }
+})
+
+it('keeps native available width and exact source slices across long human fragments', async () => {
+  const f = await fixture(), text = 'Original human body 中文🙂 "quoted" \\ literal\n'.repeat(700)
+  const original = operation({ speaker: { kind: 'human', name: 'Original human' }, payload: { kind: 'speech', text } })
+  const payload = original.payload as Extract<PublicationPayload, { kind: 'speech' }>
+  const parts = f.publisher.fragmentText(payload, original.target, original.speaker)!
+  expect(parts.length).toBeGreaterThan(1); expect(parts.map(part => part.text).join('')).toBe(text)
+  for (const [ordinal, part] of parts.entries()) {
+    const prepared = f.publisher.prepare({ ...original, operationId: 'original-human-fragment-' + ordinal,
+      fragment: { ordinal, count: parts.length }, payload: { ...payload, ...part } })
+    expect(Buffer.byteLength(prepared.request.body!)).toBeLessThanOrEqual(30 * 1024)
+    expect(await f.publisher.dispatch(prepared, original.target, 'fixture-credential', new AbortController().signal)).toMatchObject({ state: 'confirmed' })
+    const card = JSON.parse(JSON.parse(f.remote.messageCalls().at(-1)!.body).content)
+    expect(card.config.width_mode).toBe('fill')
+    expect(feishuCardElements(card).at(-1).text.content).toBe(`${ordinal + 1}/${parts.length}`)
+  }
+  expect(f.remote.messageCalls()).toHaveLength(parts.length)
+})
