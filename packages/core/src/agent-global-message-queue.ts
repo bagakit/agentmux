@@ -1,3 +1,4 @@
+import { parseAgentInputChangesRead, parseAgentInputChangesPage, type AgentInputChangesRead, type AgentInputChangesPage } from './agent-input-changes.js'
 import { validateBroadcastIntent, parseBroadcastReceipt, type AgentMuxMessageBroadcastIntent, type AgentMuxMessageBroadcastReceipt, type AgentMuxBroadcastIssue, type AgentMuxBroadcastTargetResult } from './agent-message-broadcast.js'
 import { parseMessageEventsPage, parseMessageEventsQuery, type AgentMuxMessageEventsQuery, type AgentMuxMessageEventsPage } from './agent-message-events.js'
 import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
@@ -767,6 +768,30 @@ export class DurableAgentMuxMessageQueue {
         ? [{ ...this.input(original.intent.key)!, recordedAt: original.at }] : [])
       const more = rows.length > accepted.length
       return { cut: { queueId: this.queueId, incarnation, sequence: more ? accepted.at(-1)!.sequence : through }, items, more }
+    })
+  }
+
+  /** A finite changed-key pass over the original journal, not a state/event replay. */
+  async readInputChanges(value: AgentInputChangesRead, reauthorize: () => Promise<void>): Promise<AgentInputChangesPage> {
+    const input = parseAgentInputChangesRead(value)
+    return this.withLock(async () => {
+      await reauthorize()
+      const source = { queueId: this.queueId, incarnation: String(this.db.prepare('SELECT incarnation FROM metadata').get()!.incarnation) }
+      const latest = this.nextSequence - 1, after = input.after ?? input.cursor?.after
+      const throughSequence = input.cursor?.throughSequence ?? latest
+      if (after && (after.queueId !== source.queueId || after.incarnation !== source.incarnation || after.sequence > latest) || throughSequence > latest) throw new AgentMuxError(
+        'The input changes position belongs to another original source. Retain it and reconcile the source before continuing.', 'AGENT_INPUT_CHANGE_SOURCE_CHANGED')
+      const limit = input.limit ?? 25
+      const rows = after ? this.db.prepare(`SELECT i.control_sequence AS sequence,
+        COALESCE(json_extract(original.json, '$.intent.key'), json_extract(original.json, '$.key')) AS key_json
+        FROM input_intents i JOIN records original ON original.sequence=i.intent_sequence
+        WHERE i.recipient_id=? AND i.control_sequence>? AND i.control_sequence<=?
+        ORDER BY i.control_sequence LIMIT ?`).all(input.agentSessionId, after.sequence, throughSequence, limit + 1) : []
+      const changes = rows.slice(0, limit).map(row => ({ key: validateAgentPromptInputKey(JSON.parse(String(row.key_json))), controlSequence: Number(row.sequence) }))
+      const checkpoint = { ...source, agentSessionId: input.agentSessionId, sequence: throughSequence }
+      return parseAgentInputChangesPage({ agentSessionId: input.agentSessionId, source, throughSequence, changes,
+        nextCursor: rows.length > limit ? { after: { ...checkpoint, sequence: changes.at(-1)!.controlSequence }, throughSequence } : null,
+        checkpoint: rows.length > limit ? null : checkpoint, coverage: 'input-journal-membership-and-control' }, input)
     })
   }
 

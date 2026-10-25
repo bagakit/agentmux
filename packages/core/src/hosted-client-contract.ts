@@ -8,7 +8,7 @@ import type { AgentMuxRpcSubscriptionOptions } from './public-rpc-client.js'
 /** The finite SDK surface delegated by a Client to the single semantic Host. */
 export const AGENTMUX_HOSTED_METHODS = [
   'clientPerformanceDiagnostics', 'connectRuntime', 'readDeliveryAttempt', 'readReadingDiagnostic', 'findReadingDiagnostics', 'readAgentStartupDiagnostic', 'findAgentStartupDiagnostics', 'inspectAgentPromptSubmission', 'runtimeDiagnostics', 'runtimeResourceSnapshot', 'observeRunStorage', 'probeAgent', 'probeExecutorAvailability',
-  'inspectAgentInput', 'readAgentInputResource', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting',
+  'inspectAgentInput', 'readAgentInputResource', 'readAgentInputMailbox', 'readAgentInputChanges', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting',
   'listHostExecutors', 'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory',
   'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource', 'configureHostExecutor', 'createHostAgentWithDelivery',
   'agentCreationAuthority', 'attestAgentCreation', 'listTrustedCreationSources', 'trustCreationSource',
@@ -44,6 +44,7 @@ export const AGENTMUX_HOSTED_PREPARATION = {
   inspectAgentInput: 'owner',
   readAgentInputResource: 'owner',
   readAgentInputMailbox: 'owner',
+  readAgentInputChanges: 'owner',
   stopAgentInputWaiting: 'owner',
   rejoinAgentInputWaiting: 'owner',
   listHostExecutors: 'owner',
@@ -153,7 +154,7 @@ export const AGENTMUX_HOSTED_PREPARATION = {
 type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'trustCreationSource'
   ? [input: Parameters<AgentMuxClient['trustCreationSource']>[0]]
   : M extends 'writeTerminal' ? [ref: Parameters<AgentMuxClient[M]>[0], operation: Parameters<AgentMuxClient[M]>[1], observation?: Parameters<AgentMuxClient[M]>[2]]
-  : M extends 'writeAgent' | 'pasteAgent' | 'recordExternalConversationMessage' | 'ensureAgentContinuity' | 'readAgentInputMailbox' | 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'broadcastMessages' | 'notifyMessages' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction' | 'replySessionQuestion'
+  : M extends 'writeAgent' | 'pasteAgent' | 'recordExternalConversationMessage' | 'ensureAgentContinuity' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'broadcastMessages' | 'notifyMessages' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction' | 'replySessionQuestion'
     ? [input: Parameters<AgentMuxClient[M]>[0]] : Parameters<AgentMuxClient[M]>
 export type AgentMuxHostedInvocation = { [M in AgentMuxHostedMethod]: {
   method: M; args: HostedArguments<M>

@@ -1,3 +1,4 @@
+import { parseAgentInputChangesRead, type AgentInputChangesRead, type AgentInputChangesPage } from './agent-input-changes.js'
 import { imageBytes } from './session-history-resource.js'
 import { resolveAgentInputImages, parseAgentInputResourceRead, inputImageMatches, type AgentInputImageReference, type AgentInputResourceOwner, type AgentInputResourceRead, type AgentInputResourceResult } from './agent-input-resource.js'
 import { originalMessageInputKey } from './agent-message-query.js'
@@ -5748,6 +5749,17 @@ export class AgentMuxClient {
     return { providerId: session.providerId, executorId: session.executorId,
       ...(session.nativeHandle ? { nativeHandle: structuredClone(session.nativeHandle) } : {}),
       ...(session.nativeBinding ? { nativeBinding: { source: session.nativeBinding.source, run: { ...session.nativeBinding.run } } } : {}) }
+  }
+
+  /** Discover coalesced original input keys; exact inspection owns their current facts. */
+  async readAgentInputChanges(value: AgentInputChangesRead, caller?: { agentSessionId: string; capability: string }): Promise<AgentInputChangesPage> {
+    const input = parseAgentInputChangesRead(value)
+    return this.messageQueue.readInputChanges(input, async () => {
+      if (caller) {
+        await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+        if (caller.agentSessionId !== input.agentSessionId) throw new AgentMuxError('Input change reading belongs to its exact recipient.', 'CONTROL_PERMISSION_DENIED')
+      }
+    })
   }
 
   /** Read original journal membership; this never creates waiting, prepares or dispatches input. */

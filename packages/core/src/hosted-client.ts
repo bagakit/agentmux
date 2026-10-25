@@ -1,6 +1,7 @@
 import { parseAgentInputResourceRead, parseAgentInputResourceResult } from './agent-input-resource.js'
 import { parseReadingDiagnosticSourceRead, parseReadingDiagnosticSourceFind, type ReadingDiagnosticExactTarget, type ReadingDiagnosticFindParams } from './reading-diagnostic-query.js'
 import { parseStartupDiagnosticRead, type AgentStartupDiagnosticExactTarget, type AgentStartupDiagnosticRecentTarget } from './startup-diagnostic.js'
+import { parseAgentInputChangesPage } from './agent-input-changes.js'
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-recovery/control-contract.js'
 import { parseTerminalRecoveryInput, parseTerminalRecoveryResult } from './terminal-recovery.js'
@@ -270,6 +271,7 @@ export async function connectHostedAgentMux(options: {
     }
     if (method === 'releaseConversationView') return parseConversationViewReleaseResult(decoded, wireArgs[0] as ConversationRef)
     if (method === 'readAgentInputResource') return parseAgentInputResourceResult(decoded, parseAgentInputResourceRead(wireArgs[0]))
+    if (method === 'readAgentInputChanges') return parseAgentInputChangesPage(decoded, wireArgs[0] as import('./agent-input-changes.js').AgentInputChangesRead)
     if (method === 'readAgentInputMailbox') return parseAgentInputMailboxPage(decoded, wireArgs[0] as import('./agent-input-mailbox.js').AgentInputMailboxRead)
     if (method === 'readAgentSessionHistory') return parseAgentSessionHistoryReadPage(decoded, wireArgs[0] as AgentSessionHistoryReadInput)
     return decoded
