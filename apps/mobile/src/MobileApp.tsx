@@ -3,18 +3,17 @@ import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { TopicKnowledgeSource } from '@agentmux/core/control'
-import { MobileTopicSource } from './topics/MobileTopicSource'
-import { MobileTopicsSurface, type MobileTopicsContext } from './topics/MobileTopicsSurface'
-import { MobileSurveySurface, type MobileSurveyContext } from './survey/MobileSurveySurface'
-import { MobileGoalsSurface } from './goals/MobileGoalsSurface'
-import { MobileZoneWorkface } from './navigation/MobileZoneWorkface'
+
+import type { MobileTopicsContext } from './topics/MobileTopicsSurface'
+import type { MobileSurveyContext } from './survey/MobileSurveySurface'
+
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { MobileAgentCreate, type MobileAgentCreateTarget } from './navigation/MobileAgentCreate'
 import { MobileAgentActions } from './conversation/MobileAgentActions'
 import { recoverMobileAgent } from './conversation/mobile-agent-recovery'
 import { MobileAgentMenuContext, type MobileAgentMenuTarget } from './navigation/MobileAgentRow'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
-import { MobileTerminalViewer } from './terminal/MobileTerminalViewer'
+
 import { useHostAppearance } from './appearance/useHostAppearance'
 import { bindMobileViewport, bindNativeDevice } from './platform/native/device'
 import { openBrowserHttpLink } from './platform/browser'
@@ -26,10 +25,9 @@ import { exportNativeWorkfaceFile } from './platform/native/workface-file'
 import brandIcon from './assets/dragon.png'
 import { MobileIdentity, type MobileObjectIdentity } from './navigation/MobileIdentity'
 import { MobilePrimaryNavigation } from './navigation/MobilePrimaryNavigation'
-import { MobileSpatialNavigation, type MobileSpatialContext } from './navigation/MobileSpatialNavigation'
+import type { MobileSpatialContext } from './navigation/MobileSpatialNavigation'
 import { readMobileHome, saveMobileHome, type MobileHome, type MobilePrimaryWorkface } from './navigation/home-preference'
-import { MobileGoalWork } from './navigation/MobileGoalWork'
-import { MobileMoteProfile } from './navigation/MobileMoteProfile'
+
 import { mobileChatStart } from './navigation/chat-start'
 import { useMobileBack } from './navigation/useMobileBack'
 import { retainObjectReference, type MobilePresentationRoute, type MobileTopicsRoute, type MobileGoalsContext, type MobileKnowledgeReference } from './recovery/presentation-route'
@@ -40,6 +38,18 @@ import { MobileWebDiagnostics } from './mobile-web/MobileWebDiagnostics'
 import { MobileWebUpdateSettings } from './mobile-web/MobileWebUpdate'
 import { mobileWebUpdateStatus } from './mobile-web/use-mobile-web-observation'
 import type { MobileWebPageObservation } from './mobile-web/use-mobile-web-observation'
+
+import { deferMobileSurface } from './navigation/defer-mobile-surface'
+
+const MobileTerminalViewer = deferMobileSurface('终端', async () => ({ default: (await import('./terminal/MobileTerminalViewer')).MobileTerminalViewer }))
+const MobileSpatialNavigation = deferMobileSurface('目录', async () => ({ default: (await import('./navigation/MobileSpatialNavigation')).MobileSpatialNavigation }))
+const MobileTopicsSurface = deferMobileSurface('Topics', async () => ({ default: (await import('./topics/MobileTopicsSurface')).MobileTopicsSurface }))
+const MobileSurveySurface = deferMobileSurface('Survey', async () => ({ default: (await import('./survey/MobileSurveySurface')).MobileSurveySurface }))
+const MobileGoalsSurface = deferMobileSurface('Goals', async () => ({ default: (await import('./goals/MobileGoalsSurface')).MobileGoalsSurface }))
+const MobileGoalWork = deferMobileSurface('当前目标', async () => ({ default: (await import('./navigation/MobileGoalWork')).MobileGoalWork }))
+const MobileMoteProfile = deferMobileSurface('Profile', async () => ({ default: (await import('./navigation/MobileMoteProfile')).MobileMoteProfile }))
+const MobileTopicSource = deferMobileSurface('知识来源', async () => ({ default: (await import('./topics/MobileTopicSource')).MobileTopicSource }))
+const MobileZoneWorkface = deferMobileSurface('来源工作面', async () => ({ default: (await import('./navigation/MobileZoneWorkface')).MobileZoneWorkface }))
 
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
 const ThemeObjectNetworkIcon = semanticIconComponent('object.network')
@@ -260,6 +270,11 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     }
     else familyBack?.()
   })
+  const returnToConversation = useCallback(() => {
+    navigationRevision.current += 1
+    setShowSession(true); setShowGoalWork(false); setSheet(null)
+    setWorkface(value => ({ ...value, panel: 'conversation' }))
+  }, [])
   const backRef = useRef(requestBack)
   backRef.current = requestBack
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
@@ -393,32 +408,32 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         <button className="mobile-secondary" onClick={() => setSheet('connection')}><ThemeObjectConnectionIcon size={16} />连接详情</button>
       </section>}
       {workspaceVisible && <>
-        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} openSession={openSession} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
+        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation loadWhen={!showSession && secondary === null} onLoadReturn={returnToConversation} onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} openSession={openSession} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
           recentMoteSpaceId={recentMoteSpaceId} onSelectMote={selectMote}
           initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
-        <div hidden={showSession || secondary !== 'topics' || Boolean(source && source.kind !== 'topic')}><MobileTopicsSurface rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (!source || source.kind === 'topic')} topicId={topicId}
+        <div hidden={showSession || secondary !== 'topics' || Boolean(source && source.kind !== 'topic')}><MobileTopicsSurface loadWhen={!showSession && secondary === 'topics' && (!source || source.kind === 'topic')} onLoadReturn={returnToConversation} rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (!source || source.kind === 'topic')} topicId={topicId}
           client={client} connected={connected} {...(topicsRoute.knowledge ? { initialKnowledge: topicsRoute.knowledge } : {})} onKnowledgeChange={updateKnowledgeReference}
           initialContext={topicsRoute.context} onContextChange={updateTopicsContext}
           {...(source?.kind === 'topic' ? { onLeaveTopic: leaveSource, topicBackLabel: '返回知识' } : {})}
           onOpenTopic={topic => updateTopicsContext({ ...topicsRoute.context, topicId: topic.topicId, mode: 'discussion' })} openSource={openSource} openHttpLink={openBrowserHttpLink} onBackChange={registerTopicsBack}
-          renderWorkface={(topic, visible) => <MobileZoneWorkface key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible} onCreateAgent={createAgent}
+          renderWorkface={(topic, visible) => <MobileZoneWorkface loadWhen={!showSession && secondary === 'topics'} onLoadReturn={returnToConversation} key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible} onCreateAgent={createAgent}
             {...(source?.kind === 'topic' && source.topicId === topic.topicId ? { tabId: source.chatId, regionId: source.threadId } : {})} openSession={openSession} />} /></div>
-        <div hidden={showSession || secondary !== 'survey'}><MobileSurveySurface client={client} connected={connected} visible={exposed && !showSession && secondary === 'survey'} openSession={openSession}
+        <div hidden={showSession || secondary !== 'survey'}><MobileSurveySurface loadWhen={!showSession && secondary === 'survey'} onLoadReturn={returnToConversation} client={client} connected={connected} visible={exposed && !showSession && secondary === 'survey'} openSession={openSession}
           openTopic={openSurveyTopic} initialContext={surveyContext} onContextChange={updateSurveyContext} onBackChange={registerSurveyBack} openHttpLink={openBrowserHttpLink} /></div>
         {source && source.kind !== 'topic' && <div hidden={showSession || secondary !== 'topics'}>
           {source.kind === 'space' || source.kind === 'survey' ? <>
             <button className="mobile-text-button" onClick={leaveSource}><ThemeNavigationBackIcon size={16} />返回知识</button>
-            <MobileZoneWorkface key={source.zoneId} client={client} zoneId={source.zoneId} name="来源工作面" visible={exposed && !showSession && secondary === 'topics'} tabId={source.tabId} regionId={source.regionId} openSession={openSession} />
-          </> : source.kind === 'file' || source.kind === 'note' || source.kind === 'notebook' ? <MobileTopicSource source={source} rpc={rpc} onBack={leaveSource} openHttpLink={openBrowserHttpLink}
+            <MobileZoneWorkface loadWhen={!showSession && secondary === 'topics'} onLoadReturn={returnToConversation} key={source.zoneId} client={client} zoneId={source.zoneId} name="来源工作面" visible={exposed && !showSession && secondary === 'topics'} tabId={source.tabId} regionId={source.regionId} openSession={openSession} />
+          </> : source.kind === 'file' || source.kind === 'note' || source.kind === 'notebook' ? <MobileTopicSource loadWhen={!showSession && secondary === 'topics'} onLoadReturn={returnToConversation} source={source} rpc={rpc} onBack={leaveSource} openHttpLink={openBrowserHttpLink}
             visible={exposed && !showSession && secondary === 'topics'} onBackChange={registerSourceBack}
             {...(sourceReference ? { initialReference: sourceReference } : {})} onReferenceChange={updateSourceReference}
             openScope={scope => { openSource({ kind: 'space', zoneId: scope.zoneId }) }} /> : null}
         </div>}
-        <div hidden={showSession || secondary !== 'goals'}><MobileGoalsSurface client={client} connected={connected} visible={exposed && !showSession && secondary === 'goals'} openSession={openSession} onBackChange={registerGoalsBack}
+        <div hidden={showSession || secondary !== 'goals'}><MobileGoalsSurface loadWhen={!showSession && secondary === 'goals'} onLoadReturn={returnToConversation} client={client} connected={connected} visible={exposed && !showSession && secondary === 'goals'} openSession={openSession} onBackChange={registerGoalsBack}
           context={goalsContext} onContextChange={updateGoalsContext} copyText={platform.copyText} /></div>
       </>}
       <section className="mobile-goal-panel" hidden={!workspaceVisible || !showSession || !showGoalWork}>
-        <MobileGoalWork client={client} agentSessionId={workface.selectedSessionId} connected={connected} visible={exposed && workspaceVisible && showSession && showGoalWork} />
+        <MobileGoalWork loadWhen={workspaceVisible && showSession && showGoalWork} onLoadReturn={returnToConversation} client={client} agentSessionId={workface.selectedSessionId} connected={connected} visible={exposed && workspaceVisible && showSession && showGoalWork} />
       </section>
       <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel === 'terminal'}>
         {!workface.selectedSessionId && <div className="mobile-chat-start">
@@ -434,7 +449,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
             onShowGoals={trigger => { goalReturn.current = { trigger, sessionId: workface.selectedSessionId }; setShowGoalWork(true) }} openHttpLink={openBrowserHttpLink} />
         </div>
       </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel !== 'terminal'}>
-        <MobileTerminalViewer terminalPalette={hostAppearance.terminalPalette} client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} inputActive={exposed} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
+        <MobileTerminalViewer loadWhen={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} onLoadReturn={returnToConversation} terminalPalette={hostAppearance.terminalPalette} client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} inputActive={exposed} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
       </section>
     </main>
     <div className="mobile-notice-stack">
@@ -484,7 +499,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           <MobileNoticeRestore onRestored={() => setSheet(null)} />
         </> : sheet === 'identity' && profileIdentity ? <>
           <Dialog.Description id="mobile-sheet-description">原资料与当前工作</Dialog.Description>
-          <MobileMoteProfile identity={profileIdentity} client={client} copyText={platform.copyText} visible={sheet === 'identity'} sourcePath={profileSourcePath} onSourceChange={setProfileSourcePath} onBackChange={registerProfileBack} onOpenGoals={id => {
+          <MobileMoteProfile loadWhen={sheet === 'identity'} onLoadReturn={requestBack} identity={profileIdentity} client={client} copyText={platform.copyText} visible={sheet === 'identity'} sourcePath={profileSourcePath} onSourceChange={setProfileSourcePath} onBackChange={registerProfileBack} onOpenGoals={id => {
             openSession(id, profileIdentity); setShowGoalWork(true); setSheet(null)
           }} />
         </> : sheet === 'agent' && menuTarget ? <>
