@@ -28,7 +28,7 @@ function transaction() {
 }
 
 it('real catalog and complete Shell expose Work once; object keywords reach their owning modules', async () => {
-  expect(settingsNavGroups('').find(group => group.id === 'work')?.items.map(module => module.id)).toEqual(['space', 'focus', 'goals', 'survey', 'notes'])
+  expect(settingsNavGroups('').find(group => group.id === 'work')?.items.map(module => module.id)).toEqual(['space', 'focus', 'goals'])
   for (const word of ['work', 'topic', 'project']) expect(visibleSettingsSections(word).some(module => module.id === 'space')).toBe(true)
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect(dom.container.querySelectorAll('#settings-overview-work')).toHaveLength(1)
