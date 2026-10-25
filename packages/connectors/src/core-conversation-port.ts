@@ -1,5 +1,5 @@
 import { AgentMuxError, parseAgentInputJournalCut, forwardConversationInput, readRoutedConversation, type AgentMuxClient } from '@agentmux/core'
-import { parseConversationChangesPage, parseConversationCheckpointPage, parseConversationReadPage } from '@agentmux/core/conversation'
+import { parseConversationChangesPageForWindow, parseConversationCheckpointPage, parseConversationReadPage } from '@agentmux/core/conversation'
 import type { PublicationConversationPort } from './publication-host.js'
 
 type Reader = Pick<AgentMuxClient, 'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeConversation' | 'sessionHistoryResource' | 'inspectMessageNotification' | 'readMessage' | 'readAgentInputResource'>
@@ -30,7 +30,7 @@ export function createPublicationConversationPort(clients: () => readonly { host
     },
     changes: async (input, signal) => {
       const client = original(input.hostId), forwarded = forwardConversationInput(input)
-      return parseConversationChangesPage(await readRoutedConversation(input, (maxBytes, replay) => client.readConversationChanges({ ...forwarded.input, maxBytes, ...(replay ? { cursor: replay } : {}) }, { signal }), forwarded.sourceHostId), input)
+      return parseConversationChangesPageForWindow(await readRoutedConversation(input, (maxBytes, replay) => client.readConversationChanges({ ...forwarded.input, maxBytes, ...(replay ? { cursor: replay } : {}) }, { signal }), forwarded.sourceHostId), input)
     },
     inspect: async (input, signal) => {
       const client = original(input.hostId), forwarded = forwardConversationInput(input)
