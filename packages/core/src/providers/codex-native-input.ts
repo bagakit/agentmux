@@ -13,6 +13,8 @@ import type { CodexManagedThreadConfiguration, CodexManagedRunPlan } from './cod
 import { connectCodexNativeActor } from './codex-native-rpc.js'
 import { prepareCodexDurableQueueInput } from './codex-native-queue.js'
 
+// Persisted contract identity, not the currently installed CLI version. Both
+// qualified releases use this exact actor/input wire; old claims keep their ID.
 const PROTOCOL_ID = 'codex-app-server-v2-0.163'
 const BYPASS_PERMISSIONS = '--dangerously-bypass-approvals-and-sandbox'
 const unavailable = () => new AgentMuxError('The exact native actor input service is unconfirmed. The original Agent and ordinary terminal input remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
@@ -109,7 +111,7 @@ export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManage
   const { serverConfig, frontendArgs } = (prepared ?? creation)!
   // The version is the native CLI's stable version command, not a terminal screen or readiness guess.
   const version = await runProcess(plan.command, ['--version'], { env: plan.env, timeoutMs: 2_000, maxOutputBytes: 4096 }).catch(() => null)
-  if (!version || version.exitCode !== 0 || version.stderr || version.stdout.trim() !== 'codex-cli 0.163.0') return { plan }
+  if (!version || version.exitCode !== 0 || version.stderr || !['codex-cli 0.163.0', 'codex-cli 0.165.0'].includes(version.stdout.trim())) return { plan }
   const nativeActor = { protocolId: PROTOCOL_ID, actorId: mintObjectId(), lifecycleOperationId, token: randomBytes(32).toString('hex'), frontendControl: true as const, initializationControl: true as const, launch: { command: plan.command, args: [...plan.args] } }
   const managed: CodexManagedRunPlan = { command: plan.command, serverConfig, frontendArgs,
     ...(prepared ? { resume: prepared.resume } : { create: creation!.configuration }) }
