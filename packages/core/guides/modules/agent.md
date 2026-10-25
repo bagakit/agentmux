@@ -42,6 +42,9 @@ identity and content; Goal-bound progress stays with its Goal owner. Use the ori
 expectedLoop and operationId. A list is a current observation, not a disk receipt. If a
 save response is unknown, retain the exact request and explicitly retry that same operation
 to confirm its save; a changed or superseded operation is not automatically replayed.
+Resume restores ordinary progress and immediately checks that Agent; check requires an
+active loop. Both evaluate eligibility rather than force a prompt. Read the returned
+loop outcome and decision; a completed check does not by itself confirm a new Agent turn.
 
 agent conversation checkpoint cuts current native and captured positions by default.
 Use --native-position beginning only when the consuming owner explicitly needs the original
