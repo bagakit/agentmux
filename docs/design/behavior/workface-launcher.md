@@ -23,7 +23,7 @@
 
 新 Session 冻结准确的项目端和 Agent 端。项目文件候选、文件选择及正文项目文件链接消费原 `toolExecution` 资源地址；Agent 原生 Skills、配置、输入交付与历史来源各归原 Session 运行端。缺少资源登记只说明本次文件操作的未确认事实，保原 binding 和输入，不回落到运行端的同名目录。图片的本机来源、持久保留及原 Session 输入上传保持各自原 owner，不能机械替换所有 Host。无显式 binding 的普通 Session、Scratch／Mote 与 canonical Goal 项目规则保持原合同。
 
-设置页是准备与观察入口，仍进入同一个项目 Launcher；两处引用[同一操作指南](../../../packages/core/guides/actions/remote-execution.md)。已有 Session 的 Resume 沿原身份与原绑定，不跟新模式改端。读取失败保留已确认配置与全部输入，显示观察缺口；已知 revision 改变则明确重新选择。首次支持两个已登记普通项目；Scratch／Mote 尚无跨端资格时说明该次限制，保留普通启动和原草稿。
+设置页是准备与观察入口，仍进入同一个项目 Launcher；两处引用[同一操作指南](../../../packages/core/guides/actions/remote-execution.md)。已有 Session 的 Resume 沿原身份与原绑定，不跟新模式改端。Host inventory 未读、失败或目标不符时，空候选说明配置未确认，提供原 Host 重读或重选环境；只有准确 ready 空结果才称未配置。未知不以 App 同名模板代替，已保存选择与正常输入保留，同一缺口只呈现一份具体恢复说明。读取失败保留已确认配置与全部输入，显示观察缺口；已知 revision 改变则明确重新选择。首次支持两个已登记普通项目；Scratch／Mote 尚无跨端资格时说明该次限制，保留普通启动和原草稿。
 
 ## Agent 选择、选项与草稿
 
