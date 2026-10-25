@@ -104,7 +104,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
   const dispatched = useMobileWebDispatchedOperations()
   const preparingKeys = useRef(new Map<string, { cancelled: boolean; retaining: boolean; cancel?: (() => void) | undefined }>())
   const pendingActions = useRef(new Map<string, PendingInputAction>())
-  const [preparationIssue, setPreparationIssue] = useState<{ client: AgentMuxHostedClient | null; sessionId: string | null; message: string } | null>(null)
+  const [preparationIssue, setPreparationIssue] = useState<{ client: AgentMuxHostedClient | null; sessionId: string | null; message: string; detail?: string } | null>(null)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId })
@@ -117,7 +117,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     if (!client || !session || session.agentSessionId !== agentSessionId) return
     const owner = client.runtimeOwnerIdentity()
     if (!owner || owner.availability !== 'connected') {
-      setPreparationIssue({ client, sessionId: agentSessionId, message: '原 Host 身份尚未确认，自动活动暂停未提交；手工输入与草稿仍可使用。' }); return
+      setPreparationIssue({ client, sessionId: agentSessionId, message: '暂时无法确认 Mac 身份，自动任务没有暂停；你可以继续输入。' }); return
     }
     const prior = automaticPause.current
     if (prior?.client === client && prior.target.agentSessionId === session.agentSessionId && prior.target.expectedRun.runId === session.run.runId && prior.target.ownerInstanceId === owner.ownerInstanceId) return
@@ -129,7 +129,8 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     }).then(result => {
       if (result.receipt?.status !== 'confirmed') throw new Error('原自动活动暂停回执未知。')
     }).catch(error => { if (mounted.current) setPreparationIssue({ client, sessionId: target.agentSessionId,
-      message: `自动活动暂停尚未确认：${errorMessage(error)}。保留原操作 ${target.operationId}、Host ${target.ownerInstanceId}；可用 agent automation inspect 核对，不会自动重投。手工输入仍可使用。` }) })
+      message: '自动任务未确认暂停 · 你可以继续输入',
+      detail: `为避免和你的输入冲突，手机请求 Mac 暂停这个 Agent 的自动任务，但没有收到确认；不会自动重试。\n操作 ${target.operationId} · Mac 实例 ${target.ownerInstanceId || '未记录'}\n核对：agent automation inspect\n${errorMessage(error)}` }) })
   }
   const setDraft = (value: string, key = draftKey) => {
     const occupied = Boolean(drafts.current.get(key)?.trim())
@@ -653,6 +654,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     isDispatchedPrompt: (key: string, original: PromptAttempt) => dispatched.includes(key, { client, key, original, recordId: getDeviceWorkface().recordIdentity() }),
     hasPendingAction: (key: string, kind: 'retry' | 'stop') => { const value = pendingActions.current.get(actionKey(key, kind)); return Boolean(value && !value.cancelled && !value.dispatched) },
     cancelPendingAction, cancelPreparation, preparationIssue: preparationIssue && preparationIssue.client === client && preparationIssue.sessionId === agentSessionId ? preparationIssue.message : null,
+    preparationDetail: preparationIssue && preparationIssue.client === client && preparationIssue.sessionId === agentSessionId ? preparationIssue.detail ?? null : null,
     historyLocalEntries, retainedAttempts, sessionAttempts: allAttempts,
     promptWasRefused: (original: PromptAttempt) => originalPromptRefused(session, agentSessionId, original, client?.runtimeOwnerIdentity?.()?.runtimeId) }
 }

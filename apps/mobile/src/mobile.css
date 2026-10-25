@@ -453,3 +453,9 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-secondary:active:not(:disabled) { background: var(--surface-3); transition-duration: 0s; }
 .mobile-primary:active:not(:disabled) { background: var(--green-2); box-shadow: inset 0 1px 3px var(--scrim-1); }
 .mobile-space-row:active::before { background: var(--surface-1); }
+
+/* One-line summary with on-demand detail for notices beneath the composer. */
+.mobile-compact-notice { align-items: center; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.mobile-compact-notice p { margin: 0; }
+.mobile-compact-notice summary { display: flex; align-items: center; gap: var(--sp-2); min-height: 44px; cursor: pointer; color: var(--amber-text); }
+.mobile-compact-notice__detail { margin: 0 0 var(--sp-4); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-3); user-select: text; }

@@ -101,7 +101,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId })
   current.current = { client, agentSessionId }
-  const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue,
+  const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue, preparationDetail,
     historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId,
       session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   useMobileWebUpdateSafetyOwner(() => {
@@ -504,7 +504,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           onDropFiles={files => { void attachmentControls.current?.stageFiles(files) }}
           {...(readPastedImage ? { readPastedImage } : {})}
           />
-        {preparationIssue ? <MobileNotice identity={[agentSessionId,preparationIssue]} role="status">{preparationIssue}</MobileNotice> : null}
+        {preparationIssue ? <MobileNotice identity={[agentSessionId,preparationIssue]} role="status" className="mobile-compact-notice">{preparationDetail
+          ? <details><summary>{preparationIssue}</summary><p className="mobile-compact-notice__detail">{preparationDetail}</p></details>
+          : <p>{preparationIssue}</p>}</MobileNotice> : null}
         {attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}
         {retainedAttempts.length ? <details className="mobile-retained-prompts"><summary>保留的原消息 ({retainedAttempts.length})</summary>
           {retainedAttempts.map(renderPromptAttempt)}
