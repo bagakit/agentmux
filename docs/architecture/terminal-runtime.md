@@ -113,22 +113,23 @@ Desktop `RuntimeController.resumeSession` 和 `performRecovery` 在这两条实�
 
 行为要求归 [连续阅读与输入响应](../design/behavior/terminal-reading.md#terminal-连续向上阅读历史)。需要保证的是原字节、原目标、授权和写入顺序；Core 队列本身不是产品要求。不能用新增优先级、固定攒批延时或自动重试代替降低输入成本。
 
-**当前实现**：`AgentMuxClient.writeAgentInput` 经 `serializeAgentInput`，同一 Session 的下一次操作等待前次完整结束，再由 `requireCurrentAgentRun` 查询 ctxmux，取得 `acceptedInputBytes`，最后调用 `CtxmuxRunAdapter.input`。后者使用公开 `recoverableInput`，原生 writer 在写入前比较 expected cursor。它避免重复写入，但使连续 raw 输入逐条承担状态查询和回执往返。Hosted discovery、Host 事件循环繁忙与原生请求又是不同成本，不能全部归为 Core 队列，也不能拿入队时的 `blockedBy` 快照解释整段等待。
+**输入通道**：`writeAgent`／`pasteAgent` 的非空原始写入，经 `AgentMuxClient.writeAgentInput` 消费 `CtxmuxRunAdapter.openInput`，沿 ctxmux 公开的 input-only connection 顺序发送。每个实际使用的 Run 懒开一个物理连接；同一 opening 的 RunInfo 与 daemon 身份供 Core 在首次副作用前核对 Session／Run／cwd，每次派发仍重核当前绑定与原授权。原 writer 决定可写状态和准确 applied range；Core 不维护第二份 cursor，也不逐笔查询状态。
 
 | 等待或约束 | 归属与处理原则 |
 | --- | --- |
 | 原调用的授权准备、Session／Run／daemon 身份 | Core 保留；异步准备完成顺序不能打乱已接纳的同源输入 |
 | PTY 字节顺序、真实写入背压、本条 applied range | ctxmux 原 writer 唯一持有；接纳与完成回执分离，真实背压不能伪装成功 |
 | 语义输入的原操作身份、cursor 条件与未知恢复 | Core 与 ctxmux 原 recoverable 合同保留；不能因优化 raw 输入而取消防重复写入 |
-| 每条 raw 为获取 cursor 先查询一次 Run | 拟由原 writer 直接返回本条范围消除；不能用上次本地 ACK 代替跨客户端的当前 cursor |
-| 后条 raw 等前条完整 ACK 才派发 | 拟移除重复的上层完成依赖；只保授权顺序和真实语义事务边界 |
+| 每条 raw 为获取 cursor 先查询一次 Run | 删除；消费原 writer 返回的本条范围，不从上次 ACK 或较晚 Run 快照倒推 |
+| 后条 raw 等前条完整 ACK 才派发 | 删除；前条进入有序 wire 即释放接纳顺序，各调用分别等待自己的真实回执 |
+| SDK 真实在途窗口已满 | 仅队首等待容量通知，之后重核授权再发送；不定时攒批、不丢弃未发送输入、不自动重试已派发输入 |
 | 历史投影、可选屏幕确认、无关 Session 工作 | 不应成为原始输入的必需前置；相关成本归原消费者缩小范围，不另造调度层 |
 
-**收敛方案，尚不代表已实现**：先在 ctxmux 既有普通 Input 回执中公开 writer 已生成的准确范围，使 raw 输入无需调用前的 cursor 查询；不能从回执旁较晚的 Run 快照倒推范围。迁移范围限 `writeAgent`／`pasteAgent` 的原始写入；共用 helper 的 posture、handshake、typed response 与 prompt 恢复不随之改道。原始输入的逻辑 operationId 仍关联取消诊断、native-hook 的 unknown／accepted 和协议恢复边界。普通输入结果丢失仍为 unknown，不自动重发；需要原操作恢复的语义输入继续使用 recoverableInput。公开范围先作为独立的 Runtime 能力交付，不提前加入无消费者的 Core 方法。当前 `requireCurrentAgentRun` 还在首次副作用前校验 native cwd 与 Session 绑定；冷调用只有持久 metadata，不能把这项校验移到输入之后。因此，Core 的逐条查询与完整 ACK 尾链在下述独立控制连接接入时一起删除，不为过渡增加一份资格缓存。
+**必要事务边界**：Core 区分接纳顺序与尚未完成的交易。普通 raw 接纳只随原调用增长；完成集合只保留真实在途项，必要的协议后处理也算本次完成，不能在回执缺失时积累已完成历史的 Promise 尾链。语义输入等待入队时已有交易完整结束，保留原 recoverableInput 的 cursor／operationId 合同。posture、handshake、typed response、prompt 恢复与空载荷不随 raw 改道。用户原始输入遇到当前 native-hook 请求时，先等原前驱交易，再重读准确 Session／Run 和 pending request，沿原 CAS 事务保存本次 unknown；晚回执只更新这次捕获的请求与操作，不能误改后来请求。
 
-解除该尾链还需要独立的有序命令连接 owner。现有 Core Attachment 属于输出观察，会在 detach、换 view 或观察失败时结束；不能借其寿命决定健康输入是否可用，也不能把它描述成已经存在的独立控制通道。后续通道应复用 ctxmux 的 FIFO 接纳、命令关联与结果返回机制；opening 在同一连接返回原 RunInfo，让 Core 在首次输入前校验 Run／cwd，后续每条仍核当前 Session 绑定与授权。不可变身份随真实连接持有，可变 running／cursor 仍由原 writer 裁决。通道明确原 daemon／Run 绑定、容量背压、连接关闭、晚回执与 unknown；Core 只组合授权和语义边界，不复制 Runtime 状态。完成这段合同与真实消费者验证后，删除 raw 的旧逐 ACK 尾链，不保留兼容分支或第二套队列。
+**寿命与失败**：输入通道复用 ctxmux 的 FIFO 接纳、命令关联、预算与结果机制，独立于输出 Attachment；detach、换 view 或观察失败不关闭健康输入。原 Run 终局、真实连接关闭或 adapter 连接替换释放对应 handle 与 opening；晚 opening 不得覆盖新 owner。Native 复用原 Run 终局通知收束没有输出 reader 的通道，不新增轮询。SDK 只保未完成命令，Core 只保未完成交易。未发送取消为 not_applied；已发送结果丢失保持 unknown，不自动回放，不关闭健康 Run。下次独立输入可打开新连接，但不是重试旧 unknown。
 
-验证按可推翻方案的边界展开：双 Client 交错写入仍取得各自准确范围；前条回执延迟时后条 raw 仍可接纳且实际字节有序；授权准备乱序、Run 替换、语义输入交错、观察 detach／失败、部分写与断连均不换目标、不丢字节、不自动重放未知输入。现场收益分别观察可信事件派发、Core 准备／排队、原生写入、输出解析与呈现；没有实际交互或尚未更新的实例不能代签流畅度改善。
+验证按可推翻方案的边界展开：双 Client 交错写入仍取得各自准确范围；前条回执延迟时后条 raw 已实际接纳且字节有序；突发输入经过真实窗口后完整到达；授权准备乱序、Run 替换、语义输入交错、观察 detach／失败、部分写与断连均不换目标、不丢字节、不自动重放未知输入。诊断区分准备／接纳等待、`input-capacity`、原生写入和 `input-completion-order`；Hosted discovery、Host 事件循环与呈现仍分别归属原消费者，不能拿入队时的 `blockedBy` 快照解释整段等待。没有实际交互或尚未更新的实例不能代签流畅度改善。
 
 ## 2. 所有权矩阵
 
