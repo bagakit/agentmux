@@ -99,6 +99,7 @@ window.startPageProof = {
       central: central ? { value: central.value, disabled: central.disabled } : null, count: document.querySelectorAll('.browser-start-history__card').length,
       images: [...document.querySelectorAll('.browser-start-history__card img')].map(image => ({ complete: image.complete, width: image.naturalWidth, title: image.title })),
       pane: box ? { x: box.x, y: box.y, width: box.width, height: box.height, scrollWidth: pane.scrollWidth, clientWidth: pane.clientWidth } : null,
+      atmosphereLayers: [...document.querySelectorAll('.browser-start-atmosphere__plane,.browser-start-atmosphere__sheen')].map(layer => ({ className: layer.className, inline: layer.style.transform, computed: getComputedStyle(layer).transform, opacity: getComputedStyle(layer).opacity, transitionDuration: getComputedStyle(layer).transitionDuration, rect: layer.getBoundingClientRect().toJSON() })),
       appearance: document.documentElement.dataset.appearance, retained: Object.keys(state.tabs).filter(id => id.startsWith('start-page-retained-')).length, savedStartPage: state.config.browser.startPage, plane: (() => { const plane = document.querySelector('.browser-start-atmosphere__plane'); return plane ? { inline: plane.style.transform, computed: getComputedStyle(plane).transform, rect: plane.getBoundingClientRect().toJSON() } : null })() }
   }
 }

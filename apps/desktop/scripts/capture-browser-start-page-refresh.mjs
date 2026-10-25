@@ -65,7 +65,7 @@ try {
       const source = await readFile(path, 'utf8'); inputs.set(path, hash(source)); return { contents: source, loader: 'css' }
     })
   } }
-  for (const file of ['main.cjs', 'pages.cjs', 'entry.mjs', 'scenario.md', ...(personalization ? ['personalization-scene.cjs', 'personalization.md', 'preload.cjs', 'native-config.ts'] : [])]) inputs.set(join(fixture, file), hash(await readFile(join(fixture, file))))
+  for (const file of ['main.cjs', 'pages.cjs', 'entry.mjs', 'scenario.md', ...(personalization ? ['personalization-scene.cjs', 'native-atmosphere-cost.cjs', 'personalization.md', 'preload.cjs', 'native-config.ts'] : [])]) inputs.set(join(fixture, file), hash(await readFile(join(fixture, file))))
   inputs.set(new URL(import.meta.url).pathname, hash(await readFile(new URL(import.meta.url))))
   const renderer = join(out, 'app.js')
   const result = await build({ entryPoints: [join(fixture, 'entry.mjs')], outfile: renderer, bundle: true, platform: 'browser', format: 'esm', target: 'es2022', jsx: 'automatic', conditions: ['production'], metafile: true, alias,
