@@ -1,0 +1,49 @@
+/* Canonical native action styles. Hosts supply the existing theme and density tokens. */
+:is(.small-button, .primary-button, .danger-button, .icon-button) { font: inherit; }
+.icon-button {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding:0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+  transition: color var(--dur-fast) ease, background var(--dur-fast) ease;
+}
+/* The density contract asks press to read as an inner shadow rather than a border shift, so the most
+   reused control in the app answers the click instead of only the hover. */
+.icon-button:active:not(:disabled) { box-shadow: inset 0 1px 2px var(--scrim-1); }
+.icon-button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.icon-button--danger:hover:not(:disabled) { color: var(--red); background: var(--red-bg); }
+.icon-button:disabled { opacity: .45; cursor: default; }
+
+.small-button, .primary-button { display: inline-flex; align-items: center; justify-content: center; gap:var(--sp-2); border-radius: var(--radius-sm); font-weight: 560; cursor: pointer; transition: background var(--dur-fast) ease, color var(--dur-fast) ease, box-shadow var(--dur-fast) ease; }
+.small-button { padding:var(--sp-2) var(--sp-4); border: 0; color: var(--text); background: var(--surface-3); font-size: var(--fs-meta); box-shadow: var(--hl); }
+.small-button:hover:not(:disabled) { background: var(--surface-2); box-shadow: var(--hl-strong); }
+.small-button--warning { color: var(--amber-text); background: var(--amber-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--hl); }
+.small-button--warning:hover:not(:disabled) { color: var(--amber-text-hover); background: var(--amber-bg-hover); box-shadow: inset 0 0 0 1px var(--amber-line), var(--hl-strong); }
+/* 选中/开启态（换行开关、diff 开关这类 toggle）。不能只换到 --surface-2：那正是 .small-button 的
+   hover 底色，静止时和未选中的按钮看着一样，鼠标一悬停两态又完全重合——等于没有选中态。所以走
+   强调色，与 --warning 那对 amber 完全对称：淡底 + 一圈同色内描边点出「这个开着」。 */
+.small-button--active, .small-button--active:hover:not(:disabled) { color: var(--green-text); background: var(--green-bg); box-shadow: inset 0 0 0 1px var(--green-line), var(--hl); }
+.small-button:disabled { opacity: .45; cursor: default; }
+.primary-button { padding:var(--sp-4) var(--sp-5); border: 0; color: var(--bg); background: linear-gradient(180deg, var(--green), var(--green-2)); font-size: var(--fs-meta); font-weight: 620; box-shadow: var(--elev-1), var(--hl-strong); }
+.primary-button:hover:not(:disabled) { background: linear-gradient(180deg, var(--green-text), var(--green)); }
+.primary-button:active:not(:disabled) { background: var(--green-2); box-shadow: inset 0 1px 3px var(--scrim-1); }
+.primary-button:disabled { opacity: .4; cursor: default; }
+
+.danger-button { display: inline-flex; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--bg); background: linear-gradient(180deg, var(--red-text), var(--red)); font-size: var(--fs-meta); font-weight: 620; box-shadow: var(--elev-1), var(--hl-strong); cursor: pointer; transition: background var(--dur-fast) ease; }
+.danger-button:hover:not(:disabled) { background: linear-gradient(180deg, var(--red-text), var(--red-text)); }
+.danger-button:active:not(:disabled) { background: var(--red); box-shadow: inset 0 1px 3px var(--scrim-1); }
+.danger-button:disabled { opacity: .5; cursor: default; }
+
+.icon-button--danger { color: var(--red); }
+
+:is(.small-button, .primary-button, .danger-button, .icon-button):focus-visible {
+  outline: 2px solid var(--focus-line);
+  outline-offset: 1px;
+}
