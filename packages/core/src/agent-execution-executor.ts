@@ -110,7 +110,12 @@ export function createAgentExecutionExecutor(options: {
       })().catch(() => options.onError(new Error('Native connection-end observation is unconfirmed')))
     }
     child.once('exit', ended)
-    child.once('error', ended)
+    child.on('error', () => {
+      // A failed spawn has no process. Errors after spawn (including a failed
+      // signal) do not prove exit and cannot retire its generation or pending work.
+      if (child.pid === undefined) ended()
+      else void report(generation, 'NATIVE_PROCESS_ERROR_UNCONFIRMED')
+    })
     child.stdin.on('error', () => { void report(generation, 'NATIVE_INPUT_UNCONFIRMED') })
     child.stderr.on('error', () => { void report(generation, 'NATIVE_STDERR_OBSERVATION_UNCONFIRMED') })
     children.set(generation, state)
