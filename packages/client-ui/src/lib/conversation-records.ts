@@ -8,6 +8,11 @@ import { describeConversationInputSource } from './conversation-input-source.js'
 export type ConversationRecordSource = AgentConversationRecord['source']
 export type ConversationRecord = AgentConversationRecord & { speaker?: ConversationSpeaker; presentationKey?: string; sources?: ConversationSources; coverage?: import('@agentmux/core/conversation').ConversationTimeline['coverage'] }
 
+/** Reading the accepted outcome never interprets recorded prose or current Session state. */
+export function conversationRecordTurnOutcome(record: ConversationRecord) {
+  return record.original.kind === 'deferred' ? record.original.item.item.turnOutcome : record.original.item.turnOutcome
+}
+
 /** The Core owns source-qualified records; this adapter only supplies client speaker presentation. */
 export function projectConversationReading(input: ConversationProjectionInput) {
   const reading = projectCoreReading({ ...input, executionHostId: undefined, ...(input.executionHostId ? { routeHostId: input.executionHostId } : {}) })

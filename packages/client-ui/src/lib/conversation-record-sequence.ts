@@ -1,4 +1,4 @@
-import type { ConversationRecord } from './conversation-records.js'
+import { conversationRecordTurnOutcome, type ConversationRecord } from './conversation-records.js'
 
 /** View-only slots never carry another source's conversation records. */
 export type ConversationSequenceInsertion = { key: string; beforeRecordId?: string; role?: 'anchor' }
@@ -50,6 +50,8 @@ export function projectConversationRecordSequence(
     const key = conversationPresentationKey(record)
     insert(key)
     if (beforeRecordId === key) { flush(); rows.push({ kind: 'boundary' }) }
+    // A recorded failure is readable even when the surrounding process is folded.
+    if (conversationRecordTurnOutcome(record)?.status === 'failed') { flush(); rows.push({ kind: 'record', record }); continue }
     if (record.role === 'process' || record.role !== 'observation' && conversationProcessPeer(record)) {
       const native = record.original.kind === 'native' ? record.original.item : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? record.original.item.item : undefined
       const source = record.source.kind === 'native'

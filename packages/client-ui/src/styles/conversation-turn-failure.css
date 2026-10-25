@@ -1,0 +1,21 @@
+.conversation-turn-failure { min-width: 0; margin: var(--sp-2) var(--sp-4) var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line); border-inline-start: 3px solid var(--red-text); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: var(--fs-meta)/1.5 var(--font-ui); }
+.conversation-turn-failure__heading { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.conversation-turn-failure__heading > svg { flex: 0 0 auto; color: var(--red-text); }
+.conversation-turn-failure__heading strong { font-weight: 550; }
+.conversation-turn-failure__heading > span { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.conversation-turn-failure__cause { margin: var(--sp-2) 0 0; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.conversation-turn-failure__recovery { margin: var(--sp-1) 0 0; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.conversation-turn-failure__scope { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-3); min-width: 0; margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.conversation-turn-failure__scope > span:first-child { display: flex; align-items: baseline; gap: var(--sp-1); min-width: 0; }
+.conversation-turn-failure__scope > span:first-child code { max-inline-size: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-turn-failure code { font: inherit; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.conversation-turn-failure__details { margin-top: var(--sp-2); color: var(--text-3); }
+.conversation-turn-failure summary { width: fit-content; max-width: 100%; min-height: 28px; display: list-item; align-content: center; cursor: pointer; }
+.conversation-turn-failure summary:hover { color: var(--text); }
+.conversation-turn-failure summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: var(--sp-1); border-radius: var(--radius-sm); }
+.conversation-turn-failure__details dl { display: grid; gap: var(--sp-1); margin: var(--sp-2) 0; }
+.conversation-turn-failure__details dl > div { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
+.conversation-turn-failure__details dt { color: var(--text-3); }
+.conversation-turn-failure__details dd { min-width: 0; margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.conversation-turn-failure__original { margin-top: var(--sp-2); }
+@media (pointer: coarse) { .conversation-turn-failure summary { min-height: 44px; } }
