@@ -70,6 +70,25 @@ async function choose(label: string, value: string) { const select = document.qu
 function preserved(originalTab: unknown, drafts: unknown) { expect(useAppStore.getState().tabs['original-tab']).toBe(originalTab); expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); expect(useAppStore.getState().activeWorkspaceId).toBe('workspace'); expect(useAppStore.getState().sessions.some(item => item.id === 'original')).toBe(true) }
 
 describe('actual SessionPane explicit recovery actions', () => {
+  it.each(['exited', 'interrupted'] as const)('renders the original executable failure for an %s Run and preserves its operation', async processState => {
+    useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'original' ? { ...session, processState } : session) }))
+    const original = useAppStore.getState().sessions.find(item => item.id === 'original')!
+    const continuity = { operationId: 'missing-executable', agentSessionId: 'original', trigger: 'manual',
+      previousRun: original.control.kind === 'agent' ? original.control.run : { runId: 'unused' },
+      admittedAt: 1, observedAt: 2, rechecks: 0, kind: 'unavailable', reason: 'provider-unavailable',
+      evidence: { kind: 'run-ended', state: 'interrupted', observedAt: 2 }, policy: {},
+      error: `The configured executable "${_hygiene_fixturePath('private/exact wrapper')}" was not found.`, errorCode: 'AGENT_NOT_FOUND' } as const
+    vi.spyOn(api.sessions, 'recover').mockResolvedValue({ kind: 'unavailable', agentSessionId: 'original',
+      previousRun: continuity.previousRun, reason: 'provider-unavailable', continuity } as never)
+    await act(async () => { await useAppStore.getState().recoverSession('original', continuity.operationId) })
+    const projected = useAppStore.getState().sessions.find(item => item.id === 'original')!
+    expect(projected.continuity).toEqual(continuity)
+    expect(projected.continuityOperations?.[continuity.operationId]).toEqual(continuity)
+    await mount()
+    expect(dom.container.textContent).toContain('AGENT_NOT_FOUND: ' + continuity.error)
+    expect(useAppStore.getState().agentComposerDrafts.original).toBe('Original unsent draft')
+    expect(api.sessions.launchAgent).not.toHaveBeenCalled()
+  })
   it('opens, selects and cancels without any create or send; native restore missing identity remains explicit', async () => {
     await mount(); const restore = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Re-read original'))!
     expect(restore.disabled).toBe(false); expect(dom.container.textContent).toContain('without restarting the Agent or resending messages'); expect(dom.container.textContent).not.toContain('never recorded')
