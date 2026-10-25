@@ -582,27 +582,7 @@ export class AgentPromptSubmissionCoordinator {
         session.terminalPromptSubmission?.submissionId === submissionId && session.terminalPromptSubmission.submit.acknowledged === true) return
       throw new AgentMuxError('This original prompt belongs to the previous native conversation. Its operation and receipt are retained; it will not replay into the current source. Raw Agent input remains available.', 'AGENT_PROMPT_SOURCE_CHANGED')
     }
-    let confirmedFutureIdle = false
-    if (expectedFutureIntent !== undefined && session.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(session)) {
-      const provider = this.deps.providers.get(session.providerId)
-      const context = { args: this.deps.providerArgs?.(session, run) ?? run.args, workspacePath: session.workspacePath,
-        ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
-        ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) }
-      const evidence = await provider.readPromptExecutionEvidence?.(context)
-      const boundary = session.promptCompletionAdmission?.outputCursorBytes
-      if (evidence && evidence.state !== 'working' && provider.inspectPromptExecution && boundary !== undefined) {
-        let resizeRevision: number | undefined
-        await this.deps.screenEvidence.wait(session, run.latestOutputBytes, false, screen => { resizeRevision = screen.geometryRevision; return true },
-          { timeoutMs: 2_000, requireCompleteFrame: true, timeoutMessage: 'Native screen geometry is unconfirmed.', terminalMessage: 'The original Agent Run ended.', ...(renderSignal ? { signal: renderSignal } : {}) })
-        await this.deps.screenEvidence.wait(session, run.latestOutputBytes, false, screen => provider.inspectPromptExecution!(screen.snapshot()) === 'idle',
-          { timeoutMs: 2_000, requireCompleteFrame: true,
-            requireFrameAfterBoundary: true, checkpointFrameFence: { outputByte: boundary, resizeRevision: resizeRevision! },
-            timeoutMessage: 'The native idle frame is unconfirmed; the future message remains due.', terminalMessage: 'The original Agent Run ended before future-message admission.',
-            ...(renderSignal ? { signal: renderSignal } : {}) })
-        const latest = await provider.readPromptExecutionEvidence!(context)
-        confirmedFutureIdle = latest?.sourceId === evidence.sourceId && latest.id === evidence.id && latest.state !== 'working'
-      }
-    }
+    let nativeFutureAdmissionReady = false
     const assertInteraction = (current: AgentMuxAgentSession): void => {
       assertSession?.(current)
       if (transportQualification && (transportQualification.agentSessionId !== current.agentSessionId ||
@@ -688,8 +668,8 @@ export class AgentPromptSubmissionCoordinator {
         if (agentTurnCompletionIdentity(current) === undefined && agentTurnEndBoundary(current) === undefined || current.semanticStatus?.state === 'working') {
           throw new AgentMuxError('The Agent idle boundary is unconfirmed. The future message remains due.', 'AGENT_TURN_END_UNCONFIRMED')
         }
-        if (current.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(current) && !confirmedFutureIdle) {
-          throw new AgentMuxError('The previous admission consumed this idle boundary; a current native idle frame is unconfirmed. The future message remains due and manual input remains available.', 'AGENT_TURN_END_UNCONFIRMED')
+        if (current.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(current) && !nativeFutureAdmissionReady) {
+          throw new AgentMuxError('The previous admission consumed this idle boundary; an atomic native idle admission is unconfirmed. The future message remains due and manual input remains available.', 'AGENT_TURN_END_UNCONFIRMED')
         }
       } else if (!control?.idleOnly?.nativeEvidence && (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification)) {
         throw new AgentMuxError('The completed turn changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
@@ -697,7 +677,7 @@ export class AgentPromptSubmissionCoordinator {
     }
     // Default semantic messages address the original durable Core conversation.
     // A manual terminal intent and any previously frozen byte plan stay terminal.
-    const defaultMessageInput = control?.requiredNativeSource || control?.idleOnly || inputKey.kind === 'message'
+    const defaultMessageInput = control?.requiredNativeSource || control?.idleOnly || inputKey.kind === 'message' || expectedFutureIntent !== undefined
     const sessionConversation = admissionIntent?.kind === 'session-conversation'
     const defaultSemanticInput = (sessionConversation || execution === 'default' && admissionIntent?.kind === 'exact-condition') && !rejoiningFrozenPlan
     const nativeIdleOnly = Boolean(control?.idleOnly || control?.nativeIdleOnly || expectedCompletionId !== undefined || expectedFutureIntent !== undefined)
@@ -763,6 +743,8 @@ export class AgentPromptSubmissionCoordinator {
             prepared.plan.operation !== (nativeIdleOnly ? 'queue-idle' : target.expectedTurnId === undefined ? 'start-or-steer' : 'steer')) throw new AgentMuxError(
           'The prepared native plan does not address the original source and input operation. No input was sent.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
         await prepared.assertCurrent()
+        // The exact Provider queue arbitrates idle dispatch atomically; a screen cannot renew a consumed boundary.
+        nativeFutureAdmissionReady = nativeIdleOnly && prepared.plan.operation === 'queue-idle'
         await assertNativeIdle()
         const frozenPlan = { ...prepared.plan, clientCorrelation: createNativeInputCorrelation(inputKey) }
         const intent = freezeIntent(frozenPlan)
