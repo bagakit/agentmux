@@ -2,7 +2,7 @@ import type { WebContents } from 'electron'
 import { createHash } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
 import { agentMuxControlTimeoutMs, parseRendererV8ProfileInput, parseRendererV8ProfileResult,
-  rendererV8ProfileJSON, sameRendererV8ProfileTarget,
+  v8ProfileJSON, sameRendererV8ProfileTarget,
   type RendererV8ProfileInput, type RendererV8ProfileResult, type RendererV8ProfileTarget } from '@agentmux/core/control'
 
 /** A single explicit capture on this App Renderer; never borrows another debugger owner. */
@@ -92,7 +92,7 @@ export class RendererV8Profiler {
       result.timing.stoppedAt = Date.now(); result.timing.stopMonotonicMs = performance.now()
       stage = 'profile'
       result.profileBytes = Buffer.byteLength(JSON.stringify(stopped.profile))
-      const text = rendererV8ProfileJSON(stopped.profile)
+      const text = v8ProfileJSON(stopped.profile)
       result.profile = stopped.profile; result.sha256 = createHash('sha256').update(text).digest('hex')
       stage = 'disable'; disableSent = true; await command('Profiler.disable')
       result.cleanup.disableAcknowledged = true

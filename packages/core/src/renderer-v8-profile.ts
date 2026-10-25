@@ -1,13 +1,12 @@
-import type { Profiler } from 'node:inspector'
+import { v8ProfileJSON, type V8Profile } from './v8-profile.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import type { MetricsWindow } from './metrics.js'
 
-export const RENDERER_V8_PROFILE_MAX_BYTES = 8 * 1024 * 1024
 export const RENDERER_V8_PROFILE_METADATA_BYTES = 64 * 1024
 export type RendererV8ProfileTarget = MetricsWindow & { pid: number; creationTime: number }
 export type RendererV8ProfileInput = { target: RendererV8ProfileTarget; durationMs: number }
-export type RendererV8Profile = Profiler.Profile
+export type RendererV8Profile = V8Profile
 export type RendererV8ProfileIssue = { stage: string; code: string; message: string; messageTruncated: boolean }
 export type RendererV8ProfileResult = RendererV8ProfileInput & {
   schema: 'agentmux.renderer-v8-profile.v1'
@@ -60,49 +59,6 @@ export function parseRendererV8ProfileInput(value: unknown, code = 'INVALID_CONT
   return r as unknown as RendererV8ProfileInput
 }
 
-/** Validate the original protocol object, retaining optional fields and array order. */
-export function parseRendererV8Profile(value: unknown): RendererV8Profile {
-  const code = 'CONTROL_PROTOCOL_ERROR'
-  const p = rpcRecord(value, ['nodes', 'startTime', 'endTime', 'samples', 'timeDeltas'], code)
-  if (!numeric(p.startTime) || !numeric(p.endTime) || p.endTime < p.startTime) invalid(code)
-  const nodes = array(p.nodes, code), ids = new Set<number>()
-  if (!nodes.length) invalid(code)
-  for (const item of nodes) {
-    const n = rpcRecord(item, ['id', 'callFrame', 'hitCount', 'children', 'deoptReason', 'positionTicks'], code)
-    if (!positive(n.id) || ids.has(n.id)) invalid(code)
-    ids.add(n.id)
-    const f = fields(n.callFrame, ['functionName', 'scriptId', 'url', 'lineNumber', 'columnNumber'], code)
-    if (['functionName', 'scriptId', 'url'].some(key => typeof f[key] !== 'string') ||
-      !Number.isSafeInteger(f.lineNumber) || Number(f.lineNumber) < -1 ||
-      !Number.isSafeInteger(f.columnNumber) || Number(f.columnNumber) < -1 ||
-      n.hitCount !== undefined && !count(n.hitCount) || n.deoptReason !== undefined && typeof n.deoptReason !== 'string') invalid(code)
-    if (n.positionTicks !== undefined) for (const tick of array(n.positionTicks, code)) {
-      const t = fields(tick, ['line', 'ticks'], code)
-      if (!count(t.line) || !count(t.ticks)) invalid(code)
-    }
-  }
-  for (const item of nodes) {
-    const n = item as { children?: unknown }
-    if (n.children !== undefined) for (const id of array(n.children, code)) if (!positive(id) || !ids.has(id)) invalid(code)
-  }
-  if (p.samples !== undefined || p.timeDeltas !== undefined) {
-    const samples = array(p.samples, code), deltas = array(p.timeDeltas, code)
-    if (samples.length !== deltas.length) invalid(code)
-    for (const id of samples) if (!positive(id) || !ids.has(id)) invalid(code)
-    for (const delta of deltas) if (!numeric(delta)) invalid(code)
-  }
-  return p as unknown as RendererV8Profile
-}
-
-export function rendererV8ProfileJSON(profile: RendererV8Profile): string {
-  const json = JSON.stringify(profile)
-  if (new TextEncoder().encode(json).byteLength > RENDERER_V8_PROFILE_MAX_BYTES) {
-    throw new AgentMuxError('Original Renderer profile exceeds the 8 MiB result transport budget; it was not truncated.', 'CONTROL_PROTOCOL_ERROR')
-  }
-  parseRendererV8Profile(profile)
-  return json
-}
-
 export function parseRendererV8ProfileResult(value: unknown, input?: RendererV8ProfileInput): RendererV8ProfileResult {
   const code = 'CONTROL_PROTOCOL_ERROR'
   const r = fields(value, ['target', 'durationMs', 'schema', 'scope', 'status', 'timing', 'profilerTimeUnit',
@@ -130,7 +86,7 @@ export function parseRendererV8ProfileResult(value: unknown, input?: RendererV8P
   if (r.profileBytes !== null && !count(r.profileBytes)) invalid(code)
   if (r.profile === null) { if (r.sha256 !== null) invalid(code) }
   else {
-    const text = rendererV8ProfileJSON(r.profile as RendererV8Profile)
+    const text = v8ProfileJSON(r.profile as RendererV8Profile)
     if (r.profileBytes !== new TextEncoder().encode(text).byteLength || typeof r.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(r.sha256)) invalid(code)
   }
   if (r.status === 'completed' && (r.profile === null || !source.before || !source.after || !cleanup.stopAcknowledged ||

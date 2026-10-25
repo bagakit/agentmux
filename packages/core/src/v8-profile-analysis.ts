@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import { parseRendererV8Profile, RENDERER_V8_PROFILE_MAX_BYTES, type RendererV8Profile } from './renderer-v8-profile.js'
+import { parseV8Profile, V8_PROFILE_MAX_BYTES, type V8Profile } from './v8-profile.js'
 
 export type V8ProfileWeightKind = 'script' | 'idle' | 'gc' | 'unattributed'
 export type V8ProfileFrame = {
@@ -24,7 +24,7 @@ function weightKind(frame: V8ProfileFrame): V8ProfileWeightKind {
 }
 
 /** Original sample weights, not process CPU or a source-map/module ownership claim. */
-export function analyseV8Profile(profile: RendererV8Profile): V8ProfileAnalysisResult {
+export function analyseV8Profile(profile: V8Profile): V8ProfileAnalysisResult {
   const unavailable = (reason: string): V8ProfileAnalysisResult => ({ data: null, reason })
   if (!profile.samples?.length || !profile.timeDeltas?.length) return unavailable('No weighted V8 samples were returned. The original profile remains available.')
   if (profile.nodes.length > 50000 || profile.samples.length > 1000000) return unavailable('This profile exceeds the interactive analysis budget. Export the original profile for offline analysis.')
@@ -82,13 +82,13 @@ export function analyseV8Profile(profile: RendererV8Profile): V8ProfileAnalysisR
 }
 
 /** Parse only explicit original artifact bytes; no IO, normalization or capture. */
-export function parseV8ProfileBytes(bytes: Uint8Array): RendererV8Profile {
-  if (bytes.byteLength > RENDERER_V8_PROFILE_MAX_BYTES)
+export function parseV8ProfileBytes(bytes: Uint8Array): V8Profile {
+  if (bytes.byteLength > V8_PROFILE_MAX_BYTES)
     throw new AgentMuxError('The selected profile exceeds the original 8 MiB profile budget.', 'INVALID_CLI_ARGUMENT')
   let original: unknown
   try { original = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) }
   catch { throw new AgentMuxError('The selected file is not valid profile JSON. No capture was started.', 'INVALID_CLI_ARGUMENT') }
-  return parseRendererV8Profile(original)
+  return parseV8Profile(original)
 }
 
 export type V8ProfileArtifactSource = { sha256: string; bytes: number; captureIdentity: 'unavailable-in-bare-profile' }
