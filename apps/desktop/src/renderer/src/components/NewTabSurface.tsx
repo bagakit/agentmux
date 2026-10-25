@@ -395,12 +395,14 @@ export function NewTabSurface({
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive}
         hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} onSelectWorkspace={chooseExecutionWorkspace}
         selectionDisabled={busy !== null} onManageProjects={() => settings?.open('hosts')}
-        roleLabel={splitExecution ? 'Project & tools' : undefined}>
+        roleLabel={splitExecution ? 'Project & tools' : undefined} />
+      <div className="launcher-execution-choice">
         <label className="launcher-execution-mode"><input type="checkbox" checked={splitExecution} disabled={busy !== null || !workspace || !splitExecution && isScratchWorkspaceId(workspace.id)}
           onChange={event => chooseAgentWorkspace(event.target.checked ? workspace!.id : null)} />
           <span>Run the Agent on a separate host</span></label>
-        {workspace && isScratchWorkspaceId(workspace.id) ? <p className="launcher-environment__hint">Separate execution supports registered projects. Mote keeps its original runtime and context.</p> : null}
-      </LauncherEnvironment>
+        {settings ? <button type="button" className="small-button" onClick={() => settings.open('remote-execution', undefined, 'guide')}>How it works</button> : null}
+      </div>
+      {workspace && isScratchWorkspaceId(workspace.id) ? <p className="launcher-environment__hint">Separate execution supports registered projects. Mote keeps its original runtime and context.</p> : null}
       {splitExecution ? <LauncherEnvironment workspace={agentWorkspace} host={agentHost} check={undefined}
         displayPath={agentWorkspace ? formatPathForDisplay(agentWorkspace.path, { home: agentHost?.kind === 'local' ? localHome : '', copyPathsAsAbsolute: config?.copyPathsAsAbsolute }) : ''}
         roleLabel="Agent runtime" selectionLabel="Agent runtime environment" chooseTitle="Choose where the Agent runs" active={motionActive}

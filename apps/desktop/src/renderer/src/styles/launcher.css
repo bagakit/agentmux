@@ -250,7 +250,9 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
 .launcher-environment__role { color: var(--text-3); font-size: var(--fs-meta); font-weight: 550; }
 .launcher-environment[data-role='separate'] { padding-bottom: var(--sp-4); margin-bottom: var(--sp-4); gap: var(--sp-4); }
 .launcher-environment[data-role='separate'] h2 { font-size: var(--fs-body); }
-.launcher-execution-mode { display: flex; align-items: center; gap: var(--sp-3); padding-block: var(--sp-4); font-size: var(--fs-meta); cursor: pointer; }
+.launcher-execution-choice { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-3); }
+.launcher-execution-mode { display: flex; align-items: center; gap: var(--sp-2); padding-block: var(--sp-1); font-size: var(--fs-meta); cursor: pointer; }
+.launcher-execution-choice > button { flex: 0 0 auto; font-size: var(--fs-meta); }
 .launch-surface[data-density='compact'] .launcher-environment[data-role='separate'] .launcher-environment__project { grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--sp-2) var(--sp-4); }
 .launch-surface[data-density='compact'] .launcher-environment[data-role='separate'] .launcher-environment__path { grid-column: 1 / -1; padding-inline-start: 0; }
 .launcher-environment__hint { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }

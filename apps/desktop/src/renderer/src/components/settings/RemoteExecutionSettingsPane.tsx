@@ -8,6 +8,7 @@ import { AgentToolExecutionNotice } from '../AgentToolExecutionNotice'
 import { ResolvedAgentAvatar } from '../AgentAvatar'
 import { SettingsNavigation } from '../SettingsNavigation'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
+import { RemoteExecutionGuide } from './RemoteExecutionGuide'
 import type { SettingsPaneProps } from './settings-catalog'
 import executionIllustration from '../../assets/settings/remote-execution.png'
 import '../../styles/remote-execution-settings.css'
@@ -22,7 +23,7 @@ const NO_NAMES: Record<string, string> = {}
 type BoundAgent = Extract<SessionSnapshot, { kind: 'agent' }> & { toolExecution: NonNullable<Extract<SessionSnapshot, { kind: 'agent' }>['toolExecution']> }
 
 /** A view of retained Core bindings. Creating and continuing work stay with the original workbench. */
-export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigate }: SettingsPaneProps) {
+export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigate, navigationRequest }: SettingsPaneProps) {
   const sessions = useAppStore(state => active ? state.sessions : NO_SESSIONS)
   const names = useAppStore(state => active ? state.agentNames : NO_NAMES)
   const activeWorkspaceId = useAppStore(state => state.activeWorkspaceId)
@@ -31,6 +32,9 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
   const [projectId, setProjectId] = useState(() => projects.find(workspace => workspace.id === activeWorkspaceId)?.id ?? '')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'library' | 'detail'>('library')
+  useLayoutEffect(() => {
+    if (active && navigationRequest?.field === 'guide') setView('library')
+  }, [active, navigationRequest])
   const [narrow, setNarrow] = useState(false)
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
   const container = useRef<HTMLDivElement>(null)
@@ -115,7 +119,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
 
     <section hidden={narrow && view === 'detail'} className="settings-group remote-execution-prepare" data-settings-field="prepare">
       <header><span>Start with your project</span><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>Manage Hosts<OpenIcon size={13} /></button></header>
-      <p className="settings-group-note">Choose where files and tools belong. Next, select the Agent runtime and configuration in the Launcher, then start when ready.</p>
+      <p className="settings-group-note">Start in Space → your project → New Tab, or prepare the same Launcher here. Select the Agent runtime there, then Launch.</p>
       {projects.length ? <div className="remote-execution-prepare__controls">
         <label><span>Project &amp; tools</span><select aria-label="Project for remote execution" value={projectId} onChange={event => { setProjectId(event.target.value); setActionError(null) }}>
           <option value="">Choose a project…</option>
@@ -126,6 +130,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
       </div> : <p className="settings-group-note">Register a project in Hosts to choose its files and tools. Existing Agents remain available below.</p>}
       {preparedProject ? <div className="remote-execution-prepare__target" aria-label="Selected project identity"><strong>{preparedProject.name}</strong><span>{hostName(preparedProject.hostId)} · <code>{preparedProject.hostId}</code></span><code>{preparedProject.path}</code></div> : null}
       <p className="remote-execution-caption">No Agent starts here. Provider support is checked for your selected runtime.</p>
+      <RemoteExecutionGuide active={active} />
     </section>
 
     {actionError ? <p className="remote-execution-feedback" role="status">{actionError}</p> : null}

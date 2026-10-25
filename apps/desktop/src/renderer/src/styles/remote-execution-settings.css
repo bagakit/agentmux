@@ -15,6 +15,10 @@
 .remote-execution-prepare__controls select { width: 100%; min-width: 0; height: 34px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0 var(--sp-2); background: var(--surface-2); color: var(--text); font: inherit; font-size: var(--fs-body); }
 .remote-execution-prepare__controls > button { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 34px; flex: 0 0 auto; }
 .remote-execution-caption { margin: var(--sp-3) 0 0; font-size: var(--fs-meta); color: var(--text-3); line-height: 1.6; }
+.remote-execution-guide { margin-top: var(--sp-3); border-top: 1px solid var(--line-soft); padding-top: var(--sp-3); }
+.remote-execution-guide summary { cursor: pointer; font-size: var(--fs-body); color: var(--text); }
+.remote-execution-guide summary > span { margin-left: var(--sp-2); font-size: var(--fs-meta); color: var(--text-3); }
+.remote-execution-guide__body { margin-top: var(--sp-3); max-width: 72ch; overflow-wrap: anywhere; line-height: 1.7; }
 .remote-execution-feedback { padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: var(--fs-body); color: var(--text-2); overflow-wrap: anywhere; }
 .remote-execution-bindings__body { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(0, 1.4fr); gap: var(--sp-4); align-items: start; }
 .remote-execution-bindings .settings-resource-library { min-width: 0; }
