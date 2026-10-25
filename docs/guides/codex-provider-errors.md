@@ -34,7 +34,7 @@ SDK 部分也须核对全部十类：`APIConnectionError`、`APITimeoutError`、
 - `Selected model is at capacity. Please try a different model.` 这条文案本身不能证明当前失败、HTTP `503` 或 `server_is_overloaded`。适配须读取准确原生错误记录的结构、来源与终局事实；终端呈现、普通聊天、引用或工具文本里的相同文字不建立失败资格。实际原记录若提供 `codex_error_info: server_overloaded`，保留这个原码并按本地分类解释，不改写成官方 API 的另一原码。
 - 原生错误可能发生在独立子 Agent。错误事实保实际主体，主 Agent 当前是否仍在工作或本轮是否失败由真实协议决定；不根据相邻 review 文本猜具体模型或子线程。
 - 原生重试通知、最终请求失败、轮结束和进程退出分别核对。后续同请求成功、新轮或来源更换只按准确身份收敛，迟到旧错误不覆盖新结果，历史仍可读。
-- 沿同一原记录分别核对状态、历史页、增量变化、SDK／JSON-RPC／CLI、共同对话错误卡和连接器发布。目标合同为原 item 上的 `turnOutcome`，metrics 仅保计量；不能只在 Provider helper、当前服务窗或终端看得到便声称闭环。外发使用 Provider 明确提供的 `publicMessage` 与标准恢复建议；缺摘要时使用固定通用失败文案，原 message／payload 不因可本地读取而获得公开资格。普通输入、原 Session、Run、布局、历史和草稿继续保留。
+- 沿同一原记录分别核对状态、历史页、增量变化、SDK／JSON-RPC／CLI、共同对话错误卡和连接器发布。合同为原 item 上的 `turnOutcome`，metrics 仅保计量；不能只在 Provider helper、当前服务窗或终端看得到便声称闭环。外发使用 Provider 明确提供的 `publicMessage` 与标准恢复建议；缺摘要时使用固定通用失败文案，原 message／payload 不因可本地读取而获得公开资格。普通输入、原 Session、Run、布局、历史和草稿继续保留。
 
 ## 当前适配的原生信号
 
@@ -45,7 +45,7 @@ SDK 部分也须核对全部十类：`APIConnectionError`、`APITimeoutError`、
 | `task_complete.error` 非空 | 当前轮失败，由 [`codexFailure`](../../packages/core/src/providers/codex-errors.ts) 归一化 | 保可读 message、原生码和实际提供的有效 HTTP 状态；缺码不填官方 API 码 |
 | `task_started`／`turn_context` | 当前原生轮 working | 必须有可证明的 turn 与 ordinal，不从对话文本补轮身份 |
 | `task_complete` 没有 error | 当前轮完成 | 真实轮边界与旧结果分别表达 |
-| `turn_aborted` | 当前轮已结束、成功未知 | 不转换为正常完成；实际含 error 时仍保失败 |
+| `turn_aborted` | 明确 `reason: interrupted` 为中断；实际含 error 时为失败；其余结果未知 | 不转换为正常完成，也不从缺失原因补中断 |
 | 原生重试中的普通错误／进度记录 | 不单独作为终局失败 | 仅终局错误边界改变失败结论，后续已核轮状态收敛 |
 | 未识别原生错误码 | 通用 `AGENT_PROVIDER_ERROR` 等注明来源的分类，保 nativeCode | 新码不因未列入分类表而被丢弃，不根据错误说明猜码 |
 | 聊天、工具输出、历史提示或显式 foreign thread | 不作为当前主轮失败 | 原记录仍沿现历史 reader 可读，不让相同错误文字改写状态 |
@@ -54,10 +54,10 @@ SDK 部分也须核对全部十类：`APIConnectionError`、`APITimeoutError`、
 
 Provider 的 [`observeCodexSessionStatus`](../../packages/core/src/providers/codex-session-status.ts) 复用轮证据解码与准确原文件观察，初读有界，后续读取新增字节；[`createCodexProvider`](../../packages/core/src/providers/codex.ts) 贡献 `observeSessionStatus`。Core 的 [`ensureNativeStatusObservation`／`statusAgent`](../../packages/core/src/client.ts) 接准确 Run／native source、持久状态与公共事件，SDK／JSON-RPC／CLI 复用原 `agent.inspect`、`agent.ls`、`whoami`。实际消费与后续恢复按对应实现的验证来源和边界核实。
 
-上述适配表限定为当前状态观察路径，不证明原生历史与外部 publication 已使用同一结果。目标字段、同源归并和共享摘要见[原生结果协议](../specs/conversation-protocol.md#native-request-and-turn-outcomes)，现有独立消费入口见[对话机制](../architecture/conversation.md#原生结果的现有接线与目标边界)。这些路径不表示官方 API、WebSocket 或 Python SDK 的所有错误在 CLI 都会出现，模型、完整 API error.type、Retry-After 等字段也不因此变成已暴露事实。真实支持按轮记录实际字段及对应实现的证明报告；没有原生终局记录或读取失败时保观察未知／明确诊断，不改健康 Run。
+上述适配表限定为准确原生 JSONL 路径；状态观察与 saved-history 共用 `codexTurnOutcome`，共同对话和 publication 消费原记录上的 `turnOutcome`。目标字段、同源归并和共享摘要见[原生结果协议](../specs/conversation-protocol.md#native-request-and-turn-outcomes)，实际消费入口及 indexed history 的未知边界见[对话机制](../architecture/conversation.md#原生结果的接线与能力边界)。这些路径不表示官方 API、WebSocket 或 Python SDK 的所有错误在 CLI 都会出现，模型、完整 API error.type、Retry-After 等字段也不因此变成已暴露事实。真实支持按轮记录实际字段及对应实现的证明报告；没有原生终局记录或读取失败时保观察未知／明确诊断，不改健康 Run。
 
 ## 当前源码入口与交付边界
 
-[Codex Provider](../../packages/core/src/providers/codex.ts) 的 `createCodexProvider` 持有原生协议接缝；[原生历史 reader](../../packages/core/src/providers/codex-native-history.ts) 的 `readCodexSessionHistoryPage`／`itemEntry` 持有对话记录投影，[原生只读 helper](../../packages/core/src/providers/codex-native-read.ts) 的 `withCodexNativeRead` 不执行模型请求。通用 [AgentProvider](../../packages/core/src/agent-provider.ts) 与 [Core Client](../../packages/core/src/client.ts) 的 `statusAgent` 是公共能力和当前状态出口，`probeCapabilities` 的 executable 检查不能证明模型服务有容量。
+[Codex Provider](../../packages/core/src/providers/codex.ts) 的 `createCodexProvider` 持有原生协议接缝；[原生历史 reader](../../packages/core/src/providers/app-server-native-history.ts) 的 `readAppServerSessionHistoryPage` 持有对话记录投影，[原生只读 helper](../../packages/core/src/providers/app-server-native-read.ts) 的 `withAppServerNativeRead` 不执行模型请求。通用 [AgentProvider](../../packages/core/src/agent-provider.ts) 与 [Core Client](../../packages/core/src/client.ts) 的 `statusAgent` 是公共能力和当前状态出口，`probeCapabilities` 的 executable 检查不能证明模型服务有容量。
 
 上面的适配表描述当前源码机制，具体构建与安装的支持范围仍需核对实际版本。核对时记录实际读取的原生载体、可暴露字段、未知边界、对应公共消费及验证来源；源码、构建与当前安装实例分别核对。不存在原生错误码时仍可准确显示失败和带来源的分类，不用 HTTP 状态猜补完整性，也不为预先检查容量另发模型请求。
