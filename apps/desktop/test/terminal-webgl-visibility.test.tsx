@@ -16,6 +16,7 @@ import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { yieldTerminalWork } from '@agentmux/client-ui/terminal/replay'
 import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
 import * as terminalResourceOwners from '../src/renderer/src/lib/terminal-resource-owners'
+import * as clientIncidents from '../src/renderer/src/lib/client-incident-recorder'
 
 type FixtureTerminal = HeadlessTerminal & {
   refresh: ReturnType<typeof vi.fn>
@@ -559,6 +560,103 @@ function liveOutput(data: string | Uint8Array, startByte: number): RuntimeEvent 
     data: typeof data === 'string' ? data : new TextDecoder().decode(data), dataBytes,
     evidence: { outputByteRange: { startByte, endByte: startByte + dataBytes.byteLength } } } } as RuntimeEvent
 }
+
+function continuedAttachment(text: string) {
+  const dataBytes = new TextEncoder().encode(text)
+  return { attachmentId: 'attachment-retained', currentSize: { cols: 80, rows: 24 },
+    session: { ...session, latestOutputBytes: dataBytes.byteLength }, resizeRevision: 0, gap: null,
+    terminal: { type: 'basic-vt' as const, checkpoint: { runId: session.control.run.runId, throughByte: 0, resizeRevision: 0,
+      size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
+      restoreBytes: new TextEncoder().encode('\u001b[0m'), resizes: [] },
+    replay: [{ runId: session.control.run.runId, data: text, dataBytes, startByte: 0, endByte: dataBytes.byteLength }] }
+}
+
+it.each(['completion clock', 'diagnostic recorder'] as const)(
+  'keeps confirmed output and exact refresh independent of a failed %s', async stage => {
+    fixture.attach.mockResolvedValue(continuedAttachment('before '))
+    const control = { refresh: null as (() => Promise<void>) | null }
+    const observation = { onObservationRefresh: (value: (() => Promise<void>) | null) => { control.refresh = value },
+      onRefreshSession: vi.fn(async () => ({ ...session, latestOutputBytes: 12 })) }
+    await render(true, observation)
+    const terminal = fixture.terminals[0]!, baseline = terminal.completed.length
+    const failure = new Error('Original write observation failed: ' + stage)
+    const start = rendererPerformance.start.bind(rendererPerformance)
+    let faultObserved = false
+    const observer = stage === 'diagnostic recorder'
+      ? vi.spyOn(rendererPerformance, 'terminalWrite').mockImplementationOnce(() => { faultObserved = true; throw failure })
+      : vi.spyOn(rendererPerformance, 'start').mockImplementation(() => {
+        if (!faultObserved && terminal.completed.length > baseline) { faultObserved = true; throw failure }
+        return start()
+      })
+    try {
+      await act(async () => { fixture.receive!(liveOutput(' once', 7)) })
+      await act(async () => { await vi.waitFor(() => expect(terminal.completed.slice(baseline).join('')).toBe(' once')) })
+      await act(async () => { await yieldTerminalWork() })
+      expect(faultObserved).toBe(true)
+      expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({ inFlightWrites: 0, queuedBytes: 0,
+        liveReady: true, acceptsInput: true, writes: { live: { started: 1, completed: 1 } } })
+      expect(rootContainer.textContent).toContain(failure.message)
+      fixture.refreshAttachment.mockImplementation(async (target, attachmentId, cursor) => {
+        expect(target).toEqual(session.control)
+        expect(attachmentId).toBe('attachment-retained')
+        expect(cursor, 'the original parser callback confirmed these exact bytes').toBe(12)
+        return continuedAttachment('before  once')
+      })
+      await act(async () => { await control.refresh!() })
+      expect(fixture.refreshAttachment.mock.calls.map(call => call[2]),
+        'explicit refresh must reach the original owner at the callback-confirmed cursor without duplicate parsing').toEqual([12])
+      expect(terminal.completed.slice(baseline).join(''), 'refresh must not parse confirmed bytes again').toBe(' once')
+      expect(rootContainer.textContent, 'unrelated metadata/attachment success cannot erase this observer failure').toContain(failure.message)
+      await render(false, observation); await render(true, observation)
+      expect(rootContainer.textContent).toContain(failure.message)
+      expect(fixture.terminals).toEqual([terminal]); expect(fixture.attach).toHaveBeenCalledOnce()
+      expect(fixture.detach).not.toHaveBeenCalled(); expect(terminal.dispose).not.toHaveBeenCalled()
+      terminal.input('HEALTHY_AFTER_WRITE_OBSERVER_FAILURE', true)
+      expect(fixture.write).toHaveBeenCalledWith(session.control, 'HEALTHY_AFTER_WRITE_OBSERVER_FAILURE', 'terminal-protocol', expect.anything())
+      const destination = process.env.AGENTMUX_TERMINAL_T087_SAMPLES
+      if (destination) appendFileSync(destination, JSON.stringify({ phase: 'confirmed-observation-failure', stage,
+        parsedBytes: new TextEncoder().encode(terminal.completed.slice(baseline).join('')).byteLength,
+        refreshCursor: fixture.refreshAttachment.mock.calls[0]![2], attachmentRequests: fixture.refreshAttachment.mock.calls.length,
+        inFlightWrites: rendererPerformance.snapshot().terminals[0]!.inFlightWrites, queuedBytes: rendererPerformance.snapshot().terminals[0]!.queuedBytes,
+        failureStillVisible: rootContainer.textContent?.includes(failure.message), originalRun: session.control.run.runId,
+        sameTerminal: fixture.terminals.length === 1, inputPortAvailable: true }) + '\n')
+    } finally { observer.mockRestore() }
+  })
+
+it('keeps an actual parser rejection original when its separate write observer also fails', async () => {
+  const parserFailure = new Error('Original parser write unconfirmed'), observerFailure = new Error('Separate write observer unavailable')
+  const originalRecorder = clientIncidents.createClientIncidentRecorder
+  const failures: unknown[] = []
+  const recorder = vi.spyOn(clientIncidents, 'createClientIncidentRecorder').mockImplementation(options => {
+    const owner = originalRecorder(options), capture = owner.capture.bind(owner)
+    vi.spyOn(owner, 'capture').mockImplementation((...args) => { failures.push(args[2]); return capture(...args) })
+    return owner
+  })
+  let writer: ReturnType<typeof vi.spyOn> | undefined, observer: ReturnType<typeof vi.spyOn> | undefined
+  try {
+    fixture.attach.mockResolvedValue(continuedAttachment('before '))
+    const control = { refresh: null as (() => Promise<void>) | null }
+    await render(true, { onObservationRefresh: value => { control.refresh = value },
+      onRefreshSession: async () => ({ ...session, latestOutputBytes: 12 }) })
+    const terminal = fixture.terminals[0]!, baseline = terminal.completed.length
+    writer = vi.spyOn(terminal, 'write').mockImplementationOnce(() => { throw parserFailure })
+    observer = vi.spyOn(rendererPerformance, 'terminalWrite').mockImplementationOnce(() => { throw observerFailure })
+    await act(async () => { fixture.receive!(liveOutput(' once', 7)); await yieldTerminalWork() })
+    await act(async () => { await control.refresh!() })
+    expect(failures).toContain(parserFailure)
+    expect(terminal.completed.slice(baseline)).toEqual([])
+    expect(fixture.refreshAttachment).not.toHaveBeenCalled()
+    expect(rootContainer.textContent).toContain(parserFailure.message)
+    expect(rootContainer.textContent).toContain(observerFailure.message)
+    expect(rootContainer.textContent).not.toContain('source_gap')
+    expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({ inFlightWrites: 0, queuedBytes: 0,
+      writes: { live: { started: 1, completed: 0 } } })
+    const destination = process.env.AGENTMUX_TERMINAL_T087_SAMPLES
+    if (destination) appendFileSync(destination, JSON.stringify({ phase: 'unconfirmed-parser-negative-control',
+      originalErrorRetained: failures.includes(parserFailure), parserCallbacks: terminal.completed.length - baseline,
+      attachmentRequests: fixture.refreshAttachment.mock.calls.length, noReplay: true, originalRun: session.control.run.runId }) + '\n')
+  } finally { writer?.mockRestore(); observer?.mockRestore(); recorder.mockRestore() }
+})
 
 it('sends accepted hidden output to the original write owner while ordinary timers are suspended', async () => {
   await render(false)
