@@ -97,6 +97,8 @@ Note 首次保留的内容共享沿 [Files 共享合同](../../packages/core/src
 
 输入应用、Prompt 投递、任务接受、Agent 状态和工作完成是不同事实，准确边界见 Core 接入说明与 owning 设计。初始 Prompt 的投递事实消费 `createAgentWithDelivery` 的同次返回；缺失回执不自行重启、重发或换目标。
 
+完整输入沿既有 prompt／message／inspect／rejoin 方法复用 [Core 输入 owner](../../packages/core/src/prompt-submission.ts)、[原冻结记录解析](../../packages/core/src/prompt-submission-record.ts)与实际 Provider／Runtime 承载；[可选启动上下文预算](../../packages/core/src/agent-prompt-budget.ts)只用于上下文选择，终端观察窗口不授予或撤销输入资格。此边界不新增公共方法、Provider 字段或 quote 引用格式；行为要求见[输入环境判定与复用边界](../design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界)。
+
 输入成员及等待控制的增量发现沿 [AgentInputChanges](../../packages/core/src/agent-input-changes.ts) 提供 `readAgentInputChanges`／`agent.input.changes`，CLI 为 `agent input changes --input FILE|-`。同一原 journal 按准确接收者与控制位置返回无正文的原输入 key；首次读取建立位置，后续消费后推进原 cursor／checkpoint，再沿 `agent.input.inspect` 核对当前事实。原源变化与权限错误不改变输入；该读取不重放历史阶段，不扩展 Provider 协议。
 
 ## CLI 与服务的当前来源
