@@ -1,7 +1,16 @@
 import type { ConnectionConfig, RoomDiscoveryObservation, RoomDiscoveryReason, RoomSummary, RoomDetails, RoomDiscoveredMember } from '@agentmux/core/connections'
+import type { ChannelMetadataSubject } from '@agentmux/core/connections'
+import type { ChannelStoragePort } from './channel-storage.js'
 
 type Page = { cursor?: string; limit?: number }
-type Scope = { config: ConnectionConfig }
+/** Optional display observation on the original read, never a prerequisite for room facts. */
+export type RoomProfileObservation = {
+  storage: ChannelStoragePort
+  startedAt: number
+  current(): boolean
+  changed(subject: ChannelMetadataSubject): void
+}
+type Scope = { config: ConnectionConfig; metadata?: RoomProfileObservation }
 type Target = Scope & { externalConversationId: string }
 export type RoomAdapterPage = { observation: RoomDiscoveryObservation; rooms: RoomSummary[]; next: string | null }
 export type RoomAdapterMembers = { observation: RoomDiscoveryObservation; members: RoomDiscoveredMember[]; next: string | null }

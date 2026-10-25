@@ -104,7 +104,7 @@ export class ConnectionHost implements ConnectionPort {
       })
     } catch { process.emitWarning('A connection adapter could not attach its resource owner.', { code: 'CONNECTION_RESOURCE_OWNER_UNAVAILABLE' }) }
     this.metadata = createChannelMetadata(this, options.secrets, this.channelProfileAbort.signal, change => this.publishMetadata(change))
-    const discovery = createRoomDiscovery(this, options.secrets)
+    const discovery = createRoomDiscovery(this, options.secrets, change => this.publishMetadata(change))
     this.rooms = discovery.port; this.closeRoomDiscovery = discovery.close
     const profile = (): ConnectionProfileHost => {
       if (this.closed) throw new AgentMuxError('The original profile owner is closed.', 'CONNECTION_PROFILE_UNAVAILABLE')

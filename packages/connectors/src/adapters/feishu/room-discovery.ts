@@ -3,6 +3,7 @@ import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES } from '@agentmux/core/control'
 import type { ConnectionConfig, RoomDiscoveryObservation, RoomDiscoveryReason, RoomSummary, RoomDetails } from '@agentmux/core/connections'
 import type { RoomDiscoveryAdapter, RoomAdapterPage, RoomAdapterMembers } from '../../room-discovery-adapter.js'
 import { feishuIdentity } from './message.js'
+import { observeFeishuRoomProfiles } from './channel-profile.js'
 
 type WithClient = <T>(config: ConnectionConfig, credential: string, call: (client: Client) => Promise<T>, signal?: AbortSignal) => Promise<T>
 function object(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Unconfirmed native room response'); return value as Record<string, unknown> }
@@ -38,25 +39,30 @@ function summary(value: unknown): RoomSummary {
   const p = object(value)
   return { externalConversationId: feishuIdentity(p.chat_id), name: text(p.name, true), state: p.chat_status === 'normal' ? 'active' : p.chat_status === 'dissolved' || p.chat_status === 'dissolved_save' ? 'dissolved' : 'unknown' }
 }
-function page(value: unknown): RoomAdapterPage {
+function page(value: unknown, observe: ReturnType<typeof observeFeishuRoomProfiles>): RoomAdapterPage {
   const response = object(value)
   if (response.code !== 0) return { observation: failure(response), rooms: [], next: null }
   const p = data(value)
   if (!Array.isArray(p.items)) throw new Error('Unconfirmed native room page')
-  return { observation: ready, rooms: p.items.map(summary), next: next(p) }
+  const items = p.items, rooms = items.map(summary), cursor = next(p)
+  rooms.forEach((room, index) => observe(room.externalConversationId, object(items[index])))
+  return { observation: ready, rooms, next: cursor }
 }
 /** Official SDK methods, sharing the original authenticated Client and caller cancellation. */
 export function createFeishuRoomDiscovery(withClient: WithClient): RoomDiscoveryAdapter {
   return {
     list: async (input, credential, signal) => {
-      try { return await withClient(input.config, credential, async client => page(await client.im.chat.list({ params: { page_size: input.limit ?? 20, ...(input.cursor ? { page_token: input.cursor } : {}), user_id_type: 'open_id' } })), signal) }
+      const observe = observeFeishuRoomProfiles(input)
+      try { return await withClient(input.config, credential, async client => page(await client.im.chat.list({ params: { page_size: input.limit ?? 20, ...(input.cursor ? { page_token: input.cursor } : {}), user_id_type: 'open_id' } }), observe), signal) }
       catch { return { observation: unknown, rooms: [], next: null } }
     },
     search: async (input, credential, signal) => {
-      try { return await withClient(input.config, credential, async client => page(await client.im.chat.search({ params: { query: input.query, page_size: input.limit ?? 20, ...(input.cursor ? { page_token: input.cursor } : {}), user_id_type: 'open_id' } })), signal) }
+      const observe = observeFeishuRoomProfiles(input)
+      try { return await withClient(input.config, credential, async client => page(await client.im.chat.search({ params: { query: input.query, page_size: input.limit ?? 20, ...(input.cursor ? { page_token: input.cursor } : {}), user_id_type: 'open_id' } }), observe), signal) }
       catch { return { observation: unknown, rooms: [], next: null } }
     },
     get: async (input, credential, signal) => {
+      const observe = observeFeishuRoomProfiles(input)
       try { return await withClient(input.config, credential, async client => {
         const response = await client.im.chat.get({ path: { chat_id: encodeURIComponent(input.externalConversationId) }, params: { user_id_type: 'open_id' } })
         if (object(response).code !== 0) return { observation: failure(response), room: null }
@@ -64,6 +70,7 @@ export function createFeishuRoomDiscovery(withClient: WithClient): RoomDiscovery
         // Native group_message_type identifies threaded groups; optional metadata cannot discard a confirmed name.
         const mode = p.chat_mode === 'p2p' ? 'direct' : p.chat_mode === 'topic' || p.group_message_type === 'thread' ? 'topic' : p.chat_mode === 'group' ? 'group' : 'unknown'
         const room: RoomDetails = { ...summary({ ...p, chat_id: input.externalConversationId }), mode, membershipApproval: p.membership_approval === 'approval_required' ? 'required' : p.membership_approval === 'no_approval_required' ? 'not-required' : 'unknown' }
+        observe(input.externalConversationId, p)
         return { observation: ready, room }
       }, signal) } catch { return { observation: unknown, room: null } }
     },

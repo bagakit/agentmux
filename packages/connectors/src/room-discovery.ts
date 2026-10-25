@@ -1,10 +1,11 @@
 import { AgentMuxError } from '@agentmux/core'
-import { parseRoomDiscoveryParams, parseRoomDiscoveryResult, parseRoomLinkOperation, parseRoomBindingAuthority, type RoomDiscoveryPort, type RoomDiscoveryMethod, type RoomDiscoveryParamsMap, type RoomDiscoveryResultMap, type RoomLinkOperation, type RoomDiscoveryReason } from '@agentmux/core/connections'
+import { parseRoomDiscoveryParams, parseRoomDiscoveryResult, parseRoomLinkOperation, parseRoomBindingAuthority, type RoomDiscoveryPort, type RoomDiscoveryMethod, type RoomDiscoveryParamsMap, type RoomDiscoveryResultMap, type RoomLinkOperation, type RoomDiscoveryReason, type ChannelMetadataChange } from '@agentmux/core/connections'
 import type { ConnectionHost, SecretPort } from './connection-host.js'
+import type { RoomProfileObservation } from './room-discovery-adapter.js'
 
 type ReadMethod = Exclude<RoomDiscoveryMethod, 'connection.room.link.create' | 'connection.room.link.inspect'>
 /** An original ConnectionHost fragment. Only the explicit link effect has a same-database journal. */
-export function createRoomDiscovery(connections: Pick<ConnectionHost, 'database' | 'readConfiguration' | 'registeredAdapter'>, secrets: SecretPort): { port: RoomDiscoveryPort; close(): void } {
+export function createRoomDiscovery(connections: Pick<ConnectionHost, 'database' | 'readConfiguration' | 'registeredAdapter' | 'channelStorage'>, secrets: SecretPort, changed: (change: ChannelMetadataChange) => void): { port: RoomDiscoveryPort; close(): void } {
   const life = new AbortController(), active = new Set<string>()
   const database = connections.database
   function storage<T>(call: () => T): T {
@@ -42,7 +43,14 @@ export function createRoomDiscovery(connections: Pick<ConnectionHost, 'database'
       const credential = await secrets.resolve(record.config.credentialRef)
       if (!credential) return empty('credential-unavailable')
       if (life.signal.aborted || connections.readConfiguration(input.connectionId)?.revision !== record.revision) return empty('connection-revised')
-      const native = { ...input, config: record.config }
+      let metadata: RoomProfileObservation | undefined
+      const original = record
+      try {
+        metadata = { storage: connections.channelStorage(original.config), startedAt: Date.now(),
+          current: () => !life.signal.aborted && connections.readConfiguration(input.connectionId)?.revision === original.revision,
+          changed: subject => changed({ connectionId: input.connectionId, application: original.config.application, subject }) }
+      } catch { /* A display cache cannot take away confirmed native room facts. */ }
+      const native = { ...input, config: record.config, ...(metadata ? { metadata } : {}) }
       const result = method === 'connection.room.ls' ? await adapter.list(native, credential, life.signal)
         : method === 'connection.room.search' ? await adapter.search(native as RoomDiscoveryParamsMap['connection.room.search'] & { config: typeof record.config }, credential, life.signal)
         : method === 'connection.room.get' ? await adapter.get(native as RoomDiscoveryParamsMap['connection.room.get'] & { config: typeof record.config }, credential, life.signal)

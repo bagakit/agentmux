@@ -4,11 +4,13 @@ import type { ChannelProfileAdapter, ChannelActorProfileRead } from '../../chann
 import { AgentMuxError } from '@agentmux/core'
 import { parseChannelConversationProfileObservation, parseChannelMetadataEntry, type ChannelMetadataSubject, type ChannelConversationProfileObservation, type ChannelMetadataEntry } from '@agentmux/core/connections'
 import type { ChannelStoragePort } from '../../channel-storage.js'
+import type { RoomProfileObservation } from '../../room-discovery-adapter.js'
 
 type WithClient = <T>(config: ConnectionConfig, credential: string, call: (client: Client) => Promise<T>, signal?: AbortSignal) => Promise<T>
 // Display freshness belongs to this native adapter. A stale value remains readable.
 const PROFILE_FRESH_MS = 5 * 60_000
 const actorKey = (input: ChannelActorProfileRead) => 'actor-profile:' + channelActorKey(input.actor)
+const conversationKey = (id: string) => 'conversation-profile:' + JSON.stringify(id)
 const missing = (input: ChannelActorProfileRead): ChannelActorProfileObservation => ({ actor: input.actor, state: 'unknown', profile: null, checkedAt: Date.now(), freshness: 'unknown', reason: 'not-observed' })
 function readActor(input: ChannelActorProfileRead): ChannelActorProfileObservation {
   const row = input.storage.get(actorKey(input))
@@ -16,7 +18,41 @@ function readActor(input: ChannelActorProfileRead): ChannelActorProfileObservati
   if (row.value.kind !== 'json') throw Error('Original actor profile is not metadata')
   const observed = parseChannelActorProfileObservation(row.value.value)
   if (channelActorKey(observed.actor) !== channelActorKey(input.actor)) throw Error('Original actor profile changed identity')
-  return { ...observed, freshness: observed.profile ? observed.state === 'observed' && Date.now() - observed.checkedAt < PROFILE_FRESH_MS ? 'current' : 'stale' : 'unknown' }
+  return { ...observed, freshness: observed.profile ? observed.state === 'observed' && Date.now() - observed.profile.observedAt < PROFILE_FRESH_MS ? 'current' : 'stale' : 'unknown' }
+}
+
+/** The native response may omit fields. Retained fields keep their earlier confirmation time. */
+function conversationObservation(config: ConnectionConfig, id: string, native: { name?: unknown; avatar?: unknown }, previous: ChannelConversationProfileObservation | null): ChannelConversationProfileObservation {
+  const now = Date.now(), name = typeof native.name === 'string' && native.name ? native.name : undefined
+  const avatarUrl = typeof native.avatar === 'string' && native.avatar ? native.avatar : undefined
+  if (!name && !avatarUrl) throw Error('No native group profile was observed')
+  const retained = (!name && previous?.profile?.name) || (!avatarUrl && previous?.profile?.avatarUrl)
+  const observedAt = retained ? previous!.profile!.observedAt : now
+  return parseChannelConversationProfileObservation({ application: config.application, externalConversationId: id, state: 'observed', checkedAt: now,
+    freshness: now - observedAt < PROFILE_FRESH_MS ? 'current' : 'stale', profile: { ...previous?.profile,
+      ...(name ? { name } : {}), ...(avatarUrl ? { avatarUrl } : {}), observedAt } })
+}
+
+/** Capture only an already-known target; catalog subjects are discovered by their response. */
+export function observeFeishuRoomProfiles(input: { config: ConnectionConfig; externalConversationId?: string; metadata?: RoomProfileObservation }): (id: string, native: { name?: unknown; avatar?: unknown }) => void {
+  const metadata = input.metadata
+  if (!metadata) return () => {}
+  let expectedRevision: string | null | undefined
+  try { if (input.externalConversationId) expectedRevision = metadata.storage.get(conversationKey(input.externalConversationId))?.revision ?? null }
+  catch { return () => {} }
+  return (id, native) => {
+    try {
+      if (!metadata.current() || input.externalConversationId && id !== input.externalConversationId) return
+      const key = conversationKey(id), row = metadata.storage.get(key)
+      if (expectedRevision !== undefined && (row?.revision ?? null) !== expectedRevision) return
+      const previous = row?.value.kind === 'json' ? parseChannelConversationProfileObservation(row.value.value) : null
+      if (previous && (previous.externalConversationId !== id || previous.application.domain !== input.config.application.domain || previous.application.appId !== input.config.application.appId)) return
+      if (expectedRevision === undefined && previous && previous.checkedAt >= metadata.startedAt) return
+      const observation = conversationObservation(input.config, id, native, previous)
+      metadata.storage.put({ key, expectedRevision: row?.revision ?? null, value: { kind: 'json', value: observation } })
+      metadata.changed({ kind: 'conversation', externalConversationId: id })
+    } catch { /* Optional profile observation never rejects a native room read. */ }
+  }
 }
 
 /** Exact contact.user observation through the same authenticated official SDK as native intake. */
@@ -38,9 +74,11 @@ export function createFeishuChannelProfiles(withClient: WithClient): ChannelProf
           const user = response.data.user
           if (user[idType as 'open_id' | 'user_id' | 'union_id'] !== input.actor.userId) observation = failure('source-unconfirmed')
           else {
-            const now = Date.now()
-            observation = parseChannelActorProfileObservation({ actor: input.actor, state: 'observed', checkedAt: now, freshness: 'current', profile: {
-              ...(user.name ? { name: user.name } : {}), ...(user.avatar?.avatar_240 ? { avatarUrl: user.avatar.avatar_240 } : {}), observedAt: now
+            const now = Date.now(), avatarUrl = user.avatar?.avatar_240
+            const retained = !user.name && cached.profile?.name || !avatarUrl && cached.profile?.avatarUrl
+            const observedAt = retained ? cached.profile!.observedAt : now
+            observation = parseChannelActorProfileObservation({ actor: input.actor, state: 'observed', checkedAt: now, freshness: now - observedAt < PROFILE_FRESH_MS ? 'current' : 'stale', profile: {
+              ...cached.profile, ...(user.name ? { name: user.name } : {}), ...(avatarUrl ? { avatarUrl } : {}), observedAt
             } })
           }
         }
@@ -68,7 +106,7 @@ function createFeishuMetadata(withClient: WithClient, actors: ChannelProfileAdap
     else {
       if (row.value.kind !== 'json') throw Error('Original conversation profile is not metadata')
       const original = parseChannelConversationProfileObservation(row.value.value)
-      observation = { ...original, freshness: original.profile ? original.state === 'observed' && Date.now() - original.checkedAt < PROFILE_FRESH_MS ? 'current' : 'stale' : 'unknown' }
+      observation = { ...original, freshness: original.profile ? original.state === 'observed' && Date.now() - original.profile.observedAt < PROFILE_FRESH_MS ? 'current' : 'stale' : 'unknown' }
     }
     return parseChannelMetadataEntry({ subject, observation, cacheRevision: row?.revision ?? null }, config.application)
   }
@@ -103,8 +141,7 @@ function createFeishuMetadata(withClient: WithClient, actors: ChannelProfileAdap
         signal.throwIfAborted()
         if (response.code !== 0 || !response.data || typeof response.data.name !== 'string') observation = failure()
         else {
-          const now = Date.now()
-          observation = parseChannelConversationProfileObservation({ application: input.config.application, externalConversationId: input.externalConversationId, state: 'observed', checkedAt: now, freshness: 'current', profile: { name: response.data.name, ...(response.data.avatar ? { avatarUrl: response.data.avatar } : {}), observedAt: now } })
+          observation = conversationObservation(input.config, input.externalConversationId, response.data, cached)
         }
       } catch { observation = failure() }
       if (!signal.aborted) {

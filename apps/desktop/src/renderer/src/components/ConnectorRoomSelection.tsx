@@ -59,26 +59,65 @@ export function ConnectorRoomSelection({ connection, value, onChange, disabled, 
 }
 
 /** Exact visible room only. Changing the application, revision or room releases this read window. */
-export function useConnectorRoomFacts(connection: Connection | undefined, externalConversationId: string, hostingTarget?: ConnectionHostingTarget | null, visibleActors: readonly ConnectionActor[] = []) {
+export function useConnectorRoomFacts(connection: Connection | undefined, externalConversationId: string, hostingTarget?: ConnectionHostingTarget | null, visibleActors: readonly ConnectionActor[] = [], peopleVisible = true) {
   const identity = JSON.stringify([connection?.config.connectionId, connection?.revision, externalConversationId, hostingTarget])
   const [read, setRead] = useState<{ identity: string; room: RoomGetResult | null; people: RoomMembersResult | null; issue: string } | null>(null)
   const current = useRef(identity), flight = useRef<object | null>(null), [pending, setPending] = useState(false)
   const occurrence = useRef({})
+  const peopleActive = useRef({ visible: peopleVisible, occurrence: {} })
+  const profileLifetime = useRef<AbortController | null>(null)
+  if (peopleActive.current.visible !== peopleVisible) peopleActive.current = { visible: peopleVisible, occurrence: {} }
+  useEffect(() => () => { profileLifetime.current?.abort() }, [identity, peopleVisible])
   current.current = identity
-  async function refresh(cursor?: string) {
+  async function refresh(cursor?: string, refreshProfiles = true) {
     if (!connection || !externalConversationId || hostingTarget === null || flight.current) return
     const original = identity, originalOccurrence = occurrence.current, input = { ...scopeOf(connection), externalConversationId }
     const request = {}; flight.current = request; setPending(true)
+    const profileAbort = new AbortController(), peopleOccurrence = peopleActive.current.occurrence
+    if (refreshProfiles) profileLifetime.current = profileAbort
     const update = (value: Partial<NonNullable<typeof read>>) => { if (current.current === original && occurrence.current === originalOccurrence) setRead(previous => ({ identity: original, room: null, people: null, issue: '', ...(previous?.identity === original ? previous : {}), ...value })) }
+    const active = () => !profileAbort.signal.aborted && current.current === original && occurrence.current === originalOccurrence && peopleActive.current.visible && peopleActive.current.occurrence === peopleOccurrence
+    const waitForProfiles = async (work: Promise<unknown>) => {
+      let cancelled: (() => void) | undefined
+      try { await Promise.race([work, new Promise<void>(resolve => { cancelled = () => resolve(); profileAbort.signal.addEventListener('abort', cancelled, { once: true }); if (profileAbort.signal.aborted) resolve() })]) }
+      finally { if (cancelled) profileAbort.signal.removeEventListener('abort', cancelled) }
+    }
+    const represented = (people: RoomMembersResult | null | undefined) => {
+      const subjects = new Map<string, ChannelMetadataSubject>()
+      for (const actor of [...visibleActors, ...(people?.members ?? []).map(member => ({ application: connection.config.application, idType: member.idType, userId: member.userId }))]) {
+        if (actor.application.domain !== connection.config.application.domain || actor.application.appId !== connection.config.application.appId) continue
+        const subject: ChannelMetadataSubject = { kind: 'actor', actor }
+        subjects.set(channelMetadataSubjectKey(subject), subject)
+      }
+      return subjects
+    }
     try {
+      if (profileAbort.signal.aborted || current.current !== original || occurrence.current !== originalOccurrence) return
+      let people: RoomMembersResult | undefined
       const reads = cursor ? [] : [api.connections.call('connection.room.get', input, hostingTarget).then(room => update({ room }))]
-      reads.push(api.connections.call('connection.room.members', { ...input, limit: 20, ...(cursor ? { cursor } : {}) }, hostingTarget).then(people => update({ people })))
+      reads.push(api.connections.call('connection.room.members', { ...input, limit: 20, ...(cursor ? { cursor } : {}) }, hostingTarget).then(result => { people = result; update({ people: result }) }))
       const results = await Promise.allSettled(reads)
       const failed = results.find(result => result.status === 'rejected')
       update({ issue: failed?.status === 'rejected' ? presentError(failed.reason) : '' })
-    } finally { if (flight.current === request) flight.current = null; if (current.current === original && occurrence.current === originalOccurrence) setPending(false) }
+      if (refreshProfiles && peopleVisible && active()) {
+        const subjects = represented(people)
+        const remaining = subjects.values()
+        // The panel's complete represented set, with bounded concurrency and no off-panel queue.
+        let profileFailed = false
+        await waitForProfiles(Promise.all(Array.from({ length: Math.min(4, subjects.size) }, async () => {
+          while (active()) {
+            const next = remaining.next()
+            if (next.done) return
+            try {
+              await api.connections.call('connection.metadata.refresh', { ...scopeOf(connection), subject: next.value }, hostingTarget)
+            } catch { profileFailed = true }
+          }
+        })))
+        if (profileFailed && active()) update({ issue: 'Some profile updates could not complete. Earlier profiles and member access are kept.' })
+      }
+    } finally { if (profileLifetime.current === profileAbort) profileLifetime.current = null; if (flight.current === request) flight.current = null; if (current.current === original && occurrence.current === originalOccurrence) setPending(false) }
   }
-  useEffect(() => { current.current = identity; occurrence.current = {}; void refresh(); return () => { current.current = ''; occurrence.current = {}; flight.current = null } }, [identity])
+  useEffect(() => { current.current = identity; occurrence.current = {}; void refresh(undefined, false); return () => { current.current = ''; occurrence.current = {}; flight.current = null } }, [identity])
   const facts = read?.identity === identity ? read : { room: null, people: null, issue: '' }
   const subjects: ChannelMetadataSubject[] = connection && externalConversationId ? [
     { kind: 'conversation', externalConversationId },
