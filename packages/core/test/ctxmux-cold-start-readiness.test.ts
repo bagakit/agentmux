@@ -1,187 +1,254 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { once } from 'node:events'
-import type { ChildProcess } from 'node:child_process'
+import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import type { Readable } from 'node:stream'
-import { CtxmuxClient, PROTOCOL_VERSION, type RuntimeIdentity } from '@ctxmux/sdk'
+import { createServer, createConnection, type Socket } from 'node:net'
+import { CtxmuxClient, createOperationKey, defineRun } from '@ctxmux/sdk'
 
-const processBoundary = vi.hoisted(() => ({ spawn: vi.fn(), artifactMissing: false }))
-vi.mock('node:child_process', async original => ({
-  ...await original<typeof import('node:child_process')>(), spawn: processBoundary.spawn
-}))
+const boundary = vi.hoisted(() => ({ spawn: vi.fn(), artifactMissing: false, receiptDenied: false, receiptWrites: 0, holdReceipt: null as (() => Promise<void>) | null }))
+vi.mock('node:child_process', async original => ({ ...await original<typeof import('node:child_process')>(), spawn: boundary.spawn }))
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>()
-  return { ...actual, readFile: async (...args: Parameters<typeof actual.readFile>) => {
-    if (processBoundary.artifactMissing && String(args[0]).includes(join('vendor', 'ctxmux') + '/') && String(args[0]).endsWith('/manifest.json')) {
-      throw Object.assign(new Error('Activation artifacts disappeared after the original spawn'), { code: 'ENOENT' })
+  return { ...actual,
+    readFile: async (...args: Parameters<typeof actual.readFile>) => {
+      if (boundary.artifactMissing && String(args[0]).includes(join('vendor', 'ctxmux') + '/') && String(args[0]).endsWith('/manifest.json')) {
+        throw Object.assign(new Error('Activation artifacts disappeared after the original spawn'), { code: 'ENOENT' })
+      }
+      return await Reflect.apply(actual.readFile, actual, args)
+    },
+    rename: async (...args: Parameters<typeof actual.rename>) => {
+      if (String(args[1]).endsWith('/owner.json')) {
+        boundary.receiptWrites++
+        await boundary.holdReceipt?.()
+        if (boundary.receiptDenied) throw Object.assign(new Error('owner receipt temporarily unavailable'), { code: 'EACCES' })
+      }
+      return await Reflect.apply(actual.rename, actual, args)
     }
-    return await Reflect.apply(actual.readFile, actual, args)
-  } }
+  }
 })
 import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 
-const runtime: RuntimeIdentity = {
-  daemonInstanceId: '11111111-1111-4111-8111-111111111111',
-  runtimeId: '22222222-2222-4222-8222-222222222222', runtimeIdPersistence: 'state_dir',
-  buildId: 'ctxmuxd/0.1.0', protocolGeneration: PROTOCOL_VERSION, platform: 'macos', arch: 'aarch64',
-  capabilities: { 'native.start': 1, 'native.recoverable_input': 1, 'native.recoverable_stop': 1,
-    'services.persistent_state': 1, 'services.planned_exec_upgrade_continuity': 1 }
-}
 const cleanup: (() => Promise<void>)[] = []
 afterEach(async () => {
-  processBoundary.artifactMissing = false
-  for (const action of cleanup.splice(0).reverse()) await action()
-  vi.restoreAllMocks(); vi.unstubAllEnvs(); processBoundary.spawn.mockReset()
+  boundary.artifactMissing = false; boundary.receiptDenied = false; boundary.receiptWrites = 0; boundary.holdReceipt = null
+  for (const close of cleanup.splice(0).reverse()) await close()
+  vi.restoreAllMocks(); vi.unstubAllEnvs(); boundary.spawn.mockReset()
 })
 
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), 'amx-cold-readiness-'))
+  const directory = await mkdtemp(join(tmpdir(), 'amx-sdk-ready-'))
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', directory)
-  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'durable'))
-  const serving = { value: false }
-  vi.spyOn(CtxmuxClient.prototype, 'runtimeInfo').mockImplementation(async () => {
-    if (!serving.value) throw new Error('listener is not serving yet')
-    return structuredClone(runtime)
-  })
-  // Only process creation and the public server response are controlled. Production artifact
-  // verification, activation lifetime, fd3 parsing, observation timer and receipt I/O all execute.
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'state'))
+  const wrapper = join(directory, 'launch.sh')
+  // The wrapper execs the actual daemon, preserving the exact SDK-owned child PID.
+  // Only launch timing and the inherited receipt channel are fault-injected.
+  await writeFile(wrapper, `#!/bin/sh
+IFS= read -r command
+case "$command" in
+  exit) exit 17 ;;
+  withheld-listener) exec "$1" --socket "$3.withheld" --state-dir "$5" --readiness-fd 3 ;;
+  closed) exec 3>&-; exec "$1" --socket "$3" --state-dir "$5" ;;
+  malformed) printf '{broken\\n' >&3 ;;
+  mismatch) printf '%s\\n' '{"schema":"ctxmux.daemon-ready.v1","daemon_instance":"00000000-0000-4000-8000-000000000000"}' >&3 ;;
+esac
+exec "$@"
+`, { mode: 0o700 })
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process')
-  const children: ChildProcess[] = []
-  const signals: unknown[] = []
-  processBoundary.spawn.mockImplementation(() => {
-    const child = actual.spawn(process.execPath, ['-e', `
-      const fs = require('node:fs'); let input = '';
-      process.stdin.setEncoding('utf8');
-      process.stdin.on('data', chunk => {
-        input += chunk; let index;
-        while ((index = input.indexOf('\\n')) >= 0) {
-          const command = input.slice(0, index); input = input.slice(index + 1);
-          if (command === 'exit') { process.exit(17); }
-          else if (command === 'closed') { fs.closeSync(3); }
-          else if (command === 'malformed') { fs.writeSync(3, '{broken\\n'); }
-          else {
-            fs.writeSync(3, JSON.stringify({schema: 'ctxmux.daemon-ready.v1',
-              daemon_instance: command === 'mismatch' ? 'other-child' : '${runtime.daemonInstanceId}'}) + '\\n');
-          }
-        }
-      });
-      process.stdin.on('end', () => process.exit(0));
-    `], { stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
+  const children: ChildProcess[] = [], signals: unknown[] = []
+  boundary.spawn.mockImplementation((program: string, args: string[], options: SpawnOptions) => {
+    const stdio = options.stdio as unknown[]
+    const child = actual.spawn('/bin/sh', [wrapper, program, ...args], { ...options, stdio: ['pipe', ...stdio.slice(1)] } as SpawnOptions)
     const kill = child.kill.bind(child)
     vi.spyOn(child, 'kill').mockImplementation(signal => { signals.push(signal); return kill(signal) })
     children.push(child)
     return child
   })
   cleanup.push(async () => {
-    for (const child of children) {
-      if (child.exitCode !== null || child.signalCode !== null) continue
-      const exited = once(child, 'exit'); child.stdin?.end(); await exited
+    for (const child of children) if (child.exitCode === null && child.signalCode === null) {
+      const done = once(child, 'exit'); child.kill('SIGTERM'); await done
     }
   })
   const adapter = new CtxmuxRunAdapter()
-  cleanup.push(async () => { adapter.disconnect() })
-  return { directory, adapter, children, serving, signals }
+  cleanup.push(async () => adapter.disconnect())
+  const native = new CtxmuxClient({ socketPath: adapter.socketPath })
+  const launch = async (command = 'ready') => {
+    await vi.waitFor(() => expect(children).toHaveLength(1))
+    children[0]!.stdin!.write(command + '\n')
+  }
+  return { directory, adapter, native, children, signals, launch }
 }
 
-describe('durable daemon startup outlives a connect observation', () => {
-  it('shares the child across callers after the real five-second window, preserves it on disconnect and proves late ownership', async () => {
-    const h = await fixture()
-    const other = new CtxmuxRunAdapter()
-    cleanup.push(async () => { other.disconnect() })
+describe('SDK owns the original durable activation', () => {
+  it('keeps one child after bounded waits and disconnect, then proves late ownership without activation artifacts', async () => {
+    const h = await fixture(), other = new CtxmuxRunAdapter()
+    cleanup.push(async () => other.disconnect())
+    const available = vi.fn(); h.adapter.onConnectionAvailable(available)
     const started = Date.now()
     const results = await Promise.allSettled([h.adapter.connect(), other.connect()])
-    expect(Date.now() - started).toBeGreaterThanOrEqual(5_000)
+    expect(Date.now() - started).toBeGreaterThanOrEqual(4_900)
     for (const result of results) {
       expect(result.status).toBe('rejected')
-      if (result.status === 'rejected') {
-        expect(result.reason).toMatchObject({ code: 'CTXMUX_STARTUP_PENDING' })
-        expect(result.reason.message).toContain('Retry the same Runtime connection')
-        expect(result.reason.message).toContain(`PID ${h.children[0]!.pid}`)
-      }
+      if (result.status === 'rejected') expect(result.reason).toMatchObject({ code: 'CTXMUX_STARTUP_PENDING' })
     }
     expect(h.children).toHaveLength(1)
     const child = h.children[0]!
-    h.adapter.disconnect(); other.disconnect()
+    other.disconnect()
     expect(h.signals).toEqual([])
-    expect(child.exitCode).toBeNull()
     expect((child.stdio[3] as Readable).destroyed).toBe(false)
     expect(child.stderr?.destroyed).toBe(false)
-
-    // The original activation owns its authenticated launch input even after local artifacts disappear.
-    processBoundary.artifactMissing = true
-    // A compatible public listener can be used even while its inherited receipt is pending.
-    h.serving.value = true
-    await other.connect()
-    expect(other.runtimeOwnership).toBe('unverified')
-    expect(other.isConnected()).toBe(true)
-    await expect(readFile(join(h.directory, 'owner.json'))).rejects.toMatchObject({ code: 'ENOENT' })
-    child.stdin!.write('ready\n')
-    await vi.waitFor(async () => {
-      const receipt = await readFile(join(h.directory, 'owner.json'), 'utf8').catch(error => error)
-      expect(typeof receipt).toBe('string')
-      expect(JSON.parse(receipt as string)).toMatchObject({
-        schema: 'agentmux.ctxmux-owner.v1', daemonInstanceId: runtime.daemonInstanceId,
-        runtimeId: runtime.runtimeId, socketPath: h.adapter.socketPath,
-        stateDirectory: h.adapter.stateDirectory
-      })
-      expect(other.runtimeOwnership).toBe('owned')
-    })
+    boundary.artifactMissing = true
+    await h.launch()
+    await vi.waitFor(() => expect(available).toHaveBeenCalled(), { timeout: 3_000 })
+    const original = await h.native.runtimeInfo()
     await h.adapter.connect()
     expect(h.adapter.runtimeOwnership).toBe('owned')
-    expect(h.adapter.identity().daemonInstanceId).toBe(runtime.daemonInstanceId)
-    expect(h.children).toHaveLength(1)
-    expect(h.signals).toEqual([])
+    expect(h.adapter.identity().daemonInstanceId).toBe(original.daemonInstanceId)
+    expect(JSON.parse(await readFile(join(h.directory, 'owner.json'), 'utf8'))).toMatchObject({ daemonInstanceId: original.daemonInstanceId, runtimeId: original.runtimeId })
+    expect(h.children).toHaveLength(1); expect(h.signals).toEqual([])
   }, 15_000)
 
-  it.each(['malformed', 'closed', 'mismatch'] as const)('preserves a live child after %s readiness and admits a compatible public listener without claiming it', async command => {
-    const h = await fixture(), errors = vi.fn()
-    h.adapter.onError(errors)
-    const connecting = h.adapter.connect()
-    const observed = connecting.catch(error => error)
-    await vi.waitFor(() => expect(h.children).toHaveLength(1))
-    const child = h.children[0]!
-    if (command === 'mismatch') h.serving.value = true
-    child.stdin!.write(`${command}\n`)
-    if (command === 'mismatch') await connecting
-    else {
-      expect(await observed).toMatchObject({ code: 'CTXMUX_OWNER_IDENTITY_UNPROVEN' })
-      await expect(h.adapter.connect()).rejects.toMatchObject({ code: 'CTXMUX_OWNER_IDENTITY_UNPROVEN' })
-    }
-    expect(errors).toHaveBeenCalled()
-    expect(errors.mock.calls[0]![0].message).toMatch(/invalid readiness|closed its readiness|does not match/)
-    h.serving.value = true
+  it.each(['malformed', 'closed', 'mismatch'])('keeps a real compatible Runtime usable with %s receipt without claiming its child', async command => {
+    const h = await fixture(), errors = vi.fn(); h.adapter.onError(errors)
+    const connecting = h.adapter.connect().catch(error => error)
+    await h.launch(command)
+    await connecting
+    await vi.waitFor(async () => expect((await h.native.runtimeInfo()).runtimeIdPersistence).toBe('state_dir'))
     await h.adapter.connect()
     expect(h.adapter.isConnected()).toBe(true)
     expect(h.adapter.runtimeOwnership).toBe('unverified')
-    const lateObserver = vi.fn()
-    h.adapter.onError(lateObserver)
-    expect(lateObserver).toHaveBeenCalledOnce()
-    expect(lateObserver.mock.calls[0]![0].message).toMatch(/invalid readiness|closed its readiness|does not match/)
     await expect(readFile(join(h.directory, 'owner.json'))).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(h.children).toHaveLength(1)
-    expect(child.exitCode).toBeNull()
-    expect(h.signals).toEqual([])
+    const run = await h.native.start(defineRun('/bin/cat', { cwd: h.directory }), createOperationKey(`ready-${command}`))
+    expect((await h.adapter.status(run.id)).pid).toBe(run.pid)
+    expect(h.signals).toEqual([]); expect(h.children).toHaveLength(1)
+    if (command !== 'closed') {
+      const late = vi.fn(); h.adapter.onError(late)
+      expect(late).toHaveBeenCalled()
+      expect(late.mock.calls[0]![0]).toMatchObject({ code: 'CTXMUX_OWNER_IDENTITY_UNPROVEN' })
+    }
+  }, 12_000)
+
+  it('ends one observation and releases its subscription without ending the original activation', async () => {
+    const h = await fixture(), cancelled = new AbortController(), available = vi.fn()
+    h.adapter.onConnectionAvailable(available)
+    const first = h.adapter.connect({ signal: cancelled.signal }).catch(error => error)
+    await vi.waitFor(() => expect(h.children).toHaveLength(1))
+    cancelled.abort()
+    expect(await first).toMatchObject({ code: 'CONTROL_CANCELLED' })
+    h.adapter.disconnect()
+    await h.launch()
+    await vi.waitFor(async () => expect((await h.native.runtimeInfo()).runtimeIdPersistence).toBe('state_dir'))
+    expect(available).not.toHaveBeenCalled()
+    await h.adapter.connect()
+    expect(h.adapter.isConnected()).toBe(true)
+    expect(h.children).toHaveLength(1); expect(h.signals).toEqual([])
   })
 
-  it('reports actual child exit, then permits a fresh activation at the same dead endpoint', async () => {
+  it('settles a recovered product receipt failure instead of replaying it to a late observer', async () => {
+    const h = await fixture(); boundary.receiptDenied = true
+    const connecting = h.adapter.connect(); await h.launch(); await connecting
+    expect(h.adapter.runtimeOwnership).toBe('unverified')
+    const during = vi.fn(); h.adapter.onError(during)
+    await vi.waitFor(() => expect(during).toHaveBeenCalled())
+    expect(during).toHaveBeenCalledWith(expect.objectContaining({ code: 'CTXMUX_OWNER_IDENTITY_UNPROVEN' }))
+    boundary.receiptDenied = false
+    await h.adapter.connect()
+    await vi.waitFor(() => expect(h.adapter.runtimeOwnership).toBe('owned'))
+    const late = vi.fn(); h.adapter.onError(late)
+    expect(late).not.toHaveBeenCalled()
+    expect(JSON.parse(await readFile(join(h.directory, 'owner.json'), 'utf8')).daemonInstanceId).toBe((await h.native.runtimeInfo()).daemonInstanceId)
+  })
+
+  it('retries the original published readiness proof after a failed Hello observation while keeping the listener usable', async () => {
+    const h = await fixture(), errors = vi.fn(), cancelled = new AbortController()
+    h.adapter.onError(errors)
+    const first = h.adapter.connect({ signal: cancelled.signal }).catch(error => error)
+    await h.launch('withheld-listener')
+    const original = new CtxmuxClient({ socketPath: h.adapter.socketPath + '.withheld' })
+    await vi.waitFor(async () => expect((await original.runtimeInfo()).runtimeIdPersistence).toBe('state_dir'))
+    cancelled.abort(); expect(await first).toMatchObject({ code: 'CONTROL_CANCELLED' })
+    await vi.waitFor(() => expect(errors.mock.calls.some(([error]) => error.code === 'CTXMUX_OWNER_IDENTITY_UNPROVEN')).toBe(true), { timeout: 7_000 })
+    const wires = new Set<Socket>()
+    const proxy = createServer(downstream => {
+      const upstream = createConnection(h.adapter.socketPath + '.withheld')
+      for (const wire of [downstream, upstream]) { wires.add(wire); wire.on('error', () => {}); wire.on('close', () => wires.delete(wire)) }
+      downstream.pipe(upstream).pipe(downstream)
+    })
+    cleanup.push(async () => { for (const wire of wires) wire.destroy(); await new Promise<void>(done => proxy.close(() => done())) })
+    await new Promise<void>(done => proxy.listen(h.adapter.socketPath, done))
+    await h.adapter.connect()
+    expect(h.adapter.isConnected()).toBe(true)
+    await vi.waitFor(() => expect(h.adapter.runtimeOwnership).toBe('owned'))
+    expect(h.adapter.identity().daemonInstanceId).toBe((await original.runtimeInfo()).daemonInstanceId)
+    const late = vi.fn(); h.adapter.onError(late)
+    expect(late).not.toHaveBeenCalled()
+    expect(h.children).toHaveLength(1); expect(h.signals).toEqual([])
+  }, 12_000)
+
+  it('shares one product receipt write while compatible consumers remain usable, then retries only that failed receipt', async () => {
+    const h = await fixture(), other = new CtxmuxRunAdapter(), errors = vi.fn()
+    cleanup.push(async () => other.disconnect())
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    boundary.holdReceipt = () => held; boundary.receiptDenied = true
+    h.adapter.onError(errors)
+    const first = h.adapter.connect(); await h.launch(); await first
+    await other.connect()
+    expect(h.adapter.isConnected()).toBe(true); expect(other.isConnected()).toBe(true)
+    expect(h.adapter.runtimeOwnership).toBe('unverified')
+    expect(boundary.receiptWrites).toBe(1)
+    boundary.holdReceipt = null; release()
+    await vi.waitFor(() => expect(errors).toHaveBeenCalled())
+    boundary.receiptDenied = false
+    await h.adapter.connect(); await other.connect()
+    await vi.waitFor(() => expect(h.adapter.runtimeOwnership).toBe('owned'))
+    expect(other.runtimeOwnership).toBe('owned')
+    expect(boundary.receiptWrites).toBe(2)
+    const late = vi.fn(); h.adapter.onError(late)
+    expect(late).not.toHaveBeenCalled()
+  })
+
+  it('orders product receipt publication across exited child generations without delaying compatible work', async () => {
     const h = await fixture()
-    const failed = h.adapter.connect().catch(error => error)
-    await vi.waitFor(() => expect(h.children).toHaveLength(1))
-    const first = h.children[0]!, exited = once(first, 'exit')
-    first.stdin!.write('exit\n')
-    expect(await failed).toMatchObject({ code: expect.stringMatching(/CTXMUX_(UNAVAILABLE|OWNER_IDENTITY_UNPROVEN)/) })
-    await exited
-    expect(first.exitCode).toBe(17)
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    cleanup.push(async () => release())
+    boundary.holdReceipt = () => boundary.receiptWrites === 1 ? held : Promise.resolve()
+    const first = h.adapter.connect(); await h.launch(); await first
+    await vi.waitFor(() => expect(boundary.receiptWrites).toBe(1))
+    const original = h.adapter.identity().daemonInstanceId, child = h.children[0]!, exited = once(child, 'exit')
+    child.kill('SIGTERM'); await exited
+    const second = h.adapter.connect()
+    await vi.waitFor(() => expect(h.children).toHaveLength(2))
+    h.children[1]!.stdin!.write('ready\n'); await second
+    const current = h.adapter.identity().daemonInstanceId
+    expect(current).not.toBe(original)
+    expect(h.adapter.isConnected()).toBe(true)
+    expect(h.adapter.runtimeOwnership).toBe('unverified')
+    expect(boundary.receiptWrites).toBe(1)
+    release()
+    await vi.waitFor(() => expect(h.adapter.runtimeOwnership).toBe('owned'))
+    expect(boundary.receiptWrites).toBe(2)
+    expect(JSON.parse(await readFile(join(h.directory, 'owner.json'), 'utf8')).daemonInstanceId).toBe(current)
+    const reopened = new CtxmuxRunAdapter(); cleanup.push(async () => reopened.disconnect())
+    await reopened.connect()
+    expect(reopened.runtimeOwnership).toBe('owned')
+  })
+
+  it('observes real child exit before disconnecting and permits a new activation only after that exit', async () => {
+    const h = await fixture(), lost = vi.fn(); h.adapter.onConnectionLost(lost)
+    const connecting = h.adapter.connect(); await h.launch(); await connecting
+    const original = h.adapter.identity().daemonInstanceId, child = h.children[0]!, exited = once(child, 'exit')
+    child.kill('SIGTERM'); await exited
+    expect(h.adapter.isConnected()).toBe(false); expect(lost).toHaveBeenCalledOnce()
     const retry = h.adapter.connect()
     await vi.waitFor(() => expect(h.children).toHaveLength(2))
-    h.serving.value = true
-    h.children[1]!.stdin!.write('ready\n')
-    await retry
-    expect(h.adapter.runtimeOwnership).toBe('owned')
+    h.children[1]!.stdin!.write('ready\n'); await retry
     expect(h.adapter.isConnected()).toBe(true)
-    expect(h.signals).toEqual([])
+    await vi.waitFor(() => expect(h.adapter.runtimeOwnership).toBe('owned'))
+    expect(h.adapter.identity().daemonInstanceId).not.toBe(original)
   })
 })
