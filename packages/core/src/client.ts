@@ -146,7 +146,7 @@ import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { observeMessageJournal } from './agent-message-observer.js'
 import { agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey,
   type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
-import { agentTurnCompletionIdentity, agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
+import { agentTurnCompletionIdentity, agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, agentNativeInteractionEnd, nativeInteractionEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
 import { transitionAgentSemanticStatus } from './agent-semantic-state.js'
 import { observeAgent, currentAgentSemanticStatus, type AgentObservation } from './agent-status-freshness.js'
 import { runDisplayState } from './agent-run-status.js'
@@ -9992,6 +9992,12 @@ export class AgentMuxClient {
     })
     const childrenWereActive = agentHasActiveSubagents(session.run.runId)
     const normalized = witnessTargetMismatch ? normalizeNativeHook(provider.hook, envelope, context) : provider.normalizeHook(envelope, context)
+    const interactionSourceConfirmed = (stored: AgentMuxStoredAgentSession) => !witnessTargetMismatch && normalized.mainSubject &&
+      normalized.subject?.kind === 'main' && stored.nativeHandle?.kind === 'provider' &&
+      normalized.subject.nativeSessionId === stored.nativeHandle.sessionId
+    const retainedInteractionEnd = (stored: AgentMuxStoredAgentSession, interaction: AgentMuxInteractionRequest) =>
+      interactionSourceConfirmed(stored) ? agentNativeInteractionEnd(stored, interaction.kind, interaction.nativeToolCallId) : undefined
+    let interactionAlreadyEnded = normalized.interaction !== undefined && retainedInteractionEnd(session, normalized.interaction) !== undefined
     if (normalized.mainSubject && provider.hook.nativeSessionTransition?.(normalized.eventName, envelope.payload ?? {})) {
       const previous = this.nativeCurrentActivities.get(session.agentSessionId)
       if (previous?.runId === session.run.runId) previous.invalidated = true
@@ -10091,7 +10097,7 @@ export class AgentMuxClient {
     // A Provider contributing native turn outcomes owns completion, including after tool Hooks.
     // An ordinary Stop proves a yield; it cannot prove success or overwrite that outcome.
     const nativeEnd = provider.observeSessionStatus !== undefined
-    const updatesSemanticStatus = !(nativeEnd && normalized.mainSubject && normalized.lifecycleEvent === 'turn-end') && hookEventUpdatesSemanticStatus(
+    const updatesSemanticStatus = !interactionAlreadyEnded && !(nativeEnd && normalized.mainSubject && normalized.lifecycleEvent === 'turn-end') && hookEventUpdatesSemanticStatus(
       turnPhase,
       normalized.lifecycleEvent,
       provider.hook.rules.some((rule) => eventNamesCanReopenTurn(rule.events, rule.lifecycleEvent, provider.hook.lifecycle))
@@ -10168,12 +10174,23 @@ export class AgentMuxClient {
     const completedRequestId = completion && session.pendingInteraction?.request.kind === completion.kind &&
       session.pendingInteraction.request.nativeToolCallId === completion.nativeToolCallId
       ? session.pendingInteraction.request.id : undefined
+    // Native source and main-subject qualification belong to normalization and the
+    // exact native-handle CAS below. Within that source, a call can have several Hook receipts.
+    const sameNativeCall = (left: AgentMuxInteractionRequest, right: AgentMuxInteractionRequest) =>
+      Boolean(left.nativeToolCallId) && left.nativeToolCallId === right.nativeToolCallId && left.kind === right.kind &&
+      left.agentSessionId === right.agentSessionId && left.evidence.source === 'native-hook' && right.evidence.source === 'native-hook' &&
+      left.evidence.run?.runId !== undefined && left.evidence.run.runId === right.evidence.run?.runId
+    const matchesCompletion = (request: AgentMuxInteractionRequest) => completion !== undefined &&
+      request.kind === completion.kind && request.nativeToolCallId === completion.nativeToolCallId &&
+      request.agentSessionId === session.agentSessionId && request.evidence.source === 'native-hook' &&
+      request.evidence.run?.runId === session.run.runId
     const keepsCurrentReceipt = normalized.subject?.kind !== 'foreign' && normalized.subject?.kind !== 'unknown'
     const persistReceipt = (
       current: AgentMuxStoredAgentSession
     ): AgentMuxStoredAgentSession => {
       signal.throwIfAborted()
       if (!sameNativeHandle(current.nativeHandle, session.nativeHandle)) throw new AgentMuxError('Native binding changed before Hook publication.', 'AGENT_NATIVE_CONFIRMATION_STALE')
+      interactionAlreadyEnded = normalized.interaction !== undefined && retainedInteractionEnd(current, normalized.interaction) !== undefined
       if (nativeActivity && !this.acceptsNativeCurrentActivity(
         current.nativeHandle || !normalized.nativeHandle ? current : { ...current, nativeHandle: normalized.nativeHandle }, nativeActivity)) return current
       const nativeReadiness = current.terminalPromptReadiness?.source === 'native-stop'
@@ -10200,6 +10217,8 @@ export class AgentMuxClient {
         const { toolInvocation: _staleToolInvocation, ...currentReceipt } = persistedReceipt
         persistedReceipt = { ...currentReceipt, ...(toolInvocation ? { toolInvocation } : {}) }
       }
+      if (interactionAlreadyEnded) persistedReceipt = { ...persistedReceipt,
+        decision: { activityApplied: false, lifecycleApplied: false, reason: 'native-interaction-already-ended' } }
       const { turnUsage: _staleTurnUsage, ...currentBase } = current
       if (nextTurnPhase === 'in-turn' && nativeReadiness) {
         delete currentBase.terminalPromptReadiness
@@ -10211,7 +10230,7 @@ export class AgentMuxClient {
         ...currentBase,
         updatedAt: Math.max(current.updatedAt, normalized.status.observedAt),
         ...(keepsCurrentReceipt ? { hookReceipt: persistedReceipt } : {}),
-        ...(!updatesSemanticStatus
+        ...(!updatesSemanticStatus || interactionAlreadyEnded
           ? {}
           : (() => {
               const semanticStatus = transitionAgentSemanticStatus(current.semanticStatus, normalized.status)
@@ -10265,7 +10284,7 @@ export class AgentMuxClient {
       if (nativeActivity && this.acceptsNativeCurrentActivity(next, nativeActivity)) {
         next.recoveryActivity = { ...structuredClone(nativeActivity), run: { ...current.run }, hookReceiptId: receipt.id,
           observedAt: receipt.observedAt, ...(current.promptCompletionAdmission?.submissionId ? { promptSubmissionId: current.promptCompletionAdmission.submissionId } : {}) }
-      } else if (!nativeActivity && updatesSemanticStatus && !normalized.childActivity && normalized.mainSubject && next.recoveryActivity) {
+      } else if (!nativeActivity && updatesSemanticStatus && !interactionAlreadyEnded && !normalized.childActivity && normalized.mainSubject && next.recoveryActivity) {
         // In-turn tools refresh the original main activity. A new prompt or an old idle end
         // cannot inherit that turn's interruption; neither fact grants live input eligibility.
         const ongoing = next.recoveryActivity.state === 'active' && normalized.semanticState === 'working' &&
@@ -10308,6 +10327,16 @@ export class AgentMuxClient {
           currentActivityRevision: (next.semanticStatus.currentActivityRevision ?? 0) + 1 }
       }
       const pending = current.pendingInteraction
+      if (completion && interactionSourceConfirmed(next) && next.nativeHandle &&
+          (completion.kind === 'question' || [pending?.request, ...(pending?.additionalRequests ?? [])].some(request =>
+            request !== undefined && matchesCompletion(request)))) {
+        const calls = nativeInteractionEndScopeMatches(next) ? next.nativeInteractionEnds!.calls : {}
+        const key = JSON.stringify([completion.kind, completion.nativeToolCallId])
+        const end = Object.hasOwn(calls, key) ? calls[key]! : { kind: completion.kind,
+          nativeToolCallId: completion.nativeToolCallId, hookReceiptId: receipt.id, observedAt: receipt.observedAt }
+        next.nativeInteractionEnds = { run: { ...next.run }, providerId: next.providerId,
+          nativeHandle: structuredClone(next.nativeHandle), calls: { ...calls, [key]: end } }
+      }
       if (completion && completedRequestId && pending?.request.kind === completion.kind &&
         pending.request.id === completedRequestId && pending.request.agentSessionId === current.agentSessionId &&
         pending.request.evidence.source === 'native-hook' && pending.request.evidence.run?.runId === current.run.runId &&
@@ -10317,17 +10346,22 @@ export class AgentMuxClient {
             next.interactionOperations = interactionReceiptPatch(next, operation.operationId, { nativeCompleted: structuredClone(completion.evidence) }).interactionOperations!
           }
         }
-        const completed = { ...pending, nativeCompleted: structuredClone(completion.evidence) }
+        // Older observations can already have saved several receipts for this call.
+        // Its exact completion settles all of them, while the original response keeps its own ACK state.
+        const additionalRequests = (pending.additionalRequests ?? []).filter(request => !matchesCompletion(request))
+        const { additionalRequests: _previous, ...original } = pending
+        const completed = { ...original, nativeCompleted: structuredClone(completion.evidence),
+          ...(additionalRequests.length ? { additionalRequests } : {}) }
         if (pending.response && !agentInteractionResponseSettled(completed)) next.pendingInteraction = completed
         else {
-          const [request, ...additionalRequests] = pending.additionalRequests ?? []
-          if (request) next.pendingInteraction = { request, ...(additionalRequests.length ? { additionalRequests } : {}) }
+          const [request, ...remaining] = additionalRequests
+          if (request) next.pendingInteraction = { request, ...(remaining.length ? { additionalRequests: remaining } : {}) }
           else delete next.pendingInteraction
         }
       }
       if (completion && next.pendingInteraction?.additionalRequests?.length) {
         const additionalRequests = next.pendingInteraction.additionalRequests.filter(request =>
-          !(request.kind === completion.kind && request.nativeToolCallId === completion.nativeToolCallId))
+          !matchesCompletion(request))
         const { additionalRequests: _previous, ...active } = next.pendingInteraction
         next.pendingInteraction = { ...active, ...(additionalRequests.length ? { additionalRequests } : {}) }
       }
@@ -10360,8 +10394,13 @@ export class AgentMuxClient {
           )
         }
         const previous = next.pendingInteraction
-        if (!previous) next.pendingInteraction = { request: structuredClone(interaction) }
-        else if (previous.request.id !== interaction.id && !previous.additionalRequests?.some(request => request.id === interaction.id)) {
+        // Every matching Provider hook reports the same native call again (one per registered
+        // command). It is the same request, not a second one; its own completion settles it.
+        if (retainedInteractionEnd(next, interaction)) {
+          // Keep this original Hook receipt without reopening an already completed native call.
+        } else if (!previous) next.pendingInteraction = { request: structuredClone(interaction) }
+        else if (previous.request.id !== interaction.id && !sameNativeCall(previous.request, interaction) &&
+          !previous.additionalRequests?.some(request => request.id === interaction.id || sameNativeCall(request, interaction))) {
           // Preserve both observations instead of guessing which UI is active or refusing the Hook.
           const additionalRequests = [...(previous.additionalRequests ?? []), structuredClone(interaction)]
           if (previous.nativeCompleted && (!previous.response || agentInteractionResponseSettled(previous))) {
@@ -10482,11 +10521,11 @@ export class AgentMuxClient {
     // 那个 Agent 照旧被点亮成 working，而磁盘是对的；只挡发事件、不挡落盘，本次 UI 是对的而下次冷启动
     // 读回磁盘上那条 working 继续撒谎。回执、时间轴、用量都已在上面照常落——挡的只是「所以它正在干活」
     // 这个推论。
-    if (updatesSemanticStatus) this.publisher.publishHook(next, normalized, acceptedReceipt)
-    if (normalized.interaction) {
-      const request = next.pendingInteraction?.request.id === normalized.interaction.id
-        ? next.pendingInteraction.request
-        : next.pendingInteraction?.additionalRequests?.find(request => request.id === normalized.interaction!.id)
+    if (updatesSemanticStatus && !interactionAlreadyEnded) this.publisher.publishHook(next, normalized, acceptedReceipt)
+    if (normalized.interaction && !retainedInteractionEnd(next, normalized.interaction)) {
+      const requests = next.pendingInteraction ? [next.pendingInteraction.request, ...(next.pendingInteraction.additionalRequests ?? [])] : []
+      const request = requests.find(request => request.id === normalized.interaction!.id) ??
+        requests.find(request => sameNativeCall(request, normalized.interaction!))
       if (!request) {
         throw new AgentMuxError(
           'Native Agent interaction was not persisted.',

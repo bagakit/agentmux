@@ -1540,6 +1540,13 @@ export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngress
     nativeHandle: AgentNativeSessionHandle
     turns: Record<string, { recordId: string; observedAt: number; nativeObservedAt?: number }>
   }
+  /** Exact native interaction completions; delayed Hook reports cannot reopen the same call. Private to Core. */
+  nativeInteractionEnds?: {
+    run: AgentMuxRunRef
+    providerId: AgentProviderId
+    nativeHandle: AgentNativeSessionHandle
+    calls: Record<string, { kind: AgentMuxInteractionRequest['kind']; nativeToolCallId: string; hookReceiptId: string; observedAt: number }>
+  }
 
   hookBindingId: string
   hookToken: string

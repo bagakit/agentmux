@@ -24,8 +24,21 @@ export function agentNativeTurnEnd(session: Parameters<typeof nativeTurnEndScope
     ? session.nativeTurnEnds!.turns[nativeTurnId] : undefined
 }
 
+export function nativeInteractionEndScopeMatches(session: Pick<AgentMuxStoredAgentSession, 'providerId' | 'run' | 'nativeHandle' | 'nativeInteractionEnds'>): boolean {
+  const ends = session.nativeInteractionEnds
+  return ends !== undefined && sameRun(ends.run, session.run) && ends.providerId === session.providerId &&
+    sameNativeHandle(ends.nativeHandle, session.nativeHandle)
+}
+
+export function agentNativeInteractionEnd(session: Parameters<typeof nativeInteractionEndScopeMatches>[0],
+  kind: 'permission' | 'question', nativeToolCallId: string | undefined) {
+  const key = JSON.stringify([kind, nativeToolCallId])
+  return nativeToolCallId !== undefined && nativeInteractionEndScopeMatches(session) && Object.hasOwn(session.nativeInteractionEnds!.calls, key)
+    ? session.nativeInteractionEnds!.calls[key] : undefined
+}
+
 export function cloneSession(session: AgentMuxStoredAgentSession): AgentMuxAgentSession {
-  const { initialInput: _initialInput, nativeActor: _nativeActor, continuityExecutors: _executors, nativeTurnEnds: _nativeTurnEnds, recoveryActivity: _recoveryActivity, interactionOperations: _interactionOperations, hookBindingId: _bindingId, hookToken: _token, activityCommit: _activityCommit, futurePromptIntents: _retainedBodies, ...publicSession } = session
+  const { initialInput: _initialInput, nativeActor: _nativeActor, continuityExecutors: _executors, nativeTurnEnds: _nativeTurnEnds, nativeInteractionEnds: _nativeInteractionEnds, recoveryActivity: _recoveryActivity, interactionOperations: _interactionOperations, hookBindingId: _bindingId, hookToken: _token, activityCommit: _activityCommit, futurePromptIntents: _retainedBodies, ...publicSession } = session
   return structuredClone(publicSession)
 }
 

@@ -1856,6 +1856,25 @@ function nativeTurnEnds(value: unknown): NonNullable<AgentMuxStoredAgentSession[
     })) }
 }
 
+function nativeInteractionEnds(value: unknown): NonNullable<AgentMuxStoredAgentSession['nativeInteractionEnds']> {
+  const source = record(value, 'nativeInteractionEnds'), handle = nativeHandle(source.nativeHandle)
+  const providerId = string(source.providerId, 'nativeInteractionEnds.providerId')
+  if (Object.keys(source).some(key => !['run', 'providerId', 'nativeHandle', 'calls'].includes(key)) ||
+      !isDeepStrictEqual(source.nativeHandle, handle) || handle.kind !== 'provider' || handle.providerId !== providerId) {
+    throw new AgentMuxError('Native interaction ends do not retain their exact Provider source.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return { run: runRef(source.run), providerId, nativeHandle: handle,
+    calls: Object.fromEntries(Object.entries(record(source.calls, 'nativeInteractionEnds.calls')).map(([key, value]) => {
+      const end = record(value, 'native interaction end'), nativeToolCallId = string(end.nativeToolCallId, 'native interaction call ID')
+      if (Object.keys(end).some(key => !['kind', 'nativeToolCallId', 'hookReceiptId', 'observedAt'].includes(key)) ||
+          end.kind !== 'question' && end.kind !== 'permission' || key !== JSON.stringify([end.kind, nativeToolCallId])) {
+        throw new AgentMuxError('Native interaction end identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
+      }
+      return [key, { kind: end.kind, nativeToolCallId, hookReceiptId: string(end.hookReceiptId, 'native interaction completion receipt'),
+        observedAt: timestamp(end.observedAt, 'native interaction completion observedAt') }]
+    })) }
+}
+
 function recoveryActivity(value: unknown, session: AgentMuxAgentSession): AgentRecoveryActivity {
   const source = record(value, 'recoveryActivity')
   const run = runRef(source.run)
@@ -1907,6 +1926,7 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     ...(source.nativeActor === undefined ? {} : { nativeActor: normalizePrivateNativeActor(source.nativeActor) }),
     ...(source.continuityExecutors === undefined ? {} : { continuityExecutors: structuredClone(source.continuityExecutors) }),
     ...(source.nativeTurnEnds === undefined ? {} : { nativeTurnEnds: nativeTurnEnds(source.nativeTurnEnds) }),
+    ...(source.nativeInteractionEnds === undefined ? {} : { nativeInteractionEnds: nativeInteractionEnds(source.nativeInteractionEnds) }),
     ...(source.interactionOperations === undefined ? {} : { interactionOperations: Object.fromEntries(Object.entries(record(source.interactionOperations, 'interaction operations')).map(([id, receipt]) => {
       const normalized = normalizeInteractionOperationReceipt(receipt)
       if (id !== normalized.operationId || normalized.agentSessionId !== source.agentSessionId) throw new AgentMuxError('Interaction operation identity mismatch.', 'INVALID_AGENT_SESSION_STORE')
