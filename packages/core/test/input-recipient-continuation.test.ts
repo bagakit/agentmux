@@ -11,6 +11,9 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider.js'
 import { AgentMuxError } from '../src/errors.js'
+import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
+import { DEFAULT_AGENT_CONTINUITY_POLICY, type AgentMuxContinuityOperation } from '../src/agent-session-recovery/continuity-contract.js'
+import type { AgentMuxStoredAgentSession, AgentNativeSessionHandle } from '../src/types.js'
 import { parseAgentMuxMessagePrefix } from '../src/agent-message-render.js'
 import { quote } from './helpers/channel-quote-fixture.js'
 import { offlineEndpoint } from './helpers/codex-offline-endpoint.js'
@@ -89,7 +92,7 @@ async function nativeFixture() {
   const providers = [{ ...provider, planManagedHooks: () => null,
     prepareManagedLaunch: async (...args: Parameters<NonNullable<typeof provider.prepareManagedLaunch>>) => {
       const prepared = await provider.prepareManagedLaunch!(...args)
-      expect(prepared.nativeActor).toBeDefined()
+      if (!prepared.nativeActor) return prepared
       return { ...prepared, plan: { ...prepared.plan, args: [entry, ...prepared.plan.args.slice(1)] } }
     } }]
   const activation = await activateRuntime({ executable: fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url)),
@@ -104,24 +107,44 @@ async function nativeFixture() {
   let client = new AgentMuxClient({ store: store(), providers }); await client.connect()
   cleanups.push(() => client.dispose())
   const session = await client.createAgent({ agentSessionId: 'original', createOperationId: 'original-create', providerId: provider.id, executorId: provider.id,
-    workspacePath: root, injectAgentMuxGuide: false, commandOverride: nativeCommand, prompt: 'PRIVATE_QUEUE_INITIAL_ORIGINAL', args: [],
+    workspacePath: root, injectAgentMuxGuide: false, commandOverride: nativeCommand, prompt: 'PRIVATE_QUEUE_INITIAL_ORIGINAL', args: ['--sandbox', 'read-only', '--ask-for-approval', 'never', '--model', 'private-queue'],
     env: { CODEX_HOME: join(root, 'native-home'), HOME: root } })
   const initial = await vi.waitFor(async () => {
     await client.refreshAgentSession('original', session.run)
     const status = await client.statusAgent('original')
-    { expect(status.session.nativeHandle?.sessionId).toEqual(expect.any(String)); expect((await store().readMetadata('original'))?.nativeActor).toBeDefined(); expect(status.session.semanticStatus?.state).toBe('done') }
+    { expect(status.session.nativeHandle?.sessionId).toEqual(expect.any(String)); expect(status.session.semanticStatus?.state).toBe('done') }
     return status
   }, { timeout: 20_000, interval: 100 })
   issued.mockRestore()
-  return { root, inputs, session, initial, store, capability, storePath, get client() { return client },
-    reopen: async () => { await client.dispose(); client = new AgentMuxClient({ store: store(), providers }); await client.connect();
-      const current = await client.statusAgent('original'); expect(current.run).toMatchObject({ runId: initial.run.runId, pid: initial.run.pid, state: 'running' });
-      expect(current.session.nativeHandle).toEqual(initial.session.nativeHandle) },
+  return { root, inputs, session, initial, store, get capability() { return capability }, storePath, get client() { return client },
+    resume: async (operationId: string) => {
+      const before = await client.readAgentSession('original')
+      if (!before) throw Error('Original Session missing before resume')
+      await activation.client.stop(await activation.client.prepareStop(before.run.runId))
+      await vi.waitFor(async () => expect((await client.statusAgent('original')).run.state).not.toBe('running'))
+      const issuing = vi.spyOn(capabilities, 'issueAgentCapability').mockImplementation(() => { capability = issue(); return capability })
+      try {
+        const resumed = await client.resumeAgent({ agentSessionId: 'original', operationId, prompt: 'PRIVATE_QUEUE_RESUMED_ORIGINAL',
+          args: ['--sandbox', 'read-only', '--ask-for-approval', 'never', '--model', 'private-queue'], commandOverride: nativeCommand,
+          env: { CODEX_HOME: join(root, 'native-home'), HOME: root } })
+        return await vi.waitFor(async () => {
+          await client.refreshAgentSession('original', resumed.run)
+          const status = await client.statusAgent('original')
+          expect(status.session.nativeHandle?.sessionId).toBe(initial.session.nativeHandle!.sessionId)
+          expect(status.session.semanticStatus?.state).toBe('done')
+          expect(status.session.continuity).toMatchObject({ kind: 'resumed', previousRun: before.run, newRun: resumed.run })
+          return status.session
+        }, { timeout: 20_000, interval: 100 })
+      } finally { issuing.mockRestore() }
+    },
+    reopen: async () => { const before = await client.statusAgent('original'); await client.dispose(); client = new AgentMuxClient({ store: store(), providers }); await client.connect();
+      const current = await client.statusAgent('original'); expect(current.run).toMatchObject({ runId: before.run.runId, pid: before.run.pid, state: 'running' });
+      expect(current.session.nativeHandle).toEqual(before.session.nativeHandle) },
     close: cleanupOwned }
 }
 
 
-async function channel(h: { root: string; client: AgentMuxClient; storePath: string }, id: string) {
+async function channel(h: { root: string; client: AgentMuxClient; storePath: string }, id: string, manual = false) {
   const config = { connectionId: 'original-connection', adapterId: 'sample', application: { domain: 'chat.example', appId: 'original-app' }, label: 'Team', enabled: true, credentialRef: 'original-credential' }
   const connections = new ConnectionHost({ databasePath: join(h.root, 'connections.sqlite'), secrets: { resolve: async () => 'private-credential' } })
   cleanups.push(() => { connections.close(); return Promise.resolve() })
@@ -136,7 +159,7 @@ async function channel(h: { root: string; client: AgentMuxClient; storePath: str
   expect(await bindings.bind({ operationId: 'bind', bindingId: 'original-binding', connectionId: config.connectionId,
     expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: id, externalConversationId: 'original-room',
     scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' }, expectedSource: source.checkpoint.source,
-    inputTarget: { kind: 'native-conversation', source: source.checkpoint.source } }, context)).toMatchObject({ state: 'applied' })
+    ...(manual ? {} : { inputTarget: { kind: 'native-conversation' as const, source: source.checkpoint.source } }) }, context)).toMatchObject({ state: 'applied' })
   const actor = { application: config.application, idType: 'open_id', userId: 'original-external-user' }
   const grant = { bindingId: 'original-binding', expectedBindingRevision: 1, grantId: 'original-grant', actor, capabilities: ['input' as const] }
   expect(await bindings.grant({ ...grant, operationId: 'grant', expectedRevision: null, state: 'active' }, context)).toMatchObject({ state: 'applied' })
@@ -216,14 +239,65 @@ it.runIf(process.platform === 'darwin')('original ingress crosses Hosted and rec
     nativeExactInputs: h.inputs.filter(text => text === wire).length, receipt: { transport: admission?.admission?.transport, acknowledged: admission?.admission?.acknowledged, inputDispatch: admission?.admission?.inputDispatch }, reopenedReceiptEqual: true, revokedInput: { ref: held.ref, admission: null }, independentLocalInputs: 1 })
 })
 
+it.runIf(process.platform === 'darwin')('semantic continuation delivers the original external manual request once after real Core resume through recipient compiled CLI and preserves both keys after reopen', async () => {
+  const h = await nativeFixture(), c = await channel(h, 'original', true)
+  const pause = vi.spyOn(h.client.providers.get('codex') as AgentProvider, 'planPromptInput')
+    .mockImplementation(() => { throw new AgentMuxError('Private input planning unavailable', 'PRIVATE_INPUT_UNAVAILABLE') })
+  const original = await c.receive('semantic-original')
+  const waiting = await vi.waitFor(async () => { const value = await original.receipt(); expect(value?.control.waiting?.wake).toBe('explicit-rejoin'); return value! })
+  const queue = new DurableAgentMuxMessageQueue(h.client.agentMessageQueuePath()), saved = (await queue.inspectInput({ key: original.key }))!
+  expect(saved.intent.admissionIntent.kind).toBe('manual-actor')
+  if (saved.intent.source.kind !== 'message') throw Error('Expected original external input')
+  const wire = saved.intent.source.promptWire!, oldCapability = h.capability
+  expect(Buffer.byteLength(wire)).toBeGreaterThan(65_536)
+  expect(parseAgentMuxMessagePrefix(wire)?.declaredChannelQuote?.quote).toEqual(original.claim.channelQuote)
+  pause.mockRestore()
+  const resumed = await h.resume('semantic-recipient-resume')
+  expect(resumed.run).not.toEqual(original.key.expectedRun)
+  expect(h.inputs.filter(text => text === wire)).toHaveLength(0)
+  expect(await original.receipt()).toMatchObject({ ref: waiting.ref, control: { state: 'enabled' }, admission: null })
+  const env = objectCliEnvironment(h.root, { AGENTMUX_AGENT_SESSION_ID: 'original', AGENTMUX_AGENT_CAPABILITY: h.capability })
+  const args = ['--endpoint', 'unix://' + c.path, 'agent', 'input']
+  const stale = await runCompiledObjectCli([...args, 'rejoin', '--input', '-'], { ...env, AGENTMUX_AGENT_CAPABILITY: oldCapability }, JSON.stringify({ ref: waiting.ref }))
+  expect(stale.code).toBe(1); expect(JSON.parse(stale.stderr).error.code).toBe('AGENT_CAPABILITY_INVALID')
+  const results = await Promise.all([1, 2].map(() => runCompiledObjectCli([...args, 'rejoin', '--input', '-'], env, JSON.stringify({ ref: waiting.ref }))))
+  for (const result of results) expect(result.code, result.stderr).toBe(0)
+  const actualKey = { ...original.key, expectedRun: resumed.run }
+  const delivered = await vi.waitFor(async () => { const value = await original.receipt(); expect(value).toMatchObject({ status: 'terminal-confirmed', key: original.key, ref: waiting.ref,
+    control: { state: 'dispatch-authorized', deliveryKey: actualKey }, admission: { run: resumed.run } }); return value! }, { timeout: 20_000 })
+  await vi.waitFor(() => expect(h.inputs.filter(text => text === wire)).toHaveLength(1), { timeout: 20_000 })
+  expect(delivered.admission?.admission?.transport ?? 'terminal').toBe('terminal')
+  expect(delivered.admission?.admission).toMatchObject({ intent: { prompt: wire }, inputDispatch: { ref: waiting.ref, deliveryKey: actualKey } })
+  expect((await queue.inspectInput({ key: original.key }))?.intent).toEqual(saved.intent)
+  expect(await queue.resolveInputOwnerKey(actualKey)).toEqual(original.key)
+  await c.reopen(h.reopen)
+  for (const key of [original.key, actualKey]) {
+    const read = await runCompiledObjectCli([...args, 'inspect', '--input', '-'], env, JSON.stringify({ key }))
+    expect(read.code, read.stderr).toBe(0)
+    expect(JSON.parse(read.stdout).result.input).toMatchObject({ key: original.key, ref: waiting.ref, control: delivered.control, admission: delivered.admission })
+  }
+  const again = await runCompiledObjectCli([...args, 'rejoin', '--input', '-'], env, JSON.stringify({ ref: waiting.ref }))
+  expect(again.code, again.stderr).toBe(0)
+  expect(JSON.parse(again.stdout).result.admission).toEqual(delivered.admission)
+  expect(h.inputs.filter(text => text === wire)).toHaveLength(1)
+  facts.push({ case: 'actual-semantic-recipient', executableVersion: (await runner.runProcess(process.env.AGENTMUX_TEST_CODEX_BINARY ?? 'codex', ['--version'])).stdout.trim(),
+    key: original.key, actualKey, ref: waiting.ref, continuity: resumed.continuity, author: original.claim.author,
+    savedEnvironment: saved.intent.environment, wireBytes: Buffer.byteLength(wire), wireSHA256: createHash('sha256').update(wire).digest('hex'),
+    nativeExactInputs: h.inputs.filter(text => text === wire).length, receipt: delivered, reopenedBothKeysEqual: true, staleCapabilityRejected: true })
+})
+
 function barrier() {
   let enter!: () => void, release!: () => void
   const entered = new Promise<void>(resolve => { enter = resolve }), waiting = new Promise<void>(resolve => { release = resolve })
   return { entered, release, pause: async () => { enter(); await waiting } }
 }
-async function controlled() {
+async function controlled(nativeHandle?: AgentNativeSessionHandle, captureNative = true) {
   const h = await rpcOwnerFixture(['recipient', 'outsider', 'author'], undefined, () => ({ providerId: 'claude', executorId: 'claude' }))
   cleanups.push(h.close)
+  if (nativeHandle) {
+    const recipient = (await h.store.readMetadata('recipient'))!
+    await h.store.compareAndSwapMetadata(recipient, { ...recipient, nativeHandle }); await h.inner.registry.load('local')
+  }
   vi.spyOn(h.client.providers.get('claude'), 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
   const queue = new DurableAgentMuxMessageQueue(h.client.agentMessageQueuePath())
   const externalAuthor = { kind: 'external' as const, connectionId: 'connection', actor: { application: { domain: 'chat.example', appId: 'app' }, idType: 'open_id', userId: 'external-user' },
@@ -231,15 +305,15 @@ async function controlled() {
   let allowed = true
   const author = { identity: externalAuthor, assertCurrent: vi.fn(async () => { if (!allowed) throw new AgentMuxError('Original grant unavailable', 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED') }) }
   const context = { externalAuthor: author }
-  const save = async (id: string, kind: 'external' | 'human' | 'agent' | 'prompt' = 'external') => {
+  const save = async (id: string, kind: 'external' | 'human' | 'agent' | 'prompt' = 'external', admissionKind: 'manual-actor' | 'session-conversation' = 'manual-actor') => {
     const expectedRun = { runId: 'run-recipient' }
     if (kind === 'prompt') return (await queue.savePromptInput({ key: { kind: 'prompt', agentSessionId: 'recipient', expectedRun, submissionId: id }, admissionIntent: { kind: 'manual-actor', expectedRun },
       execution: 'immediate', environment: { providerId: 'claude', executorId: 'claude' }, source: { kind: 'prompt', prompt: 'Original local input', authorHuman: true } }))!
     const sender = kind === 'external' ? externalAuthor : kind === 'human' ? { kind: 'human' as const, principal: 'local-cli' as const } : { kind: 'agent-session' as const, agentSessionId: 'author' }
     await queue.append({ messageId: id, operationId: id + '-operation', createdAt: 1, sender, recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
       senderSessionId: kind === 'agent' ? 'author' : null, senderRunId: kind === 'agent' ? 'run-author' : null, recipientSessionId: 'recipient', recipientRunId: expectedRun.runId,
-      threadId: id, correlationId: id, replyTo: null, workspaceId: null, body: 'Original ' + id, admissionIntent: { kind: 'manual-actor', expectedRun }, execution: 'immediate' },
-      { inputEnvironment: { providerId: 'claude', executorId: 'claude' } })
+      threadId: id, correlationId: id, replyTo: null, workspaceId: null, body: 'Original ' + id, admissionIntent: { kind: admissionKind, expectedRun }, execution: 'immediate' },
+      { inputEnvironment: { providerId: 'claude', executorId: 'claude', ...(captureNative && nativeHandle ? { nativeHandle } : {}) } })
     return (await queue.inspectInput({ key: { kind: 'message', agentSessionId: 'recipient', expectedRun, messageId: id } }))!
   }
   const inspect = (entry: Awaited<ReturnType<typeof save>>) => h.client.inspectAgentInput({ key: entry.intent.key })
@@ -319,4 +393,152 @@ it('a late old recipient observer preserves the newer author observer across the
   newAuthority.release(); await inner.scheduleInputWaiting('recipient')
   await vi.waitFor(async () => expect(await h.inspect(saved)).toMatchObject({ status: 'terminal-confirmed', ref: newer.ref }))
   expect(h.inner.kernel.input).toHaveBeenCalledOnce()
+})
+
+
+/** Controlled counterexamples for target/generation races; the positive above
+ * obtains its continuity from real Core resume and an actual Native process. */
+async function semanticControlled(captureNative = true) {
+  const nativeHandle = { kind: 'provider' as const, providerId: 'claude', sessionId: 'original-native' }
+  const h = await controlled(nativeHandle, captureNative)
+  let serial = 0
+  const resume = async (alter?: (next: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession) => {
+    const previous = (await h.store.readMetadata('recipient'))!, run = { runId: 'resumed-recipient-' + ++serial }
+    const operation: AgentMuxContinuityOperation = { operationId: 'semantic-resume-' + serial, agentSessionId: 'recipient', trigger: 'manual',
+      policy: DEFAULT_AGENT_CONTINUITY_POLICY, previousRun: previous.run, newRun: run, nativeTarget: nativeHandle,
+      admittedAt: 1, observedAt: 1, rechecks: 0, kind: 'resumed', reason: 'run-ended', evidence: { kind: 'run-ended', state: 'exited', observedAt: 1 } }
+    const next: AgentMuxStoredAgentSession = { ...previous, run, retiredRuns: [...previous.retiredRuns, previous.run],
+      nativeBinding: { source: 'semantic-resume-target', run, observedAt: 1 }, continuity: operation,
+      continuityOperations: { ...previous.continuityOperations, [operation.operationId]: operation } }
+    delete next.promptCompletionAdmission; delete next.terminalPromptSubmission; delete next.terminalPromptDelivery
+    await h.store.compareAndSwap(previous, alter ? alter(next) : next)
+    await h.inner.registry.load('local')
+    return next
+  }
+  const settled = () => (h.client as unknown as { scheduleInputWaiting(id: string): Promise<void> }).scheduleInputWaiting('recipient')
+  return { ...h, resume, settled, nativeHandle }
+}
+
+it('semantic continuation refuses same native identity without an unambiguous Core recovery receipt and mismatched saved environments', async () => {
+  const h = await semanticControlled(), saved = await h.save('target-boundary')
+  const original = (await h.store.readMetadata('recipient'))!
+  const variants: Array<[string, (next: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession]> = [
+    ['no-receipt', next => { delete next.continuity; delete next.continuityOperations; return next }],
+    ['ambiguous', next => ({ ...next, continuityOperations: { ...next.continuityOperations, conflicting: { ...next.continuity!, operationId: 'conflicting' } } })],
+    ['provider', next => ({ ...next, providerId: 'codex', nativeHandle: { ...h.nativeHandle, providerId: 'codex' } })],
+    ['executor', next => ({ ...next, executorId: 'codex' })],
+    ['native', next => ({ ...next, nativeHandle: { ...h.nativeHandle, sessionId: 'another-native' } })],
+    ['unknown-native', next => { delete next.nativeHandle; delete next.nativeBinding; return next }]
+  ]
+  for (const [name, alter] of variants) {
+    await h.store.compareAndSwapMetadata((await h.store.readMetadata('recipient'))!, original)
+    await h.resume(alter)
+    await expect(h.client.rejoinAgentInputWaiting({ ref: saved.control.ref, caller: h.caller }, h.context), name).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+    expect(await h.inspect(saved)).toMatchObject({ ref: saved.control.ref, control: { state: 'enabled' }, admission: null })
+  }
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it('semantic continuation retains nonmanual external and original author boundaries without creating cold or author-only replay permission', async () => {
+  const h = await semanticControlled(), manual = await h.save('manual-author'), nonmanual = await h.save('not-manual', 'external', 'session-conversation')
+  await h.resume()
+  await expect(h.client.rejoinAgentInputWaiting({ ref: manual.control.ref, caller: { ...h.caller, agentSessionId: 'outsider' } }, h.context)).rejects.toMatchObject({ code: 'MESSAGE_SENDER_MISMATCH' })
+  await expect(h.client.rejoinAgentInputWaiting({ ref: manual.control.ref, caller: { ...h.caller, capability: 'stale' } }, h.context)).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+  await expect(h.client.rejoinAgentInputWaiting({ ref: nonmanual.control.ref, caller: h.caller }, h.context)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+  h.revoke()
+  await expect(h.client.rejoinAgentInputWaiting({ ref: manual.control.ref, caller: h.caller }, h.context)).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
+  h.allow()
+  await h.client.rejoinAgentInputWaiting({ ref: manual.control.ref }, h.context)
+  await h.settled()
+  expect(await h.inspect(manual)).toMatchObject({ status: 'waiting', control: { state: 'enabled', waiting: { wake: 'explicit-rejoin' } }, admission: null })
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  const reopen = new AgentMuxClient({ store: h.store }); cleanups.push(() => reopen.dispose())
+  await (Reflect.get(reopen, 'registry') as typeof h.inner.registry).load('local')
+  await (reopen as unknown as { restoreInputWaiting(): Promise<void> }).restoreInputWaiting()
+  expect((Reflect.get(reopen, 'inputWaitingContexts') as Map<string, unknown>).size).toBe(0)
+  expect(await reopen.inspectAgentInput({ key: manual.intent.key })).toMatchObject({ ref: manual.control.ref, admission: null })
+})
+
+it('semantic continuation cannot adopt a new generation after its original observer admission awaits', async () => {
+  const h = await semanticControlled(), saved = await h.save('semantic-generation'), point = barrier()
+  await h.resume()
+  const inner = h.client as unknown as { acceptInputWaiting(...args: unknown[]): Promise<unknown> }, original = inner.acceptInputWaiting.bind(h.client)
+  vi.spyOn(inner, 'acceptInputWaiting').mockImplementationOnce(async (...args) => { await point.pause(); return original(...args) })
+  const joining = h.client.rejoinAgentInputWaiting({ ref: saved.control.ref, caller: h.caller }, h.context)
+  await point.entered
+  expect(await h.client.stopAgentInputWaiting({ ref: saved.control.ref, cancelOperationId: 'stop-semantic-generation' })).toMatchObject({ outcome: 'stopped-before-dispatch' })
+  const next = await h.queue.reenableInputWaiting(saved.control.ref)
+  point.release(); await joining; await h.settled()
+  expect(await h.inspect(saved)).toMatchObject({ ref: next, control: { state: 'enabled' }, admission: null })
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it.each(['stop', 'run'] as const)('semantic continuation rechecks concurrent %s before its original dispatch gate', async change => {
+  const h = await semanticControlled(), saved = await h.save('semantic-gate-' + change), point = barrier()
+  await h.resume()
+  const gate = DurableAgentMuxMessageQueue.prototype.authorizeInputDispatch
+  vi.spyOn(DurableAgentMuxMessageQueue.prototype, 'authorizeInputDispatch').mockImplementationOnce(async function(this: DurableAgentMuxMessageQueue, ...args) {
+    await point.pause(); return gate.apply(this, args)
+  })
+  await h.client.rejoinAgentInputWaiting({ ref: saved.control.ref, caller: h.caller }, h.context)
+  await point.entered
+  if (change === 'stop') expect(await h.client.stopAgentInputWaiting({ ref: saved.control.ref, cancelOperationId: 'stop-before-semantic-gate' })).toMatchObject({ outcome: 'stopped-before-dispatch' })
+  else await h.resume()
+  point.release(); await h.settled()
+  const receipt = await h.inspect(saved)
+  expect(receipt?.control.state).toBe(change === 'stop' ? 'stopped-before-dispatch' : 'enabled')
+  expect(receipt?.admission).toBeNull(); expect(receipt?.control.deliveryKey).toBeUndefined()
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it('semantic continuation keeps the first actual delivery target after an uncertain gate and a further recovery', async () => {
+  const h = await semanticControlled(), saved = await h.save('semantic-unknown'), resumed = await h.resume()
+  const gate = DurableAgentMuxMessageQueue.prototype.authorizeInputDispatch
+  vi.spyOn(DurableAgentMuxMessageQueue.prototype, 'authorizeInputDispatch').mockImplementationOnce(async function(this: DurableAgentMuxMessageQueue, ...args) {
+    const link = await gate.apply(this, args); expect(link).not.toBeNull()
+    throw Error('Original gate committed but its reply was lost')
+  })
+  await h.client.rejoinAgentInputWaiting({ ref: saved.control.ref, caller: h.caller }, h.context); await h.settled()
+  const before = await h.inspect(saved)
+  expect(before).toMatchObject({ status: 'unknown', control: { state: 'dispatch-authorized', deliveryKey: { ...saved.intent.key, expectedRun: resumed.run } } })
+  expect(before?.admission).toBeNull()
+  await h.resume()
+  const again = await h.client.rejoinAgentInputWaiting({ ref: saved.control.ref, caller: h.caller }, h.context)
+  expect(again.control).toEqual(before?.control); expect(again.status).toBe('unknown')
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  const read = new DurableAgentMuxMessageQueue(h.client.agentMessageQueuePath())
+  expect((await read.inspectInput({ key: saved.intent.key }))?.control).toEqual(before?.control)
+  expect(await read.resolveInputOwnerKey(before!.control.deliveryKey!)).toEqual(saved.intent.key)
+})
+
+it('semantic continuation public result accepts only the exact original or frozen delivery selector', async () => {
+  const h = await semanticControlled(), saved = await h.save('semantic-selector'), resumed = await h.resume()
+  await h.client.rejoinAgentInputWaiting({ ref: saved.control.ref, caller: h.caller }, h.context); await h.settled()
+  const receipt = (await h.inspect(saved))!, actualKey = { ...saved.intent.key, expectedRun: resumed.run }
+  expect(receipt.status).toBe('terminal-confirmed')
+  await expect(h.client.inspectAgentInput({ key: actualKey }, { ...h.caller, agentSessionId: 'outsider' })).rejects.toMatchObject({ code: 'MESSAGE_SENDER_MISMATCH' })
+  const result = { input: receipt, record: receipt.admission }
+  for (const key of [saved.intent.key, actualKey]) expect(parseRpcNativeResult('agent.input.inspect', result, { key })).toEqual(result)
+  for (const key of [{ ...actualKey, expectedRun: { runId: 'unrelated-run' } }, { ...actualKey, agentSessionId: 'outsider' },
+    { ...actualKey, messageId: 'another-message' }, { kind: 'prompt', agentSessionId: actualKey.agentSessionId, expectedRun: actualKey.expectedRun, submissionId: 'semantic-selector' }]) {
+    expect(() => parseRpcNativeResult('agent.input.inspect', result, { key })).toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  }
+  for (const change of [
+    { control: { ...receipt.control, deliveryKey: { ...actualKey, expectedRun: { runId: 'invented-run' } } } },
+    { control: { ...receipt.control, deliveryKey: { ...actualKey, messageId: 'another-message' } } },
+    { key: { ...receipt.key, agentSessionId: 'outsider' } }
+  ]) expect(() => parseRpcNativeResult('agent.input.inspect', { ...result, input: { ...receipt, ...change } }, { key: actualKey }))
+    .toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  expect(() => parseRpcNativeResult('agent.input.inspect', { ...result, record: null }, { key: actualKey }))
+    .toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+})
+
+
+it('semantic continuation does not replace an unknown saved native environment with the current matching handle', async () => {
+  const h = await semanticControlled(false), saved = await h.save('semantic-unknown-environment')
+  expect(saved.intent.environment.nativeHandle).toBeUndefined()
+  await h.resume()
+  await expect(h.client.rejoinAgentInputWaiting({ ref: saved.control.ref, caller: h.caller }, h.context)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+  expect(await h.inspect(saved)).toMatchObject({ ref: saved.control.ref, control: { state: 'enabled' }, admission: null })
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
 })
