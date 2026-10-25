@@ -828,6 +828,7 @@ export function projectRuntimeEvent(
       ...current,
       providerId: core.session.providerId,
       ...projectNativeSourceFacts(core.session),
+      ...(core.session.toolExecution ? { toolExecution: structuredClone(core.session.toolExecution) } : {}),
       ...(core.session.hookIngressObservation
         ? { hookIngressObservation: structuredClone(core.session.hookIngressObservation) }
         : {}),
