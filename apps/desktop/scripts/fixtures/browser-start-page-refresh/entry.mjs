@@ -15,6 +15,7 @@ const input = window.startPageFixtureInput
 if (!input?.previews?.length) throw new Error('Actual native fixture captures are required')
 const config = await api.config.get(), sessionSnapshot = await api.sessions.snapshot()
 const workspace = { ...config.workspaces.find(item => item.id === 'workspace-demo'), path: fixturePath('private/start-page-research'), name: 'Research' }
+const unrelatedWorkspace = { ...workspace, id: 'start-page-unrelated', name: 'Retained work', path: fixturePath('private/start-page-retained') }
 const session = { ...sessionSnapshot.sessions.find(item => item.id === 'session-codex'), workspacePath: workspace.path }
 const pages = [], native = new Map(), previewById = new Map()
 const control = { owner: 'human', activeOperationId: null, revision: 1, inputIsolation: 'inactive', agent: null }
@@ -56,7 +57,7 @@ for (const method of ['stop', 'resume', 'launchAgent', 'write', 'interrupt']) {
   const previous = api.sessions[method]
   api.sessions[method] = (...args) => { calls.agent.push(method); return previous(...args) }
 }
-useAppStore.setState({ loading: false, initialize: async () => () => {}, config: { ...config, workspaces: [workspace] }, sessions: [session],
+useAppStore.setState({ loading: false, initialize: async () => () => {}, config: { ...config, workspaces: [workspace, ...(input.scene === 'personalization' ? [unrelatedWorkspace] : [])] }, sessions: [session],
   activeWorkspaceId: workspace.id, mainSurface: 'survey', toolsOpen: false, projectRailOpen: false, surveyToolsOpen: false,
   tabs: Object.fromEntries(pages.map(tab => [tab.id, tab])), layouts: { [workspace.id]: createWorkspaceLayout('start-page-group', pages.map(tab => tab.id)) },
   surveySidebarWidth: 260, surveySidebarCollapsed: false, surveyCollectedZones: {}, surveyExplorationNames: {}, surveyZoneSelection: null,
@@ -66,8 +67,26 @@ const zoneId = catalog.tabs.find(tab => tab.tabId === start.id)?.zoneId
 if (!zoneId) throw new Error('Actual Survey Zone required')
 const selection = surveySelectReference(surveyInitialZoneSelection(catalog, zoneId, useAppStore.getState().layouts, useAppStore.getState().tabs, workspace.id), { tabId: start.id, regionId: originalRegion.regionId })
 useAppStore.setState({ surveyCollectedZones: { [zoneId]: true }, surveyExplorationNames: { [zoneId]: 'Open research' }, surveyZoneSelection: selection })
+if (input.scene === 'personalization') {
+  const committed = await window.startPageNativeConfig.initialize(useAppStore.getState().config)
+  const listeners = new Set()
+  api.config.get = () => window.startPageNativeConfig.read()
+  api.config.save = async (value, expected) => {
+    const saved = await window.startPageNativeConfig.save(value, expected)
+    for (const listener of listeners) listener(structuredClone(saved))
+    return saved
+  }
+  api.config.onChange = listener => { listeners.add(listener); return () => listeners.delete(listener) }
+  useAppStore.setState({ config: committed })
+}
 const original = useAppStore.getState()
 window.startPageProof = {
+  retainTabs(count) {
+    const tabs = Object.fromEntries(pages.map(tab => [tab.id, useAppStore.getState().tabs[tab.id]]))
+    const retained = Array.from({ length: count }, (_, index) => createWorkbenchTab(`start-page-retained-${index}`, { regionId: `start-page-retained-region-${index}`, kind: 'launcher', workspaceId: unrelatedWorkspace.id }, `Retained ${index}`))
+    for (const tab of retained) tabs[tab.id] = tab
+    useAppStore.setState({ tabs, layouts: { ...useAppStore.getState().layouts, [unrelatedWorkspace.id]: createWorkspaceLayout('start-page-retained-group', retained.map(tab => tab.id)) } })
+  },
   ready: true, originalBrowserId: originalRegion.browserId, firstHistory: historyTexts[0], scope,
   theme(mode) { return updateThemeSelection({ ...useAppStore.getState().config.appearance, appAppearance: mode }) },
   async reset() { useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: await navigate(originalRegion.browserId, 'about:blank') }) },
@@ -80,7 +99,7 @@ window.startPageProof = {
       central: central ? { value: central.value, disabled: central.disabled } : null, count: document.querySelectorAll('.browser-start-history__card').length,
       images: [...document.querySelectorAll('.browser-start-history__card img')].map(image => ({ complete: image.complete, width: image.naturalWidth, title: image.title })),
       pane: box ? { x: box.x, y: box.y, width: box.width, height: box.height, scrollWidth: pane.scrollWidth, clientWidth: pane.clientWidth } : null,
-      appearance: document.documentElement.dataset.appearance }
+      appearance: document.documentElement.dataset.appearance, retained: Object.keys(state.tabs).filter(id => id.startsWith('start-page-retained-')).length, savedStartPage: state.config.browser.startPage, plane: (() => { const plane = document.querySelector('.browser-start-atmosphere__plane'); return plane ? { inline: plane.style.transform, computed: getComputedStyle(plane).transform, rect: plane.getBoundingClientRect().toJSON() } : null })() }
   }
 }
 createClientUiRoot(document.getElementById('root')).render(createElement(App))

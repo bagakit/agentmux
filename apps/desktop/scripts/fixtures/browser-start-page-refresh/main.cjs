@@ -1,18 +1,47 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path'), http = require('node:http')
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, ipcMain } = require('electron')
 const { pages, html: pageHtml } = require('./pages.cjs')
-const [html, privateRoot, evidence] = process.argv.slice(2)
+const [html, privateRoot, evidence, scene = 'history'] = process.argv.slice(2)
+if (scene === 'personalization') {
+  require('node:fs').mkdirSync(path.join(privateRoot, 'home'), { recursive: true })
+  app.setPath('home', path.join(privateRoot, 'home'))
+}
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 // This isolated process creates several capture windows; only the final receipt exits it.
 app.on('window-all-closed', () => {})
-const receipt = { schema: 'agentmux.browser-start-page-refresh-actual.v1', passed: false, pid: process.pid, frames: [], operations: [], nativePreviewSources: [], userAppRunRuntimeControlled: false,
+const receipt = { schema: 'agentmux.browser-start-page-refresh-actual.v1', scene, passed: false, pid: process.pid, frames: [], operations: [], nativePreviewSources: [], userAppRunRuntimeControlled: false,
   boundary: 'Actual App/Survey/Workbench/BrowserPane/BrowserStartPage and complete source CSS. Typed preview API only; four historical image pixels come from this process capturing its own HTTP fixture pages. No production Main history durability, user Session/Runtime, installed application or ordinary restart is certified.' }
 const pause = ms => new Promise(done => setTimeout(done, ms))
 let window, previewWindow, server
 app.whenReady().then(async () => {
   try {
+    let configOwner, configStore, currentConfig
+    if (scene === 'personalization') {
+      const { ConfigOwner, ConfigStore } = await import(require('node:url').pathToFileURL(path.join(path.dirname(html), 'native-config.mjs')).href)
+      configStore = new ConfigStore(path.join(privateRoot, 'user-data', 'personalization.json'))
+      receipt.configuration = { owner: 'ConfigOwner', store: 'ConfigStore', path: configStore.filePath, edits: [] }
+      ipcMain.handle('probe:start-page:config:initialize', async (_event, seed) => {
+        assert.equal(currentConfig, undefined, 'The private config is initialized exactly once')
+        currentConfig = await configStore.save(seed)
+        await configStore.confirmSaved(currentConfig)
+        configOwner = new ConfigOwner({ read: () => currentConfig, save: value => configStore.save(value), publish: value => { currentConfig = value } })
+        return currentConfig
+      })
+      ipcMain.handle('probe:start-page:config:read', async () => {
+        const fresh = new ConfigStore(configStore.filePath)
+        return fresh.validate(JSON.parse(await fs.readFile(configStore.filePath, 'utf8')))
+      })
+      ipcMain.handle('probe:start-page:config:save', async (_event, value, expected) => {
+        const saved = await configOwner.edit(expected, value)
+        await configStore.confirmSaved(saved)
+        receipt.configuration.edits.push({ expected: expected.browser.startPage, requested: value.browser.startPage, saved: saved.browser.startPage, durable: true })
+        await fs.copyFile(configStore.filePath, path.join(evidence, 'saved-personalization.json'))
+        return saved
+      })
+    }
     server = http.createServer((request, response) => {
       const page = pages.find(item => request.url === '/' + item.slug)
       response.writeHead(page ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -37,8 +66,8 @@ app.whenReady().then(async () => {
       previews.push({ url: sourceUrl, title, capturedAt, image: { width: 480, height: 300, dataUrl: 'data:image/jpeg;base64,' + bytes.toString('base64') } })
     }
     previewWindow.destroy(); previewWindow = undefined
-    await fs.writeFile(path.join(path.dirname(html), 'fixture-data.js'), 'window.startPageFixtureInput=' + JSON.stringify({ previews, capturedAt }) + ';')
-    window = new BrowserWindow({ width: 1440, height: 950, useContentSize: true, show: false, webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
+    await fs.writeFile(path.join(path.dirname(html), 'fixture-data.js'), 'window.startPageFixtureInput=' + JSON.stringify({ previews, capturedAt, scene }) + ';')
+    window = new BrowserWindow({ width: 1440, height: 950, useContentSize: true, show: false, webPreferences: { ...(scene === 'personalization' ? { preload: path.join(__dirname, 'preload.cjs') } : {}), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
     window.webContents.on('console-message', details => { if (details.level === 'error') process.stderr.write('renderer-error: ' + details.message + '\n') })
     const read = code => window.webContents.executeJavaScript(code), facts = () => read('window.startPageProof.facts()')
     const until = async (label, predicate) => {
@@ -78,6 +107,11 @@ app.whenReady().then(async () => {
       receipt.frames.push({ file, width, height, facts: fact })
     }
     await window.loadFile(html); window.showInactive(); window.webContents.debugger.attach('1.3')
+    if (scene === 'personalization') {
+      await require('./personalization-scene.cjs')({ window, read, facts, until, pointer, key, type, preserved, shot, pause, receipt, evidence })
+      receipt.passed = true
+      return
+    }
     await until('initial history and toolbar', () => read('window.startPageProof?.ready && document.querySelectorAll(".browser-start-history__card").length===12 && Boolean(document.querySelector(".browser-toolbar input"))'))
     await until('four real preview images decoded', () => read('(()=>{const images=[...document.querySelectorAll(".browser-start-history__card img")];return images.length===4&&images.every(image=>image.complete&&image.naturalWidth>0)})()'))
     receipt.initial = await facts(); preserved(receipt.initial)

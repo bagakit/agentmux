@@ -12,6 +12,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import type { BrowserRecoveryPreview } from '../src/shared/browser-recovery-preview'
+import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 
 const original = useAppStore.getState()
 const target = { kind: 'browser' as const, browserId: 'original-browser', profileId: 'original-profile' }
@@ -170,6 +171,37 @@ it('shows a useful first twelve and expands the real history without another rea
   await click('.browser-start-history__more')
   expect(host.querySelectorAll('.browser-start-history__card')).toHaveLength(12)
   expect(api.browser.listInputHistory).toHaveBeenCalledTimes(1)
+})
+
+it('uses the saved first-view count without hiding the rest of the original history', async () => {
+  const history = Array.from({ length: 24 }, (_, index) => ({ text: `query ${index}`, submittedAt: entries[0]!.submittedAt }))
+  vi.mocked(api.browser.listInputHistory).mockResolvedValue({ ...snapshot, entries: history })
+  await render(page({ historyLimit: 6 }))
+  expect(host.querySelectorAll('.browser-start-history__card')).toHaveLength(6)
+  await click('.browser-start-history__more')
+  expect(host.querySelectorAll('.browser-start-history__card')).toHaveLength(24)
+  await click('.browser-start-history__more')
+  await render(page({ historyLimit: 18 }))
+  expect(host.querySelectorAll('.browser-start-history__card')).toHaveLength(18)
+  expect(api.browser.listInputHistory).toHaveBeenCalledTimes(1)
+  await render(page({ historyLimit: 50 }))
+  expect(host.querySelectorAll('.browser-start-history__card')).toHaveLength(24)
+  expect(host.querySelector('.browser-start-history__more')).toBeNull()
+})
+
+it('opens the original Survey settings and honors the decorative effect switch', async () => {
+  const open = vi.fn()
+  const navigation = { open, openToolkit: vi.fn(), openHost: vi.fn(), openChannel: vi.fn(), channelEntries: [], channelPresentation: () => null, openMoteLark: vi.fn(), chooseAgent: vi.fn() }
+  const navigate = vi.spyOn(api.browser, 'navigate')
+  await render(<SettingsNavigation.Provider value={navigation}>{page()}</SettingsNavigation.Provider>)
+  expect(host.querySelector('[data-start-atmosphere]')).not.toBeNull()
+  await click('.browser-start-page__customize')
+  expect(open).toHaveBeenCalledExactlyOnceWith('survey', undefined, 'start-title')
+  expect(navigate).not.toHaveBeenCalled()
+  await render(<SettingsNavigation.Provider value={navigation}>{page({ interactiveBackground: false })}</SettingsNavigation.Provider>)
+  expect(host.querySelector('[data-start-atmosphere]')).toBeNull()
+  expect(host.querySelectorAll('.browser-start-history__card')).toHaveLength(3)
+  expect(host.querySelector('input')?.disabled).toBe(false)
 })
 
 it('keeps toolbar and central drafts synchronized and submits through the original Browser', async () => {

@@ -1,0 +1,11 @@
+# Start-page personalization and pointer cost
+
+Run `capture-browser-start-page-refresh.mjs --evidence <new local directory> --personalization`.
+
+The same real App → Survey → Workbench → BrowserPane is mounted. Customize uses the original SettingsNavigation context and Survey settings module. Title, count, interactive-background checkbox, actual HTML file input and FileReader are operated with native CDP input. A private preload bridge sends the original configuration edit to actual ConfigOwner.edit → ConfigStore.save → confirmSaved. A fresh ConfigStore validates separately reread disk bytes before the Settings surface closes. This does not claim the complete production IPC registration or an ordinary installed-application restart.
+
+The unsent original Browser address and Browser/Profile/Workspace identity survive both save cycles. The first cycle saves a title, six cards, an inline locally selected JPEG and disabled interaction; the second enables interaction through the original setting. The image comes from this same probe's native local HTTP-page capture, not user data. Screenshots cover default dark, two actual pointer positions, reduced motion, settings draft, disabled custom background, custom dark/light/narrow.
+
+Cost observations keep one visible homepage. Exactly 100 then 1000 unrelated launcher Tabs are retained in the same production store and layout of another Workspace. The same 48 native pointer moves cross the empty top strip; there are no hover-card events. CDP Performance metrics and native timeline traces retain Layout, style and main-thread work. They verify actual layer style mutations and no Layout from pointer decoration, without treating CSS text or React counts as a native cost result. Idle and reduced-motion windows must write no layer styles. Disabled interaction has no atmosphere layer. Full trace files are gzipped beside the receipt. No user Run, PTY, native Browser resource or background periodic animation is introduced.
+
+Ratios report this machine and trace window, not a universal latency guarantee. Whole-Renderer costs include normal App and trace overhead; the check blocks a proportional increase with unrelated retained Tabs. Independent visual review must inspect the actual full PNGs, including custom image text readability and the pointer's subtle visible displacement.
