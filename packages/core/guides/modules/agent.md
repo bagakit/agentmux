@@ -93,3 +93,7 @@ Load only the journey needed now:
 Before opening or rearranging a workface, read amux space --skill for placement and focus.
 Readers keep their original source/cursor and release only their reader, not the Agent;
 reading, input admission, native adoption and task completion remain separate facts.
+
+Inspect an original tool operation with `amux agent execution inspect --help`. This metadata-only query requires a transport-authenticated user or device and the exact Host, binding, stream generation and JSON-encoded native request ID from the original machine protocol. Numeric `0` and string `"0"` are different identities. It returns no request or response bytes and never searches other Hosts. An unknown outcome is not permission to replay or replace the original request.
+
+For cross-Host execution, `amux agent execution create --input FILE|-` consumes one exact authorized Agent/resource binding and the original Agent creation identity. Read its help before forming JSON. The two Host roles may be reversed in a new binding; an existing Session keeps its original pair and each direction needs its own resource authorization. `amux agent execution binding --input FILE|-` reads `{bindingId}` at the original coordinator endpoint. `amux agent execution rejoin --input FILE|-` reconnects only retained helper readers: it does not restart a helper, restore an Agent CLI, or replay a native operation. Keep an unknown creation’s original full input and IDs; inspection does not grant retry permission. These commands require a transport-authenticated user or device.
