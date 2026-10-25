@@ -1,3 +1,5 @@
+import { prepareClaudeToolExecutionLaunch } from './claude-tool-execution-launch.js'
+import { prepareClaudeExecutionHelper } from './claude-execution-helper.js'
 import { CLAUDE_USAGE_CAPABILITY } from './claude-usage.js'
 import { inspectHookDisableSetting } from './shared.js'
 import { listClaudeNativeSessions, assertClaudeNativeResumeSource } from './claude-native-catalog.js'
@@ -150,6 +152,8 @@ export function createClaudeManagedHookPlan(workspacePath: string): AgentManaged
 
 export function createClaudeProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   const provider = defineAgentProvider({
+    prepareToolExecutionLaunch: prepareClaudeToolExecutionLaunch,
+    prepareExecutionHelper: prepareClaudeExecutionHelper,
     planManagedHooks: ({ workspacePath }) => createClaudeManagedHookPlan(workspacePath),
     readSessionHistoryPage: readClaudeSessionHistoryPage,
     readSessionHistoryRecord: readClaudeSessionHistoryRecord,
