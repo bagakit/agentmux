@@ -47,7 +47,6 @@ export function queryInputReceipt(store: PublicationStore, binding: PublicationB
       query.ingressId !== original.queryFeedback?.ingressId || query.externalMessageId !== original.queryFeedback.messageId ||
       receipt.key.kind !== 'message' || receipt.key.agentSessionId !== query.input.agentSessionId ||
       receipt.key.expectedRun.runId !== query.input.expectedRun.runId || receipt.key.messageId !== query.input.messageId) return
-  if (receipt.status === 'waiting') queueQueryFeedback(store, binding, query, 'queued')
   const delivered = receipt.status === 'terminal-confirmed' || receipt.status === 'admitted'
   if (delivered) queueQueryFeedback(store, binding, query, 'dispatched')
   if (delivered || receipt.status === 'not-applied' || receipt.status === 'stopped' && receipt.control.state === 'stopped-before-dispatch') {

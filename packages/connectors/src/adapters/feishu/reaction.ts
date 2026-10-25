@@ -4,7 +4,9 @@ import type { PreparedPublication } from '../../publication-wire.js'
 import { feishuFailure, feishuIdentity } from './message.js'
 
 const path = '/open-apis/im/v1/messages/'
-const reactions = { received: 'Get', queued: 'OneSecond', dispatched: 'CheckMark', started: 'OnIt', completed: 'DONE', failed: 'CrossMark', interrupted: 'MinusOne' } as const
+const reactions = { received: 'OneSecond', queued: 'OneSecond', dispatched: 'Get', started: 'OnIt', completed: 'DONE', failed: 'CrossMark', interrupted: 'MinusOne' } as const
+// Frozen wires predate the current automatic presentation and retain their exact meaning.
+const retainedEmojiTypes = [...new Set([...Object.values(reactions), 'CheckMark'])]
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 export type FeishuQueryReaction = { messageId: string; emojiType?: string; reactionId?: string }
 
@@ -33,7 +35,7 @@ export function readFeishuQueryReaction(prepared: PreparedPublication): FeishuQu
     if (request.path !== `${path}${encodeURIComponent(messageId)}/reactions`) return null
     const body = object(JSON.parse(request.body!)), reaction = object(body?.reaction_type)
     if (!body || Object.keys(body).length !== 1 || !reaction || Object.keys(reaction).length !== 1 ||
-        !Object.values(reactions).some(emojiType => emojiType === reaction.emoji_type)) return null
+        !retainedEmojiTypes.some(emojiType => emojiType === reaction.emoji_type)) return null
     return { messageId, emojiType: reaction.emoji_type as string }
   } catch { return null }
 }

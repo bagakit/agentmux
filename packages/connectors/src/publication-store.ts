@@ -350,7 +350,7 @@ export class PublicationStore {
   }
   /** Called only after the original ingress/admission owner authorizes this exact query. */
   queueQueryReceived(boundary: PublicationBoundary, query: import('@agentmux/core/connections').ConnectionIngressMessage, directBinding?: RoomBinding): void {
-    queueQueryFeedback(this, boundary, query, 'received', undefined, undefined, directBinding)
+    queueQueryFeedback(this, boundary, query, 'received', directBinding)
   }
   queryReceived(boundary: PublicationBoundary, ingressId: string): PublicationOperation | null {
     return this.inspect(queryFeedbackOperationId(boundary, ingressId, 'received'))
