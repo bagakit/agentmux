@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { groupTarget, type ConnectionApplicationAccessOperation, type ConnectionApplicationGrant, type ConnectionDiagnosis, type ConnectionGrant, type ConnectionMemberAccess, type ConnectionRecord, type RoomBinding, type RoomBindingOperation, type RoomLinkOperation, type RoomMembersResult } from '@agentmux/core/connections'
 import { conversationRevision, parseConversationReadPage, projectConversationTimeline, type ConversationTimelineReadInput } from '@agentmux/core/conversation'
-import type { AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentTimelineSnapshot, AgentInputSubmissionReceipt } from '@agentmux/core'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SettingsNavigation, type SettingsNavigationRequest } from '../../../src/renderer/src/components/SettingsNavigation'
@@ -25,7 +25,7 @@ api.config.get = async () => config
 await useAppStore.getState().initialize()
 const executorId = Object.keys(config.executors)[0]!, workspace = config.workspaces[0]!
 const launched = (await api.sessions.launchAgent({ hostId: workspace.hostId, workspacePath: workspace.path, executorId })).session
-if (launched.kind !== 'agent') throw Error('Preview requires the original Agent kind')
+if (!launched || launched.kind !== 'agent') throw Error('Preview requires the original Agent kind')
 const session = { ...launched, label: 'Research Agent', nativeHandle: { kind: 'provider' as const, providerId: launched.providerId, sessionId: 'preview-original-native' } }
 const tab = createWorkbenchTab('channel-preview-tab', { kind: 'agent', phase: 'attached', regionId: 'channel-preview-region', workspaceId: workspace.id, sessionId: session.id })
 useAppStore.setState({ config, loading: false, sessions: [session], tabs: { [tab.id]: tab }, layouts: { [workspace.id]: createWorkspaceLayout('channel-preview-group', [tab.id]) },
@@ -45,8 +45,9 @@ const composerNames = ['Research and Engineering - customer investigation and re
 const popoverClarity = new URLSearchParams(location.search).has('popover-clarity')
 const refusalClarity = new URLSearchParams(location.search).has('refusal-clarity')
 const questionValidation = new URLSearchParams(location.search).has('question-validation')
+const inputRecovery = new URLSearchParams(location.search).has('input-recovery')
 const statusPriority = new URLSearchParams(location.search).has('status-priority')
-const groupActivityActions = statusPriority || new URLSearchParams(location.search).has('group-activity-actions')
+const groupActivityActions = inputRecovery || statusPriority || new URLSearchParams(location.search).has('group-activity-actions')
 const memberAccess = new URLSearchParams(location.search).has('member-access')
 const applicationAccess = new URLSearchParams(location.search).has('application-access'), memberScenario = memberAccess || applicationAccess
 const feishuScenario = memberScenario || sharedAudiences || popoverClarity || refusalClarity || groupActivityActions
@@ -88,6 +89,11 @@ const proof = { ready: false, omitOriginal: false, accessUnavailable: false, sta
     useAppStore.setState({ tabs: { [next.id]: next } })
   },
   draft: () => useAppStore.getState().agentComposerDrafts[session.id]
+}
+function originalWaitingReceipt(): AgentInputSubmissionReceipt {
+  const key = { kind: 'message' as const, agentSessionId: target.agentSessionId, expectedRun: { runId: 'preview-original-run' }, messageId: 'preview-original-message' }, ref = { key, waitGeneration: 1 }
+  return { key, ref, originalControlOperationId: 'preview-original-agent-input', persistence: 'confirmed', status: 'waiting', observation: 'rejoin-needed', admission: null,
+    control: { ref, state: 'enabled', at: 1, waiting: { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin', failure: { name: 'AgentMuxError', message: 'Original input observation unavailable' } } } }
 }
 const room = { externalConversationId: '345678901234567890', name: 'research-and-engineering', state: 'active' as const, mode: 'group' as const, membershipApproval: 'not-required' as const }
 const members: RoomMembersResult['members'] = [
@@ -145,7 +151,7 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
     const mixed = (popoverClarity || groupActivityActions) && proof.scenario === 'mixed'
     const unsupported = refusalClarity && proof.scenario === 'unsupported'
     const healthy = statusPriority && proof.scenario === 'healthy'
-    const attention = proof.status === 'attention', sourceGap = (attention || groupActivityActions && (!statusPriority || mixed)) && binding?.externalConversationId === room.externalConversationId
+    const attention = proof.status === 'attention', sourceGap = !inputRecovery && (attention || groupActivityActions && (!statusPriority || mixed)) && binding?.externalConversationId === room.externalConversationId
     const unknownEffect = mixed && !statusPriority || attention && !sourceGap
     const effective = binding && applicationAccess ? previewMemberAccess(binding).flatMap(member => member.effective?.state === 'active' ? [member.effective] : []) : null
     const report = { target: input, service: { value: { enabled: true, revision: 1 }, issue: null }, groups: { issue: null, value: { nextBindingId: null, items: binding ? [{
@@ -166,8 +172,19 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
         recording: (statusPriority && mixed || questionValidation) ? null : unsupported ? { state: 'refused', code: 'INGRESS_CONTENT_UNSUPPORTED' } : { state: 'recorded' }, coreStatus: sourceGap || unsupported ? null : mixed ? 'bytes-accepted' : 'admitted', coreObservation: sourceGap || unsupported ? 'not-started' : 'observed', nativeAdoption: sourceGap || unsupported ? null : 'unknown', waiting: null
       }] : [] } }
     }] : [] } } } satisfies ConnectionDiagnosis
+    if (inputRecovery && binding) {
+      const recovery: ConnectionDiagnosis = report, group = recovery.groups.value!.items[0]!
+      group.outgoing.value!.deliveries = (proof.scenario === 'mixed' ? ['conversation', 'query-feedback', 'query-feedback'] : ['query-feedback', 'query-feedback']).map((kind, i) => ({ kind: kind as 'conversation' | 'query-feedback', association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-original-feedback-' + i, state: 'confirmed', receipt: 'confirmed', platformMessageId: 'preview-platform-result-' + i, reason: null, resourceUpload: null }))
+      group.outgoing.value!.observation = { state: 'ready' }; group.outgoing.value!.effectObservation = null
+      group.incoming.value!.rows = [{ ingressId: 'preview-original-intake-' + binding.bindingId, sourceConnectionId: binding.connectionId, kind: 'message', state: 'claimed', code: null, codeRecorded: false, bindingId: binding.bindingId, bindingRevision: binding.revision, targetConnectionId: binding.connectionId, scope: 'current-binding', inputOperationId: 'preview-original-agent-input', recording: { state: 'recorded' }, coreStatus: 'waiting', coreObservation: 'observed', nativeAdoption: null, waiting: originalWaitingReceipt().control.waiting! }]
+    }
     if (popoverClarity || refusalClarity || groupActivityActions) proof.lastDiagnosis = structuredClone(report)
     return report
+  }
+  if (inputRecovery && method === 'connection.ingress.inspect') {
+    const binding = bindings.find(value => input.ingressId === 'preview-original-intake-' + value.bindingId)!
+    const receipt = originalWaitingReceipt()
+    return { ingress: { kind: 'message', ingressId: input.ingressId, application: binding.application, externalConversationId: binding.externalConversationId, input: { operationId: receipt.originalControlOperationId, hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, expectedRun: receipt.key.expectedRun, messageId: 'preview-original-message', author: { bindingId: binding.bindingId, bindingRevision: binding.revision, connectionId: binding.connectionId } } }, inputReceipt: receipt, observation: 'observed' }
   }
   if (method === 'connection.binding.inspect') {
     const operation = input.operationId ? memberOperations.get(input.operationId) ?? null : null
@@ -265,7 +282,7 @@ if (sharedAudiences) {
   Object.assign(proof, { sharing: { facts: () => ({ bindings: structuredClone(bindings), drafts: structuredClone(useAppStore.getState().connectorRoomDrafts) }) } })
 }
 if (conversationSync) {
-  const pending = { operationId: 'preview-retained-input', runId: session.control.run.runId, text: 'Keep this pending input for explicit send.', status: 'deferred' as const, promptCondition: null, awaitingExplicitSend: true, errorCode: 'AGENT_EXECUTION_NOT_REQUESTED' }
+  const pending = { operationId: 'preview-retained-input', runId: session.control.run.runId, text: 'Keep this pending input for explicit send.', status: 'deferred' as const, promptCondition: null, awaitingExplicitSend: true as const, errorCode: 'AGENT_EXECUTION_NOT_REQUESTED' }
   useAppStore.setState({ agentSteerQueues: { [session.id]: [pending] } })
   const reference = { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }, sourceHostId = reference.hostId
   const items: AgentTimelineSnapshot['items'] = [
