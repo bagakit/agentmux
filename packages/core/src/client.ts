@@ -157,7 +157,7 @@ import {
   type AgentPromptTransportQualification,
   type AgentPromptProtocolInputBoundary
 } from './prompt-submission.js'
-import { CTXMUX_COMMIT, CTXMUX_VERSION, CtxmuxRunAdapter, type CtxmuxAdapterAttachment, type CtxmuxAdapterEvent, type CtxmuxAdapterRun, type CtxmuxAdapterStopOperation, type CtxmuxEndpointObservation } from './ctxmux-run-adapter.js'
+import { CTXMUX_COMMIT, CTXMUX_VERSION, CtxmuxRunAdapter, type CtxmuxAdapterAttachment, type CtxmuxAdapterEvent, type CtxmuxAdapterRun, type CtxmuxAdapterStopOperation, type CtxmuxEndpointObservation, type CtxmuxAdapterInputChannel } from './ctxmux-run-adapter.js'
 import { supportedCtxmuxArtifactPlatform } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
 import { agentCreationNotAppliedError, finishAgentCreationCleanup } from './agent-creation-failure.js'
@@ -569,7 +569,18 @@ function projectRunWith(
 }
 
 
-type AgentInputLane = { tail: Promise<void>; running?: InputPerformanceHandle; renderObservations: Set<AgentInputObservation> }
+type AgentInputLane = {
+  admission: Promise<void>
+  pending: Set<Promise<void>>
+  running?: InputPerformanceHandle
+  renderObservations: Set<AgentInputObservation>
+}
+
+type AgentRawInputDispatch = {
+  channel: CtxmuxAdapterInputChannel
+  waitForEarlier(): Promise<void>
+  releaseAdmission(): void
+}
 
 type AgentInputObservation = {
   run: AgentMuxRunRef
@@ -849,8 +860,7 @@ export class AgentMuxClient {
   }>()
   private readonly pendingLifecycleBindings = new Map<string, AgentHookBinding>()
   private reopensDisposed = false
-  private readonly agentInputCursors = new Map<string, number>()
-  private readonly agentInputTails = new Map<string, AgentInputLane>()
+  private readonly agentInputLanes = new Map<string, AgentInputLane>()
   private readonly providerReads = new Set<AbortController>()
   private readonly conversationReadState = new ConversationReaderState()
   private readingDiagnosticSource: CoreReadingDiagnosticSource | undefined
@@ -1084,7 +1094,6 @@ export class AgentMuxClient {
       providers: this.providers,
       registry: this.registry,
       publisher: this.publisher,
-      agentInputCursors: this.agentInputCursors,
       screenEvidence: this.screenEvidence,
       requireAgentSession: (agentSessionId) => this.requireAgentSession(agentSessionId),
       providerArgs: (session, run) => this.providerLaunch(session, run).args,
@@ -2034,8 +2043,7 @@ export class AgentMuxClient {
     this.stopRequestedRuns.clear()
     this.endedRuns.clear()
     this.hookTurnPhases.clear()
-    this.agentInputCursors.clear()
-    for (const lane of this.agentInputTails.values()) {
+    for (const lane of this.agentInputLanes.values()) {
       for (const observation of lane.renderObservations) {
         const cancellation = new AgentMuxError(
           'Input observation cancelled because its Core client disconnected.', 'AGENT_INPUT_OBSERVATION_CANCELLED',
@@ -5704,9 +5712,6 @@ export class AgentMuxClient {
       throw error
     }
     this.runPids.set(attached.run.runId, attached.run.pid)
-    if (attached.run.acceptedInputBytes !== null) {
-      this.agentInputCursors.set(agentSessionId, attached.run.acceptedInputBytes)
-    }
     // 恢复路径：实时通道又通了，撤下「输出通道断了」的降级事实。放在这处共享核心而非两个调用方各自
     // 抄一遍——它对两条路（自动重连 / 用户 Resume）的处置相同，不像 process-state/replay 那样分叉。
     // 缺席即 no-op（clearOutputChannel 早退），所以对没进过降级的正常 attach 零成本。
@@ -7497,8 +7502,7 @@ export class AgentMuxClient {
       this.recovery.wake(agentSessionId)
       this.runPids.delete(session.run.runId)
       if (!this.registry.has(agentSessionId) || sameRun(this.registry.get(agentSessionId).run, session.run)) {
-        this.agentInputCursors.delete(agentSessionId)
-        this.agentInputTails.delete(agentSessionId)
+        this.agentInputLanes.delete(agentSessionId)
       }
       this.publisher.publish({
         type: 'run-removed', agentSessionId, run: { ...session.run },
@@ -7937,7 +7941,6 @@ export class AgentMuxClient {
           'CTXMUX_INPUT_CURSOR_MISSING'
         )
       }
-      this.agentInputCursors.set(requestedSession.agentSessionId, cursor)
       const observedAt = Date.now()
       const degraded: AgentTerminalCapabilityState = {
         state: 'unknown',
@@ -8095,9 +8098,6 @@ export class AgentMuxClient {
     const provider = this.providers.get(requestedSession.providerId)
     const handshake = provider.terminalHandshake
     if (!handshake) {
-      if (knownRun?.acceptedInputBytes !== null && knownRun?.acceptedInputBytes !== undefined) {
-        this.agentInputCursors.set(requestedSession.agentSessionId, knownRun.acceptedInputBytes)
-      }
       return await this.clearTerminalCapability(
         this.requireAgentSession(requestedSession.agentSessionId)
       )
@@ -8117,8 +8117,6 @@ export class AgentMuxClient {
       session.terminalCapability &&
       !session.terminalHandshake?.acknowledged
     ) {
-      const cursor = degradedInputCursor(knownRun?.acceptedInputBytes)
-      if (cursor !== undefined) this.agentInputCursors.set(session.agentSessionId, cursor)
       return session
     }
     const frontendReconnect = session.continuity?.frontendReconnect
@@ -8177,9 +8175,6 @@ export class AgentMuxClient {
             'CtxMux Input cursor precedes the persisted terminal handshake receipt.',
             'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
           )
-        }
-        if (knownRun?.acceptedInputBytes !== null && knownRun?.acceptedInputBytes !== undefined) {
-          this.agentInputCursors.set(session.agentSessionId, knownRun.acceptedInputBytes)
         }
         const readySession = session.terminalCapability
           ? await this.clearTerminalCapability(session)
@@ -8367,7 +8362,6 @@ export class AgentMuxClient {
               'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
             )
           }
-          this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
           observeReadiness(claimed)
           return claimed
         }
@@ -8436,7 +8430,6 @@ export class AgentMuxClient {
                 acknowledgeHandshake
               )
         }
-        this.agentInputCursors.set(session.agentSessionId, accepted.run.acceptedInputBytes)
         observeReadiness(ready)
         return ready
       }, { kind: 'protocol', bytes: responseBytes })
@@ -9207,7 +9200,6 @@ export class AgentMuxClient {
           response: { ...stored.pendingInteraction.response!, acknowledged: true } }, updatedAt: Date.now() }
       })
     }
-    this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
     const settled = current.pendingInteraction?.request.id === request.id && agentInteractionResponseSettled(current.pendingInteraction)
       ? await this.clearPendingInteraction(current, request.id) : current
     this.publishSession(settled)
@@ -9243,10 +9235,6 @@ export class AgentMuxClient {
     observation?: InputObservationReference | null,
     call: RawInputCall = this.rawInputCall()
   ): Promise<AgentMuxRunInputAck> {
-    // Capture before waiting on the input lane: a later request cannot inherit this operation.
-    const requestId = source === 'user' && !requestedSession.pendingInteraction?.nativeInput &&
-      requestedSession.pendingInteraction?.request.evidence.source === 'native-hook'
-      ? requestedSession.pendingInteraction.request.id : undefined
     // 空载荷在这里就地收掉，不下到 ctxmux。daemon 的 RecoverableInput 校验会拒绝空载荷
     // （`recoverable native Input must not be empty`），而「按了键但没有字节要发」是**正常**的终端
     // 事件：IME 组字途中的 onData('')、旧式鼠标上报越界时的零长字节。把它当失败上报，等于用户在
@@ -9276,7 +9264,7 @@ export class AgentMuxClient {
     // A late ACK cannot grant authority to a later preparation or another Run.
     const mousePreparation = source === 'user' && inputKind === 'write' && wholeMouseReports(data)
     const protocolObservers = source === 'terminal-protocol' || mousePreparation
-      ? [...(this.agentInputTails.get(requestedSession.agentSessionId)?.renderObservations ?? [])]
+      ? [...(this.agentInputLanes.get(requestedSession.agentSessionId)?.renderObservations ?? [])]
           .filter(observation => sameRun(observation.run, requestedSession.run) && observation.protocolInput &&
             (!mousePreparation || !observation.protocolInput.preclaim?.claimStarted))
       : []
@@ -9291,19 +9279,34 @@ export class AgentMuxClient {
     // be pending. Only its current success may yield the earlier render reader.
     const preparation = call.author ? this.assertRawInputCurrent(call).then(preempt) : (preempt(), undefined)
     if (preparation) void preparation.catch(() => {}) // The queued owner below consumes its original failure.
-    return await this.serializeAgentInput(requestedSession, async (session, run, diagnostic) => {
+    return await this.serializeAgentInput(requestedSession, async (session, run, diagnostic, dispatch) => {
       // The native terminal remains usable while a typed request is pending. These bytes
       // are not a semantic answer and must not settle or approve that request.
-      // This lane already read the current Run. Another public Client may have
-      // accepted input since our last ACK; that local cursor cannot start new bytes.
+      // Raw input uses the original connection's immutable Run qualification.
+      // The writer assigns each range; another Client's input needs no cursor read here.
       if (source === 'user') {
         try { await diagnostic.measure('session-state', () => this.recovery.userInput(session.agentSessionId, session.run.runId)) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
           code: 'CONTINUITY_INPUT_UNCONFIRMED', message: `Automatic recovery input priority persistence is unconfirmed. Your terminal input remains available. ${error instanceof Error ? error.message : String(error)}`,
           evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } }) }
       }
+      // A pending native-hook response has one durable uncertainty marker.
+      // Earlier failed input may clear it while this input waits. Observe the
+      // current request only after that original transaction has settled.
+      if (dispatch && source === 'user' && this.requireAgentSession(session.agentSessionId).pendingInteraction?.request.evidence.source === 'native-hook') {
+        await diagnostic.measure('input-completion-order', () => dispatch!.waitForEarlier())
+        const current = this.requireAgentSession(session.agentSessionId)
+        if (!sameRun(current.run, session.run)) throw new AgentMuxError('Agent Session changed before native Input dispatch.', 'STALE_AGENT_SESSION')
+        session = current
+        run = await diagnostic.measure('current-run', () => observePromptInput(call.signal, () => this.requireCurrentAgentRun(session)))
+        dispatch = undefined
+      }
+      const pending = this.requireAgentSession(session.agentSessionId).pendingInteraction
+      // Capture once before the side effect. A later ACK cannot modify a new request.
+      const requestId = source === 'user' && !pending?.nativeInput && pending?.request.evidence.source === 'native-hook'
+        ? pending.request.id : undefined
       const expectedByte = run.acceptedInputBytes
-      if (expectedByte === null) {
+      if (!dispatch && expectedByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
       // Save uncertainty before the side effect; a crash must not re-enable an old typed approval.
@@ -9333,18 +9336,29 @@ export class AgentMuxClient {
         }
       }
       await observeNativeInput('unknown')
-      let result: Awaited<ReturnType<typeof this.kernel.input>>
+      let result: { runId: string; pid: number | null; appliedByteRange: { startByte: number; endByte: number }; acceptedThroughByte: number | null }
       let dispatched = false
       try {
+        if (dispatch) await diagnostic.measure('input-capacity', () => dispatch.channel.waitWritable(Buffer.byteLength(data), call.signal))
         await diagnostic.measure('input-authority', () => this.assertRawInputCurrent(call))
         if (!sameRun(this.requireAgentSession(session.agentSessionId).run, session.run)) throw new AgentMuxError(
           'Agent Session changed before native Input dispatch.', 'STALE_AGENT_SESSION')
+        this.assertAgentRun(session, run)
         const ownerInstanceId = this.kernel.identity().daemonInstanceId
         diagnostic.executionOwner(ownerInstanceId)
         call.check()
-        result = await diagnostic.measure('native-input', () => {
+        result = await diagnostic.measure('native-input', async () => {
           dispatched = true
-          return this.kernel.input(session.run.runId, { ownerInstanceId, operationId, expectedByte, data })
+          if (dispatch) {
+            const completion = dispatch.channel.input(data)
+            dispatch.releaseAdmission()
+            const accepted = await completion
+            return { runId: run.runId, pid: run.pid, appliedByteRange: accepted.appliedByteRange,
+              acceptedThroughByte: accepted.appliedByteRange.endByte }
+          }
+          const accepted = await this.kernel.input(session.run.runId, { ownerInstanceId, operationId, expectedByte: expectedByte!, data })
+          return { runId: accepted.run.runId, pid: accepted.run.pid, appliedByteRange: accepted.appliedByteRange,
+            acceptedThroughByte: accepted.run.acceptedInputBytes }
         })
       } catch (error) {
         for (const observation of protocolObservers) observation.protocolInput!.invalid = true
@@ -9352,13 +9366,18 @@ export class AgentMuxClient {
         throw error
       }
       await observeNativeInput('accepted')
+      if (dispatch && (protocolObservers.length > 0 || source === 'terminal-protocol')) {
+        // Receipt arrival order need not be byte order. Preserve the original
+        // continuity reader without making subsequent raw dispatch await it.
+        await diagnostic.measure('input-completion-order', () => dispatch!.waitForEarlier())
+      }
       for (const observation of protocolObservers) {
         const protocol = observation.protocolInput!
         const range = result.appliedByteRange
         const previous = protocol.acknowledged
-        const endByte = expectedByte + Buffer.byteLength(data)
-        if (result.run.runId !== session.run.runId || result.run.pid !== run.pid ||
-            range.startByte !== expectedByte || range.endByte !== endByte || result.run.acceptedInputBytes !== endByte ||
+        if (result.runId !== session.run.runId || result.pid !== run.pid ||
+            range.endByte - range.startByte !== Buffer.byteLength(data) ||
+            (!dispatch && range.startByte !== expectedByte) ||
             previous && (previous.endByte !== range.startByte || previous.processId !== run.pid)) {
           protocol.invalid = true
         } else {
@@ -9366,13 +9385,11 @@ export class AgentMuxClient {
             endByte: range.endByte, processId: run.pid }
         }
       }
-      if (result.run.acceptedInputBytes === null) {
+      if (result.acceptedThroughByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
-      this.agentInputCursors.set(session.agentSessionId, result.run.acceptedInputBytes)
-      if (source === 'terminal-protocol' && result.run.runId === session.run.runId && result.run.pid === run.pid &&
-          result.appliedByteRange.startByte === expectedByte && result.appliedByteRange.endByte === expectedByte + Buffer.byteLength(data) &&
-          result.run.acceptedInputBytes === result.appliedByteRange.endByte) {
+      if (source === 'terminal-protocol' && result.runId === session.run.runId && result.pid === run.pid &&
+          result.appliedByteRange.endByte - result.appliedByteRange.startByte === Buffer.byteLength(data)) {
         try { await this.recovery.protocolAccepted(session.agentSessionId, session.run.runId, operationId, result.appliedByteRange) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
           code: 'CONTINUITY_INPUT_UNCONFIRMED', message: `Terminal protocol input succeeded, but recovery input boundary persistence is unconfirmed. Ordinary input remains available. ${error instanceof Error ? error.message : String(error)}`,
@@ -9384,11 +9401,11 @@ export class AgentMuxClient {
       return {
         runId: session.run.runId,
         appliedByteRange: result.appliedByteRange,
-        acceptedThroughByte: result.run.acceptedInputBytes
+        acceptedThroughByte: result.acceptedThroughByte
       }
     }, {
       kind: source === 'terminal-protocol' ? 'protocol' : inputKind === 'paste' ? 'paste' : mousePreparation ? 'mouse' : 'user', bytes: Buffer.byteLength(data), parent: observation ?? null
-    }, { rawInput: call, rawPreparation: preparation })
+    }, { rawInput: call, rawPreparation: preparation, orderedRaw: inputKind !== 'posture' })
   }
 
   private cancelPromptRenderObservation(session: AgentMuxAgentSession,
@@ -9400,7 +9417,7 @@ export class AgentMuxClient {
           : 'Input observation cancelled for terminal user-source input.',
       'AGENT_INPUT_OBSERVATION_CANCELLED', JSON.stringify({ source: source === 'user' ? 'terminal-user' : source,
         ...(competingInput ? { competingInput } : {}) }))
-    const lane = this.agentInputTails.get(session.agentSessionId)
+    const lane = this.agentInputLanes.get(session.agentSessionId)
     for (const observation of lane?.renderObservations ?? []) {
       if (!sameRun(observation.run, session.run)) continue
       const preserveProtocolPreparation = source === 'terminal-protocol' ||
@@ -9444,15 +9461,15 @@ export class AgentMuxClient {
     read: (signal: AbortSignal) => Promise<T>, requestedSignal?: AbortSignal,
     protocolInput?: AgentPromptProtocolInputBoundary,
     retainUntilQueued?: (release: (next?: AbortController) => void) => void): Promise<T> {
-    const lane: AgentInputLane = this.agentInputTails.get(session.agentSessionId) ?? {
-      tail: Promise.resolve(), renderObservations: new Set<AgentInputObservation>() }
+    const lane: AgentInputLane = this.agentInputLanes.get(session.agentSessionId) ?? {
+      admission: Promise.resolve(), pending: new Set(), renderObservations: new Set<AgentInputObservation>() }
     const controller = new AbortController()
     const cancelRequested = () => controller.abort(requestedSignal?.reason)
     if (requestedSignal?.aborted) cancelRequested()
     else requestedSignal?.addEventListener('abort', cancelRequested, { once: true })
     const observation = { run: session.run, controller, ...(protocolInput ? { protocolInput } : {}) }
     lane.renderObservations.add(observation)
-    this.agentInputTails.set(session.agentSessionId, lane)
+    this.agentInputLanes.set(session.agentSessionId, lane)
     const timeout = setTimeout(() => controller.abort(new AgentMuxError('Native input preparation timed out; the terminal remains available.', 'AGENT_INPUT_PREPARATION_UNCONFIRMED')), timeoutMs)
     let abort!: () => void
     const cancelled = new Promise<never>((_resolve, reject) => {
@@ -9463,12 +9480,7 @@ export class AgentMuxClient {
     const release = (next?: AbortController) => {
       if (next && controller.signal.aborted) next.abort(controller.signal.reason)
       lane.renderObservations.delete(observation)
-      if (this.agentInputTails.get(session.agentSessionId) === lane && lane.renderObservations.size === 0) {
-        const tail = lane.tail
-        void tail.finally(() => {
-          if (this.agentInputTails.get(session.agentSessionId) === lane && lane.tail === tail && lane.renderObservations.size === 0) this.agentInputTails.delete(session.agentSessionId)
-        })
-      }
+      this.releaseAgentInputLane(session.agentSessionId, lane)
     }
     let retained = false
     try {
@@ -9485,25 +9497,26 @@ export class AgentMuxClient {
 
   private async serializeAgentInput<T>(
     requestedSession: AgentMuxAgentSession,
-    operation: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun, diagnostic: InputPerformanceHandle) => Promise<T>,
+    operation: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun, diagnostic: InputPerformanceHandle, dispatch?: AgentRawInputDispatch) => Promise<T>,
     diagnosticInput: ({ kind: 'semantic'; bytes: null; work: InputPerformanceWork } | { kind: 'user' | 'mouse' | 'protocol' | 'paste'; bytes: number }) & { parent?: InputObservationReference | null },
     options: {
       renderObservation?: AbortController | undefined; protocolInput?: AgentPromptProtocolInputBoundary | undefined
       onQueued?: ((next?: AbortController) => void) | undefined
       retainPreclaimYield?: ((release: (next?: AbortController) => void) => void) | undefined
       preclaimDeadline?: number | undefined
-      rawInput?: RawInputCall; rawPreparation?: Promise<void> | undefined
+      rawInput?: RawInputCall; rawPreparation?: Promise<void> | undefined; orderedRaw?: boolean
     } = {}
   ): Promise<T> {
-    const { renderObservation, protocolInput, onQueued, retainPreclaimYield, preclaimDeadline, rawInput, rawPreparation } = options
+    const { renderObservation, protocolInput, onQueued, retainPreclaimYield, preclaimDeadline, rawInput, rawPreparation, orderedRaw } = options
     const agentSessionId = requestedSession.agentSessionId
     const lifetime = this.inputPreparationLifetime.signal
     // A preclaim cancellation owns its read-only preparation. Ordinary raw
     // preemption only yields optional rendering and must retain typed dispatch.
     const preparationSignal = protocolInput?.preclaim && !protocolInput.preclaim.claimStarted && renderObservation
       ? AbortSignal.any([lifetime, renderObservation.signal]) : lifetime
-    const lane: AgentInputLane = this.agentInputTails.get(agentSessionId) ?? {
-      tail: Promise.resolve(),
+    const lane: AgentInputLane = this.agentInputLanes.get(agentSessionId) ?? {
+      admission: Promise.resolve(),
+      pending: new Set(),
       renderObservations: new Set<AgentInputObservation>()
     }
     const observation = renderObservation ? {
@@ -9518,7 +9531,23 @@ export class AgentMuxClient {
       kind: diagnosticInput.kind, bytes: diagnosticInput.bytes, parent: diagnosticInput.parent ?? null,
       work: diagnosticInput.kind === 'semantic' ? diagnosticInput.work : null, blockedBy: lane.running?.reference() ?? null })
     try { const identity = this.runtimeIdentity(); diagnostic.executionOwner(identity.instanceId, identity.hostId) } catch { /* Observation cannot gate input. */ }
-    const previous = lane.tail
+    const previous = orderedRaw ? lane.admission : Promise.all(lane.pending)
+    // Only actual unfinished operations retain completion ownership. Ordinary
+    // input never builds a historical Promise chain behind a missing ACK.
+    const waitForEarlier = async (): Promise<void> => {
+      const predecessors: Promise<void>[] = []
+      for (const pending of lane.pending) {
+        if (pending === completion) break
+        predecessors.push(pending)
+      }
+      await Promise.all(predecessors)
+    }
+    let admit!: () => void
+    const admitted = new Promise<void>(resolve => { admit = resolve })
+    const releaseAdmission = () => {
+      if (lane.running === diagnostic) delete lane.running
+      admit()
+    }
     beginPromptPreparationPhase(protocolInput, 'input-lane')
     let result!: T
     const queued = previous.catch(() => {}).then(async () => {
@@ -9537,9 +9566,12 @@ export class AgentMuxClient {
           renderObservation?.signal.aborted) throw promptPreparationFailure(protocolInput.cancelled)
       completePromptPreparationPhase(protocolInput)
       beginPromptPreparationPhase(protocolInput, 'current-run')
-      const run = await diagnostic.measure('current-run', () => rawInput
+      const channel = orderedRaw ? await diagnostic.measure('current-run', () =>
+        observePromptInput(rawInput!.signal, () => this.kernel.openInput(session.run.runId))) : undefined
+      const run = channel ? channel.run : await diagnostic.measure('current-run', () => rawInput
         ? observePromptInput(rawInput.signal, () => this.requireCurrentAgentRun(session))
         : observePromptInput(preparationSignal, () => this.requireCurrentAgentRun(session)))
+      if (channel) this.assertAgentRun(session, run)
       preparationSignal.throwIfAborted()
       rawInput?.check()
       completePromptPreparationPhase(protocolInput)
@@ -9550,13 +9582,19 @@ export class AgentMuxClient {
         )
       }
       diagnostic.stage('operation')
-      result = await diagnostic.measure('operation', () => operation(session, run, diagnostic))
+      result = await diagnostic.measure('operation', () => operation(session, run, diagnostic,
+        channel ? { channel, waitForEarlier, releaseAdmission } : undefined))
     }).then(() => { diagnostic.settle(true) }, error => { diagnostic.settle(false); throw error }).finally(() => {
-      if (lane.running === diagnostic) delete lane.running
+      releaseAdmission()
     })
-    const tail = queued.then(() => {}, () => {})
-    lane.tail = tail
-    this.agentInputTails.set(agentSessionId, lane)
+    const completion = queued.catch(() => {})
+    lane.pending.add(completion)
+    lane.admission = orderedRaw ? admitted : completion
+    this.agentInputLanes.set(agentSessionId, lane)
+    void completion.then(() => {
+      lane.pending.delete(completion)
+      this.releaseAgentInputLane(agentSessionId, lane)
+    })
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined
     const preclaimExpiry = preclaimDeadline === undefined ? undefined : new Promise<never>((_resolve, reject) => {
       deadlineTimer = setTimeout(() => {
@@ -9581,9 +9619,6 @@ export class AgentMuxClient {
     try {
       await (preclaimExpiry ? Promise.race([queued, preclaimExpiry]) : queued)
       return result
-    } catch (error) {
-      this.agentInputCursors.delete(agentSessionId)
-      throw error
     } finally {
       if (deadlineTimer) clearTimeout(deadlineTimer)
       const preclaim = protocolInput?.preclaim
@@ -9593,21 +9628,17 @@ export class AgentMuxClient {
         retainPreclaimYield(next => {
           if (next && protocolInput?.cancelled) next.abort(protocolInput.cancelled)
           lane.renderObservations.delete(observation)
-          if (this.agentInputTails.get(agentSessionId) === lane && lane.renderObservations.size === 0) {
-            const currentTail = lane.tail
-            void currentTail.finally(() => {
-              if (this.agentInputTails.get(agentSessionId) === lane && lane.tail === currentTail && lane.renderObservations.size === 0) this.agentInputTails.delete(agentSessionId)
-            })
-          }
+          this.releaseAgentInputLane(agentSessionId, lane)
         })
       } else if (observation) lane.renderObservations.delete(observation)
-      // An observation deadline can return before the queued operation settles.
-      // Only the actual tail may release its ordering ownership.
-      void tail.then(() => {
-        if (this.agentInputTails.get(agentSessionId) === lane && lane.tail === tail && lane.renderObservations.size === 0) {
-          this.agentInputTails.delete(agentSessionId)
-        }
-      })
+      // A public observation deadline cannot retire an unfinished transaction.
+      this.releaseAgentInputLane(agentSessionId, lane)
+    }
+  }
+
+  private releaseAgentInputLane(agentSessionId: string, lane: AgentInputLane): void {
+    if (this.agentInputLanes.get(agentSessionId) === lane && lane.pending.size === 0 && lane.renderObservations.size === 0) {
+      this.agentInputLanes.delete(agentSessionId)
     }
   }
 

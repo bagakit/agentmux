@@ -219,7 +219,6 @@ type PromptSubmissionDeps = {
   providers: AgentProviderRegistry
   registry: AgentMuxAgentSessionRegistry
   publisher: AgentMuxClientEventPublisher
-  agentInputCursors: Map<string, number>
   screenEvidence: AgentScreenEvidenceStore
   requireAgentSession: (agentSessionId: string) => AgentMuxStoredAgentSession
   providerArgs?: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => readonly string[]
@@ -1011,7 +1010,6 @@ export class AgentPromptSubmissionCoordinator {
         }
         return next
       })
-      this.deps.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
       await publishSettledNotice(uncertainTurn)
       return
     }
@@ -1142,7 +1140,6 @@ export class AgentPromptSubmissionCoordinator {
                 frameRefresh: { ...frozen, acknowledged: true } }, updatedAt: Math.max(stored.updatedAt, Date.now()) }
             })
             frameRefresh = { ...frameRefresh, acknowledged: true }
-            this.deps.agentInputCursors.set(session.agentSessionId, run.acceptedInputBytes!)
           } else if (run.acceptedInputBytes === null || run.acceptedInputBytes < frameRefresh.inputByteRange.endByte) {
             throw new AgentMuxError('CtxMux Input cursor precedes native refresh receipt.', 'AGENT_PROMPT_SUBMISSION_STATE_INVALID')
           }
@@ -1351,7 +1348,6 @@ export class AgentPromptSubmissionCoordinator {
             'AGENT_PROMPT_SUBMISSION_STATE_INVALID'
           )
         }
-        this.deps.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
         return
       }
       // Rendering/receipt waits can outlive the original admission. A new request owns
@@ -1384,14 +1380,12 @@ export class AgentPromptSubmissionCoordinator {
           return { ...stored, terminalPromptSubmission: { ...state, prepare: { ...state.prepare,
             interrupt: { ...state.prepare.interrupt, acknowledged: true } } }, updatedAt: Math.max(stored.updatedAt, Date.now()) }
         })
-        this.deps.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
         return
       }
       if (phaseName === 'payload') {
         // 高频受据合并（f-23q8faabh / T-003）：payload 受据不单独整写一次 CAS JSON，随后续
         // submit 受据一次落盘。崩溃窗口内它可从 ctxmux 事实重推——同一 operationId 重放拿到
         // 幂等回执，上面的 appliedByteRange 校验就是恢复路径。
-        this.deps.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
         return
       }
       const acknowledgePhase = (
@@ -1432,7 +1426,6 @@ export class AgentPromptSubmissionCoordinator {
         session.agentSessionId, session.run, acknowledgePhase
       )
       submission = current.terminalPromptSubmission
-      this.deps.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
       if (uncertainTurn) {
         await this.publishDeliveryDegrade(session, {
           state: 'unverified',

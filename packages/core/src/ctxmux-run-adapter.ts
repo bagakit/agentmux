@@ -31,6 +31,7 @@ import {
   defineRun,
   type OutputChunk,
   type AttachedSnapshot,
+  type InputChannel,
   type RecoverableStopOperation,
   type AttachmentEvent,
   type AttachmentGapEvent,
@@ -73,6 +74,18 @@ const CTXMUX_TREE = ctxmuxArtifactSource().tree
 export const CTXMUX_VERSION = ctxmuxArtifacts.version
 // Runtime SDK values reach published consumers through this bundled adapter.
 export const CTXMUX_MAX_FRAME_BYTES = MAX_FRAME_BYTES
+
+/** Immutable Run qualification and ordered input share one physical connection. */
+export type CtxmuxAdapterInputChannel = {
+  readonly run: CtxmuxAdapterRun
+  waitWritable(byteLength: number, signal?: AbortSignal): Promise<void>
+  input(data: AgentMuxRunInputData): Promise<{ appliedByteRange: { startByte: number; endByte: number } }>
+}
+
+type InputChannelOpening = {
+  opening: Promise<CtxmuxAdapterInputChannel>
+  channel?: InputChannel
+}
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
   [RUNTIME_CAPABILITY_NATIVE_START]: 1,
@@ -769,6 +782,7 @@ export class CtxmuxRunAdapter {
   }
   private readonly attachments = new Map<string, LiveAttachment>()
   private readonly attachmentOpenings = new Map<string, symbol>()
+  private readonly inputChannels = new Map<string, InputChannelOpening>()
 
   private eventListener: ((event: CtxmuxAdapterEvent) => void) | null = null
   private errorListener: ((error: AgentMuxError, runId?: string) => void) | null = null
@@ -1023,6 +1037,7 @@ export class CtxmuxRunAdapter {
   private acceptRuntime(runtime: RuntimeIdentity, ownership: 'owned' | 'unverified' | null): void {
     this.ownership = ownership
     if (isDeepStrictEqual(this.runtime, runtime)) return
+    this.closeInputChannels()
     this.runtime = runtime
     this.client = new CtxmuxClient({
       socketPath: this.socketPath,
@@ -1087,6 +1102,7 @@ export class CtxmuxRunAdapter {
   /** A failed wire/setup keeps exact-Run continuation; it never persists output state. */
   resetConnection(): void {
     this.connectionEpoch++
+    this.closeInputChannels()
     for (const controller of this.connectionObservations) controller.abort()
     this.connectionObservations.clear()
     this.observedActivation?.release()
@@ -1579,6 +1595,61 @@ export class CtxmuxRunAdapter {
       live.attachment.close()
       throw translateCtxmuxError(error)
     }
+  }
+
+  /** Input lifetime is independent from output attachment visibility or failure. */
+  private closeInputChannels(): void {
+    for (const owner of this.inputChannels.values()) owner.channel?.close()
+    this.inputChannels.clear()
+  }
+
+  async openInput(runId: string): Promise<CtxmuxAdapterInputChannel> {
+    const previous = this.inputChannels.get(runId)
+    if (previous) return await previous.opening
+    const client = this.requireClient(), epoch = this.connectionEpoch
+    const owner: InputChannelOpening = { opening: Promise.resolve().then(async () => {
+      let channel: InputChannel | undefined
+      const current = () => {
+        if (this.client !== client || this.connectionEpoch !== epoch || this.inputChannels.get(runId) !== owner) {
+          throw new AgentMuxError('The original input connection ended before dispatch.', 'CTXMUX_DISCONNECTED', 'not_applied')
+        }
+      }
+      try {
+        channel = await client.openInput(runId)
+        current()
+        owner.channel = channel
+        const original = channel
+        const run = Object.freeze(this.projectRun(original.snapshot))
+        void original.closed.then(() => {
+          if (this.inputChannels.get(runId) === owner) this.inputChannels.delete(runId)
+          delete owner.channel
+        })
+        return {
+          run,
+          waitWritable: async (byteLength: number, signal?: AbortSignal) => {
+            current()
+            try { await original.waitWritable(byteLength, signal) }
+            catch (error) { throw translateCtxmuxError(error) }
+            current()
+          },
+          input: (data: AgentMuxRunInputData) => {
+            current()
+            // The SDK enqueues the frame synchronously. Do not await an earlier
+            // receipt here or borrow an output reader's control lifetime.
+            return original.input(data).then(accepted => ({ appliedByteRange: {
+              startByte: accepted.receipt.range.start_byte,
+              endByte: accepted.receipt.range.end_byte
+            } }), error => { throw translateCtxmuxError(error) })
+          }
+        }
+      } catch (error) {
+        channel?.close()
+        if (this.inputChannels.get(runId) === owner) this.inputChannels.delete(runId)
+        throw translateCtxmuxError(error)
+      }
+    }) }
+    this.inputChannels.set(runId, owner)
+    return await owner.opening
   }
 
   async input(

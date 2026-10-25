@@ -5,7 +5,7 @@ export type PerformanceTiming = { count: number; totalMs: number; maxMs: number 
 export type InputObservationReference = { observerId: string; source: 'user' | 'protocol' | 'paste'; sequence: number }
 export type InputPerformanceSender = { webContentsId: number; window: { windowId: number; webContentsId: number; generation: number } | null }
 export type InputPerformanceKind = 'user' | 'mouse' | 'protocol' | 'paste' | 'semantic' | 'terminal'
-export const INPUT_PERFORMANCE_STAGES = ['queued', 'current-run', 'operation', 'native-input', 'received', 'connected-client', 'host-call', 'reply-ready',
+export const INPUT_PERFORMANCE_STAGES = ['queued', 'current-run', 'operation', 'native-input', 'input-capacity', 'input-completion-order', 'received', 'connected-client', 'host-call', 'reply-ready',
   'submission-store', 'session-state', 'input-authority', 'input-claim', 'provider-prepare', 'provider-verify', 'provider-send', 'provider-cleanup',
   'input-receipt', 'render-observation', 'cancel-recovery-status', 'delivery-notice'] as const
 export type InputPerformanceStage = typeof INPUT_PERFORMANCE_STAGES[number]
