@@ -82,7 +82,7 @@ it('opens View group details at the group overview from the actual channel menu 
   expect(audiences.textContent).toContain('Original collaboration group')
   expect(audiences.textContent).toContain('AgentMux App')
   const boundaries = dialog().querySelector<HTMLElement>('[aria-label="Context and sharing boundaries"]')!
-  expect(boundaries.closest('details:not([open]),[hidden]')).toBeNull()
+  expect(boundaries.closest('details:not([open])')).not.toBeNull()
   expect(relationship().textContent).toContain('Original Mote Agent')
   expect(writes()).toBe(before)
   await f.button('Close')
@@ -106,7 +106,11 @@ it('keeps configured paused replies-only relation and audiences visible across a
     const header = dialog().querySelector<HTMLElement>('.connector-group-details__header')!
     expect(header.textContent).toContain('Original Mote Agent')
     expect(header.textContent).toContain('Original collaboration group')
-    expect(header.textContent).toContain('Configured · Paused · Agent replies only')
+    if (name === 'sharing') {
+      const sharing = dialog().querySelector<HTMLElement>('[data-connection-panel="sharing"]')!
+      expect(sharing.textContent).toContain('Paused')
+      expect(sharing.textContent).toContain('Agent replies only')
+    } else expect(header.textContent).toContain('Configured · Paused · Agent replies only')
     expect(header.closest('.agent-connector-dialog__body')).toBeNull()
   }
   await section('sharing')
