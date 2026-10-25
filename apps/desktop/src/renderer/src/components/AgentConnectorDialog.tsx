@@ -19,6 +19,7 @@ import { ResolvedAgentAvatar } from './AgentAvatar'
 import { ConnectorRoomOverview, ConnectorRoomPeople, ConnectorRoomSelection, useConnectorRoomFacts } from './ConnectorRoomSelection'
 import { ConnectorRoomJoinLink, ConnectorRoomJoinReceipt } from './ConnectorRoomJoinLink'
 import { ConnectorCreatorInvitation, useConnectorCreatorInvitation } from './ConnectorCreatorInvitation'
+import { ConnectorGroupDetails, type ConnectorGroupSection } from './ConnectorGroupDetails'
 import { ConnectorDeliveryDetails } from './ConnectorDeliveryDetails'
 import { ConnectorBindingNotices } from './ConnectorBindingNotices'
 import { ConnectorServiceControl } from './settings/ConnectorServiceControl'
@@ -34,10 +35,7 @@ const LoadingIcon = semanticIconComponent('status.loading')
 const AgentIcon = semanticIconComponent('object.agent')
 const GroupIcon = semanticIconComponent('object.team')
 const CheckIcon = semanticIconComponent('action.confirm')
-const AccessIcon = semanticIconComponent('status.permission')
 const SharingIcon = semanticIconComponent('conversation.mixed')
-const JoinIcon = semanticIconComponent('object.link')
-const InspectIcon = semanticIconComponent('action.inspect')
 
 const availableForNewGroup = (record: ConnectionRecord) => record.config.enabled && !connectionNeedsInitialSetup(record)
 const recordedRepliesOnly = (intent: ConnectorRoomIntent) => (intent.method === 'connection.bind' || intent.method === 'connection.binding.relink') && intent.input.scope.publication !== 'future-shared-conversation'
@@ -99,6 +97,8 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   const unqualifiedDraft = useAppStore(state => state.connectorRoomDrafts[connectorRoomDraftKey(target)])
   const [savedDraft] = useState(() => useAppStore.getState().connectorRoomDrafts[draftKey])
   const [mode, setMode] = useState(initialMode === 'details' ? initialMode : savedDraft?.mode ?? initialMode)
+  const [section, setSection] = useState<ConnectorGroupSection>('overview')
+  const sectionToFocus = useRef<string | null>(null)
   const [changingGroup, setChangingGroup] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false), [selectedBindingId, setSelectedBindingId] = useState(original.bindingId ?? savedDraft?.bindingId ?? '')
   const mote = useContext(MoteWorkfaceContext), settings = useContext(SettingsNavigation)
@@ -439,14 +439,23 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     if (id && group) { mote.selectTab(id, group.id); onClose() }
     else setIssue('The original Mote discussion entry is unavailable. Your Agent and draft are kept.')
   }
-  function showSection(section: 'members' | 'sharing' | 'joining' | 'sync' | 'activity') {
-    const node = content.current?.querySelector<HTMLElement>(`[data-connection-section="${section}"]`)
+  function showSection(destination: 'members' | 'sharing' | 'joining' | 'sync' | 'activity') {
+    sectionToFocus.current = destination
+    setSection(destination === 'sync' || destination === 'activity' ? 'overview' : destination)
+    // Also schedules a render when the destination is already selected.
+    setSectionRequest(value => value + 1)
+  }
+  const [sectionRequest, setSectionRequest] = useState(0)
+  useEffect(() => {
+    const destination = sectionToFocus.current
+    if (!destination) return
+    sectionToFocus.current = null
+    const node = content.current?.querySelector<HTMLElement>(`[data-connection-section="${destination}"]`)
     for (let parent = node?.parentElement; parent && parent !== content.current; parent = parent.parentElement) {
       if (parent.tagName === 'DETAILS') parent.setAttribute('open', '')
     }
-    node?.scrollIntoView({ block: 'start' })
-    node?.focus({ preventScroll: true })
-  }
+    node?.scrollIntoView({ block: 'nearest' }); node?.focus({ preventScroll: true })
+  }, [section, sectionRequest])
   const sameFilters = !!binding && audience === binding.externalConversationId && scope === binding.scope.input
   const connectedAudiences = bindings.filter(item => item.state !== 'detached')
   const audienceReview = <div aria-label="Groups sharing this conversation" className="agent-connector-fields">
@@ -513,7 +522,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     { label: 'Sharing', detail: bindingPending ? 'Check result' : sharingSaved ? 'Saved locally' : binding?.state === 'paused' ? 'Paused' : 'Review scope', done: !!sharingSaved },
     { label: 'Member access', detail: !showingCurrentBinding ? binding ? 'Review after sharing' : 'Not set' : unconfirmedMembers ? 'Check result' : approvedMembers === null ? binding ? 'Checking' : 'Not set' : approvedMembers === 0 ? 'Approve members' : `${approvedMembers} approved`, done: accessConfirmed }
   ]
-  const joining = initialSection === 'joining' && showingCurrentBinding
+  const joining = section === 'joining' && showingCurrentBinding
   const disabledBinding = !!binding && connection?.config.enabled === false
   const taskTitle = detached ? 'This group is disconnected' : joining ? 'Join with your chat account' : disabledBinding ? 'This bot is disabled' : bindingPending ? 'Check the original connection result' : !connection ? 'Choose a bot to connect' : roomIntent && !created && !binding ? 'Check this group’s creation' : changingGroup ? 'Review this group change' : !groupSelected ? creatingGroup ? 'Give your group a name' : 'Choose the group for this Agent'
     : !binding ? created ? 'Group created. Connect it to this Agent.' : 'Your group is selected. Review sharing next.'
@@ -548,6 +557,26 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
       lifecycle('connection.binding.resume', { ...binding, revision: resumeBinding.revision })
   }, [showingCurrentBinding, binding, loaded, initialSection, resumeBinding])
 
+  const connectionDetails = <div className="agent-connector-fields">
+            {showingCurrentBinding ? application : null}
+            {settings ? <button className="agent-connector-text-action" onClick={() => { connection ? settings.openChannel({ sessionId: session.id, hostId: target.executionHostId, hostingTarget, agentSessionId: target.agentSessionId, connection: connection.config }) : settings.open('overview'); onClose() }}>Application settings</button> : null}
+            {connection ? <span>{connection.config.application.domain} · {connection.config.application.appId} · Revision {connection.revision}</span> : null}
+            <span>Bot hosting · {hostingTarget.hostId}</span><span>Runtime · {hostingTarget.runtimeId}</span><span>Agent execution · {target.executionHostId}</span><span>Session · {target.agentSessionId}</span>{audience ? <span>{bindingPending ? 'Requested group' : 'Group'} · {audience}</span> : null}{binding ? <>{bindingPending ? <span>Last observed group · {binding.externalConversationId}</span> : null}<span>{bindingPending ? 'Last observed Binding' : 'Binding'} · {binding.bindingId} · Revision {binding.revision}</span></> : null}
+          </div>
+  const changeGroup = binding ? <details className="agent-connector-disclosure" open={changingGroup} onToggle={event => setChangingGroup(event.currentTarget.open)}><summary>Change connected group</summary><p className="agent-connector-note">{bindingPending ? 'Check the pending connection setup before changing groups.' : 'Choose another group above. Your current group stays connected until you confirm this change.'}</p></details> : null
+  const openChannelSettings = settings && connection ? () => { settings.openChannel({ sessionId: session.id, hostId: target.executionHostId, hostingTarget, agentSessionId: target.agentSessionId, connection: connection.config }); onClose() } : undefined
+  const technicalDetails = <>{connectionDetails}<div className="agent-connector-host-sync" data-connection-section="sync" tabIndex={-1}><ConnectorServiceControl active={section === 'overview'} hostingTarget={hostingTarget} /></div>{changeGroup}</>
+  const sharingStatus = binding ? <section className="agent-connector-status" aria-label="Group connection status"><div className="agent-connector-saved"><SharingIcon size={14} /><span>Configured: {binding.state === 'paused' ? 'Sync paused' : binding.scope.publication === 'future-shared-conversation' ? 'Two-way sync enabled' : 'Agent replies only'}</span></div>{binding.scope.publication === 'future-native-user-facing' ? <div role="status" className="agent-connector-fields" data-partial-sharing><strong>App and group are not fully synced</strong><p className="agent-connector-note">{binding.state === 'paused' ? 'Sync is paused. No new messages are being shared. The saved configuration shares only Agent replies. Resume two-way sync' : 'This group currently receives only Agent replies. Enable two-way sync'} so new messages in the App and this group stay in the same conversation. Earlier private history stays local; saved member access and original requests are kept.</p>{audienceReview}<p className="agent-connector-note">This Agent may use its existing private context in replies to these audiences.</p><button type="button" className="primary-button" disabled={busy || bindingPending || !connection?.config.enabled || session.nativeHandle?.kind !== 'provider'} onClick={() => bind(true)}>{binding.state === 'paused' ? 'Resume two-way sync' : 'Enable two-way sync'}</button></div> : null}<div className="agent-connector-link-actions">{binding.state !== 'paused' || binding.scope.publication === 'future-shared-conversation' ? <button className="small-button" disabled={busy} onClick={() => lifecycle(binding.state === 'paused' ? 'connection.binding.resume' : 'connection.binding.pause')}>{binding.state === 'paused' ? 'Resume sync' : 'Pause sync'}</button> : null}<button className="agent-connector-text-action" disabled={busy} onClick={() => setDisconnecting(true)}>Disconnect group</button></div>
+            {disconnecting ? <div className="agent-connector-disconnect" role="group" aria-label="Confirm group disconnection"><strong>Disconnect this group?</strong><p className="agent-connector-note">New messages will stop in both directions. This Agent keeps running and its conversation stays here. An end card is sent to this group; a card failure does not prevent disconnection.</p><div className="agent-connector-link-actions"><button className="small-button" disabled={busy} onClick={() => setDisconnecting(false)}>Keep connected</button><button className="small-button" disabled={busy} onClick={() => lifecycle('connection.binding.detach')}>Confirm disconnect</button></div></div> : null}
+          </section> : null
+  const groupOverview = binding ? <ConnectorDeliveryDetails active={section === 'overview'} details={technicalDetails} binding={binding} hostingTarget={hostingTarget} onMembers={() => showSection('members')} actions={{ sync: () => showSection('sync'), sharing: () => showSection('sharing'), ...(openChannelSettings ? { 'channel-settings': openChannelSettings } : {}) }} /> : null
+  const groupDetails = showingCurrentBinding && binding ? <ConnectorGroupDetails section={section} onSection={setSection}
+    identity={<ConnectorRoomOverview facts={roomFacts} groupId={audience} requestedName={created === audience ? frozenRoom?.name : undefined} />}
+    bot={<>Bot · <strong>{connection?.config.label ?? 'Saved bot'}</strong> · {channel?.title ?? connection?.config.application.domain ?? 'Platform unconfirmed'}</>}
+    overview={groupOverview}
+    members={memberAccess} sharing={<>{sharingStatus}{sharing}</>} joining={<div className="agent-connector-section" data-connection-section="joining" tabIndex={-1}>{joiningAccess}</div>}
+    /> : null
+
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="dialog-scrim" />
       <Dialog.Content ref={content} className="dialog-surface agent-connector-dialog" aria-busy={busy}
@@ -570,27 +599,22 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
             </li>)}
           </ol> : null}
           {!showingCurrentBinding ? <div className="agent-connector-task-heading"><h3>{taskTitle}</h3><p className="agent-connector-note">{taskDetail}</p></div> : null}
-          {!showingCurrentBinding ? application : null}
+          {!showingCurrentBinding ? application : groupDetails}
 
           {!binding && !detached && !roomIntent && !bindingPending ? <div className="agent-connector-modes" role="group" aria-label="Group choice">
             <button type="button" aria-label="Existing group" aria-pressed={mode !== 'create'} disabled={busy} onClick={() => { setMode('existing'); setScope('mentions-and-replies'); setConfirmed(false) }}>Existing group<span>Connect a group your bot has joined</span></button>
             <button type="button" aria-label="New group" aria-pressed={mode === 'create'} disabled={busy || creationUnsupported} onClick={() => { setMode('create'); setScope('all-messages'); setConfirmed(false) }}>New group<span>{creationUnsupported ? 'Existing groups only' : 'Create a dedicated space'}</span></button>
           </div> : null}
           {creationUnsupported && !roomIntent && !binding ? <p role="status" className="agent-connector-note">Group creation is unavailable for this application. Choose an existing group; your saved draft is kept.</p> : connection && connection.capabilities === undefined && creatingGroup && !roomIntent ? <p role="status" className="agent-connector-note">Group creation support is not confirmed. This request will be checked for the selected application; platform permissions are checked separately.</p> : null}
-          <section className="agent-connector-group-selection" data-bound={showingCurrentBinding || undefined} aria-label="Agent and group conversation">
+          {!showingCurrentBinding ? <section className="agent-connector-group-selection" data-bound={showingCurrentBinding || undefined} aria-label="Agent and group conversation">
             <span className="agent-connector-group-selection__label"><GroupIcon size={14} aria-hidden="true" />{creatingGroup && !created ? 'Group name' : bindingPending ? 'Requested group' : 'Group conversation'}</span>
             {creatingGroup && !created ? <TextInput aria-label="Group name" title={frozenRoom?.name ?? name} value={frozenRoom?.name ?? name} disabled={busy || !!roomIntent} onChange={event => setName(event.target.value)} />
               : (created && !binding || bindingPending || showingCurrentBinding || detached) ? <ConnectorRoomOverview facts={roomFacts} groupId={audience} requestedName={created === audience ? frozenRoom?.name : undefined} />
               : connection ? <ConnectorRoomSelection key={JSON.stringify([connectionId, connection.revision, hostingTarget])} hostingTarget={hostingTarget} connection={connection} value={audience} disabled={busy || bindingPending} onChange={value => { setGroup(value); setConfirmed(false) }} /> : <p className="agent-connector-note">Choose an application above to find its groups.</p>}
             {audience && !created && !bindingPending && !showingCurrentBinding && !detached ? <ConnectorRoomOverview facts={roomFacts} groupId={audience} /> : null}
-            {showingCurrentBinding ? application : null}
-          </section>
+          </section> : null}
           {defaultNote ? <p className="agent-connector-note" role="status" data-mote-bot-source>{defaultNote}</p> : null}
           {busy ? <p className="agent-connector-note" role="status" aria-busy="true" data-connector-request-pending><LoadingIcon size={13} animation="spin" /> Working on this group request…</p> : null}
-          {showingCurrentBinding && binding ? <ConnectorDeliveryDetails key={JSON.stringify([binding.bindingId, binding.revision])} binding={binding} hostingTarget={hostingTarget} onMembers={() => showSection('members')} /> : null}
-          {showingCurrentBinding && binding ? <section className="agent-connector-status" aria-label="Group connection status"><div className="agent-connector-saved"><SharingIcon size={14} /><span>Configured: {binding.state === 'paused' ? 'Sync paused' : binding.scope.publication === 'future-shared-conversation' ? 'Two-way sync enabled' : 'Agent replies only'}</span></div>{binding.scope.publication === 'future-native-user-facing' ? <div role="status" className="agent-connector-fields" data-partial-sharing><strong>App and group are not fully synced</strong><p className="agent-connector-note">{binding.state === 'paused' ? 'Sync is paused. No new messages are being shared. The saved configuration shares only Agent replies. Resume two-way sync' : 'This group currently receives only Agent replies. Enable two-way sync'} so new messages in the App and this group stay in the same conversation. Earlier private history stays local; saved member access and original requests are kept.</p>{audienceReview}<p className="agent-connector-note">This Agent may use its existing private context in replies to these audiences.</p><button type="button" className="primary-button" disabled={busy || bindingPending || !connection?.config.enabled || session.nativeHandle?.kind !== 'provider'} onClick={() => bind(true)}>{binding.state === 'paused' ? 'Resume two-way sync' : 'Enable two-way sync'}</button></div> : null}<div className="agent-connector-link-actions">{binding.state !== 'paused' || binding.scope.publication === 'future-shared-conversation' ? <button className="small-button" disabled={busy} onClick={() => lifecycle(binding.state === 'paused' ? 'connection.binding.resume' : 'connection.binding.pause')}>{binding.state === 'paused' ? 'Resume sync' : 'Pause sync'}</button> : null}<button className="agent-connector-text-action" disabled={busy} onClick={() => setDisconnecting(true)}>Disconnect group</button></div>
-            {disconnecting ? <div className="agent-connector-disconnect" role="group" aria-label="Confirm group disconnection"><strong>Disconnect this group?</strong><p className="agent-connector-note">New messages will stop in both directions. This Agent keeps running and its conversation stays here. An end card is sent to this group; a card failure does not prevent disconnection.</p><div className="agent-connector-link-actions"><button className="small-button" disabled={busy} onClick={() => setDisconnecting(false)}>Keep connected</button><button className="small-button" disabled={busy} onClick={() => lifecycle('connection.binding.detach')}>Confirm disconnect</button></div></div> : null}
-          </section> : null}
           {detached ? <section className="agent-connector-status" aria-label="Disconnected group"><div><strong>Group disconnected</strong><span>This Agent and its conversation remain available. New group messages are no longer shared.</span></div></section> : null}
           {recentApplied ? <ConnectorBindingNotices operation={recentApplied} /> : null}
 
@@ -629,23 +653,14 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
             </>
             return memberIntent || isRoom && fact.creation.state === 'created' && (binding || fact.membership.state === 'not-requested' || fact.membership.state === 'settled') ? <details className="agent-connector-disclosure" key={intent.input.operationId}><summary>{memberIntent ? 'Earlier member access receipt' : 'Group setup receipt'}</summary><div className="agent-connector-receipt">{receipt}</div></details> : <section className="agent-connector-receipt" key={intent.input.operationId} aria-label="Group setup status">{receipt}</section>
           })}
-          {showingCurrentBinding ? <div className="agent-connector-configuration" aria-label="Group connection sections">
-            <details className="agent-connector-disclosure agent-connector-panel" data-connection-panel="members"><summary><AccessIcon size={15} />Member access<small>{approvedMembers === null || unconfirmedMembers ? 'Check access' : `${approvedMembers} approved`}</small></summary>{memberAccess}</details>
-            <details className="agent-connector-disclosure agent-connector-panel" data-connection-panel="sharing"><summary><SharingIcon size={15} />Sharing options<small>Message scope</small></summary>{sharing}</details>
-            {joiningAccess ? <details className="agent-connector-disclosure agent-connector-panel" data-connection-panel="joining"><summary><JoinIcon size={15} />Join this group<small>{connection?.capabilities?.roomLink === false ? 'Not supported' : 'Link & code'}</small></summary><div className="agent-connector-section" data-connection-section="joining" tabIndex={-1}>{joiningAccess}</div></details> : null}
-            <details className="agent-connector-disclosure agent-connector-panel" data-connection-panel="sync"><summary><SharingIcon size={15} />Automatic sync<small>All bots on this Host</small></summary><div className="agent-connector-host-sync" data-connection-section="sync" tabIndex={-1}><ConnectorServiceControl active hostingTarget={hostingTarget} /></div></details>
-          </div> : audience && !bindingPending && !detached ? <div className="agent-connector-section-grid">
+          {!showingCurrentBinding && (audience && !bindingPending && !detached ? <div className="agent-connector-section-grid">
             {memberAccess}
             <div className="agent-connector-section-stack">{sharing}{joiningAccess ? <div className="agent-connector-section" data-connection-section="joining" tabIndex={-1}>{joiningAccess}</div> : null}</div>
-          </div> : joiningAccess ? <div className="agent-connector-section" data-connection-section="joining" tabIndex={-1}>{joiningAccess}</div> : memberAccess}
-          {binding ? <details className="agent-connector-disclosure" open={changingGroup} onToggle={event => setChangingGroup(event.currentTarget.open)}><summary>Change connected group</summary><p className="agent-connector-note">{bindingPending ? 'Check the pending connection setup before changing groups.' : 'Choose another group above. Your current group stays connected until you confirm this change.'}</p></details> : null}
+          </div> : joiningAccess ? <div className="agent-connector-section" data-connection-section="joining" tabIndex={-1}>{joiningAccess}</div> : memberAccess)}
+          {!showingCurrentBinding ? changeGroup : null}
 
           {audience && !binding && !detached ? <section className="agent-connector-section" aria-label="Group members"><ConnectorRoomPeople facts={roomFacts} prominent /></section> : null}
-          <details className="agent-connector-disclosure"><summary><InspectIcon size={14} />Connection details</summary><div className="agent-connector-fields">
-            {settings ? <button className="agent-connector-text-action" onClick={() => { connection ? settings.openChannel({ sessionId: session.id, hostId: target.executionHostId, hostingTarget, agentSessionId: target.agentSessionId, connection: connection.config }) : settings.open('overview'); onClose() }}>Application settings</button> : null}
-            {connection ? <span>{connection.config.application.domain} · {connection.config.application.appId} · Revision {connection.revision}</span> : null}
-            <span>Bot hosting · {hostingTarget.hostId}</span><span>Runtime · {hostingTarget.runtimeId}</span><span>Agent execution · {target.executionHostId}</span><span>Session · {target.agentSessionId}</span>{audience ? <span>{bindingPending ? 'Requested group' : 'Group'} · {audience}</span> : null}{binding ? <>{bindingPending ? <span>Last observed group · {binding.externalConversationId}</span> : null}<span>{bindingPending ? 'Last observed Binding' : 'Binding'} · {binding.bindingId} · Revision {binding.revision}</span></> : null}
-          </div></details>
+          {!showingCurrentBinding ? <details className="agent-connector-disclosure"><summary>Connection details</summary>{connectionDetails}</details> : null}
           {issue ? <p role="status" className="surface-inline-error">{issue}</p> : null}
         </div><footer className="agent-connector-dialog__footer">
           {issue || relevant.length ? <button className="agent-connector-text-action" disabled={busy} onClick={() => void work(refresh)}>Refresh</button> : null}

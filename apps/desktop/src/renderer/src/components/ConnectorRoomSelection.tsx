@@ -7,7 +7,7 @@ import { channelMetadataSubjectKey, type ChannelMetadataSubject, type Connection
 import { api } from '../lib/api'
 import { SelectionField } from './SelectionField'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { ConnectorEntityIdentity, ConnectorIdentityField } from './ConnectorEntityIdentity'
+import { ConnectorEntityIdentity, ConnectorIdentityField, ConnectorProfileUpdates } from './ConnectorEntityIdentity'
 import { useConnectorEntityProfiles } from '../lib/use-connector-room-name'
 
 const LoadingIcon = semanticIconComponent('status.loading')
@@ -94,11 +94,12 @@ export function ConnectorRoomOverview({ facts, groupId, requestedName }: {
   facts: ReturnType<typeof useConnectorRoomFacts>; groupId: string; requestedName?: string | undefined
 }) {
   const room = facts.room?.room, observation = facts.room?.observation
-  const profile = facts.profiles.get(channelMetadataSubjectKey({ kind: 'conversation', externalConversationId: groupId }))?.observation?.profile
+  const profileRead = facts.profiles.get(channelMetadataSubjectKey({ kind: 'conversation', externalConversationId: groupId })), profile = profileRead?.observation?.profile
   return <div className="agent-connector-room-overview" aria-busy={facts.pending}>
-    <ConnectorEntityIdentity identityKey={facts.identity} kind="group" name={room?.name ?? profile?.name} avatarUrl={profile?.avatarUrl} missingName="Group name not confirmed" actions={<button type="button" className="agent-connector-text-action agent-connector-room-refresh" aria-label="Refresh group details" title="Refresh group details" disabled={facts.pending} onClick={() => void facts.refresh()}>
+    <ConnectorEntityIdentity identityKey={facts.identity} kind="group" profileRead={profileRead} name={profile?.name ?? room?.name} avatarUrl={profile?.avatarUrl} missingName="Group name not confirmed" actions={<button type="button" className="agent-connector-text-action agent-connector-room-refresh" aria-label="Refresh group details" title="Refresh group details" disabled={facts.pending} onClick={() => void facts.refresh()}>
       {facts.pending ? <LoadingIcon size={13} animation="spin" /> : <RefreshIcon size={14} />}
     </button>} />
+    <ConnectorProfileUpdates reads={facts.profiles} />
     {facts.pending ? <p className="agent-connector-note" role="status">Reading group details…</p> : null}
     {observation && observation.state !== 'ready' ? <p className="agent-connector-note" role="status">
       {observation.reason === 'permission-denied' ? 'This bot cannot read the group details. Review its application permissions.' : observation.reason === 'room-unavailable' ? 'The platform could not find an accessible group for this bot.' : 'Current group details could not be confirmed. Check this original group again.'}
@@ -121,10 +122,10 @@ export function ConnectorRoomPeople({ facts, onSelect, prominent = false }: { fa
     {facts.pending ? <p className="agent-connector-note" role="status"><LoadingIcon size={14} animation="spin" /> Reading this group…</p> : null}
     {people?.observation.state === 'ready' ? people.members.length ? people.members.map(member => {
       const subject: ChannelMetadataSubject | undefined = people.application ? { kind: 'actor', actor: { application: people.application, idType: member.idType, userId: member.userId } } : undefined
-      const profile = subject ? facts.profiles.get(channelMetadataSubjectKey(subject))?.observation?.profile : undefined
+      const profileRead = subject ? facts.profiles.get(channelMetadataSubjectKey(subject)) : undefined, profile = profileRead?.observation?.profile
       const identityKey = JSON.stringify([facts.identity, member.idType, member.userId])
       return <div className="agent-connector-person" key={JSON.stringify([member.idType, member.userId])}>
-      <div><ConnectorEntityIdentity identityKey={identityKey} kind="person" name={profile?.name ?? member.name} avatarUrl={profile?.avatarUrl} missingName="Group member" compact /><ConnectorIdentityField identityKey={identityKey} label={member.idType} value={member.userId} compact /></div>
+      <div><ConnectorEntityIdentity identityKey={identityKey} kind="person" profileRead={profileRead} name={profile?.name ?? member.name} avatarUrl={profile?.avatarUrl} missingName="Group member" compact /><ConnectorIdentityField identityKey={identityKey} label={member.idType} value={member.userId} compact /></div>
       {onSelect ? <button className="small-button" onClick={() => onSelect(member.idType, member.userId)}>Choose</button> : null}
     </div>}) : <p className="agent-connector-note">No people were returned by the application.</p> : <p role="status" className="agent-connector-note">Group members are not confirmed.</p>}
     {facts.issue ? <p role="status" className="surface-inline-error">{facts.issue}</p> : null}

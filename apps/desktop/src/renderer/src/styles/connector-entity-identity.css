@@ -27,3 +27,5 @@
 .connector-account-summary__identities { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--sp-4); min-width: 0; }
 .connector-account-summary__status { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
 @media (pointer: coarse) { .connector-entity__copy.content-copy { min-height: 44px; } }
+
+.connector-entity__profile-note { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }

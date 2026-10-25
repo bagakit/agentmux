@@ -6,7 +6,7 @@ import { api } from './api'
 type MetadataConnection = { connectionId: string; application: ConnectionApplication }
 type MetadataRead = { observation?: ChannelMetadataEntry['observation']; loading: boolean; unconfirmed: boolean }
 type MetadataReads = { scope: string; profiles: ReadonlyMap<string, MetadataRead>; updatesUnconfirmed: boolean }
-export type ConnectorEntityProfileRead = { observation?: ChannelMetadataEntry['observation']; loading: boolean; issue: string }
+export type ConnectorEntityProfileRead = { observation?: ChannelMetadataEntry['observation']; loading: boolean; issue: string; updatesUnconfirmed?: boolean }
 
 /** One observation owner for the represented objects; native lookup remains the visible room-name policy. */
 function useConnectorMetadata(connection: MetadataConnection | null, subjects: readonly ChannelMetadataSubject[], hostingTarget: ConnectionHostingTarget | null | undefined, active: boolean, refresh = 0, refreshMissingRoomName = false) {
@@ -88,10 +88,9 @@ export function useConnectorEntityProfiles(connection: MetadataConnection | null
   return new Map([...selected.keys()].map(key => {
     const profile = current?.profiles.get(key)
     const issue = hostingTarget === null ? 'Original bot hosting owner unconfirmed' : [
-      profile?.unconfirmed ? 'Profile unconfirmed' : profile?.observation?.state === 'unavailable' ? 'Profile update unavailable' : '',
-      current?.updatesUnconfirmed ? 'Profile updates unconfirmed' : ''
+      profile?.unconfirmed ? 'Profile update unconfirmed' : profile?.observation?.state === 'unavailable' ? 'Profile update unavailable' : profile?.observation && profile.observation.freshness !== 'current' ? 'Profile update unconfirmed' : ''
     ].filter(Boolean).join(' · ')
-    return [key, { ...(profile?.observation ? { observation: profile.observation } : {}), loading: loading && (!profile || profile.loading), issue }]
+    return [key, { ...(profile?.observation ? { observation: profile.observation } : {}), loading: loading && (!profile || profile.loading), issue, updatesUnconfirmed: current?.updatesUnconfirmed === true }]
   }))
 }
 

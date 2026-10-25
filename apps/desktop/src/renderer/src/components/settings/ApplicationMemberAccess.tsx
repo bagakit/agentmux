@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { channelMetadataSubjectKey, parseConnectionParams, type ChannelMetadataEntry, type ConnectionActor, type ConnectionApplicationAccess, type ConnectionApplicationAccessOperation, type ConnectionApplicationGrant, type ConnectionGrant, type ConnectionRecord } from '@agentmux/core/connections'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
-import { ConnectorEntityIdentity, ConnectorIdentityField } from '../ConnectorEntityIdentity'
+import { ConnectorEntityIdentity, ConnectorIdentityField, ConnectorProfileUpdates } from '../ConnectorEntityIdentity'
 import { useConnectorEntityProfiles } from '../../lib/use-connector-room-name'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
@@ -165,6 +165,7 @@ function ApplicationMemberAccessEditor({ record, hostingTarget, intent, active }
     <p className="agent-connector-note">Rules for this bot’s current and future groups. A group’s own member settings take precedence. Saved people are profile observations, not a group member list.</p>
     {!hostingTarget ? <p role="status">The original bot hosting owner is not confirmed. No access change can be sent from this view.</p> : null}
     {readIssue ? <p role="status" className="agent-connector-note">Member access could not be confirmed. Saved observations and your edits are kept. {readIssue}</p> : !value ? <p role="status" className="agent-connector-note">Reading this bot’s member rules…</p> : null}
+    <ConnectorProfileUpdates reads={visibleProfiles} />
     <div className="connector-member-list">{[...rows.entries()].map(([key, row]) => {
       const observed = value ? value.grants.find(grant => JSON.stringify(grant.actor) === JSON.stringify(row.actor)) ?? null : undefined
       const receipt = Object.values(results).filter((result): result is Extract<ConnectionApplicationAccessOperation, { state: 'applied' }> => result?.state === 'applied' && JSON.stringify(result.grant.actor) === JSON.stringify(row.actor)).map(result => result.grant).sort((a, b) => b.revision - a.revision)[0]
@@ -179,8 +180,8 @@ function ApplicationMemberAccessEditor({ record, hostingTarget, intent, active }
       const activity = flights.get(key), creator = creatorReading.creator?.idType === row.actor.idType && creatorReading.creator.userId === row.actor.userId
       const change = (capability: ConnectionGrant['capabilities'][number], enabled: boolean) => edit(row.actor, grant, enabled ? [...desired, capability] : desired.filter(value => value !== capability))
       return <div className="connector-member-row" key={key} data-application-member-row={JSON.stringify([row.actor.idType, row.actor.userId])} data-member-state={pending ? 'pending' : dirty || needsReview ? 'dirty' : value ? 'saved' : 'unconfirmed'}>
-        <ConnectorEntityIdentity identityKey={key} kind="person" name={row.named ? row.name : undefined} label={row.name} missingName="Account" avatarUrl={row.avatar}
-          secondary={creator ? 'Bot creator' : row.actor.idType} status={<span role="status">{activity ? activity === 'saving' ? 'Saving changes' : 'Checking original result' : pending ? pending.phase === 'not-dispatched' ? 'Original change not sent' : 'Original result unconfirmed' : dirty ? needsReview ? 'Unsaved · review current access' : 'Unsaved · all groups' : grant === undefined ? 'Access unconfirmed' : needsReview ? 'Saved access changed' : grant?.state === 'active' ? 'Saved · all groups' : 'No access'}</span>} />
+        <ConnectorEntityIdentity identityKey={key} kind="person" profileRead={visibleProfiles.get(channelMetadataSubjectKey({ kind: 'actor', actor: row.actor }))} name={row.named ? row.name : undefined} label={row.name} missingName="Account" avatarUrl={row.avatar}
+          secondary={creator ? 'Bot creator' : undefined} status={<span role="status">{activity ? activity === 'saving' ? 'Saving changes' : 'Checking original result' : pending ? pending.phase === 'not-dispatched' ? 'Original change not sent' : 'Original result unconfirmed' : dirty ? needsReview ? 'Unsaved · review current access' : 'Unsaved · all groups' : grant === undefined ? 'Access unconfirmed' : needsReview ? 'Saved access changed' : grant?.state === 'active' ? 'Saved · all groups' : 'No access'}</span>} />
         <ConnectorMemberChoices name={row.name} value={desired} change={change} scope="application" />
         <details className="agent-connector-disclosure"><summary>Account details</summary><ConnectorIdentityField identityKey={key} label={row.actor.idType} value={row.actor.userId} /><ConnectorIdentityField identityKey={key} label="App ID" value={row.actor.application.appId} /></details>
         {dirty || needsReview ? <p className="agent-connector-note">Last confirmed access: {grant === undefined ? 'not checked' : grant?.state === 'active' ? grant.capabilities.join(', ') : 'No access'}</p> : null}
