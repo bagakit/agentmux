@@ -159,6 +159,13 @@ AgentMux 物化通用 `RunSpec` 后交给 ctxmux；Level B provenance 不足时�
 Level A restart。相反，daemon activation、Run wait、权威生命周期时间与 revision 等不理解
 Agent 也成立的能力应由 ctxmux 公共 SDK 提供，AgentMux 不长期维护第二份实现。
 
+本地 Native 激活复用 SDK 的 `activateRuntime` 与 pending/selected 共享观察 owner；SDK 持有
+child、fd3 readiness、匹配 Hello、退出与单 reader 取消。Core 仅持有已验证 artifact、SDK handle
+和产品 owner receipt。公开 Hello 的有界观察失败不证明 daemon 死亡；已有 compatible listener
+可先以 unverified 身份使用，准确原 child 的 readiness 与 Hello 完成后才记录产品归属。晚到证明
+通过 SDK 订阅接回原观察；释放 Core consumer 只退订和取消其 reader，保留原激活。单次观察错误
+不是 owner 终局；准确恢复成功后清除当前失败，保留未解除的 receipt／诊断通道服务说明。
+
 一句话概括所有权分层（`terminal-theme.ts` 注释原文）：*"App chrome owns product
 surfaces, xterm owns terminal appearance, and the PTY/CtxMux path owns bytes only."*
 
