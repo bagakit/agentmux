@@ -266,6 +266,10 @@ export class PublicationStore {
       WHERE json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved';
       CREATE INDEX IF NOT EXISTS connector_publication_gap_part ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.gap.part'))
         WHERE json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved';
+      CREATE INDEX IF NOT EXISTS connector_publication_gap_source ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.sourceKey'))
+        WHERE json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved';
+      CREATE INDEX IF NOT EXISTS connector_publication_gap_record ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.gap.part.record'))
+        WHERE json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved';
       CREATE INDEX IF NOT EXISTS connector_publication_intent_projection ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.projectionId'))
       WHERE json_extract(decision_json,'$.kind') IN ('representation','legacy-representation');
       CREATE INDEX IF NOT EXISTS connector_publication_intent_record ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.part.record'))
@@ -583,7 +587,7 @@ export class PublicationStore {
       for (const original of questionRecords) this.saveDecision(boundary, 'question-read-' + digest(original.question), 'current', { kind: 'question-read', ...original })
       for (const coverage of page.coverage) {
         const key = conversationSourceKey(coverage.source)
-        const rows = this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved'").all(...scopeKey(boundary))
+        const rows = this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.sourceKey')=?").all(...scopeKey(boundary), key)
         for (const row of rows) {
           const d = JSON.parse(String(row.decision_json))
           if (d.sourceKey !== key) continue
@@ -673,7 +677,8 @@ export class PublicationStore {
         // historical operations, prepared bytes or platform receipts.
         if (!mappingConflict) this.saveDecision(boundary, 'event-' + digest(unit.event.id), unit.event.revision, { kind: 'event-representation', event: { id: unit.event.id, revision: unit.event.revision }, records: references, projectionId })
         // Resolve only decisions superseded by these accepted original versions.
-        for (const row of this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved'").all(...scopeKey(boundary))) {
+        const relatedGaps = unit.records.flatMap(record => this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.gap.part.record')=?").all(...scopeKey(boundary), encode(record.reference)))
+        for (const row of relatedGaps) {
           const d = JSON.parse(String(row.decision_json))
           if (plan.gaps.some(gap => same(gap.part, d.gap.part) && same(gap.event, d.gap.event) && (gap.reason === d.gap.reason || gap.reason === 'resource-unavailable' && d.gap.reason === 'version-unavailable'))) continue
           if (d.kind === 'gap' && !d.inputAlias && d.gap.part && !ambiguous.has(conversationRecordId(d.gap.part.record)) && unit.records.some(r => r.id === conversationRecordId(d.gap.part.record))) this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...d, state: 'resolved' }), Number(row.rowid))
