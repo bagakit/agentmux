@@ -1,11 +1,7 @@
 import { useId } from 'react'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import capsuleArt from '../../assets/settings/capsule-keepsake.png'
+import goalsArt from '../../assets/settings/goals-companions.png'
 import './settings-concept-intro.css'
-
-const GoalIcon = semanticIconComponent('object.goal')
-const AgentIcon = semanticIconComponent('object.agent')
-const NoteIcon = semanticIconComponent('object.note')
 
 /** Read-only illustrations. Configuration and execution remain with each pane. */
 export function CapsuleIntroduction() {
@@ -30,15 +26,8 @@ export function GoalsIntroduction() {
       <h3 className="settings-concept-intro__title" id={titleId}>让想做到的事，一步步成形。</h3>
       <p className="settings-concept-intro__description">和 Agent 一起拆解目标、推进工作，再核对结果。</p>
     </div>
-    <figure className="settings-concept-path" aria-label="目标、Agent 协作与结果核对的关系示意">
-      <div className="settings-concept-path__nodes" aria-hidden="true">
-        <span className="settings-concept-path__node"><span className="settings-concept-path__symbol"><GoalIcon size={24} /></span><span>明确目标</span></span>
-        <span className="settings-concept-path__thread" />
-        <span className="settings-concept-path__node"><span className="settings-concept-path__symbol"><AgentIcon size={23} /></span><span>一起推进</span></span>
-        <span className="settings-concept-path__thread" />
-        <span className="settings-concept-path__node"><span className="settings-concept-path__symbol"><NoteIcon size={23} /></span><span>核对结果</span></span>
-      </div>
-      <figcaption>每一步，都围绕同一个目标。</figcaption>
-    </figure>
+    <div className="settings-concept-intro__art settings-concept-intro__art--goals" aria-hidden="true">
+      <img src={goalsArt} alt="" width="1536" height="1024" draggable={false} />
+    </div>
   </section>
 }
