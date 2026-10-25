@@ -50,6 +50,13 @@ The captured frontier's inputJournal and the record's inputOrigin preserve origi
 journal membership across recovery; a later capture or status change never moves an
 older input past an audience's sharing cut. Missing old cut proof stays unconfirmed.
 
+For bounded input membership/control change discovery, use agent input changes --input
+with the exact Host and recipient. Its first read returns only a checkpoint; later reads
+resume with after or cursor, including offline cancellation and rejoin. Persist the
+position only after consuming its page. Keys coalesce changes: inspect each original
+input for current facts, never reconstruct historical waiting or native adoption.
+Positions are source-bound, not permission tokens; managed Agents read only themselves.
+
 Load only the journey needed now:
 - Review useful work experience: agent learning --help exposes preparation, the designated
   extractor's proposal and original-operation inspection. Only the trusted App can confirm
