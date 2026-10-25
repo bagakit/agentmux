@@ -57,6 +57,8 @@ const galleryConversation: AgentSessionHistoryPage = {
   items: [
     { id: 'gallery-input', kind: 'user-message', contentParts: [{ kind: 'text', text: '检查这次改动，并保留每轮的真实结果。' }] },
     { id: 'gallery-progress', kind: 'assistant-message', turnId: 'gallery-failed-turn', messagePhase: 'progress', contentParts: [{ kind: 'text', text: '已读取改动，正在核对实现边界。' }] },
+    { id: 'gallery-tool-call', kind: 'activity', turnId: 'gallery-failed-turn', contentParts: [{ kind: 'tool-call', callId: 'gallery-original-call', name: 'inspect', input: '{"file":"src/summary.ts","mode":"read-only"}' }] },
+    { id: 'gallery-tool-result', kind: 'activity', turnId: 'gallery-failed-turn', contentParts: [{ kind: 'tool-result', callId: 'gallery-original-call', name: 'inspect', failed: true, output: 'Original tool result: the requested source could not be read. No changes were made.' }] },
     { id: 'gallery-failure', kind: 'activity', turnId: 'gallery-failed-turn', contentParts: [{ kind: 'text', text: 'Original provider outcome record.' }],
       turnOutcome: { status: 'failed', failure: { code: 'MODEL_CAPACITY', nativeCode: 'server_overloaded',
         message: 'Selected model is at capacity. Please try a different model.',
