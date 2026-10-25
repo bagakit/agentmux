@@ -73,6 +73,8 @@ Load only the journey needed now:
 - Authorized unmanaged prompt intake: agent input submit preserves the original prompt key;
   Browser context is declared data. It cannot establish Human authorship or Host capture.
   Managed Agents must use agent send; public prompt intake cannot bypass A2A attribution.
+  The directed session-conversation intent uses the original Session capability and
+  retains controlled waiting; a selected native request never changes to terminal after unknown.
 - Recovery or lifecycle: use the exact action's --help; interrupt, stop, resume and reopen differ.
 Before opening or rearranging a workface, read amux space --skill for placement and focus.
 Readers keep their original source/cursor and release only their reader, not the Agent;
