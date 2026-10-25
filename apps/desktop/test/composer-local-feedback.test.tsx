@@ -9,9 +9,9 @@ import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessio
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, MAX_AGENT_STEER_QUEUE_ENTRIES, executorDetectionKey } from '../src/renderer/src/store'
-import { MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { promptCarrierWaiting } from './helpers/prompt-carrier-receipt'
 
 const dom = composerDOM()
 const failure = () => document.querySelector('.composer-mailbox .composer-notice, .composer-feedback')
@@ -85,14 +85,14 @@ it('skill discovery failure remains visible after the menu closes and retry disc
   expect(dom.draft()).toBe('Keep my draft')
 })
 
-it.each(['oversized', 'full queue'] as const)('reports %s admission locally and preserves the exact draft', async (reason) => {
-  const draft = reason === 'oversized' ? 'x'.repeat(MAX_AGENT_PROMPT_BYTES + 1) : 'Refused queue draft'
-  useAppStore.setState({ agentComposerDrafts: { 'agent-1': draft }, agentSteerQueues: reason === 'full queue' ? {
+it('reports full queue admission locally and preserves the exact draft', async () => {
+  const draft = 'Refused queue draft'
+  useAppStore.setState({ agentComposerDrafts: { 'agent-1': draft }, agentSteerQueues: {
     'agent-1': Array.from({ length: MAX_AGENT_STEER_QUEUE_ENTRIES }, (_, index) => ({ operationId: `op-${index}`, text: 'queued', runId: 'run-agent-1', status: 'queued' as const }))
-  } : {} })
+  } })
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await dom.click('.composer-send')
-  expect(failure()?.textContent).toMatch(reason === 'oversized' ? /too large/ : /queue is full/)
+  expect(failure()?.textContent).toMatch(/queue is full/)
   expect(dom.draft()).toBe(draft)
   expect(useAppStore.getState().error).toBeNull()
   expect(dom.container.querySelector('.composer__mailbox')?.getAttribute('data-unread')).toBe('true')
@@ -101,8 +101,23 @@ it.each(['oversized', 'full queue'] as const)('reports %s admission locally and 
   await act(async () => dom.container.querySelector('.composer-mailbox')!.dispatchEvent(event))
   await dom.click('[role="tab"][id$="-inbox-tab"]')
   expect(dom.container.querySelector('.composer__mailbox')?.getAttribute('data-unread')).toBe('false')
-  expect(failure()?.textContent).toMatch(reason === 'oversized' ? /too large/ : /queue is full/)
+  expect(failure()?.textContent).toMatch(/queue is full/)
   expect(dom.draft()).toBe(draft)
+})
+
+it('the mounted composer sends a complete multibyte draft above the old cap', async () => {
+  const draft = '原消息 \"完整上下文\" \n'.repeat(6000)
+  useAppStore.setState({ agentComposerDrafts: { 'agent-1': draft } })
+  vi.spyOn(api.sessions, 'refresh').mockResolvedValue(composerSession())
+  vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (_c, _t, id) => promptCarrierWaiting('agent-1', 'run-agent-1', id))
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await dom.click('.composer-send')
+  await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce())
+  expect(Buffer.byteLength(draft)).toBeGreaterThan(64 * 1024)
+  expect(submit.mock.calls[0]![1]).toBe(draft)
+  expect(dom.draft()).toBeUndefined()
+  expect(failure()).toBeNull()
 })
 
 async function launcher() {

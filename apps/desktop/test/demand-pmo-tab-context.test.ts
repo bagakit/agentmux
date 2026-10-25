@@ -13,7 +13,6 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
 import { recordGoalCoordinationEvidence } from './helpers/goal-coordination-evidence'
-import { MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 
 const initialState = useAppStore.getState()
 let dispose: (() => void) | undefined
@@ -75,15 +74,18 @@ describe('Demand dedicated PMO Tab context', () => {
     expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual(entries)
   })
 
-  it('rejects the complete serialized budget before taking draft ownership or occupying the queue', () => {
+  it('keeps complete context above the old cap in the original durable queue', () => {
     const session = { id: 'budget-recipient', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'budget-recipient', run: { runId: 'healthy-run' } }, processState: 'running', status: { state: 'working', observedAt: 1 } }
-    const body = '  Original draft  ', rejected = vi.fn(), pause = vi.spyOn(api.continuousProgress, 'pauseForInput')
+    const body = '  Original draft  ', note = '<完整上下文>'.repeat(7000), rejected = vi.fn()
+    vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
     useAppStore.setState({ sessions: [session as never], agentSteerQueues: {}, agentComposerDrafts: { [session.id]: body } })
-    expect(useAppStore.getState().enqueueAgentSteer(session.id, body, rejected, 'oversized-note', undefined, '<'.repeat(MAX_AGENT_PROMPT_BYTES / 3))).toBe(false)
-    expect(rejected).toHaveBeenCalledTimes(1)
-    expect(useAppStore.getState().agentSteerQueues).toEqual({})
+    expect(useAppStore.getState().enqueueAgentSteer(session.id, body, rejected, 'complete-note', undefined, note)).toBe(true)
+    expect(rejected).not.toHaveBeenCalled()
+    const entries = useAppStore.getState().agentSteerQueues[session.id]!
+    expect(entries).toEqual([expect.objectContaining({ operationId: 'complete-note', text: body, agentMuxNote: note, runId: 'healthy-run' })])
+    expect(useAppStore.persist.getOptions().partialize!(useAppStore.getState()).agentSteerQueues![session.id]).toEqual(entries)
     expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe(body)
-    expect(useAppStore.getState().sessions).toEqual([session]); expect(pause).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions).toEqual([session])
   })
 
   it('keeps a fresh dedicated PMO launcher, original draft and explicit note when Topic preparation is unavailable', async () => {
