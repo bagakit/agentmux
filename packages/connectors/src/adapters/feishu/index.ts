@@ -8,7 +8,7 @@ import type { ConnectionIngressTransport, ConnectionIngressReceiver } from '../.
 import type { IngressAuthenticator, VerifiedIngressEvent } from '../../durable-ingress.js'
 import { FEISHU_MESSAGE_EVENT, feishuFailure, feishuIdentity, readFeishuMessage, projectFeishuMessage } from './message.js'
 import { feishuParentAddressing } from './reply.js'
-import { readFeishuAction } from './action.js'
+import { isFeishuQuestionSubmit, readFeishuAction } from './action.js'
 import { FeishuPublicationAdapter } from './publication.js'
 import { createFeishuProfile } from './profile.js'
 import { createFeishuEnrollment } from './enrollment.js'
@@ -31,6 +31,12 @@ const sameConfig = (left: ConnectionConfig, right: ConnectionConfig) => JSON.str
 const muted = () => undefined
 // SDK logs can include credentials, connection tickets and complete platform bodies. No SDK argument leaves this sink.
 const safeLogger: Logger = { error: muted, warn: muted, info: muted, debug: muted, trace: muted }
+const questionAnswerRefusals: Readonly<Record<string, string>> = {
+  INGRESS_QUESTION_ANSWER_INVALID: 'Answer not sent. Choose one option or enter text for every question, then submit.',
+  INGRESS_ACTION_UNSUPPORTED: 'Answer not accepted. Open the original conversation to continue.',
+  INGRESS_ACTOR_NOT_AUTHORIZED: 'Answer not accepted. Check your access to answer in this conversation.',
+  INGRESS_AUTHORITY_REVISED: 'This card can no longer accept an answer. Open the original conversation to continue.'
+}
 
 export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly adapterId = 'feishu'
@@ -222,8 +228,9 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
         if (!witness || !this.witnesses.has(witness) || witness.receiver !== receiver) feishuFailure('FEISHU_TRANSPORT_PROOF_REQUIRED')
         const received = await receive({ raw: witness.raw, transportProof: witness }, () => undefined)
         receiver.observed = true
-        if (received.ingress.kind === 'action' && received.ingress.code === 'INGRESS_QUESTION_ANSWER_INVALID') return {
-          toast: { type: 'warning', content: 'Answer not sent. Choose one option or enter text for every question, then submit.' }
+        if (received.ingress.kind === 'action' && received.ingress.state === 'refused' && isFeishuQuestionSubmit(witness.raw)) {
+          const content = questionAnswerRefusals[received.ingress.code ?? '']
+          if (content) return { toast: { type: 'warning', content } }
         }
         return {}
       } })

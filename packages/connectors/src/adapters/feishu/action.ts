@@ -7,6 +7,11 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
 function identity(value: unknown): string | undefined {
   try { return feishuIdentity(value) } catch { return undefined }
 }
+/** Qualifies feedback only; the authenticated receiver and durable ingress still own acceptance. */
+export function isFeishuQuestionSubmit(raw: string): boolean {
+  const action = object(object(object(JSON.parse(raw))?.event)?.action)
+  return action?.tag === 'button' && action.name === 'submit_original_answer'
+}
 /** Authentication belongs to the private SDK witness. Unsupported fields remain complete in raw. */
 export function readFeishuAction(raw: string, application: ConnectionApplication): VerifiedIngressAction | null {
   let parsed: unknown
