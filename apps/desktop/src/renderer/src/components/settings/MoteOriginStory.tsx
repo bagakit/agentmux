@@ -22,7 +22,7 @@ const chapters = [
     alt: 'Topic 的开放工作区里，蓝色、琥珀色和紫色的三位 Agent 处理日常任务，留下图表、任务卡和笔记。',
   },
   {
-    label: '晋升为 Mote', path: '从事情成长 · 晋升构想', organization: 'Mote · 长期伙伴',
+    label: '晋升为 Mote', path: '从事情成长 · 晋升为伙伴', organization: 'Mote · 长期伙伴',
     title: '让重要的方向，成为长期伙伴。',
     description: '当一个 Topic 足够重要、被频繁依赖，就让它晋升为 Mote，建立团队人格。原来的 Agent 与积累一起延续。',
     continuity: '成员继续成长：深耕专业，也可以逐渐承担协调。',
