@@ -70,18 +70,20 @@ hook_port=40000+int.from_bytes(hashlib.sha256(runtime.encode()).digest()[:2],'bi
 authority=hashlib.sha256(json.dumps({'stateDirectory':state,'storePath':store,'ctxmuxSocket':os.path.join(runtime,'ctxmux.sock'),'ctxmuxState':os.path.join(state,'ctxmux'),'hookPort':hook_port},separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
 if binding.get('schema')!='agentmux.semantic-runtime.v1' or binding.get('runtimeId')!=p['runtimeId'] or binding.get('authority')!=authority:
  raise RuntimeError('Durable Runtime authority does not match original launch namespace.')
-for lease in [os.path.join(state,'semantic-owner.lock'),p['socket']+'.owner.lock']:
+def require_lease(directory,owner_pid,lease):
  held=False
- for fd in os.listdir(base+'/fd'):
+ for fd in os.listdir(directory+'/fd'):
   try:
-   if os.path.realpath(base+'/fd/'+fd)!=os.path.realpath(lease): continue
-   inode=os.stat(base+'/fd/'+fd).st_ino
-   for line in text(base+'/fdinfo/'+fd).splitlines():
+   if os.path.realpath(directory+'/fd/'+fd)!=os.path.realpath(lease): continue
+   inode=os.stat(directory+'/fd/'+fd).st_ino
+   for line in text(directory+'/fdinfo/'+fd).splitlines():
     lock=line.split()
     if len(lock)==9 and lock[0]=='lock:' and lock[3:5]==['ADVISORY','WRITE'] and lock[7:]==['0','EOF'] and int(lock[6].rsplit(':',1)[1])==inode:
-     if lock[2]=='OFDLCK' and lock[5]=='-1' or lock[2]=='FLOCK' and lock[5]==str(pid): held=True
+     if lock[2]=='OFDLCK' and lock[5]=='-1' or lock[2]=='FLOCK' and lock[5]==str(owner_pid): held=True
   except FileNotFoundError: pass
- if not held: raise RuntimeError('Original semantic owner lease is not verified.')
+ if not held: raise RuntimeError('Original process state lease is not verified.')
+for lease in [os.path.join(state,'semantic-owner.lock'),p['socket']+'.owner.lock']:
+ require_lease(base,pid,lease)
 root=os.path.dirname(os.path.dirname(argv[1]))
 if json.loads(text(os.path.join(root,'package.json'))).get('name')!='@agentmux/core': raise RuntimeError('Original program is not Core.')
 deployment_path=os.path.join(root,'deployment.json')
@@ -104,16 +106,32 @@ def flag(name):
  if native_argv.count(name)!=1: raise RuntimeError('Native launch namespace is ambiguous.')
  return native_argv[native_argv.index(name)+1]
 if flag('--socket')!=native_socket or flag('--state-dir')!=os.path.join(state,'ctxmux'): raise RuntimeError('Native listener namespace differs from the original Core.')
+require_lease(native_base,native_pid,os.path.join(state,'ctxmux','state.lock'))
 native_start=text(native_base+'/stat').rsplit(')',1)[1].split()[19]
 native_sha=sha(native_base+'/exe')
-receipt=json.loads(text(os.path.join(runtime,'owner.json')))
-if receipt.get('schema')!='agentmux.ctxmux-owner.v1' or receipt.get('socketPath')!=native_socket or receipt.get('stateDirectory')!=os.path.join(state,'ctxmux') or receipt.get('daemonSha256')!=native_sha or not os.path.isabs(receipt.get('daemonPath','')) or os.path.realpath(receipt['daemonPath'])!=os.readlink(native_base+'/exe'):
- raise RuntimeError('Original Native executable does not match its exact ownership receipt.')
-artifact=os.path.dirname(os.path.dirname(receipt['daemonPath'])); manifest_path=os.path.join(artifact,'manifest.json'); manifest=json.loads(text(manifest_path))
+native_executable=os.readlink(native_base+'/exe')
+artifact=os.path.dirname(os.path.dirname(native_executable)); manifest_path=os.path.join(artifact,'manifest.json'); manifest=json.loads(text(manifest_path))
 daemon=next((item for item in manifest.get('binaries',[]) if item.get('name')=='ctxmuxd'),None)
-if sha(manifest_path)!=receipt.get('manifestSha256') or manifest.get('schema')!='ctxmux.local-artifacts.v1' or manifest.get('support',{}).get('platform')!='linux' or manifest.get('support',{}).get('architecture')!='x64' or manifest.get('source',{}).get('commit')!=receipt.get('sourceCommit') or manifest.get('source',{}).get('tree')!=receipt.get('sourceTree') or not daemon or os.path.join(artifact,daemon['path'])!=receipt['daemonPath'] or daemon.get('sha256')!=native_sha or sha(receipt['daemonPath'])!=native_sha:
- raise RuntimeError('Original Native artifact does not match its executable and ownership receipt.')
-print(json.dumps({'node':exe,'cli':argv[1],'cwd':cwd,'processId':pid,'startTicks':start,'listenerProcessId':worker_pid,'listenerStartTicks':worker_stat[19],'socketDevice':socket_dev,'socketInode':socket_inode,'env':env,'stateDirectory':state,'runtimeDirectory':runtime,'storePath':store,'nativeSha256':native_sha,'nativeProcessId':native_pid,'nativeStartTicks':native_start,'nativeArtifactDirectory':artifact,'nativeManifestSha256':receipt['manifestSha256'],'nativeInstanceId':receipt['daemonInstanceId'],'nativeRuntimeId':receipt['runtimeId'],'nativeBuildId':receipt['runtimeBuildId'],'platform':'linux-x64','deploymentDigest':deployment['digest']}))
+if not os.path.isabs(native_executable) or os.path.realpath(native_executable)!=native_executable or not daemon or os.path.join(artifact,daemon['path'])!=native_executable or manifest.get('schema')!='ctxmux.local-artifacts.v1' or manifest.get('support',{}).get('platform')!='linux' or manifest.get('support',{}).get('architecture')!='x64' or daemon.get('sha256')!=native_sha or sha(native_executable)!=native_sha:
+ raise RuntimeError('Original Native artifact does not match its exact executing image.')
+manifest_sha=sha(manifest_path)
+result={'node':exe,'cli':argv[1],'cwd':cwd,'processId':pid,'startTicks':start,'listenerProcessId':worker_pid,'listenerStartTicks':worker_stat[19],'socketDevice':socket_dev,'socketInode':socket_inode,'env':env,'stateDirectory':state,'runtimeDirectory':runtime,'storePath':store,'nativeSha256':native_sha,'nativeProcessId':native_pid,'nativeStartTicks':native_start,'nativeArtifactDirectory':artifact,'nativeManifestSha256':manifest_sha,'platform':'linux-x64','deploymentDigest':deployment['digest']}
+# The caller derives this exact address only after public Core/Native identity agrees.
+# Receipt contents never select the current instance or override these OS facts.
+if 'receipt' in p:
+ request=p['receipt']; receipt_path=request['path']; identity=request['identity']
+ if os.path.dirname(receipt_path)!=runtime or not os.path.basename(receipt_path).startswith('owner-') or not os.path.basename(receipt_path).endswith('.json'): raise RuntimeError('Owner receipt address is outside the original namespace.')
+ diagnostic={'status':'unreadable','path':receipt_path}
+ try:
+  metadata=os.lstat(receipt_path)
+  if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid!=os.getuid() or metadata.st_mode&0o777!=0o600 or metadata.st_size>65536: raise RuntimeError('Owner receipt is not a bounded private regular file.')
+  receipt=json.loads(text(receipt_path))
+  matching=receipt.get('schema')=='agentmux.ctxmux-owner.v1' and receipt.get('socketPath')==native_socket and receipt.get('stateDirectory')==os.path.join(state,'ctxmux') and receipt.get('daemonSha256')==native_sha and receipt.get('daemonPath')==native_executable and receipt.get('manifestSha256')==manifest_sha and receipt.get('sourceCommit')==manifest.get('source',{}).get('commit') and receipt.get('sourceTree')==manifest.get('source',{}).get('tree') and receipt.get('daemonInstanceId')==identity['daemonInstanceId'] and receipt.get('runtimeId')==identity['runtimeId'] and receipt.get('runtimeBuildId')==identity['buildId']
+  diagnostic['status']='matching' if matching else 'mismatch'
+ except FileNotFoundError: diagnostic['status']='missing'
+ except Exception as error: diagnostic['detail']=str(error)
+ result['ownerReceipt']=diagnostic
+print(json.dumps(result))
 `
 
 /** The exact serving producer validates its own public DTOs before projecting
@@ -137,8 +155,9 @@ function nativeScope(){
  if(hash(manifestBytes)!==launch.nativeManifestSha256)throw Error('Original Native manifest changed');
  return JSON.parse(manifestBytes);
 }
+let currentNative;
 function ownerFacts(owner){
- if(owner.runtimeId!==p.runtimeId||owner.processId!==launch.processId||owner.availability!=='connected'||!owner.ctxmux||owner.ctxmux.instanceId!==launch.nativeInstanceId||owner.ctxmux.buildIdentity!==launch.nativeBuildId||owner.ctxmux.processId!==null&&owner.ctxmux.processId!==launch.nativeProcessId)throw Error('The original owner or Native identity is unconfirmed');
+ if(owner.runtimeId!==p.runtimeId||owner.processId!==launch.processId||owner.availability!=='connected'||!owner.ctxmux||owner.ctxmux.instanceId!==currentNative.daemonInstanceId||owner.ctxmux.buildIdentity!==currentNative.buildId||owner.ctxmux.processId!==null&&owner.ctxmux.processId!==launch.nativeProcessId)throw Error('The original owner or Native identity is unconfirmed');
  return {runtimeId:owner.runtimeId,ownerInstanceId:owner.ownerInstanceId,processId:owner.processId,
   ctxmux:{instanceId:owner.ctxmux.instanceId,processId:owner.ctxmux.processId,buildIdentity:owner.ctxmux.buildIdentity,protocolVersion:owner.ctxmux.protocolVersion}};
 }
@@ -158,7 +177,8 @@ void(async()=>{
   if(sdkPackage.name!==manifest.sdk.name||sdkPackage.version!==manifest.sdk.version)throw Error('Original Native SDK package identity is invalid');
   const {CtxmuxClient,CtxmuxProtocolError}=await import(url.pathToFileURL(path.join(scratch,'package/dist/index.js')).href);
   const sdk=new CtxmuxClient({socketPath:path.join(launch.runtimeDirectory,'ctxmux.sock')}),hello=await sdk.runtimeInfo();
-  if(hello.daemonInstanceId!==launch.nativeInstanceId||hello.runtimeId!==launch.nativeRuntimeId||hello.buildId!==launch.nativeBuildId||hello.protocolGeneration!==manifest.product.protocol)throw Error('The exact Native Hello identity is unconfirmed');
+  if(hello.protocolGeneration!==manifest.product.protocol||launch.nativeInstanceId!==undefined&&(hello.daemonInstanceId!==launch.nativeInstanceId||hello.runtimeId!==launch.nativeRuntimeId||hello.buildId!==launch.nativeBuildId))throw Error('The exact Native Hello identity is unconfirmed');
+  currentNative=hello;
   const native=new CtxmuxClient({socketPath:path.join(launch.runtimeDirectory,'ctxmux.sock'),expectedRuntimeIdentity:hello});
   const nativeRuntime={daemonInstanceId:hello.daemonInstanceId,runtimeId:hello.runtimeId,buildId:hello.buildId,protocolGeneration:hello.protocolGeneration,runtimeIdPersistence:hello.runtimeIdPersistence,platform:hello.platform,arch:hello.arch,capabilities:hello.capabilities};
   const {connectAgentMuxRpc}=await import(url.pathToFileURL(path.join(root,'dist/public-rpc-client.js')).href);
