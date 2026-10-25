@@ -56,6 +56,19 @@ export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose
     writes.set(key, { data: input.data, startByte, endByte }); cursors.set(id, endByte)
     return { run: run(id), appliedByteRange: { startByte, endByte } }
   })
+  // The native writer owns raw byte ranges. Record the send synchronously;
+  // tests may hold its ACK without holding the next send or inventing a Core cursor.
+  const rawInput = vi.fn((id: string, data: string | Uint8Array) => {
+    const startByte = cursors.get(id) ?? 0
+    const endByte = startByte + (typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength)
+    cursors.set(id, endByte)
+    return Promise.resolve({ appliedByteRange: { startByte, endByte } })
+  })
+  const waitWritable = vi.fn(async (_bytes: number, signal?: AbortSignal) => { signal?.throwIfAborted() })
+  inner.kernel.openInput = vi.fn(async (id: string) => ({
+    run: run(id), waitWritable,
+    input: (data: string | Uint8Array) => rawInput(id, data)
+  }))
   const observers = new Set<(event: CtxmuxAdapterObservationEvent) => void>(), closes = vi.fn()
   inner.kernel.observeOutput = vi.fn(async (id: string, _after: number, listener: (event: CtxmuxAdapterObservationEvent) => void) => {
     observers.add(listener)
@@ -65,7 +78,7 @@ export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose
     ], close: async () => { observers.delete(listener); closes() } }
   })
   inner.kernel.attach = vi.fn(); inner.kernel.detach = vi.fn(); inner.kernel.stop = vi.fn()
-  return { root, store, client, inner, run, observers, closes, capability,
+  return { root, store, client, inner, run, rawInput, waitWritable, observers, closes, capability,
     coreClients: () => [{ hostId: 'local', client }],
     credentials: { agentSessionId: ids[0]!, capability },
     close: async () => { await client.dispose(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }) } }
