@@ -12,7 +12,7 @@ const SurveyIcon = semanticIconComponent('navigation.survey')
 export const surveySettingsModule = {
   id: 'survey', group: 'work', title: 'Survey', icon: SurveyIcon,
   description: 'Personalize your browser start page and continue research.',
-  keywords: 'work survey research browser default system http https browsing exploration start page title subtitle icon background history cards',
+  keywords: 'work survey research browser default system http https browsing exploration start page title subtitle icon background history cards count motion interactive',
   searchTargets: [
     { id: 'default-browser', title: 'Default browser', keywords: 'http https system settings', kind: 'action' },
     { id: 'start-title', title: 'Start page title', keywords: 'survey browser title' },
@@ -20,6 +20,8 @@ export const surveySettingsModule = {
     { id: 'start-icon', title: 'Start page icon', keywords: 'survey image url' },
     { id: 'start-background', title: 'Start page background image', keywords: 'survey image url' },
     { id: 'start-history', title: 'Show recent addresses and searches', keywords: 'browser history cards' },
+    { id: 'start-history-limit', title: 'Cards on first view', keywords: 'browser history quantity count number' },
+    { id: 'start-interactive-background', title: 'Interactive background', keywords: 'browser start page pointer light motion animation' },
   ],
   savedSummary: config => config.browser.startPage?.title ?? 'AMUX - Survey',
   Pane({ config, onClose, active }) {

@@ -1,16 +1,19 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useId, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { BrowserInputHistoryEntry, BrowserInputHistoryScope, BrowserInputHistoryTarget } from '../../../shared/browser-input-history'
 import type { BrowserRecoveryPreview } from '../../../shared/browser-recovery-preview'
-import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
+import { resolveBrowserStartPage, type BrowserStartPageConfig } from '../../../shared/browser-start-page'
 import { resolveBrowserInput } from '../../../shared/browser-address'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
+import { SettingsNavigation } from './SettingsNavigation'
+import { StartPageAtmosphere } from './StartPageAtmosphere'
 
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
 
 
 /** Generic renderer start page. Its caller supplies identity, input and navigation. */
@@ -22,8 +25,14 @@ export function BrowserStartPage({ config, historyTarget, historyRevision = 0, v
   onChooseHistory(text: string): void
   children: ReactNode
 }) {
-  return <div className="browser-start-page" data-background={Boolean(config.backgroundImage)}>
+  const surface = useRef<HTMLDivElement>(null)
+  const settings = useContext(SettingsNavigation)
+  const appearance = resolveBrowserStartPage(config)
+  return <div ref={surface} className="browser-start-page" data-background={Boolean(config.backgroundImage)}>
     {config.backgroundImage ? <StartPageImage key={config.backgroundImage} src={config.backgroundImage} kind="background" /> : null}
+    {appearance.interactiveBackground ? <StartPageAtmosphere host={surface} visible={visible} /> : null}
+    {settings ? <button type="button" className="browser-start-page__customize" onClick={() => settings.open('survey', undefined, 'start-title')}>
+      <ThemeActionAdjustIcon size={14} aria-hidden="true" />Customize</button> : null}
     <div className="browser-start-page__content">
       {config.icon || config.title || config.subtitle ? <header className="browser-start-page__brand">
         {config.icon ? <StartPageImage key={config.icon} src={config.icon} kind="icon" /> : null}
@@ -31,7 +40,7 @@ export function BrowserStartPage({ config, historyTarget, historyRevision = 0, v
         {config.subtitle ? <p>{config.subtitle}</p> : null}
       </header> : null}
       {children}
-      {config.showHistory && visible ? <StartPageHistory key={JSON.stringify(historyTarget)} historyTarget={historyTarget} revision={historyRevision} onChoose={onChooseHistory} /> : null}
+      {config.showHistory && visible ? <StartPageHistory key={JSON.stringify(historyTarget)} historyTarget={historyTarget} revision={historyRevision} limit={appearance.historyLimit} onChoose={onChooseHistory} /> : null}
     </div>
   </div>
 }
@@ -47,7 +56,7 @@ function StartPageImage({ src, kind }: { src: string; kind: 'icon' | 'background
   </>
 }
 
-function StartPageHistory({ historyTarget, revision, onChoose }: { historyTarget: BrowserInputHistoryTarget | null; revision: number; onChoose(text: string): void }) {
+function StartPageHistory({ historyTarget, revision, limit, onChoose }: { historyTarget: BrowserInputHistoryTarget | null; revision: number; limit: number; onChoose(text: string): void }) {
   const key = historyTarget?.kind === 'browser' ? JSON.stringify(['browser', historyTarget.browserId, historyTarget.profileId])
     : historyTarget ? JSON.stringify(['workspace', historyTarget.workspaceId]) : ''
   const [loaded, setLoaded] = useState<{ key: string; revision: number; scope: BrowserInputHistoryScope; entries: BrowserInputHistoryEntry[]; previews: Map<string, string> } | null>(null)
@@ -80,7 +89,7 @@ function StartPageHistory({ historyTarget, revision, onChoose }: { historyTarget
     return () => { active = false }
   }, [key, attempt, revision])
   const current = loaded?.key === key && loaded.revision === revision
-  const entries = current ? loaded.entries.slice(0, expanded ? undefined : 12) : []
+  const entries = current ? loaded.entries.slice(0, expanded ? undefined : limit) : []
   const failure = issue?.key === key && issue.revision === revision ? issue.message : null
   if (!historyTarget) return <p className="browser-start-page__notice" role="status">Recent input is unavailable until its Workspace and Profile are confirmed. You can still browse.</p>
   if (!failure && current && entries.length === 0) return null
@@ -93,7 +102,7 @@ function StartPageHistory({ historyTarget, revision, onChoose }: { historyTarget
     {entries.length && current ? <div id={gridId} className="browser-start-history__grid">{entries.map(entry =>
       <HistoryCard key={entry.text} entry={entry} scope={loaded.scope} browserId={loaded.previews.get(entry.text)} onChoose={onChoose} />
     )}</div> : null}
-    {current && loaded.entries.length > 12 ? <button type="button" className="browser-start-history__more" aria-expanded={expanded} aria-controls={gridId}
+    {current && loaded.entries.length > limit ? <button type="button" className="browser-start-history__more" aria-expanded={expanded} aria-controls={gridId}
       onClick={() => setExpanded(value => !value)}>{expanded ? 'Show less' : `Show all ${loaded.entries.length}`}</button> : null}
   </section>
 }

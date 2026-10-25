@@ -173,13 +173,26 @@
 .browser-empty--private > span { width: min(460px, 100%); overflow: visible; text-overflow: clip; white-space: normal; line-height: 1.5; }
 /* The start page is a browsing workface: a clear input followed by real recent work. */
 .browser-start-page { position: relative; isolation: isolate; display: flex; flex: 1; height: 100%; min-width: 0; min-height: 0; overflow: auto; padding: clamp(24px, 4cqw, 64px); }
-.browser-start-page__content { position: relative; display: flex; flex-direction: column; align-items: center; gap: 28px; width: min(1120px, 100%); min-width: 0; margin: auto; padding-block: 24px; }
+.browser-start-page__content { position: relative; display: flex; flex-direction: column; align-items: center; gap: 28px; width: min(1120px, 100%); min-width: 0; margin: auto; padding-block: 40px 24px; }
 .browser-start-page__brand { display: grid; justify-items: center; gap: var(--sp-3); width: 100%; text-align: center; }
 .browser-start-page__brand h1 { margin: 0; color: var(--text); font-size: clamp(24px, 2.4cqw, 32px); font-weight: 550; letter-spacing: -.04em; overflow-wrap: anywhere; }
 .browser-start-page__brand p { margin: 0; max-width: 560px; color: var(--text-3); font-size: var(--fs-body); line-height: 1.5; overflow-wrap: anywhere; }
 .browser-start-page__icon { flex: none; width: 44px; height: 44px; border-radius: 10px; object-fit: contain; }
-.browser-start-page__background { position: absolute; z-index: -2; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.browser-start-page[data-background="true"]::before { content: ''; position: absolute; z-index: -1; inset: 0; background: color-mix(in srgb, var(--surface-0) 82%, transparent); pointer-events: none; }
+.browser-start-page__background { position: absolute; z-index: -3; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.browser-start-page[data-background="true"]::before { content: ''; position: absolute; z-index: -2; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--surface-0) 56%, transparent), color-mix(in srgb, var(--surface-0) 78%, transparent)); pointer-events: none; }
+.browser-start-page[data-background="true"] .browser-start-page__brand { text-shadow: 0 1px 12px var(--surface-0); }
+.browser-start-page__customize { position: absolute; z-index: 1; top: 16px; right: 20px; display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 5px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--text-2); background: var(--surface-1); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
+.browser-start-page__customize:hover { color: var(--text); border-color: var(--focus-line); }
+.browser-start-page__customize:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
+/* Pointer-driven atmosphere is rasterized within this local, noninteractive paint boundary. */
+.browser-start-atmosphere { position: absolute; z-index: -1; inset: 0 0 auto; height: min(720px, 100%); overflow: hidden; contain: strict; pointer-events: none; }
+.browser-start-atmosphere__plane { position: absolute; inset: -40px; contain: layout paint; transform: translate3d(0px, 0px, 0px); transition: transform 180ms ease-out; }
+.browser-start-atmosphere__light { position: absolute; inset: 0; background: radial-gradient(ellipse at 22% 15%, color-mix(in srgb, var(--green) 18%, transparent), transparent 55%), radial-gradient(ellipse at 80% 8%, color-mix(in srgb, var(--blue) 16%, transparent), transparent 55%); }
+.browser-start-atmosphere__lines { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--green); opacity: .13; }
+.browser-start-atmosphere__lines path { stroke: currentColor; stroke-width: .7; }
+.browser-start-atmosphere__lines circle { fill: currentColor; }
+.browser-start-page[data-background="true"] .browser-start-atmosphere { opacity: .45; }
+@media (prefers-reduced-motion: reduce) { .browser-start-atmosphere__plane { transition: none; } }
 .browser-start-page__input { display: flex; align-items: center; gap: var(--sp-4); width: min(640px, 100%); min-width: 0; min-height: 54px; padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius-lg); color: var(--text-3); background: var(--surface-1); box-shadow: var(--elev-2); }
 .browser-start-page__input:focus-within { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 .browser-start-page__input > svg { flex: none; }
