@@ -30,7 +30,7 @@ import { MOTE_COORDINATION_ROLE, PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_WIKI_PATH, SC
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import { composeAgentLaunchPrompt } from '@agentmux/core/agent-outbound-message'
 import { recordGoalCoordinationEvidence } from './helpers/goal-coordination-evidence'
-import { reduceAgentMembershipSnapshot } from '../src/renderer/src/lib/session-state.js'
+import { projectRuntimeEvent, reduceAgentMembershipSnapshot } from '../src/renderer/src/lib/session-state.js'
 import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices.js'
 import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -3437,4 +3437,143 @@ it.each(['stalled', 'failed', 'foreign'])('short Mote Wiki recovery %s retains h
   if(variant!=='foreign')expect(result).toHaveProperty('advisory',expect.stringMatching(/Wiki directory association is unconfirmed/))
   expect(client.ensureAgentContinuity).toHaveBeenCalledOnce();expect(client.ensureAgentContinuity.mock.calls[0]?.[0]).not.toHaveProperty('env.AGENTMUX_WIKI_DIR');expect(list).not.toHaveBeenCalled()
   await controller.dispose();vi.restoreAllMocks()
+})
+
+
+describe('tool execution Desktop boundary', () => {
+  beforeEach(() => {
+    runtimeFixture.FakeClient.instances.length = 0
+    runtimeFixture.FakeClient.failNextConnect = false
+    runtimeFixture.FakeClient.initializeNext = undefined
+    runtimeFixture.createdHosts.length = 0
+    vi.clearAllMocks()
+  })
+
+  async function fixture(agentHostId = 'local') {
+    const resourceHostId = agentHostId === 'local' ? 'remote' : 'local'
+    const launch = { id: 'agent-workspace', hostId: agentHostId, path: _hygiene_fixturePath('agent-workspace'), label: 'Agent' }
+    const resource = { id: 'tool-workspace', hostId: resourceHostId, path: _hygiene_fixturePath('tool-workspace'), label: 'Tools' }
+    const config: AppConfig = { ...localConfig, hosts: [...localConfig.hosts, remoteHost], workspaces: [launch, resource],
+      executors: { review: { label: 'Same name in App namespace', providerId: 'claude', command: 'wrong-app-command', args: [], env: {}, injectAgentMuxGuide: false } } }
+    const controller = new RuntimeController(store, localRuntimeConnector)
+    controller.commit(await controller.prepare(config))
+    const clients = Object.fromEntries(['local', 'remote'].map((hostId, index) => {
+      const client = runtimeFixture.FakeClient.instances[index]!
+      return [hostId, Object.assign(client, {
+        listHostExecutors: vi.fn(async () => ({ runtimeId: `${hostId}-runtime`, executors: [{ executorId: 'review', providerId: 'codex', configRevision: `${hostId}-revision` }] })),
+        agentCreationAuthority: vi.fn(async () => ({ runtimeId: `${hostId}-runtime` })),
+        resolveAgentCreationSessionId: vi.fn(async () => 'original-agent'),
+        createHostAgentWithDelivery: vi.fn(async () => { throw new Error('unbound creation') })
+      })]
+    }))
+    const request = { executorId: 'review', hostId: agentHostId, workspacePath: launch.path, executionWorkspaceId: launch.id,
+      toolWorkspace: { id: resource.id, hostId: resource.hostId, path: resource.path }, createOperationId: 'private:工具-open' }
+    const create = vi.fn(async (input: Parameters<NonNullable<Parameters<RuntimeController['launchAgent']>[3]>['create']>[0]) => ({
+      session: { ...agentStatusFixture().session, agentSessionId: input.agent.agentSessionId, hostId: 'local', workspacePath: launch.path,
+        creation: { createOperationId: input.agent.createOperationId, initialPrompt: 'not-requested' as const } }
+    }))
+    return { controller, config, request, create, clients, launch, resource }
+  }
+
+  it.each(['local', 'remote'])('uses the exact %s Core inventory with independently authorized tool owner', async hostId => {
+    const f = await fixture(hostId)
+    try {
+      const result = await f.controller.launchAgent(f.request, f.config, undefined, { create: f.create } as NonNullable<Parameters<RuntimeController['launchAgent']>[3]>)
+      const input = f.create.mock.calls[0]![0]
+      expect(input).toMatchObject({ agentHostId: hostId, agentRuntimeId: `${hostId}-runtime`, resourceHostId: f.resource.hostId,
+        resourceRuntimeId: `${f.resource.hostId}-runtime`, resourceWorkspacePath: f.resource.path,
+        agent: { executorId: 'review', executorRevision: `${hostId}-revision`, agentSessionId: 'original-agent', workspacePath: f.launch.path, createOperationId: f.request.createOperationId } })
+      expect(input.resourceGrant).toEqual({ scope: 'host-user', bindingId: input.bindingId })
+      expect(input.bindingId).toMatch(/^[a-zA-Z0-9_-]+$/u)
+      expect(input.bindingId).not.toEqual(f.request.createOperationId)
+      expect(input.agent).not.toHaveProperty('commandOverride')
+      expect(result.created.hostId).toBe(hostId)
+      expect(f.clients[hostId]!.listHostExecutors).toHaveBeenCalledOnce()
+      expect(f.clients[f.resource.hostId]!.agentCreationAuthority).toHaveBeenCalledOnce()
+      expect(f.clients[hostId]!.createAgent).not.toHaveBeenCalled()
+      expect(f.clients[hostId]!.createHostAgentWithDelivery).not.toHaveBeenCalled()
+    } finally { await f.controller.dispose() }
+  })
+
+  it('retains opaque operation IDs while binding identity is stable and Session specific', async () => {
+    const f = await fixture()
+    try {
+      const coordinator = { create: f.create } as NonNullable<Parameters<RuntimeController['launchAgent']>[3]>
+      for (const agentSessionId of ['original-agent', 'original-agent', 'another-agent']) {
+        await f.controller.launchAgent({ ...f.request, agentSessionId }, f.config, undefined, coordinator)
+      }
+      const inputs = f.create.mock.calls.map(([input]) => input)
+      expect(inputs.map(input => input.agent.createOperationId)).toEqual(Array(3).fill(f.request.createOperationId))
+      expect(inputs[0]!.bindingId).toBe(inputs[1]!.bindingId)
+      expect(inputs[0]!.bindingId).not.toBe(inputs[2]!.bindingId)
+      expect(inputs.every(input => input.resourceGrant.bindingId === input.bindingId)).toBe(true)
+    } finally { await f.controller.dispose() }
+  })
+
+  it('preserves the frozen inventory revision instead of replacing it with the latest revision', async () => {
+    const f = await fixture()
+    try {
+      await f.controller.launchAgent({ ...f.request, executorRevision: 'original-revision' }, f.config, undefined,
+        { create: f.create } as NonNullable<Parameters<RuntimeController['launchAgent']>[3]>)
+      expect(f.create.mock.calls[0]![0].agent.executorRevision).toBe('original-revision')
+    } finally { await f.controller.dispose() }
+  })
+
+  it.each(['tool-path', 'tool-host', 'agent-path', 'agent-host', 'duplicate-tool', 'duplicate-agent', 'caller', 'initial-message', 'coordinator'])(
+    'rejects only this new tool execution request for %s', async defect => {
+      const f = await fixture()
+      try {
+        const request = structuredClone(f.request) as Parameters<RuntimeController['launchAgent']>[0]
+        if (defect === 'tool-path') request.toolWorkspace!.path += '-replaced'
+        if (defect === 'tool-host') request.toolWorkspace!.hostId = 'local'
+        if (defect === 'agent-path') request.workspacePath += '-replaced'
+        if (defect === 'agent-host') f.config.workspaces[0]!.hostId = 'remote'
+        if (defect === 'duplicate-tool') f.config.workspaces.push({ ...f.resource })
+        if (defect === 'duplicate-agent') f.config.workspaces.push({ ...f.launch })
+        if (defect === 'caller') request.creationCaller = { agentSessionId: 'managed', capability: 'private-capability' }
+        if (defect === 'initial-message') request.initialMessage = { callerAgentSessionId: 'managed', capability: 'private-capability' }
+        await expect(f.controller.launchAgent(request, f.config, undefined, defect === 'coordinator' ? undefined :
+          { create: f.create } as NonNullable<Parameters<RuntimeController['launchAgent']>[3]>)).rejects.toMatchObject({
+          code: ['caller', 'initial-message', 'coordinator'].includes(defect) ? 'EXECUTION_RESOURCE_NOT_AUTHORIZED' : 'EXECUTION_BINDING_MISMATCH'
+        })
+        expect(f.create).not.toHaveBeenCalled()
+        for (const client of Object.values(f.clients)) {
+          expect(client.stopAgent).not.toHaveBeenCalled()
+          expect(client.stopTerminal).not.toHaveBeenCalled()
+          expect(client.dispose).not.toHaveBeenCalled()
+        }
+      } finally { await f.controller.dispose() }
+    })
+
+  it('keeps ordinary local launches on their original App executor path', async () => {
+    const f = await fixture()
+    try {
+      await expect(f.controller.launchAgent({ executorId: 'review', hostId: 'local', workspacePath: f.launch.path }, f.config)).rejects.toThrow('input capture')
+      expect(f.clients.local!.createAgent).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'claude', commandOverride: 'wrong-app-command' }))
+      expect(f.clients.local!.listHostExecutors).not.toHaveBeenCalled()
+      expect(f.create).not.toHaveBeenCalled()
+    } finally { await f.controller.dispose() }
+  })
+
+  it.each(['snapshot', 'recovery', 'event'] as const)('retains and independently clones toolExecution in %s projection', async mode => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!, status = agentStatusFixture()
+    const toolExecution = { bindingId: 'original-binding', resourceHostId: 'remote', resourceRuntimeId: 'resource-runtime', workspacePath: _hygiene_fixturePath('tool-workspace') }
+    const original = structuredClone(toolExecution)
+    const stored = { ...status.session, toolExecution }
+    client.agentSessions.mockReturnValue([stored])
+    client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: mode === 'recovery' ? [] : [{
+      subjectId: 'agent:local:agent-1', kind: 'agent', hostId: 'local', workspacePath: stored.workspacePath,
+      providerId: stored.providerId, executorId: stored.executorId, agentSession: mode === 'event' ? status.session : stored, run: status.run
+    }] })
+    try {
+      const snapshot = await controller.snapshot(localConfig)
+      const projected = mode === 'event' ? projectRuntimeEvent({ sessions: snapshot.sessions, timelines: snapshot.timelines,
+        pendingAgentLaunches: {}, tabs: {}, layouts: {}, viewModes: {} }, { hostId: 'local', event: { type: 'agent-session', session: stored } }).state.sessions[0]
+        : mode === 'recovery' ? snapshot.recoveryCandidates[0] : snapshot.sessions[0]
+      expect(projected?.toolExecution).toEqual(original)
+      toolExecution.workspacePath += '-changed'
+      expect(projected?.toolExecution).toEqual(original)
+      expect(projected?.workspacePath).toBe(status.session.workspacePath)
+    } finally { await controller.dispose() }
+  })
 })
