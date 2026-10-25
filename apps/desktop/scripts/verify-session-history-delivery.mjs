@@ -241,7 +241,7 @@ async function readSurface(processProbe) {
 }
 
 async function compiledCandidate() {
-  const coreFiles = ['client.js', 'agent-provider.js', 'session-history.js', 'providers/codex-native-history.js']
+  const coreFiles = ['client.js', 'agent-provider.js', 'session-history.js', 'providers/app-server-native-history.js']
   const core = Object.fromEntries(await Promise.all(coreFiles.map(async (file) => [file,
     hash(await readFile(resolve(desktopRoot, '../../packages/core/dist', file)))])))
   const assetRoot = join(desktopRoot, 'out/renderer/assets')

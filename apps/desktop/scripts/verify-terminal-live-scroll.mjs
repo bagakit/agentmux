@@ -35,9 +35,9 @@ const critical = [
   path.join(desktop, 'src/renderer/src/lib/idle-agent-restore-policy.ts'), path.join(desktop, 'src/renderer/src/lib/terminal-theme.ts'),
   path.join(root, 'packages/client-ui/src/theme/terminal-palettes.ts'), path.join(desktop, 'src/renderer/src/styles/activity.css'),
   path.join(desktop, 'src/preload/index.ts'), path.join(desktop, 'src/shared/contracts.ts'), productPreload,
-  core, ...['providers/codex.js', 'providers/codex-native-history.js', 'providers/codex-native-read.js', 'session-history.js', 'errors.js']
+  core, ...['providers/codex.js', 'providers/app-server-native-history.js', 'providers/app-server-native-read.js', 'session-history.js', 'errors.js']
     .map(name => path.join(root, 'packages/core/dist', name)),
-  ...['providers/codex.ts', 'providers/codex-native-history.ts', 'providers/codex-native-read.ts', 'session-history.ts', 'types.ts']
+  ...['providers/codex.ts', 'providers/app-server-native-history.ts', 'providers/app-server-native-read.ts', 'session-history.ts', 'types.ts']
     .map(name => path.join(root, 'packages/core/src', name)),
   path.join(pkg, 'package.json'), path.join(pkg, 'lib/xterm.mjs'), path.join(pkg, 'src/browser/CoreBrowserTerminal.ts'),
   electron
