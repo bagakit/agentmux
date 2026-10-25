@@ -242,6 +242,7 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
       <button type="button" className="mote-calendar__create" aria-label="New arrangement" title="New arrangement" onClick={() => prepare()}><Plus size={14} aria-hidden /><span>New<span className="mote-calendar__create-label"> arrangement</span></span></button>
     </header>
     <div className="mote-calendar__meta"><span className="mote-calendar__zone">{timezone}</span><span>{source.observed ? source.records.length + ' saved arrangements' : 'Arrangements unconfirmed'}</span></div>
+    {mode !== 'upcoming' && occurrences.some(item => item.omittedRepeat) ? <p className="mote-calendar__legend">Minute-based repetitions are not shown individually throughout this view. Open the arrangement to inspect its rule and next due time.</p> : null}
     {!queries.length || source.error ? <div className="calendar-schedules__notice" role="status"><p>{!queries.length ? scope.issue ?? scope.topic.readError ?? 'Mote directory scope is unconfirmed.' : source.error} Last confirmed arrangements are kept.</p>{queries.length ? <button type="button" className="small-button" onClick={source.refresh}>Retry arrangements</button> : null}</div> : null}
     {navigationIssue ? <p role="status" className="calendar-schedules__notice">{navigationIssue}</p> : null}
     {mode !== 'upcoming' && source.observed && !source.records.length ? <div className="mote-calendar__empty"><strong>No arrangements yet</strong><p>Choose a date and prepare a reminder for an original discussion.</p></div> : null}

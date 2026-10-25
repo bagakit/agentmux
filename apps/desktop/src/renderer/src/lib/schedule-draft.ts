@@ -8,7 +8,7 @@ export type ScheduleRequest =
   | { action: 'pause' | 'resume' | 'cancel'; params: ScheduleParamsMap['schedule.pause'] }
 export type ScheduleFormDraft = {
   open: boolean
-  timing: 'calendar' | 'afterMs'
+  timing: 'calendar' | 'afterMs' | 'everyMs'
   kind: 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly'
   timezone: string; time: string; date: string
   weekday: string; day: string; month: string; fold: 'earlier' | 'later'

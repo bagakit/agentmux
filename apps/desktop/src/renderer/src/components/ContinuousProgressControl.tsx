@@ -41,13 +41,13 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
   const [sourceRoot, setSourceRoot] = useState('')
   const [sourceId, setSourceId] = useState('')
   const [readerPath, setReaderPath] = useState('')
-  const hadLoop = useRef(false)
+  const hadLoop = useRef(false), edited = useRef(false), progressFormElement = useRef<HTMLFormElement>(null)
   const current = useRef(target); current.current = target
   const updates = useRef(0)
   const reads = useRef(new Map<string, Promise<ContinuousProgressLoop[]>>())
   useEffect(() => {
     updates.current++
-    hadLoop.current = false
+    hadLoop.current = false; edited.current = false
     setLoops([]); setError(undefined); setBusy(false); setPrompt(form.current.defaults.progressPrompt); setInterval(String(form.current.defaults.progressIntervalMs / 60_000)); setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
   }, [target])
   useEffect(() => {
@@ -99,6 +99,7 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
     if (loop) { hadLoop.current = true; return }
     if (observedTarget !== target || !hadLoop.current) return
     hadLoop.current = false
+    if (edited.current || progressFormElement.current?.contains(document.activeElement)) return
     const defaults = resolveAutomationPreferences(useAppStore.getState().config?.automation)
     form.current.defaults = defaults
     setInterval(String(defaults.progressIntervalMs / 60_000)); setPrompt(defaults.progressPrompt)
@@ -109,13 +110,11 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
   const combinedStatus = [status, calendarStatus].includes('unconfirmed') ? 'unconfirmed' : [status, calendarStatus].includes('active') ? 'active' : [status, calendarStatus].includes('paused') ? 'paused' : 'inactive'
   useEffect(() => { onStatusChange?.(combinedStatus) }, [onStatusChange, combinedStatus])
   const action = (kind: 'pause' | 'resume' | 'stop' | 'check') => loop && void run(() => api.continuousProgress.action(target, loop.loopId, kind, loop, mintObjectId()))
-  return <div className="continuous-progress-control" data-progress-state={status}>
-    <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={visible} />
-    {presented ? <>
-    <details className="continuous-progress-control__details" data-progress-details="interval" onToggle={event => event.stopPropagation()}>
-      <summary>Continuous progress <span>{status === 'unconfirmed' ? 'Unconfirmed' : displayed?.status === 'stopped' ? 'Stopped' : status === 'inactive' ? 'Not enabled' : status === 'active' ? 'Active' : 'Paused'}</span></summary>
-      <div className="continuous-progress-control__detail-body">
+  const progress = displayed || status === 'unconfirmed' ? <>
     {status === 'unconfirmed' ? <p className="continuous-progress-control__notice" role="status">Automatic progress is unconfirmed. {observedTarget !== target && !error ? 'Waiting for loop status. ' : ''}Manual input follows terminal readiness.{error ? ` ${error}` : ''}</p> : null}
+    <details className="continuous-progress-control__details" data-progress-details="interval" onToggle={event => event.stopPropagation()}>
+      <summary><span className="automation-progress__title">Continuous progress</span> <span>{status === 'unconfirmed' ? 'Unconfirmed' : displayed?.status === 'stopped' ? 'Stopped' : status === 'inactive' ? 'Not enabled' : status === 'active' ? 'Active' : 'Paused'}</span>{displayed ? <small className="automation-progress__summary">{displayed.prompt.split('\n')[0]} · every {displayed.intervalMs / 60000} min</small> : null}</summary>
+      <div className="continuous-progress-control__detail-body">
     {displayed ? <ContinuousProgressPanel loop={{ loopId: displayed.loopId, providerLabel: agentProviderLabel(session.providerId),
       executionState: session.status.state, loopState: displayed.status,
       ...(displayed.status === 'active' && status !== 'unconfirmed' ? { nextCheckAt: displayed.nextCheckAt } : {}),
@@ -136,7 +135,10 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
         </dl> : <p className="continuous-progress-control__help">No task source bound. Periodic continuation only.</p>}
       </div>
     </details> : null}
-    {!loop ? <form onSubmit={event => { event.preventDefault(); void run(() => api.continuousProgress.create(target, Number(interval) * 60_000, prompt, bindSource ? { root: sourceRoot, ownerId: sourceId, readerPath } : undefined)) }}>
+      </div>
+    </details>
+  </> : null
+  const progressForm = <form ref={progressFormElement} aria-label="Continuous progress setup" onChange={() => { edited.current = true }} onSubmit={event => { event.preventDefault(); if (!loop) void run(() => api.continuousProgress.create(target, Number(interval) * 60_000, prompt, bindSource ? { root: sourceRoot, ownerId: sourceId, readerPath } : undefined)) }}>
       <section className="continuous-progress-control__group" aria-label="Continuation settings">
         <h4>Continuation settings</h4>
         <label className="continuous-progress-control__interval">Check every (minutes)<TextInput type="number" min="1" value={interval} onChange={event => setInterval(event.target.value)} /></label>
@@ -151,10 +153,14 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
           <label>Public Tracker script<TextInput aria-label="Public Tracker script" value={readerPath} onChange={event => setReaderPath(event.target.value)} /></label>
         </div> : <p className="continuous-progress-control__help">Periodic continuation only. This loop is not bound to a business task source.</p>}
       </section>
-        <button type="submit" className="small-button" disabled={busy || !prompt.trim() || (bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))}>Enable continuous progress</button>
-      </form> : null}
-      </div>
-    </details>
+        {loop ? <p className="continuous-progress-control__help">Continuous progress is already configured above. Your draft is kept.</p> : null}
+        <button type="submit" className="small-button" disabled={!!loop || busy || !prompt.trim() || (bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))}>Enable continuous progress</button>
+      </form>
+  return <div className="continuous-progress-control" data-progress-state={status}>
+    <div className="automation-target"><span>Sending to</span><strong>{session.label}</strong><small>{target.agentSessionId}</small></div>
+    <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={visible} unified
+      progress={presented ? progress : null} progressForm={presented ? progressForm : null} />
+    {presented ? <>
     <details className="continuous-progress-control__details" data-progress-details="target" onToggle={event => event.stopPropagation()}>
       <summary>Target details</summary>
       <dl className="continuous-progress-control__detail-body">
