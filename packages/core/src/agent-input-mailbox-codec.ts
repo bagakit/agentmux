@@ -25,7 +25,7 @@ function count(v: unknown): asserts v is number { if (!Number.isSafeInteger(v) |
 
 /** A complete original input, never an incomplete transport fragment. */
 export function parseAgentInputMailboxItem(value: unknown, agentSessionId: string): AgentInputMailboxItem {
-    const entry = object(value, ['kind', 'sequence', 'recordedAt', 'intent', 'message', 'receipt', 'key', 'record', 'sourceChannel', 'sourceDevice', 'failure'])
+    const entry = object(value, ['kind', 'sequence', 'recordedAt', 'intent', 'message', 'receipt', 'key', 'record', 'sourceChannel', 'sourceDevice', 'failure','moteObservationId'])
     count(entry.sequence); if (entry.sequence < 1) fail()
     if (typeof entry.recordedAt !== 'number' || !Number.isFinite(entry.recordedAt) || entry.recordedAt < 0) fail()
     if (entry.failure !== undefined) parseDeliveryFailure(entry.failure)
@@ -87,6 +87,7 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
           record.admission?.inputKey && !dequal(record.admission.inputKey, key)) fail()
       }
     }
+    if(entry.moteObservationId!==undefined && (entry.kind!=='submission'||typeof entry.moteObservationId!=='string'||!entry.moteObservationId)) fail()
     if (key.agentSessionId !== agentSessionId) fail()
     return (displaySource ? { ...entry, intent: { ...(entry.intent as Record<string, unknown>), source: displaySource } } : value) as AgentInputMailboxItem
 }

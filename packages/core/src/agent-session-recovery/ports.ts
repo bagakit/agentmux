@@ -87,7 +87,7 @@ export type AgentSessionRecoveryPorts = {
     continueInitialInput(session: AgentMuxStoredAgentSession, run: CtxmuxAdapterRun,
     assertCurrent?: () => Promise<void>): Promise<AgentMuxStoredAgentSession>;
     inspectAgentPromptSubmission(key: AgentPromptInputKey): Promise<import('../types.js').AgentPromptSubmissionRecord | null>;
-    submitAgentPrompt(input: RecoveryPromptInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt>;
+    submitAgentPrompt(input: RecoveryPromptInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt | import('../mote-input.js').MoteInputSubmissionReference>;
     deliverPostLaunchPrompt(
     provider: AgentProvider,
     session: AgentMuxAgentSession,

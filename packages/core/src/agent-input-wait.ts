@@ -107,6 +107,7 @@ export type AgentInputWaitStopReceipt = {
 }
 /** Admission is a projection of the original Session owner, never journal outcome. */
 export type AgentInputSubmissionReceipt = {
+  moteObservationId?: string
   key: AgentPromptInputKey
   ref: AgentInputWaitRef
   originalControlOperationId?: string

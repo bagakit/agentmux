@@ -31,6 +31,8 @@ import { unavailableDiagnosticEvidence } from '@agentmux/diagnostic-evidence'
 import type { ReadingDiagnosticExactTarget, ReadingDiagnosticFindParams, ReadingDiagnosticFindResult } from './reading-diagnostic-query.js'
 import { runAgentMessageBroadcast, type AgentMuxMessageBroadcastInput, type AgentMuxMessageBroadcastReceipt } from './agent-message-broadcast.js'
 import { AgentMuxMessageNotifications } from './agent-message-notifications.js'
+import { MoteInputOwner, type AutomaticInputOpportunity } from './mote-input-owner.js'
+import { moteInputObservationId, moteInputMember, type MoteInputOrigin, type MoteInputInspection, type AgentInputMoteResolver } from './mote-input.js'
 import type { AgentMuxMessageNotification } from './agent-message-notification.js'
 import { isMessageNotificationInput } from './agent-message-notification.js'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontend } from './agent-terminal-frontend.js'
@@ -366,6 +368,8 @@ type AgentMuxAgentPromptContent = {
   operationId: string
   /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
+  /** Original selected Mote workface; the Host verifies its primary and membership. */
+  moteSource?: import('./mote-input.js').AgentInputMoteSource
   sourceDevice?: import('./types.js').AgentOperationDevice
   sourceChannel?: import('./types.js').AgentMessageChannel
   /** Explicit host-generated context; a tag inside prompt cannot supply this fact. */
@@ -408,6 +412,9 @@ export type AgentMuxAgentMessageSubmission = {
 export type AgentMuxAgentMessageInput = AgentMuxAgentMessageSubmission & { agentSessionId: string }
 
 export type AgentMuxAgentInteractionInput = AgentMuxInteractionOperationIntent & {
+  /** Trusted Host attribution, not an unmanaged RPC argument. */
+  authorHuman?: true
+  moteSource?: import('./mote-input.js').AgentInputMoteSource
   agentSessionId: string
   expectedRun: AgentMuxRunRef
   response: AgentMuxInteractionResponse
@@ -457,6 +464,7 @@ function rawInputCancellationDetail(session: AgentMuxAgentSession, data: AgentMu
 }
 
 export type AgentMuxClientOptions = {
+  moteInputResolver?: AgentInputMoteResolver
   inputResources?: AgentInputResourceOwner
   /** Complete Host exports before freezing a new execution; original reads and healthy Runs stay available. */
   prepareExecutionEnvironment?: () => Promise<void>
@@ -773,6 +781,7 @@ export class AgentMuxClient {
   private messageEventReaders = 0
   private messageLegacyEventReaders = 0
   private readonly messageNotifications: AgentMuxMessageNotifications
+  private readonly moteInputs: MoteInputOwner
   private readonly messageNotificationsUnsubscribe: () => void
   private messageObservationDisposed = false
   private messageObservation: ReturnType<typeof observeMessageJournal> | undefined
@@ -1139,27 +1148,7 @@ export class AgentMuxClient {
     })
     this.messageNotifications = new AgentMuxMessageNotifications({ queue: this.messageQueue,
       connected: () => this.connected && this.kernel.isConnected(),
-      read: async id => {
-        if (!this.registry.has(id)) return null
-        const current = await this.registry.refresh(id, this.registry.get(id).run)
-        const run = await this.requireCurrentAgentRun(current)
-        const session = this.projectSession(current)
-        const provider = this.providers.get(session.providerId)
-        const observation = { session, inputByte: run.acceptedInputBytes }
-        if (!provider.prepareNativeInput) return { ...observation, unavailable: new AgentMuxError(
-          'This Provider has not contributed the queue adapter required for automatic idle-only Inbox notifications.',
-          'AGENT_NATIVE_INPUT_UNAVAILABLE') }
-        if (agentTurnCompletionIdentity(session)) return observation
-        if (session.semanticStatus?.state === 'working' || session.currentActivity?.state === 'active') {
-          return observation
-        }
-        try {
-          const evidence = await provider.readPromptExecutionEvidence?.(this.providerNativeContext(session, run))
-          if (evidence?.state === 'idle') return { ...observation, nativeIdle: evidence }
-          if (!evidence) return { ...observation, unavailable: new AgentMuxError('The Provider initial idle opportunity is unconfirmed. Inspect the original Session or read its retained Inbox.', 'AGENT_TURN_END_UNCONFIRMED') }
-          return observation
-        } catch (error) { return { ...observation, unavailable: error } }
-      },
+      read: id => this.readAutomaticInputOpportunity(id),
       submit: notice => this.submitMessageNotification(notice),
       inputAbsent: async key => !await this.inspectAgentPromptSubmission(key),
       unavailable: (agentSessionId, error, run) => this.publisher.publish({ type: 'agent-error',
@@ -1167,9 +1156,25 @@ export class AgentMuxClient {
         message: `Inbox notification is unconfirmed. Original messages and healthy manual input are retained; read the original MID or explicitly notify it. ${error instanceof Error ? error.message : String(error)}`,
         evidence: { source: 'agentmux', observedAt: Date.now(), ...(run ? { run } : {}) } })
     })
+    this.moteInputs = new MoteInputOwner({queue:this.messageQueue,...(options.moteInputResolver ? {capture:options.moteInputResolver} : {}),
+      readSource: origin => this.readMoteInputSource(origin),
+      sourceExists: async origin => origin.kind === 'prompt'
+        ? Boolean(await this.messageQueue.inspectInput({key:origin.key}) || await this.inspectAgentPromptSubmission(origin.key))
+        : Boolean(await this.inspectAgentInteractionOperation({agentSessionId:origin.agentSessionId,operationId:origin.operationId})),
+      checkpoint: async (agentSessionId,signal) => (await this.conversationCheckpoint({hostId:'local',agentSessionId},signal ? {signal} : {})).checkpoint,
+      original: (input,signal) => this.readAgentConversation(input,{signal}),
+      release: (input) => this.releaseConversationView(input),
+      changes: (input,signal) => this.readConversationChanges(input,{signal}),
+      watch: (agentSessionId,changed) => this.observeConversation({hostId:'local',agentSessionId},() => changed()),
+      opportunity: id => this.readAutomaticInputOpportunity(id),
+      submit: notice => this.submitMessageNotification(notice), inspectNotice: operationId => this.inspectMessageNotification({operationId}),
+      issue: (agentSessionId,message) => this.publisher.publish({type:'agent-error',...(agentSessionId ? {agentSessionId} : {}),
+        code:'MOTE_INPUT_OBSERVATION_UNCONFIRMED',message:`Mote coordination is unconfirmed. Original member input and healthy Agents remain available. Inspect the original Mote input observation. ${message}`,
+        evidence:{source:'agentmux',observedAt:Date.now()}})})
     this.messageNotificationsUnsubscribe = this.publisher.onStatusEvent(event => {
-      if (event.type === 'agent-session') this.messageNotifications.changed(event.session.agentSessionId)
-      else if (event.type === 'connection-state' && event.state === 'restored') void this.messageNotifications.restore()
+      if (event.type === 'agent-session') { this.messageNotifications.changed(event.session.agentSessionId); this.moteInputs.changed(event.session.agentSessionId) }
+      else if (event.type === 'agent-input' || event.type === 'agent-input-recorded') this.moteInputs.changed(event.type === 'agent-input' ? event.receipt.key.agentSessionId : event.agentSessionId)
+      else if (event.type === 'connection-state' && event.state === 'restored') { void this.messageNotifications.restore(); void this.moteInputs.restore() }
     })
   }
 
@@ -1394,6 +1399,7 @@ export class AgentMuxClient {
       this.connectionNeedsObservation = false
       this.connectionHealthySince = Date.now()
       void this.messageNotifications.restore()
+      void this.moteInputs.restore()
       this.recovery.restore(this.registry.list())
       for (const session of this.registry.list()) {
         if (runs.some(run => run.runId === session.run.runId && run.state.type === 'running')) {
@@ -2034,6 +2040,7 @@ export class AgentMuxClient {
     void this.startupDiagnostics.dispose()
     this.messageNotificationsUnsubscribe()
     await this.messageNotifications.dispose()
+    await this.moteInputs.dispose()
     this.messageObservationDisposed = true; this.messageObservation?.dispose(); this.messageObservation = undefined
     await this.recovery.dispose()
     this.inputWaitingDisposed = true
@@ -5796,7 +5803,71 @@ export class AgentMuxClient {
       : input.terminalData, 'user', 'paste', readInputObservationField(input), call)
   }
 
-  async submitAgentPrompt(input: AgentMuxAgentPromptInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt> {
+  private async readAutomaticInputOpportunity(id: string): Promise<AutomaticInputOpportunity | null> {
+    if (!this.registry.has(id)) return null
+    const current = await this.registry.refresh(id, this.registry.get(id).run)
+    const run = await this.requireCurrentAgentRun(current)
+    const session = this.projectSession(current)
+    const provider = this.providers.get(session.providerId)
+    const observation = { session, inputByte: run.acceptedInputBytes }
+    if (!provider.prepareNativeInput) return { ...observation, unavailable: new AgentMuxError(
+      'This Provider has not contributed the queue adapter required for automatic idle-only Inbox notifications.',
+      'AGENT_NATIVE_INPUT_UNAVAILABLE') }
+    if (agentTurnCompletionIdentity(session)) return observation
+    if (session.semanticStatus?.state === 'working' || session.currentActivity?.state === 'active') {
+      return observation
+    }
+    try {
+      const evidence = await provider.readPromptExecutionEvidence?.(this.providerNativeContext(session, run))
+      if (evidence?.state === 'idle') return { ...observation, nativeIdle: evidence }
+      if (!evidence) return { ...observation, unavailable: new AgentMuxError('The Provider initial idle opportunity is unconfirmed. Inspect the original Session or read its retained Inbox.', 'AGENT_TURN_END_UNCONFIRMED') }
+      return observation
+    } catch (error) { return { ...observation, unavailable: error } }
+  }
+  private async readMoteInputSource(origin: MoteInputOrigin): Promise<{input: import('./mote-input.js').MoteInputObservation['input']; key?: AgentPromptInputKey; text:string|null; confirmedQuestion?:import('./mote-input.js').MoteInputObservation['confirmedQuestion']; result?: import('./mote-input.js').MoteInputObservation['result']}> {
+    if (origin.kind === 'interaction') {
+      const receipt = await this.inspectAgentInteractionOperation({agentSessionId:origin.agentSessionId,operationId:origin.operationId})
+      if (!receipt || receipt.run.runId !== origin.runId || ['saved','unknown'].includes(receipt.delivery)) return {input:'unconfirmed',text:null}
+      if(receipt.authorHuman!==true)return {input:'interaction-confirmed',text:null}
+      return {input:'interaction-confirmed',text:null,result:{kind:'interaction',requestId:receipt.response.requestId,responseKind:receipt.response.kind,
+        delivery:receipt.delivery,nativeAdoption:receipt.nativeAdoption,nativeCompleted:Boolean(receipt.nativeCompleted),
+        ...(receipt.response.kind === 'permission' ? {decision:receipt.response.decision.outcome === 'selected' ? receipt.response.decision.optionId : 'cancelled'} : {})}}
+    }
+    const saved = await this.messageQueue.inspectInput({key:origin.key})
+    const key = saved ? agentInputDeliveryKey(saved.control) : origin.key
+    const receipt = await this.inspectAgentInput({key:origin.key}), claim = receipt?.admission ?? await this.inspectAgentPromptSubmission(key)
+    const source = saved?.intent.source.kind === 'prompt' ? saved.intent.source : undefined
+    const message = claim?.admission?.intent?.message ?? claim?.launch?.message
+    const status = receipt?.status ?? (claim?.admission?.acknowledged
+      ? claim.admission.transport === 'native' && claim.admission.native.outcome === 'admitted' ? 'admitted'
+        : claim.admission.transport === 'pty' ? 'terminal-confirmed' : 'unknown' : 'unknown')
+    if(source?.authorHuman!==true && message?.authorHuman!==true)return {input:status==='unknown'?'unconfirmed':status,text:null,key}
+    const question=message?.questionReply
+    return {input:status === 'unknown' ? 'unconfirmed' : status,text:question ? null : source?.prompt ?? message?.userContent ?? null,key,
+      ...(question && status === 'admitted' ? {confirmedQuestion:{source:question.source,turnId:question.turnId,recordId:question.recordId,questionIds:question.questionIds}} : {})}
+  }
+  async inspectMoteInput(input: {agentSessionId:string; observationId:string; caller?:{agentSessionId:string;capability:string}}): Promise<MoteInputInspection|null> {
+    const original = await this.messageQueue.readMoteInputObservation(safeId(input.observationId,'Original Mote input observation'))
+    if (!original) return null
+    if (moteInputMember(original.origin) !== input.agentSessionId) throw new AgentMuxError('The original input observation belongs to another member.', 'MOTE_INPUT_OBSERVATION_MISMATCH')
+    if (input.caller) {
+      await this.authorizeRetainedAgentCaller(input.caller.capability,input.caller.agentSessionId)
+      if (input.caller.agentSessionId !== input.agentSessionId && (original.binding?.primary.hostId !== 'local' || input.caller.agentSessionId !== original.binding.primary.agentSessionId))
+        throw new AgentMuxError('Only this original member or its frozen primary may read this shared input observation.', 'CONTROL_PERMISSION_DENIED')
+    }
+    return await this.moteInputs.inspect(original.id)
+  }
+
+  async submitAgentPrompt(input: AgentMuxAgentPromptInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt | import('./mote-input.js').MoteInputSubmissionReference> {
+    const origin: MoteInputOrigin = {kind:'prompt',key:{kind:'prompt',agentSessionId:input.agentSessionId,expectedRun:input.expectedRun,submissionId:input.operationId}}
+    const observationId = await this.moteInputs.prepare(origin,input.moteSource,input.authorHuman === true && !context?.externalAuthor)
+    try {
+      const receipt = await this.submitAgentPromptOwned(input,context)
+      return observationId ? receipt ? {...receipt,moteObservationId:observationId} : {moteObservationId:observationId,inputKey:origin.key} : receipt
+    }
+    finally { if (input.moteSource) this.moteInputs.changed(input.agentSessionId) }
+  }
+  private async submitAgentPromptOwned(input: AgentMuxAgentPromptInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt> {
     context?.requestSignal?.throwIfAborted()
     let authority = this.inputCallAuthority(undefined, context)
     if ('inputContextSource' in input || 'inputContextCaptureProof' in input || 'promptWire' in input) throw new AgentMuxError('Input producer facts come from the original Host, not prompt arguments.', 'INVALID_AGENT_PROMPT')
@@ -5969,7 +6040,8 @@ export class AgentMuxClient {
         let record: import('./types.js').AgentPromptSubmissionRecord | null = null, failure: ReturnType<typeof deliveryFailure> | undefined
         try { record = await this.inspectAgentPromptSubmission(original.key); if (!record) throw new AgentMuxError('The original accepted admission is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED') }
         catch (error) { failure = deliveryFailure(error) }
-        item = { kind: 'submission', sequence, recordedAt, key: original.key, record, ...(failure ? { failure } : {}) }
+        const observation=await this.messageQueue.readMoteInputObservation(moteInputObservationId({kind:'prompt',key:original.key})).catch(()=>null)
+        item = { kind: 'submission', sequence, recordedAt, key: original.key, record, ...(observation ? {moteObservationId:observation.id} : {}), ...(failure ? { failure } : {}) }
       } else {
         let receipt: AgentInputSubmissionReceipt | null = null, failure: ReturnType<typeof deliveryFailure> | undefined
         try { receipt = await this.inspectAgentInput({ key: original.intent.key }); if (!receipt) throw new AgentMuxError('The original input receipt is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED') }
@@ -6029,7 +6101,10 @@ export class AgentMuxClient {
       persistence: 'confirmed', status, admission, observation: saved.control.state !== 'enabled' || admission ? 'closed'
         : this.inputWaitingContexts.has(agentInputJournalKey(saved.intent.key)) ? 'owned' : 'rejoin-needed',
       ...(saved.intent.source.kind === 'message' ? { originalControlOperationId: saved.intent.source.originalControlOperationId } : {}) }
-    return receipt
+    try {
+      const observation = await this.messageQueue.readMoteInputObservation(moteInputObservationId({kind:'prompt',key:saved.intent.key}))
+      return observation ? {...receipt,moteObservationId:observation.id} : receipt
+    } catch { return receipt } // Original input receipt remains authoritative if supplementary observation is unavailable.
   }
 
   /** Materialize the original journal into the existing captured source, never another input owner. */
@@ -6594,6 +6669,14 @@ export class AgentMuxClient {
 
   /** Route an exact historical question reply without guessing the live terminal's active editor. */
   async replySessionQuestion(input: AgentMuxSessionQuestionReplyInput, context?: AgentInputCallContext): Promise<AgentSessionQuestionReplyReceipt> {
+    const observationId = await this.moteInputs.prepare({kind:'prompt',key:{kind:'prompt',agentSessionId:input.agentSessionId,expectedRun:input.expectedRun,submissionId:input.operationId}},input.moteSource,input.authorHuman === true && !input.externalAction)
+    try {
+      const receipt = await this.replySessionQuestionOwned(input,context)
+      return observationId ? {...receipt,moteObservationId:observationId} : receipt
+    }
+    finally { if (input.moteSource) this.moteInputs.changed(input.agentSessionId) }
+  }
+  private async replySessionQuestionOwned(input: AgentMuxSessionQuestionReplyInput, context?: AgentInputCallContext): Promise<AgentSessionQuestionReplyReceipt> {
     const condition = validateAgentPromptCondition(input)
     input = { ...input, ...condition, source: { ...input.source },
       answers: Array.isArray(input.answers) ? input.answers.map(answer => ({ ...answer })) : input.answers }
@@ -6954,7 +7037,11 @@ export class AgentMuxClient {
     notification: AgentMuxMessageNotification | null; inputOrigin: import('./agent-input-conversation.js').AgentInputJournalCut | null; input: import('./types.js').AgentPromptSubmissionRecord | null
   }> {
     const notification = await this.messageQueue.readNotification(safeId(input.operationId, 'Notification operation ID'))
-    await this.messageNotificationAuthority(notification ? await this.messageQueue.readNotificationMessages(notification.messageIds) : [], input.caller)
+    if (notification?.moteObservation && input.caller) {
+      const observation = await this.messageQueue.readMoteInputObservation(notification.moteObservation.id)
+      await this.authorizeAgentCaller(input.caller.capability,input.caller.agentSessionId)
+      if (!observation?.binding || input.caller.agentSessionId !== moteInputMember(observation.origin) && (observation.binding.primary.hostId !== 'local' || input.caller.agentSessionId !== observation.binding.primary.agentSessionId)) throw new AgentMuxError('Only an original member or primary may inspect this coordination notification.', 'MESSAGE_PARTICIPANT_MISMATCH')
+    } else await this.messageNotificationAuthority(notification ? await this.messageQueue.readNotificationMessages(notification.messageIds) : [], input.caller)
     if (!notification) return { notification: null, inputOrigin: null, input: null }
     const inputOrigin = await this.messageQueue.readConversationInputOrigin(notification.key)
     const record = await this.inspectAgentPromptSubmission(notification.key)
@@ -7128,6 +7215,11 @@ export class AgentMuxClient {
   }
 
   async respondAgentInteraction(input: AgentMuxAgentInteractionInput, context?: AgentInputCallContext): Promise<AgentMuxInteractionOperationReceipt> {
+    const observationId = await this.moteInputs.prepare({kind:'interaction',agentSessionId:input.agentSessionId,runId:input.expectedRun.runId,operationId:input.operationId},input.moteSource,input.authorHuman === true && !input.externalAction)
+    try { return await this.respondAgentInteractionOwned(input,context,observationId) }
+    finally { if (input.moteSource) this.moteInputs.changed(input.agentSessionId) }
+  }
+  private async respondAgentInteractionOwned(input: AgentMuxAgentInteractionInput, context?: AgentInputCallContext, observationId?: string): Promise<AgentMuxInteractionOperationReceipt> {
     if (typeof input.operationId !== 'string' || !input.operationId || Buffer.byteLength(input.operationId) > 512 || /[\0\r\n]/u.test(input.operationId)) {
       throw new AgentMuxError('A stable interaction operation ID is required.', 'INVALID_AGENT_INTERACTION_RESPONSE')
     }
@@ -7173,6 +7265,8 @@ export class AgentMuxClient {
       }
       return { ...current, interactionOperations: { ...current.interactionOperations, [input.operationId]: {
         operationId: input.operationId, agentSessionId: input.agentSessionId, run: input.expectedRun,
+        ...(input.authorHuman === true && !input.externalAction ? {authorHuman:true as const} : {}),
+        ...(observationId ? {moteObservationId:observationId} : {}),
         expectedRequest: structuredClone(expected), response: structuredClone(response),
         ...(input.externalAction ? { externalAction: structuredClone(input.externalAction) } : {}),
         ...(current.nativeHandle ? { nativeHandle: current.nativeHandle } : {}), delivery: 'saved', nativeAdoption: 'unknown' } }, updatedAt: Date.now() }

@@ -244,7 +244,7 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'agent.native.history': import('./public-rpc-native-history.js').AgentMuxRpcNativeHistoryParams
   'agent.native.history.resource': import('./public-rpc-native-history.js').AgentMuxRpcNativeHistoryResourceParams
   'agent.context': import('./agent-context.js').AgentContextParams
-  'agent.interaction.respond': import('./client.js').AgentMuxAgentInteractionInput
+  'agent.interaction.respond': Omit<import('./client.js').AgentMuxAgentInteractionInput,'authorHuman'>
   'agent.interaction.inspect': { agentSessionId: string; operationId: string }
   'agent.question.reply': Omit<import('./client.js').AgentMuxSessionQuestionReplyInput, 'authorHuman' | 'sourceDevice' | 'signal' | 'commandOverride' | 'args' | 'env'>
   'agent.history.resource': import('./session-history-resource.js').AgentSessionHistoryResourceParams
@@ -270,6 +270,7 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'browser.input.inspect': import('./agent-input-context-capture.js').AgentInputContextCaptureReference
   'agent.input.resource': import('./agent-input-resource.js').AgentInputResourceRead
   'agent.input.inspect': import('./agent-input-wait.js').AgentInputSelector
+  'agent.input.observation': {agentSessionId:string;observationId:string}
   'agent.input.stop': { ref: import('./agent-input-wait.js').AgentInputWaitRef; cancelOperationId: string }
   'agent.input.rejoin': { ref: import('./agent-input-wait.js').AgentInputWaitRef }
   'agent.send': { target: AgentMuxMessageTarget; text: string; operationId: string;
@@ -370,7 +371,8 @@ type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'agent.automation.inspect': import('./agent-automation.js').AgentAutomationPauseInspection
   'browser.input.inspect': import('./agent-input-context-capture.js').AgentInputContextCaptureRead
   'agent.input.resource': import('./agent-input-resource.js').AgentInputResourceResult
-  'agent.input.inspect': { record: Awaited<ReturnType<AgentMuxClient['inspectAgentPromptSubmission']>>; input?: import('./agent-input-wait.js').AgentInputSubmissionReceipt | null }
+  'agent.input.inspect': { moteObservationId?:string; record: Awaited<ReturnType<AgentMuxClient['inspectAgentPromptSubmission']>>; input?: import('./agent-input-wait.js').AgentInputSubmissionReceipt | null }
+  'agent.input.observation': {inspection:import('./mote-input.js').MoteInputInspection|null}
   'agent.input.stop': import('./agent-input-wait.js').AgentInputWaitStopReceipt
   'agent.input.rejoin': import('./agent-input-wait.js').AgentInputSubmissionReceipt
   'agent.send': AgentMuxMessageReceipt & { agentSessionId?: string; inputReceipt?: import('./agent-input-wait.js').AgentInputSubmissionReceipt }
@@ -456,6 +458,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   whoami: 'short', 'skill.ls': 'long', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.creation.continue': 'short', 'agent.execution.inspect': 'short', 'agent.execution.create': 'long', 'agent.execution.binding': 'short', 'agent.execution.rejoin': 'long', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.record': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short', 'agent.spawn.ls': 'short',
   'agent.automation.pause': 'short', 'agent.automation.inspect': 'short',
+  'agent.input.observation': 'short',
   'agent.input.changes': 'short', 'agent.input.ls': 'short', 'agent.input.submit': 'long', 'agent.input.inspect': 'short', 'agent.input.resource': 'long', 'agent.input.stop': 'short', 'agent.input.rejoin': 'long', 'agent.send': 'long', 'agent.broadcast': 'long', 'agent.broadcast.inspect': 'short', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'browser.input.inspect': 'long',
   'app.mobile.assets.inspect': 'short',

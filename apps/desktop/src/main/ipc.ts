@@ -1859,6 +1859,10 @@ export async function registerIpc(args: {
     requireTrustedSender('sessions:inputMailbox', event)
     return await args.runtime.inputMailbox(session, options)
   })
+  handleWithEvent('sessions:inspectMoteInput', async (event, session: import('../shared/contracts.js').SessionHistoryReference, observationId: string) => {
+    requireTrustedSender('sessions:inspectMoteInput',event)
+    return await args.runtime.inspectMoteInput(session,observationId)
+  })
   handleWithEvent('sessions:inspectInput', async (event, session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) => sessionInputOperationResult(async () => {
     assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.inspectInput(session, key)
@@ -1871,11 +1875,15 @@ export async function registerIpc(args: {
     assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.rejoinInputWaiting(session, ref)
   }))
-  handle('sessions:respondInteraction', async (
+  handleWithEvent('sessions:respondInteraction', async (
+    event,
     session: AgentSessionControl,
     response: AgentMuxInteractionResponse,
-    intent: import('@agentmux/core').AgentMuxInteractionOperationIntent
-  ) => await args.runtime.respondInteraction(session, response, intent))
+    intent: import('@agentmux/core').AgentMuxInteractionOperationIntent & {moteSource?:import('@agentmux/core').AgentInputMoteSource}
+  ) => {
+    assertManualPromptSenderTrusted(event.sender, contents)
+    return await args.runtime.respondInteraction(session, response, intent)
+  })
   handle('sessions:inspectInteraction', async (session: AgentSessionControl, operationId: string) => await args.runtime.inspectInteraction(session, operationId))
   handle('sessions:setPosture', async (session: AgentSessionControl, modeId: string) => {
     await args.runtime.setPosture(session, modeId)

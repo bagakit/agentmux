@@ -38,6 +38,7 @@ import { isConnectionMethod, parseConnectionParams, parseConnectionResult } from
 import { parseConversationReadPage } from './conversation.js'
 import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
 import { parseAgentInputSubmissionReceipt as inputReceipt } from './agent-input-receipt-codec.js'
+import { parseMoteInputObservation, moteInputMember } from './mote-input.js'
 import { isGoalDelegationMethod } from './goal-delegation-methods.js'
 import { parseGoalDelegationParams, parseGoalDelegationResult } from './goal-delegation.js'
 import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWriteResult } from './mote-avatar-write.js'
@@ -548,7 +549,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.question.reply': {
-        record(p, ['agentSessionId', 'source', 'recordId', 'questionIds', 'operationId', 'outcome'])
+        record(p, ['agentSessionId', 'source', 'recordId', 'questionIds', 'operationId', 'outcome', 'moteObservationId'])
+        if (p.moteObservationId !== undefined) string(p.moteObservationId)
         const source = record(p.source, ['providerId', 'nativeSessionId']), expected = record(input.source)
         string(source.providerId); string(source.nativeSessionId)
         if (!rpcSessionTargetMatches(input.agentSessionId, String(p.agentSessionId)) || p.recordId !== input.recordId ||
@@ -701,7 +703,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       }
       case 'agent.automation.pause': case 'agent.automation.inspect': { parseAgentAutomationInspection(p, parseAgentAutomationTarget(input)); break }
       case 'agent.input.submit': {
-        record(p, ['key', 'record', 'input'])
+        record(p, ['key', 'record', 'input','moteObservationId'])
+        if(p.moteObservationId!==undefined)string(p.moteObservationId)
         const key = validateAgentPromptInputKey(p.key)
         if (key.kind !== 'prompt' || key.agentSessionId !== input.agentSessionId || key.submissionId !== input.operationId || !isDeepStrictEqual(key.expectedRun, input.expectedRun)) fail()
         if (key.kind !== 'prompt') return fail()
@@ -736,8 +739,27 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.input.resource': return parseAgentInputResourceResult(value, parseAgentInputResourceRead(params)) as unknown as Record<string, unknown>
+      case 'agent.input.observation': {
+        record(p,['inspection'])
+        if (p.inspection !== null) {
+          const read = record(p.inspection,['observation','inputText','notices'])
+          const original = parseMoteInputObservation(read.observation)
+          if (original.id !== input.observationId || moteInputMember(original.origin) !== input.agentSessionId ||
+              read.inputText !== null && typeof read.inputText !== 'string') fail()
+          const notices = record(read.notices,['input','result'])
+          for (const phase of ['input','result']) if (notices[phase] !== undefined) {
+            const notice = record(notices[phase],['state','notificationId','key','reason','mode','preparedAt','resultRecordedAt'])
+            if (notice.notificationId !== original.notices[phase as 'input'|'result']) fail()
+            member(notice.state,['pending','submitted','unconfirmed','not-applied'])
+            const key = validateAgentPromptInputKey(notice.key)
+            if (key.kind !== 'prompt' || key.submissionId !== notice.notificationId || key.agentSessionId !== original.binding?.primary.agentSessionId) fail()
+          }
+        }
+        break
+      }
       case 'agent.input.inspect': {
-        record(p, ['record', 'input'])
+        record(p, ['record', 'input','moteObservationId'])
+        if(p.moteObservationId!==undefined)string(p.moteObservationId)
         const observed = p.input === null || p.input === undefined ? null : inputReceipt(p.input)
         if (input.kind === 'message-control') {
           if (observed && observed.originalControlOperationId !== input.originalControlOperationId || p.record !== null && !observed ||

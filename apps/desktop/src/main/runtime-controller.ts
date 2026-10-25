@@ -1835,14 +1835,14 @@ export class RuntimeController {
     operationId: string,
     condition: AgentPromptInputBinding,
     automation?: { completionId?: string; futureIntent?: { intentId: string; occurrenceAt: number }; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
-    choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence },
+    choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence; moteSource?: import('@agentmux/core').AgentInputMoteSource },
     authorHuman?: boolean,
     agentMuxNote?: string,
     sourceChannel: AgentMessageChannel = 'message-tool',
     inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference,
     inputImages?: readonly import('@agentmux/core').AgentInputImageReference[],
     authorProfile?: import('@agentmux/core').AgentPreparedAuthorProfile
-  ): Promise<void | AgentInputSubmissionReceipt> {
+  ): Promise<void | AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference> {
     const capturedCondition = validateAgentPromptInputBinding(condition)
     if ('admissionIntent' in capturedCondition) {
       if (automation || choice?.execution !== 'immediate' || choice.preparationRetry || choice.allowUncertainTurn) throw new AgentMuxError(
@@ -1850,13 +1850,14 @@ export class RuntimeController {
       if (control.run.runId !== capturedCondition.expectedRun.runId) throw new AgentMuxError('Prompt intent targets another Run.', 'STALE_AGENT_SESSION')
       return await this.trackHostOperation(control.hostId, async () => await this.configuredClient(control.hostId).submitAgentPrompt({
         agentSessionId: control.agentSessionId, ...capturedCondition, execution: 'immediate', operationId, prompt,
+        ...(choice?.moteSource ? { moteSource: choice.moteSource } : {}),
         ...(agentMuxNote === undefined ? {} : { agentMuxNote }), sourceChannel,
         ...(inputContextCapture ? { inputContextCapture } : {}),
         ...(inputImages?.length ? { inputImages } : {}),
         ...(authorHuman === true ? { authorHuman: true, ...(authorProfile ? { authorProfile } : {}) } : {})
       }))
     }
-    await this.trackHostOperation(control.hostId, async () => {
+    return await this.trackHostOperation(control.hostId, async () => {
       const client = await observeProgressRead(automation?.signal, () => this.connectedClient(control.hostId))
       if (control.run.runId !== capturedCondition.expectedRun.runId) {
         throw new AgentMuxError('Prompt intent targets another Run.', 'STALE_AGENT_SESSION')
@@ -1872,12 +1873,13 @@ export class RuntimeController {
         if (automation && !automation.isCurrent()) {
           throw new AgentMuxError('Automatic delivery was cancelled.', 'AGENT_COMPLETION_CHANGED')
         }
-        await client.submitAgentPrompt({
+        return await client.submitAgentPrompt({
           agentSessionId: control.agentSessionId,
           ...capturedCondition,
           operationId,
           ...(automation ? { ...(automation.futureIntent ? { expectedFutureIntent: automation.futureIntent } : automation.completionId === undefined ? {} : { expectedCompletionId: automation.completionId }), ...(automation.inputByte === undefined ? {} : { expectedInputByte: automation.inputByte }), signal: automation.signal } : {}),
           prompt,
+          ...(choice?.moteSource ? { moteSource: choice.moteSource } : {}),
           ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
           sourceChannel,
           ...(inputContextCapture ? { inputContextCapture } : {}),
@@ -1917,6 +1919,7 @@ export class RuntimeController {
     const hostId = control.hostId, agentSessionId = control.agentSessionId
     if (control.run.runId !== condition.expectedRun.runId) throw new AgentMuxError('Question reply targets another Run.', 'STALE_AGENT_SESSION')
     const original = { source: { ...input.source }, turnId: input.turnId, recordId: input.recordId,
+      ...(input.moteSource ? { moteSource: input.moteSource } : {}),
       answers: input.answers.map(answer => ({ ...answer })), operationId: input.operationId,
       ...(input.allowUncertainTurn === undefined ? {} : { allowUncertainTurn: input.allowUncertainTurn }) }
     return await this.trackHostOperation(hostId, async () => {
@@ -1940,6 +1943,9 @@ export class RuntimeController {
     if (this.configuredClient(control.hostId) !== client) throw new AgentMuxError('The original mailbox Host changed during reading. Its records are retained.', 'CONTROL_UNAVAILABLE')
     return page
   }
+  async inspectMoteInput(control: SessionHistoryReference, observationId: string) {
+    return await this.configuredClient(control.hostId).inspectMoteInput({agentSessionId:control.agentSessionId,observationId})
+  }
   async inspectInput(control: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) {
     this.assertInputControl(control, key)
     return await this.configuredClient(control.hostId).inspectAgentInput({ key })
@@ -1956,13 +1962,13 @@ export class RuntimeController {
   async respondInteraction(
     control: Extract<SessionControl, { kind: 'agent' }>,
     response: AgentMuxInteractionResponse,
-    intent: import('@agentmux/core').AgentMuxInteractionOperationIntent
+    intent: import('@agentmux/core').AgentMuxInteractionOperationIntent & { moteSource?: import('@agentmux/core').AgentInputMoteSource }
   ): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt> {
     return await this.trackHostOperation(control.hostId, async () => {
       return await this.configuredClient(control.hostId).respondAgentInteraction({
         agentSessionId: control.agentSessionId,
         expectedRun: control.run,
-        response, ...intent
+        response, ...intent, ...(intent.moteSource ? {authorHuman:true as const} : {})
       })
     })
   }

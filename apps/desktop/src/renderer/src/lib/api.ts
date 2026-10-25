@@ -1180,6 +1180,7 @@ const mockApi: AgentMuxDesktopApi = {
     },
     replyQuestion: async () => { throw new Error('Native question replies require the original Desktop Core.') },
     inputMailbox: async () => { throw new Error('Original input mailbox reading requires the Desktop Runtime.') },
+    inspectMoteInput: async () => { throw new Error('Original Mote input observation requires the Desktop Runtime.') },
     inspectInput: async () => { throw new Error('Original durable input inspection requires the Desktop Runtime.') },
     stopInputWaiting: async () => { throw new Error('Original durable waiting control requires the Desktop Runtime.') },
     rejoinInputWaiting: async () => { throw new Error('Original durable waiting control requires the Desktop Runtime.') },

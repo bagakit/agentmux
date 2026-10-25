@@ -210,3 +210,5 @@ export type { AgentExecutionOperationKey, AgentExecutionOperation } from './agen
 
 export { AgentExecutionCoordinator, AgentExecutionBindingService } from './agent-execution-coordinator.js'
 export type { AgentExecutionOpenInput, AgentExecutionInspection, AgentExecutionHostPort, AgentExecutionCoordinatorOptions } from './agent-execution-coordinator.js'
+export { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote-input.js'
+export type { AgentInputMoteBinding, AgentInputMoteResolver, MoteInputInspection, MoteInputObservation, MoteInputSubmissionReference } from './mote-input.js'

@@ -1103,6 +1103,7 @@ export type AgentProviderSessionHistoryRecordContext = Omit<AgentProviderSession
 }
 
 export type AgentSessionQuestionReplyReceipt = {
+  moteObservationId?: string
   agentSessionId: string
   source: AgentSessionHistorySource
   recordId: string
@@ -1709,6 +1710,8 @@ export type AgentMuxInteractionOperationIntent = {
 
 /** Original semantic response facts; transport acceptance never claims Native adoption. */
 export type AgentMuxInteractionOperationReceipt = AgentMuxInteractionOperationIntent & {
+  authorHuman?: true
+  moteObservationId?: string
   agentSessionId: string
   run: AgentMuxRunRef
   nativeHandle?: AgentNativeSessionHandle

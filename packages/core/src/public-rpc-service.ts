@@ -1,3 +1,4 @@
+import { moteInputObservationId } from './mote-input.js'
 import { parseCreationContinueParams, parseCreationContinueReceipt, parseCreationContinueResult } from './agent-creation-continue.js'
 import { AGENT_EXECUTION_CREATE_FIELDS, parseAgentExecutionCreate, parseAgentExecutionBinding } from './public-rpc-agent-execution.js'
 import { parseAgentInputResourceRead } from './agent-input-resource.js'
@@ -141,7 +142,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
-  'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
+  'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
@@ -341,9 +342,9 @@ const NATIVE_FIELDS = {
   'agent.native.history': ['hostId', 'executorId', 'source', 'cursor', 'limit'],
   'agent.native.history.resource': ['hostId', 'executorId', 'nativeSource', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'],
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
-  'agent.interaction.respond': ['agentSessionId', 'expectedRun', 'operationId', 'expectedRequest', 'response', 'externalAction'],
+  'agent.interaction.respond': ['agentSessionId', 'expectedRun', 'operationId', 'expectedRequest', 'response', 'externalAction', 'moteSource'],
   'agent.interaction.inspect': ['agentSessionId', 'operationId'],
-  'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel', 'externalAction'],
+  'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel', 'externalAction', 'moteSource'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'],
   'agent.conversation.record': ['hostId', 'agentSessionId', 'ingressId', 'authoritySource'],
   'agent.conversation.checkpoint': ['hostId', 'agentSessionId', 'nativePosition'],
@@ -368,6 +369,7 @@ const NATIVE_FIELDS = {
   'browser.input.inspect': ['hostId', 'operationId'],
   'agent.input.resource': ['key', 'index', 'revision', 'maxBytes', 'purpose'],
   'agent.input.inspect': ['key', 'kind', 'originalControlOperationId'],
+  'agent.input.observation': ['agentSessionId','observationId'],
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent'],
   'agent.broadcast': ['operationId', 'recipientSessionIds', 'text', 'sourceChannel'],
@@ -2437,11 +2439,11 @@ export class AgentMuxRpcService {
         const receipt = await scope.client.submitAgentPrompt({ ...input, sourceChannel: context.transport === 'unix' ? 'cli' : 'api',
           ...(device ? { sourceDevice: normalizeOperationDevice(device) } : {}) }, this.inputCallContext(context))
         const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
-        const observed = await scope.client.inspectAgentInput({ key }) ?? receipt
+        const observed = await scope.client.inspectAgentInput({ key }) ?? (receipt && 'key' in receipt ? receipt : undefined)
         // One receipt owns its observed admission. Independent reads can straddle
         // dispatch and would produce an internally contradictory public packet.
         const record = observed ? observed.admission : await scope.client.inspectAgentPromptSubmission(key)
-        result = { key, record, ...(observed ? { input: observed } : {}) }
+        result = { key, record, ...(observed ? { input: observed } : {}), ...(receipt?.moteObservationId ? {moteObservationId:receipt.moteObservationId} : {}) }
         break
       }
       case 'agent.input.changes': {
@@ -2485,6 +2487,14 @@ export class AgentMuxRpcService {
         result = await client.readAgentInputResource(input, caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined)
         break
       }
+      case 'agent.input.observation': {
+        const agentSessionId = rpcString(p.agentSessionId,'Original member Session'), observationId = rpcString(p.observationId,'Original input observation')
+        const scope = await this.originalInputOwner(agentSessionId,caller)
+        if (scope.client.forwardRpc) return await scope.client.forwardRpc('agent.input.observation',{agentSessionId,observationId},context) as AgentMuxRpcResult<M>
+        result = {inspection:await scope.client.inspectMoteInput({agentSessionId,observationId,
+          ...(caller ? {caller:{agentSessionId:caller.agentSessionId,capability:caller.capability}} : {})})}
+        break
+      }
       case 'agent.input.inspect': {
         if (p.kind === 'message-control') {
           rpcRecord(p, ['kind', 'originalControlOperationId'])
@@ -2522,7 +2532,9 @@ export class AgentMuxRpcService {
         const input = key.attemptId && observed && !isDeepStrictEqual(agentInputDeliveryKey(observed.control), key) ? null : observed
         const original = input ? input.admission : await client.inspectAgentPromptSubmission(key)
         if (!input && caller && caller.agentSessionId !== key.agentSessionId && original?.admission?.intent?.message?.authorAgentSessionId !== caller.agentSessionId) throw new AgentMuxError('Only an original input participant can inspect its claim.', 'CONTROL_PERMISSION_DENIED')
-        result = { record: original, ...(input ? { input } : {}) }; break
+        // A supplementary pointer must not revoke the original authorized input read.
+        const observation=await client.inspectMoteInput({agentSessionId:key.agentSessionId,observationId:moteInputObservationId({kind:'prompt',key}),...(caller ? {caller:{agentSessionId:caller.agentSessionId,capability:caller.capability}} : {})}).catch(()=>null)
+        result = { record: original, ...(input ? { input } : {}), ...(observation ? {moteObservationId:observation.observation.id} : {}) }; break
       }
       case 'agent.input.stop': case 'agent.input.rejoin': {
         const ref = validateAgentInputWaitRef(p.ref)

@@ -14,7 +14,7 @@ export type AgentInputMailboxItem = {
   recordedAt: number
 } & (
   | { kind: 'controlled'; intent: Omit<AgentInputJournalIntent, 'environment'>; message?: AgentMuxMessageEnvelope; sourceChannel?: AgentMessageChannel; sourceDevice?: AgentOperationDevice; receipt: AgentInputSubmissionReceipt | null; failure?: DeliveryFailure }
-  | { kind: 'submission'; key: AgentPromptInputKey; record: AgentPromptSubmissionRecord | null; failure?: DeliveryFailure }
+  | { kind: 'submission'; moteObservationId?:string; key: AgentPromptInputKey; record: AgentPromptSubmissionRecord | null; failure?: DeliveryFailure }
 )
 export type AgentInputMailboxPage = {
   agentSessionId: string

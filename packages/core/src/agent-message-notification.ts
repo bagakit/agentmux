@@ -17,6 +17,8 @@ export type AgentMuxMessageNotification = {
   notificationId: string
   key: Extract<AgentPromptInputKey, { kind: 'prompt' }>
   messageIds: readonly string[]
+  /** Exact original input observation, instead of Inbox MIDs; no synthetic A2A message. */
+  moteObservation?: { id: string; phase: import('./mote-input.js').MoteInputNoticePhase }
   wire: string
   condition: AgentPromptCondition
   mode: 'idle' | 'steer'
@@ -59,7 +61,9 @@ export function validateMessageNotification(value: AgentMuxMessageNotification):
   const condition = validateAgentPromptCondition(value.condition)
   messageEnvelopeString(value.notificationId, 'Notification ID')
   if (key.kind !== 'prompt' || key.submissionId !== value.notificationId || key.expectedRun.runId !== condition.expectedRun.runId ||
-      !Array.isArray(value.messageIds) || value.messageIds.length < 1 || value.messageIds.length > 100 ||
+      !Array.isArray(value.messageIds) || (value.moteObservation ? value.messageIds.length !== 0 ||
+        Object.keys(value.moteObservation).some(key => !['id','phase'].includes(key)) || typeof value.moteObservation.id !== 'string' || !value.moteObservation.id || !['input', 'result'].includes(value.moteObservation.phase)
+        : value.messageIds.length < 1) || value.messageIds.length > 100 ||
       new Set(value.messageIds).size !== value.messageIds.length || value.messageIds.includes(value.notificationId) ||
       typeof value.wire !== 'string' || !value.wire || Buffer.byteLength(value.wire) > MAX_A2A_NOTIFICATION_BYTES ||
       !['idle', 'steer'].includes(value.mode) || !['pending', 'submitted', 'unconfirmed', 'not-applied'].includes(value.state) ||

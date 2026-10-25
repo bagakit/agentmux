@@ -1,7 +1,7 @@
 import { AgentMuxError, validateAgentPromptInputBinding, type AgentMuxClient,
   type AgentMuxAgentSession, type AgentMuxAgentCreationInspection, type AgentMuxAgentRuntimeStatus, type AgentMuxClientEvent,
   type AgentMuxRunRef, type AgentMuxRun, type AgentMuxRpcCallContext, type AgentPromptInputBinding,
-  type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentPromptPreparationRetryFence,
+  type AgentPromptExecution, type AgentPromptPreparationRetryFence,
   type AgentMessageChannel, type AgentPromptSubmissionRecord, type AgentTimelineSnapshot,
   type ContinuousProgressObservation, type ContinuousProgressTarget, type ContinuousProgressLoop,
   type AgentScheduleCheckInPolicy } from '@agentmux/core'
@@ -32,7 +32,7 @@ export interface GoalRuntimePort {
   submitPrompt(control: GoalAgentControl, prompt: string, operationId: string, condition: AgentPromptInputBinding,
     automation?: Automation, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: AgentPromptPreparationRetryFence },
     authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel,
-    inputContextCapture?: AgentInputContextCaptureReference, authority?: AgentMuxRpcCallContext): Promise<void | AgentInputSubmissionReceipt>
+    inputContextCapture?: AgentInputContextCaptureReference, authority?: AgentMuxRpcCallContext): ReturnType<AgentMuxClient['submitAgentPrompt']>
   sessionTimeline(target: { hostId: string; agentSessionId: string }): Promise<AgentTimelineSnapshot>
   saveGoalAttention(input: Attention & { intentId: string; agentMuxNote: string }): Promise<void>
   disableGoalAttention(input: Omit<Attention, 'supervisorRunId'> & { intentId: string; agentMuxNote: string }): Promise<void>

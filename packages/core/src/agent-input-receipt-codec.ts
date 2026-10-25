@@ -11,7 +11,8 @@ function wireString(value: unknown): void { if (typeof value !== 'string' || !va
 function wireTimestamp(value: unknown): void { if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) wireFail() }
 function wireMember(value: unknown, fields: readonly unknown[]): void { if (!fields.includes(value)) wireFail() }
 export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubmissionReceipt {
-  const p = wireRecord(value, ['key', 'ref', 'originalControlOperationId', 'persistence', 'control', 'admission', 'status', 'observation'])
+  const p = wireRecord(value, ['key', 'ref', 'originalControlOperationId', 'persistence', 'control', 'admission', 'status', 'observation', 'moteObservationId'])
+  if (p.moteObservationId !== undefined) wireString(p.moteObservationId)
   const key = validateAgentPromptInputKey(p.key), ref = validateAgentInputWaitRef(p.ref)
   if (!dequal(key, ref.key) || p.persistence !== 'confirmed') wireFail()
   wireMember(p.observation, ['owned', 'rejoin-needed', 'closed'])

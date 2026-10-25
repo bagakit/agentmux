@@ -1915,16 +1915,17 @@ export type AgentMuxDesktopApi = {
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
     recordDeliveryFailure(record: DeliveryAttempt): Promise<DeliveryAttemptLookup>
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference, inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference, inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt>
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence; moteSource?: import('@agentmux/core').AgentInputMoteSource }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference, inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference, inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference>
     replyQuestion(session: AgentSessionControl, input: SessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt>
     inputMailbox(session: SessionHistoryReference, options?: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'>): Promise<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxPage>
+    inspectMoteInput(session: SessionHistoryReference, observationId: string): Promise<import('@agentmux/core').MoteInputInspection | null>
     inspectInput(session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): Promise<import('@agentmux/core').AgentInputSubmissionReceipt | null>
     stopInputWaiting(session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string): Promise<import('@agentmux/core').AgentInputWaitStopReceipt>
     rejoinInputWaiting(session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef): Promise<import('@agentmux/core').AgentInputSubmissionReceipt>
     respondInteraction(
       session: AgentSessionControl,
       response: AgentMuxInteractionResponse,
-      intent: import('@agentmux/core').AgentMuxInteractionOperationIntent
+      intent: import('@agentmux/core').AgentMuxInteractionOperationIntent & { moteSource?: import('@agentmux/core').AgentInputMoteSource }
     ): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt>
     inspectInteraction(session: AgentSessionControl, operationId: string): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt | null>
     // Set the Agent's live security posture in-band. The renderer sends the picked mode id; Core resolves
