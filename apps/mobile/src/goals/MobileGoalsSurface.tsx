@@ -1,4 +1,5 @@
 import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
+import { formatMobileTime, withMobileTime } from '../presentation/time'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -221,7 +222,7 @@ function GoalDetail({ goalId, goal, factScope, visible, decisions, client, conne
       {alignment ? <><p className="mobile-goals-body">{alignment.summary}</p><ul>{alignment.criteria.map(criterion => <li key={criterion.id}>{criterion.text}</li>)}</ul>
         {!alignment.criteria.length && <p>尚无成功标准。</p>}
         {!!alignment.openQuestions.length && <><h4>待决定事项</h4><ul>{alignment.openQuestions.map((question, index) => <li key={index}>{question}</li>)}</ul></>}
-        <p>{alignment.confirmedAt === null ? '目标尚未确认。' : `目标已确认 · ${new Date(alignment.confirmedAt).toLocaleString()}`}</p>
+        <p>{alignment.confirmedAt === null ? '目标尚未确认。' : withMobileTime('目标已确认', alignment.confirmedAt)}</p>
       </> : <p>尚无目标提案，原意与关联会话仍可阅读。</p>}
     </section>
     <section aria-label="结果与证据"><h3>结果与证据</h3>
@@ -230,7 +231,7 @@ function GoalDetail({ goalId, goal, factScope, visible, decisions, client, conne
         {(currentReport ? alignment?.criteria : [])?.filter(criterion => !grounding.checks.some(check => check.criterionId === criterion.id)).map(criterion => <p key={criterion.id}>缺少结果检查：{criterion.text}</p>)}
         <ul>{grounding.checks.map(check => <li key={check.criterionId}><strong>{currentReport ? alignment?.criteria.find(criterion => criterion.id === check.criterionId)?.text ?? check.criterionId : `旧报告标准 ${check.criterionId}`}</strong><p>{({ met: '报告声称达成', gap: '仍有差距', unknown: '结果未知' })[check.outcome]}</p><p>{check.note}</p>
           <MobileGoalEvidence evidence={check.evidence} client={client} copyText={copyText} />{!check.evidence.length && <p>暂无定位证据。</p>}
-        </li>)}</ul><p>{grounding.acceptedAt === null ? '结果尚未接受。' : `${currentReport ? '当前结果已接受' : '旧报告曾被接受，不代表当前结果接受'} · ${new Date(grounding.acceptedAt).toLocaleString()}`}</p>
+        </li>)}</ul><p>{grounding.acceptedAt === null ? '结果尚未接受。' : withMobileTime(currentReport ? '当前结果已接受' : '旧报告曾被接受，不代表当前结果接受', grounding.acceptedAt)}</p>
       </> : <p>{goal.status === 'done' ? '工作状态已完成，结果尚未核验。' : '尚无结果报告。'}</p>}
     </section>
     {children}
@@ -238,7 +239,7 @@ function GoalDetail({ goalId, goal, factScope, visible, decisions, client, conne
       <label>工作状态<select disabled={saving} aria-label="工作状态" value={goal.status} onChange={event => { void save({ status: event.target.value as AgentMuxRpcGoal['status'] }) }}>{AGENTMUX_DEMAND_STATUSES.map(value => <option key={value} value={value}>{statuses[value]}</option>)}</select></label>
       <p>工作状态不代表目标确认或结果接受。</p>
       <label>优先级<select disabled={saving} aria-label="优先级" value={goal.priority} onChange={event => { void save({ priority: event.target.value as AgentMuxRpcGoal['priority'] }) }}>{AGENTMUX_DEMAND_PRIORITIES.map(value => <option key={value} value={value}>{priorities[value]}</option>)}</select></label>
-      <dl><dt>目标 ID</dt><dd>{goal.id}</dd><dt>项目</dt><dd>{goal.projectId ? `${goal.projectName ?? '名称未确认'} · ${goal.projectId}` : '未分配项目'}</dd><dt>负责人</dt><dd>{goal.assigneeSessionIds?.join('、') || '未分配'}</dd><dt>Supervisor</dt><dd>{goal.supervisorSessionId ?? '未指定'}</dd><dt>标签</dt><dd>{goal.tags?.join('、') || '无'}</dd><dt>父目标</dt><dd>{goal.parentGoalId ?? '无'}</dd><dt>计划开始</dt><dd>{goal.plannedStartAt ? new Date(goal.plannedStartAt).toLocaleString() : '未设置'}</dd><dt>目标日期</dt><dd>{goal.targetAt ? new Date(goal.targetAt).toLocaleString() : '未设置'}</dd><dt>最后更新</dt><dd>{new Date(goal.updatedAt).toLocaleString()}</dd></dl>
+      <dl><dt>目标 ID</dt><dd>{goal.id}</dd><dt>项目</dt><dd>{goal.projectId ? `${goal.projectName ?? '名称未确认'} · ${goal.projectId}` : '未分配项目'}</dd><dt>负责人</dt><dd>{goal.assigneeSessionIds?.join('、') || '未分配'}</dd><dt>Supervisor</dt><dd>{goal.supervisorSessionId ?? '未指定'}</dd><dt>标签</dt><dd>{goal.tags?.join('、') || '无'}</dd><dt>父目标</dt><dd>{goal.parentGoalId ?? '无'}</dd><dt>计划开始</dt><dd>{goal.plannedStartAt ? (formatMobileTime(goal.plannedStartAt) ?? '时间未记录') : '未设置'}</dd><dt>目标日期</dt><dd>{goal.targetAt ? (formatMobileTime(goal.targetAt) ?? '时间未记录') : '未设置'}</dd><dt>最后更新</dt><dd>{(formatMobileTime(goal.updatedAt) ?? '时间未记录')}</dd></dl>
     </details>
     <details><summary>活动与决策记录</summary><ul>{goal.activityLog?.map((entry, index) => <li key={index}>{entry}</li>)}</ul>
       {decisions === null ? <p>决策记录尚未确认。</p> : decisions.map((decision, index) => <div key={index}><p>{decision.question}</p><p>{decision.decision}</p><p>{decision.rationale}</p></div>)}
