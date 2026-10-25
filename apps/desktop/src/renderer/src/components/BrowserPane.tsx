@@ -79,6 +79,7 @@ import { BrowserWorkfaceBoundary, type BrowserWorkfaceAddressDraft } from './Bro
 import { createBrowserAgent, type BrowserAgentCreationResult } from '../lib/browser-agent-creation'
 
 const ThemeActionAddAnnotationIcon = semanticIconComponent('action.add-annotation')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeStatusSavedIcon = semanticIconComponent('status.saved')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
@@ -1031,6 +1032,9 @@ function BrowserPaneContent({
     const key = presentation?.occurrence.presentationId ?? tab.browserId
     let addressInput = addressInputs.current.get(key)
     if (!addressInput) { addressInput = createRef<BrowserAddressInputHandle>(); addressInputs.current.set(key, addressInput) }
+    const startInputKey = `${key}:start`
+    let startInput = addressInputs.current.get(startInputKey)
+    if (!startInput) { startInput = createRef<BrowserAddressInputHandle>(); addressInputs.current.set(startInputKey, startInput) }
     const visible = presentation?.visible ?? defaultPresentationVisible
     const regionSurface = presentation?.target.surface ?? regionSplitSurface
     const inSurvey = regionSurface === 'survey'
@@ -1150,8 +1154,9 @@ function BrowserPaneContent({
           startPageConfig ? <BrowserStartPage config={startPageConfig} visible={visible} historyRevision={historyRevision}
             historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
             onChooseHistory={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); addressInput.current?.submit(value) }}>
-            <form className="browser-start-page__input" onSubmit={event => { event.preventDefault(); addressInput.current?.submit() }}>
-              <BrowserAddressInput ref={addressInput} aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address}
+            <form className="browser-start-page__input" onSubmit={event => { event.preventDefault(); startInput.current?.submit() }}>
+              <ThemeActionSearchIcon size={19} aria-hidden="true" />
+              <BrowserAddressInput ref={startInput} aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address}
                 onHistoryChange={() => setHistoryRevision(value => value + 1)}
                 historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
                 onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
@@ -1191,7 +1196,7 @@ function BrowserPaneContent({
           onClick={() => { if (restoreError !== null) retryConnection(); else void run(() => api.browser.reload(tab.browserId)) }}>
           {tab.loading || busy ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionRefreshIcon size={13} />}
         </button>
-        {startPageConfig && tab.url === 'about:blank' ? <span className="browser-toolbar__empty-address">New page</span> : <label>
+        <label>
           <ThemeObjectBrowserIcon size={13} />
           <BrowserAddressInput
             onHistoryChange={() => setHistoryRevision(value => value + 1)}
@@ -1200,7 +1205,7 @@ function BrowserPaneContent({
             onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }}
             onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })}
           />
-        </label>}
+        </label>
         <BrowserOperatorPresence
           activity={browserActivity}
           control={tab.control}
