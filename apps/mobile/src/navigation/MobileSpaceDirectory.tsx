@@ -84,7 +84,7 @@ export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, on
       </details>
     })}
     {hosts.map(host => <details className="mobile-tree-section" key={host} open>
-      <summary><SemanticIcon name="object.folders" size={14} /><strong>{host === 'local' ? 'Folders' : host}</strong></summary>
+      <summary title={host === 'local' ? undefined : host}><SemanticIcon name="object.folders" size={14} /><strong>{host === 'local' || hosts.length === 1 ? '文件夹' : host}</strong></summary>
       {folders.filter(group => group.hostId === host).map((group, index) => {
         const nodes = group.nodes.filter(node => !filtering || matchingFolders.has(node.project.id))
         const shownNodes = new Map<string, boolean>()
@@ -94,11 +94,11 @@ export function MobileSpaceDirectory({ catalog, home, query, selectedSpaceId, on
           return shown ? row(node.project.space, node.depth) : null
         })
         if (!nodes.length) return null
-        return group.groupPath ? <details key={projectGroupKey(group)} className="mobile-tree-folder-group" open><summary title={group.groupPath}><SemanticIcon name="navigation.disclosure" size={13} /><span>{group.label}</span><small>{railGroupAddress(group.groupPath)}</small></summary><ul className="mobile-space-tree mobile-session-list">{entries}</ul></details>
+        return group.groupPath ? <details key={projectGroupKey(group)} className="mobile-tree-folder-group" open><summary title={group.groupPath}><SemanticIcon name="navigation.disclosure" size={13} /><span>{group.label}</span>{folders.filter(other => other.label === group.label).length > 1 && <small>{railGroupAddress(group.groupPath)}</small>}</summary><ul className="mobile-space-tree mobile-session-list">{entries}</ul></details>
           : <ul className="mobile-space-tree mobile-session-list" key={index}>{entries}</ul>
       })}
     </details>)}
-    {spaces.some(space => space.kind !== 'folder' && matching(space)) && <details className="mobile-tree-section" open><summary><SemanticIcon name="object.topic" size={14} /><strong>Topics / 其他空间</strong></summary>
+    {spaces.some(space => space.kind !== 'folder' && matching(space)) && <details className="mobile-tree-section" open><summary><SemanticIcon name="object.topic" size={14} /><strong>Topics 与其他</strong></summary>
       <ul className="mobile-space-tree mobile-session-list">{spaces.filter(space => space.kind !== 'folder' && matching(space)).map(space => row(space))}</ul></details>}
     {filtering && !spaces.some(matching) && <p className="mobile-spatial-empty">没有匹配的空间。</p>}
   </div>
