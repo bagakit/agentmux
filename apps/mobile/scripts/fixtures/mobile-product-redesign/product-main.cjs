@@ -69,6 +69,10 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
   }
+  if (mode === 'polish-followup') {
+    await require('./polish-followup.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
   if (mode === 'floating-tools') {
     await require('./floating-tools.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
     result.passed = true; return
@@ -746,7 +750,7 @@ app.whenReady().then(async () => {
   await read('mobileProductScene.setAppearance("dark")'); await resize(320, 760)
   await read('mobileProductScene.unknownNext()')
   await button('Send')
-  await pause(120)
+  await until('!!document.querySelector(".mobile-send-status[data-phase=unknown]")')
   assert.equal(await visible('.mobile-send-status[data-phase=unknown]'), true, 'Unknown delivery remains independently visible')
   await tap('.mobile-conversation-panel [contenteditable=true]', 'Continue later draft')
   await read('(()=>{const e=document.querySelector(".mobile-conversation-panel [contenteditable=true]"),s=window.getSelection(),r=document.createRange();r.selectNodeContents(e);r.collapse(false);s.removeAllRanges();s.addRange(r)})()')
@@ -760,6 +764,9 @@ app.whenReady().then(async () => {
   await resize(390, 480); await capture('unknown-short-viewport')
   await tap('.mobile-send-status__diagnosis > summary', '发送详情')
   await capture('unknown-details-short-viewport')
+  await tap('.mobile-send-status__diagnosis > details:nth-of-type(1) > summary', '消息正文')
+  await tap('.mobile-send-status__diagnosis > details:nth-of-type(2) > summary', '技术信息')
+  await capture('unknown-technical-details-short-viewport')
   const diagnostic = await read(`(()=>{const n=document.querySelector('.mobile-send-status__diagnosis'),e=document.querySelector('[contenteditable=true]'),r=e.getBoundingClientRect();return {text:n.innerText,scrollHeight:n.scrollHeight,clientHeight:n.clientHeight,overflow:getComputedStyle(n).overflowY,editor:r.toJSON(),editorFont:getComputedStyle(e).fontSize,readingHeight:document.querySelector('.mobile-conversation__reading').getBoundingClientRect().height}})()`)
   assert.ok(diagnostic.text.includes('原 Host 已受理输入') && diagnostic.text.includes('后来补充的草稿也保留'), 'Unknown diagnosis retains the full original explanation')
   assert.ok(diagnostic.scrollHeight <= diagnostic.clientHeight || diagnostic.overflow === 'auto', 'Long unknown diagnosis remains scrollable')
