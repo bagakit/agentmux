@@ -101,7 +101,10 @@ async function parseServicePlist(plist: string): Promise<unknown> {
 /** Compare the original service's effective paths, without adopting another target or rewriting it. */
 export function normalizeMacosHostServiceDefinition(definition: unknown, storePath: string): unknown {
   if (!definition || typeof definition !== 'object' || Array.isArray(definition)) return definition
-  const fields = definition as Record<string, unknown>, environment = fields.EnvironmentVariables
+  const { ProcessType: _scheduling, ...fields } = definition as Record<string, unknown>, environment = fields.EnvironmentVariables
+  // Scheduling class is not namespace identity: a service written before it was declared
+  // owns the same Store, socket and Runs, and takes the new class at its next installation.
+  if (_scheduling !== undefined && _scheduling !== 'Interactive') return definition
   if (!environment || typeof environment !== 'object' || Array.isArray(environment) ||
     Object.values(environment).some(value => typeof value !== 'string')) return definition
   const original = environment as Record<string, string>
