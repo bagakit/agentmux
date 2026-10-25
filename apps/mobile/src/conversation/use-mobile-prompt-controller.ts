@@ -265,9 +265,9 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
           execution: 'immediate', authorHuman: true })
       action.dispatched = true; action.allowUpdate(); if (mounted.current) redraw(value => value + 1)
       const receipt = await pending
-      if (receipt && !observeInputReceipt(key, original, receipt)) throw Object.assign(
+      if (!receipt || 'inputKey' in receipt) throw Object.assign(new Error('原操作尚未返回 Core 输入回执；原正文和身份保留。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+      if (!observeInputReceipt(key, original, receipt)) throw Object.assign(
         new Error('Core 返回了另一条输入的回执；原记录保留。'), { code: 'CONTROL_PROTOCOL_ERROR' })
-      if (!receipt) throw Object.assign(new Error('原操作尚未返回 Core 输入回执；原正文和身份保留。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
     } catch (error) { if (!action.cancelled) await retainFailure(original, manualSeed(original), error, 'input-observation', client, key, true) }
   }
   function stopManualInput(key: string, original: PromptAttempt) {
@@ -515,9 +515,9 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
         allowUpdate()
         const receipt = await pendingReceipt
         if (original.manualInput) {
-          if (receipt && !observeInputReceipt(originalKey, original, receipt)) throw Object.assign(
+          if (!receipt || 'inputKey' in receipt) throw Object.assign(new Error('原消息的 Core 保存或输入回执尚未确认；原正文和身份保留，可核对原请求。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+          if (!observeInputReceipt(originalKey, original, receipt)) throw Object.assign(
             new Error('Core 返回了另一条输入的回执；原记录保留。'), { code: 'CONTROL_PROTOCOL_ERROR' })
-          if (!receipt) throw Object.assign(new Error('原消息的 Core 保存或输入回执尚未确认；原正文和身份保留，可核对原请求。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
         } else confirmPrompt(originalKey, original)
         if (mounted.current && current.current.client === originalClient && current.current.agentSessionId === originalId) void refresh()
       } catch (error) {
