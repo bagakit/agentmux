@@ -109,7 +109,7 @@ describe('actual Space cross-device group interaction', () => {
     const add = vi.spyOn(api.workspaces, 'add').mockRejectedValueOnce(new Error('Remote temporarily unavailable'))
       .mockResolvedValueOnce({ id: 'new-remote', hostId: 'farm', name: 'new', path: _hygiene_fixturePath("remote/new"), kind: 'folder' })
     await click(button('Open Folder on Farm machine'))
-    const input = document.querySelector<HTMLInputElement>('.project-group-dialog__name input')!
+    const input = document.querySelector<HTMLInputElement>('.host-folder-dialog__path input')!
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, _hygiene_fixturePath("remote/new")); input.dispatchEvent(new Event('input', { bubbles: true })) })
     await click(button('Open Folder'))
     await vi.waitFor(() => expect(document.querySelector('[role="alert"]')?.textContent).toContain('temporarily unavailable'))
@@ -142,7 +142,7 @@ describe('actual Space cross-device group interaction', () => {
     vi.spyOn(useAppStore.getState(), 'saveProjectGroup').mockResolvedValue({ layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
     await click(button('Related projects for Shared project'))
     await click(button('Create group'))
-    await vi.waitFor(() => expect(document.querySelector('[role="alert"]')?.textContent).toContain('Saving is unconfirmed'))
+    await vi.waitFor(() => expect(document.querySelector('[role="status"]')?.textContent).toContain('Saving is unconfirmed'))
     expect(document.querySelector('[role="dialog"]')).toBeTruthy()
     expect(button('Retry saving')).toBeTruthy()
   })

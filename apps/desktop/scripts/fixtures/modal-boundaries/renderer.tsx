@@ -76,5 +76,5 @@ async function move(toChild: boolean) {
 Object.assign(window, { modalProof: { render, state, removeLast, outsideFocus, ime, move,
   focusEditor() { sourceDocument.querySelector<HTMLInputElement>('#original-editor')?.focus(); return state() },
   focusAttachment() { sourceDocument.querySelector<HTMLElement>('#attached-control')?.focus(); return state() },
-  setFolder() { const input = document.querySelector<HTMLInputElement>('.project-group-dialog input')!; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!; setter.call(input, '/isolated/project'); input.dispatchEvent(new Event('input', { bubbles: true })); return state() }
+  setFolder() { const input = document.querySelector<HTMLInputElement>('.host-folder-dialog input')!; const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!; setter.call(input, '/isolated/project'); input.dispatchEvent(new Event('input', { bubbles: true })); return state() }
 } })
