@@ -2,12 +2,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { PassThrough } from 'node:stream'
 import { EventEmitter } from 'node:events'
 import { createInterface } from 'node:readline'
 import { AgentExecutionJournal } from '../src/agent-execution-journal.js'
 import { createAgentExecutionExecutor } from '../src/agent-execution-executor.js'
 import type { AgentExecutionIntent, AgentExecutionProtocol } from '../src/agent-execution-protocol.js'
+
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return { ...actual, spawn: vi.fn(actual.spawn) }
+})
 
 type Frame = { type: string; generation: string; code?: string; payload?: { id?: number; method?: string; result?: Record<string, unknown>; error?: { code: number } } }
 const cleanup: (() => Promise<void>)[] = []
@@ -27,7 +33,7 @@ const native = String.raw`
     process.stdout.write('  '+JSON.stringify({jsonrpc:'2.0',id:request.id,result:{pid:process.pid,count}})+' \n');
   }})();`
 
-async function fixture() {
+async function fixture(executable = process.execPath) {
   const root = await mkdtemp(join(tmpdir(), 'amux-executor-test-'))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   const journal = await AgentExecutionJournal.open(join(root, 'journal'))
@@ -40,7 +46,7 @@ async function fixture() {
   lines.on('line', line => { const frame = JSON.parse(line) as Frame; frames.push(frame); events.emit('frame', frame) })
   const log = join(root, 'native.log'), effects = join(root, 'effects'), release = join(root, 'release')
   const protocol: AgentExecutionProtocol = {
-    executor: { command: process.execPath, args: ['-e', native, log, effects, release], cwd: root },
+    executor: { command: executable, args: ['-e', native, log, effects, release], cwd: root },
     parseServer(payload) {
       const p = payload as Record<string, unknown>
       if (p.method === 'native-event') return { kind: 'notification', method: p.method, payload: p }
@@ -199,6 +205,48 @@ describe('resource executor original native stream', () => {
     expect(await readFile(h.effects, 'utf8')).toBe('effect\n')
     await h.executor.dispose()
     for (const pid of [oldPid, freshPid]) expect(() => process.kill(pid, 0)).toThrow()
+  })
+
+  it('retains the live original child and pending work after process errors without an exit', async () => {
+    const h = await fixture(), pid = Number((await h.initialize()).payload!.result!.pid)
+    const child = vi.mocked(spawn).mock.results.at(-1)!.value as ChildProcessWithoutNullStreams
+    expect(child.pid).toBe(pid)
+    cleanup.push(async () => {
+      if (child.exitCode === null && child.signalCode === null) await new Promise<void>(resolve => {
+        child.once('exit', () => resolve()); child.kill('SIGTERM')
+      })
+    })
+    h.send(1, 'hold-save')
+    await vi.waitFor(async () => { expect(await readFile(h.effects, 'utf8')).toBe('effect\n') })
+    const key = { bindingId: 'fixed-binding', streamGeneration: 'original', nativeRequestId: 1 }
+    const before = await h.journal.inspect(key)
+    const cursor = h.frames.length
+    child.emit('error', Object.assign(new Error('signal permission unavailable'), { code: 'EPERM', syscall: 'kill' }))
+    expect((await h.wait(frame => frame.code === 'NATIVE_PROCESS_ERROR_UNCONFIRMED' || frame.code === 'NATIVE_CONNECTION_ENDED', cursor)).code).toBe('NATIVE_PROCESS_ERROR_UNCONFIRMED')
+    const second = h.frames.length
+    child.emit('error', Object.assign(new Error('signal still unconfirmed'), { code: 'EPERM', syscall: 'kill' }))
+    await h.wait(frame => frame.code === 'NATIVE_PROCESS_ERROR_UNCONFIRMED', second)
+    expect(await h.journal.inspect(key)).toEqual(before)
+    expect(h.frames.slice(cursor).some(frame => frame.type === 'generation' || frame.code === 'NATIVE_CONNECTION_ENDED')).toBe(false)
+    expect(() => process.kill(pid, 0)).not.toThrow()
+    h.send(8, 'hello', 'replacement')
+    expect((await h.reply(8)).payload!.error!.code).toBe(-32002)
+    await h.release()
+    expect((await h.reply(1)).payload!.result).toEqual({ pid, count: 1 })
+    expect(await h.journal.inspect(key)).toMatchObject({ phase: 'completed' })
+    h.send(2, 'echo'); expect((await h.reply(2)).payload!.result!.pid).toBe(pid)
+    await h.executor.dispose()
+    expect(() => process.kill(pid, 0)).toThrow()
+  })
+
+  it('recognizes a failed spawn without a pid as an unavailable original generation', async () => {
+    const h = await fixture(join(tmpdir(), 'missing-native-executor-command'))
+    h.send(0, 'hello')
+    await h.wait(frame => frame.code === 'NATIVE_CONNECTION_ENDED')
+    const child = vi.mocked(spawn).mock.results.at(-1)!.value as ChildProcessWithoutNullStreams
+    expect(child.pid).toBeUndefined()
+    h.send(1, 'hello')
+    expect((await h.reply(1)).payload!.error!.code).toBe(-32002)
   })
 
   it('detaching the reader preserves the generation and lets its original native response settle', async () => {
