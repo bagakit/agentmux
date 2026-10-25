@@ -15,7 +15,7 @@ export function metricsPage(nativeSessionId = 'native-reading'): AgentSessionHis
       metrics: { scope: 'turn', usage: { inputTokens: 600, outputTokens: 127, totalTokens: 727, cachedInputTokens: 400, reasoningOutputTokens: 66 } } },
     { id: 'answer', turnId: 'turn-original', kind: 'assistant-message', messagePhase: 'final', contentParts: [{ kind: 'text', text: '系统版本 26.5.1，架构为 arm64。' }] },
     { id: 'duration', turnId: 'turn-original', kind: 'activity', contentParts: [{ kind: 'text', text: '{"duration_ms":13000}' }],
-      metrics: { scope: 'turn', durationMs: 13_000, status: 'completed' } }
+      turnOutcome: { status: 'completed' }, metrics: { scope: 'turn', durationMs: 13_000 } }
   ] }
 }
 

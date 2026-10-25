@@ -277,9 +277,9 @@ it.each([false, true])('the shared consumer preserves a report’s own metrics w
   const diagnostic = { code: 'ORIGINAL_REPORT_METRICS_GAP', message: 'Original report retained diagnostic.' }
   const process: AgentSessionHistoryItem = withStepMetrics ? { ...step('real-process'),
     collaboration: { kind: 'operation', operation: 'wait', status: 'completed', receivers: [], agentStates: [] },
-    metrics: { scope: 'response', status: 'completed', durationMs: 11, usage: { outputTokens: 3 } } } : step('real-process')
+    metrics: { scope: 'response', durationMs: 11, usage: { outputTokens: 3 } } } : step('real-process')
   const originalReport: AgentSessionHistoryItem = { ...report('report-with-metrics'),
-    metrics: { scope: 'response', status: 'failed', durationMs: 31, usage: { outputTokens: 7 } }, metricsDiagnostic: diagnostic }
+    metrics: { scope: 'response', durationMs: 31, usage: { outputTokens: 7 } }, metricsDiagnostic: diagnostic }
   const props = reading([process, originalReport, report('following-report')]), { host, draw, click } = surface()
   expect(props.records.map(record => record.role)).toEqual(['process', 'message', 'message'])
   await draw(props)
@@ -287,11 +287,11 @@ it.each([false, true])('the shared consumer preserves a report’s own metrics w
   const processCard = host.querySelector('.wf-card')!
   expect(processCard.getAttribute('data-status')).toBe(withStepMetrics ? 'complete' : null)
   expect(processCard.querySelector('.log-fold__steps')?.textContent).toBe('1 条已加载记录')
-  expect(processCard.querySelector('.wf-head')?.textContent).not.toContain('本次响应失败')
+  expect(processCard.querySelector('.wf-head')?.textContent).not.toContain('31 ms')
   const reportMetrics = [...host.querySelectorAll<HTMLDetailsElement>('.conversation-metrics')].find(node => [...node.querySelectorAll('code')].some(code => code.textContent === 'report-with-metrics'))!
   expect(reportMetrics).not.toBeNull(); expect(reportMetrics).not.toBeUndefined()
   expect(reportMetrics.closest('.native-process-observation__step,[hidden],[inert]')).toBeNull()
-  expect(reportMetrics.querySelector('summary')?.textContent).toContain('本次响应失败')
+  expect(reportMetrics.querySelector('summary')?.textContent).toContain('本次响应用量')
   expect(reportMetrics.textContent).toContain('31 ms'); expect(reportMetrics.textContent).toContain('7 tokens')
   await act(async () => { reportMetrics.open = true; reportMetrics.dispatchEvent(new Event('toggle')) })
   await click('.wf-head'); await click('.wf-head')

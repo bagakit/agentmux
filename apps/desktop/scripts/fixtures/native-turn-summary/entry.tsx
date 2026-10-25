@@ -45,7 +45,7 @@ createClientUiRoot(document.getElementById('root')!).render(createElement(App))
   response() { page = { ...page, items: [...page.items, ...responsePage().items] }; changed?.() },
   responseActivities() { page = { ...page, items: [...page.items, ...['response-a', 'response-b'].map((id, index) => ({ id, kind: 'activity' as const,
     contentParts: [{ kind: 'text' as const, text: `Original response process ${index ? 'B' : 'A'}` }],
-    metrics: { scope: 'response' as const, status: 'completed' as const, usage: { outputTokens: index + 2 } } }))] }; changed?.() },
+    turnOutcome: { status: 'completed' as const }, metrics: { scope: 'response' as const, usage: { outputTokens: index + 2 } } }))] }; changed?.() },
   retainResponse() { const original = [...document.querySelectorAll<HTMLElement>('[data-native-record-id="response-b"]')].find(node => node.checkVisibility())!;
     const body = original.querySelector('.log-turn__body')!, text = body.querySelector('p')!.firstChild!;
     const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 8); const selection = getSelection()!; selection.removeAllRanges(); selection.addRange(range);

@@ -5,7 +5,11 @@ import { DEFAULT_MOTE_FACE } from '../../../shared/mote-avatars'
 import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../shared/scratch-topics'
 import { scratchTopicsScope } from '../lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
+import type { AgentSessionHistoryPage } from '@agentmux/core'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
+import { projectConversationReading } from '@agentmux/client-ui/conversation-records'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { StatusDot } from './StatusDot'
@@ -48,7 +52,19 @@ const degradedNotice: RenderableServiceNotice = {
   }
 }
 
-const galleryOrigin = Date.now()
+const galleryConversation: AgentSessionHistoryPage = {
+  agentSessionId: 'gallery-conversation', sourceHostId: 'local', source: { providerId: 'example-provider', nativeSessionId: 'gallery-native' }, nextCursor: null,
+  items: [
+    { id: 'gallery-input', kind: 'user-message', contentParts: [{ kind: 'text', text: '检查这次改动，并保留每轮的真实结果。' }] },
+    { id: 'gallery-progress', kind: 'assistant-message', turnId: 'gallery-failed-turn', messagePhase: 'progress', contentParts: [{ kind: 'text', text: '已读取改动，正在核对实现边界。' }] },
+    { id: 'gallery-failure', kind: 'activity', turnId: 'gallery-failed-turn', contentParts: [{ kind: 'text', text: 'Original provider outcome record.' }],
+      turnOutcome: { status: 'failed', failure: { code: 'MODEL_CAPACITY', nativeCode: 'server_overloaded',
+        message: 'Selected model is at capacity. Please try a different model.',
+        recovery: '检查模型设置后，可在当前会话继续提交；本轮失败记录会保留。', nativeTurnId: 'gallery-failed-turn' } } },
+    { id: 'gallery-next-turn', kind: 'assistant-message', turnId: 'gallery-next-turn', messagePhase: 'progress', contentParts: [{ kind: 'text', text: '新一轮已开始。上一轮失败原因仍可查看。' }] }
+  ]
+}
+const galleryConversationReading = projectConversationReading({ agentSessionId: galleryConversation.agentSessionId, executionHostId: 'local', historyPage: galleryConversation })
 
 export function ObservationSurfaceGallery() {
   const feedback = useComposerFeedback('gallery')
@@ -72,35 +88,10 @@ export function ObservationSurfaceGallery() {
         <article className="observation-sample observation-sample--conversation">
           <div className="observation-sample__label">Conversation · example states</div>
           <div className="observation-sample__body">
-            <ConversationMessage
-              speaker={{ role: 'human', id: 'gallery-human' }}
-              name="You"
-              content="让对话也接入这一套组件，保留清楚的身份和状态。"
-              status="complete"
-              createdAt={(galleryOrigin + 0)}
-              origin={(galleryOrigin + 0)}
-            />
-            <ConversationMessage
-              speaker={{ role: 'agent', id: 'gallery-reviewer' }}
-              name="Review agent"
-              providerId="codex"
-              content={'Shared message surface.\n\n- **Identity** stays with each message.\n- Read [ActivityView.tsx](src/ActivityView.tsx) in the workspace.'}
-              status="streaming"
-              createdAt={(galleryOrigin + 10000)}
-              origin={(galleryOrigin + 0)}
-              workspaceRoot={new URL("./gallery", import.meta.url).pathname}
-              openWorkspaceFile={(path) => setConversationAction(`File action: ${path}`)}
-              onContinue={() => setConversationAction('Continue requested for this example message; delivery belongs to the host.')}
-            />
-            <ConversationMessage
-              speaker={{ role: 'agent', id: 'gallery-checker' }}
-              name="Check agent"
-              providerId="claude"
-              content="The last check did not finish. Its partial response remains readable."
-              status="failed"
-              createdAt={(galleryOrigin + 20000)}
-              origin={(galleryOrigin + 0)}
-            />
+            <ConversationView sessionId={galleryConversation.agentSessionId} executionHostId="local" page={galleryConversation}
+              records={galleryConversationReading.records} originalRecords={galleryConversationReading.originalRecords}
+              renderProcess={props => <NativeProcessObservation {...props} compact />}
+              onContinue={() => setConversationAction('Continue requested for this example message; delivery belongs to the host.')} />
             {conversationAction ? <p role="status">{conversationAction}</p> : null}
           </div>
         </article>

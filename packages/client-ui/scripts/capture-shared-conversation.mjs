@@ -14,6 +14,7 @@ const gallery = resolve(root, 'apps/desktop/dist/gallery')
 const evidence = resolve(root, '.tmp/agentmux-private-mobile-client/shared-ui/visual')
 const privateRoot = await mkdtemp(resolve(tmpdir(), 'agentmux-client-ui-'))
 const require = createRequire(resolve(root, 'apps/desktop/package.json'))
+const conversationOnly = process.argv.includes('--conversation-only')
 const hash = data => createHash('sha256').update(data).digest('hex')
 const receipt = { schema: 'agentmux.shared-conversation-visual-capture.v1', passed: false,
   scope: 'Actual compiled Desktop component gallery in a private Electron profile. Shared UI and Desktop adapter; no mobile auth, device, user App or healthy Run claim.',
@@ -36,10 +37,10 @@ function run(args) {
 await mkdir(evidence, { recursive: true })
 try {
   for (const path of [...await files(resolve(root, 'packages/client-ui/src')),
-    ...['gallery-main.tsx', 'components/WorkflowComponentGallery.tsx', 'components/ObservationSurfaceGallery.tsx', 'components/DesktopClientUiProvider.tsx', 'styles/index.css'].map(path => resolve(root, 'apps/desktop/src/renderer/src', path))]) {
+    ...['gallery-main.tsx', 'components/WorkflowComponentGallery.tsx', 'components/ObservationSurfaceGallery.tsx', 'components/DesktopClientUiProvider.tsx', 'styles/index.css', 'styles/workflow.css'].map(path => resolve(root, 'apps/desktop/src/renderer/src', path))]) {
     receipt.source[relative(root, path)] = hash(await readFile(path))
   }
-  run(['--filter', '@agentmux/client-ui', 'build'])
+  // Vite consumes the package's browser source exports; its one build binds the captured UI.
   run(['--filter', '@agentmux/desktop', 'build:gallery'])
   for (const path of await files(gallery)) receipt.compiled[relative(root, path)] = hash(await readFile(path))
   assert.ok(Object.keys(receipt.compiled).some(path => path.endsWith('.js')))
@@ -58,12 +59,12 @@ try {
   await new Promise(done => server.listen(0, '127.0.0.1', done))
   const url = `http://127.0.0.1:${server.address().port}/agentmux-gallery/gallery.html`
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-  receipt.process = await runProbeProcess(require('electron'), [resolve(root, 'packages/client-ui/scripts/shared-conversation-electron.cjs'), url, privateRoot, evidence],
+  receipt.process = await runProbeProcess(require('electron'), [resolve(root, 'packages/client-ui/scripts/shared-conversation-electron.cjs'), url, privateRoot, evidence, ...conversationOnly ? ['--conversation-only'] : []],
     { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 45_000, onLine: line => receipt.stderr.push(line) })
   assert.equal(receipt.process.exitCode, 0, 'Private Electron capture failed')
   const actual = JSON.parse(await readFile(resolve(evidence, 'actual.json'), 'utf8'))
   assert.equal(actual.passed, true, JSON.stringify(actual.failure))
-  assert.equal(actual.frames.length, 4)
+  assert.equal(actual.frames.length, conversationOnly ? 4 : 6)
   for (const frame of actual.frames) {
     const bytes = await readFile(resolve(evidence, frame.file))
     assert.ok(bytes.length > 1000)

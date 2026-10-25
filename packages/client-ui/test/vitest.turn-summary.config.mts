@@ -15,7 +15,8 @@ const mutations: Record<string, [string, string, string]> = {
     'const recordIds = [...previous?.recordIds ?? [], item.id]'],
   'forget-read-body': ['packages/client-ui/src/components/WorkflowObservation.tsx', 'expanded || readOnce ? children : null', 'expanded ? children : null'],
   'unstable-record-wrapper': ['packages/client-ui/src/components/ConversationRecordSequence.tsx', 'renderRecord: (record, wrapBody) => renderOne(record, wrapBody, disclosure, false, !summary)', 'renderRecord: summary ? renderRecord : (record, wrapBody) => renderOne(record, wrapBody, disclosure, false)'],
-  'hide-recorded-failure': ['packages/client-ui/src/components/NativeProcessObservation.tsx', "const status = nativeOnly ? recordedStepStatus ?? (metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status) : undefined", "const status = nativeOnly ? metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status ?? recordedStepStatus : undefined"],
+  'hide-recorded-failure': ['packages/client-ui/src/components/NativeProcessObservation.tsx', "const status = nativeOnly ? recordedStepStatus ?? (turnOutcome?.status === 'completed' ? 'complete' : turnOutcome?.status) : undefined", "const status = nativeOnly ? 'complete' : undefined"],
+  'borrow-turn-outcome': ['packages/client-ui/src/components/NativeProcessObservation.tsx', 'const turnOutcome = sameTurn ?', 'const turnOutcome = true ?'],
   'guess-legacy-turn': ['apps/desktop/src/renderer/src/lib/agent-usage.ts', "'Latest report · scope unrecorded'", "'Last turn'"]
 }
 
