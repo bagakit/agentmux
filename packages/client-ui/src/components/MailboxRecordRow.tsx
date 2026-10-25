@@ -8,6 +8,7 @@ export type MailboxRecordRowProps = {
   avatar?: ReactNode
   metadata?: ReactNode
   source?: ReactNode
+  context?: ReactNode
   status?: ReactNode
   actions?: ReactNode
   /** Only disclosures use expanded/controls; ordinary detail navigation does not. */
@@ -17,12 +18,14 @@ export type MailboxRecordRowProps = {
 }
 
 /** Presentation only: reading and actions are independent keyboard targets. */
-export function MailboxRecordRow({ recordKey, label, preview, avatar, metadata, source, status, actions, expanded, controls, onOpen }: MailboxRecordRowProps) {
+export function MailboxRecordRow({ recordKey, label, preview, avatar, metadata, source, context, status, actions, expanded, controls, onOpen }: MailboxRecordRowProps) {
   return <div className="composer-mailbox__record">
     <button type="button" className="composer-mailbox__row" data-record-key={recordKey}
       aria-label={`Read ${label}: ${preview}`} aria-expanded={expanded} aria-controls={controls}
       onClick={event => onOpen(recordKey, event)}>
-      <span className="composer-mailbox__row-head">{avatar}<strong title={label}>{label}</strong><span className="composer-mailbox__metadata">{metadata}</span></span>
+      <span className="composer-mailbox__row-head"><span className="composer-mailbox__record-identity">{avatar}<strong title={label}>{label}</strong>
+        {context ? <span className="composer-mailbox__record-context">{context}</span> : null}</span>
+        <span className="composer-mailbox__metadata">{metadata}</span></span>
       <span className="composer-mailbox__preview">{preview}</span>
       {source ? <span className="composer-mailbox__source">{source}</span> : null}
     </button>

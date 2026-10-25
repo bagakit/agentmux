@@ -2431,8 +2431,18 @@ export class RuntimeController {
   }
 
   /** A new trusted client intent can freeze the original local target before writing. */
-  async connectionHostingTarget(hostId = 'local', context: AgentMuxRpcCallContext = { transport: 'unix' }): Promise<ConnectionHostingTarget> {
-    return (await this.connectionHost({ hostId }, context)).target
+  async connectionHostingTarget(source: string | { runtimeId: string } = 'local', context: AgentMuxRpcCallContext = { transport: 'unix' }): Promise<ConnectionHostingTarget> {
+    if (typeof source === 'string') return (await this.connectionHost({ hostId: source }, context)).target
+    if (!source || Object.keys(source).some(key => key !== 'runtimeId') || typeof source.runtimeId !== 'string' || !source.runtimeId.trim() || /[\0\r\n]/u.test(source.runtimeId))
+      throw new AgentMuxError('Select the original connector Runtime identity.', 'RUNTIME_OWNER_MISMATCH')
+    const matches = [...this.hosts].filter(([, host]) => {
+      const owner = runtimeOwner(host.client)
+      return owner?.availability === 'connected' && owner.runtimeId === source.runtimeId
+    })
+    if (!matches.length) throw new AgentMuxError('The original connector Runtime is unavailable. Its saved identities remain readable.', 'RUNTIME_OWNER_MISMATCH')
+    // Cached instance observations may straddle a Host restart. The existing
+    // owner protocol obtains and fences the current instance on this exact Runtime.
+    return (await this.connectionHost({ hostId: matches[0]![0], runtimeId: source.runtimeId }, context)).target
   }
 
   /** Explicit hosting route; the Binding's execution Host never selects this owner. */
