@@ -26,9 +26,9 @@ test('a generic success cannot substitute for original native identity and relay
     resumedRun: 'second', helperRuns: ['frontend', 'executor'], originalContextRetained: true, originalEffectCount: 1, errors: [],
     agentControl: { originalWhoami: 'sid', resumedWhoami: 'sid', callerlessRejected: true, userOnlyRejected: true,
       ownerChangedRouteUnavailable: true, nativeToolsRetained: true },
-    ownerRestartEvidence: { previousOwner: 'old', currentOwner: 'new', runId: 'first', nativeInstanceId: 'original-runtime' } }
+    ownerRestartEvidence: { previousOwner: 'old', currentOwner: 'new', runId: 'second', nativeInstanceId: 'original-runtime' } }
   validateSummary('verify-native-agent-control', summary)
-  for (const bad of [{ ...summary, originalEffectCount: 2 }, { ...summary, resumedRun: 'first' },
+  for (const bad of [{ ...summary, ownerRestartEvidence: { ...summary.ownerRestartEvidence, runId: 'first' } }, { ...summary, originalEffectCount: 2 }, { ...summary, resumedRun: 'first' },
     { ...summary, agentControl: { ...summary.agentControl, resumedWhoami: 'replacement' } },
     { ...summary, ownerRestartEvidence: { ...summary.ownerRestartEvidence, currentOwner: 'old' } }]) assert.throws(() => validateSummary('verify-native-agent-control', bad))
 })

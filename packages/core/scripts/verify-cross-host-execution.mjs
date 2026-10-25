@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, readdir, writeFile, chmod } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile, chmod, realpath } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { dirname, resolve, delimiter } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -61,6 +61,7 @@ export function validateTests(report, mutant = false) {
 function run(args, env = {}) {
   return new Promise((done, reject) => {
     const childEnv = { ...process.env }; delete childEnv.CROSS_HOST_EXECUTION_MUTATION; delete childEnv.CROSS_HOST_EXECUTION_MUTATION_HIT
+    for (const key of ['AGENTMUX_TEST_CLIENT_ENTRY', 'AGENTMUX_TEST_RPC_CLIENT_ENTRY', 'AGENTMUX_TEST_SERVICE_ENTRY', 'AGENTMUX_TEST_OWNER_ENTRY']) delete childEnv[key]
     const child = spawn(process.execPath, args, { cwd: repository, env: { ...childEnv, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = '', stderr = ''
     child.stdout.on('data', bytes => { stdout += bytes }); child.stderr.on('data', bytes => { stderr += bytes })
@@ -92,7 +93,7 @@ export function validateSummary(name, summary) {
     assert(control?.originalWhoami === summary.originalCoreSession && control.resumedWhoami === summary.originalCoreSession &&
       control.callerlessRejected === true && control.userOnlyRejected === true && control.ownerChangedRouteUnavailable === true &&
       control.nativeToolsRetained === true && restart?.previousOwner && restart.currentOwner &&
-      restart.previousOwner !== restart.currentOwner && restart.runId === summary.firstRun.runId && restart.nativeInstanceId,
+      restart.previousOwner !== restart.currentOwner && restart.runId === summary.resumedRun && restart.nativeInstanceId,
     'The real relay must preserve the original caller and native work across an actual semantic-owner change')
   } else assert(summary.resourceCoreRestarted === true && summary.automaticReadersRestored === true &&
     summary.originalHelperPidsRetained === true && summary.bindingAfterResume?.state === 'connected', 'Actual resource Core restart and original readers required')
@@ -100,9 +101,16 @@ export function validateSummary(name, summary) {
 export async function main(args) {
   const options = parseArgs(args), output = options.output ?? resolve(repository, '.tmp/cross-host-execution-core', `run-${Date.now()}-${process.pid}`)
   const native = ['verify-native-execution-helpers', 'verify-execution-binding', 'verify-native-agent-control']
-  const relayMutants = 'packages/core/scripts/verify-agent-control-mutants.mjs'
+  const mutationGates = [
+    { id: 'relay', script: 'packages/core/scripts/verify-agent-control-mutants.mjs', names: [
+      'caller-elevation', 'batch-members', 'invocation-conflict', 'fixed-credential', 'owner-fence',
+      'generation-qualification', 'frontend-duplicate-id', 'resource-duplicate-id', 'uncertain-write', 'closed-connection'] },
+    { id: 'input', script: 'packages/core/scripts/verify-execution-input-mutants.mjs', names: [
+      'wire-numeric-budget', 'source-cursor-midframe', 'unknown-chunk-new-id', 'ignore-confirmed-offset',
+      'repartition-old-claim', 'skip-durable-claim'] },
+  ]
   const buildArgs = ['packages/core/scripts/build.mjs']
-  if (options.plan) return console.log(JSON.stringify({ mode: 'plan-only', buildArgs, tests, mutations: options.mutations ? mutations.map(value => value.id) : [], relayMutants: options.mutations ? relayMutants : null, native, output, actualMachines: 1 }))
+  if (options.plan) return console.log(JSON.stringify({ mode: 'plan-only', buildArgs, tests, mutations: options.mutations ? mutations.map(value => value.id) : [], mutationGates: options.mutations ? mutationGates : [], native, output, actualMachines: 1 }))
   await mkdir(dirname(output), { recursive: true }); await mkdir(output)
   const report = { passed: false, scope: 'Local Core/CLI/native qualification; no real two-machine or UI acceptance', tests: [], mutations: [], native: [] }
   const save = () => writeFile(resolve(output, 'report.json'), JSON.stringify(report, null, 2))
@@ -110,7 +118,7 @@ export async function main(args) {
   try {
     for (const file of tests) await readFile(resolve(repository, file))
     for (const name of native) await readFile(resolve(repository, `packages/core/scripts/${name}.mjs`))
-    if (options.mutations) await readFile(resolve(repository, relayMutants))
+    if (options.mutations) for (const gate of mutationGates) await readFile(resolve(repository, gate.script))
     const sourcePaths = ['packages/core/src', 'packages/core/scripts/build.mjs', 'packages/core/scripts/clean-build.mjs',
       'packages/core/scripts/generate-guides.mjs', 'packages/core/scripts/check-guides.mjs', 'packages/core/native',
       'packages/core/guides',
@@ -120,11 +128,19 @@ export async function main(args) {
     await writeFile(resolve(output, 'build.log'), built.stdout + built.stderr)
     assert(built.code === 0 && built.signal === null, 'Exact Core candidate build failed')
     assert.deepEqual(await manifest(sourcePaths), source, 'Core source changed during compilation; candidate is unconfirmed')
-    const consumedPaths = [...sourcePaths, 'packages/core/dist', 'packages/core/bin',
+    const dependencyPaths = []
+    const dependencies = JSON.parse(await readFile(resolve(repository, 'packages/core/package.json'), 'utf8')).dependencies
+    for (const [name, version] of Object.entries(dependencies).filter(([, version]) => version.startsWith('workspace:'))) {
+      assert(name.startsWith('@agentmux/'), 'Unqualified workspace dependency location')
+      const directory = 'packages/' + name.slice('@agentmux/'.length)
+      assert.equal(await realpath(resolve(repository, 'packages/core/node_modules', name)), await realpath(resolve(repository, directory)), 'Workspace consumer resolves outside this candidate: ' + name)
+      dependencyPaths.push(directory + '/package.json', directory + '/dist')
+    }
+    const consumedPaths = [...sourcePaths, ...dependencyPaths, 'packages/core/dist', 'packages/core/bin',
       `packages/core/vendor/ctxmux/${process.platform}-${process.arch}`, 'packages/core/test/helpers',
       'packages/core/scripts/fixtures/cross-host-execution-checks.mjs', 'packages/core/scripts/fixtures/vitest.cross-host-execution.config.mts',
       'packages/core/scripts/fixtures/execution-proof-cleanup.mjs',
-      'packages/core/scripts/verify-cross-host-execution.mjs', ...(options.mutations ? [relayMutants] : []),
+      'packages/core/scripts/verify-cross-host-execution.mjs', ...(options.mutations ? mutationGates.map(gate => gate.script) : []),
       ...native.map(name => `packages/core/scripts/${name}.mjs`), ...tests]
     const consumed = await manifest(consumedPaths)
     await writeFile(resolve(output, 'candidate.json'), JSON.stringify({ source, consumed, buildArgs, exitCode: built.code,
@@ -148,21 +164,21 @@ export async function main(args) {
       validateTests(JSON.parse(await readFile(json, 'utf8')), true)
       report.mutations.push({ id: mutation.id, killed: true, evidence: json, hits: hit }); await save()
     }
-    if (options.mutations) {
-      const result = await run([relayMutants, resolve(output, 'relay-mutants')])
-      await writeFile(resolve(output, 'relay-mutants.log'), result.stdout + result.stderr)
-      assert(result.code === 0 && result.signal === null, 'Original Agent relay mutation gate failed')
+    if (options.mutations) for (const gate of mutationGates) {
+      const directory = resolve(output, gate.id + '-mutants')
+      const result = await run([gate.script, directory])
+      await writeFile(resolve(output, gate.id + '-mutants.log'), result.stdout + result.stderr)
+      assert(result.code === 0 && result.signal === null, gate.id + ' mutation gate failed')
       const receipt = machineResult(result.stdout)
-      const summary = JSON.parse(await readFile(resolve(output, 'relay-mutants/summary.json'), 'utf8'))
-      const expected = ['caller-elevation', 'batch-members', 'invocation-conflict', 'fixed-credential', 'owner-fence',
-        'generation-qualification', 'frontend-duplicate-id', 'resource-duplicate-id', 'uncertain-write', 'closed-connection']
+      const summary = JSON.parse(await readFile(resolve(directory, 'summary.json'), 'utf8'))
       assert(receipt.passed === true && summary.passed === true && summary.complete === true &&
-        summary.errors?.length === 0 && summary.mutations?.length === 10 &&
-        new Set(summary.mutations.map(value => value.mutation)).size === 10 &&
-        summary.mutations.every(value => value.killed === true && value.exitCode !== 0 && value.closed === true && value.signal === null && value.totalTests > 0 && value.failedTests > 0),
-      'All ten relay mutations must reach real assertions')
-      assert.deepEqual(summary.mutations.map(value => value.mutation).sort(), expected.sort(), 'Exact relay mutation coverage required')
-      report.relayMutations = receipt; await save()
+        summary.errors?.length === 0 && summary.mutations?.length === gate.names.length &&
+        new Set(summary.mutations.map(value => value.mutation)).size === gate.names.length &&
+        summary.mutations.every(value => value.killed === true && Number.isInteger(value.exitCode) && value.exitCode !== 0 &&
+          value.closed === true && value.signal === null && value.totalTests > 0 && value.failedTests > 0),
+      gate.id + ' mutations must reach real assertions')
+      assert.deepEqual(summary.mutations.map(value => value.mutation).sort(), [...gate.names].sort(), 'Exact mutation coverage required')
+      report[gate.id + 'Mutations'] = receipt; await save()
     }
     for (const name of native) {
       const result = await run([`packages/core/scripts/${name}.mjs`])
