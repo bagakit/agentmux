@@ -27,6 +27,8 @@ import { activityReadingProps } from './helpers/activity-reading-props'
 import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 import { projectMailboxInputs } from '../src/renderer/src/lib/mailbox-input-projection'
 import { copyConnectorIdentity } from './helpers/connector-identity-copy'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
+import { DefaultRestOptions, discordConfig, discordTransport } from '../../../packages/connectors/test/fixtures/discord'
 
 const bridge = vi.hoisted(() => ({ api: null as any, handlers: new Map<string, (...args: any[]) => Promise<any>>(), listeners: new Map<string, Set<(...args: any[]) => void>>() }))
 // This reader/metadata test retains the real Terminal slot. Chromium/xterm paint
@@ -46,14 +48,15 @@ import '../src/preload/index'
 const dom = composerDOM(), cleanup: Array<() => void | Promise<void>> = []
 let f: Awaited<ReturnType<typeof channelMetadataFixture>>, calls: Array<{ method: string; input: any }> = []
 let metadataReady = false, metadataInFlight = 0, metadataChanges = 0
-beforeEach(async () => {
+beforeEach(async context => {
   vi.stubGlobal('URL', NodeURL)
-  f = await channelMetadataFixture(cleanup); calls = []; metadataReady = false; metadataInFlight = 0; metadataChanges = 0
+  const explicitOwner = context.task.name.startsWith('original Inputs fills') || context.task.name.startsWith('confirmed profile route')
+  f = await channelMetadataFixture(cleanup, explicitOwner ? { hostingRuntimeId: 'original-profile-runtime', executionRuntimeId: 'original-execution-runtime' } : undefined); calls = []; metadataReady = false; metadataInFlight = 0; metadataChanges = 0
   terminals.mounted = 0; terminals.disposed = 0
   // This controlled hosting port retains the fixture's actual public RPC owner.
   const hostingTarget = { hostId: 'local', runtimeId: 'original-profile-runtime' }
   const runtime: ConnectionHostIpc = {
-    connectionHostingTarget: async (hostId = 'local') => { expect(hostId).toBe('local'); return { ...hostingTarget } },
+    connectionHostingTarget: async (source = 'local') => { expect(source).toEqual(typeof source === 'string' ? 'local' : { runtimeId: hostingTarget.runtimeId }); return { ...hostingTarget } },
     callConnectionHost: async (target, method, params) => {
       expect(target).toEqual(hostingTarget)
       return await f.sdk.call(method, params)
@@ -130,6 +133,83 @@ async function openInputs() {
   await dom.click('[role="tab"][id$="-user-tab"]')
   return panel
 }
+it.each([{ reference: false, partial: false }, { reference: true, partial: false }, { reference: false, partial: true }])('original Inputs fills missing person/group metadata and reads the frozen native quote through public consumers (%j)', async ({ reference, partial }) => {
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+  const request = f.transport.request.getMockImplementation()!
+  const native = (id: string, time: number, content: string) => ({ message_id: id, chat_id: 'original-room', msg_type: 'text', create_time: String(time),
+    sender: { sender_type: 'user', id_type: 'open_id', id: 'original-external-user' }, body: { content: JSON.stringify({ text: content }) } })
+  const messages = [native('metadata-message-ui-profile', 1, 'Earlier original request'),
+    { ...native('quoted-middle', 2, reference ? 'Earlier retained context. '.repeat(1200) : 'The review has two outstanding items.'), ...(partial ? { deleted: true } : {}) },
+    native('metadata-message-context', 3, 'Please review both items.')]
+  f.transport.request.mockImplementation(async input => {
+    const url = new URL(input.url!, 'https://native.example')
+    if (url.pathname === '/open-apis/im/v1/messages') return { code: 0, data: { items: [...messages].reverse(), has_more: false } }
+    if (url.pathname.startsWith('/open-apis/im/v1/messages/')) return { code: 0, data: { items: messages.filter(message => message.message_id === decodeURIComponent(url.pathname.split('/').at(-1)!)) } }
+    return request(input)
+  })
+  await f.submit('context')
+  let item: Extract<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxItem, { kind: 'controlled' }> | undefined
+  await vi.waitFor(async () => {
+    const page = await f.sdk.call('agent.input.ls', { hostId: 'local', agentSessionId: 'original-agent', maxBytes: 128 * 1024 })
+    item = page.items.flatMap(entry => entry.kind === 'item' && entry.item.kind === 'controlled' && entry.item.message?.sender.kind === 'external' &&
+      entry.item.message.sender.externalMessageId === 'metadata-message-context' ? [entry.item] : [])[0]
+    expect(item?.message?.channelQuote?.records).toHaveLength(2)
+  })
+  expect(item!.message!.channelQuote!.coverage).toBe(partial ? 'partial' : 'complete')
+  expect(item!.message!.sender).toMatchObject({ authoritySource: { hostingRuntimeId: 'original-profile-runtime', executionRuntimeId: 'original-execution-runtime' } })
+  expect(item!.intent.source).toMatchObject({ kind: 'message', representation: { quote: reference ? 'reference' : 'inline' } })
+  f.source('Avery Chen · Platform Engineering', 'Release review · Platform Engineering')
+  for (const subject of [actorSubject, groupSubject]) {
+    const prior = await f.get(subject)
+    await f.sdk.call('connection.metadata.clear', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject, expectedCacheRevision: prior.entry.cacheRevision })
+  }
+  const session = originalSession('terminal')
+  await dom.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible
+    linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'test-group', tabId: 'tab', regionId: 'original-region' }} />)
+  expect(actorReads()).toHaveLength(0)
+  const panel = await openInputs(), key = inputMailboxItemKey('local', item!)
+  const row = () => [...panel.querySelectorAll<HTMLButtonElement>('.composer-mailbox__row')].find(node => node.dataset.recordKey === key)!
+  await vi.waitFor(() => {
+    expect(row()?.querySelector('strong')?.textContent).toBe('Avery Chen · Platform Engineering')
+    expect(row()?.querySelector('img')?.getAttribute('src')).toBe('https://cdn.example/person.png')
+    expect(row()?.querySelector('[data-input-channel]')?.textContent).toContain('Release review · Platform Engineering')
+    expect(row()?.querySelector('[data-input-quote]')?.textContent).toBe('2 quoted messages' + (partial ? ' · history gaps' : '') + (reference ? ' · reference' : ''))
+  })
+  expect(calls.some(call => call.method === 'connection.metadata.refresh' && call.input.subject.kind === 'actor')).toBe(true)
+  expect(calls.some(call => call.method === 'connection.metadata.refresh' && call.input.subject.kind === 'conversation')).toBe(true)
+  const readsBefore = f.requests().length
+  await act(async () => row().querySelector('img')!.dispatchEvent(new Event('error')))
+  expect(row().querySelector('img')).toBeNull()
+  await f.sdk.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: actorSubject })
+  await vi.waitFor(() => expect(row().querySelector('img')).not.toBeNull())
+  expect(f.requests()).toHaveLength(readsBefore + 1)
+  const actorCli = await f.cli(['get', '--input', '-'], { connectionId: f.config.connectionId, subject: actorSubject })
+  const groupCli = await f.cli(['get', '--input', '-'], { connectionId: f.config.connectionId, subject: groupSubject })
+  expect(actorCli.entry.observation.profile.name).toBe('Avery Chen · Platform Engineering')
+  expect(groupCli.entry.observation.profile.name).toBe('Release review · Platform Engineering')
+  const cli = await runCompiledObjectCli(['--endpoint', 'unix:' + f.server.path, 'message', 'read', '--message-id', item!.message!.messageId,
+    '--host', 'local', '--field', 'channelQuote', '--max-bytes', '131072'], objectCliEnvironment(f.root))
+  expect(cli.code, cli.stdout + cli.stderr).toBe(0)
+  expect(JSON.parse(cli.stdout).result.field.entry.item).toEqual(item!.message!.channelQuote)
+  const wire = item!.intent.source.kind === 'message' ? item!.intent.source.promptWire : undefined
+  await act(async () => row().click())
+  await dom.click('.conversation-input-details__toggle')
+  expect(panel.querySelector('.conversation-input-details__body')?.textContent).toContain('Release review · Platform Engineering')
+  expect(panel.querySelector('[data-input-quote]')?.textContent).toContain('2 quoted messages')
+  await dom.click('[aria-label="Copy message"]')
+  expect(copy).toHaveBeenLastCalledWith(wire)
+  await dom.click('[aria-label="Back to Inputs"]')
+  expect(row()).toBeDefined(); expect([terminals.mounted, terminals.disposed]).toEqual([1, 0])
+  const after = await f.sdk.call('agent.input.ls', { hostId: 'local', agentSessionId: 'original-agent', maxBytes: 128 * 1024 })
+  expect(after.items.flatMap(entry => entry.kind === 'item' && entry.item.kind === 'controlled' && entry.item.message?.messageId === item!.message!.messageId ? [entry.item.intent.source] : [])).toEqual([item!.intent.source])
+  if (!reference && !partial) {
+    const timeline = await f.client.sessionTimeline(session.id)
+    await mkdir('.local/message-channel-identity', { recursive: true })
+    await writeFile('.local/message-channel-identity/scene.json', JSON.stringify({ control: session.control, sourceHostId: timeline.sourceHostId,
+      timeline, messages: projectSessionUserMessages({ agentSessionId: session.id, timeline }), mailbox: after,
+      actor: await f.get(), group: await f.get(groupSubject), selectedKey: key, wire, terminal: { mounted: terminals.mounted, disposed: terminals.disposed } }, null, 2))
+  }
+}, 30_000)
 it('native sender -> original profile cache -> public RPC -> registered IPC/preload -> mounted SessionPane original-record reader and exact renamed group', async () => {
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   let messages: AgentSessionUserMessage[] = []
@@ -475,6 +555,7 @@ it('a same-scope author-set change keeps represented saved profiles on read fail
   try {
     await dom.render(<Profiles authors={[author, second]} />)
     expect(dom.container.textContent).toBe('Original native person | ')
+    expect(reads.slice(before).length).toBeGreaterThan(0)
     expect(reads.slice(before).every(profiles => profiles.get(channelProfileKey(author))?.observation !== undefined)).toBe(true)
   } finally { await act(async () => release()) }
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Original native person | This exact display read is unavailable'))
@@ -636,3 +717,66 @@ it('unavailable display notifications preserve the actual recorded sender and re
   expect(dom.container.querySelector('[data-speaker-role=external]')).not.toBeNull()
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
+
+it('confirmed profile route survives a later observation failure while exact Runtime changes retain no foreign profiles', async () => {
+  const original = (await originalMessages()).find(message => message.author.kind === 'external')!
+  if (original.author.kind !== 'external' || !original.author.authoritySource) throw Error('Original native authority source is required')
+  const author = original.author, owner = { hostId: 'local', sourceHostId: 'local' }
+  const watched = vi.mocked(api.connections.onMetadataChanged)
+  function Person({ visible = true, current = author }: { visible?: boolean; current?: typeof author }) {
+    const profiles = useChannelActorProfiles([current, current], undefined, visible), person = profiles.get(channelProfileKey(current))
+    return <output>{person?.observation?.profile?.name ?? 'No saved profile'} | {person?.issue}</output>
+  }
+  await dom.render(<Person />)
+  await vi.waitFor(() => expect(dom.container.textContent).toBe('Original native person | '))
+  expect(api.connections.hostingTarget).toHaveBeenCalledWith({ runtimeId: author.authoritySource.hostingRuntimeId })
+  expect(watched.mock.calls.filter(args => args[2]?.runtimeId === author.authoritySource!.hostingRuntimeId)).toHaveLength(1)
+  await dom.render(<Person visible={false} />)
+  vi.mocked(api.connections.hostingTarget).mockRejectedValue(Error('Original route observation unavailable'))
+  await dom.render(<Person />)
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Original native person | Original route observation unavailable'))
+  const before = calls.length
+  await dom.render(<Person current={{ ...author, authoritySource: { ...author.authoritySource, hostingRuntimeId: 'different-original-runtime' } }} />)
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('No saved profile | Original route observation unavailable'))
+  expect(calls).toHaveLength(before)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('a second native Gateway adapter supplies the same original Inputs person, conversation and quote reading through the shared owner', async () => {
+  const { createRequire } = await import('node:module')
+  const nativeFetch = createRequire(process.cwd() + '/packages/connectors/node_modules/@discordjs/rest/package.json')('undici').fetch
+  const wire = await discordTransport(nativeFetch); cleanup.push(wire.close)
+  vi.spyOn(DefaultRestOptions, 'makeRequest').mockImplementation(wire.http.makeRequest)
+  const credential = await f.services.secrets.store({ operationId: 'second-native-secret', secret: 'fixture-bot-token' })
+  await f.sdk.call('connection.configure', { operationId: 'second-native-configure', expectedRevision: null, connection: { ...discordConfig, credentialRef: credential.credentialRef } })
+  expect((await f.sdk.call('connection.test', { connectionId: discordConfig.connectionId })).observation.authentication.state).toBe('ready')
+  await f.sdk.call('connection.bind', { ...f.input, operationId: 'second-native-bind', bindingId: 'second-native-binding', connectionId: discordConfig.connectionId, externalConversationId: '300' })
+  await f.sdk.call('connection.grant', { ...f.grant, operationId: 'second-native-grant', bindingId: 'second-native-binding', grantId: 'second-native-grant', actor: { application: discordConfig.application, idType: 'snowflake', userId: '400' } })
+  await vi.waitFor(() => expect(wire.sessions.length).toBeGreaterThan(0))
+  wire.message('700', 'Original second native adapter request')
+  let original: import('@agentmux/core/agent-input-mailbox').AgentInputMailboxItem | undefined
+  await vi.waitFor(async () => {
+    const page = await f.sdk.call('agent.input.ls', { hostId: 'local', agentSessionId: 'original-agent' })
+    original = page.items.flatMap(entry => entry.kind === 'item' && entry.item.kind === 'controlled' && entry.item.message?.sender.kind === 'external' && entry.item.message.sender.actor.application.domain === 'discord.com' ? [entry.item] : [])[0]
+    expect(original).toBeDefined()
+  })
+  const session = originalSession('terminal')
+  await dom.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'test-group', tabId: 'tab', regionId: 'original-region' }} />)
+  const panel = await openInputs(), key = inputMailboxItemKey('local', original!)
+  const row = () => [...panel.querySelectorAll<HTMLButtonElement>('.composer-mailbox__row')].find(node => node.dataset.recordKey === key)!
+  await vi.waitFor(() => {
+    expect(row()?.querySelector('strong')?.textContent).toBe('Original person')
+    expect(row()?.querySelector('img')?.getAttribute('src')).toContain('/avatars/400/native_avatar.png')
+    expect(row()?.querySelector('[data-input-channel]')?.textContent).toContain('Original channel')
+    expect(row()?.querySelector('[data-input-quote]')?.textContent).toBe('0 quoted messages')
+  })
+  expect(original?.kind === 'controlled' && original.message?.channelQuote).toMatchObject({ coverage: 'complete', records: [] })
+  expect(api.connections.onMetadataChanged).toHaveBeenCalledOnce()
+  const exactReads = calls.filter(call => call.method === 'connection.metadata.get' && call.input.connectionId === discordConfig.connectionId)
+  expect(exactReads.filter(call => call.input.subject.kind === 'actor')).toHaveLength(1)
+  // A guild channel has no avatar; the exact visible refresh may notify one
+  // further cache read, under the same shared subscription.
+  expect(exactReads.filter(call => call.input.subject.kind === 'conversation').length).toBeGreaterThanOrEqual(1)
+  expect(exactReads.filter(call => call.input.subject.kind === 'conversation').length).toBeLessThanOrEqual(2)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 30_000)

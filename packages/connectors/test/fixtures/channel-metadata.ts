@@ -11,7 +11,7 @@ import { feishuConfig, feishuPayload, feishuSdkTransport } from './feishu.js'
 export const actor = { application: feishuConfig.application, idType: 'open_id', userId: 'original-external-user' }
 export const actorSubject: ChannelMetadataSubject = { kind: 'actor', actor }
 export const groupSubject: ChannelMetadataSubject = { kind: 'conversation', externalConversationId: 'original-room' }
-export async function channelMetadataFixture(cleanup: Array<() => void | Promise<void>>) {
+export async function channelMetadataFixture(cleanup: Array<() => void | Promise<void>>, authoritySource?: { hostingRuntimeId: string; executionRuntimeId: string }) {
   const f = await ingressFixture(true, feishuConfig); cleanup.push(f.close)
   const transport = feishuSdkTransport(), fallback = transport.request.getMockImplementation()!
   let actorName = 'Original native person', groupName = 'Original native group', failure = false
@@ -35,7 +35,8 @@ export async function channelMetadataFixture(cleanup: Array<() => void | Promise
   const directory = join(f.root, 'desktop-metadata'), changes: ChannelMetadataChange[] = []
   const open = async () => {
     // Default registry, original private Connection owner and actual receiver lifecycle.
-    const services = await createConnectionServices({ directory, bindings: { spatial: f.spatial, checkpoint: ref => f.client.conversationCheckpoint(ref) }, ingress: { core: hostId => hostId === 'local' ? f.client : undefined } })
+    const services = await createConnectionServices({ directory, bindings: { spatial: f.spatial, checkpoint: ref => f.client.conversationCheckpoint(ref) }, ingress: { core: hostId => hostId === 'local' ? f.client : undefined,
+      ...(authoritySource ? { authoritySource: () => authoritySource } : {}) } })
     cleanup.push(() => services.close())
     services.onChannelMetadataChanged(change => changes.push(change))
     const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'metadata.sock'), connections: services.connections, spatialState: f.spatial, coreClients: f.coreClients })

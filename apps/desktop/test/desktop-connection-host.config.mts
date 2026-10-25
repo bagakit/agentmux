@@ -6,7 +6,7 @@ import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../..')
 const { build } = createRequire(resolve(root, 'apps/host/package.json'))('esbuild')
 const mutation = process.env.DESKTOP_CONNECTION_MUTANT
-if (mutation && !['omit-cold-namespace', 'drop-destination-fence', 'drop-business-caller'].includes(mutation)) throw Error('Unknown Desktop connection owner mutation')
+if (mutation && !['omit-cold-namespace', 'drop-destination-fence', 'drop-business-caller', 'profile-runtime-match'].includes(mutation)) throw Error('Unknown Desktop connection owner mutation')
 const artifact = resolve(root, 'apps/desktop/.tmp/connection-host', mutation ?? 'normal'), directory = resolve(artifact, 'out/main')
 mkdirSync(directory, { recursive: true })
 const entry = resolve(directory, 'desktop-host.mjs'), host = resolve(directory, 'agentmux-host.js')
@@ -18,6 +18,7 @@ copyFileSync(resolve(root, 'apps/host/dist/index.js'), host)
 mkdirSync(resolve(artifact, 'resources/bin'), { recursive: true })
 copyFileSync(resolve(root, 'apps/host/resources/bin/agentmux-workspace-move'), resolve(artifact, 'resources/bin/agentmux-workspace-move'))
 const variants = {
+  'profile-runtime-match': [resolve(root, 'apps/desktop/src/main/runtime-controller.ts'), "owner?.availability === 'connected' && owner.runtimeId === source.runtimeId", "owner?.availability === 'connected'"],
   'omit-cold-namespace': [entry, 'AGENTMUX_CONNECTOR_DIRECTORY: configuration.connectorDirectory', 'AGENTMUX_CONNECTOR_DIRECTORY: void 0'],
   'drop-business-caller': [resolve(root, 'apps/desktop/src/main/runtime-controller.ts'), 'callOriginalDesktopHost(original.client, method, params, context, original.expectedOwner)', 'callOriginalDesktopHost(original.client, method, params, {}, original.expectedOwner)'],
   'drop-destination-fence': [resolve(root, 'apps/desktop/src/main/runtime-controller.ts'), 'callOriginalDesktopHost(original.client, method, params, context, original.expectedOwner)', 'callOriginalDesktopHost(original.client, method, params, context)']
@@ -42,5 +43,5 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'false' 
     const marker = { path: relative(root, path), diskSHA256: sha(readFileSync(path, 'utf8')), originalSHA256: sha(original), loadedSHA256: sha(loaded), ...(loaded === original ? {} : { mutation }) }
     return { code: "import { appendFileSync as __desktopConnectionLoaded } from 'node:fs'; __desktopConnectionLoaded(" + JSON.stringify(report) + ', ' + JSON.stringify(JSON.stringify(marker) + '\n') + ');\n' + loaded, map: null }
   }
-}], test: { include: ['apps/desktop/test/desktop-connection-host.test.ts', 'apps/desktop/test/desktop-host-startup.test.ts'],
+}], test: { include: ['apps/desktop/test/channel-profile-runtime.test.ts', 'apps/desktop/test/desktop-connection-host.test.ts', 'apps/desktop/test/desktop-host-startup.test.ts'],
   setupFiles: [resolve(root, 'vitest.setup.ts')], environment: 'node', fileParallelism: false, maxWorkers: 1, passWithNoTests: false, testTimeout: 35_000, hookTimeout: 20_000 } })
