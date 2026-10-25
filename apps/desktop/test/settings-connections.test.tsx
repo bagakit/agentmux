@@ -68,12 +68,12 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 describe('Conversation Channels settings', () => {
   it('catalog: every navigation projection has the same conversation channel contributions without authorization guesses', async () => {
     const groups = settingsNavGroups(''), connections = groups.find(group => group.id === 'conversation-channels')
-    expect(groups.find(group => group.id === 'remote')?.items.map(item => item.id), 'Remote owns environments and mobile access').toEqual(['hosts', 'mobile'])
-    expect(connections?.items.map(item => item.id), 'Conversation Channels owns only the in-app and external conversations').toEqual(['inapp-conversation', 'lark'])
-    expect(hostsSettingsModule.title).toBe('Environments')
+    expect(groups.find(group => group.id === 'remote')?.items.map(item => item.id), 'Remote owns environments and mobile access').toEqual(['hosts', 'remote-execution', 'mobile'])
+    expect(connections?.items.map(item => item.id), 'Conversation Channels owns only the in-app and external conversations').toEqual(['inapp-conversation', 'lark', 'discord'])
+    expect(hostsSettingsModule.title).toBe('Hosts')
     expect(groups.find(group => group.id === 'toolkit')?.items.map(item => item.id)).not.toContain('lark')
     expect(groups.some(group => group.id === 'connections')).toBe(false)
-    expect(groups.find(group => group.id === 'resources')!.items.some(item => ['hosts', 'mobile', 'inapp-conversation'].includes(item.id))).toBe(false)
+    expect(groups.flatMap(group => group.id === 'resources' ? group.items : []).some(item => ['hosts', 'mobile', 'inapp-conversation'].includes(item.id))).toBe(false)
     const phoneResults = visibleSettingsSections('手机').map(item => item.id)
     expect(phoneResults).toContain('mobile')
     expect(phoneResults).not.toContain('inapp-conversation')
@@ -86,9 +86,9 @@ describe('Conversation Channels settings', () => {
     expect(dom.container.querySelector('#settings-overview-conversation-channels')).not.toBeNull()
     expect(dom.container.querySelector('#settings-overview-remote')).not.toBeNull()
     expect([...dom.container.querySelectorAll<HTMLElement>('[aria-labelledby="settings-overview-conversation-channels"] [data-settings-section]')]
-      .map(node => node.dataset.settingsSection)).toEqual(['inapp-conversation', 'lark'])
+      .map(node => node.dataset.settingsSection)).toEqual(['inapp-conversation', 'lark', 'discord'])
     expect([...dom.container.querySelectorAll<HTMLElement>('[aria-labelledby="settings-overview-remote"] [data-settings-section]')]
-      .map(node => node.dataset.settingsSection)).toEqual(['hosts', 'mobile'])
+      .map(node => node.dataset.settingsSection)).toEqual(['hosts', 'remote-execution', 'mobile'])
     expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
     expect(api.deviceManagement.ls).not.toHaveBeenCalled()
   })
