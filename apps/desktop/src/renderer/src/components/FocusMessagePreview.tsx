@@ -207,7 +207,7 @@ export function FocusMessagePreview({ active = true, autoFocus = true, message, 
         ...(system ? { recordTitle: `${message.source.providerId} · ${message.original.item.title ?? 'System record'}` } : {})
       } : {})}
       {...(message.original.kind === 'native' && message.original.item.messagePhase ? { messagePhase: message.original.item.messagePhase } : {})}
-      {...(message.original.kind === 'captured' ? { status: message.original.item.status } : completedNativeReply(message.original.item) ? { status: 'complete' } : {})}
+      {...(message.original.kind === 'captured' ? { status: message.original.item.status } : message.original.kind === 'native' && completedNativeReply(message.original.item) ? { status: 'complete' } : {})}
       {...(message.executionHostId ? { executionHostId: message.executionHostId } : {})}
       name={described!.name} content={message.contentParts}
       {...(message.original.kind === 'native' && message.original.item.questionAnswers ? { questionAnswers: message.original.item.questionAnswers } : {})}
