@@ -177,7 +177,7 @@ export function claudeNativeActivityMutations(workspacePath: string): AgentManag
   ]
 }
 
-/** A variadic --plugin-dir follows positional prompts; an explicit -- keeps its original meaning. */
+/** The repeatable, single-value --plugin-dir follows prompts; an explicit -- keeps its meaning. */
 export function withClaudeNativeActivity(args: readonly string[], workspacePath: string): string[] {
   const separator = args.indexOf('--')
   const at = separator < 0 ? args.length : separator

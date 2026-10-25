@@ -10,7 +10,7 @@ import { agentControlFailureCode, registerAgentExecutionInvocation } from '../ag
 
 import { prepareClaudeExecutionPolicy } from './claude-execution-policy.js'
 export const CLAUDE_EXECUTION_MCP_SERVER = 'amux_exec'
-const valueOptions = new Set(['--model', '--permission-mode', '--settings', '--setting-sources', '--system-prompt', '--system-prompt-file', '--append-system-prompt', '--append-system-prompt-file', '--agent', '--agents', '--resume', '-r', '--session-id', '--effort', '--output-format', '--input-format', '--max-turns', '--max-budget-usd', '--add-dir'])
+const valueOptions = new Set(['--model', '--permission-mode', '--settings', '--setting-sources', '--system-prompt', '--system-prompt-file', '--append-system-prompt', '--append-system-prompt-file', '--agent', '--agents', '--resume', '-r', '--session-id', '--effort', '--output-format', '--input-format', '--max-turns', '--max-budget-usd', '--add-dir', '--plugin-dir', '--plugin-url'])
 
 export async function qualifyClaudeExecutionExecutable(command: string, options: { env: Readonly<NodeJS.ProcessEnv>; workspacePath: string }): Promise<string> {
   const candidates = isAbsolute(command) || command.includes('/') ? [resolve(options.workspacePath, command)]
@@ -46,10 +46,19 @@ export async function prepareClaudeToolExecutionLaunch(plan: AgentLaunchPlan, co
   const policy = await prepareClaudeExecutionPolicy({ workspacePath: context.launchWorkspacePath, bindingId: context.binding.bindingId, serverName: CLAUDE_EXECUTION_MCP_SERVER })
   const mcp = JSON.stringify({ mcpServers: { [CLAUDE_EXECUTION_MCP_SERVER]: { type: 'ws', url } } })
   const note = `Your project and tools are on Host ${JSON.stringify(context.binding.resourceHostId)}, in ${JSON.stringify(context.binding.workspacePath)}. Your original file and command tools are routed to that resource Host by the execution binding. Their paths and command cwd belong to that Host. Your Agent process cwd is ${JSON.stringify(context.launchWorkspacePath)}. Read the resource project's CLAUDE.md through its Read tool before working. Existing native permission decisions still apply to MCP calls; connection does not grant blanket tool approval.`
-  // Both flags accept lists. Contribute to an existing occurrence so its
-  // native loader still owns all user-supplied paths, JSON and trust decisions.
+  const lastOption = (flag: string) => {
+    let last = -1
+    for (let index = 0; index < boundary; index++) {
+      const arg = args[index]!, option = arg.split('=')[0]!
+      if (option === flag) last = index
+      if (valueOptions.has(option) && !arg.includes('=')) index++
+    }
+    return last
+  }
+  // Native MCP config is variadic and a later occurrence replaces the list.
+  // Contribute last to the effective list, preserving its existing inputs.
   const list = (flag: string, value: string) => {
-    const at = args.findIndex((arg, index) => index < boundary && (arg === flag || arg.startsWith(flag + '=')))
+    const at = lastOption(flag)
     if (at < 0) { args.unshift(flag, value); boundary += 2; return }
     const original = args[at]!
     if (original !== flag) { args.splice(at, 1, flag, original.slice(flag.length + 1)); boundary++ }
@@ -60,9 +69,11 @@ export async function prepareClaudeToolExecutionLaunch(plan: AgentLaunchPlan, co
     args.splice(end, 0, value); boundary++
   }
   list('--mcp-config', mcp)
-  list('--plugin-dir', policy)
-  const promptAt = args.findIndex((arg, index) => index < boundary && (arg === '--append-system-prompt' || arg.startsWith('--append-system-prompt=')))
-  const fileAt = args.findIndex((arg, index) => index < boundary && (arg === '--append-system-prompt-file' || arg.startsWith('--append-system-prompt-file=')))
+  // Unlike MCP config, plugin-dir is single-valued and repeatable. A second
+  // path after the same flag is a positional argument, not another plugin.
+  args.splice(boundary, 0, '--plugin-dir', policy); boundary += 2
+  const promptAt = lastOption('--append-system-prompt')
+  const fileAt = lastOption('--append-system-prompt-file')
   if (promptAt >= 0) {
     const equal = args[promptAt]!.startsWith('--append-system-prompt=')
     const original = equal ? args[promptAt]!.slice('--append-system-prompt='.length) : args[promptAt + 1]!
