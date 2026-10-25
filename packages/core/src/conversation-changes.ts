@@ -66,7 +66,8 @@ class ConversationPageOwner {
     if (token !== pageOwnerToken) bad('A conversation page needs its original parser owner.')
     this.#page = page
   }
-  static owns(page: AgentConversationReadPage): boolean {
+  static owns(page: unknown): page is AgentConversationReadPage {
+    if (page === null || typeof page !== 'object') return false
     const owner: unknown = Object.getOwnPropertyDescriptor(page, parsedPageOwner)?.value
     return typeof owner === 'object' && owner !== null && #page in owner && owner.#page === page
   }
@@ -439,7 +440,7 @@ function parseCompleteConversationUnit(value: unknown, ref: ConversationRef, acc
   if (conversationRevision({ policy: 1, versions: records.map(record => [record.id, record.revision]), event }) !== version) return bad('Conversation event version changed.')
   return { event: { ...event, revision: version }, records }
 }
-function basePage(value: unknown, input: ConversationTimelineReadInput, changes = false): AgentConversationReadPage {
+function basePage(value: unknown, input: ConversationTimelineReadInput, changes = false, ownedItems?: readonly ConversationUnitEntry[]): AgentConversationReadPage {
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'coverage', 'order', 'items', 'nextCursor', 'budgetBytes', 'window', 'processDetails', ...(changes ? ['checkpoint', 'more'] : [])], 'CONTROL_PROTOCOL_ERROR')
   if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || p.budgetBytes !== (input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES) || bytes(value) > Number(p.budgetBytes) || !Array.isArray(p.items) || p.items.length > (input.limit ?? 30)) return bad()
   if (p.processDetails !== input.processDetails) return bad('The process detail representation changed during reading.')
@@ -447,7 +448,7 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
   if (input.record && input.record.hostId !== source.hostId || input.nativeSource && !accepted.sources.some(source => source.kind === 'native' && source.providerId === input.nativeSource!.providerId && source.nativeSessionId === input.nativeSource!.nativeSessionId) ||
       input.anchor && (input.anchor.frontier.sourceHostId !== source.hostId || !same(input.anchor.frontier.frontier.scope, accepted))) return bad('The read returned another explicitly selected original source.')
   if (order.direction !== 'newest-first' || order.basis !== 'source-and-relations' || !['partial', 'confirmed'].includes(String(order.crossSource))) return bad()
-  const items = p.items.map(value => {
+  const items = ownedItems ?? p.items.map(value => {
     const entry = rpcRecord(value, ['kind', 'item', 'itemId', 'encoding', 'sha256', 'offsetBytes', 'totalBytes', 'dataBase64'], 'CONTROL_PROTOCOL_ERROR')
     if (entry.kind === 'item') { rpcRecord(value, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR'); return { kind: 'item' as const, item: parseConversationUnit(entry.item, source, accepted) } }
     rpcRecord(value, ['kind', 'itemId', 'encoding', 'sha256', 'offsetBytes', 'totalBytes', 'dataBase64'], 'CONTROL_PROTOCOL_ERROR')
@@ -480,18 +481,26 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
   return { hostId: input.hostId, agentSessionId: input.agentSessionId, ...(input.processDetails ? { processDetails: input.processDetails } : {}), sourceHostId: source.hostId, scope: accepted, coverage: coverage(p.coverage, source, accepted), order: order as AgentConversationReadPage['order'], items, nextCursor: p.nextCursor === null ? null : text(p.nextCursor, 131_072), budgetBytes: Number(p.budgetBytes), window }
 }
 export function parseConversationReadPage(value: unknown, input: ConversationTimelineReadInput): AgentConversationReadPage { return basePage(value, input) }
-export function parseConversationChangesPage(value: unknown, input: ConversationChangesInput): ConversationChangesPage {
-  const result = basePage(value, input, true), p = rpcRecord(value), checkpoint = parseConversationCheckpoint(p.checkpoint, input)
+function changesPage(value: unknown, input: ConversationChangesInput, ownedItems?: readonly ConversationUnitEntry[]): ConversationChangesPage {
+  const result = basePage(value, input, true, ownedItems), p = rpcRecord(value), checkpoint = parseConversationCheckpoint(p.checkpoint, input)
   if (input.checkpoint.sourceHostId !== result.sourceHostId || checkpoint.sourceHostId !== result.sourceHostId || !same(result.scope, input.checkpoint.frontier.scope) || !same(result.scope, checkpoint.frontier.scope) || !same(result.window.checkpoint, checkpoint) || typeof p.more !== 'boolean') return bad()
   return { ...result, checkpoint, more: p.more }
 }
-/** Validate and retain one immutable response for its window consumer, without
- * changing the ordinary public parser's independently mutable DTO result. */
+export function parseConversationChangesPage(value: unknown, input: ConversationChangesInput): ConversationChangesPage {
+  return changesPage(value, input)
+}
+/** Retain complete-unit validation on the exact immutable response. Each consumer
+ * still validates its own request envelope; ordinary DTO parsers remain strict.
+ * Only an original owner may omit its private non-wire marker from that check. */
 export function parseConversationReadPageForWindow(value: unknown, input: ConversationTimelineReadInput): AgentConversationReadPage {
-  return ownParsedPage(parseConversationReadPage(value, input))
+  if (!ConversationPageOwner.owns(value)) return ownParsedPage(parseConversationReadPage(value, input))
+  basePage({ ...value }, input, false, value.items)
+  return value
 }
 export function parseConversationChangesPageForWindow(value: unknown, input: ConversationChangesInput): ConversationChangesPage {
-  return ownParsedPage(parseConversationChangesPage(value, input))
+  if (!ConversationPageOwner.owns(value)) return ownParsedPage(parseConversationChangesPage(value, input))
+  changesPage({ ...value }, input, value.items)
+  return value as ConversationChangesPage
 }
 export function parseConversationCheckpointPage(value: unknown, input: ConversationRef): ConversationCheckpointPage {
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'checkpoint', 'coverage'], 'CONTROL_PROTOCOL_ERROR'), source = { hostId: text(p.sourceHostId), agentSessionId: input.agentSessionId }, checkpoint = parseConversationCheckpoint(p.checkpoint, input), accepted = scope(p.scope)
