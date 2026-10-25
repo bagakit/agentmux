@@ -36,6 +36,7 @@
 | --- | --- |
 | 产品对象、行为、身份、恢复、终端连续阅读 | [交互专题索引](design/agentmux-desktop-interaction.md) |
 | 远程管理的产品需求、连接拓扑、监控信息与维护流程 | [Remote 管理 PRD](design/behavior/remote-management.md) · [应用账户同步](design/behavior/remote-application-access.md) |
+| 从项目开始远程执行、选择两端和继续原工作 | [Core 使用指南](../packages/core/guides/actions/remote-execution.md) · [行为合同](design/behavior/remote-management.md#独立-remote-execution-工作台) · [当前适配范围](../packages/core/README.md#agent-与工具分端执行) |
 | 读取所选环境的网络配置、请求耗时与接口地址 | [Remote 网络观察](guides/remote-network-observation.md) |
 | 视觉、密度、主题 token、控件语言 | [呈现专题索引](design/agentmux-surface-density.md) |
 | Dialog、菜单、tooltip 与原生 Browser 的层级接线 | [UI 弹层实现归属](architecture/ui-layering.md) · [共享层级呈现](design/presentation/shared-rules.md#弹层作用域与层级) |
