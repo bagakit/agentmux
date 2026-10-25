@@ -76,3 +76,28 @@ export function setUnobservedRecoveryScene(mode: 'connecting' | 'created') {
     pendingAgentLaunches: mode === 'created' ? { [originalId]: { request: { executorId: 'codex', hostId: 'local', workspacePath: original.workspacePath, prompt: 'Original submitted request' }, events: [], overflowed: false, created,
       projectionFailures: [{ step: 'session', message: 'The original Host did not return current Session facts.' }] } } : {} }))
 }
+
+let creationWakeStatus: 'woken' | 'not-waiting' = 'woken'
+export function setCreationWakeReceipt(status: 'woken' | 'not-waiting') { creationWakeStatus = status }
+
+/** Source-pinned pending creation scene; responses are explicit presentation fixtures. */
+export function setCreationWakeScene() {
+  creationWakeStatus = 'woken'
+  useAppStore.setState(state => ({ sessions: state.sessions.filter(item => item.id !== originalId),
+    tabs: { ...state.tabs, 'original-tab': { ...state.tabs['original-tab']!, regions: { ...state.tabs['original-tab']!.regions,
+      'original-region': { ...state.tabs['original-tab']!.regions['original-region']!, phase: 'launching' } } } },
+    pendingAgentLaunches: { [originalId]: { request: { executorId: 'codex', hostId: 'local', createOperationId: 'original-create-operation',
+      prompt: 'Review the workspace changes and keep the original reasoning and unsent draft.' }, events: [], overflowed: false } } }))
+  updateCreationWakeScene('waiting')
+  api.sessions.creation = async () => { throw new Error('The original creation record is not available yet.') }
+  api.sessions.continueCreation = async input => {
+    Object.assign(window, { __creationContinueInput: input })
+    return { ...input, status: creationWakeStatus }
+  }
+}
+export function updateCreationWakeScene(mode: 'waiting' | 'unknown') {
+  useAppStore.getState().applyEvent({ hostId: 'local', event: { type: 'agent-error', agentSessionId: originalId,
+    code: mode === 'waiting' ? 'AGENT_CREATION_WAITING_FOR_STORAGE' : 'AGENT_CREATION_RESOURCE_RETRY_STOPPED',
+    message: mode === 'waiting' ? 'Storage is unavailable while checking the original creation. Its request and input are retained. ENOSPC: no space left on device, write original Session journal.'
+      : 'Automatic creation retry ended. The original operation result is unknown.', evidence: { source: 'agentmux', observedAt: Date.now() } } })
+}

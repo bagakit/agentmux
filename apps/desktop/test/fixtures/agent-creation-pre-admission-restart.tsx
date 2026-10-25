@@ -8,6 +8,7 @@ import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { RuntimeController } from '../../src/main/runtime-controller'
 
 const [mode, directory] = process.argv.slice(2)
+const wake = process.argv.includes('--wake')
 assert.ok(mode === 'first' || mode === 'second')
 const progress = (stage: string) => process.stderr.write(JSON.stringify({ mode, stage }) + '\n')
 const window = new Window({ url: 'http://private-restart.test' })
@@ -44,9 +45,12 @@ const provider = defineAgentProvider({ catalog: { id: 'private-capacity-restart'
   buildArgs: (prompt, args) => [...args, prompt], hook: { rules: [] } })
 let capacityFailures = 0
 let capacityFault: { code: string; activeCreations: number } | undefined
+let capacityReleasedByContinue = false
+let continuation: { input: unknown; receipt?: unknown; startCountAtRequest: number; originalPendingRetained: boolean } | undefined
+let ownerAfterRestart: unknown
 const store = new AgentMuxFileAgentSessionStore(join(directory, 'sessions.sqlite'))
 const core = new AgentMuxClient({ store, providers: [provider], prepareExecutionEnvironment: async () => {
-  if (mode === 'first' && capacityFailures === 0) {
+  if (mode === 'first' && (wake ? !capacityReleasedByContinue : capacityFailures === 0)) {
     capacityFailures++
     const error = Object.assign(new Error('Private preparation ENOSPC'), { code: 'ENOSPC' })
     capacityFault = { code: error.code, activeCreations: (core as any).activeCreations.size }
@@ -55,7 +59,7 @@ const core = new AgentMuxClient({ store, providers: [provider], prepareExecution
 } })
 Object.defineProperty((core as any).hookServer, 'port', { value: 0 })
 await core.connect()
-const counts = { start: 0, input: 0, stop: 0, launch: 0, wait: 0, spatialRead: 0, spatialCommit: 0, spatialSubscribe: 0, attach: 0 }
+const counts = { start: 0, input: 0, stop: 0, launch: 0, wait: 0, continue: 0, spatialRead: 0, spatialCommit: 0, spatialSubscribe: 0, attach: 0 }
 const kernel = (core as any).kernel
 for (const name of ['start', 'input', 'stop'] as const) {
   const original = kernel[name].bind(kernel)
@@ -85,6 +89,22 @@ api.sessions.snapshot = async () => ({ ...await runtime.snapshot(config), localH
 api.providers.list = ((options?: { observation: true }) => options ? runtime.providerCatalog(options) : runtime.providerCatalog()) as typeof api.providers.list
 api.sessions.onEvent = listener => { listeners.add(listener); return () => { listeners.delete(listener) } }
 api.sessions.launchAgent = input => { counts.launch++; assert.equal(mode, 'first', 'Restart must not create'); return runtime.launchAgent(input, config) }
+api.sessions.continueCreation = async input => {
+  counts.continue++
+  if (mode === 'first') {
+    assert.equal(wake, true, 'Automatic recovery does not use continuation')
+    const pending = useAppStore.getState().pendingAgentLaunches[input.agentSessionId!]
+    assert.ok(pending?.request, 'Continue targets the actual original pending Store request')
+    assert.deepEqual(input, { hostId: pending.request.hostId, createOperationId: pending.request.createOperationId, agentSessionId: input.agentSessionId })
+    assert.equal(input.hostId, 'local'); assert.equal(counts.start, 0)
+    continuation = { input, startCountAtRequest: counts.start, originalPendingRetained: useAppStore.getState().pendingAgentLaunches[input.agentSessionId!] === pending }
+    // Test-owned resource availability changes only because the real Pane invoked this action.
+    capacityReleasedByContinue = true
+  }
+  const receipt = await runtime.continueAgentCreation(input)
+  if (continuation && mode === 'first') continuation.receipt = receipt
+  return receipt
+}
 api.sessions.refresh = control => runtime.refresh(control, config)
 api.sessions.timeline = control => runtime.sessionTimeline(control)
 api.sessions.recover = (control, path, operation) => runtime.recoverSession(control, config, path, operation)
@@ -128,14 +148,22 @@ try {
     id = await wait(() => Object.keys(useAppStore.getState().pendingAgentLaunches)[0], Boolean, 'original pending SID')
     const mount = () => root.render(<SessionPane sessionId={id} surfaceKind="agent" visible interactiveResize={false}
       linkOrigin={{ workspaceId: 'private', tabGroupId: groupId, tabId, regionId }} />)
-    await act(async () => { mount(); await wait(() => counts.wait, n => n === 1, 'one original Core storage wait') })
+    await act(async () => { mount(); await wait(() => counts.wait, n => wake ? n >= 1 : n === 1, 'original Core storage wait') })
     progress('wait-mounted')
     await act(async () => { await new Promise(done => setTimeout(done, 25)) })
     assert.match(container.textContent!, /Waiting for storage/); waitWasVisible = true
     assert.match(container.textContent!, /Original capacity-recovered prompt/)
+    if (wake) {
+      const button = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === 'Continue now')
+      assert.ok(button && !button.disabled, 'Production Pane exposes the current original wait action')
+      await act(async () => { button.click(); await wait(() => continuation?.receipt, Boolean, 'actual Core continuation receipt') })
+      assert.equal((continuation!.receipt as { status: string }).status, 'woken')
+    }
     await act(async () => { await launch })
     progress('recovered')
-    assert.equal(counts.start, 1); assert.equal(counts.launch, 1); assert.equal(counts.wait, 1)
+    assert.equal(counts.start, 1); assert.equal(counts.launch, 1)
+    if (wake) { assert.ok(counts.wait >= 1); assert.equal(capacityFailures, counts.wait) }
+    else assert.equal(counts.wait, 1)
     useAppStore.getState().setAgentComposerDraft(regionId, 'Retained original unsent draft')
   } else {
     ({ id, tabId, regionId, groupId } = previous)
@@ -151,6 +179,10 @@ try {
   progress('terminal-ready')
   await act(async () => { await wait(terminalText, text => text.includes('original-history-39') && text.includes('Original capacity-recovered prompt'), 'actual xterm retained original content') })
   if (mode === 'second') {
+    if (wake) {
+      ownerAfterRestart = await api.sessions.continueCreation({ hostId: 'local', createOperationId: previous.cid, agentSessionId: id })
+      assert.deepEqual(ownerAfterRestart, { hostId: 'local', createOperationId: previous.cid, status: 'unknown' }, 'No retained in-memory creation owner is reconstructed')
+    }
     writeFileSync(join(directory, 'live-output'), 'after-real-host-restart')
     await act(async () => { await wait(terminalText, text => text.includes('after-real-host-restart'), 'same Run live output after host restart') })
     assert.equal(counts.start, 0); assert.equal(counts.launch, 0)
@@ -170,6 +202,7 @@ try {
   const current = useAppStore.getState(), record = { mode, clientPid: process.pid, id, tabId, regionId, groupId,
     run: status.session.run, childPid: status.run.pid, daemon: core.runtimeIdentity().instanceId,
     acceptedInputBytes: status.run.acceptedInputBytes, counts, waitWasVisible, capacityFailures, capacityFault,
+    ...(wake ? { continuation, ownerAfterRestart, capacityReleasedByContinue } : {}),
     tabs: current.tabs, layouts: current.layouts, draft: current.agentComposerDrafts[regionId],
     spatialRevision: (await spatial.read())!.revision, terminalRead: terminalText().includes('original-history-39'), liveRead: terminalText().includes('after-real-host-restart'),
     cid: (await store.readMetadata(session.control.agentSessionId))!.creation!.createOperationId }

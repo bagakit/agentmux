@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url'
 const root = resolve(import.meta.dirname, '../../../../..'), desktop = join(root, 'apps/desktop'), require = createRequire(join(desktop, 'package.json'))
 const output = process.env.AGENTMUX_RECOVERY_ACTION_PRESENTATION
 assert.ok(output, 'Explicit private presentation receipt is required.')
+const creationWake = process.env.AGENTMUX_CREATION_WAKE_PRESENTATION === '1'
 const recheck = process.env.AGENTMUX_RECOVERY_RECHECK_PRESENTATION === '1'
 const unobserved = process.env.AGENTMUX_RECOVERY_UNOBSERVED_PRESENTATION === '1'
 const startup = process.env.AGENTMUX_STARTUP_PRESENTATION === '1'
@@ -16,24 +17,34 @@ const parkingOnly = startup && process.env.AGENTMUX_STARTUP_PARKING_ONLY === '1'
 const detailsOnly = startup && process.env.AGENTMUX_STARTUP_DETAILS_ONLY === '1'
 const evidence = resolve(output, '..'), temporary = await mkdtemp(join(root, '.tmp/recovery-actions-presentation-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
+const creationVisualSources = new Set([
+ 'apps/desktop/src/renderer/src/components/SessionPane.tsx',
+ 'apps/desktop/src/renderer/src/components/SessionConnectingSurface.tsx',
+ 'apps/desktop/src/renderer/src/components/SessionRecoveryActions.tsx',
+ 'apps/desktop/src/renderer/src/components/FullPageLoadingSurface.tsx',
+ 'apps/desktop/src/renderer/src/components/SurfaceState.tsx',
+ 'apps/desktop/src/renderer/src/lib/session-state.ts', 'apps/desktop/src/renderer/src/lib/api.ts',
+ 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/styles/session-connecting.css',
+ 'apps/desktop/scripts/fixtures/recovery-actions/presentation-cases.tsx'
+])
 const entry = `import React from 'react';import { createRoot } from 'react-dom/client';
-import { initializeRecoveryScene,recoveryScene,setUnobservedRecoveryScene,setOriginalRecheckScene,setStartupRecoveryScene } from '${join(desktop, 'scripts/fixtures/recovery-actions/presentation-cases.tsx')}';
+import { initializeRecoveryScene,recoveryScene,setUnobservedRecoveryScene,setOriginalRecheckScene,setStartupRecoveryScene,setCreationWakeScene,updateCreationWakeScene,setCreationWakeReceipt } from '${join(desktop, 'scripts/fixtures/recovery-actions/presentation-cases.tsx')}';
 import { mountThemeRuntime,updateThemeSelection } from '@agentmux/client-ui/theme';
 const applyAppAppearance=mode=>updateThemeSelection({appAppearance:mode});mountThemeRuntime(window,{appAppearance:'dark'});
 import '${join(desktop,'src/renderer/src/styles/index.css')}';
-await initializeRecoveryScene();${startup ? "setStartupRecoveryScene('preparing');" : ''}${recheck ? 'setOriginalRecheckScene();' : ''}${unobserved ? "setUnobservedRecoveryScene('connecting');" : ''}applyAppAppearance('dark');const root=createRoot(document.getElementById('root'));root.render(recoveryScene());
-window.__setStartupVisible=visible=>root.render(recoveryScene(visible));window.__setStartup=phase=>setStartupRecoveryScene(phase);window.__setUnobservedRecovery=mode=>setUnobservedRecoveryScene(mode);window.__fixtureReady=true;window.__setLight=light=>{applyAppAppearance(light?'light':'dark')};`
+await initializeRecoveryScene();${creationWake ? "setCreationWakeScene();" : ""}${startup ? "setStartupRecoveryScene('preparing');" : ''}${recheck ? 'setOriginalRecheckScene();' : ''}${unobserved ? "setUnobservedRecoveryScene('connecting');" : ''}applyAppAppearance('dark');const root=createRoot(document.getElementById('root'));root.render(recoveryScene());
+window.__setCreationWake=updateCreationWakeScene;window.__setCreationContinueStatus=setCreationWakeReceipt;window.__setStartupVisible=visible=>root.render(recoveryScene(visible));window.__setStartup=phase=>setStartupRecoveryScene(phase);window.__setUnobservedRecovery=mode=>setUnobservedRecoveryScene(mode);window.__fixtureReady=true;window.__setLight=light=>{applyAppAppearance(light?'light':'dark')};`
 const main = `import { app,BrowserWindow } from 'electron';import { readFileSync,writeFileSync } from 'node:fs';import { createHash } from 'node:crypto';
 app.setPath('home',process.env.PRIVATE_HOME);app.setPath('userData',process.env.PRIVATE_DATA);
 const hash=b=>createHash('sha256').update(b).digest('hex');
-const report={schema:'agentmux.session-recovery-actions-presentation.v1',passed:false,userRuntimeTouched:false,recheckOnly:${recheck},startup:${startup},images:[],limitations:['Actual production SessionPane and dialog mounted in a private Electron renderer, with explicit synthetic Store/API replies. No native restore, user GUI, input, Runtime or installed package qualification.']};
+const report={schema:'agentmux.session-recovery-actions-presentation.v1',passed:false,userRuntimeTouched:false,recheckOnly:${recheck},startup:${startup},creationWake:${creationWake},privateHiddenWindow:${creationWake},images:[],limitations:['Actual production SessionPane and dialog mounted in a private Electron renderer, with explicit synthetic Store/API replies. No native restore, user GUI, input, Runtime or installed package qualification.']};
 let window;const wait=async(fn,label)=>{const end=Date.now()+12000;while(Date.now()<end){if(await fn())return;await new Promise(r=>setTimeout(r,25))}throw new Error(label)};
 app.whenReady().then(async()=>{try{
- window=new BrowserWindow({width:820,height:760,show:true,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:${startup}}});
+ window=new BrowserWindow({width:820,height:760,show:${!creationWake},webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:${startup}}});
  window.webContents.on('console-message',event=>{report.console??=[];report.console.push(event.message)});
  window.webContents.debugger.attach('1.3');const scripts=new Map();window.webContents.debugger.on('message',(_event,method,p)=>{if(method==='Debugger.scriptParsed'&&p.url)scripts.set(p.url,p.scriptId)});
  await window.loadURL(process.env.PRIVATE_PAGE);await window.webContents.debugger.sendCommand('Debugger.enable');const evaluate=x=>window.webContents.executeJavaScript(x,true);
- await wait(()=>evaluate('window.__fixtureReady && !!document.querySelector("${startup ? ".full-page-loading" : ".session-recovery-actions"}")'),'real SessionPane actions');
+ await wait(()=>evaluate('window.__fixtureReady && !!document.querySelector("${startup || creationWake ? ".full-page-loading" : ".session-recovery-actions"}")'),'real SessionPane actions');
  const click=text=>evaluate('(()=>{const b=[...document.querySelectorAll("button")].find(b=>b.textContent.trim()==='+JSON.stringify(text)+');if(!b)throw new Error("button missing");b.click()})()');
  const choose=(label,value)=>evaluate('(()=>{const s=document.querySelector('+JSON.stringify('select[aria-label="'+label+'"]')+');s.value='+JSON.stringify(value)+';s.dispatchEvent(new Event("change",{bubbles:true}))})()');
  const frame=async(label,width,height,light)=>{report.phase=label;window.setContentSize(width,height);await evaluate('window.__setLight('+light+')');await new Promise(r=>setTimeout(r,50));
@@ -42,7 +53,50 @@ app.whenReady().then(async()=>{try{
   if(facts.dialogRect&&(facts.dialogRect.left<0||facts.dialogRect.right>width+1||facts.dialogRect.top<0||facts.dialogRect.bottom>height+1||facts.dialogRect.scrollWidth>facts.dialogRect.clientWidth))throw new Error('Dialog escaped viewport: '+label);
   if(process.env.PRIVATE_UNOBSERVED==='1'&&(!facts.actions?.includes('Check original')||!facts.actions.includes('Take over…')||!facts.actions.includes('Analyze…')||facts.stageScrollWidth>facts.stageWidth))throw new Error('Original reference actions are missing or overflow: '+label);
   const png=await window.webContents.capturePage(),bytes=png.toPNG(),path=process.env.PRIVATE_EVIDENCE+'/'+label+'.png';writeFileSync(path,bytes);report.images.push({label,path,sha256:hash(bytes),facts});};
- ${startup ? `
+ ${creationWake ? `
+ await frame('creation-wait-dark',820,760,false);
+ await frame('creation-wait-narrow-light',360,640,true);
+ await frame('creation-wait-short',420,340,false);
+ report.shortScroll=await evaluate('(()=>{const e=document.querySelector(".full-page-loading__stage");e.scrollTop=e.scrollHeight;return {top:e.scrollTop,height:e.clientHeight,scrollHeight:e.scrollHeight}})()');
+ if(report.shortScroll.top<=0)throw new Error('Short original prompt is not scrollable');
+ await frame('creation-wait-short-prompt',420,340,false);
+ await evaluate('document.querySelector(".full-page-loading__stage").scrollTop=0');
+ await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true});report.focusEmulated=true;
+ await evaluate('document.querySelector(".session-connecting summary").focus()');
+ const key=async(key,code,n)=>{await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyDown',key,code,windowsVirtualKeyCode:n,...(n===13?{text:String.fromCharCode(13),unmodifiedText:String.fromCharCode(13)}:{})});await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:n})};
+ await key('Enter','Enter',13);
+ await wait(()=>evaluate('document.querySelector(".session-connecting details").open'),'keyboard disclosure');
+ await key('Tab','Tab',9);
+ report.keyboard=await evaluate('({name:document.activeElement?.textContent.trim(),details:!!document.activeElement?.closest("details")})');
+ if(report.keyboard.name!=='Check original'||!report.keyboard.details)throw new Error('Expanded original actions are not keyboard reachable');
+ report.keyboard.actions=[report.keyboard.name];await key('Tab','Tab',9);report.keyboard.actions.push(await evaluate('document.activeElement.textContent.trim()'));await key('Tab','Tab',9);report.keyboard.actions.push(await evaluate('document.activeElement.textContent.trim()'));
+ if(JSON.stringify(report.keyboard.actions)!==JSON.stringify(['Check original','Take over','Analyze…']))throw new Error('Secondary actions are not keyboard reachable');
+ await key('Enter','Enter',13);await wait(()=>evaluate('!!document.querySelector(".session-recovery-dialog")'),'keyboard analysis dialog');await click('Cancel');await wait(()=>evaluate('!document.querySelector(".session-recovery-dialog")'),'analysis cancel');
+ report.keyboard.returned=await evaluate('document.activeElement.textContent.trim()');if(report.keyboard.returned!=='Analyze…')throw new Error('Analysis cancel lost original focus');
+ await click('Check original');await wait(()=>evaluate('document.body.textContent.includes("Latest read: The original creation record is not available yet.")'),'read feedback retained');
+ await frame('creation-wait-details',360,780,true);
+ await click('Continue now');await wait(()=>evaluate('!!window.__creationContinueInput && document.body.textContent.includes("Continue requested.")'),'actual Continue handler');
+ report.continueInput=await evaluate('window.__creationContinueInput');
+ if(report.continueInput.hostId!=='local'||report.continueInput.createOperationId!=='original-create-operation'||report.continueInput.agentSessionId!=='retained-original-session-7B2a')throw new Error('Continue changed the original target');
+ await evaluate('document.querySelector(".session-connecting summary").click()');
+ await frame('creation-continue-feedback',820,760,false);
+ await evaluate('window.__setCreationContinueStatus("not-waiting")');await click('Continue now');
+ await wait(()=>evaluate('document.querySelector(".full-page-loading").dataset.loadingPhase==="parked" && document.body.textContent.includes("The original request has no active wait.")'),'actual no-wait reply');
+ await evaluate('document.querySelector(".session-connecting summary").click()');await frame('creation-no-wait-details',360,780,true);
+ await evaluate('document.querySelector(".session-connecting summary").click()');
+ await evaluate('window.__setCreationWake("unknown")');
+ await wait(()=>evaluate('document.querySelector(".full-page-loading").dataset.loadingPhase==="parked"'),'unknown is static');
+ if(await evaluate('!!document.querySelector("[data-icon-animation=wait]")'))throw new Error('Unknown retained activity');
+ await frame('creation-unconfirmed-light',360,640,true);
+ await evaluate('window.__setCreationWake("waiting")');
+ await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+ await wait(()=>evaluate('!!document.querySelector("[data-icon-animation=wait]")'),'same pending waiting instance');
+ report.reducedMotion=await evaluate('({reduced:matchMedia("(prefers-reduced-motion: reduce)").matches,iterations:getComputedStyle(document.querySelector("[data-icon-animation=wait]")).getPropertyValue("--icon-motion-iterations").trim(),title:document.querySelector(".full-page-loading h2").textContent})');
+ if(!report.reducedMotion.reduced||report.reducedMotion.iterations!=='0')throw new Error('Reduced motion retained animation');
+ await evaluate('window.__setStartupVisible(false)');await new Promise(r=>setTimeout(r,50));
+ report.hidden=await evaluate('({activeWait:!!document.querySelector("[data-icon-animation=wait]"),elapsed:document.querySelector(".full-page-loading__elapsed")?.textContent})');
+ if(report.hidden.activeWait)throw new Error('Hidden Pane retained activity');
+ ` : startup ? `
  if(${detailsOnly}) {
  await evaluate('window.__setStartup("unknown")');await wait(()=>evaluate('document.querySelector(".full-page-loading")?.getAttribute("data-loading-phase")==="parked"'),'unknown original setup');
  await evaluate('document.querySelector(".full-page-loading details summary").click()');await frame('startup-unconfirmed-details-dark',900,900,false);
@@ -104,7 +158,7 @@ try {
  await mkdir(evidence,{recursive:true});await mkdir(join(temporary,'home'));await mkdir(join(temporary,'user-data'))
  await writeFile(join(temporary,'entry.tsx'),entry);await writeFile(join(temporary,'terminal.tsx'),'export function TerminalView(){return null}')
  const {build}=require('vite'),react=require('@vitejs/plugin-react').default,coreExports=JSON.parse(await readFile(join(root,'packages/core/package.json'),'utf8')).exports
- const sourceConfig = startup ? (await require('vite').loadConfigFromFile({command:'build',mode:'production'},join(desktop,'test/session-startup-service-window.config.mts'))).config : null
+ const sourceConfig = startup || creationWake ? (await require('vite').loadConfigFromFile({command:'build',mode:'production'},join(desktop,'test/session-startup-service-window.config.mts'))).config : null
  const aliases=[{find:/^\.\/TerminalView$/,replacement:join(temporary,'terminal.tsx')},{find:/^@agentmux\/client-ui\/styles\/(.+)$/,replacement:join(root,'packages/client-ui/src/styles/$1')},{find:/^@agentmux\/client-ui\/input\/styles.css$/,replacement:join(root,'packages/client-ui/src/input/input.css')},...(sourceConfig?.resolve?.alias ?? []),
   {find:/^@agentmux\/client-ui\/theme$/,replacement:join(root,'packages/client-ui/src/theme/index.ts')},
   {find:/^@agentmux\/client-ui\/icons$/,replacement:join(root,'packages/client-ui/src/theme/icons.tsx')},
@@ -118,14 +172,18 @@ try {
   {find:/^@agentmux\/client-ui\/(.+)$/,replacement:join(root,'packages/client-ui/src/lib/$1.ts')},{find:/^@agentmux\/client-ui$/,replacement:join(root,'packages/client-ui/src/index.ts')},
   ...Object.entries({react:join(desktop,'node_modules/react'),'react-dom':join(desktop,'node_modules/react-dom'),'lucide-react':join(desktop,'node_modules/lucide-react')}).map(([find,replacement])=>({find,replacement}))]
  const sourcePins={}
- await build({configFile:false,root:desktop,logLevel:'error',worker:{format:'es'},resolve:{alias:aliases},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},plugins:[{name:'private-production-source-pins',enforce:'pre',transform(code,id){const file=id.split('?')[0];if(file.startsWith(root+'/')&&!file.includes('/node_modules/')&&!file.includes('/.tmp/'))sourcePins[file.slice(root.length+1)]=hash(readFileSync(file));return id.endsWith('.tsx')&&id.includes('/src/')?{code:"import React from 'react'\n"+code,map:null}:undefined}},react({jsxRuntime:'classic'})],build:{target:'esnext',outDir:temporary,emptyOutDir:false,lib:{entry:join(temporary,'entry.tsx'),formats:['es'],fileName:()=> 'renderer.mjs'}}})
+ await build({configFile:false,root:desktop,logLevel:'error',worker:{format:'es'},css:{postcss:{plugins:[{
+  postcssPlugin:'creation-wake-loaded-css',OnceExit(styles){if(creationWake)styles.walk(node=>{const input=node.source?.input;if(input?.file&&creationVisualSources.has(input.file.slice(root.length+1)))sourcePins[input.file.slice(root.length+1)]=hash(input.css)})}
+ }]}},resolve:{alias:aliases},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},plugins:[{name:'private-production-source-pins',enforce:'pre',transform(code,id){const file=id.split('?')[0];if(file.startsWith(root+'/')&&!file.includes('/node_modules/')&&!file.includes('/.tmp/')){const relative=file.slice(root.length+1);if(creationWake?creationVisualSources.has(relative):/\.(?:[cm]?[jt]sx?|css)$/.test(file))sourcePins[relative]=hash(code);}return id.endsWith('.tsx')&&id.includes('/src/')?{code:"import React from 'react'\n"+code,map:null}:undefined}},react({jsxRuntime:'classic'})],build:{target:'esnext',outDir:temporary,emptyOutDir:false,lib:{entry:join(temporary,'entry.tsx'),formats:['es'],fileName:()=> 'renderer.mjs'}}})
  const css=(await readdir(temporary)).find(name=>name.endsWith('.css'));assert.ok(css)
  await writeFile(join(temporary,'index.html'),`<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="./${css}"></head><body style="margin:0"><div id="root" style="height:100vh"></div><script type="module" src="./renderer.mjs"></script></body></html>`);await writeFile(join(temporary,'main.mjs'),main);execFileSync(process.execPath,['--check',join(temporary,'main.mjs')])
  const env={...process.env,PRIVATE_HOME:join(temporary,'home'),PRIVATE_DATA:join(temporary,'user-data'),PRIVATE_PAGE:pathToFileURL(join(temporary,'index.html')).href,PRIVATE_REPORT:join(temporary,'report.json'),PRIVATE_MODULE:join(temporary,'renderer.mjs'),PRIVATE_MODULE_URL:pathToFileURL(join(temporary,'renderer.mjs')).href,PRIVATE_EVIDENCE:evidence,PRIVATE_UNOBSERVED:unobserved?'1':'0'}
  for(const key of Object.keys(env))if(key.startsWith('AGENTMUX_'))delete env[key];delete env.ELECTRON_RUN_AS_NODE
  child=spawn(require('electron'),[join(temporary,'main.mjs')],{env,stdio:['ignore','ignore','pipe']});let diagnostics='';child.stderr.on('data',bytes=>{diagnostics=(diagnostics+bytes.toString()).slice(-4000)})
  const exit=await new Promise((done,fail)=>{const timer=setTimeout(()=>{child.kill('SIGTERM');fail(new Error('Private presentation timed out: '+diagnostics))},60000);child.once('error',error=>{clearTimeout(timer);fail(error)});child.once('exit',(code,signal)=>{clearTimeout(timer);completed=true;done({code,signal})})})
- const report=JSON.parse(await readFile(join(temporary,'report.json'),'utf8'));report.exit=exit;report.sourceRoot=root;report.sourcePins=sourcePins
+ const report=JSON.parse(await readFile(join(temporary,'report.json'),'utf8'));report.exit=exit;report.sourceRoot=root;report.sourcePins=sourcePins;report.fixtureRunnerSHA256=hash(await readFile(import.meta.filename))
+ await writeFile(output,JSON.stringify(report,null,2)+'\n')
+ if(creationWake)for(const file of creationVisualSources)assert.ok(sourcePins[file],'Required actual visual source: '+file)
  for(const[file,sha]of Object.entries(sourcePins))assert.equal(hash(await readFile(join(root,file))),sha,'Source changed during capture: '+file)
  await writeFile(output,JSON.stringify(report,null,2)+'\n');assert.equal(exit.code,0,report.error??diagnostics);assert.equal(report.passed,true)
  console.log('Private production SessionPane: '+report.images.length+' actual frames; independent image review pending.')

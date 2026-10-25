@@ -8,7 +8,7 @@ export default defineConfig({ ...source, plugins: [{ name: 'original-storage-wai
     'duplicate-global-notice': ['lib/session-state.ts',
       'if (core.agentSessionId && isPendingLaunchStorageWait(state.pendingAgentLaunches?.[core.agentSessionId], core.agentSessionId, event)) return null', ''],
     'wrong-host-owner': ['lib/session-state.ts', 'pending.request?.hostId === event.hostId', 'true'],
-    'disconnected-pane': ['components/SessionPane.tsx', '!session ? pendingAgentLaunchStorageWait(pendingLaunch, sessionId) : undefined', 'undefined'],
+    'disconnected-pane': ['components/SessionPane.tsx', '!session ? pendingAgentLaunchResourceDiagnostic(pendingLaunch, sessionId) : undefined', 'undefined'],
     'queued-wait-resurrection': ['lib/session-state.ts', "if (session?.kind === 'agent' && core.code === 'AGENT_CREATION_WAITING_FOR_STORAGE') return null", ''],
     'stale-wait-after-stop': ['lib/session-state.ts', "latest.event.agentSessionId !== agentSessionId) continue",
       "latest.event.agentSessionId !== agentSessionId || latest.event.code !== 'AGENT_CREATION_WAITING_FOR_STORAGE') continue"]
