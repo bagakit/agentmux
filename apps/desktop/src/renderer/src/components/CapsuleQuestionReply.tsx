@@ -148,24 +148,26 @@ export function CapsuleQuestionReply({ browserId, visible = true, interaction, o
     <details className="capsule-question__history" ref={history} open={settled ? undefined : true}>
       <summary hidden={!settled}><span>Answered · {current.question}</span><span>{inputObservationLabel(delivery)}</span></summary>
       <div className="capsule-question__body">
-    <div className="capsule-question__recipient">{current.target ? <><span>Host <code>{current.target.hostId}</code></span><span>Session <code>{current.target.agentSessionId}</code></span></> : <span>No original Agent recipient is bound. The request and draft remain available.</span>}</div>
     <p className="capsule-question__question">{current.question}</p>
     <label className="capsule-question__answer">Your answer
       <textarea aria-label={`Answer to ${current.question}`} value={current.status === 'answered' ? current.answer ?? answer : answer} readOnly={Boolean(issue) || current.status === 'answered' || attempt?.method === 'capsule.interaction.reply'}
         onChange={event => { const value = event.target.value; if (!issue) update(saved => ({ ...saved, answer: value, autoSave: true })) }} rows={3} />
     </label>
+    {current.target ? <details className="capsule-question__recipient"><summary>Send to original Agent <code>{current.target.agentSessionId}</code></summary>
+      <dl><dt>Host</dt><dd><code>{current.target.hostId}</code></dd><dt>Session</dt><dd><code>{current.target.agentSessionId}</code></dd></dl></details>
+      : <p className="capsule-question__notice">No original Agent recipient is bound. The request and draft remain available.</p>}
     {current.status === 'answered' && answer !== current.answer && answer !== current.draft ? <details><summary>Your later unsent text</summary><p className="capsule-question__retained">{answer}</p></details> : null}
     <div className="capsule-question__actions">
       {current.status === 'pending' ? <>
         <span role="status">{attempt?.pending ? 'Saving original operation…' : dirty ? 'Unsaved draft' : 'Draft saved'}</span>
-        <button type="button" className="small-button" disabled={Boolean(issue) || !dirty || Boolean(attempt)} onClick={() => void saveDraft()}>Save draft</button>
-        <button type="button" className="small-button capsule-question__confirm" disabled={Boolean(issue) || Boolean(attempt) || !current.target || !answer.trim()}
+        <button type="button" className="small-button capsule-question__save" disabled={Boolean(issue) || !dirty || Boolean(attempt)} onClick={() => void saveDraft()}>Save draft</button>
+        <button type="button" className="primary-button capsule-question__confirm" disabled={Boolean(issue) || Boolean(attempt) || !current.target || !answer.trim()}
           onClick={() => void confirm()}>Confirm answer</button>
       </> : <span role="status">Answer saved{delivery ? ` · ${inputObservationLabel(delivery)}` : ''}</span>}
       {current.status === 'answered' && current.reply?.phase === 'prepared' && (delivery?.status === 'unknown' || delivery?.status === 'unavailable') ?
-        <button type="button" className="small-button capsule-question__confirm" disabled={Boolean(issue) || attempt?.pending || inspecting} onClick={() => void confirm(true)}>Continue saved confirmation</button> : null}
-      {attempt && !attempt.pending ? <button type="button" className="small-button" disabled={inspecting} onClick={() => void inspect()}>{inspecting ? 'Inspecting…' : 'Inspect original operation'}</button> : inspectSavedReply ?
-        <button type="button" className="small-button" disabled={inspecting} onClick={() => void inspectRestored()}>Inspect original operation</button> : null}
+        <button type="button" className="small-button" disabled={Boolean(issue) || attempt?.pending || inspecting} onClick={() => void confirm(true)}>Continue saved confirmation</button> : null}
+      {attempt && !attempt.pending ? <button type="button" className="primary-button capsule-question__confirm" disabled={inspecting} onClick={() => void inspect()}>{inspecting ? 'Inspecting…' : 'Inspect original operation'}</button> : inspectSavedReply ?
+        <button type="button" className={settled ? 'small-button' : 'primary-button capsule-question__confirm'} disabled={inspecting} onClick={() => void inspectRestored()}>Inspect original operation</button> : null}
     </div>
     {issue ? <p className="capsule-question__notice" role="status">{issue}</p> : null}
     {notice ? <p className="capsule-question__notice" role="status">{notice}</p> : null}

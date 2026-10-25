@@ -12,6 +12,11 @@ import { BrowserPresentationStage, useBrowserPresentationCapture, type BrowserSt
 import { CapsuleInteractionChrome } from './CapsuleInteractionChrome'
 
 const PageIcon = semanticIconComponent('object.browser')
+const ShowIcon = semanticIconComponent('navigation.down')
+const HideIcon = semanticIconComponent('navigation.up')
+const ExpandIcon = semanticIconComponent('layout.expand')
+const CompactIcon = semanticIconComponent('layout.collapse')
+const OpenIcon = semanticIconComponent('action.open-external')
 
 /** A card owns its presentation only. Content, native document and human input keep their original owners. */
 export function ConversationCapsule(input: CapsuleEmbedInput) {
@@ -108,12 +113,12 @@ function CapsulePage({ uri, capsuleId, title, visible, browserId, owner }: Capsu
   }), [occurrenceId, owner.reference, active])
   const open = () => { void api.ui.openObjectLink(uri).catch(error => setNotice(presentError(error))) }
   return <section className={`conversation-capsule${expanded ? ' conversation-capsule--expanded' : ''}`} aria-label={title || 'Capsule page'} data-capsule-id={capsuleId} data-conversation-keyframe={browser?.navigationId}>
-    <header className="conversation-capsule__header"><PageIcon size={15} aria-hidden="true" /><strong>{title || page?.record.title || 'Saved page'}</strong>
-      {page ? <span className="conversation-capsule__mode">{page.record.mode === 'injected' ? 'Injected' : 'Isolated'}</span> : null}
+    <header className="conversation-capsule__header"><span className="conversation-capsule__identity"><PageIcon size={15} aria-hidden="true" /><strong>{title || page?.record.title || 'Saved page'}</strong>
+      {page ? <span className="conversation-capsule__mode">{page.record.mode === 'injected' ? 'Injected' : 'Isolated'}</span> : null}</span>
       <span className="conversation-capsule__actions">
-        <button type="button" className="small-button" onClick={() => setCollapsed(value => !value)} aria-expanded={!collapsed}>{collapsed ? 'Show page' : 'Hide'}</button>
-        {!collapsed ? <button type="button" className="small-button" onClick={() => setExpanded(value => !value)} aria-pressed={expanded}>{expanded ? 'Compact' : 'Expand'}</button> : null}
-        <button type="button" className="small-button" onClick={open}>Open in Browser</button>
+        <button type="button" className="small-button" onClick={() => setCollapsed(value => !value)} aria-expanded={!collapsed}>{collapsed ? <ShowIcon size={13} aria-hidden="true" /> : <HideIcon size={13} aria-hidden="true" />}{collapsed ? 'Show page' : 'Hide'}</button>
+        {!collapsed ? <button type="button" className="small-button" onClick={() => setExpanded(value => !value)} aria-pressed={expanded}>{expanded ? <CompactIcon size={13} aria-hidden="true" /> : <ExpandIcon size={13} aria-hidden="true" />}{expanded ? 'Compact' : 'Expand'}</button> : null}
+        <button type="button" className="small-button" onClick={open}><OpenIcon size={13} aria-hidden="true" />Open in Browser</button>
       </span>
     </header>
     {!collapsed ? <>
@@ -121,8 +126,9 @@ function CapsulePage({ uri, capsuleId, title, visible, browserId, owner }: Capsu
       {active && browser ? <CapsuleNativePage browser={browser} presentation={presentation} release={release} />
         : <div className="conversation-capsule__placeholder" role={loading ? 'status' : undefined}>{loading ? 'Connecting saved page…' : !visible ? 'Page preview paused while outside the reading window' : 'The original page reference is kept below.'}</div>}
     </> : null}
-    {browser?.capsuleId === capsuleId ? <div hidden={!active} inert={!active}><span className="conversation-capsule__questions" ref={setToolbar} /><CapsuleInteractionChrome browserId={browser.id} capsuleId={browser.capsuleId} active={browser.capsuleActive === true} visible={active} toolbarHost={toolbar} /></div> : null}
-    <details className="conversation-capsule__source"><summary>Page reference</summary><code>{uri}</code>{browser ? <code>Browser {browser.id}</code> : null}</details>
+    {browser?.capsuleId === capsuleId ? <div hidden={!active} inert={!active}><span className="conversation-capsule__questions" ref={setToolbar} /><CapsuleInteractionChrome embedded browserId={browser.id} capsuleId={browser.capsuleId} active={browser.capsuleActive === true} visible={active} toolbarHost={toolbar} /></div> : null}
+    <details className="conversation-capsule__source"><summary>Page reference</summary><code>{uri}</code>{browser ? <code>Browser {browser.id}</code> : null}
+      {page ? <><code>{page.record.contentRoot}</code>{page.endpoint.status === 'available' ? <code>{page.endpoint.url}</code> : <p>{page.endpoint.issue.message}</p>}</> : null}</details>
   </section>
 }
 
