@@ -1,3 +1,4 @@
+import { parseAgentInputImages } from './agent-input-resource.js'
 import { parseExternalConversationAuthor, parseExternalConversationInputObservation } from './external-conversation.js'
 import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
 import { conversationRevision } from './conversation-stream.js'
@@ -227,6 +228,7 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     createdAt,
     updatedAt,
     title: text(source.title, 'Timeline item title'),
+    ...(source.inputImages === undefined ? {} : { inputImages: parseAgentInputImages(source.inputImages) }),
     ...browserInputContextFields(source), ...agentInputContextCaptureProofFields(source),
     ...optionalField(source, 'content'),
     ...(contentEligibility === undefined ? {} : { contentEligibility }),

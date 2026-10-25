@@ -190,3 +190,6 @@ export * from './agent-progress.js'
 export * from './goal-changes.js'
 
 export * from './goal-participation.js'
+
+export type { AgentInputImageReference, AgentInputImage, AgentInputResourceRead, AgentInputResourceResult, AgentInputResourceOwner } from './agent-input-resource.js'
+export { parseAgentInputResourceRead, parseAgentInputResourceResult, inputImageMatches } from './agent-input-resource.js'

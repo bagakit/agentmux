@@ -74,6 +74,15 @@ export class FileUploadOwner implements AgentMuxRpcFileUploadsOwner {
       return parseFileUploadResult({ ...identity, status: 'uploaded', path: original.path }, identity)
     } catch (error) { return failure(identity, error) }
   }
+  async read(input: FileUploadIdentity, maxBytes: number): Promise<{ dataBase64: string; byteLength: number; mimeType: string; revision: string } | null> {
+    const identity = identityOf(input)
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < identity.byteLength) return null
+    const original = await this.original(identity)
+    if (!original) return null
+    const bytes = await readBounded(original.path, identity.byteLength)
+    if (bytes.byteLength !== identity.byteLength || digest(bytes) !== identity.revision) return null
+    return { dataBase64: bytes.toString('base64'), byteLength: bytes.length, mimeType: identity.mimeType, revision: identity.revision }
+  }
   async upload(input: FileUploadParams): Promise<FileUploadResult> {
     const params = parseFileUploadParams(input), identity = identityOf(params)
     const previous = this.tails.get(identity.operationId) ?? Promise.resolve()

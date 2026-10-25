@@ -1,3 +1,4 @@
+import { parseAgentInputResourceRead, parseAgentInputResourceResult } from './agent-input-resource.js'
 import { parseReadingDiagnosticSourceRead, parseReadingDiagnosticSourceFind, type ReadingDiagnosticExactTarget, type ReadingDiagnosticFindParams } from './reading-diagnostic-query.js'
 import { parseStartupDiagnosticRead, type AgentStartupDiagnosticExactTarget, type AgentStartupDiagnosticRecentTarget } from './startup-diagnostic.js'
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
@@ -268,6 +269,7 @@ export async function connectHostedAgentMux(options: {
         : parseConversationChangesPage(decoded, { ...expected, checkpoint: (input as import('./conversation-changes.js').ConversationChangesInput).checkpoint })
     }
     if (method === 'releaseConversationView') return parseConversationViewReleaseResult(decoded, wireArgs[0] as ConversationRef)
+    if (method === 'readAgentInputResource') return parseAgentInputResourceResult(decoded, parseAgentInputResourceRead(wireArgs[0]))
     if (method === 'readAgentInputMailbox') return parseAgentInputMailboxPage(decoded, wireArgs[0] as import('./agent-input-mailbox.js').AgentInputMailboxRead)
     if (method === 'readAgentSessionHistory') return parseAgentSessionHistoryReadPage(decoded, wireArgs[0] as AgentSessionHistoryReadInput)
     return decoded

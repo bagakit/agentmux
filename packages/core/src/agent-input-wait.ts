@@ -49,7 +49,7 @@ export type AgentInputJournalIntent = {
   execution: 'immediate'
   environment: AgentInputSavedEnvironment
   source:
-    | { kind: 'prompt'; prompt: string; agentMuxNote?: string; authorHuman?: boolean; sourceChannel?: AgentMessageChannel; sourceDevice?: AgentOperationDevice;
+    | { kind: 'prompt'; inputImages?: import('./agent-input-resource.js').AgentInputImage[]; prompt: string; agentMuxNote?: string; authorHuman?: boolean; sourceChannel?: AgentMessageChannel; sourceDevice?: AgentOperationDevice;
         /** Original Core intake confirmed local human authority without an invocation-local restrictor. */
         recoveryAuthorization?: 'local-human';
         inputContext?: import('./browser-input-context.js').BrowserInputContext; inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource;

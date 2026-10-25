@@ -68,6 +68,7 @@ export type FileUploadResult = FileUploadIdentity & (
 export interface AgentMuxRpcFileUploadsOwner {
   upload(params: FileUploadParams): Promise<FileUploadResult>
   inspect(params: FileUploadIdentity): Promise<FileUploadResult>
+  read?(identity: FileUploadIdentity, maxBytes: number): Promise<{ dataBase64: string; byteLength: number; mimeType: string; revision: string } | null>
 }
 export type FileParameterMap = { 'file.import': FileImportParams; 'file.share.undo': FileShareUndoParams; 'file.share': FileShareParams; 'file.share.inspect': FileShareInspectParams; 'file.read': FileReadParams; 'file.list': FileListParams; 'file.history': FileHistoryParams; 'file.write': FileWriteParams; 'file.create': FileCreateParams; 'file.restore': FileRestoreParams; 'file.undo': FileUndoParams;
   'file.upload': FileUploadParams; 'file.upload.inspect': FileUploadIdentity }

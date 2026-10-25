@@ -1150,6 +1150,7 @@ export type AgentSessionUserMessageAuthor =
   | { kind: 'unknown' }
 
 export type AgentSessionUserMessage = {
+  inputImages?: import('./agent-input-resource.js').AgentInputImage[]
   inputSubmission?: import('./agent-input-conversation.js').AgentInputSubmissionObservation
   inputContext?: import('./browser-input-context.js').BrowserInputContext
   inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
@@ -1339,6 +1340,7 @@ export type AgentMuxAgentCreationFact = {
 
 /** Original message segments and verified authors captured before Input dispatch. */
 export type AgentPromptMessageContent = {
+  inputImages?: import('./agent-input-resource.js').AgentInputImage[]
   /** Original Core notification input identity; the encoded text does not establish this fact. */
   a2aNotificationId?: string
   inputContext?: import('./browser-input-context.js').BrowserInputContext
@@ -2022,6 +2024,7 @@ export type AgentWorkHistoryProjection = {
 }
 
 export type AgentTimelineItem = {
+  inputImages?: import('./agent-input-resource.js').AgentInputImage[]
   inputContext?: import('./browser-input-context.js').BrowserInputContext
   inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   inputContextCaptureProof?: import('./agent-input-context-capture.js').AgentInputContextCaptureProof

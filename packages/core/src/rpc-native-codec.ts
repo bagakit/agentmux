@@ -1,3 +1,4 @@
+import { parseAgentInputResourceRead, parseAgentInputResourceResult } from './agent-input-resource.js'
 import { parseAgentInputJournalCut } from './agent-input-conversation.js'
 import { parseGoalParticipationConfirm } from './goal-participation.js'
 import { parseTerminalRecoveryInput, parseTerminalRecoveryResult } from './terminal-recovery.js'
@@ -666,6 +667,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
               (original.admission?.submissionId ?? original.launch?.input.submissionId) !== key.submissionId ||
               original.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key) ||
               !message || message.userContent !== input.prompt || !isDeepStrictEqual(message.inputContext, input.inputContext) ||
+              !isDeepStrictEqual(message.inputImages?.map(({ observation: _observation, ...reference }) => reference), input.inputImages) ||
               message.authorHuman !== undefined || message.authorAgentSessionId !== undefined || message.authorExternal !== undefined ||
               message.systemContext !== undefined || message.inputContextSource !== (input.inputContext === undefined ? undefined : 'caller-declared')) fail()
         }
@@ -679,6 +681,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         parseAgentInputMailboxPage(page, read as import('./agent-input-mailbox.js').AgentInputMailboxRead)
         break
       }
+      case 'agent.input.resource': return parseAgentInputResourceResult(value, parseAgentInputResourceRead(params)) as unknown as Record<string, unknown>
       case 'agent.input.inspect': {
         record(p, ['record', 'input'])
         const observed = p.input === null || p.input === undefined ? null : inputReceipt(p.input)

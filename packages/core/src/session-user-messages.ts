@@ -128,6 +128,7 @@ export function projectSessionUserMessages(params: {
 
       result.push({
         id: `captured:${item.id}`,
+        ...(item.inputImages === undefined ? {} : { inputImages: structuredClone(item.inputImages) }),
         ...(item.inputContext ? { inputContext: structuredClone(item.inputContext), ...(item.inputContextSource ? { inputContextSource: item.inputContextSource, ...(item.inputContextCaptureProof ? { inputContextCaptureProof: item.inputContextCaptureProof } : {}) } : {}) } : {}),
         rawId,
         agentSessionId,
