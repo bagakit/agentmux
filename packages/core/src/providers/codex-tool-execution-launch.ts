@@ -2,6 +2,7 @@ import { readFile, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve, win32 } from 'node:path'
 import type { AgentLaunchPlan } from '../types.js'
+import { agentControlFailureCode, registerAgentExecutionInvocation, type AgentExecutionInvocation } from '../agent-execution-rpc-relay.js'
 import { qualifyCodexExecutionExecutable } from './codex-execution-helper.js'
 
 const noiseOverrides = ['CODEX_EXEC_SERVER_NOISE_REGISTRY_URL', 'CODEX_EXEC_SERVER_NOISE_ENVIRONMENT_ID', 'CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN'] as const
@@ -43,7 +44,7 @@ function nativeArguments(args: readonly string[], workspacePath: string): string
 export async function prepareCodexToolExecutionLaunch(
   plan: AgentLaunchPlan,
   execution: { workspacePath: string; url: string },
-  options: { inheritedEnv?: Readonly<NodeJS.ProcessEnv>; launchWorkspacePath?: string } = {},
+  options: { inheritedEnv?: Readonly<NodeJS.ProcessEnv>; launchWorkspacePath?: string; invocation?: AgentExecutionInvocation } = {},
 ): Promise<AgentLaunchPlan> {
   const { workspacePath } = execution
   if (!workspacePath || workspacePath.includes('\0') || (!isAbsolute(workspacePath) && !win32.isAbsolute(workspacePath))) throw new CodexToolExecutionLaunchError('Tool workspace must be an absolute owner-Host path')
@@ -72,7 +73,16 @@ export async function prepareCodexToolExecutionLaunch(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new CodexToolExecutionLaunchError('The effective environments.toml cannot be read; the requested execution binding is unconfirmed')
     const command = await qualifyCodexExecutionExecutable(plan.command, { env, ...(options.launchWorkspacePath === undefined ? {} : { workspacePath: options.launchWorkspacePath }) })
-    return { ...plan, command, args: nativeArguments(plan.args, workspacePath), env: { ...plan.env, CODEX_EXEC_SERVER_URL: execution.url } }
+    let nativeUrl = execution.url
+    if (options.invocation) {
+      // Agent control qualification is independent of healthy native execution.
+      // Failed or unknown registration remains visible without blocking native tools.
+      try { nativeUrl = await registerAgentExecutionInvocation(execution.url, options.invocation) } catch (error) {
+        // This reserved machine path reports qualification only; it grants no caller.
+        nativeUrl = execution.url + '/unverified/' + agentControlFailureCode(error)
+      }
+    }
+    return { ...plan, command, args: nativeArguments(plan.args, workspacePath), env: { ...plan.env, CODEX_EXEC_SERVER_URL: nativeUrl } }
   }
   // Native selects the TOML provider by presence, even for an empty/comment-only
   // file. It does not merge CODEX_EXEC_SERVER_URL into that provider. No TOML

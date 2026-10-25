@@ -124,7 +124,7 @@ export class AgentExecutionBridge {
       partial.parts = []; partial.bytes = 0
       const frame = JSON.parse(line.toString('utf8')) as { type?: unknown }
       const sourceEndByte = data.startByte + newline + 1
-      const forward = side === 'frontend' ? frame.type === 'request' || frame.type === 'closed' : frame.type === 'response'
+      const forward = side === 'frontend' ? ['request', 'closed', 'agent-rpc-context', 'agent-rpc-response', 'agent-rpc-closed'].includes(String(frame.type)) : ['response', 'agent-rpc-request', 'agent-rpc-close'].includes(String(frame.type))
       if (forward) {
         const target = side === 'frontend' ? 'executor' : 'frontend'
         const operationId = createHash('sha256').update(JSON.stringify([this.state.bindingId, side, sourceEndByte])).digest('hex')

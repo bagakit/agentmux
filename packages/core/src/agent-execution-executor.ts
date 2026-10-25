@@ -30,6 +30,11 @@ export function createAgentExecutionExecutor(options: {
   /** Resolve only after the exact resource binding's permission has been established. */
   authorize(target: { bindingId: string; generation: string; intent: AgentExecutionIntent }): Promise<void>
   stderr?: Writable
+  control?: {
+    receive(frame: unknown, send: (frame: unknown) => Promise<void>): Promise<boolean>
+    environment(generation: string): NodeJS.ProcessEnv | undefined
+    close(): Promise<void>
+  }
   onError(error: Error): void
 }): { closeObservation(): void; dispose(): Promise<void> } {
   if (!options.bindingId || typeof options.authorize !== 'function') throw new TypeError('A fixed execution binding and its permission owner are required')
@@ -72,7 +77,7 @@ export function createAgentExecutionExecutor(options: {
   const start = (generation: string): Generation => {
     const spec = options.protocol.executor
     // stderr is never connected to the helper Run's machine-protocol stdout.
-    const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: { ...process.env, ...spec.env }, stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: { ...process.env, ...spec.env, ...options.control?.environment(generation) }, stdio: ['pipe', 'pipe', 'pipe'] })
     if (options.stderr) child.stderr.pipe(options.stderr, { end: false })
     else child.stderr.resume()
     const state: Generation = { id: generation, child, channel: undefined as unknown as Channel, alive: true, initialized: false, initializing: false,
@@ -126,6 +131,7 @@ export function createAgentExecutionExecutor(options: {
     async onFrame(frame) {
       try {
       if (disposed) return
+      if (await options.control?.receive(frame, value => channel.send(value))) return
       if (!object(frame) || typeof frame.generation !== 'string' || !frame.generation) {
         await report('', 'INVALID_EXECUTION_FRAME'); return
       }
@@ -218,6 +224,7 @@ export function createAgentExecutionExecutor(options: {
     closeObservation() { channel.close() },
     async dispose() {
       disposed = true; channel.close()
+      await options.control?.close()
       // Explicit whole-helper owner shutdown only. Closed frontend sockets do
       // not authorize this; every retained native child remains owned until now.
       await Promise.all([...children.values()].filter(state => state.alive).map(async state => {

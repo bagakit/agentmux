@@ -193,7 +193,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
   })
   const verifyPromptExecutionTransport = createCodexPromptExecutionTransportVerifier()
   return defineAgentProvider({
-    prepareToolExecutionLaunch: (plan, context) => prepareCodexToolExecutionLaunch(plan, { workspacePath: context.binding.workspacePath, url: context.url }, { launchWorkspacePath: context.launchWorkspacePath }),
+    prepareToolExecutionLaunch: (plan, context) => prepareCodexToolExecutionLaunch(plan, { workspacePath: context.binding.workspacePath, url: context.url }, { launchWorkspacePath: context.launchWorkspacePath, ...(context.invocation ? { invocation: context.invocation } : {}) }),
     prepareExecutionHelper: prepareCodexExecutionHelper,
     prepareManagedLaunch: prepareCodexManagedLaunch,
     prepareNativeInput: prepareCodexNativeInput,

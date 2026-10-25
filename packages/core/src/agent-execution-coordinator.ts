@@ -22,7 +22,7 @@ export interface AgentExecutionOpenInput {
   resourceGrant: import('./agent-execution-helper.js').AgentExecutionResourceGrant
   agent: Omit<AgentMuxHostAgentCreateInput, 'toolExecution'> & { agentSessionId: string; createOperationId: string }
 }
-type RecordValue = { input: AgentExecutionOpenInput; notices?: AgentExecutionNotice[]; diagnostic?: AgentExecutionInspection['diagnostic']; attempts?: Partial<Record<'frontend' | 'executor', { ownerInstanceId: string }>>; bridge?: AgentExecutionBridgeState; frontend?: AgentExecutionBridgeState['frontend']; executor?: AgentExecutionBridgeState['executor'] }
+type RecordValue = { input: AgentExecutionOpenInput; agentControl?: { generation: string; state: 'unconfigured' | 'unverified' | 'available' | 'unavailable'; stage?: 'invocation-registration'; code?: string }; notices?: AgentExecutionNotice[]; diagnostic?: AgentExecutionInspection['diagnostic']; attempts?: Partial<Record<'frontend' | 'executor', { ownerInstanceId: string }>>; bridge?: AgentExecutionBridgeState; frontend?: AgentExecutionBridgeState['frontend']; executor?: AgentExecutionBridgeState['executor'] }
 export interface AgentExecutionInspection {
   bindingId: string
   agentHostId: string
@@ -110,7 +110,22 @@ export class AgentExecutionCoordinator {
     void next.finally(() => { if (this.lanes.get(id) === next) this.lanes.delete(id) }).catch(() => {})
     return next
   }
+  private qualificationNotices(record: RecordValue): AgentExecutionNotice[] | undefined {
+    return record.notices?.flatMap(notice => {
+      if (notice.capability !== 'agent-control' || !record.agentControl || record.agentControl.state === 'unconfigured') return [notice]
+      if (record.agentControl.state === 'available') return []
+      return [{ ...notice, state: 'unverified' as const, ...(record.agentControl.code ? { code: record.agentControl.code } : {}),
+        message: record.agentControl.stage === 'invocation-registration'
+          ? 'Original Agent control invocation registration is unconfirmed. Native execution remains available.'
+          : record.agentControl.state === 'unverified'
+          ? 'The original Agent control route is configured; its current native generation has not received a confirmed Core response.'
+          : 'The original Agent control owner or transport is unconfirmed. Native execution remains available.',
+        action: 'Recheck the original Agent control route without replacing the Agent, helper Runs or pending operations.' }]
+    })
+  }
   private observe(input: AgentExecutionOpenInput, diagnostic?: AgentExecutionInspection['diagnostic'], notices?: AgentExecutionNotice[]): void {
+    const retained = this.read(input.bindingId)
+    if (retained) notices = this.qualificationNotices(retained)
     const value: AgentExecutionInspection = { bindingId: input.bindingId, agentHostId: input.agentHostId, resourceHostId: input.resourceHostId,
       agentSessionId: input.agent.agentSessionId, resourceWorkspacePath: input.resourceWorkspacePath,
       state: diagnostic ? 'unavailable' : 'connected', ...(notices === undefined ? {} : { notices }), ...(diagnostic ? { diagnostic } : {}) }
@@ -123,7 +138,7 @@ export class AgentExecutionCoordinator {
     return structuredClone(this.observations.get(bindingId) ?? { bindingId, agentHostId: record.input.agentHostId,
       resourceHostId: record.input.resourceHostId, agentSessionId: record.input.agent.agentSessionId,
       resourceWorkspacePath: record.input.resourceWorkspacePath, state: 'unavailable',
-      ...(record.notices === undefined ? {} : { notices: record.notices }),
+      ...(record.notices === undefined ? {} : { notices: this.qualificationNotices(record)! }),
       diagnostic: record.diagnostic ?? { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: 'The original helpers have not been observed by this Core connection.' } })
   }
   /** Resume only retained bridge readers. This never creates or restores an Agent Run. */
@@ -156,8 +171,15 @@ export class AgentExecutionCoordinator {
     Object.assign(record, latest)
     const bridge = new AgentExecutionBridge({ state: record.bridge!, ports: { frontend: hosts.agent, executor: hosts.resource },
       persist: async state => { record.bridge = state; this.save(record) },
-      onFrame: async (_side, frame) => {
-        const value = frame as { type?: string; code?: string; generation?: unknown; operation?: import('./agent-execution-journal.js').AgentExecutionOperationKey }
+      onFrame: async (side, frame) => {
+        const value = frame as { type?: string; code?: string; stage?: unknown; state?: unknown; generation?: unknown; operation?: import('./agent-execution-journal.js').AgentExecutionOperationKey }
+        if (side === 'frontend' && value.type === 'agent-control-state' && typeof value.generation === 'string' && value.generation &&
+            ['unconfigured', 'unverified', 'available', 'unavailable'].includes(String(value.state)) && (Object.keys(value).length === 3 || Object.keys(value).length === 5 && value.stage === 'invocation-registration' && typeof value.code === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/u.test(value.code))) {
+          if (value.state === 'unconfigured' || value.state === 'unverified' || record.agentControl?.generation === value.generation) {
+            record.agentControl = { generation: value.generation, state: value.state as NonNullable<RecordValue['agentControl']>['state'], ...(value.stage === 'invocation-registration' && value.code ? { stage: value.stage, code: value.code } : {}) }
+            this.save(record); this.observe(record.input, record.diagnostic, record.notices)
+          }
+        }
         if (value.type === 'diagnostic') {
           record.diagnostic = { code: value.code ?? 'EXECUTION_OBSERVATION_UNCONFIRMED', message: 'The original native tool service reported an observation diagnostic. Inspect the retained operation.',
             ...(typeof value.generation === 'string' && value.generation.length > 0 ? { generation: value.generation } : {}),

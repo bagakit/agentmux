@@ -7,9 +7,9 @@ import { isAgentMuxRpcDeviceMethod } from './public-rpc-device.js'
 import { AgentMuxRpcLines, parseRpcRequest, rpcFailure, rpcEncode } from './public-rpc-frame.js'
 
 /** Both directions share the existing bounded decoder and emit whole original frames. */
-function frames(consume: (value: unknown, raw: Buffer) => Buffer | void | Promise<Buffer | void>): Transform {
+export function createAgentMuxRpcFrameStream(consume: (value: unknown, raw: Buffer) => Buffer | void | Promise<Buffer | void>, budget?: { reserve(bytes: number): void; release(bytes: number): void }): Transform {
   const lines = new AgentMuxRpcLines()
-  let pieces: Buffer[] = []
+  let pieces: Buffer[] = [], heldBytes = 0
   const stream = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       const accept = async () => {
@@ -18,13 +18,14 @@ function frames(consume: (value: unknown, raw: Buffer) => Buffer | void | Promis
           const newline = chunk.indexOf(10, offset)
           const end = newline < 0 ? chunk.byteLength : newline + 1
           const part = chunk.subarray(offset, end)
+          budget?.reserve(part.byteLength); heldBytes += part.byteLength
           pieces.push(Buffer.from(part))
           let complete = false, value: unknown
           lines.accept(part, parsed => { complete = true; value = parsed })
           if (complete) {
-            const raw = Buffer.concat(pieces); pieces = []
-            const outgoing = await consume(value, raw)
-            if (outgoing) stream.push(outgoing)
+            const raw = Buffer.concat(pieces), reserved = heldBytes; pieces = []; heldBytes = 0
+            try { const outgoing = await consume(value, raw); if (outgoing) stream.push(outgoing) }
+            finally { budget?.release(reserved) }
           }
           offset = end
         }
@@ -32,7 +33,7 @@ function frames(consume: (value: unknown, raw: Buffer) => Buffer | void | Promis
       void accept().then(() => callback(), error => callback(error))
     },
     flush(callback) { try { lines.end(); callback() } catch (error) { callback(error as Error) } },
-    destroy(error, callback) { pieces = []; callback(error) }
+    destroy(error, callback) { pieces = []; budget?.release(heldBytes); heldBytes = 0; callback(error) }
   })
   return stream
 }
@@ -43,7 +44,7 @@ export async function forwardAgentMuxRpcStdio(options: { endpoint: AgentMuxRpcEn
   const outgoing = new PassThrough()
   // Validate a complete frame before forwarding any member. Ordinary bytes keep
   // their original spelling, while the maintained stream owns backpressure.
-  const gate = frames(async (value, raw) => {
+  const gate = createAgentMuxRpcFrameStream(async (value, raw) => {
     if (Array.isArray(value) && !value.length) throw new AgentMuxError('An RPC batch cannot be empty.', 'CONTROL_PROTOCOL_ERROR')
     const requests = (Array.isArray(value) ? value : [value]).map(parseRpcRequest)
     if (!requests.some(request => isAgentMuxRpcDeviceMethod(request.method))) return raw
@@ -55,7 +56,7 @@ export async function forwardAgentMuxRpcStdio(options: { endpoint: AgentMuxRpcEn
     }
   })
   // A local denial cannot be inserted inside an upstream response/notification.
-  const responses = frames((_value, raw) => raw)
+  const responses = createAgentMuxRpcFrameStream((_value, raw) => raw)
   const socket = createConnection({ path: options.endpoint.path })
   await new Promise<void>((resolve, reject) => {
     let settled = false

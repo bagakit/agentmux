@@ -21,5 +21,6 @@ export interface AgentToolExecutionLaunchContext {
   /** Private exact original local helper capability; never a caller-selected URL. */
   url: string
   launchWorkspacePath: string
+  invocation?: import('./agent-execution-rpc-relay.js').AgentExecutionInvocation
 }
 export type PrepareAgentToolExecutionLaunch = (plan: AgentLaunchPlan, context: AgentToolExecutionLaunchContext) => Promise<AgentLaunchPlan>

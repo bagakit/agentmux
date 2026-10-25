@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { Readable, Writable } from 'node:stream'
 import { WebSocket, WebSocketServer, createWebSocketStream } from 'ws'
+import { agentControlFailureCode, AgentExecutionRpcFrontend, type AgentExecutionRelayContext } from '../agent-execution-rpc-relay.js'
 import { createExecutionFrameChannel } from '../agent-execution-channel.js'
 
 const DEFAULT_FRAME_BYTES = 32 * 1024 * 1024
@@ -14,6 +15,7 @@ export interface CodexExecutionFrontendOptions {
   output: Writable
   onError: (error: Error) => void
   maxFrameBytes?: number
+  agentSessionId?: string
   /** Maximum unresolved native requests per original socket. */
   maxPendingRequests?: number
 }
@@ -37,11 +39,26 @@ export async function runCodexExecutionFrontend(options: CodexExecutionFrontendO
   if (!Number.isSafeInteger(maxFrameBytes) || maxFrameBytes < 256 || !Number.isSafeInteger(maxPendingRequests) || maxPendingRequests < 1) throw new TypeError('Invalid native frontend limits')
   const report = (error: unknown): void => options.onError(error instanceof Error ? error : new Error(String(error)))
   const capabilityPath = `/${randomBytes(32).toString('hex')}`
-  const http = createServer((_request, response) => { response.writeHead(404); response.end() })
+  let relay: AgentExecutionRpcFrontend | undefined
+  const http = createServer((request, response) => {
+    if (!relay || request.socket.remoteAddress !== '127.0.0.1' || request.method !== 'POST' || request.url !== capabilityPath + '/invocation') {
+      response.writeHead(404); response.end(); return
+    }
+    void (async () => {
+      const chunks: Buffer[] = []; let bytes = 0
+      for await (const value of request) {
+        const chunk = Buffer.from(value); bytes += chunk.length
+        if (bytes > 16384) throw new Error('Invocation registration exceeds its limit')
+        chunks.push(chunk)
+      }
+      const token = await relay!.register(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+      response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ token }))
+    })().catch(error => { response.writeHead(403, { 'content-type': 'application/json' }); response.end(JSON.stringify({ code: agentControlFailureCode(error) })) })
+  })
   // ws enforces its native 1009 frame-size boundary before JSON decoding. That
   // protocol failure affects this socket only, not other sockets or the Run.
   const server = new WebSocketServer({ noServer: true, maxPayload: maxFrameBytes, perMessageDeflate: false })
-  const connections = new Map<string, { socket: WebSocket; pending: Map<NativeId, number>; pendingBytes: number }>()
+  const connections = new Map<string, { socket: WebSocket; pending: Map<NativeId, number>; pendingBytes: number; initializations: Set<NativeId>; controlStarted: boolean; claim: AgentExecutionRelayContext | undefined; registrationFailure: string | undefined }>()
   let closing = false
   const sendNative = async (socket: WebSocket, payload: unknown): Promise<void> => {
     if (socket.readyState !== WebSocket.OPEN) return
@@ -55,6 +72,7 @@ export async function runCodexExecutionFrontend(options: CodexExecutionFrontendO
     maxFrameBytes,
     onError: report,
     onFrame: async frame => {
+      try { if (await relay?.receive(frame)) return } catch { report(new Error('Agent control frame was refused')); return }
       if (!object(frame) || frame.type !== 'response' || typeof frame.generation !== 'string' || !object(frame.payload)) {
         report(new Error('Invalid native frontend response frame'))
         return
@@ -66,6 +84,10 @@ export async function runCodexExecutionFrontend(options: CodexExecutionFrontendO
       const response = !Object.hasOwn(payload, 'method') && (Object.hasOwn(payload, 'result') || Object.hasOwn(payload, 'error'))
       if (response && (!nativeId(payload.id) || !connection.pending.has(payload.id))) return
       try {
+        if (response && nativeId(payload.id) && connection.initializations.delete(payload.id) && Object.hasOwn(payload, 'result') && !connection.controlStarted) {
+          connection.controlStarted = true
+          await relay?.begin(frame.generation, !!connection.claim, connection.registrationFailure)
+        }
         await sendNative(connection.socket, payload)
         if (response && nativeId(payload.id)) {
           connection.pendingBytes -= connection.pending.get(payload.id) ?? 0
@@ -74,18 +96,29 @@ export async function runCodexExecutionFrontend(options: CodexExecutionFrontendO
       } catch (error) { report(error) }
     },
   })
+  if (options.agentSessionId) relay = new AgentExecutionRpcFrontend({ agentSessionId: options.agentSessionId, send: frame => channel.send(frame), onError: report })
+  const claims = new WeakMap<WebSocket, AgentExecutionRelayContext>()
+  const registrationFailures = new WeakMap<WebSocket, string>()
   http.on('upgrade', (request, socket, head) => {
     const supplied = Buffer.from(request.url ?? '')
     const expected = Buffer.from(capabilityPath)
-    if (closing || request.socket.remoteAddress !== '127.0.0.1' || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+    const token = request.url?.startsWith(capabilityPath + '/') ? request.url.slice(capabilityPath.length + 1) : undefined
+    const failure = token?.startsWith('unverified/') && /^[A-Z][A-Z0-9_]{0,79}$/u.test(token.slice(11)) ? token.slice(11) : undefined
+    const ordinary = supplied.length === expected.length && timingSafeEqual(supplied, expected)
+    if (closing || request.socket.remoteAddress !== '127.0.0.1' || !(ordinary || failure && relay || token && relay?.available(token))) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
       return
     }
-    server.handleUpgrade(request, socket, head, connection => server.emit('connection', connection, request))
+    server.handleUpgrade(request, socket, head, connection => {
+      if (failure) registrationFailures.set(connection, failure)
+      else if (token) claims.set(connection, relay!.claim(token, randomUUID()))
+      server.emit('connection', connection, request)
+    })
   })
   server.on('connection', socket => {
-    const generation = randomUUID()
-    const connection = { socket, pending: new Map<NativeId, number>(), pendingBytes: 0 }
+    const claim = claims.get(socket)
+    const generation = claim?.generation ?? randomUUID()
+    const connection = { socket, pending: new Map<NativeId, number>(), pendingBytes: 0, initializations: new Set<NativeId>(), controlStarted: false, claim, registrationFailure: registrationFailures.get(socket) }
     connections.set(generation, connection)
     const stream = createWebSocketStream(socket, { readableObjectMode: true, readableHighWaterMark: 1 })
     stream.on('error', report)
@@ -94,6 +127,7 @@ export async function runCodexExecutionFrontend(options: CodexExecutionFrontendO
       if (!closing) void channel.send({ type: 'closed', generation }).catch(report)
     })
     void (async () => {
+      if (claim) await channel.send({ type: 'agent-rpc-context', ...claim })
       // ws pauses its socket when the stream cannot accept more messages. Await
       // the machine pipe and socket callbacks rather than accumulating payloads.
       for await (const bytes of stream) {
@@ -133,6 +167,7 @@ export async function runCodexExecutionFrontend(options: CodexExecutionFrontendO
             continue
           }
           connection.pending.set(payload.id, idBytes)
+          if (payload.method === 'initialize') connection.initializations.add(payload.id)
           connection.pendingBytes += idBytes
         }
         try { await channel.send(frame) } catch (error) {
@@ -155,6 +190,7 @@ export async function runCodexExecutionFrontend(options: CodexExecutionFrontendO
   const close = async (): Promise<void> => {
       if (closing) return
       closing = true
+      relay?.close()
       channel.close()
       // Only explicit helper owner shutdown terminates native connections.
       for (const { socket } of connections.values()) socket.terminate()
