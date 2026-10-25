@@ -201,7 +201,7 @@ it('managed receipt readers consume original upsert and withdrawal through SDK a
   await expect(foreign.call('connection.delivery.inspect', { operationId: waiting.operationId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   await expect(sdk.call('connection.delivery.ls', { ...request, connectionId: 'foreign-connection' })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   await expect(sdk.call('connection.delivery.ls', { ...request, bindingRevision: 987 })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
-  await expect(sdk.call('connection.delivery.retry', { operationId: waiting.operationId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(sdk.call('connection.delivery.retry', { operationId: waiting.operationId })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
   await expect(sdk.call('connection.ingress.ls', { connectionId: oldBinding.connectionId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   await expect(sdk.call('connection.inspect', { connectionId: oldBinding.connectionId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   const inspect = owner.bindings!.inspect.bind(owner.bindings)
