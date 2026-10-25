@@ -710,7 +710,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           break
         }
         const key = validateAgentPromptInputKey(input.key)
-        if (observed && (!isDeepStrictEqual(observed.key, key) || !isDeepStrictEqual(p.record, observed.admission))) fail()
+        if (observed && ((!isDeepStrictEqual(observed.key, key) && !isDeepStrictEqual(agentInputDeliveryKey(observed.control), key)) ||
+            !isDeepStrictEqual(p.record, observed.admission))) fail()
         if (p.record !== null) {
           const original = parsePromptSubmissionRecord(p.record), deliveryKey = observed ? agentInputDeliveryKey(observed.control) : key
           if (original.agentSessionId !== key.agentSessionId || original.run.runId !== deliveryKey.expectedRun.runId ||

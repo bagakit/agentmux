@@ -765,6 +765,7 @@ export class AgentMuxClient {
   private readonly inputWaitingContexts = new Map<string, {
     ref: AgentInputWaitRef; input: AgentMuxAgentPromptInput; producer: 'prompt' | 'message';
     authorAgentSessionId?: string; authority?: import('./prompt-submission.js').AgentPromptInputAuthority;
+    recipientContinuation?: boolean;
     controller: AbortController; runtimeWake: boolean; sessionWake: boolean; observedTarget?: string; requested: boolean; active: boolean; sequence: number
   }>()
   private readonly inputWaitingByRecipient = new Map<string, Set<string>>()
@@ -5864,7 +5865,8 @@ export class AgentMuxClient {
 
   /** Same original journal/key selector. Inspect never constructs a new waiting generation. */
   async inspectAgentInput(selector: AgentInputSelector, caller?: { agentSessionId: string; capability: string }): Promise<AgentInputSubmissionReceipt | null> {
-    const saved = await this.messageQueue.inspectInput(selector)
+    const saved = await this.messageQueue.inspectInput('key' in selector
+      ? { key: await this.messageQueue.resolveInputOwnerKey(selector.key) } : selector)
     if (!saved) return null
     if (caller) {
       if (caller.agentSessionId === saved.intent.key.agentSessionId) await this.authorizeAgentCaller(caller.capability, caller.agentSessionId)
@@ -6056,8 +6058,8 @@ export class AgentMuxClient {
     }
     const assertCurrent = async () => {
       const recipient = await this.authorizeAgentCaller(caller.capability, caller.agentSessionId)
-      if (!sameRun(recipient.run, intent.key.expectedRun)) throw new AgentMuxError(
-        'Recipient continuation requires the original Run. Retain and inspect the original input.', 'STALE_AGENT_SESSION')
+      if (!sameRun(recipient.run, intent.key.expectedRun) && !this.canResumeInput(intent, recipient, true)) throw new AgentMuxError(
+        'Recipient continuation requires the original Run or its confirmed semantic recovery. Retain and inspect the original input.', 'STALE_AGENT_SESSION')
     }
     await assertCurrent()
     return assertCurrent
@@ -6082,7 +6084,7 @@ export class AgentMuxClient {
       prompt.authorAgentSessionId, recipientContinuation ? { ...authority, assertCurrent: async () => {
         await recipientContinuation()
         await authority?.assertCurrent()
-      } } : authority, context?.requestSignal)
+      } } : authority, context?.requestSignal, Boolean(recipientContinuation))
   }
 
   private async inputWaitingPrompt(intent: AgentInputJournalIntent, caller?: { agentSessionId: string; capability: string }, context?: AgentInputCallContext): Promise<{
@@ -6173,16 +6175,19 @@ export class AgentMuxClient {
     return work
   }
 
-  private canResumeInput(intent: AgentInputJournalIntent, session: AgentMuxAgentSession): boolean {
+  private canResumeInput(intent: AgentInputJournalIntent, session: AgentMuxAgentSession, recipientContinuation = false): boolean {
     const expected = intent.environment
-    return this.isRetainedHumanInput(intent) && expected.providerId === session.providerId && expected.executorId === session.executorId &&
+    // The external branch exists only in the live, authenticated recipient rejoin
+    // context. Persisted attribution never restores this permission on startup.
+    const eligible = this.isRetainedHumanInput(intent) || recipientContinuation && intent.source.kind === 'message' && intent.admissionIntent.kind === 'manual-actor'
+    return eligible && expected.providerId === session.providerId && expected.executorId === session.executorId &&
       matchesProviderNativeSessionTarget(expected.nativeHandle, session.nativeHandle) &&
       sessionSemanticResumeSourceRuns(session).includes(intent.key.expectedRun.runId)
   }
 
   private async acceptInputWaiting(ref: AgentInputWaitRef, input: AgentMuxAgentPromptInput, producer: 'prompt' | 'message',
     authorAgentSessionId?: string, authority?: import('./prompt-submission.js').AgentPromptInputAuthority,
-    requestSignal?: AbortSignal): Promise<AgentInputSubmissionReceipt> {
+    requestSignal?: AbortSignal, recipientContinuation = false): Promise<AgentInputSubmissionReceipt> {
     let releaseRequest = () => {}
     try {
       const saved = await this.messageQueue.inspectInput({ key: ref.key })
@@ -6190,7 +6195,7 @@ export class AgentMuxClient {
       if (isDeepStrictEqual(saved.control.ref, ref) && saved.control.state === 'enabled' && !await this.inspectAgentPromptSubmission(ref.key) && !this.inputWaitingDisposed) {
         const id = agentInputJournalKey(ref.key)
         if (!this.inputWaitingContexts.has(id)) {
-          const controller = new AbortController(), context = { ref, input, producer,
+          const controller = new AbortController(), context = { ref, input, producer, recipientContinuation,
             controller, runtimeWake: true, sessionWake: this.isRetainedHumanInput(saved.intent), requested: true, active: false, sequence: saved.sequence,
             ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(authority ? { authority } : {}) }
           this.inputWaitingContexts.set(id, context)
@@ -6255,6 +6260,7 @@ export class AgentMuxClient {
 
   private async advanceInputWaiting(context: {
     ref: AgentInputWaitRef; input: AgentMuxAgentPromptInput; producer: 'prompt' | 'message'; authorAgentSessionId?: string;
+    recipientContinuation?: boolean;
     authority?: import('./prompt-submission.js').AgentPromptInputAuthority; controller: AbortController; runtimeWake: boolean; sessionWake: boolean; observedTarget?: string; requested: boolean
   }): Promise<void> {
     const key = context.ref.key
@@ -6301,7 +6307,7 @@ export class AgentMuxClient {
         const assertTarget = (value: AgentMuxAgentSession) => {
           const expected = saved.intent.environment
           targetChanged = !sameRun(value.run, deliveryKey.expectedRun) || expected.providerId !== value.providerId || expected.executorId !== value.executorId ||
-            !sameRun(value.run, key.expectedRun) && !this.canResumeInput(saved.intent, value)
+            !sameRun(value.run, key.expectedRun) && !this.canResumeInput(saved.intent, value, context.recipientContinuation)
           if (targetChanged) throw new AgentMuxError('The saved input is not authorized for this Session recovery target. Its original intent is retained.', 'AGENT_PROMPT_SOURCE_CHANGED')
         }
         assertTarget(selected)

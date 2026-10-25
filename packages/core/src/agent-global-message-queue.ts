@@ -677,9 +677,8 @@ export class DurableAgentMuxMessageQueue {
     if (next.state === 'dispatch-authorized') validateAgentInputControlId(next.gateId)
     else if (next.gateId !== undefined) throw new AgentMuxError('Unclaimed input cannot invent a dispatch gate.', 'INVALID_AGENT_INPUT_CONTROL')
     if (next.deliveryKey !== undefined) {
-      if (next.state !== 'dispatch-authorized' || current.intent.source.kind !== 'prompt' || current.intent.source.authorHuman !== true ||
-          current.intent.admissionIntent.kind !== 'manual-actor') throw new AgentMuxError(
-        'Only an original human manual input can freeze delivery to its confirmed resumed Session.', 'INVALID_AGENT_INPUT_CONTROL')
+      if (next.state !== 'dispatch-authorized' || !this.canBindResumedInput(current.intent)) throw new AgentMuxError(
+        'Only an original human or external manual input can freeze delivery to its confirmed resumed Session.', 'INVALID_AGENT_INPUT_CONTROL')
       const key = validateAgentInputDeliveryKey(ref.key, next.deliveryKey)
       const deliveryId = agentInputJournalKey(key), ownerId = agentInputJournalKey(ref.key)
       const existing = this.db.prepare('SELECT input_id FROM input_delivery_bindings WHERE delivery_id=?').get(deliveryId)
@@ -880,6 +879,13 @@ export class DurableAgentMuxMessageQueue {
     }, true)
   }
 
+  /** Structural journal eligibility, not a grant: Core checks the current author and recovery target. */
+  private canBindResumedInput(intent: AgentInputJournalIntent): boolean {
+    if (intent.admissionIntent.kind !== 'manual-actor') return false
+    return intent.source.kind === 'prompt' ? intent.source.authorHuman === true
+      : this.message(intent.source.messageId)?.envelope.sender.kind === 'external'
+  }
+
   /** Stop and this short gate share one original journal transaction; no Native await. */
   async authorizeInputDispatch(refValue: AgentInputWaitRef, signal?: AbortSignal,
     delivery?: { key: AgentPromptInputKey; claimsAbsent: () => Promise<boolean>; assertTarget: () => Promise<void> }): Promise<AgentInputDispatchLink | null> {
@@ -889,9 +895,8 @@ export class DurableAgentMuxMessageQueue {
       const current = this.input(ref.key)
       if (!current || !isDeepStrictEqual(current.control.ref, ref) || current.control.state !== 'enabled') return null
       const deliveryKey = delivery && !isDeepStrictEqual(delivery.key, ref.key) ? validateAgentInputDeliveryKey(ref.key, delivery.key) : undefined
-      if (deliveryKey && (current.intent.source.kind !== 'prompt' || current.intent.source.authorHuman !== true ||
-          current.intent.admissionIntent.kind !== 'manual-actor')) throw new AgentMuxError(
-        'Only the original human manual input may first deliver after its Session resumes.', 'INVALID_AGENT_INPUT_CONTROL')
+      if (deliveryKey && !this.canBindResumedInput(current.intent)) throw new AgentMuxError(
+        'Only the original human or external manual input may first deliver after its Session resumes.', 'INVALID_AGENT_INPUT_CONTROL')
       if (delivery) {
         await delivery.assertTarget()
         signal?.throwIfAborted()
