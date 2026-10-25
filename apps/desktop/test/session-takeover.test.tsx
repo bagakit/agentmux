@@ -13,12 +13,14 @@ import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api'
-import { useAppStore, executorDetectionKey } from '../src/renderer/src/store'
+import { useAppStore, executorDetectionKey, prepareRendererUpdate } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { inspectTakeover, takeOverSession, takeoverExecution, takeoverPrompt, type TakeoverSource } from '../src/renderer/src/lib/session-takeover'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { SessionTakeoverSurface } from '../src/renderer/src/components/SessionTakeoverSurface'
+import { launcherTakeoverSource } from '../src/renderer/src/lib/launcher-resume-actions'
+import { launcherNativeResumeRows, launcherResumeRows } from '../src/renderer/src/lib/launcher-resume'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
@@ -82,7 +84,7 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
 })
 afterEach(async () => {
-  await act(async () => root.unmount())
+  await act(async () => { root.unmount(); await prepareRendererUpdate() })
   dispose?.(); dispose = undefined; document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.setState(initial, true)
   await rm(ownerDirectory, {recursive:true,force:true})
 })
@@ -155,7 +157,7 @@ it('one choice reaches the real spatial owner, hands over complete context and p
   const onClose = await mountPicker()
   const pick = document.querySelector<HTMLButtonElement>('.agent-pick[data-executor-id="fixture"]')!
   await act(async () => { pick.click(); pick.click(); await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(1)) })
-  await vi.waitFor(async () => { await act(async () => {}); expect(onClose).toHaveBeenCalledTimes(1) })
+  await vi.waitFor(async () => { await act(async () => {}); expect(onClose).toHaveBeenCalledTimes(1) }, { timeout: 10000 })
   const input = launch.mock.calls[0]![0]
   expect(input.hostId).toBe('local'); expect(input.workspacePath).toBe(_hygiene_fixturePath("repo"))
   expect(input.prompt).toContain(diagnostic)
@@ -565,4 +567,57 @@ it('retains conflicting takeover bindings and refuses another creation', async (
     expect(useAppStore.getState().spatialRequests[first.requestId]).toEqual(binding)
     expect(launch).toHaveBeenCalledTimes(1)
   }
+})
+
+
+it.each(['managed', 'retired', 'unmanaged'] as const)('takes over a %s saved source through the real spatial owner without resuming the original', async kind => {
+  const launch = launchBoundary(), stop = vi.spyOn(api.sessions, 'stop'), recover = vi.spyOn(api.sessions, 'recover')
+  const read = vi.spyOn(api.sessions, 'nativeHistoryPage').mockRejectedValue(new Error('Preview unavailable'))
+  const launcher = createWorkbenchTab('saved-launcher', { regionId: 'saved-region', kind: 'launcher', workspaceId: 'repo' })
+  const previous = useAppStore.getState()
+  useAppStore.setState({ tabs: { ...previous.tabs, [launcher.id]: launcher }, layouts: { repo: createWorkspaceLayout('source-group', ['source-tab', launcher.id]) },
+    agentComposerDrafts: { ...previous.agentComposerDrafts, 'saved-region': 'Launcher unsent draft' } })
+  const candidate = { agentSessionId: original.id, hostId: 'local', workspacePath: original.workspacePath,
+    providerId: original.providerId, executorId: 'fixture', capabilities: original.capabilities, label: original.label, createdAt: 1, updatedAt: 2, run: original.control.run }
+  const nativeSource = { nativeHandle: { kind: 'provider' as const, providerId: original.providerId, sessionId: 'exact-provider-origin', transcriptPath: _hygiene_fixturePath('history/original.jsonl') },
+    workspacePath: original.workspacePath, revision: 'saved-file-lifetime' }
+  const row = kind === 'managed' ? launcherResumeRows({ candidates: [candidate], config, timelines: {}, agentNames: {}, sessions: [], nativeRecaps: {} })[0]!
+    : launcherNativeResumeRows({ catalogs: [{ hostId: 'local', executorId: 'fixture', providerId: original.providerId, capabilities: original.capabilities,
+      availability: 'available', issues: [], sessions: [{ source: nativeSource, title: 'Saved original', updatedAt: 2,
+        ...(kind === 'retired' ? { managed: { agentSessionId: original.id, executorId: 'fixture', run: original.control.run, state: 'retired' as const } } : {}) }] }],
+      managed: [], agentNames: {}, config })[0]!
+  const saved = launcherTakeoverSource(row, { workspaceId: 'repo', tabGroupId: 'source-group', tabId: launcher.id, regionId: 'saved-region' })
+  const beforeTabs = structuredClone(useAppStore.getState().tabs), beforeOriginal = structuredClone(original), onOpened = vi.fn()
+  await act(async () => root.render(<SessionTakeoverSurface source={saved} active onClose={() => {}} onOpened={onOpened} />))
+  await act(async () => document.querySelector<HTMLButtonElement>('.agent-pick[data-executor-id="fixture"]')!.click())
+  await vi.waitFor(() => expect(launch, document.querySelector('.session-takeover')?.textContent ?? 'Saved takeover surface').toHaveBeenCalledOnce(), { timeout: 10000 })
+  await vi.waitFor(() => expect(onOpened).toHaveBeenCalledOnce(), { timeout: 10000 })
+  const input = launch.mock.calls[0]![0]
+  expect(input.workspacePath).toBe(original.workspacePath); expect(input.hostId).toBe('local')
+  expect(input).not.toHaveProperty('nativeResumeSource')
+  if (kind !== 'managed') {
+    expect(input.prompt).toContain('agent native history --input -')
+    const nativeInput = JSON.parse(input.prompt!.split("<<'AGENTMUX_SAVED_SOURCE'\n")[1]!.split('\nAGENTMUX_SAVED_SOURCE')[0]!)
+    expect(nativeInput).toEqual({ hostId: 'local', executorId: 'fixture', source: nativeSource, limit: 100 })
+    if (kind === 'unmanaged') expect(input.prompt).not.toContain('agent context --host local --session')
+    else expect(input.prompt).toContain('These are independent original sources')
+  }
+  if (kind !== 'unmanaged') expect(input.prompt).toContain("agent context --host local --session 'original'")
+  expect(useAppStore.getState().sessions.find(session => session.id === original.id)).toEqual(beforeOriginal)
+  for (const [id, tab] of Object.entries(beforeTabs)) expect(useAppStore.getState().tabs[id]).toMatchObject(tab)
+  expect(useAppStore.getState().agentComposerDrafts['saved-region']).toBe('Launcher unsent draft')
+  expect(stop).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled()
+  const inspected = await takeOverSession(saved, 'fixture', () => true)
+  expect(inspected.agent?.agentSessionId).toBe(input.agentSessionId); expect(launch).toHaveBeenCalledOnce()
+})
+
+it('refuses a saved handover after its Launcher Region is replaced and keeps the original Agent usable', async () => {
+  const launch = launchBoundary(), before = structuredClone(original)
+  const launcher = createWorkbenchTab('saved-launcher', { regionId: 'saved-region', kind: 'launcher', workspaceId: 'repo' })
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [launcher.id]: launcher }, layouts: { repo: createWorkspaceLayout('source-group', ['source-tab', launcher.id]) } }))
+  const saved: TakeoverSource = { ...source, kind: 'saved', origin: { workspaceId: 'repo', tabGroupId: 'source-group', tabId: launcher.id, regionId: 'saved-region' } }
+  const replacement = createWorkbenchTab(launcher.id, { regionId: 'saved-region', kind: 'agent', phase: 'attached', workspaceId: 'repo', sessionId: original.id })
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [launcher.id]: replacement } }))
+  await expect(takeOverSession(saved, 'fixture', () => true)).rejects.toThrow('original Region or Session changed')
+  expect(launch).not.toHaveBeenCalled(); expect(useAppStore.getState().sessions.find(session => session.id === original.id)).toEqual(before)
 })

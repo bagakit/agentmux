@@ -1,6 +1,14 @@
 const { fixturePath: _reshape_fixturePath, fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
+const renders = vi.hoisted(() => ({ messages: 0 }))
+vi.mock('@agentmux/client-ui', async importOriginal => {
+ const actual = await importOriginal<typeof import('@agentmux/client-ui')>()
+ return { ...actual, ConversationMessage: (props: import('@agentmux/client-ui/components/ConversationMessage').ConversationMessageProps) => {
+  renders.messages += 1
+  return <actual.ConversationMessage {...props} />
+ } }
+})
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
@@ -21,7 +29,8 @@ let container: HTMLDivElement, root: Root, observer: TestObserver
 class TestObserver {
  callback: IntersectionObserverCallback
  constructor(callback: IntersectionObserverCallback) { this.callback = callback; observer = this }
- observe() {} unobserve() {} disconnect() {}
+ observes = 0; unobserves = 0; disconnects = 0
+ observe() { this.observes += 1 } unobserve() { this.unobserves += 1 } disconnect() { this.disconnects += 1 }
  notify(visible: number[]) {
   this.callback([...document.querySelectorAll<HTMLElement>('[role="option"]')].map((target, n) =>
    ({ target, isIntersecting: visible.includes(n) })) as IntersectionObserverEntry[], this as unknown as IntersectionObserver)
@@ -39,7 +48,7 @@ async function open() {
  expect(document.querySelectorAll('[role="option"]')).toHaveLength(30)
 }
 beforeEach(() => {
- calls.length = 0; vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('IntersectionObserver', TestObserver)
+ renders.messages = 0; calls.length = 0; vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('IntersectionObserver', TestObserver)
  container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
  useAppStore.setState({ config, activeWorkspaceId: 'project', sessions: [], recoveryCandidates: [], timelines: {}, agentNames: {},
  tabs: {}, layouts: {}, runtimeConnected: true, startupComplete: true, loading: false, warmTerminals: {} })
@@ -133,5 +142,27 @@ it('uses managed Core history and refuses a reply for another managed Session wi
  expect(original.textContent).toContain('Input · Actual managed request')
  expect(document.querySelector('.launcher-resume__detail')!.textContent).toContain('Actual managed request')
  expect(document.querySelector<HTMLButtonElement>('.launcher-resume__footer .primary-button')!.disabled).toBe(false)
+ expect(api.sessions.launchAgent).not.toHaveBeenCalled()
+})
+
+it('keeps retained row observations and the selected reading subtree stable as other previews settle', async () => {
+ await open()
+ await act(async () => calls[0]!.resolve(page(calls[0]!, 'Selected original **rich** message')))
+ const before = { messages: renders.messages, observes: observer.observes, disconnects: observer.disconnects }
+ expect(before.messages).toBeGreaterThan(0); expect(before.observes).toBe(30)
+ await act(async () => observer.notify([0, 1, 2]))
+ await act(async () => calls[1]!.resolve(page(calls[1]!, 'Unrelated preview one')))
+ await act(async () => calls[2]!.resolve(page(calls[2]!, 'Unrelated preview two')))
+ expect(document.querySelector('.launcher-resume__detail')!.textContent).toContain('Selected original')
+ expect(row(1).textContent).toContain('Unrelated preview one')
+ expect(renders.messages).toBe(before.messages)
+ expect(observer.observes).toBe(before.observes)
+ expect(observer.disconnects).toBe(before.disconnects)
+ await act(async () => row(1).click())
+ const changed = calls.at(-1)!
+ await act(async () => changed.resolve(page(changed, 'New selected full history')))
+ expect(renders.messages).toBeGreaterThan(before.messages)
+ expect(document.querySelector('.launcher-resume__detail')!.textContent).toContain('New selected full history')
+ expect(observer.observes).toBe(before.observes)
  expect(api.sessions.launchAgent).not.toHaveBeenCalled()
 })
