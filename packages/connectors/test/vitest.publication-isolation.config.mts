@@ -6,6 +6,7 @@ import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.PUBLICATION_ISOLATION_MUTANT, marker = process.env.PUBLICATION_ISOLATION_LOADED
 export const mutations = {
+  decision_prepare: ['packages/connectors/src/publication-store.ts', 'this.decisionWrite.run(', 'this.database.prepare(this.decisionWrite.sourceSQL).run('],
   selection: ['packages/connectors/src/publication-store.ts', "AND original.state='pending'", "AND original.state='pending' AND NOT EXISTS (SELECT 1 FROM connector_publication_operation blocker WHERE blocker.binding_id=original.binding_id AND blocker.binding_revision=original.binding_revision AND blocker.state IN ('unknown','dispatching'))"],
   claim: ['packages/connectors/src/publication-store.ts', 'first.operationId !== expectedOperationId', 'false'],
   dependency: ['packages/connectors/src/publication-store.ts', 'AND earlier.ordinal<original.ordinal', 'AND 0'],
