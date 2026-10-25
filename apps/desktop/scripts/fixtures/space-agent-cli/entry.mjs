@@ -33,6 +33,7 @@ api.files.observe = async () => {}
 api.files.unobserve = async () => {}
 api.scratch.listTopics = async () => request('topics')
 api.workspaces.createZoneResource = async input => request('create-resource', input)
+Object.assign(api.sessions, window.spaceBoundary.execution)
 api.sessions.snapshot = async () => request('snapshot')
 api.sessions.launchAgent = async input => request('launch', input)
 // Keep this explicitly excluded optional slot pending. Rejecting it makes the production
@@ -126,3 +127,5 @@ window.spaceRegionObservation = regionId => {
 }
 window.spaceReady = true
 createRoot(document.getElementById('root')).render(createElement(App))
+
+window.spaceExecution = { read: id => api.sessions.executionBinding(id), observe(id) { const values = []; const errors = []; const stop = api.sessions.observeExecutionBinding(id, value => values.push(value), error => errors.push(error)); window.spaceExecutionReader = { values, errors, stop }; } }

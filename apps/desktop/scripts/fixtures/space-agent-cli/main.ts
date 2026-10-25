@@ -1,3 +1,5 @@
+import { ExecutionBindingReaders } from '../../../src/main/execution-binding-readers'
+import { registerExecutionBindingIpc } from '../../../src/main/execution-binding-ipc'
 import { renderAgentMuxMessageEnvelope } from '@agentmux/core/agent-message-render'
 import assert from 'node:assert/strict'
 import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
@@ -55,7 +57,9 @@ const runtime = new RuntimeController(store, toolMode ? async host => {
   const client = await connectHostedAgentMux({ rpc }); await client.connectRuntime()
   return client
 } : localRuntimeConnector, topics)
+const bindingReaders = new ExecutionBindingReaders(id => executionBindings!.inspect(id))
 const executionBindings = toolMode ? new AgentExecutionBindingService(path.join(privateRoot, 'execution-bindings'), {
+  onObservation: inspection => bindingReaders.publish(inspection),
   resolveHost: async hostId => {
     const scopes = runtime.rpcClients().filter(scope => scope.hostId === hostId)
     assert.equal(scopes.length, 1)
@@ -64,6 +68,7 @@ const executionBindings = toolMode ? new AgentExecutionBindingService(path.join(
     return { runtimeId: (await client.agentCreationAuthority()).runtimeId, client }
   }
 }) : undefined
+if (executionBindings) registerExecutionBindingIpc({ handle: (channel, listener) => { ipcMain.handle(channel, listener) }, assertTrusted: (_channel, event) => { assert.equal(event.sender, win.webContents) }, bindings: executionBindings, readers: bindingReaders })
 let registrationFault = false
 const owner = new ConfigOwner({ read: () => config, save: async next => {
   if (registrationFault) { registrationFault = false; throw new Error('Private registration receipt is unavailable after Git creation') }
@@ -180,6 +185,7 @@ async function finish(passed: boolean) {
   disposeSpatial()
   // Server.stop waits for this deliberately abandoned request; app exit owns its private socket.
   if (!result.admission) await server?.stop().catch(error => { result.cleanupFailure = String(error); result.passed = false })
+  bindingReaders.dispose()
   await executionBindings?.dispose()
   await runtime.dispose().catch(error => { result.cleanupFailure = String(error); result.passed = false })
   await fs.writeFile(path.join(evidence, `${phase}.json`), JSON.stringify(result, null, 2))
@@ -265,6 +271,25 @@ app.whenReady().then(async () => {
       const launch = calls.find(call => call.operation === 'launch')!.args[0] as any
       assert.deepEqual(launch.toolWorkspace, { id: 'repo', hostId: 'local', path: path.join(privateRoot, 'repo') })
       assert.equal(launch.executionWorkspaceId, 'agent-launch')
+      const rendererBinding = await win.webContents.executeJavaScript(`spaceExecution.read(${JSON.stringify(bindingId)})`)
+      assert.equal(rendererBinding.bindingId, bindingId); assert.equal(rendererBinding.agentSessionId, original!.agentSessionId)
+      assert.equal(rendererBinding.notices.length, 4, 'Provider notices reach the actual preload reader')
+      await win.webContents.executeJavaScript(`spaceExecution.observe(${JSON.stringify(bindingId)})`)
+      for (let index = 0; index < 100; index++) {
+        if (await win.webContents.executeJavaScript('spaceExecutionReader.values.length > 0')) break
+        await new Promise(resolve => setTimeout(resolve, 30))
+      }
+      const observedBinding = await win.webContents.executeJavaScript('spaceExecutionReader.values[0]')
+      assert.equal(observedBinding.bindingId, bindingId)
+      assert.equal(observedBinding.agentSessionId, original!.agentSessionId)
+      assert.equal(observedBinding.notices.length, 4)
+      await win.webContents.executeJavaScript('spaceExecutionReader.stop()')
+      const stoppedReader = await win.webContents.executeJavaScript('({ count: spaceExecutionReader.values.length, errors: spaceExecutionReader.errors })')
+      await executionBindings!.inspect(bindingId)
+      assert.equal(await win.webContents.executeJavaScript('spaceExecutionReader.values.length'), stoppedReader.count)
+      assert.deepEqual(stoppedReader.errors, [])
+      assert.equal((await agentClient.readAgentSession(original!.agentSessionId))!.run.runId, original!.run.runId)
+      result.bindingObservation = { rendererBinding, observedBinding, stoppedReader, originalRunRetained: true }
       result.toolBinding = { original, opened, repeated, inspection, coordinator: retained, frontend: frontend.run, executor: executor.run,
         snapshot: snapshot.sessions, launch, actualMachines: 1, modelTurnSubmitted: false }
       await finish(true)

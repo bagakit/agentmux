@@ -57,7 +57,9 @@ const criticalConsumers = new Set(['apps/desktop/src/main/runtime-controller.ts'
   'apps/desktop/src/renderer/src/lib/space-agent-control.ts', 'apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts',
   'apps/desktop/src/renderer/src/lib/workbench-tabs.ts', 'apps/desktop/src/renderer/src/lib/session-state.ts',
   'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/shared/space-addresses.ts'])
-const creationConsumer = name => name.startsWith('packages/core/') || criticalConsumers.has(name)
+// This fixture imports compiled Core. Concurrent unconsumed Core source is provenance,
+// not the identity of the running artifact; bin/dist/vendor remain exact inputs.
+const creationConsumer = name => name.startsWith('packages/core/') && !name.startsWith('packages/core/src/') || criticalConsumers.has(name)
 const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'AGENTMUX_SPATIAL_STATE_STORE'].map(name => [name, process.env[name]]))
 let client
@@ -99,13 +101,16 @@ try {
     ssr: { noExternal: ['zod'] },
     build: { ssr: path.join(fixture, 'main.ts'), target: 'node22', outDir: path.join(privateRoot, 'main'), emptyOutDir: true,
       rollupOptions: { external: ['electron', '@agentmux/core', /^@agentmux\/core\//], output: { format: 'es', entryFileNames: 'main.mjs' } } } })
+  await build({ configFile: false, root: fixture, logLevel: 'error', ssr: { noExternal: true },
+    build: { ssr: path.join(fixture, 'preload.ts'), target: 'node22', outDir: path.join(privateRoot, 'preload'), emptyOutDir: true,
+      rollupOptions: { external: ['electron'], output: { format: 'cjs', entryFileNames: 'preload.cjs' } } } })
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   for (const name of Object.keys(env)) if (name.startsWith('AGENTMUX_') || name.startsWith('CTXMUX_')) delete env[name]
   Object.assign(env, { AGENTMUX_RUNTIME_DIRECTORY: path.join(privateRoot, 'runtime'),
     AGENTMUX_STATE_DIRECTORY: path.join(privateRoot, 'runtime', 'state'),
     AGENTMUX_SPATIAL_STATE_STORE: path.join(privateRoot, 'runtime', 'state', 'spatial-state.json'),
     AGENTMUX_MESSAGE_QUEUE_PATH: path.join(privateRoot, 'messages.ndjson') })
-  receipt.builtInputs = Object.fromEntries(await Promise.all((await files(path.join(privateRoot, 'renderer'))).concat(await files(path.join(privateRoot, 'main'))).map(async file => [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
+  receipt.builtInputs = Object.fromEntries(await Promise.all((await files(path.join(privateRoot, 'renderer'))).concat(await files(path.join(privateRoot, 'main')), await files(path.join(privateRoot, 'preload'))).map(async file => [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
   if (toolMode) await startToolCores(privateRoot, path.join(root, 'packages/core'), evidence, toolOwners)
   for (const phase of toolMode ? ['tool-workspace'] : ['seed', 'restore', 'empty-restore', 'admission', 'after-admission']) {
     const phaseRoot = path.join(privateRoot, `phase-${phase}`)
@@ -113,7 +118,7 @@ try {
     await fs.rm(path.join(evidence, `${phase}.json`), { force: true })
     const stderr = []
     const exit = await runProbeProcess(electron, [path.join(privateRoot, 'main/main.mjs'), path.join(privateRoot, 'renderer/index.html'),
-      privateRoot, phase, path.join(fixture, 'preload.cjs'), evidence, process.execPath, path.join(root, 'packages/core/bin/amux'), phaseRoot],
+      privateRoot, phase, path.join(privateRoot, 'preload/preload.cjs'), evidence, process.execPath, path.join(root, 'packages/core/bin/amux'), phaseRoot],
       { temporaryRoot: phaseRoot, cwd: root, env, timeoutMs: 150000, onLine: line => { stderr.push(line.slice(0, 1800)); process.stderr.write(`${phase}: ${line.slice(0, 350)}\n`) } })
     const entry = { phase, exit, stderr }; receipt.phases.push(entry)
     await fs.writeFile(path.join(evidence, `${phase}-stderr.log`), stderr.join('\n'))
@@ -147,6 +152,9 @@ try {
   receipt.toolsAfter = { electron: { path: electron, sha256: hash(await fs.readFile(electron)) } }
   assert.deepEqual(receipt.toolsAfter, receipt.tools, 'Private Electron tool changed during verification')
   receipt.sourceChanges = Object.keys(receipt.inputsAfter).filter(name => receipt.inputsAfter[name] !== receipt.inputs[name])
+  if (toolMode) receipt.coreConsumption = { kind: 'compiled-artifact', sourceCorrespondence: 'unconfirmed-without-a-build-receipt',
+    unconsumedSourceChanges: receipt.sourceChanges.filter(name => name.startsWith('packages/core/src/')),
+    hashes: Object.fromEntries(Object.entries(receipt.inputs).filter(([name]) => name.startsWith('packages/core/dist/'))) }
   if (toolMode) assert.deepEqual(receipt.sourceChanges.filter(name => creationConsumer(name) || name.startsWith('apps/desktop/scripts/fixtures/space-agent-cli/')), [], 'Creation consumer changed during private verification')
   else assert.deepEqual(receipt.inputsAfter, receipt.inputs, 'Source changed during private verification')
   receipt.passed = true
