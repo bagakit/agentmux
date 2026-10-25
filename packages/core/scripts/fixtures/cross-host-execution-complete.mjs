@@ -109,12 +109,21 @@ export function validateRemote(summary, mode, commit) {
         value.agentSessionId && value.nativeHandle && value.initializeCount === 1 && value.protocolRequestBytes > 0 && value.protocolOutputBytes > 0 && value.samples?.length > 0), 'Both independent native consumers must be measured')
       assert(result.file?.bytes === 1024 * 1024 && /^[a-f0-9]{64}$/.test(result.file.sha256) && result.file.roundtripMs > 0)
       assert(result.bindings.some(value => [['output-1mib', 1], ['slow-output', 4]].every(([label, size]) =>
-        value.outputs?.some(output => output.label === label && output.bytes === size * 1024 * 1024 && output.roundtripMs > 0 && /^[a-f0-9]{64}$/.test(output.sha256)))), 'Both exact original output workloads must be measured')
-      const window = result.concurrencyWindow, samples = result.bindings.flatMap(value => value.samples), producer = samples.find(value => value.label === 'slow-output')
-      assert(window && producer && window.producer.emittedAt === producer.emittedAt && window.producer.completedAt === producer.completedAt && producer.completedAt > producer.emittedAt)
+        value.outputs?.some(output => output.label === label && output.bytes === size * 1024 * 1024 && output.toolReplyMs > 0 && output.nativeCompletion === 'process/exited:0' && output.deliveryDuration?.state === 'unknown' && output.MiBPerSecond === undefined && /^[a-f0-9]{64}$/.test(output.sha256)))), 'Both exact original output workloads must be measured')
+      const window = result.concurrencyWindow, samples = result.bindings.flatMap(value => value.samples)
+      assert(window?.clock === 'resource-host-monotonic-ms' && typeof window.scope === 'string' && window.scope.length > 0)
+      const producer = window.producer, commands = window.nativeCommands
+      assert(producer && Number.isFinite(producer.startedAt) && Number.isFinite(producer.completedAt) && producer.completedAt > producer.startedAt && producer.outputBytes === 4 * 1024 * 1024)
       const all = samples.filter(value => value.label === 'under-load')
       assert(all.length === 6 && new Set(all.map(value => value.callId)).size === 6 && window.totalCount === 6)
-      const overlap = all.filter(value => value.emittedAt >= producer.emittedAt && value.completedAt <= producer.completedAt)
+      assert(commands?.length === 6 && new Set(commands.map(value => value.index)).size === 6)
+      for (const command of commands) {
+        assert(command.label === 'under-load' && Number.isInteger(command.index) && command.index >= 0 && command.index < 6)
+        assert(Number.isFinite(command.startedAt) && Number.isFinite(command.completedAt) && command.completedAt >= command.startedAt)
+        assert(all.some(sample => sample.index === command.index && sample.callId === command.callId), 'Native execution must identify its original model call')
+      }
+      const overlappingIds = commands.filter(value => value.startedAt >= producer.startedAt && value.completedAt <= producer.completedAt).map(value => value.callId)
+      const overlap = all.filter(value => overlappingIds.includes(value.callId))
       assert(overlap.length > 0 && window.overlapCount === overlap.length && result.healthyWithStoppedIndependentReader?.count === overlap.length)
       assert.deepEqual([...window.overlappingCallIds].sort(), overlap.map(value => value.callId).sort(), 'Only actual overlapping calls may contribute to concurrent latency')
       const excluded = all.filter(value => !overlap.includes(value)).map(({ callId, emittedAt, completedAt, roundtripMs }) => ({ callId, emittedAt, completedAt, roundtripMs }))
