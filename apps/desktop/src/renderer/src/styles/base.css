@@ -1,7 +1,7 @@
 @import '@agentmux/client-ui/styles/native-controls.css';
 /**
  * reset、html/body、滚动条、以及被所有表面复用的原子控件
- * （.icon-button / .small-button / .primary-button / .eyebrow / .status 状态语汇）。
+ * （.eyebrow / .status 状态语汇）；公共按钮由 client-ui/styles/buttons.css 持有。
  *
  * 按表面分文件（见 docs/design/agentmux-surface-density.md「样式表的组织」）。
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
@@ -57,26 +57,6 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 }
 /* MERGE：workbench 顶行下沉进 pane，主区不再占用独立 topbar 行 */
 .main-shell--merged { grid-template-rows: minmax(0, 1fr) auto; }
-.icon-button {
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding:0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: var(--text-2);
-  background: transparent;
-  cursor: pointer;
-  transition: color var(--dur-fast) ease, background var(--dur-fast) ease;
-}
-/* The density contract asks press to read as an inner shadow rather than a border shift, so the most
-   reused control in the app answers the click instead of only the hover. */
-.icon-button:active:not(:disabled) { box-shadow: inset 0 1px 2px var(--scrim-1); }
-.icon-button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
-.icon-button--danger:hover:not(:disabled) { color: var(--red); background: var(--red-bg); }
-.icon-button:disabled { opacity: .45; cursor: default; }
 /* Source Control: the content slot's bottom half switches between Branches and Changes. */
 .content-slot-source-control { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--surface-0); }
 .content-slot-source-control .branches-panel, .content-slot-source-control .changes-panel { flex: 1; min-height: 0; }
@@ -89,20 +69,6 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .animate-fade-in { animation: fadeIn var(--dur-enter) ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
 
-.small-button, .primary-button { display: inline-flex; align-items: center; justify-content: center; gap:var(--sp-2); border-radius: var(--radius-sm); font-weight: 560; cursor: pointer; transition: background var(--dur-fast) ease, color var(--dur-fast) ease, box-shadow var(--dur-fast) ease; }
-.small-button { padding:var(--sp-2) var(--sp-4); border: 0; color: var(--text); background: var(--surface-3); font-size: var(--fs-meta); box-shadow: var(--hl); }
-.small-button:hover:not(:disabled) { background: var(--surface-2); box-shadow: var(--hl-strong); }
-.small-button--warning { color: var(--amber-text); background: var(--amber-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--hl); }
-.small-button--warning:hover:not(:disabled) { color: var(--amber-text-hover); background: var(--amber-bg-hover); box-shadow: inset 0 0 0 1px var(--amber-line), var(--hl-strong); }
-/* 选中/开启态（换行开关、diff 开关这类 toggle）。不能只换到 --surface-2：那正是 .small-button 的
-   hover 底色，静止时和未选中的按钮看着一样，鼠标一悬停两态又完全重合——等于没有选中态。所以走
-   强调色，与 --warning 那对 amber 完全对称：淡底 + 一圈同色内描边点出「这个开着」。 */
-.small-button--active, .small-button--active:hover:not(:disabled) { color: var(--green-text); background: var(--green-bg); box-shadow: inset 0 0 0 1px var(--green-line), var(--hl); }
-.small-button:disabled { opacity: .45; cursor: default; }
-.primary-button { padding:var(--sp-4) var(--sp-5); border: 0; color: var(--bg); background: linear-gradient(180deg, var(--green), var(--green-2)); font-size: var(--fs-meta); font-weight: 620; box-shadow: var(--elev-1), var(--hl-strong); }
-.primary-button:hover:not(:disabled) { background: linear-gradient(180deg, var(--green-text), var(--green)); }
-.primary-button:active:not(:disabled) { background: var(--green-2); box-shadow: inset 0 1px 3px var(--scrim-1); }
-.primary-button:disabled { opacity: .4; cursor: default; }
 .brand-mark--large { width: 52px; height: 52px; margin-bottom:var(--sp-6); border-radius: var(--radius-lg); }
 .boot { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap:var(--sp-4); background: var(--bg); }
 .boot strong { font-size: var(--fs-prose); }
@@ -183,17 +149,12 @@ input:where([type='checkbox'], [type='radio'], [type='range'], [type='color'], [
 .global-system-notices__details button:hover { color: var(--text); background-color: var(--surface-3); }
 .global-system-notices__details :is(button, summary):focus-visible, .global-system-notices__trigger:focus-visible, .global-system-notices__connection:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
 
-.danger-button { display: inline-flex; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--bg); background: linear-gradient(180deg, var(--red-text), var(--red)); font-size: var(--fs-meta); font-weight: 620; box-shadow: var(--elev-1), var(--hl-strong); cursor: pointer; transition: background var(--dur-fast) ease; }
-.danger-button:hover:not(:disabled) { background: linear-gradient(180deg, var(--red-text), var(--red-text)); }
-.danger-button:active:not(:disabled) { background: var(--red); box-shadow: inset 0 1px 3px var(--scrim-1); }
-.danger-button:disabled { opacity: .5; cursor: default; }
 .field-hint { padding:var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
 .check-pill { max-width: 260px; display: inline-flex; align-items: center; gap:var(--sp-2); padding:var(--sp-1) var(--sp-3); overflow: hidden; border-radius: var(--radius); color: var(--text-3); background: var(--surface-3); font-size: var(--fs-micro); font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .check-pill--ready { color: var(--success); background: var(--success-bg); }
 .check-pill--missing, .check-pill--error { color: var(--red-text); background: var(--red-bg); }
 .check-pill--checking { color: var(--amber); }
 .check-pill--unsupported, .check-pill--check-failed { color: var(--text-2); background: var(--surface-3); }
-.icon-button--danger { color: var(--red); }
 
 @media (max-width: 1120px) {
   .topbar-button { font-size: 0; gap:0; }

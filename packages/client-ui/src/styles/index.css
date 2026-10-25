@@ -1,7 +1,8 @@
 @import './note-static-markup.css';
-/* Client supplies its own theme tokens, font and shell. These rules own conversation surfaces. */
+/* Client supplies its own theme tokens, font and shell. These rules own shared presentation. */
 @import './overlays.css';
 @import '../input/input.css';
+@import './buttons.css';
 @import './theme-transition.css';
 @import './native-controls.css';
 @import './semantic-icons.css';
