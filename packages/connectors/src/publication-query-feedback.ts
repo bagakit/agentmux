@@ -119,7 +119,7 @@ export function projectQueryFeedback(store: PublicationStore, boundary: Publicat
     const ref = record.reference
     if (record.original.kind !== 'native' || ref?.source.kind !== 'native' || ref.hostId !== boundary.executionHostId || ref.agentSessionId !== boundary.agentSessionId) continue
     const item = record.original.item
-    if (!item.turnId || item.metrics?.scope !== 'turn' || item.metrics.status !== 'completed') continue
+    if (!item.turnId || item.turnOutcome?.status !== 'completed') continue
     for (const row of started.all(boundary.bindingId, boundary.revision, ref.source.providerId, ref.source.nativeSessionId, item.turnId)) {
       const original = JSON.parse(String(row.operation_json)) as PublicationOperation, witness = original.queryTurn
       if (!witness?.key) continue
