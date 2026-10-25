@@ -1,7 +1,8 @@
+import { PublicationQueryInputObserver, type PublicationQueryInputPort } from './publication-query-input.js'
 import { publicationInputImages } from './publication-input-images.js'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { publicationMarkdown } from './publication-markdown.js'
-import { AgentMuxError, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
+import { AgentMuxError, parseAgentInputResourceResult, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
 import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationCheckpointPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationSourceRef, type ConversationCheckpointInput, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
 import { readRoomPublicationBinding, roomPublicationReference, connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
@@ -41,6 +42,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
   readonly store: PublicationStore
   private readonly lanes = new Map<string, Lane>()
   private readonly notices = new Map<string, Lane>()
+  private readonly resourcePreparations = new Map<string, Promise<unknown>>()
   private closed = false
   private readonly timer: ReturnType<typeof setInterval>
   constructor(private readonly options: PublicationHostOptions) {
@@ -68,14 +70,14 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (!lane) {
         lane = { binding, abort: new AbortController(), dirty: false, observation: { state: 'unknown', reason: 'not-started' } }
         this.lanes.set(binding.bindingId, lane)
-        try {
-          const current = lane, adapter = this.options.connections.publicationAdapter(binding.connectionId)
         if (this.options.queryInput && this.options.connections.publicationAdapter(binding.connectionId)?.queryFeedback) {
           const current = lane
           lane.queryInput = new PublicationQueryInputObserver(this.store, binding, this.options.queryInput, lane.abort.signal,
             () => this.authorized(binding), () => this.wake(current))
           lane.queryInput.wake()
         }
+        try {
+          const current = lane, adapter = this.options.connections.publicationAdapter(binding.connectionId)
           lane.permissionStop = adapter?.permissionActions === true || adapter?.questionActions === true ? this.options.permissions?.observe(binding, () => this.wake(current)) : undefined
         } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
         this.wake(lane)
@@ -342,6 +344,23 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const result = new Map<string, PublicationSpeaker>(), details = new Map<string, Promise<PublicationSpeakerDetails>>()
     for (const unit of units) {
       const speaker = publicationSpeaker(unit, reference)
+      if (speaker.avatar?.input && speaker.avatar.revision && this.options.conversation.inputResource) {
+        try {
+          const request = { key: speaker.avatar.input, purpose: 'author-avatar' as const, index: 0, revision: speaker.avatar.revision, maxBytes: 144 * 1024 }
+          const key = 'input-avatar:' + JSON.stringify([reference, request])
+          let reading = this.resourcePreparations.get(key)
+          if (!reading) {
+            // The journal RPC may not be cancellable. Retain its real promise
+            // until settlement; an observer deadline is not completion.
+            reading = Promise.resolve().then(() => this.options.conversation.inputResource!(reference, request, signal))
+              .finally(() => { this.resourcePreparations.delete(key) })
+            this.resourcePreparations.set(key, reading)
+          }
+          const resource = parseAgentInputResourceResult(await this.until(reading, AbortSignal.any([signal, AbortSignal.timeout(750)])), request)
+          if (resource.status === 'available') speaker.avatar = { ...speaker.avatar, observation: 'available', image: publicationImage({ ...resource, status: 'read' }) }
+        } catch { signal.throwIfAborted() /* Optional original portrait never changes the accepted author. */ }
+      }
+
       if (speaker.kind === 'agent' && speaker.reference && this.options.speaker) {
         const target = speaker.reference, key = JSON.stringify(target)
         if (!details.has(key)) details.set(key, this.until(this.options.speaker(target, signal), signal).catch(() => { signal.throwIfAborted(); return {} }))
@@ -531,15 +550,25 @@ export class PublicationHost implements ConnectionDeliveryPort {
     }).catch(() => { /* Only this exact observation remains unconfirmed; input and independent publication continue. */ })
       .finally(() => { lane.inspection = undefined })
   }
+  private queryAuthorized(operation: PublicationOperation, binding: RoomBinding): boolean {
+    if (!operation.queryFeedback || operation.queryFeedback.stage === 'received' || !this.options.queryInput) return true
+    const row = this.store.database.prepare('SELECT record_json FROM connection_ingress_message WHERE ingress_id=?').get(operation.queryFeedback.ingressId)
+    return !!row && this.options.queryInput.authorized(JSON.parse(String(row.record_json)), binding)
+  }
   private async drain(lane: Lane, adapter: PublicationAdapter, projectionId?: string): Promise<PublicationObservation | undefined> {
     const binding = lane.binding, signal = lane.abort.signal
     const authorized = () => lane.notice ? this.noticeAuthorized(lane.notice) : this.authorized(binding)
     const accepted = new Map<string, { unit: ConversationUnit; frontier: ConversationCheckpoint; resolved: ReadonlyMap<string, ResolvedPublicationPart> }>()
     const qualified = new Set<string>() // One frozen representation is verified once in this bounded drain.
+    let after = projectionId === undefined ? lane.querySkipAfter : undefined
+    if (projectionId === undefined) lane.querySkipAfter = undefined
     for (let count = 0; count < 16; count++) {
       if (signal.aborted || !authorized()) return
       let original = this.store.next(binding, projectionId, after)
       if (!original) return this.effectObservation(binding, projectionId)
+      // Authority belongs to this one query; keep its original pending effect
+      // and continue independent projections without turning feedback into a lane gate.
+      if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
       let credential: string | null
       try { credential = await this.options.connections.resolveCredential(binding.connectionId) }
       catch (error) { return { state: 'unavailable', reason: credentialLookupFailure(error) ?? 'storage-unconfirmed' } }
@@ -550,25 +579,15 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (!qualified.has(frozen) && !original.originalMessage && ['speech', 'image', 'file', 'question'].includes(original.payload.kind) && original.effect === 'upsert' && ['native', 'captured'].includes(original.reference.source.kind)) {
         const reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
         try {
-  private queryAuthorized(operation: PublicationOperation, binding: RoomBinding): boolean {
-    if (!operation.queryFeedback || operation.queryFeedback.stage === 'received' || !this.options.queryInput) return true
-    const row = this.store.database.prepare('SELECT record_json FROM connection_ingress_message WHERE ingress_id=?').get(operation.queryFeedback.ingressId)
-    return !!row && this.options.queryInput.authorized(JSON.parse(String(row.record_json)), binding)
-  }
           for (const record of relevant) {
             const key = conversationRecordId(record)
             if (accepted.has(key)) continue
             let cursor: string | undefined, pending: ConversationWindowAssembly | undefined, complete = false
             while (!complete) {
-    let after = projectionId === undefined ? lane.querySkipAfter : undefined
-    if (projectionId === undefined) lane.querySkipAfter = undefined
               signal.throwIfAborted()
               const input = { ...reference, record, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
               const page = parseConversationReadPage(await this.options.conversation.inspect(input, signal), input)
               const before = (pending?.bytes ?? 0) + (pending?.fragment?.receivedBytes ?? 0)
-      // Authority belongs to this one query; keep its original pending effect
-      // and continue independent projections without turning feedback into a lane gate.
-      if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
               const consumed = consumeConversationWindowPage(page, pending)
               if (consumed.kind === 'complete') {
                 const unit = consumed.snapshot.units.find(unit => unit.records.some(value => conversationRecordId(value.reference!) === key))
@@ -587,23 +606,37 @@ export class PublicationHost implements ConnectionDeliveryPort {
         qualified.add(frozen)
       }
       if (original.effect === 'upsert' && original.speaker?.avatar?.image && !original.prepared && original.attempt === undefined) {
+        const attemptKey = (operationId: string, attempt: number) => `${operationId}:avatar:${attempt}`
         const last = original.avatarUploads?.at(-1)
-        if (last?.state === 'dispatching') this.store.settleResourceUpload(original.operationId, original.avatarUploads!.length, { state: 'unknown' }, 'avatar')
+        if (last?.state === 'dispatching' && !this.resourcePreparations.has(attemptKey(original.operationId, original.avatarUploads!.length)))
+          this.store.settleResourceUpload(original.operationId, original.avatarUploads!.length, { state: 'unknown' }, 'avatar')
         else if (!last && !original.avatarSource && adapter.images?.upload && adapter.images.accepts(original.speaker.avatar.image)) {
-          const upload = this.store.claimResourceUpload(original.operationId, authorized, 'avatar')
+          const upload = this.store.claimResourceUpload(original.operationId, authorized, 'avatar', (operationId, attempt) => this.resourcePreparations.has(attemptKey(operationId, attempt)))
           if (upload?.speaker?.avatar?.image && !upload.avatarSource) {
             const uploadSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
-            let effect: Promise<ResourceUploadReceipt>
-            try { effect = Promise.resolve(adapter.images.upload(upload.speaker.avatar.image, upload.target, credential, uploadSignal)) }
-            catch { effect = Promise.reject(new Error('Unconfirmed original avatar upload.')) }
-            const settle = (receipt: ResourceUploadReceipt) => { if (!this.closed) this.store.settleResourceUpload(upload.operationId, upload.avatarUploads!.length, receipt, 'avatar') }
-            effect.then(receipt => { try { settle(receipt) } catch { try { settle({ state: 'unknown' }) } catch { /* Keep this same optional attempt. */ } } }, () => {
-              try { settle({ state: 'unknown' }) } catch { /* Original bytes and receipt stay retained. */ }
-            })
-            // Optional presentation never delays the original body or replaces its frozen wire.
-            uploadSignal.addEventListener('abort', () => { try { settle({ state: 'unknown' }) } catch { /* Retain the original optional claim. */ } }, { once: true })
+            const id = attemptKey(upload.operationId, upload.avatarUploads!.length)
+            const operation = upload
+            const effect = Promise.resolve().then(() => adapter.images!.upload!(operation.speaker!.avatar!.image!, operation.target, credential, uploadSignal))
+            const retained = effect.then(receipt => {
+              if (!this.closed) this.store.settleResourceUpload(operation.operationId, operation.avatarUploads!.length, receipt, 'avatar')
+              return receipt
+            }, () => {
+              const receipt = { state: 'unknown' as const }
+              if (!this.closed) this.store.settleResourceUpload(operation.operationId, operation.avatarUploads!.length, receipt, 'avatar')
+              return receipt
+            }).catch(() => ({ state: 'unknown' as const })).finally(() => { this.resourcePreparations.delete(id) })
+            this.resourcePreparations.set(id, retained)
           }
         }
+        original = this.store.inspect(original.operationId)!
+        const sourceId = original.avatarSource?.operationId ?? original.operationId
+        const sourceAttempt = original.avatarSource?.attempt ?? original.avatarUploads?.length ?? 0
+        const effect = this.resourcePreparations.get(attemptKey(sourceId, sourceAttempt))
+        if (effect) try {
+          // A short optional preparation belongs to this original unprepared wire,
+          // not Agent input or a new background polling/decoration lifecycle.
+          await this.until(effect, AbortSignal.any([signal, AbortSignal.timeout(750)]))
+        } catch { signal.throwIfAborted() /* The original body proceeds without a portrait. */ }
         original = this.store.inspect(original.operationId)!
         if (signal.aborted || !authorized()) return
       }
@@ -632,15 +665,18 @@ export class PublicationHost implements ConnectionDeliveryPort {
           if (original.uploads?.at(-1)?.state !== 'confirmed') continue
         }
       }
+      if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
       if (['permission', 'question'].includes(original.payload.kind) && !this.options.permissions?.authorized(original)) return { state: 'unavailable', reason: 'source-unconfirmed' }
       const claimed = this.store.claimNext(binding, original.operationId, () => authorized() && this.queryAuthorized(original!, binding) && (!['permission', 'question'].includes(original!.payload.kind) || this.options.permissions?.authorized(original!) === true), adapter, original.projectionId)
       if (!claimed) {
+        if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
         // A concurrent original claim may expose another candidate. Re-enter qualification
         // on the existing lane, but never spin on the same unchanged pending operation.
         const next = this.store.next(binding, projectionId, after)
         if (next && next.operationId !== original.operationId) lane.dirty = true
         return this.effectObservation(binding, projectionId)
       }
+      if (!this.queryAuthorized(claimed, binding)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); after = claimed.operationId; continue }
       if (signal.aborted || !authorized() || ['permission', 'question'].includes(claimed.payload.kind) && !this.options.permissions?.authorized(claimed)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
       const timeout = AbortSignal.timeout(30_000), dispatchSignal = AbortSignal.any([signal, timeout])
       let effect: Promise<PublicationReceipt>
@@ -668,18 +704,16 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const stop = () => reject(new Error('External effect observation ended.'))
       signal.addEventListener('abort', stop, { once: true })
       work.then(value => { signal.removeEventListener('abort', stop); resolve(value) }, error => { signal.removeEventListener('abort', stop); reject(error) })
-      if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
     })
   }
   observation(bindingId: string, revision: number): PublicationObservation {
-        if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
     const lane = this.lanes.get(bindingId)
     const requested = this.options.bindings.readExact(bindingId, revision)
+    if (requested && lane?.binding.revision === roomPublicationReference(requested).revision && lane.queryInput?.failed) return { state: 'unavailable', reason: 'source-unconfirmed' }
     if (requested && lane?.binding.revision === roomPublicationReference(requested).revision) return lane.observation.state === 'ready' || lane.observation.reason === 'effect-unconfirmed'
       ? this.effectObservation(lane.binding) ?? { ...lane.observation } : { ...lane.observation }
     if (this.closed) return { state: 'unknown', reason: 'not-started' }
     const authority = this.authority({ bindingId, revision })
-      if (!this.queryAuthorized(claimed, binding)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); after = claimed.operationId; continue }
     return authority === null ? { state: 'unavailable', reason: 'storage-unconfirmed' } : authority.authorized ? { state: 'unknown', reason: 'not-started' } : { state: 'disabled' }
   }
   async inspect(value: ConnectionDeliveryOperationInput) {
@@ -709,7 +743,6 @@ export class PublicationHost implements ConnectionDeliveryPort {
     this.closed = true; clearInterval(this.timer)
     for (const lane of this.lanes.values()) { lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.handle?.dispose() } catch { /* Release failure cannot change an Agent lifecycle. */ } }
     this.lanes.clear()
-    if (requested && lane?.binding.revision === roomPublicationReference(requested).revision && lane.queryInput?.failed) return { state: 'unavailable', reason: 'source-unconfirmed' }
     for (const lane of this.notices.values()) lane.abort.abort()
     this.notices.clear()
   }

@@ -997,7 +997,7 @@ export class PublicationStore {
       return 'cancelled'
     })
   }
-  claimResourceUpload(operationId: string, authorized: () => boolean, purpose: 'content' | 'avatar' = 'content'): PublicationOperation | null {
+  claimResourceUpload(operationId: string, authorized: () => boolean, purpose: 'content' | 'avatar' = 'content', inFlight?: (operationId: string, attempt: number) => boolean): PublicationOperation | null {
     return this.transaction(() => {
       const original = this.inspect(operationId)
       if (purpose === 'avatar') {
@@ -1005,10 +1005,11 @@ export class PublicationStore {
           original.avatarSource || original.avatarUploads?.length || original.prepared || original.attempt !== undefined) return null
         const previous = this.read(this.database.prepare(`SELECT operation_json,state FROM connector_publication_operation
           WHERE json_array_length(json_extract(operation_json,'$.avatarUploads'))>0
+            AND json_extract(operation_json,'$.avatarUploads[#-1].state') IN ('confirmed','dispatching')
             AND json_extract(operation_json,'$.target.connectionId')=? AND json_extract(operation_json,'$.target.application.domain')=?
             AND json_extract(operation_json,'$.target.application.appId')=? AND json_extract(operation_json,'$.speaker.avatar.image.sha256')=?
-          ORDER BY ordinal DESC LIMIT 1`).get(original.target.connectionId, original.target.application.domain, original.target.application.appId, original.speaker.avatar.image.sha256))
-        if (previous) {
+          ORDER BY CASE json_extract(operation_json,'$.avatarUploads[#-1].state') WHEN 'confirmed' THEN 0 ELSE 1 END, ordinal DESC LIMIT 1`).get(original.target.connectionId, original.target.application.domain, original.target.application.appId, original.speaker.avatar.image.sha256))
+        if (previous && (previous.avatarUploads!.at(-1)!.state === 'confirmed' || inFlight?.(previous.operationId, previous.avatarUploads!.length))) {
           const receipt = previous.avatarUploads!.at(-1)!
           const { image: _bytes, ...avatar } = original.speaker.avatar
           const retained: PublicationOperation = { ...original, speaker: { ...original.speaker, avatar }, avatarSource: { operationId: previous.operationId, attempt: previous.avatarUploads!.length,
@@ -1060,6 +1061,11 @@ export class PublicationStore {
       const predecessor = first.predecessorOperationId ? this.inspect(first.predecessorOperationId) : null
       if (predecessor && (predecessor.state !== 'confirmed' || !predecessor.mapping)) return null
       const original = { ...first, ...(predecessor?.mapping && predecessor.effect !== 'withdraw' ? { mapping: predecessor.mapping } : {}) }
+      if (!original.prepared && original.avatarSource && !original.avatarSource.imageKey) {
+        const source = this.inspect(original.avatarSource.operationId)?.avatarUploads?.[original.avatarSource.attempt - 1]
+        if (source?.state === 'confirmed') original.avatarSource = { ...original.avatarSource, imageKey: source.imageKey }
+      }
+
       if (!adapter.directResources && (original.payload.kind === 'image' || original.payload.kind === 'file') && original.effect === 'upsert' && original.uploads?.at(-1)?.state !== 'confirmed') return null
       let candidate: unknown = original.prepared
       if (!candidate) {
