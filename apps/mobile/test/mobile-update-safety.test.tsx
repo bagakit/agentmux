@@ -17,7 +17,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { NoteSnapshotTestWorker } from '../../desktop/test/note-snapshot-test-worker'
-import { acceptedPrompt, button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { acceptedPrompt, button, click, deferred, editor, fixture, mount, mounted, paste, waitForElement } from './conversation-fixture'
 
 let apply: ReturnType<typeof useMobileWebUpdateSafety>['apply']
 function Action() { apply = useMobileWebUpdateSafety().apply; return null }
@@ -574,7 +574,7 @@ it('keeps a dispatched original send updateable across real mobile workface swit
   await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
   await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Space'))
   await click(button(view.element.querySelector('nav.mobile-navigation')!, 'Focus'))
-  await click(view.element.querySelector('.mobile-session-list button')!)
+  await click(await waitForElement(view.element, '.mobile-session-list button'))
   expect(await apply()).toEqual({ status: 'navigating' })
   await view.render(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action /></MobileWebUpdateSafetyProvider>)
   await view.render(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action />{app}</MobileWebUpdateSafetyProvider>)
