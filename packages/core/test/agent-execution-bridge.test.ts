@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import { MAX_FRAME_BYTES } from '@ctxmux/sdk'
+import { createHash } from 'node:crypto'
 import { AgentExecutionBridge, type AgentExecutionBridgePort, type AgentExecutionBridgeState } from '../src/agent-execution-bridge.js'
 import type { AgentMuxClientEvent, AgentMuxRunInputOperation } from '../src/types.js'
 
 function port(runId: string, output: string, options: { replayChunkBytes?: number; replayEndByte?: number; liveDuringAttach?: { startByte: number; data: string }[] } = {}) {
   let listener: ((event: AgentMuxClientEvent) => unknown) | undefined
   const writes: AgentMuxRunInputOperation[] = [], targets: string[] = []
-  const claimed = new Map<string, { startByte: number; endByte: number }>()
-  let cursor = 0, loseAck = false, gap = false, runtime = 'runtime', replayFault: 'none' | 'tamper' | 'truncated' = 'none'
+  const claimed = new Map<string, { startByte: number; endByte: number }>(), claimedBytes = new Map<string, Buffer>()
+  let cursor = 0, loseAck = false, loseAckAt = -1, gap = false, runtime = 'runtime', replayFault: 'none' | 'tamper' | 'truncated' = 'none'
   const replayReads: { runId: string; after: number; surface: string }[] = []
   const emit = (startByte: number, data: string) => listener?.({ type: 'terminal-output', run: { runId }, data, dataBytes: Buffer.from(data),
     evidence: { source: 'terminal-output', observedAt: 0, run: { runId }, outputByteRange: { startByte, endByte: startByte + Buffer.byteLength(data) } } } as AgentMuxClientEvent)
@@ -38,19 +40,27 @@ function port(runId: string, output: string, options: { replayChunkBytes?: numbe
     writeTerminal: async (target: { runId: string }, operation: AgentMuxRunInputOperation) => {
       targets.push(target.runId)
       if (target.runId !== runId) throw new Error('The original Input was retargeted to another Run')
+      const wire = { type: 'request', request: { type: 'recoverable_input', operation: {
+        daemon_instance: operation.ownerInstanceId, operation_key: operation.operationId, id: target.runId,
+        expected_byte: operation.expectedByte, data: Array.from(typeof operation.data === 'string' ? Buffer.from(operation.data) : operation.data) } } }
+      if (Buffer.byteLength(JSON.stringify(wire)) > MAX_FRAME_BYTES) throw new Error('Runtime wire frame exceeds the public SDK limit')
       writes.push(structuredClone(operation))
       let range = claimed.get(operation.operationId)
+      if (range) {
+        expect(operation.expectedByte).toBe(range.startByte)
+        expect(Buffer.from(operation.data).equals(claimedBytes.get(operation.operationId)!)).toBe(true)
+      }
       if (!range) {
         expect(operation.expectedByte).toBe(cursor)
         const bytes = typeof operation.data === 'string' ? Buffer.byteLength(operation.data) : operation.data.byteLength
         range = { startByte: cursor, endByte: cursor + bytes }; cursor += bytes
-        claimed.set(operation.operationId, range)
+        claimed.set(operation.operationId, range); claimedBytes.set(operation.operationId, Buffer.from(operation.data))
       }
-      if (loseAck) { loseAck = false; throw new Error('original acknowledgement lost') }
+      if (loseAck || writes.length === loseAckAt) { loseAck = false; loseAckAt = -1; throw new Error('original acknowledgement lost') }
       return { runId, appliedByteRange: range, acceptedThroughByte: cursor }
     },
   } as unknown as AgentExecutionBridgePort
-  return { api, writes, targets, claimed, replayReads, replayFault: (value: typeof replayFault) => { replayFault = value }, runtime: (value: string) => { runtime = value }, loseAck: () => { loseAck = true }, gap: () => { gap = true },
+  return { api, writes, targets, claimed, replayReads, replayFault: (value: typeof replayFault) => { replayFault = value }, runtime: (value: string) => { runtime = value }, loseAck: (at?: number) => { if (at === undefined) loseAck = true; else loseAckAt = at }, gap: () => { gap = true },
     emit }
 }
 const state = (): AgentExecutionBridgeState => ({ bindingId: 'binding',
@@ -143,11 +153,90 @@ describe('execution bridge original Runtime continuation', () => {
     const started = performance.now()
     try {
       await bridge.start()
-      expect(e.writes.map(write => inputText(write.data))).toEqual([large])
+      expect(e.writes.map(write => inputText(write.data)).join('')).toBe(large)
+      expect(e.writes.length).toBeGreaterThan(1)
       expect(copiedBytes).toBeGreaterThanOrEqual(Buffer.byteLength(large) - 1)
       expect(copiedBytes).toBeLessThanOrEqual(Buffer.byteLength(large) * 2)
       console.info('execution bridge large-frame cost', { frameBytes: Buffer.byteLength(large), chunkBytes: 4096, copiedBytes, durationMs: performance.now() - started })
     } finally { Buffer.concat = concat; await bridge.close() }
+  })
+  it('recovers an acknowledged prefix and the same unknown middle chunk from the full original Unicode frame', async () => {
+    const frame = { type: 'request', generation: 'original-generation', payload: { id: 'native-once', method: 'fs/writeFile', params: { data: '中文'.repeat(400_000) } } }
+    const large = JSON.stringify(frame) + '\n', f = port('front', large, { replayChunkBytes: 4096 }), e = port('exec', '')
+    let saved = state()
+    const options = { ports: { frontend: f.api, executor: e.api }, persist: async (next: AgentExecutionBridgeState) => { saved = structuredClone(next) }, onFrame: async () => {}, onError: () => {} }
+    e.loseAck(2)
+    const first = new AgentExecutionBridge({ ...options, state: saved })
+    await expect(first.start()).rejects.toThrow(); await first.close()
+    expect(e.writes).toHaveLength(2)
+    expect(saved.frontend.outputByte).toBe(0)
+    expect(saved.pending!.sourceStartByte).toBe(0)
+    expect(saved.pending!.sourceEndByte).toBe(Buffer.byteLength(large))
+    expect(saved.pending!.chunk!.offset).toBe(saved.executor.inputByte)
+    expect(saved.pending!.chunk!.offset).toBeGreaterThan(0)
+    const uncertain = structuredClone(e.writes[1])
+    const second = new AgentExecutionBridge({ ...options, state: saved })
+    try {
+      await second.start()
+      expect(e.writes[2]).toEqual(uncertain)
+      expect(f.replayReads).toEqual([{ runId: 'front', after: 0, surface: 'raw' }])
+      const originals = [...new Map(e.writes.map(write => [write.operationId, write])).values()]
+      const applied = Buffer.concat(originals.map(write => Buffer.from(write.data)))
+      expect(applied.equals(Buffer.from(large))).toBe(true)
+      expect(applied.toString().trim().split('\n').map(line => JSON.parse(line))).toEqual([frame])
+      expect(saved.pending).toBeUndefined()
+      expect(saved.frontend.outputByte).toBe(Buffer.byteLength(large))
+      expect(saved.executor.inputByte).toBe(Buffer.byteLength(large))
+    } finally { await second.close() }
+  })
+  it('retains the same chunk claim when saving its acknowledged progress fails', async () => {
+    const large = JSON.stringify({ type: 'request', payload: { id: 1, data: 'x'.repeat(MAX_FRAME_BYTES) } }) + '\n'
+    const f = port('front', large), e = port('exec', '')
+    let saved = state(), failSave = true
+    const options = { ports: { frontend: f.api, executor: e.api }, persist: async (next: AgentExecutionBridgeState) => {
+      if (failSave && next.pending?.chunk && next.pending.chunk.offset > 0) throw new Error('original chunk progress acknowledgement lost')
+      saved = structuredClone(next)
+    }, onFrame: async () => {}, onError: () => {} }
+    const first = new AgentExecutionBridge({ ...options, state: saved })
+    await expect(first.start()).rejects.toThrow(); await first.close()
+    expect(saved.pending!.chunk!.offset).toBe(0)
+    expect(saved.frontend.outputByte).toBe(0)
+    expect(e.writes).toHaveLength(1)
+    failSave = false
+    const second = new AgentExecutionBridge({ ...options, state: saved })
+    try {
+      await second.start()
+      expect(e.writes[1]).toEqual(e.writes[0])
+      expect(e.claimed.size).toBe(e.writes.length - 1)
+      expect(saved.frontend.outputByte).toBe(Buffer.byteLength(large))
+    } finally { await second.close() }
+  })
+  it('rejoins an original whole-frame claim that fits the actual wire even when larger than a worst-case chunk', async () => {
+    const original = JSON.stringify({ type: 'request', payload: { id: 1, data: 'A'.repeat(300_000) } }) + '\n'
+    const f = port('front', original), e = port('exec', '')
+    const retained: AgentExecutionBridgeState = { ...state(), pending: { source: 'frontend', sourceStartByte: 0, sourceEndByte: Buffer.byteLength(original),
+      digest: createHash('sha256').update(original).digest('hex'), operation: { ownerInstanceId: 'runtime', operationId: 'original-whole-frame', expectedByte: 0 } } }
+    const bridge = new AgentExecutionBridge({ state: retained, ports: { frontend: f.api, executor: e.api }, persist: async () => {}, onFrame: async () => {}, onError: () => {} })
+    try {
+      await bridge.start()
+      expect(e.writes).toHaveLength(1)
+      expect(e.writes[0]!.operationId).toBe('original-whole-frame')
+      expect(inputText(e.writes[0]!.data)).toBe(original)
+      expect(bridge.snapshot().pending).toBeUndefined()
+    } finally { await bridge.close() }
+  })
+  it('does not repartition a retained oversized whole-frame Input of unknown outcome', async () => {
+    const large = JSON.stringify({ type: 'request', payload: { id: 'original', data: 'x'.repeat(MAX_FRAME_BYTES) } }) + '\n'
+    const f = port('front', large), e = port('exec', '')
+    const original = { ...state(), pending: { source: 'frontend' as const, sourceStartByte: 0, sourceEndByte: Buffer.byteLength(large),
+      digest: createHash('sha256').update(large).digest('hex'), operation: { ownerInstanceId: 'runtime', operationId: 'original-whole-frame', expectedByte: 0 } } }
+    const saves: AgentExecutionBridgeState[] = []
+    const bridge = new AgentExecutionBridge({ state: original, ports: { frontend: f.api, executor: e.api }, persist: async value => { saves.push(value) }, onFrame: async () => {}, onError: () => {} })
+    try {
+      await expect(bridge.start()).rejects.toMatchObject({ code: 'EXECUTION_INPUT_SIZE_UNCONFIRMED' })
+      expect(bridge.snapshot()).toEqual(original)
+      expect(saves).toEqual([]); expect(e.writes).toEqual([])
+    } finally { await bridge.close() }
   })
   it('retains the original pending Input when the Runtime owner changes instead of retargeting it', async () => {
     const f = port('front', request), e = port('exec', '')
