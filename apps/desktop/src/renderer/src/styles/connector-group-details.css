@@ -1,21 +1,44 @@
 .connector-group-details { display: grid; gap: var(--sp-4); min-width: 0; }
-.connector-group-details__identity { display: grid; gap: var(--sp-3); min-width: 0; }
+.connector-group-details__header { flex: none; display: grid; gap: var(--sp-3); padding: var(--sp-2) var(--sp-6) 0; min-width: 0; border-bottom: 1px solid var(--line-soft); }
+.agent-connector-dialog__header[data-group-details=true] { padding-bottom: var(--sp-2); border-bottom: 0; }
+.agent-connector-dialog__header[data-group-details=true] h2 { font-size: var(--fs-meta); color: var(--text-3); font-weight: 500; }
+.connector-group-details__identity { min-width: 0; }
 .connector-group-details__identity .connector-entity__name { font-size: var(--fs-title); letter-spacing: -.015em; }
-.connector-group-details__bot { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
-.connector-group-details__bot strong { color: var(--text-2); font-weight: 500; }
-.connector-group-details__tabs { position: sticky; top: calc(-1 * var(--sp-5)); z-index: 1; display: flex; flex-wrap: wrap; gap: var(--sp-1); padding-block: var(--sp-2); background: var(--overlay-surface); border-bottom: 1px solid var(--line-soft); }
+.connector-group-details__relationship { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); min-width: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.connector-group-details__conversation { display: flex; align-items: center; gap: var(--sp-2); margin: 0; min-width: 0; }
+.connector-group-details__conversation > span { min-width: 0; overflow-wrap: anywhere; }
+.connector-group-details__relationship small { color: var(--text-3); font-size: inherit; }
+.connector-group-details__via { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+.connector-group-details__via strong { font-weight: 500; overflow-wrap: anywhere; }
+.connector-group-details__via > svg { flex: none; color: var(--text-3); }
+.connector-group-details__tabs { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding-block: var(--sp-2); }
 .connector-group-details__tabs button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); min-height: 32px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: 500 var(--fs-meta)/1.4 var(--font-sans); cursor: pointer; }
 .connector-group-details__tabs button[aria-selected=true] { background: var(--surface-3); color: var(--text); }
 .connector-group-details__tabs button:hover { color: var(--text); }
 .connector-group-details__tabs button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
 .connector-group-details__panel:not([hidden]) { display: grid; gap: var(--sp-4); min-width: 0; }
 .connector-group-details__panel[hidden] { display: none; }
-.agent-connector-dialog .connector-group-details :is(summary, [data-connection-section], [data-receipt-section]) { scroll-margin-block-start: 72px; }
+.agent-connector-dialog .connector-group-details :is(summary, [data-connection-section], [data-receipt-section]) { scroll-margin-block-start: var(--sp-3); }
 .connector-group-details__panel > .agent-connector-section { border: 0; padding: 0; background: transparent; }
 .connector-group-details__panel > .agent-connector-status { padding: 0; }
 .connector-group-details__configuration { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
 .connector-group-details__configuration strong { font-weight: 500; color: var(--text-2); }
+.connector-group-details__section { display: grid; gap: var(--sp-3); padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); min-width: 0; }
+.connector-group-details__section h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: var(--fs-body); font-weight: 600; color: var(--text); }
+.connector-group-details__section h3 > svg { color: var(--text-3); }
+.connector-group-details .agent-connector-audiences { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--sp-2); }
+.connector-group-details .agent-connector-audiences > span { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3); background: var(--surface-2); border: 0; border-radius: var(--radius-sm); }
+.connector-group-details .agent-connector-audiences > span > svg { flex: none; margin-top: 2px; color: var(--text-3); }
+.connector-group-details .agent-connector-audiences > span > span { display: grid; gap: var(--sp-1); min-width: 0; overflow-wrap: anywhere; }
+.connector-group-details .agent-connector-audiences strong { font-weight: 500; }
+.connector-group-details .agent-connector-audiences small { color: var(--text-3); }
+.connector-group-details .agent-connector-status { background: var(--surface-2); border-radius: var(--radius-sm); padding: var(--sp-3); }
+.connector-group-details .agent-connector-room-metadata { gap: var(--sp-2); }
+.connector-group-details .agent-connector-room-metadata > span { background: var(--surface-2); padding: var(--sp-2) var(--sp-3); }
 @media (max-width: 420px) {
   .connector-group-details__tabs button { flex: 1 1 calc(50% - var(--sp-1)); }
-  .agent-connector-dialog .connector-group-details :is(summary, [data-connection-section], [data-receipt-section]) { scroll-margin-block-start: 108px; }
+  .connector-group-details__header { padding-inline: var(--sp-4); gap: var(--sp-2); }
+  .connector-group-details__relationship { gap: var(--sp-1); }
+  .connector-group-details__conversation, .connector-group-details__via { width: 100%; }
+  .connector-group-details__tabs button { padding-inline: var(--sp-2); }
 }

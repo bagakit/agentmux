@@ -77,7 +77,9 @@
 .connector-member-row > details > small { display: block; color: var(--text-3); overflow-wrap: anywhere; }
 .connector-member-row > .agent-connector-disclosure > summary { padding-block: var(--sp-1); font-size: var(--fs-micro); }
 .agent-connector-audiences { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.agent-connector-audiences > span { display: grid; gap: 3px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); min-width: 0; }
+.agent-connector-audiences > span { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); min-width: 0; }
+.agent-connector-audiences > span > svg { flex: none; margin-top: 2px; }
+.agent-connector-audiences > span > span { display: grid; gap: 3px; min-width: 0; }
 .agent-connector-audiences > span strong { font-size: 12px; font-weight: 600; }
 .agent-connector-audiences > span small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .agent-connector-audiences button { text-align: left; overflow-wrap: anywhere; }
@@ -119,8 +121,6 @@
 .agent-connector-section { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--surface-1); }
 .agent-connector-section > h3, .agent-connector-section .agent-connector-fields > h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: var(--fs-body); font-weight: 600; }
 
-.agent-connector-group-selection[data-bound] { gap: var(--sp-2); padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--surface-1); }
-.agent-connector-group-selection[data-bound] .agent-connector-application { border-top: 1px solid var(--line-soft); padding-top: var(--sp-2); }
 .agent-connector-room-refresh { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--line-soft); }
 .agent-connector-room-refresh:hover { background: var(--surface-2); }
 .agent-connector-saved { display: flex; align-items: center; gap: var(--sp-2); margin-right: auto; color: var(--text-3); }
