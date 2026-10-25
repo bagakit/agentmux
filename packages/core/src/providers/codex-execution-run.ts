@@ -44,7 +44,7 @@ export async function runCodexExecutionHelper(
     // A failed diagnostic write is an observation failure, not child shutdown.
     if (diagnosticPending) return
     diagnosticPending = true
-    io.output.write(JSON.stringify({ type: 'diagnostic', code: 'NATIVE_EXECUTION_HELPER_OBSERVATION_UNCONFIRMED' }) + '\n', () => { diagnosticPending = false })
+    io.output.write(JSON.stringify({ type: 'diagnostic', scope: 'helper', code: 'NATIVE_EXECUTION_HELPER_OBSERVATION_UNCONFIRMED' }) + '\n', () => { diagnosticPending = false })
   }
   if (context.role === 'frontend') return await runCodexExecutionFrontend({ input: io.input, output: io.output, onError: diagnostic, ...(context.agentSessionId ? { agentSessionId: context.agentSessionId } : {}) })
 
@@ -85,7 +85,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     const context = parseCodexExecutionRunArguments(process.argv.slice(2))
     await runCodexExecutionHelper(context, { input: process.stdin, output: process.stdout })
   })().catch(() => {
-    process.stdout.write(JSON.stringify({ type: 'diagnostic', code: 'NATIVE_EXECUTION_HELPER_START_FAILED' }) + '\n')
+    process.stdout.write(JSON.stringify({ type: 'diagnostic', scope: 'helper', code: 'NATIVE_EXECUTION_HELPER_START_FAILED' }) + '\n')
     process.exitCode = 1
   })
 }

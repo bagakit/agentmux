@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { join, isAbsolute, dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
-import { AgentExecutionBridge, type AgentExecutionBridgeState, type AgentExecutionBridgePort } from './agent-execution-bridge.js'
+import { AgentExecutionBridge, type AgentExecutionBridgeState, type AgentExecutionBridgePort, type AgentExecutionBridgeSide, type AgentExecutionBridgeConnection } from './agent-execution-bridge.js'
 import type { AgentMuxClient, AgentMuxHostAgentCreateInput } from './client.js'
 import type { AgentMuxAgentSession } from './types.js'
 import { AgentMuxError } from './errors.js'
@@ -22,7 +22,20 @@ export interface AgentExecutionOpenInput {
   resourceGrant: import('./agent-execution-helper.js').AgentExecutionResourceGrant
   agent: Omit<AgentMuxHostAgentCreateInput, 'toolExecution'> & { agentSessionId: string; createOperationId: string }
 }
-type RecordValue = { input: AgentExecutionOpenInput; agentControl?: { generation: string; state: 'unconfigured' | 'unverified' | 'available' | 'unavailable'; stage?: 'invocation-registration'; code?: string }; notices?: AgentExecutionNotice[]; diagnostic?: AgentExecutionInspection['diagnostic']; attempts?: Partial<Record<'frontend' | 'executor', { ownerInstanceId: string }>>; bridge?: AgentExecutionBridgeState; frontend?: AgentExecutionBridgeState['frontend']; executor?: AgentExecutionBridgeState['executor'] }
+type OperationKey = import('./agent-execution-journal.js').AgentExecutionOperationKey
+type Diagnostic = { code: string; message: string; generation?: string; operation?: OperationKey }
+export type AgentExecutionDiagnostic = Diagnostic & (
+  | { scope: 'unclassified'; side?: AgentExecutionBridgeSide; runId?: string }
+  | { scope: 'helper' | 'request' | 'generation'; side: AgentExecutionBridgeSide; runId: string }
+  | { scope: 'operation'; side: 'executor'; runId: string; generation: string; operation: OperationKey }
+)
+const originalOperation = (value: unknown, bindingId: string, generation: unknown): value is OperationKey => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const key = value as OperationKey
+  return Object.keys(key).length === 3 && key.bindingId === bindingId && typeof key.streamGeneration === 'string' && !!key.streamGeneration &&
+    key.streamGeneration === generation && (typeof key.nativeRequestId === 'string' || Number.isSafeInteger(key.nativeRequestId))
+}
+type RecordValue = { input: AgentExecutionOpenInput; agentControl?: { generation: string; state: 'unconfigured' | 'unverified' | 'available' | 'unavailable'; stage?: 'invocation-registration'; code?: string }; notices?: AgentExecutionNotice[]; diagnostic?: AgentExecutionInspection['diagnostic']; diagnostics?: AgentExecutionDiagnostic[]; attempts?: Partial<Record<'frontend' | 'executor', { ownerInstanceId: string }>>; bridge?: AgentExecutionBridgeState; frontend?: AgentExecutionBridgeState['frontend']; executor?: AgentExecutionBridgeState['executor'] }
 export interface AgentExecutionInspection {
   bindingId: string
   agentHostId: string
@@ -31,7 +44,10 @@ export interface AgentExecutionInspection {
   resourceWorkspacePath: string
   state: 'unavailable' | 'connected'
   notices?: AgentExecutionNotice[]
-  diagnostic?: { code: string; message: string; generation?: string; operation?: import('./agent-execution-journal.js').AgentExecutionOperationKey }
+  /** Current original helper/reader connection only; not native tool qualification. */
+  diagnostic?: Diagnostic
+  /** Retained local issues; unrelated progress or rejoin cannot settle an operation. */
+  diagnostics?: AgentExecutionDiagnostic[]
 }
 const nativeLock = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
 const fail = (message: string, code = 'EXECUTION_BINDING_CONFLICT') => new AgentMuxError(message, code)
@@ -47,6 +63,8 @@ export class AgentExecutionCoordinator {
   private readonly lanes = new Map<string, Promise<unknown>>()
   private readonly bridges = new Map<string, AgentExecutionBridge>()
   private readonly observations = new Map<string, AgentExecutionInspection>()
+  private readonly connectionFailures = new Map<string, Diagnostic>()
+  private readonly helperConnections = new Map<string, Map<AgentExecutionBridgeSide, AgentExecutionBridgeConnection>>()
   private disposed = false
   private constructor(private readonly db: DatabaseSync, private readonly lease: FileHandle, private readonly options: AgentExecutionCoordinatorOptions) {}
   static async open(directory: string, options: AgentExecutionCoordinatorOptions): Promise<AgentExecutionCoordinator> {
@@ -123,12 +141,36 @@ export class AgentExecutionCoordinator {
         action: 'Recheck the original Agent control route without replacing the Agent, helper Runs or pending operations.' }]
     })
   }
-  private observe(input: AgentExecutionOpenInput, diagnostic?: AgentExecutionInspection['diagnostic'], notices?: AgentExecutionNotice[]): void {
+  private localDiagnostics(record: RecordValue): AgentExecutionDiagnostic[] {
+    // Old records did not declare a scope. Preserve exactly what was recorded;
+    // neither reader attachment nor a guessed error-code category can settle it.
+    return [...(record.diagnostic ? [{ ...record.diagnostic, scope: 'unclassified' as const }] : []), ...(record.diagnostics ?? [])]
+  }
+  private connectionDiagnostic(bindingId: string): Diagnostic | undefined {
+    const failed = this.connectionFailures.get(bindingId)
+    if (failed) return failed
+    const connections = this.helperConnections.get(bindingId)
+    for (const side of ['frontend', 'executor'] as const) {
+      const value = connections?.get(side)
+      if (!value || value.process === 'unobserved') return { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: `The original ${side} helper has not been observed by this reader.` }
+      if (value.process !== 'running') return { code: 'EXECUTION_HELPER_UNAVAILABLE', message: `The original ${side} helper Run ${value.runId} is ${value.process}. The Agent and original operations remain retained.` }
+      if (value.reader !== 'attached') return value.readerDiagnostic ?? { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: `The original ${side} helper reader is unconfirmed. Rejoin its original connection.` }
+      const service = value.nativeService
+      if (service && (service.owner.type !== 'serving' || !['serving', 'backpressured'].includes(service.output.type) || service.input.phase.type !== 'open'))
+        return { code: 'EXECUTION_HELPER_SERVICE_UNAVAILABLE', message: `The original ${side} helper Run ${value.runId} has unconfirmed native input/output service. Its process and operations remain retained.` }
+    }
+    return undefined
+  }
+  private observe(input: AgentExecutionOpenInput, failure?: Diagnostic, notices?: AgentExecutionNotice[]): void {
+    if (failure) this.connectionFailures.set(input.bindingId, failure)
     const retained = this.read(input.bindingId)
     if (retained) notices = this.qualificationNotices(retained)
+    const diagnostic = this.connectionDiagnostic(input.bindingId)
+    const diagnostics = retained ? this.localDiagnostics(retained) : []
     const value: AgentExecutionInspection = { bindingId: input.bindingId, agentHostId: input.agentHostId, resourceHostId: input.resourceHostId,
       agentSessionId: input.agent.agentSessionId, resourceWorkspacePath: input.resourceWorkspacePath,
-      state: diagnostic ? 'unavailable' : 'connected', ...(notices === undefined ? {} : { notices }), ...(diagnostic ? { diagnostic } : {}) }
+      state: diagnostic ? 'unavailable' : 'connected', ...(notices === undefined ? {} : { notices }), ...(diagnostic ? { diagnostic } : {}),
+      ...(diagnostics.length ? { diagnostics } : {}) }
     this.observations.set(input.bindingId, value)
     try { this.options.onObservation?.(structuredClone(value)) } catch { /* A reader cannot change this operation or healthy helpers. */ }
   }
@@ -139,7 +181,8 @@ export class AgentExecutionCoordinator {
       resourceHostId: record.input.resourceHostId, agentSessionId: record.input.agent.agentSessionId,
       resourceWorkspacePath: record.input.resourceWorkspacePath, state: 'unavailable',
       ...(record.notices === undefined ? {} : { notices: this.qualificationNotices(record)! }),
-      diagnostic: record.diagnostic ?? { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: 'The original helpers have not been observed by this Core connection.' } })
+      ...(this.localDiagnostics(record).length ? { diagnostics: this.localDiagnostics(record) } : {}),
+      diagnostic: { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: 'The original helpers have not been observed by this Core connection.' } })
   }
   /** Resume only retained bridge readers. This never creates or restores an Agent Run. */
   async rejoin(bindingId: string): Promise<AgentExecutionInspection> {
@@ -169,29 +212,58 @@ export class AgentExecutionCoordinator {
     const latest = this.read(id)
     if (!latest || !isDeepStrictEqual(latest.input, record.input)) throw fail('The original execution binding changed while its reader was closing.')
     Object.assign(record, latest)
+    this.helperConnections.set(id, new Map())
     const bridge = new AgentExecutionBridge({ state: record.bridge!, ports: { frontend: hosts.agent, executor: hosts.resource },
       persist: async state => { record.bridge = state; this.save(record) },
       onFrame: async (side, frame) => {
-        const value = frame as { type?: string; code?: string; stage?: unknown; state?: unknown; generation?: unknown; operation?: import('./agent-execution-journal.js').AgentExecutionOperationKey }
+        if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return
+        const value = frame as { type?: string; scope?: unknown; code?: string; stage?: unknown; state?: unknown; generation?: unknown; operation?: OperationKey }
         if (side === 'frontend' && value.type === 'agent-control-state' && typeof value.generation === 'string' && value.generation &&
             ['unconfigured', 'unverified', 'available', 'unavailable'].includes(String(value.state)) && (Object.keys(value).length === 3 || Object.keys(value).length === 5 && value.stage === 'invocation-registration' && typeof value.code === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/u.test(value.code))) {
           if (value.state === 'unconfigured' || value.state === 'unverified' || record.agentControl?.generation === value.generation) {
             record.agentControl = { generation: value.generation, state: value.state as NonNullable<RecordValue['agentControl']>['state'], ...(value.stage === 'invocation-registration' && value.code ? { stage: value.stage, code: value.code } : {}) }
-            this.save(record); this.observe(record.input, record.diagnostic, record.notices)
+            this.save(record); this.observe(record.input, undefined, record.notices)
           }
         }
         if (value.type === 'diagnostic') {
-          record.diagnostic = { code: value.code ?? 'EXECUTION_OBSERVATION_UNCONFIRMED', message: 'The original native tool service reported an observation diagnostic. Inspect the retained operation.',
-            ...(typeof value.generation === 'string' && value.generation.length > 0 ? { generation: value.generation } : {}),
-            ...(value.operation?.bindingId === record.input.bindingId && value.operation.streamGeneration === value.generation &&
-              (typeof value.operation.nativeRequestId === 'string' || Number.isSafeInteger(value.operation.nativeRequestId)) ? { operation: structuredClone(value.operation) } : {}) }
-          this.save(record); this.observe(record.input, record.diagnostic, record.notices)
+          const operation = originalOperation(value.operation, record.input.bindingId, value.generation) ? structuredClone(value.operation) : undefined
+          const base: Diagnostic = { code: typeof value.code === 'string' ? value.code : 'EXECUTION_OBSERVATION_UNCONFIRMED',
+            message: 'The original native tool service reported a local diagnostic. Its scope and retained operation are separate from the helper connection.',
+            ...(typeof value.generation === 'string' && value.generation ? { generation: value.generation } : {}), ...(operation ? { operation } : {}) }
+          const subject = { side, runId: record.bridge![side].runId }
+          const diagnostic: AgentExecutionDiagnostic = value.scope === 'operation' && side === 'executor' && operation
+            ? { ...base, ...subject, side: 'executor', scope: 'operation', generation: operation.streamGeneration, operation }
+            : value.scope === 'helper' || value.scope === 'request' || value.scope === 'generation'
+              ? { ...base, ...subject, scope: value.scope } : { ...base, ...subject, scope: 'unclassified' }
+          record.diagnostics ??= []
+          if (!record.diagnostics.some(retained => isDeepStrictEqual(retained, diagnostic))) record.diagnostics.push(diagnostic)
+          this.save(record); this.observe(record.input)
         }
+        if (side === 'executor' && value.type === 'operation-completed' && originalOperation(value.operation, record.input.bindingId, value.generation)) {
+          // The resource helper emits this fact only after its original journal
+          // commits. An arbitrary response, success frame or rejoin is insufficient.
+          const retained = record.diagnostics ?? []
+          const unresolved = retained.filter(diagnostic => !(diagnostic.scope === 'operation' &&
+            diagnostic.runId === record.bridge!.executor.runId && isDeepStrictEqual(diagnostic.operation, value.operation)))
+          // The bridge already commits its cursor. An ordinary completed tool
+          // with no matching issue needs no second write or UI observation.
+          if (unresolved.length === retained.length) return
+          record.diagnostics = unresolved
+          this.save(record); this.observe(record.input)
+        }
+      },
+      onConnection: (side, connection) => {
+        const before = this.connectionDiagnostic(id)
+        this.helperConnections.get(id)!.set(side, connection)
+        // Native byte counters advance independently of the public connection
+        // fact. Retain their revision without rereading the durable creation intent.
+        if (!isDeepStrictEqual(before, this.connectionDiagnostic(id))) this.observe(record.input)
       },
       onError: error => this.observeFailure(record.input, error) })
     this.bridges.set(id, bridge)
     await bridge.start()
-    this.observe(record.input, record.diagnostic, record.notices)
+    this.connectionFailures.delete(id)
+    this.observe(record.input, undefined, record.notices)
   }
   /** Original user-authorized creation; retries retain both Host identities and all original operation IDs. */
   async create(value: AgentExecutionOpenInput): Promise<{ session: AgentMuxAgentSession; execution: AgentExecutionInspection }> {

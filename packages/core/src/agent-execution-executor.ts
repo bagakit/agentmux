@@ -43,17 +43,18 @@ export function createAgentExecutionExecutor(options: {
   const closed = new Set<string>()
   const children = new Map<string, Generation>()
   const retained = new Map<string, Map<string, Pending>>()
-  const report = async (generation: string, code: string, operation?: AgentExecutionOperationKey) => {
+  const report = async (generation: string, code: string, operation?: AgentExecutionOperationKey, scope: 'helper' | 'request' | 'generation' = 'generation') => {
     if (disposed) return
-    await channel.send({ type: 'diagnostic', generation, code, ...(operation ? { operation } : {}) }).catch(() => {
+    await channel.send({ type: 'diagnostic', scope: operation ? 'operation' : scope, generation, code, ...(operation ? { operation } : {}) }).catch(() => {
       options.onError(new Error('Execution diagnostic delivery is unconfirmed; the original operation remains retained'))
     })
   }
   const reject = async (generation: string, requestId: string | number | undefined, code: number, message: string) => {
-    if (requestId === undefined) { await report(generation, 'INVALID_NATIVE_MESSAGE'); return }
+    if (requestId === undefined) { await report(generation, 'INVALID_NATIVE_MESSAGE', undefined, 'request'); return }
     await channel.send({ type: 'response', generation, payload: { jsonrpc: '2.0', id: requestId, error: { code, message } } })
   }
   const respond = (generation: string, bytes: Uint8Array) => channel.send({ type: 'response', generation, payload: JSON.parse(Buffer.from(bytes).toString('utf8')) as unknown })
+  const completed = (key: AgentExecutionOperationKey) => channel.send({ type: 'operation-completed', generation: key.streamGeneration, operation: key })
   const settle = async (state: Generation, pending: Pending): Promise<void> => {
     if (!pending.response) return
     try {
@@ -72,6 +73,7 @@ export function createAgentExecutionExecutor(options: {
     if (pending.request.intent.initialize) { state.initializing = false; if (success) state.initialized = true }
     state.pending.delete(requestKey(pending.key.nativeRequestId))
     if (!state.pending.size) retained.delete(state.id)
+    await completed(pending.key)
     await respond(state.id, pending.response)
   }
   const start = (generation: string): Generation => {
@@ -133,7 +135,7 @@ export function createAgentExecutionExecutor(options: {
       if (disposed) return
       if (await options.control?.receive(frame, value => channel.send(value))) return
       if (!object(frame) || typeof frame.generation !== 'string' || !frame.generation) {
-        await report('', 'INVALID_EXECUTION_FRAME'); return
+        await report('', 'INVALID_EXECUTION_FRAME', undefined, 'request'); return
       }
       if (frame.type === 'closed') {
         // Only the original frontend's machine receipt closes this generation.
@@ -146,7 +148,7 @@ export function createAgentExecutionExecutor(options: {
         return
       }
       if (frame.type !== 'request' || !Object.hasOwn(frame, 'payload')) {
-        await report('', 'INVALID_EXECUTION_FRAME'); return
+        await report('', 'INVALID_EXECUTION_FRAME', undefined, 'request'); return
       }
       const generation = frame.generation, message = options.protocol.parse(frame.payload)
       if (message.kind === 'rejected') { await reject(generation, message.requestId, message.code, message.reason); return }
@@ -171,6 +173,7 @@ export function createAgentExecutionExecutor(options: {
         catch { await report(generation, 'ORIGINAL_REQUEST_CONFLICT_OR_STORAGE_UNCONFIRMED', key); return }
         if (operation.phase === 'completed') {
           const result = await options.journal.readResult(key, operation.payloadDigest)
+          await completed(key)
           if (result) await respond(generation, result)
           return
         }
@@ -182,6 +185,7 @@ export function createAgentExecutionExecutor(options: {
             else {
               await options.journal.complete(key, pending.digest, pending.response)
               retained.get(generation)?.delete(requestKey(message.requestId))
+              await completed(key)
               await respond(generation, pending.response)
             }
           } else if (!pending || closed.has(generation)) await report(generation, 'ORIGINAL_OPERATION_OUTCOME_UNKNOWN', key)
