@@ -6,7 +6,7 @@
 
 [文档导航](../README.md) · [文档事实与维护规范](../guides/document-truth-and-maintenance.md) · [交互合同](agentmux-desktop-interaction.md)
 
-手机端复用专题及其具体差异见 [Mobile 对齐索引](agentmux-mobile-alignment.md)，视觉与密度要求仍由下列原专题持有。
+**改手机界面先读[手机客户端的呈现](presentation/mobile-client.md)**：手机的尺度、控件、文案、状态、动效与采图验收都在那一页。手机复用哪些桌面专题及其差异见 [Mobile 对齐索引](agentmux-mobile-alignment.md)。
 
 ## 按主题阅读
 
@@ -32,7 +32,8 @@
 | Explorer、编辑、分支、差异和留存提示 | [文件与 Git 的呈现](presentation/files-and-git.md) |
 | Settings、状态栏、Activity、通知和工具密度 | [设置与观测的呈现](presentation/settings-and-observation.md) |
 | Remote 拓扑画布、节点、监控摘要与选中详情 | [Remote 管理拓扑](presentation/settings-and-observation.md#remote-管理拓扑) |
-| 公共控制的原表面与手机闭环状态 | [公共控制与客户端的呈现](presentation/public-control.md) |
+| 手机 Web client 的尺度、控件、文案、状态、动效与采图验收 | [手机客户端的呈现](presentation/mobile-client.md) |
+| 公共控制的原表面 | [公共控制与客户端的呈现](presentation/public-control.md) |
 
 ## 更新与保全
 

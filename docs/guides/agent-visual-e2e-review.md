@@ -8,6 +8,8 @@
 pnpm --filter @agentmux/desktop capture:visual
 ```
 
+手机 Web client 使用自己的场景：从仓库根目录运行 `node apps/mobile/scripts/fixtures/mobile-product-redesign/capture-ui.mjs`，专项参数见该目录的 [scenario.md](../../apps/mobile/scripts/fixtures/mobile-product-redesign/scenario.md)，评审依据见[手机客户端的呈现](../design/presentation/mobile-client.md#验收采图与看图)。
+
 命令打印本次 `receipt.json` 与 `review.md` 路径。`review.md` 列出场景、截图与私有编译身份；逐张打开 PNG 看完整画面。命令只采集，JSON 明确 `captureOnly: true`、`aestheticReview: not-performed`；它不打包、不安装、不修改产品源码或操作用户 Session/Run。preview API 的真实 Renderer 证据不证明真实 CLI、Native 或整个产品。采图失败如实记录并修复采集步骤，不关闭健康 Agent。
 
 可直接交给独立 Agent 的请求：

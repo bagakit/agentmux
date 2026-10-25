@@ -6,7 +6,7 @@
 
 [文档导航](../README.md) · [文档事实与维护规范](../guides/document-truth-and-maintenance.md) · [视觉与密度合同](agentmux-surface-density.md)
 
-手机端复用专题及其具体差异见 [Mobile 对齐索引](agentmux-mobile-alignment.md)，行为要求仍由下列原专题持有。
+手机的连接、导航、对象身份、提醒与网页更新行为见[手机版 Relay 连接](behavior/public-control.md#手机版-relay-连接)；手机界面呈现见[手机客户端的呈现](presentation/mobile-client.md)。手机复用哪些专题及其差异见 [Mobile 对齐索引](agentmux-mobile-alignment.md)。
 
 ## 按主题阅读
 
