@@ -1795,7 +1795,8 @@ export class RuntimeController {
     agentMuxNote?: string,
     sourceChannel: AgentMessageChannel = 'message-tool',
     inputContextCapture?: import('@agentmux/core/agent-input-context-capture').AgentInputContextCaptureReference,
-    inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]
+    inputImages?: readonly import('@agentmux/core').AgentInputImageReference[],
+    authorProfile?: import('@agentmux/core').AgentPreparedAuthorProfile
   ): Promise<void | AgentInputSubmissionReceipt> {
     const capturedCondition = validateAgentPromptInputBinding(condition)
     if ('admissionIntent' in capturedCondition) {
@@ -1807,7 +1808,7 @@ export class RuntimeController {
         ...(agentMuxNote === undefined ? {} : { agentMuxNote }), sourceChannel,
         ...(inputContextCapture ? { inputContextCapture } : {}),
         ...(inputImages?.length ? { inputImages } : {}),
-        ...(authorHuman === true ? { authorHuman: true } : {})
+        ...(authorHuman === true ? { authorHuman: true, ...(authorProfile ? { authorProfile } : {}) } : {})
       }))
     }
     await this.trackHostLifecycleOperation(control.hostId, async () => {
@@ -1839,7 +1840,7 @@ export class RuntimeController {
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
           ...(!automation && choice?.execution !== undefined ? { execution: choice.execution } : {}),
           ...(!automation && choice?.preparationRetry ? { preparationRetry: choice.preparationRetry } : {}),
-          ...(authorHuman === true ? { authorHuman: true } : {})
+          ...(authorHuman === true ? { authorHuman: true, ...(authorProfile ? { authorProfile } : {}) } : {})
         })
       } catch (error) {
         // A process can exit in the small window after the first status check. Re-read the same

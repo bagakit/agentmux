@@ -281,6 +281,10 @@
     "./goal-discussion-bindings": {
       "types": "./dist/goal-discussion-bindings.d.ts",
       "import": "./dist/goal-discussion-bindings.js"
+    },
+    "./author-profile": {
+      "types": "./dist/public-author-profile.d.ts",
+      "import": "./dist/public-author-profile.js"
     }
   }
 }

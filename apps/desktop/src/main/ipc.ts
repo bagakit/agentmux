@@ -1,3 +1,4 @@
+import { preparePublicUserProfile } from '@agentmux/host/author-profile'
 import { fileUploadRevision, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
 import { captureGoalDiscussionLauncherLaunch, confirmGoalDiscussionLauncherLaunch, handoffGoalDiscussion, launcherCreationSpatialIntent } from './goal-discussion-handoff.js'
 import { desktopGoalControl, desktopGoalChanges, observeDesktopGoalChanges, readDesktopGoals, confirmDesktopGoalParticipation, reconcileDesktopGoalDispatch } from './desktop-goals.js'
@@ -1766,7 +1767,7 @@ export async function registerIpc(args: {
       assertManualPromptSenderTrusted(event.sender, contents)
       if (goalContinuation || goalPmo || goalDispatch) throw new AgentMuxError('The original Goal input cannot become a new manual message.', 'CONTROL_REQUEST_CONFLICT')
       pauseUserProgress(session, 'Paused for your message.')
-      return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, authorHuman, agentMuxNote, sourceChannel, inputContextCapture, inputImages)
+      return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, authorHuman, agentMuxNote, sourceChannel, inputContextCapture, inputImages, authorHuman === true ? preparePublicUserProfile(config.profile) : undefined)
     }
     if (goalPmo) {
       assertManualPromptSenderTrusted(event.sender, contents)
@@ -1797,7 +1798,7 @@ export async function registerIpc(args: {
         ...(loop?.taskSource?.kind === 'goal' ? { continuation: { intervalMs: loop.intervalMs, alignmentRevision: loop.taskSource.alignmentRevision } } : {}) })
     } else {
       pauseUserProgress(session, 'Paused for your message.')
-      await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture, inputImages)
+      await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture, inputImages, effectiveAuthorHuman ? preparePublicUserProfile(config.profile) : undefined)
     }
     if (goalPmo) {
       const original = await args.runtime.agentCreation(session.hostId, session.agentSessionId)
