@@ -461,9 +461,9 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.input.stop', '--input FILE|-', 'Stop this original waiting generation; a dispatched input cannot be recalled.', { '--input': 'data' },
     async f => await readControlJsonInput(value(f, '--input', true)!, 'Original input stop') as Record<string, unknown>,
     'JSON carries ref {key,waitGeneration} and cancelOperationId. The original Core action receipt distinguishes stopped-before-dispatch from observation-stopped; no Run interruption occurs.'),
-  command('agent.input.rejoin', '--input FILE|-', 'Explicitly rejoin the original enabled or stopped input with current author authorization.', { '--input': 'data' },
+  command('agent.input.rejoin', '--input FILE|-', 'Rejoin the original input as its author, or continue an enabled external input as its exact recipient.', { '--input': 'data' },
     async f => await readControlJsonInput(value(f, '--input', true)!, 'Original input rejoin') as Record<string, unknown>,
-    'JSON carries ref {key,waitGeneration}. An unresolved gate/claim is read only and never dispatched again. A stopped-before-dispatch generation may be explicitly enabled as the next generation.'),
+    'JSON carries ref {key,waitGeneration}. An unresolved gate/claim is read only and never dispatched again. The exact recipient may continue only an enabled external message on its original Run with current author permission; it cannot reopen stopped input or change author. Only original-author control can enable a stopped-before-dispatch generation again.'),
   command('agent.send', '(--to-session ID|--to-region ID|--to-tab ID) --text TEXT [--expect-run ID] [--execution default|immediate] [message identity] | --input FILE|-', 'Send one original message: idle Inbox references by default, or explicit immediate input.', { '--input': 'data', '--to-session': 'data', '--to-region': 'data', '--to-tab': 'data', '--text': 'data', '--expect-run': 'data', '--execution': 'value', '--message-id': 'data', '--thread': 'data', '--correlation': 'data', '--reply-to': 'data', ...OP }, async f => {
     if (f.values.has('--input')) {
       if (f.values.size !== 1) invalid('--input carries the complete original send; do not combine it with send flags.')
