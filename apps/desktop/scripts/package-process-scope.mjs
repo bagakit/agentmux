@@ -176,7 +176,7 @@ import ctypes,json,os,re,struct,subprocess,sys
 lib=ctypes.CDLL('/usr/lib/libSystem.B.dylib',use_errno=True)
 pids=[int(p) for p in sys.argv[1:]]
 def identities():
- result=subprocess.run(['/bin/ps','-p',','.join(map(str,pids)),'-o','uid=,pid=,ppid=,lstart='],capture_output=True,text=True,timeout=2,env={**os.environ,'LC_ALL':'C'})
+ result=subprocess.run(['/bin/ps','-p',','.join(map(str,pids)),'-o','uid=,pid=,ppid=,lstart='],capture_output=True,text=True,env={**os.environ,'LC_ALL':'C'})
  if result.returncode not in (0,1):raise RuntimeError('identity unavailable')
  rows={}
  for line in result.stdout.splitlines():
@@ -217,8 +217,9 @@ print(json.dumps(result))
 async function electronNodeModes(pids) {
   if (!pids.length) return []
   try {
+    // A slow OS observation is not an unknown owner; wait for its fenced result.
     const result = await exec('/usr/bin/python3', ['-c', NODE_MODE_SOURCE, ...pids.map(String)],
-      { timeout: 5_000, maxBuffer: 256 * 1024 })
+      { maxBuffer: 256 * 1024 })
     return JSON.parse(result.stdout)
   } catch { return [] } // Unknown stays protected. It is not proof of process exit.
 }
