@@ -122,3 +122,71 @@ describe('AgentMux Client event publisher Consumer isolation', () => {
     })
   })
 })
+
+describe('exact Run event index', () => {
+  const output = (runId: string): AgentMuxClientEvent => ({ type: 'terminal-output', run: { runId }, data: 'original bytes',
+    dataBytes: Buffer.from('original bytes'), evidence: { source: 'terminal-output', observedAt: 1, run: { runId },
+      outputByteRange: { startByte: 0, endByte: 14 } } })
+
+  it.each([0, 10_000])('visits only the selected Run registrations with %i unrelated Runs', unrelatedCount => {
+    const publisher = new AgentMuxClientEventPublisher(), selected = vi.fn(), global = vi.fn()
+    let unrelatedCalls = 0
+    for (let index = 0; index < unrelatedCount; index++) publisher.onRunEvent(`unrelated-${index}`, () => { unrelatedCalls++ })
+    const release = publisher.onRunEvent('selected', selected)
+    publisher.onEvent(global)
+    // Count work before Consumer code: callback-local filtering cannot pass this
+    // oracle, nor can a full registry scan that eventually selects the right Run.
+    const internals = publisher as unknown as { runListeners: Map<string, Map<unknown, unknown>>;
+      deliver(value: AgentMuxClientEvent, registrations: unknown[]): void }
+    const registry = internals.runListeners
+    const scans = [vi.spyOn(registry, Symbol.iterator), vi.spyOn(registry, 'values'), vi.spyOn(registry, 'entries'),
+      vi.spyOn(registry, 'keys'), vi.spyOn(registry, 'forEach')]
+    const get = vi.spyOn(registry, 'get'), deliver = vi.spyOn(internals, 'deliver')
+    const original = output('selected')
+    try {
+      publisher.publish(original)
+      expect(selected).toHaveBeenCalledExactlyOnceWith(original)
+      expect(global).toHaveBeenCalledExactlyOnceWith(original)
+      expect(unrelatedCalls).toBe(0)
+      expect(get).toHaveBeenCalledExactlyOnceWith('selected')
+      expect(scans.every(scan => scan.mock.calls.length === 0)).toBe(true)
+      expect(deliver.mock.calls.filter(([value]) => value === original).reduce((sum, [, registrations]) => sum + registrations.length, 0)).toBe(2)
+      release()
+      publisher.publish(original)
+      expect(selected).toHaveBeenCalledOnce()
+      expect(global).toHaveBeenCalledTimes(2)
+      expect(unrelatedCalls).toBe(0)
+    } finally { vi.restoreAllMocks(); publisher.dispose() }
+  })
+
+  it('delivers exact Run lifecycle facts, never invents a scope for unrelated owner events, and disposes registrations', () => {
+    const publisher = new AgentMuxClientEventPublisher(), first = vi.fn(), second = vi.fn()
+    publisher.onRunEvent('first', first); const release = publisher.onRunEvent('second', second)
+    expect(publisher.hasEventListeners).toBe(true)
+    publisher.publish(event)
+    expect(first).not.toHaveBeenCalled(); expect(second).not.toHaveBeenCalled()
+    const exit: AgentMuxClientEvent = { type: 'process-state', run: { runId: 'second' }, state: 'exited', pid: 11,
+      exitCode: 0, evidence: { source: 'run-process', observedAt: 1, run: { runId: 'second' } } }
+    publisher.publish(exit)
+    expect(second).toHaveBeenCalledExactlyOnceWith(exit); expect(first).not.toHaveBeenCalled()
+    release(); publisher.publish(exit); expect(second).toHaveBeenCalledOnce()
+    publisher.dispose(); publisher.publish(output('first')); expect(first).not.toHaveBeenCalled()
+    expect(publisher.hasEventListeners).toBe(false)
+  })
+
+  it('detaches an invalid async Run consumer while preserving other Run readers and explicit resubscription', () => {
+    const publisher = new AgentMuxClientEventPublisher(), failure = vi.fn(), healthy = vi.fn(), other = vi.fn()
+    const invalid = vi.fn(() => Promise.resolve()) as unknown as (value: AgentMuxClientEvent) => void
+    publisher.onRunEvent('selected', invalid, { onError: failure })
+    publisher.onRunEvent('selected', healthy); publisher.onRunEvent('other', other)
+    const original = output('selected')
+    publisher.publish(original); publisher.publish(original)
+    expect(invalid).toHaveBeenCalledOnce()
+    expect(failure).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: 'CLIENT_EVENT_LISTENER_ASYNC' }))
+    expect(healthy).toHaveBeenCalledTimes(2); expect(other).not.toHaveBeenCalled()
+    const corrected = vi.fn(); publisher.onRunEvent('selected', corrected); publisher.publish(original)
+    expect(corrected).toHaveBeenCalledExactlyOnceWith(original)
+    publisher.publish(output('other')); expect(other).toHaveBeenCalledOnce()
+    publisher.dispose()
+  })
+})
