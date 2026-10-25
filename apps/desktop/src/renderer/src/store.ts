@@ -5585,7 +5585,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const capture=()=> !get().config && spatial.current
           ? {...spatial.current.graph,projectGroups:get().projectGroups}
           : desktopSpatialGraph(get(),Object.values(get().scratchTopicSnapshots).flatMap(snapshot=>snapshot.topics??[]),spatial.current?.graph??null,spatial.removedEntities)
-        const apply=(saved:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>{
+        const apply=(saved:import('@agentmux/core/spatial-graph').AgentMuxSpatialState,baseline:import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph|null)=>{
           const current=get()
           // Organization facts do not require available Host resource configuration.
           if(!current.config) { set({projectGroups:saved.graph.projectGroups ?? []}); return }
@@ -5594,12 +5594,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           if(unavailable.size) current.reportWorkbenchSaveFailure(new Error('Host resources are unavailable for '+unavailable.size+' saved tab(s). Original identities and current content are retained. Restore their Host connection.'))
           const restored=restorePersistedWorkbench({config:current.config,sessions:current.sessions,persisted,createTabGroupId:newTabGroupId,retiredSessionIds:new Set(),preserveEntityIds:new Set(saved.graph.tabs.map(tab=>tab.tabId))})
           const old=projectPersistedWorkbench({tabs:current.tabs,layouts:current.layouts})
+          const originalLaunchers=new Map(baseline?.regions.filter(region=>region.kind==='launcher').map(region=>[region.regionId,region]))
           const tabs={...Object.fromEntries([...unavailable].flatMap(id=>current.tabs[id]?[[id,current.tabs[id]]]:[])),...Object.fromEntries(Object.entries(restored.tabs).map(([id,tab])=>{
             const live=current.tabs[id]
             if(live && sameSpatialValue(old.tabs[id],persisted.tabs[id])) return [id,live]
             if(!live) return [id,tab]
-            const regions=Object.fromEntries(Object.entries(tab.regions).map(([regionId,region])=>[regionId,
-              live.regions[regionId] && sameSpatialValue(old.tabs[id]?.regions[regionId],persisted.tabs[id]?.regions[regionId]) ? live.regions[regionId] : region]))
+            const regions=Object.fromEntries(Object.entries(tab.regions).map(([regionId,region])=>{
+              const surface=live.regions[regionId],original=originalLaunchers.get(regionId)
+              // A pending creation is encoded as its original Launcher until Core
+              // confirms it. That unchanged ACK cannot cancel the live creation.
+              // Compare the submitted baseline, never borrow a replacement's data.
+              const pendingLauncher=surface?.kind==='agent' && surface.phase==='launching' &&
+                current.pendingAgentLaunches[surface.sessionId]?.request?.createOperationId &&
+                region.kind==='launcher' && original?.tabId===id &&
+                sameSpatialValue(baseline?.resources['region:'+regionId],saved.graph.resources['region:'+regionId])
+              return [regionId,surface && (pendingLauncher || sameSpatialValue(old.tabs[id]?.regions[regionId],persisted.tabs[id]?.regions[regionId])) ? surface : region]
+            }))
             return [id,{...tab,regions}]
           }))}
           set({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph,current.config)})
