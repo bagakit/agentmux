@@ -1,3 +1,4 @@
+import { AgentToolExecutionNotice } from './AgentToolExecutionNotice'
 import { usePendingDeliveryLayout, type PendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { ConversationLandmarkList, renderConversationLandmarkAction } from './ConversationLandmarks'
@@ -1142,6 +1143,7 @@ export function SessionPane({
         busy={recovering || refreshing} retry={() => void recover()}
         {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
       {frontendObservationNotice}
+      {session.kind === 'agent' && session.toolExecution ? <AgentToolExecutionNotice session={session} visible={visible} /> : null}
       <div ref={bodyRef} className="agent-body" data-pending-interaction={session.kind === 'agent' && session.pendingInteraction ? '' : undefined} style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && activityShown ? 'workflow' : undefined}>
         <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || needsSessionSurface || terminalLifetime.current.opened ? (

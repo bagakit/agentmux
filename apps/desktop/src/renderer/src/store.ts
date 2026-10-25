@@ -1362,7 +1362,7 @@ export type AppState = {
     workspaceId: string,
     update: (current: FileExplorerViewState) => FileExplorerViewState
   ): void
-  detectExecutors(hostId: string, options?: { onlyUnconfirmed?: boolean; onlyObserved?: boolean }): Promise<void>
+  detectExecutors(hostId: string, options?: { onlyUnconfirmed?: boolean; onlyObserved?: boolean; source?: 'host' }): Promise<void>
   discoverHostExecutors(hostId: string): Promise<void>
   checkHost(host: HostConfig): Promise<void>
   /**
@@ -1513,6 +1513,8 @@ export type AppState = {
    * 一格一个 setter 会让"启动成功要清掉这个 region 的名字草稿"变成两处要记得改的地方。
    */
   setLauncherExecutionWorkspace(launcher: { tabId: string; regionId: string }, workspaceId: string, executorId?: string): void
+  setLauncherAgentWorkspace(launcher: { tabId: string; regionId: string }, workspaceId: string | null): void
+  setLauncherAgentExecutor(launcher: { tabId: string; regionId: string }, executorId: string): void
   setLauncherNameDraft(regionId: string, field: LauncherNameField, value: string): void
   setLauncherOptionDraft(regionId: string, providerId: string, optionId: string, choiceId: string | null): void
   appendAgentComposerDraft(sessionId: string, text: string): void
@@ -7963,7 +7965,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async detectExecutors(hostId, options) {
     const config = get().config, host = config?.hosts.find(host => host.id === hostId)
     if (!config || !host) return
-    if (host.kind === 'ssh') {
+    if (host.kind === 'ssh' || options?.source === 'host') {
       const inventory = get().hostExecutorInventories[hostId]
       if (options?.onlyUnconfirmed && hostExecutorInventoryMatches(inventory, host) && inventory.state === 'ready' &&
         inventory.result && inventory.result.executors.every(item => item.availability === 'available' || item.availability === 'missing')) return
@@ -9646,8 +9648,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       launcherTabWorkspaceId: launcherTab?.workspaceId,
       activeWorkspaceId: state.activeWorkspaceId
     })
-    const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
-    if (!workspace) throw new Error('Select a workspace first')
+    const resourceWorkspace = state.config?.workspaces.find((item) => item.id === workspaceId)
+    const agentWorkspaceId = launcherSurface?.kind === 'launcher' ? launcherSurface.agentWorkspaceId : undefined
+    const workspace = agentWorkspaceId ? state.config?.workspaces.find(item => item.id === agentWorkspaceId) : resourceWorkspace
+    if (!resourceWorkspace || !workspace) throw new Error('Select the original project and Agent workspace first')
+    if (agentWorkspaceId && (isScratchWorkspaceId(resourceWorkspace.id) || isScratchWorkspaceId(workspace.id))) {
+      throw new Error('Separate execution requires two registered project workspaces. The original Mote and draft are retained.')
+    }
+    const toolWorkspace = agentWorkspaceId ? { id: resourceWorkspace.id, hostId: resourceWorkspace.hostId, path: resourceWorkspace.path } : undefined
     const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
     const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
     if (!layout || !groupIds(layout.root).includes(tabGroupId) || !findGroup(layout, tabGroupId) || launcherTab && !findGroup(layout, tabGroupId)!.tabOrder.includes(launcherTab.id)) throw new Error('The exact Agent display position is unavailable')
@@ -9659,7 +9667,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) throw new Error('The View is closing')
     // The target Topic is the View's explicit binding. An unbound View launches with no Topic;
     // we never fabricate one from the Tab identity (a Tab id is not a Topic).
-    const scratchTopicId = isScratchWorkspaceId(workspace.id)
+    const scratchTopicId = isScratchWorkspaceId(resourceWorkspace.id)
       ? targetTab.topicId
       : undefined
     if (scratchTopicId && !isScratchTopicId(scratchTopicId)) {
@@ -9677,7 +9685,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const submittedNames = originalNames &&
       (originalNames.agentName.trim() || undefined) === requestedNames.agentName &&
       (originalNames.tabName.trim() || undefined) === requestedNames.tabName ? originalNames : undefined
-    const executor = executorsForHost(state.config, workspace.hostId, state.executorDetections, state.hostExecutorInventories[workspace.hostId]).find(item => item.id === executorId)
+    const executor = executorsForHost(state.config, workspace.hostId, state.executorDetections, state.hostExecutorInventories[workspace.hostId], toolWorkspace ? 'host' : undefined).find(item => item.id === executorId)
+    const selectedHostExecutor = launcherSurface?.kind === 'launcher' ? launcherSurface.agentExecutor : undefined
+    if (toolWorkspace && (!selectedHostExecutor || selectedHostExecutor.hostId !== workspace.hostId || selectedHostExecutor.executorId !== executorId ||
+      !executor?.executorRevision || selectedHostExecutor.executorRevision !== executor.executorRevision)) {
+      throw new Error('Select the exact Agent Host configuration for this launch. The original project and draft are kept.')
+    }
     const providerId = executor?.providerId
     const originalOptions = providerId ? state.launcherOptionDrafts[regionId]?.[providerId] : undefined
     const submittedOptions = originalOptions && launchOptions && shallow(originalOptions, launchOptions) ? originalOptions : undefined
@@ -9714,6 +9727,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       pendingAgentLaunches: {
         ...current.pendingAgentLaunches,
         [sessionId]: { events: [], overflowed: false, request: { executorId, hostId: workspace.hostId, workspacePath: workspace.path, createOperationId, prompt,
+          ...(toolWorkspace ? { toolWorkspace, executionWorkspaceId: workspace.id, executorRevision: executor!.executorRevision! } : {}),
           ...(launchNote === undefined ? {} : { agentMuxNote: launchNote }), ...(pmo ? { goalPmo: pmo.intent } : {}) } }
       }
     }))
@@ -9721,7 +9735,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     let creationObserved = false
     try {
       if (scratchTopicId && targetTab.topicPreparation === 'mote') {
-        await api.scratch.ensureMote(workspace.id, scratchTopicId)
+        await api.scratch.ensureMote(resourceWorkspace.id, scratchTopicId)
         if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'agent', sessionId)) {
           set(current => discardPendingAgentLaunch(current, sessionId))
           return
@@ -9730,12 +9744,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const tab = current.tabs[tabId]
           if (tab?.topicId !== scratchTopicId || !ownsSessionLaunch(tab.regions[regionId], 'agent', sessionId) || !tab.topicPreparation) return current
           const { topicPreparation: _prepared, ...preparedTab } = tab
-          return { tabs: { ...current.tabs, [tab.id]: preparedTab }, workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspace.id) }
+          return { tabs: { ...current.tabs, [tab.id]: preparedTab }, workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, resourceWorkspace.id) }
         })
       }
       dispatchStarted = true
       const launched = await api.sessions.launchAgent({
         ...(launcher ? { launcher: { tabId, regionId }, executionWorkspaceId: workspace.id } : {}),
+        ...(toolWorkspace ? { toolWorkspace } : {}),
         executorId,
         ...(executor?.executorRevision ? { executorRevision: executor.executorRevision } : {}),
         hostId: workspace.hostId,
@@ -9797,12 +9812,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               ...reduced.state,
               workspaceFileRevisions: bumpWorkspaceFileRevision(
                 current.workspaceFileRevisions,
-                workspace.id
+                resourceWorkspace.id
               )
             }
           : reduced.state
       })
-      if (scratchTopicId) void get().refreshScratchTopics(workspace.id, true, scratchTopicId)
+      if (scratchTopicId) void get().refreshScratchTopics(resourceWorkspace.id, true, scratchTopicId)
       // 只有启动成功、region 从 launcher 变成 agent 之后，才清掉这条 launcher 草稿——此刻它已失去归属。
       // 失败路径（下方 catch → reduceSessionLaunchFailed）绝不清：region 会翻回 launcher 且沿用同一个
       // regionId，草稿留在原地供用户直接重试。这正是用户报告"报错退回初始页、之前输入没缓存"要修的行为。
@@ -10665,6 +10680,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (surface.workspaceId === workspaceId && (executorId === undefined || surface.executorId === executorId)) return
     // Only this resource changes. Display, other Regions and all unsent inputs retain their owners.
     set({ tabs: { ...state.tabs, [tab.id]: updateWorkbenchRegion(tab, launcher.regionId, current => ({ ...current, workspaceId, ...(executorId ? { executorId } : {}) })) } })
+  },
+  setLauncherAgentWorkspace(launcher, workspaceId) {
+    const state = get(), tab = state.tabs[launcher.tabId], surface = tab?.regions[launcher.regionId]
+    if (!tab || surface?.kind !== 'launcher') throw new Error('Only an unstarted Launcher can select an Agent workspace')
+    const workspace = workspaceId === null ? undefined : state.config?.workspaces.find(item => item.id === workspaceId)
+    if (workspaceId !== null && (!workspace || !state.config?.hosts.some(host => host.id === workspace.hostId))) throw new Error('Select a registered Agent workspace on its configured Host')
+    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tab.id)) throw new Error('The View is closing')
+    const { agentWorkspaceId: _old, agentExecutor, ...project } = surface
+    const next = workspace ? { ...project, agentWorkspaceId: workspace.id,
+      ...(agentExecutor?.hostId === workspace.hostId ? { agentExecutor } : {}) } : project
+    set({ tabs: { ...state.tabs, [tab.id]: replaceWorkbenchRegion(tab, launcher.regionId, next) } })
+  },
+  setLauncherAgentExecutor(launcher, executorId) {
+    const state = get(), tab = state.tabs[launcher.tabId], surface = tab?.regions[launcher.regionId]
+    if (!tab || surface?.kind !== 'launcher' || !surface.agentWorkspaceId) throw new Error('The original split-execution Launcher is unavailable')
+    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tab.id)) throw new Error('The View is closing')
+    const workspace = state.config?.workspaces.find(item => item.id === surface.agentWorkspaceId)
+    const executor = workspace && executorsForHost(state.config, workspace.hostId, state.executorDetections, state.hostExecutorInventories[workspace.hostId], 'host').find(item => item.id === executorId)
+    if (!workspace || !executor?.executorRevision) throw new Error('Read and select the configuration from the exact Agent Host')
+    const agentExecutor = { hostId: workspace.hostId, executorId, executorRevision: executor.executorRevision }
+    if (surface.agentExecutor && shallow(surface.agentExecutor, agentExecutor)) return
+    set({ tabs: { ...state.tabs, [tab.id]: replaceWorkbenchRegion(tab, launcher.regionId, { ...surface, agentExecutor }) } })
   },
   setLauncherNameDraft(regionId, field, value) {
     set((state) => {

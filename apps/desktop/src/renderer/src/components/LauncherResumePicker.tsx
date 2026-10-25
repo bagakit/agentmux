@@ -42,7 +42,7 @@ const EMPTY_CANDIDATES: ReturnType<typeof useAppStore.getState>['recoveryCandida
 const EMPTY_ROWS: LauncherResumeRow[] = []
 const EMPTY_FACTS = { timelines: {} as Record<string, AgentTimelineSnapshot>, sessions: [] as SessionSnapshot[], names: {} as Record<string, string> }
 
-export function LauncherResumePicker({ workspace, disabled = false }: { workspace?: WorkspaceRecord | undefined; disabled?: boolean }) {
+export function LauncherResumePicker({ workspace, disabled = false, originalTarget = false }: { workspace?: WorkspaceRecord | undefined; disabled?: boolean; originalTarget?: boolean }) {
   const [open, setOpen] = useState(false)
   const displayPath = usePathDisplay()
   const config = useAppStore(state => open ? state.config : null)
@@ -335,8 +335,8 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
   return <Dialog.Root open={open} onOpenChange={changeOpen}>
     <Dialog.Trigger asChild>
       <button type="button" className="small-button launcher-resume-trigger" disabled={disabled}
-        title="Choose a saved Session from this project or all projects">
-        <ThemeActionResumeSessionIcon size={13} aria-hidden="true" /><span>Resume</span><ThemeNavigationDownIcon size={11} aria-hidden="true" />
+        title={originalTarget ? "Resume a saved Session on its original Host and tool binding; the new Agent target does not change it" : "Choose a saved Session from this project or all projects"}>
+        <ThemeActionResumeSessionIcon size={13} aria-hidden="true" /><span>{originalTarget ? 'Resume original' : 'Resume'}</span><ThemeNavigationDownIcon size={11} aria-hidden="true" />
       </button>
     </Dialog.Trigger>
     <DocumentOverlayPortal component={Dialog.Portal}>

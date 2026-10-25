@@ -18,6 +18,7 @@ const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 type ExecutorPickerProps = {
   executors: readonly ExecutorChoice[]
   selected: string | null
+  onConfigure?: (() => void) | undefined
   onSelect(id: string): void
   active?: boolean
   disabled?: boolean
@@ -81,7 +82,7 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
         {showUnavailable ? 'Hide unavailable' : `Unavailable · ${unavailable.length}`}<ThemeNavigationDownIcon size={12} />
       </button> : null}
       {!executors.length ? <div className="agent-catalog__empty">No Agent is configured.
-        {settings ? <button type="button" className="small-button" onClick={() => settings.open('agents')}>Configure an Agent</button> : ' Add one in Settings to launch here.'}
+        {settings || props.onConfigure ? <button type="button" className="small-button" onClick={() => props.onConfigure ? props.onConfigure() : settings?.open('agents')}>Configure an Agent</button> : ' Add one in Settings to launch here.'}
       </div> : !available.length ? <div className="agent-catalog__empty">Configured executables are unavailable on this host. Check their configuration and unavailable details, then refresh.</div> : null}
     </div>
     {showUnavailable ? <div className="launcher-unavailable-agents">{unavailable.map(executor => <span key={executor.id} title={executor.detection?.detail}>
