@@ -187,7 +187,9 @@ export type DemandNameChangePage = {
   nextOffset: number | null
 }
 
-export type DemandStoreListener = (snapshot: DemandStoreSnapshot, changedDemandIds: readonly string[]) => void
+/** Post-commit records from this same revision; null is an exact removal. */
+export type DemandStoreChanges = ReadonlyMap<string, Demand | null>
+export type DemandStoreListener = (snapshot: DemandStoreSnapshot, changedDemandIds: readonly string[], changes: DemandStoreChanges) => void
 
 export function isDemandStatus(value: unknown): value is DemandStatus {
   return typeof value === 'string' && (DEMAND_STATUSES as readonly string[]).includes(value)
