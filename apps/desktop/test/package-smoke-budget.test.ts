@@ -15,7 +15,8 @@ const names = ['verifyLaunchServices', 'waitForPath', 'waitForProcessExit', 'cle
 const functions = names.map(name => {
   const declarations = ast.statements.filter(ts.isFunctionDeclaration).filter(node => node.name?.text === name)
   if (declarations.length !== 1) throw new Error(`Expected exactly one original ${name}`)
-  return declarations[0]!.getText(ast)
+  // Dynamic imports are dependency ports, supplied by the controlled boundaries below.
+  return declarations[0]!.getText(ast).replace(/^  const \{ (?:createPrivateRuntimeScope|macosHostService, macosHostServiceRegistration|defaultAgentMuxControlSocketPath) \} = await import\([^\n]+\)\n/gmu, '')
 }).join('\n')
 
 type Scenario = {
@@ -63,6 +64,7 @@ function launch(scenario: Scenario = {}) {
       } },
     PRODUCT_NAME: 'AgentMux', manifest: { version: '0.1.0' },
     createPrivateRuntimeScope: async () => ({ directory: runtime, daemonPath, socketPath,
+      ownerReceiptPath: async () => path.join(runtime, 'owner-exact-runtime-instance-artifact.json'),
       observeOwner: async () => {
         if (scenario.ownerUnknown) throw new Error('Private Runtime owner is unknown')
         ownerObserved = true
@@ -84,7 +86,7 @@ function launch(scenario: Scenario = {}) {
     assert: (condition: unknown, message: string) => { if (!condition) throw new Error(message) },
     pathExists: async (value: string) => value.endsWith('desktop-ready.json')
       ? launched && now >= readyAt
-      : value.endsWith('owner.json') ? launched && now >= ownerAt : false,
+      : value.endsWith('owner-exact-runtime-instance-artifact.json') ? launched && now >= ownerAt : false,
     readFile: async (value: string) => {
       if (value.endsWith('desktop-stderr.log')) { stderrReads.push(value); throw new Error('Full stderr read is forbidden') }
       return JSON.stringify(

@@ -1,6 +1,7 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath, fixturePsBirth: _hygiene_fixturePsBirth } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, expect, it, vi } from 'vitest'
+import { ctxmuxOwnerReceiptPath } from '../../../packages/core/src/runtime-paths.js'
 import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
@@ -64,12 +65,16 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
       product: { protocol: 18 }, binaries: [{ name: 'ctxmuxd', path: 'bin/ctxmuxd', version: '0.1.0', sha256: sha(bytes) }],
       sdk: { archive: { path: 'sdk.tgz', sha256: sha(archive) } } }))
   }
-  const receiptPath = join(dirname(socket), 'owner.json')
+  const runtime = { runtimeId: 'persistent-runtime', daemonInstanceId: 'same-instance', buildId: 'ctxmuxd/0.1.0',
+    protocolGeneration: 18, runtimeIdPersistence: 'state_dir', capabilities: { 'services.planned_exec_upgrade_continuity': 1 } }
+  const manifests = await Promise.all(binaries.map(binary => readFile(join(dirname(dirname(binary)), 'manifest.json'))))
+  const receiptPath = ctxmuxOwnerReceiptPath(socket, runtime, sha(manifests[0]!))
+  const candidateReceiptPath = ctxmuxOwnerReceiptPath(socket, runtime, sha(manifests[1]!))
+  const legacyReceiptPath = join(dirname(socket), 'owner.json')
+  await writeFile(legacyReceiptPath, 'retained legacy receipt', { mode: 0o600 })
   if (ledger !== 'missing') await writeFile(receiptPath, ledger === 'invalid' ? 'not-json' : JSON.stringify({
     schema: 'agentmux.ctxmux-owner.v1', daemonInstanceId: 'previous-incarnation', stateDirectory: configured }), { mode: 0o600 })
   const pid = process.pid, uid = process.getuid!(), birth = ("" + (pid) + " " + (uid) + (" " + _hygiene_fixturePsBirth(23751753000)))
-  const runtime = { runtimeId: 'persistent-runtime', daemonInstanceId: 'same-instance', buildId: 'ctxmuxd/0.1.0',
-    protocolGeneration: 18, runtimeIdPersistence: 'state_dir', capabilities: { 'services.planned_exec_upgrade_continuity': 1 } }
   const run = { id: 'original-run', pid: 12345, backend: 'pty', acceptedInputBytes: 2, outputBytes: 50 }
   let signalled = false, mapped = binaries[0]!, currentLock = lock
   let extraLock = false, wrongInode = false, changeBirth = false, mappingReads = 0
@@ -174,7 +179,7 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
   const signal = vi.spyOn(process, 'kill').mockImplementation((target, name) => {
     expect(target).toBe(pid); expect(name).toBe('SIGHUP'); signalled = true; mapped = binaries[1]!; return true
   })
-  return { root, old, candidate, configured, state, lock, receiptPath, binaries, signal,
+  return { root, old, candidate, configured, state, lock, receiptPath, candidateReceiptPath, legacyReceiptPath, binaries, signal,
     async prepare() { const plan = await installer.prepareRuntimeUpgrade(old, candidate); plans.push(plan); return plan },
     multipleLocks() { extraLock = true }, badImageInode() { wrongInode = true },
     driftBirth() { changeBirth = true; startMicroseconds++ },
@@ -327,11 +332,14 @@ it('records only the confirmed actual post-exec image and serving state, retaini
   expect(outcome.status).toBe('upgraded'); expect(outcome.originalRuns).toBe(1); expect(f.wasSignalled()).toBe(true)
   expect(f.versionCalls()).toBe(2)
   expect(outcome.candidateVersion).toEqual({ version: '0.1.0', protocol: 18, handoff: 'opaque-public-declaration' })
-  const receipt = JSON.parse(await readFile(f.receiptPath, 'utf8'))
+  const receipt = JSON.parse(await readFile(f.candidateReceiptPath, 'utf8'))
+  expect(f.candidateReceiptPath).not.toBe(f.receiptPath)
+  expect(await readFile(f.legacyReceiptPath, 'utf8')).toBe('retained legacy receipt')
+  expect(JSON.parse(await readFile(f.receiptPath, 'utf8')).daemonInstanceId).toBe('previous-incarnation')
   expect(receipt.daemonPath).toBe(mappedPath); expect(receipt.stateDirectory).toBe(f.state)
   expect(receipt.daemonSha256).toBe(sha(await readFile(f.binaries[1]!)))
   expect(receipt.runtimeId).toBe('persistent-runtime'); expect(receipt.daemonInstanceId).toBe('same-instance')
-  expect((await lstat(f.receiptPath)).mode & 0o777).toBe(0o600)
+  expect((await lstat(f.candidateReceiptPath)).mode & 0o777).toBe(0o600)
 })
 it('does not claim same-native success from a signal while the original file remains mapped', async () => {
   const f = await fixture()

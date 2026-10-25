@@ -8,6 +8,7 @@ import { promisify } from 'node:util'
 import { homedir } from 'node:os'
 import { canonicalInstallPath } from './package-identity.mjs'
 import { pathToFileURL } from 'node:url'
+import { ctxmuxOwnerReceiptPath } from '../../../packages/core/src/runtime-paths.ts'
 import { prepareRuntimeUpgrade, finishRuntimeUpgrade, closeRuntimeUpgrade } from './package-runtime-upgrade.mjs'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 
@@ -94,7 +95,7 @@ async function scenario(name) {
     const run = await client17.start(oldSdk.defineRun('/usr/bin/python3', { args: ['-u', worker], cwd: directory, env: {}, initialSize: { rows: 4, cols: 12 } }))
     runId = run.id; childPid = run.pid
     const before = await wait(() => client17.status(run.id), (value) => value.latest_output_bytes >= 29, 'PTY initialization')
-    const receiptPath = join(runtimeDir, 'owner.json')
+    const receiptPath = ctxmuxOwnerReceiptPath(socket, identity, await sha(join(old.vendor, 'manifest.json')))
     await writeFile(receiptPath, JSON.stringify({ schema: 'agentmux.ctxmux-owner.v1', sourceCommit: old.manifest.source.commit,
       sourceTree: old.manifest.source.tree, manifestSha256: await sha(join(old.vendor, 'manifest.json')),
       daemonSha256: old.manifest.binaries.find((entry) => entry.name === 'ctxmuxd').sha256,
@@ -139,7 +140,9 @@ async function scenario(name) {
     if (name === 'unproven-owner') {
       const receipt = JSON.parse(await readFile(receiptPath)); receipt.daemonInstanceId = 'another-daemon'
       await writeFile(receiptPath, JSON.stringify(receipt))
-      await assert.rejects(prepareRuntimeUpgrade(current, next).then((value) => { plan = value; return value }), /matching AgentMux owner receipt/)
+      plan = await prepareRuntimeUpgrade(current, next)
+      assert.equal(plan.ownerReceipt.status, 'mismatch')
+      assert.equal(plan.owner.pid, daemon.pid)
       const after = await client17.status(run.id)
       assert.equal(after.pid, childPid); assert.equal(after.applied_input_bytes, 0)
       records.push({ name, passed: true, daemonPid: daemon.pid, childPid, unchangedRun: true, noCutover: true })
@@ -171,7 +174,7 @@ async function scenario(name) {
       activeClient = new CtxmuxClient({ socketPath: socket })
       const attachment = await activeClient.attachTerminal(run.id, before.latest_output_bytes)
       assert.equal(attachment.snapshot.terminal.type, oldManifest.product.protocol === 17 ? 'unknown' : 'basic_vt'); attachment.close()
-      const saved = JSON.parse(await readFile(receiptPath))
+      const saved = JSON.parse(await readFile(ctxmuxOwnerReceiptPath(socket, identity, plan.candidate.manifestSha256)))
       assert.equal(saved.daemonSha256, await sha(daemon18)); assert.equal(saved.daemonInstanceId, identity.daemonInstanceId)
     }
     const kept = await activeClient.status(run.id)
