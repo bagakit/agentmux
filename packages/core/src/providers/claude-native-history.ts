@@ -117,10 +117,17 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   const contentEligibility = record.isCompactSummary === true || record.type === 'system' ? 'private'
     : isGenerated ? 'unconfirmed'
     : record.type === 'assistant' && message && content !== undefined ? 'public' : 'unconfirmed'
+  // Claude stamps the response's stop reason onto its original content-block records.
+  // A missing reason (including an interrupted stream) cannot establish a phase.
+  const messagePhase = kind === 'assistant-message' && record.isAbortedMidStream !== true
+    ? message?.stop_reason === 'tool_use' ? 'progress' as const
+      : message?.stop_reason === 'end_turn' ? 'final' as const : undefined
+    : undefined
 
   return {
     id: typeof record.uuid === 'string' && record.uuid ? record.uuid : `claude-record:${start}`,
     kind,
+    ...(messagePhase === undefined ? {} : { messagePhase }),
     contentParts: (messageParts ?? (queuedInput && kind === 'user-message' ? parts(content) : [{ kind: 'text' as const, text: nativeJsonStringify(record) }]))
       .map(part => ({ ...part, contentEligibility: contentEligibility === 'private' || isGenerated ? contentEligibility : part.contentEligibility ?? contentEligibility })),
     // Native message.usage covers this response, even when several responses share a turn.
