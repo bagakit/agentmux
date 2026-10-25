@@ -18,7 +18,7 @@ export async function inspectCodexHookActivation(context: AgentProviderHookActiv
         if (!Array.isArray(group.hooks)) throw new AgentMuxError('Codex Hook plan group is invalid.', 'INVALID_HOOK_PLAN')
         return group.hooks.map(value => {
           const handler = object(value)
-          if (handler.type !== 'command' || typeof handler.command !== 'string' || typeof handler.timeout !== 'number') {
+          if (handler.type !== 'command' || typeof handler.command !== 'string' || (handler.timeout !== undefined && typeof handler.timeout !== 'number')) {
             throw new AgentMuxError('Codex Hook plan command is invalid.', 'INVALID_HOOK_PLAN')
           }
           return { sourcePath: mutation.path, eventName: event[0]!.toLowerCase() + event.slice(1),
