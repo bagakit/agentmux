@@ -15,7 +15,7 @@ import { parseAgentInputMailboxRead, type AgentInputMailboxPage, type AgentInput
 import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
 import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
 import { validateAgentMuxMessageEnvelope } from './agent-message-envelope.js'
-import { channelQuoteWireMatchesEnvelope } from './agent-message-render.js'
+import { messageInputWireMatches } from './agent-message-input.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 const fail = (): never => { throw new AgentMuxError('The input mailbox page does not match its original scope and facts.', 'CONTROL_PROTOCOL_ERROR') }
@@ -43,14 +43,14 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
       const deliveryKey = receipt ? agentInputDeliveryKey(receipt.control) : key
       if (receipt?.admission?.admission && !dequal(receipt.admission.admission.intent?.admissionIntent,
         { ...admission, expectedRun: deliveryKey.expectedRun })) fail()
-      const source = object(intent.source, ['kind', 'prompt', 'agentMuxNote', 'authorHuman', 'recoveryAuthorization', 'sourceChannel', 'sourceDevice', 'messageId', 'originalControlOperationId', 'inputContext', 'inputContextSource', 'inputContextCaptureProof', 'inputImages', 'authorProfile', 'promptWire'])
+      const source = object(intent.source, ['kind', 'prompt', 'agentMuxNote', 'authorHuman', 'recoveryAuthorization', 'sourceChannel', 'sourceDevice', 'messageId', 'originalControlOperationId', 'inputContext', 'inputContextSource', 'inputContextCaptureProof', 'inputImages', 'authorProfile', 'promptWire', 'representation'])
       // The receipt codec already binds each same-Run retry to its original
       // logical key and typed predecessor. Only Run rebinding has manual-author
       // eligibility; a fresh transport identity alone does not change the target.
       const rebound = receipt?.control.deliveryKey && deliveryKey.expectedRun.runId !== key.expectedRun.runId
       if (rebound && admission.kind !== 'manual-actor') fail()
       if (source.kind === 'prompt') {
-        if (rebound && source.authorHuman !== true) fail()
+        if (source.representation !== undefined || rebound && source.authorHuman !== true) fail()
         if (source.authorProfile !== undefined) {
           const { authorProfile: _untrusted, ...fields } = source
           displaySource = { ...fields, ...preparedAuthorProfileFields(source.authorProfile) }
@@ -72,7 +72,7 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
         const message = object(entry.message, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient', 'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId', 'body', 'channelProfile', 'channelQuote'])
         const envelope = validateAgentMuxMessageEnvelope(message as unknown as Parameters<typeof validateAgentMuxMessageEnvelope>[0])
         if (rebound && envelope.sender.kind !== 'external') fail()
-        if (envelope.channelQuote ? typeof source.promptWire !== 'string' || !channelQuoteWireMatchesEnvelope(source.promptWire, envelope) : source.promptWire !== undefined) fail()
+        if (!messageInputWireMatches(envelope, source)) fail()
         if (key.kind !== 'message' || envelope.messageId !== key.messageId || envelope.operationId !== source.originalControlOperationId ||
           envelope.recipientSessionId !== key.agentSessionId || envelope.recipientRunId !== key.expectedRun.runId || receipt && receipt.originalControlOperationId !== envelope.operationId) fail()
       }

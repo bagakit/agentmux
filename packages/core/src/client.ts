@@ -7,6 +7,9 @@ import { parseAgentInputChangesRead, type AgentInputChangesRead, type AgentInput
 import { imageBytes } from './session-history-resource.js'
 import { resolveAgentInputImages, parseAgentInputResourceRead, inputImageMatches, type AgentInputImageReference, type AgentInputResourceOwner, type AgentInputResourceRead, type AgentInputResourceResult } from './agent-input-resource.js'
 import { originalMessageInputKey } from './agent-message-query.js'
+import { validateMessageFieldRead } from './agent-message-field.js'
+import { readMessageField } from './agent-message-field-reader.js'
+import type { AgentMuxMessageRead, AgentMuxMessageReadRequest, AgentMuxMessageFieldRead, AgentMuxMessageReadView, AgentMuxMessageFieldPage } from './agent-message-query.js'
 import { lifecycleDiagnosticSource, lifecycleObserved } from './lifecycle-diagnostic.js'
 import { decodePreparedTerminal, parsePreparedTerminal, parsePreparedTerminalStop, type AgentMuxPreparedTerminal, type AgentMuxPreparedTerminalStop } from './terminal-preparation.js'
 import { TerminalRecoveryOwner } from './terminal-recovery-owner.js'
@@ -4688,7 +4691,11 @@ export class AgentMuxClient {
   }
 
   /** Read original intake before any input claim or dispatch exists; no Runtime readiness is required. */
-  async readMessage(input: import('./agent-message-query.js').AgentMuxMessageRead & { caller?: { agentSessionId: string; capability: string } }): Promise<import('./agent-message-query.js').AgentMuxMessageReadView | null> {
+  async readMessage(input: AgentMuxMessageFieldRead & { caller?: { agentSessionId: string; capability: string } }): Promise<AgentMuxMessageFieldPage | null>
+  async readMessage(input: AgentMuxMessageRead & { field?: undefined; caller?: { agentSessionId: string; capability: string } }): Promise<AgentMuxMessageReadView | null>
+  async readMessage(input: AgentMuxMessageReadRequest & { caller?: { agentSessionId: string; capability: string } }): Promise<AgentMuxMessageReadView | AgentMuxMessageFieldPage | null>
+  async readMessage(input: AgentMuxMessageReadRequest & { caller?: { agentSessionId: string; capability: string } }): Promise<AgentMuxMessageReadView | AgentMuxMessageFieldPage | null> {
+    validateMessageFieldRead(input)
     if ((input.operationId !== undefined) === (input.messageId !== undefined)) throw new AgentMuxError(
       'Choose exactly one original message operationId or messageId.', 'INVALID_CONTROL_REQUEST')
     const reauthorize = async (message: DurableAgentMuxMessage | null) => {
@@ -4703,6 +4710,10 @@ export class AgentMuxClient {
       ? this.messageQueue.readByOperationId(input.operationId!, reauthorize, input.notificationId)
       : this.messageQueue.readByMessageId(input.messageId, reauthorize, input.notificationId))
     if (!message) return null
+    if (input.field !== undefined) {
+      const cut = await this.messageQueue.readConversationInputCut(message.envelope.recipientSessionId ?? '')
+      return readMessageField(message, { ...input, field: input.field }, { queueId: cut.queueId, incarnation: cut.incarnation })
+    }
     const key = originalMessageInputKey(message)
     // Optional membership observation cannot revoke the original authorized body read.
     const inputOrigin = key ? await this.messageQueue.readConversationInputOrigin(key).catch(() => null) : null
@@ -6243,7 +6254,7 @@ export class AgentMuxClient {
     }
     if (envelope.sender.kind === 'external') authority = await this.externalMessageAuthority(envelope, context, intent.admissionIntent)
     return { input: { agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun, operationId: agentPromptInputId(intent.key),
-      prompt: envelope.channelQuote ? source.promptWire! : renderAgentMuxMessageEnvelope(envelope), admissionIntent: (() => { const { expectedRun: _run, ...target } = intent.admissionIntent; return target })(), execution: 'immediate',
+      prompt: source.representation === undefined && envelope.channelQuote ? source.promptWire! : renderAgentMuxMessageEnvelope(envelope), admissionIntent: (() => { const { expectedRun: _run, ...target } = intent.admissionIntent; return target })(), execution: 'immediate',
       ...(original.sourceChannel ? { sourceChannel: original.sourceChannel } : {}), ...(original.sourceDevice ? { sourceDevice: original.sourceDevice } : {}) },
       ...(envelope.sender.kind === 'agent-session' ? { authorAgentSessionId: envelope.sender.agentSessionId } : {}), ...(authority ? { authority } : {}) }
   }
@@ -6720,9 +6731,12 @@ export class AgentMuxClient {
       agentSessionId: input.agentSessionId, expectedRun: input.expectedRun,
       ...(producer === 'message' ? { kind: 'message', messageId: input.operationId } : { kind: 'prompt', submissionId: input.operationId })
     }))?.admission?.intent : undefined)
-    const waiting = producer === 'prompt' && input.admissionIntent !== undefined ? await this.messageQueue.inspectInput({ key: inputControl?.sourceKey ?? {
-      kind: 'prompt', agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId } }) : undefined
+    const waiting = input.admissionIntent !== undefined ? await this.messageQueue.inspectInput({ key: inputControl?.sourceKey ?? {
+      agentSessionId: input.agentSessionId, expectedRun: input.expectedRun,
+      ...(producer === 'message' ? { kind: 'message', messageId: input.operationId } : { kind: 'prompt', submissionId: input.operationId }) } }) : undefined
     const waitingSource = waiting?.intent.source.kind === 'prompt' ? waiting.intent.source : undefined
+    const messageSource = waiting?.intent.source.kind === 'message' ? waiting.intent.source : undefined
+    const systemContext = messageSource?.representation?.reminder ?? composed.systemContext
     const captureProof = waitingSource?.inputContextCaptureProof ?? authority?.inputContextCaptureProof
     const capturedImages = waitingSource?.inputImages ?? authority?.inputImages
     const capturedProfile = waitingSource?.authorProfile ?? authority?.authorProfile
@@ -6733,7 +6747,7 @@ export class AgentMuxClient {
         ...(captureProof ? { inputContextCaptureProof: captureProof } : {}) } : {}),
       ...(questionReply ? { questionReply: structuredClone(questionReply) } : {}),
       ...(content.trim() ? { userContent: content } : {}),
-      ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
+      ...(systemContext ? { systemContext } : {}),
       ...(authorAgentSessionId ? { authorAgentSessionId } : authority?.externalAuthor ? { authorExternal: structuredClone(authority.externalAuthor) } : input.authorHuman === true ? { authorHuman: true } : {}),
       ...(input.sourceDevice ? { sourceDevice: normalizeOperationDevice(input.sourceDevice) } : {}),
       sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api')
@@ -6741,7 +6755,7 @@ export class AgentMuxClient {
     // Ordinary prompt retries must still submit the same explicit body, note
     // and provenance. A text envelope never supplies those producer facts.
     const retainWire = frozen && (producer === 'message' || isDeepStrictEqual(frozen.message, authored))
-    const outbound = retainWire ? frozen.prompt : waitingSource?.promptWire ?? composed.text
+    const outbound = retainWire ? frozen.prompt : messageSource?.promptWire ?? waitingSource?.promptWire ?? composed.text
     const message = producer === 'message' && frozen?.message ? frozen.message : authored
     const operationId = safeId(input.operationId, 'Agent prompt operation id')
     // 握手绝不做发 prompt 的前置门。这里不是生命周期路径——run 早就活着，用户此刻正在提交。

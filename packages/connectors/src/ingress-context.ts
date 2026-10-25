@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
 import type { AgentInputSubmissionReceipt, AgentSessionHistorySource, ChannelQuoteRange, ChannelTranscriptQuote } from '@agentmux/core'
+import { channelQuoteWireMatchesEnvelope } from '@agentmux/core/agent-message-render'
 import { parseConnectionIngressRecord, type ConnectionIngressMessage, type RoomBinding } from '@agentmux/core/connections'
 
 export type IngressContextRecipient = {
@@ -104,6 +105,14 @@ export class IngressContextPositions {
     if (receipt.status !== 'admitted' || admission?.transport !== 'native' || !admission.acknowledged ||
         admission.native.outcome !== 'admitted' || admission.native.plan.threadId !== recipient.source.nativeSessionId ||
         quote.coverage !== 'complete' || quote.gaps.length || quote.range.throughMessageId !== record.externalMessageId) return false
+    // The original receipt confirms its actual wire. A MID reference is not the
+    // retained quote itself; later body reads cannot advance this provided range.
+    if (!admission.intent?.prompt) return false
+    if (!channelQuoteWireMatchesEnvelope(admission.intent.prompt, { sender: input.author, body: record.body,
+      channelQuote: quote, ...(input.channelProfile ? { channelProfile: input.channelProfile } : {}) })) {
+      this.database.prepare('DELETE FROM connection_ingress_context_pending WHERE ingress_id=?').run(record.ingressId)
+      return false
+    }
     const scope = scopeKey(recipient)
     this.database.exec('BEGIN IMMEDIATE')
     try {

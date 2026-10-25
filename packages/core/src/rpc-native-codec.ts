@@ -1,3 +1,4 @@
+import { parseMessageFieldPage, validateMessageFieldRead } from './agent-message-field.js'
 import { parseAgentExecutionCreate, parseAgentExecutionBinding, parseAgentExecutionInspection } from './public-rpc-agent-execution.js'
 import { parseAgentInputResourceRead, parseAgentInputResourceResult } from './agent-input-resource.js'
 import { parseAgentInputJournalCut } from './agent-input-conversation.js'
@@ -861,8 +862,15 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'message.read': {
-        record(p, ['hostId', 'message']); string(p.hostId)
+        record(p, ['hostId', 'message', 'field']); string(p.hostId)
         if (input.hostId !== undefined && p.hostId !== input.hostId) fail()
+        validateMessageFieldRead(input as import('./agent-message-query.js').AgentMuxMessageReadRequest)
+        if (input.field !== undefined) {
+          if (p.message !== null || p.field === undefined) fail()
+          if (p.field !== null) parseMessageFieldPage(p.field, input as import('./agent-message-query.js').AgentMuxMessageFieldRead, credentials?.agentSessionId)
+          break
+        }
+        if (p.field !== undefined) fail()
         if (p.message !== null) {
           const original = record(p.message, ['sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice', 'inputOrigin'])
           if (original.inputOrigin !== null) parseAgentInputJournalCut(original.inputOrigin)

@@ -382,7 +382,7 @@ const NATIVE_FIELDS = {
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
   'message.notify': ['operationId', 'messageIds', 'hostId'],
   'message.notify.inspect': ['operationId', 'hostId'],
-  'message.read': ['operationId', 'messageId', 'notificationId', 'hostId'],
+  'message.read': ['operationId', 'messageId', 'notificationId', 'field', 'cursor', 'maxBytes', 'hostId'],
   'message.ls': ['hostId', 'participantSessionId', 'direction', 'beforeSequence', 'limit'],
   'message.events': ['hostId', 'participantSessionId', 'afterSequence', 'latest', 'beforeSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'limit'],
   'message.dispatch.open': ['sourceMessageId'], 'message.dispatch.inspect': ['sourceMessageId'],
@@ -2303,10 +2303,13 @@ export class AgentMuxRpcService {
           'Message reading requires an authenticated Agent participant or a transport-approved user/device. Original communication and Runs are retained.', 'CONTROL_PERMISSION_DENIED')
         if (method === 'message.read' && (p.operationId !== undefined) === (p.messageId !== undefined)) throw new AgentMuxError(
           'Choose exactly one original message operationId or messageId.', 'INVALID_CONTROL_REQUEST')
-        const messageSelector: import('./agent-message-query.js').AgentMuxMessageRead | undefined = method !== 'message.read' ? undefined : {
+        const messageSelector: import('./agent-message-query.js').AgentMuxMessageReadRequest | undefined = method !== 'message.read' ? undefined : {
           ...(p.messageId === undefined ? { operationId: rpcString(p.operationId, 'Original message operation ID') }
             : { messageId: rpcString(p.messageId, 'Original message ID') }),
-          ...(p.notificationId === undefined ? {} : { notificationId: rpcString(p.notificationId, 'Original notification ID') }) }
+          ...(p.notificationId === undefined ? {} : { notificationId: rpcString(p.notificationId, 'Original notification ID') }),
+          ...(p.field === undefined ? {} : { field: p.field as import('./agent-message-query.js').AgentMuxMessageField }),
+          ...(p.cursor === undefined ? {} : { cursor: rpcString(p.cursor, 'Original field cursor') }),
+          ...(p.maxBytes === undefined ? {} : { maxBytes: rpcCount(p.maxBytes, -1) }) }
         const hostId = p.hostId === undefined ? caller?.hostId : rpcString(p.hostId, 'Original message Host ID')
         if (hostId === undefined) throw new AgentMuxError('A trusted reader must select the exact original message Host.', 'INVALID_CONTROL_REQUEST')
         if (caller && caller.hostId !== hostId) throw new AgentMuxError('Agent authority cannot read another semantic Host journal.', 'CONTROL_PERMISSION_DENIED')
@@ -2327,7 +2330,9 @@ export class AgentMuxRpcService {
         }
         const auth = caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}
         if (method === 'message.read') {
-          result = { message: await owner.client.readMessage({ ...messageSelector!, ...auth }), hostId }
+          result = messageSelector!.field === undefined
+            ? { message: await owner.client.readMessage({ ...messageSelector!, field: undefined, ...auth }), hostId }
+            : { message: null, field: await owner.client.readMessage({ ...messageSelector!, field: messageSelector!.field, ...auth }), hostId }
         } else if (method === 'agent.broadcast.inspect') {
           result = { broadcast: await owner.client.inspectMessageBroadcast({ operationId: rpcString(p.operationId, 'Original broadcast operation ID'), ...auth }), hostId }
         } else if (method === 'message.ls') {

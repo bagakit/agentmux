@@ -1,3 +1,4 @@
+import { parseMessageFieldPage } from './agent-message-field.js'
 import { parseAgentInputResourceRead, parseAgentInputResourceResult } from './agent-input-resource.js'
 import { parseReadingDiagnosticSourceRead, parseReadingDiagnosticSourceFind, type ReadingDiagnosticExactTarget, type ReadingDiagnosticFindParams } from './reading-diagnostic-query.js'
 import { parseStartupDiagnosticRead, type AgentStartupDiagnosticExactTarget, type AgentStartupDiagnosticRecentTarget } from './startup-diagnostic.js'
@@ -280,6 +281,10 @@ export async function connectHostedAgentMux(options: {
     if (method === 'readAgentInputChanges') return parseAgentInputChangesPage(decoded, wireArgs[0] as import('./agent-input-changes.js').AgentInputChangesRead)
     if (method === 'readAgentInputMailbox') return parseAgentInputMailboxPage(decoded, wireArgs[0] as import('./agent-input-mailbox.js').AgentInputMailboxRead)
     if (method === 'readAgentSessionHistory') return parseAgentSessionHistoryReadPage(decoded, wireArgs[0] as AgentSessionHistoryReadInput)
+    if (method === 'readMessage') {
+      const input = wireArgs[0] as import('./agent-message-query.js').AgentMuxMessageReadRequest & { caller?: { agentSessionId: string } }
+      if (input.field !== undefined && decoded !== null) return parseMessageFieldPage(decoded, { ...input, field: input.field }, input.caller?.agentSessionId)
+    }
     return decoded
   }
   const notifyHistory = (read: HistoryRead, observation: AgentSessionHistoryObservation): void => {

@@ -1,5 +1,7 @@
 import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 import type { DurableAgentMuxMessage, AgentMuxMessageDeliveryState } from './agent-global-message-queue.js'
+import type { ChannelTranscriptQuote } from './channel-quote.js'
+import type { JsonReadEntry } from './json-read-fragments.js'
 
 /** Derived original-owner reading facts; never persisted back into the message journal. */
 export type AgentMuxMessageReadView = DurableAgentMuxMessage & {
@@ -23,6 +25,27 @@ export type AgentMuxMessageRead = (
   ) & {
   /** Select this exact notification's metadata for the original message, without consuming it. */
   notificationId?: string
+}
+
+export type AgentMuxMessageField = 'body' | 'channelQuote'
+export type AgentMuxMessageFieldRead = AgentMuxMessageRead & {
+  field: AgentMuxMessageField
+  cursor?: string
+  maxBytes?: number
+}
+export type AgentMuxMessageReadRequest = AgentMuxMessageRead & {
+  field?: AgentMuxMessageField | undefined
+  cursor?: string
+  maxBytes?: number
+}
+/** Exact field bytes only. No full message, unused quote, profile or input wire. */
+export type AgentMuxMessageFieldPage = {
+  field: AgentMuxMessageField
+  sequence: number
+  envelope: Omit<AgentMuxMessageEnvelope, 'body' | 'channelQuote' | 'channelProfile'>
+  entry: JsonReadEntry<string | ChannelTranscriptQuote | null>
+  budgetBytes: number
+  nextCursor: string | null
 }
 
 export type AgentMuxMessageDirection = 'incoming' | 'outgoing'
