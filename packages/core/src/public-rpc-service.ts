@@ -2308,6 +2308,22 @@ export class AgentMuxRpcService {
         result = { key, record, ...(observed ? { input: observed } : {}) }
         break
       }
+      case 'agent.input.changes': {
+        const hostId = rpcString(p.hostId, 'Original input Host ID')
+        if (caller && caller.hostId !== hostId || !caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
+          'Input changes requires its original Host and an authenticated recipient or user/device.', 'CONTROL_PERMISSION_DENIED')
+        const scopes = (caller ? [caller] : await this.clients()).filter(scope => scope.hostId === hostId)
+        if (scopes.length !== 1 || this.endpointUnverified(scopes[0]!.client)) throw new AgentMuxError('The original input Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const client = scopes[0]!.client, { hostId: _route, ...read } = p
+        const input = parseAgentInputChangesRead(read)
+        if (client.forwardRpc) {
+          const forwarded = await client.forwardRpc('agent.input.changes', { ...input, hostId: 'local' }, context)
+          if (forwarded.hostId !== 'local') throw new AgentMuxError('The original input changes Host response changed.', 'CONTROL_PROTOCOL_ERROR')
+          const { hostId: _sourceRoute, ...page } = forwarded
+          result = { ...parseAgentInputChangesPage(page, input), hostId }
+        } else result = { ...await client.readAgentInputChanges(input, caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined), hostId }
+        break
+      }
       case 'agent.input.ls': {
         const hostId = rpcString(p.hostId, 'Original input Host ID')
         if (caller && caller.hostId !== hostId || !caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) {
@@ -2338,22 +2354,6 @@ export class AgentMuxRpcService {
           rpcRecord(p, ['kind', 'originalControlOperationId'])
           const operationId = validateAgentInputControlId(p.originalControlOperationId)
           const local = (await this.clients()).filter(scope => scope.hostId === 'local' && !scope.client.forwardRpc)
-      case 'agent.input.changes': {
-        const hostId = rpcString(p.hostId, 'Original input Host ID')
-        if (caller && caller.hostId !== hostId || !caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
-          'Input changes requires its original Host and an authenticated recipient or user/device.', 'CONTROL_PERMISSION_DENIED')
-        const scopes = (caller ? [caller] : await this.clients()).filter(scope => scope.hostId === hostId)
-        if (scopes.length !== 1 || this.endpointUnverified(scopes[0]!.client)) throw new AgentMuxError('The original input Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
-        const client = scopes[0]!.client, { hostId: _route, ...read } = p
-        const input = parseAgentInputChangesRead(read)
-        if (client.forwardRpc) {
-          const forwarded = await client.forwardRpc('agent.input.changes', { ...input, hostId: 'local' }, context)
-          if (forwarded.hostId !== 'local') throw new AgentMuxError('The original input changes Host response changed.', 'CONTROL_PROTOCOL_ERROR')
-          const { hostId: _sourceRoute, ...page } = forwarded
-          result = { ...parseAgentInputChangesPage(page, input), hostId }
-        } else result = { ...await client.readAgentInputChanges(input, caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined), hostId }
-        break
-      }
           if (local.length !== 1) throw new AgentMuxError('The original semantic endpoint journal is unknown or ambiguous. No route was re-resolved.', 'CONTROL_UNAVAILABLE')
           const client = local[0]!.client
           if (caller && caller.client !== client) throw new AgentMuxError('Original control inspection cannot cross semantic owners.', 'CONTROL_PERMISSION_DENIED')
