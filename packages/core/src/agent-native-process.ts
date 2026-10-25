@@ -1,3 +1,4 @@
+import { linuxNativeProcessFiles } from './agent-native-process-linux.js'
 import { runProcess } from './process-runner.js'
 import { AgentMuxError } from './errors.js'
 import { normalizeNativeTranscriptPath } from './agent-native-locator.js'
@@ -49,6 +50,7 @@ export async function nativeProcessFiles(processId: number, signal: AbortSignal,
   if (!['darwin', 'linux'].includes(process.platform) || !Number.isSafeInteger(processId) || processId <= 0) {
     throw unavailable('Read-only native process discovery is unavailable on this Host.')
   }
+  if (process.platform === 'linux') return linuxNativeProcessFiles(processId, signal, scope)
   const options = { signal, timeoutMs: 2_000, maxOutputBytes: 1024 * 1024 }
   const observe = async (command: string, args: string[]) => {
     try { return await runProcess(command, args, options) } catch (error) {
