@@ -40,7 +40,7 @@ export async function permissionActionsFixture(initialCoreAvailable = true, spea
     const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function () {
       const inner = this as unknown as typeof original.inner
       await inner.registry.load('local')
-      for (const name of ['isConnected', 'status', 'identity', 'input', 'observeOutput', 'attach', 'detach', 'stop']) inner.kernel[name] = runtime[name]
+      for (const name of ['isConnected', 'status', 'identity', 'input', 'openInput', 'observeOutput', 'attach', 'detach', 'stop']) inner.kernel[name] = runtime[name]
       inner.connected = true
     })
     let services!: Awaited<ReturnType<typeof createConnectionServices>>

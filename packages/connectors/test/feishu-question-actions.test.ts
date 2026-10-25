@@ -66,13 +66,14 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
     const question = f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'question' && value.state === 'confirmed').at(-1)
     return question?.mapping ? f.card(question.mapping.messageId) : undefined
   }
-  const submit = () => feishuCardElements(card()!).find(value => value.name === 'submit_original_answer') as { value: Record<string, unknown> }
+  const submit = () => feishuCardElements(card()!).find(value => value.name === 'submit_original_answer') as { name: string; behaviors: Array<{ type: string; value: Record<string, unknown> }> }
+  const callback = () => submit().behaviors.find(behavior => behavior.type === 'callback')!.value
   const answer = (eventId = 'original-answer-action', fields: Record<string, unknown> = { question_0_option: '0', question_1_text: 'Continue with the original plan' }) => {
-    const value = structuredClone(submit().value)
+    const value = structuredClone(callback())
     const mapping = f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'question' && value.state === 'confirmed').at(-1)!.mapping!
-    return f.action(String(value.actionRef), eventId, { context: { open_chat_id: 'original-room', open_message_id: mapping.messageId }, action: { tag: 'button', value, form_value: fields } })
+    return f.action(String(value.actionRef), eventId, { context: { open_chat_id: 'original-room', open_message_id: mapping.messageId }, action: { tag: 'button', name: submit().name, value, form_value: fields } })
   }
-  return { ...f, card, send, publish, submit, answer, questionId2, speaker }
+  return { ...f, card, send, publish, submit, callback, answer, questionId2, speaker }
 }
 
 it('default Desktop and authenticated Feishu form answer exact original questions through Hosted Core once', async () => {
@@ -85,6 +86,11 @@ it('default Desktop and authenticated Feishu form answer exact original question
   expect(card.header).toBeUndefined()
   expect(elements.find(value => value.text?.content?.startsWith('Choose one option'))).toMatchObject({ text_size: 'notation', text: { text_size: 'notation', text_color: 'grey' } })
   expect(elements.filter(value => value.tag === 'form')).toHaveLength(1)
+  const formElements = feishuCardElements(elements.find(value => value.tag === 'form')!)
+  expect(formElements.filter(value => value.tag === 'button').map(value => value.name)).toEqual(['submit_original_answer'])
+  expect(formElements.filter(value => ['button', 'input', 'select_static'].includes(value.tag)).every(value => typeof value.name === 'string' && value.name.length > 0)).toBe(true)
+  expect(f.submit()).toMatchObject({ form_action_type: 'submit', behaviors: [{ type: 'callback' }] })
+  expect(f.submit()).not.toHaveProperty('value')
   expect(elements.find(value => value.tag === 'div')).toMatchObject({ text_size: 'notation', text: { content: 'Original Question author · Agent · Question', text_color: 'grey' },
     icon: { tag: 'custom_icon', img_key: 'original-question-portrait', size: '16px 16px' } })
   expect(elements.filter(value => value.tag === 'input')).toMatchObject([{ input_type: 'multiline_text', show_icon: false }, { input_type: 'multiline_text', show_icon: false }])
@@ -100,12 +106,13 @@ it('default Desktop and authenticated Feishu form answer exact original question
     await writeFile(join(process.env.QUESTION_CARD_PROOF, 'pending-operation.json'), JSON.stringify({ question, delivery }, null, 2) + '\n')
   }
 
-  const wire = f.answer(), actionRef = f.submit().value.actionRef
+  const wire = f.answer(), actionRef = f.callback().actionRef
   const formRead = { connectionId: 'feishu-connection', application: f.actor.application, actor: f.actor,
     externalConversationId: wire.event.context.open_chat_id, sourceMessageId: wire.event.context.open_message_id, actionRef: String(actionRef) }
   expect(f.services.ingress!.questionForm(formRead)).toMatchObject({ status: 'pending', questions: [{ id: savedQuestionId }, { id: f.questionId2 }] })
   expect(f.services.ingress!.questionForm({ ...formRead, actor: { ...f.actor, userId: 'foreign-person' } })).toBeNull()
   await f.sdk.receive(wire)
+  expect(nativeActionResponse(f)).toEqual({})
   await vi.waitFor(() => expect(f.send).toHaveBeenCalledOnce(), { timeout: 8_000 })
   expect(codexQuestionAnswers([{ type: 'text', text: f.send.mock.calls[0]![0] }])).toEqual([
     { questionId: savedQuestionId, prompt: 'Choose how to continue the original work.', answer: 'Keep the original work' },
@@ -123,6 +130,7 @@ it('default Desktop and authenticated Feishu form answer exact original question
   await f.sdk.receive(wire); await f.sdk.receive({ ...wire, header: { ...wire.header, event_id: 'duplicate-answer-event' } })
   await vi.waitFor(async () => expect((await f.services.ingress!.list({ connectionId: 'feishu-connection' })).ingresses).toHaveLength(2))
   expect(f.send).toHaveBeenCalledOnce(); expect(f.original.inner.kernel.input).not.toHaveBeenCalled()
+  expect(f.original.rawInput).not.toHaveBeenCalled()
   f.services.publication!.refresh()
   await vi.waitFor(() => expect(JSON.stringify(f.card())).toContain('Answer submitted to the original Agent'), { timeout: 8_000 })
   expect(JSON.stringify(f.card())).toContain('Answer 1: Keep the original work')
@@ -149,7 +157,7 @@ it('permission grants do not authorize answers, and revocation refuses the exact
   await vi.waitFor(async () => expect((await f.services.ingress!.list({ connectionId: 'feishu-connection' })).ingresses[0]).toMatchObject({ state: 'refused', code: 'INGRESS_ACTOR_NOT_AUTHORIZED' }))
   expect(f.send).not.toHaveBeenCalled()
   await f.original.client.writeAgent({ agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' }, source: 'user', data: 'Local input remains usable' })
-  expect(f.original.inner.kernel.input).toHaveBeenCalledOnce()
+  expect(f.original.rawInput).toHaveBeenCalledExactlyOnceWith('run-original-agent', 'Local input remains usable')
 }, 25_000)
 
 it('unknown native answer delivery preserves the original action and refuses a changed repeat without replay', async () => {
@@ -158,7 +166,7 @@ it('unknown native answer delivery preserves the original action and refuses a c
   await vi.waitFor(() => expect(f.send).toHaveBeenCalledOnce(), { timeout: 8_000 })
   const first = (await f.services.ingress!.list({ connectionId: 'feishu-connection' })).ingresses[0]!
   await f.sdk.receive({ ...wire, header: { ...wire.header, event_id: 'invalid-after-unknown' }, event: { ...wire.event, action: { ...wire.event.action, form_value: {} } } })
-  expect(nativeActionResponse(f)).toEqual({})
+  expect(nativeActionResponse(f)).toMatchObject({ toast: { type: 'warning', content: expect.stringContaining('no longer accept') } })
   expect((await f.services.ingress!.list({ connectionId: 'feishu-connection' })).ingresses[1]).toMatchObject({ state: 'refused', code: 'INGRESS_AUTHORITY_REVISED' })
   expect((await f.services.ingress!.inspect({ ingressId: first.ingressId })).ingress!.input?.operationId).toBe(first.input!.operationId)
   const inspection = vi.spyOn(f.hosted, 'inspectAgentPromptSubmission').mockRejectedValue(Error('Original receipt observation unavailable'))
@@ -189,7 +197,7 @@ it('original live Hook question preserves the same unavailable route as local Co
     .rejects.toHaveProperty('code', 'AGENT_INTERACTION_UNCONFIRMED')
   expect(f.send).not.toHaveBeenCalled(); expect(f.original.inner.kernel.input).not.toHaveBeenCalled()
   await f.original.client.writeAgent({ agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' }, source: 'user', data: 'Original terminal answer' })
-  expect(f.original.inner.kernel.input).toHaveBeenCalledOnce()
+  expect(f.original.rawInput).toHaveBeenCalledExactlyOnceWith('run-original-agent', 'Original terminal answer')
 }, 25_000)
 
 it('application access answers original questions through the same native owner without materializing room grants', async () => {
@@ -205,7 +213,7 @@ it('application access answers original questions through the same native owner 
   const observed = f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'question').map(value => ({ projectionId: value.projectionId, payload: value.payload }))
   expect(observed, JSON.stringify({ originalProjections, observed })).toEqual(originalProjections)
   unavailable.mockRestore()
-  const wire = f.answer(), actionRef = f.submit().value.actionRef
+  const wire = f.answer(), actionRef = f.callback().actionRef
   await f.sdk.receive(wire)
   await vi.waitFor(() => expect(f.send).toHaveBeenCalledOnce(), { timeout: 8_000 })
   const record = (await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])).ingresses[0]
@@ -283,19 +291,34 @@ it('invalid Question feedback preserves missing reference, exact message and rev
   const missing = f.answer('missing-original-reference', {})
   delete (missing.event.action.value as Record<string, unknown>).actionRef
   await f.sdk.receive(missing)
-  expect(nativeActionResponse(f)).toEqual({})
+  expect(nativeActionResponse(f)).toEqual({ toast: { type: 'warning', content: 'Answer not accepted. Open the original conversation to continue.' } })
   const wrong = f.answer('wrong-original-message', {}); wrong.event.context.open_message_id = 'another-original-card'
   await f.sdk.receive(wrong)
-  expect(nativeActionResponse(f)).toEqual({})
+  expect(nativeActionResponse(f)).toEqual({ toast: { type: 'warning', content: 'This card can no longer accept an answer. Open the original conversation to continue.' } })
   const revoked = f.answer('revoked-invalid-form', {})
   await f.grant([], 1); await f.sdk.receive(revoked)
-  expect(nativeActionResponse(f)).toEqual({})
+  expect(nativeActionResponse(f)).toEqual({ toast: { type: 'warning', content: 'Answer not accepted. Check your access to answer in this conversation.' } })
   const rows = (await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])).ingresses
   expect(rows.map((r: { code: string }) => r.code)).toEqual(['INGRESS_ACTION_UNSUPPORTED', 'INGRESS_AUTHORITY_REVISED', 'INGRESS_ACTOR_NOT_AUTHORIZED'])
   expect(rows.every((r: { input?: unknown }) => r.input === undefined)).toBe(true)
   expect(f.send).not.toHaveBeenCalled()
   await f.original.client.writeAgent({ agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' }, source: 'user', data: 'Healthy original terminal input' })
-  expect(f.original.inner.kernel.input).toHaveBeenCalledOnce()
+  expect(f.original.rawInput).toHaveBeenCalledExactlyOnceWith('run-original-agent', 'Healthy original terminal input')
+}, 30_000)
+
+it('native select changes and unrelated button callbacks do not acquire Question refusal feedback', async () => {
+  const f = await fixture(); await f.grant(['answer']); await f.publish()
+  for (const [eventId, tag, name] of [['selection-only', 'select_static', 'question_0_option'], ['unrelated-button', 'button', 'another_action']]) {
+    const wire = f.answer(eventId, {})
+    Object.assign(wire.event.action, { tag, name, value: {} })
+    await f.sdk.receive(wire)
+    expect(nativeActionResponse(f)).toEqual({})
+  }
+  const rows = (await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])).ingresses
+  expect(rows).toHaveLength(2)
+  expect(rows.every((row: { state: string; code: string; input?: unknown }) => row.state === 'refused' && row.code === 'INGRESS_ACTION_UNSUPPORTED' && !row.input)).toBe(true)
+  expect(f.send).not.toHaveBeenCalled()
+  expect(f.services.ingress!.questionForm(originalQuestionForm(f, f.answer()))).toMatchObject({ status: 'pending' })
 }, 30_000)
 
 it('invalid Question during an original authority observation gap recovers to validation without claiming input', async () => {
