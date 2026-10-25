@@ -4,6 +4,7 @@ import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../../../..')
 const edits: Record<string, [string, string, string]> = {
+  'initial-binding': ['packages/core/src/client.ts', 'current.nativeHandle || !normalized.nativeHandle ? current : { ...current, nativeHandle: normalized.nativeHandle }, nativeActivity)) return current', 'current, nativeActivity)) return current'],
   'main-turn': ['packages/core/src/client.ts', 'event.nativeTurnId !== previous.event.nativeTurnId', 'false'],
   'child-turn': ['packages/core/src/hook-normalizer.ts', 'previous.nativeTurnId !== identity.nativeTurnId', 'false'],
   'child-source': ['packages/core/src/client.ts', 'agentSubagentActivityUnconfirmed(session.run.runId, previousActivity?.runId === session.run.runId ? previousActivity.event.sourceId : undefined)', 'false'],
