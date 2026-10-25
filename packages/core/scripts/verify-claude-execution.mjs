@@ -172,7 +172,12 @@ try {
   assert(JSON.stringify(resumedRequest.body.messages).includes(finalNames.first))
   assert.equal(await readFile(join(workspace, 'effect-count.txt'), 'utf8'), 'once\n')
   await assert.rejects(readFile(join(workspace, 'long-background-forbidden.txt')), { code: 'ENOENT' })
-  const machine = await frames(agent, helpers.frontend.runId), effects = machine.filter(frame => frame.type === 'request' && frame.payload?.method === 'tools/call' && frame.payload.params?.name === 'Bash' && frame.payload.params.arguments?.command === steps.find(step => step.id === 'toolu_remote_effect').input.command)
+  const machine = await frames(agent, helpers.frontend.runId)
+  for (const step of steps) {
+    const routed = machine.filter(frame => frame.type === 'request' && frame.payload?.method === 'tools/call' && frame.payload.params?.name === step.name && Object.entries(step.input).every(([key, value]) => frame.payload.params.arguments?.[key] === value))
+    assert.equal(routed.length, 1, 'Every original native resource tool must have one typed binding request: ' + step.id)
+  }
+  const effects = machine.filter(frame => frame.type === 'request' && frame.payload?.method === 'tools/call' && frame.payload.params?.name === 'Bash' && frame.payload.params.arguments?.command === steps.find(step => step.id === 'toolu_remote_effect').input.command)
   assert.equal(effects.length, 1, 'Original effect has one native request')
   const stops = machine.filter(frame => frame.type === 'request' && frame.payload?.method === 'tools/call' && frame.payload.params?.name === 'TaskStop' && frame.payload.params.arguments?.task_id === backgroundTaskId)
   assert.equal(stops.length, 1, 'The resumed Agent submits one original resource task stop')
@@ -195,9 +200,15 @@ try {
   success = { passed: true, evidence: root, originalCoreSession: agentSessionId, nativeConversationId: nativeId, modelRequests: modelRequests.length }
 } catch (error) {
   failure = error
-  for (const owner of owners) for (const session of owner.sessions) {
-    const replay = await owner.client?.readRunReplay(session.run, 0, 'raw').catch(() => null)
-    if (replay) await writeFile(join(root, `agent-${session.agentSessionId}.raw`), Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))), { mode: 0o600 })
+  for (const owner of owners) {
+    for (const session of owner.sessions) {
+      const replay = await owner.client?.readRunReplay(session.run, 0, 'raw').catch(() => null)
+      if (replay) await writeFile(join(root, `agent-${session.agentSessionId}.raw`), Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))), { mode: 0o600 })
+    }
+    for (const runId of new Set(owner.runs)) {
+      const replay = await owner.client?.readRunReplay({ runId }, 0, 'raw').catch(() => null)
+      if (replay) await writeFile(join(root, `helper-${owner.name}-${runId}.raw`), Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))), { mode: 0o600 })
+    }
   }
   await writeFile(join(root, 'failure.json'), JSON.stringify({ message: String(error), stack: error.stack, diagnostics }, null, 2), { mode: 0o600 })
 } finally {
