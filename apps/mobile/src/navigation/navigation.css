@@ -6,8 +6,6 @@
 .mobile-spatial-search > svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); pointer-events: none; }
 .mobile-spatial-search input { width: 100%; min-width: 0; color: var(--text); font: inherit; }
 .mobile-app .mobile-spatial-search input { padding-left: 28px; }
-.mobile-spatial-subheading { display: flex; align-items: baseline; gap: 8px; margin: 12px 0 3px; font-size: 11px; font-weight: 600; color: var(--text-3); }
-.mobile-spatial-subheading > span { font-weight: 400; }
 .mobile-spatial-tab { min-width: 0; }
 .mobile-spatial-zone-name { font-size: 12px; font-weight: 550; margin: 8px 0 0; color: var(--text-2); }
 .mobile-spatial-tab h3 { font-size: 11px; font-weight: 500; margin: 6px 0 0; color: var(--text-3); }
@@ -71,7 +69,3 @@
 .mobile-session-state > span:not(.focus-state-mark) { min-width: 0; overflow: hidden; overflow-wrap: anywhere; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .mobile-session-state > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-session-state[data-state='done'] { color: var(--status-success-text, var(--green)); }
-
-.mobile-section-actions, .mobile-zone-tools { display: flex; align-items: center; gap: 2px; }
-.mobile-zone-tools { justify-content: flex-end; }
-

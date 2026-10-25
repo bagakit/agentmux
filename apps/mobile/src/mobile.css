@@ -62,6 +62,7 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-goal-list strong { line-height: 1.5; font-weight: 500; font-size: 13px; }
 .mobile-goal-list small, .mobile-goal-meta { color: var(--text-3); font-size: 12px; line-height: 1.65; }
 .mobile-goal-section { padding: 12px 0; }
+.mobile-goal-section > summary { min-height: 44px; padding-block: var(--sp-5); font-size: var(--fs-body); font-weight: 600; cursor: pointer; }
 .mobile-goal-section h2 { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; font-size: 15px; font-weight: 550; }
 .mobile-goal-kicker { display: flex; align-items: center; gap: 6px; color: var(--green); font-size: 11px; }
 .mobile-goal-summary { white-space: pre-wrap; font-size: 13px; margin: 8px 0; line-height: 1.5; }
@@ -81,8 +82,6 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-goal-result > strong { display: block; font-weight: 500; font-size: 13px; line-height: 1.6; }
 .mobile-goal-result > small { display: block; margin-top: 4px; color: var(--text-3); }
 .mobile-goal-result code { display: block; margin: 5px 0; padding: 7px 9px; font-size: 11px; background: var(--surface-1); border-radius: var(--radius-sm); white-space: pre-wrap; }
-.mobile-goal-evidence button { min-width: 44px; min-height: 44px; padding: 6px 12px; border: 0; border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: var(--hl); color: var(--text-2); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
-.mobile-goal-evidence button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .mobile-goal-section details { margin-top: 16px; color: var(--text-3); font-size: 12px; line-height: 1.7; }
 .mobile-goal-section summary { min-height: 44px; cursor: pointer; }
 .mobile-goal-pending { margin-top: 16px; padding: 14px; border: 1px solid var(--green-line); border-radius: var(--radius-lg); color: var(--text-2); font-size: 12px; line-height: 1.7; }
@@ -120,10 +119,15 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-sheet > .mobile-sheet-title { position: sticky; top: 0; z-index: 1; background: var(--surface-1); }
 .mobile-sheet-title h2 { font-weight: 550; letter-spacing: -.6px; font-size: 17px; margin: 4px 0 8px; }
 .mobile-icon-button, .icon-button.mobile-icon-button { width: 44px; height: 44px; min-width: 44px; min-height: 44px; flex: none; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: calc((44px - var(--mobile-control-surface)) / 2) solid transparent; border-radius: calc(var(--radius-sm) + (44px - var(--mobile-control-surface)) / 2); background: transparent; background-clip: padding-box; color: var(--text-2); transition: color var(--dur-fast) ease, background-color var(--dur-fast) ease; }
-.mobile-icon-button.icon-button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); background-clip: padding-box; }
-.mobile-icon-button.icon-button:active:not(:disabled) { color: var(--text); background: var(--surface-3); background-clip: padding-box; box-shadow: none; }
-.mobile-icon-button.icon-button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -3px; }
+.mobile-icon-button:hover:not(:disabled) { color: var(--text); background: var(--surface-2); background-clip: padding-box; }
+.mobile-icon-button:active:not(:disabled) { color: var(--text); background: var(--surface-3); background-clip: padding-box; box-shadow: none; }
+.mobile-icon-button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -3px; }
 .mobile-page-header { display: flex; align-items: center; gap: 6px; min-height: 44px; }
+.mobile-section-actions, .mobile-zone-tools { display: flex; align-items: center; gap: var(--sp-1); }
+.mobile-zone-tools { justify-content: flex-end; }
+.mobile-spatial-subheading { display: flex; align-items: baseline; gap: var(--sp-4); margin: var(--sp-5) 0 var(--sp-1); font-size: var(--fs-meta); font-weight: 600; color: var(--text-3); }
+.mobile-spatial-subheading > span { font-weight: 400; }
+.mobile-region-source { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-body); line-height: 1.55; }
 .mobile-page-header > :is(h1, div) { flex: 1; min-width: 0; }
 .mobile-page-header > .mobile-section-actions { flex: none; margin-left: auto; }
 .mobile-app[data-page-header='inline'] .mobile-main { padding-top: env(safe-area-inset-top); }
@@ -396,6 +400,13 @@ button:disabled { opacity: .5; cursor: default; }
 
 /* Deferred feedback must be styled before optional workface styles arrive. */
 .mobile-deferred-surface { min-width: 0; padding: 12px; color: var(--text-2); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.mobile-loading-label { display: block; font-size: var(--fs-meta); color: var(--text-3); }
+.mobile-loading-skeleton { display: grid; gap: var(--sp-4); padding-block: var(--sp-6); }
+.mobile-loading-skeleton > span { height: var(--sp-5); border-radius: var(--radius-sm); background: var(--surface-3); }
+.mobile-loading-skeleton > span:first-child { width: 40%; }
+.mobile-loading-skeleton > span:last-child { width: 70%; }
+.mobile-composer-feedback { min-height: 0; max-height: min(25dvh, calc(var(--sp-8) * 5)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.mobile-composer-feedback:has(details[open]) { max-height: 40dvh; }
 .mobile-deferred-surface > p { margin: 0 0 4px; }
 .mobile-deferred-surface > details { color: var(--text-3); }
 .mobile-deferred-surface > details > summary { box-sizing: border-box; min-height: 44px; padding-block: 12px; cursor: pointer; }
@@ -427,7 +438,7 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-space-icon { position: relative; display: inline-flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
 .mobile-agent-create { display: grid; gap: 10px; }
 .mobile-agent-create label { display: grid; gap: 4px; font-size: 12px; }
-.mobile-agent-create select, .mobile-agent-create textarea { width: 100%; min-height: 44px; font-size: 16px; background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--line-soft); border-radius: var(--radius-md, 8px); padding: 8px; }
+.mobile-agent-create select, .mobile-agent-create textarea { width: 100%; min-height: 44px; font-size: 16px; background: var(--surface-2); color: var(--text); border: 1px solid var(--line-soft); border-radius: var(--radius-md, 8px); padding: 8px; }
 .mobile-agent-create textarea { min-height: 76px; resize: vertical; }
 .mobile-create-receipt { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .mobile-create-target { min-width: 0; font-size: 12px; line-height: 1.4; }
@@ -441,19 +452,13 @@ button:disabled { opacity: .5; cursor: default; }
 
 /* Motion explains a state change only: sheets rise in, the drawer slides in, and every touch
    target answers the finger at once. Offsets use `translate` so positioning `transform`/`bottom`
-   stay owned by the viewport binder. Exits use distinct keyframes with finite durations. */
+   stay owned by the viewport binder. Closing releases the modal immediately. */
 @keyframes mobile-sheet-enter { from { opacity: 0; translate: 0 24px; } }
-@keyframes mobile-sheet-exit { to { opacity: 0; translate: 0 24px; } }
 @keyframes mobile-drawer-enter { from { opacity: .6; translate: -24px 0; } }
-@keyframes mobile-drawer-exit { to { opacity: 0; translate: -24px 0; } }
 @keyframes mobile-scrim-enter { from { opacity: 0; } }
-@keyframes mobile-scrim-exit { to { opacity: 0; } }
 .mobile-sheet[data-state='open'] { animation: mobile-sheet-enter var(--dur-enter) var(--ease-enter); }
-.mobile-sheet[data-state='closed'] { animation: mobile-sheet-exit var(--dur-fast) ease-in forwards; }
 .mobile-drawer[data-state='open'] { animation: mobile-drawer-enter var(--dur-enter) var(--ease-enter); }
-.mobile-drawer[data-state='closed'] { animation: mobile-drawer-exit var(--dur-fast) ease-in forwards; }
 :is(.mobile-sheet-backdrop, .mobile-drawer-backdrop)[data-state='open'] { animation: mobile-scrim-enter var(--dur-enter) ease-out; }
-:is(.mobile-sheet-backdrop, .mobile-drawer-backdrop)[data-state='closed'] { animation: mobile-scrim-exit var(--dur-fast) ease-in forwards; }
 :is(.mobile-session-list button, .mobile-menu-row, .mobile-navigation button, .mobile-mote-choice, .mobile-tree-section > summary, .mobile-goals-list button, .mobile-secondary) { transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease; }
 :is(.mobile-session-list button, .mobile-menu-row, .mobile-navigation button, .mobile-mote-choice, .mobile-tree-section > summary, .mobile-goals-list button):active { background-color: var(--surface-1); transition-duration: 0s; }
 .mobile-secondary:active:not(:disabled) { background: var(--surface-3); transition-duration: 0s; }

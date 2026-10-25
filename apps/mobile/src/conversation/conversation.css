@@ -124,7 +124,7 @@
 .mobile-send-status__summary > span { min-width: 0; font-size: 11px; overflow-wrap: anywhere; }
 .mobile-send-status__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .mobile-send-status button, .mobile-send-status summary { min-width: 44px; min-height: 44px; cursor: pointer; }
-.mobile-send-status > button, .mobile-send-status__actions > button, .mobile-send-status__diagnosis > button, .mobile-send-status__diagnosis > summary { border: 0; padding: 0 4px; color: inherit; background: transparent; font: inherit; }
+.mobile-send-status > button, .mobile-send-status__actions > button, .mobile-send-status__diagnosis > button, .mobile-send-status__diagnosis > summary, .mobile-send-status__diagnosis > details > button, .mobile-send-status__diagnosis > details > summary { border: 0; padding: 0 4px; color: inherit; background: transparent; font: inherit; }
 .mobile-send-status .message-delivery-failure button { border: 8px solid transparent; padding: 2px 8px; background: var(--surface-2); background-clip: padding-box; border-radius: calc(var(--radius-sm, 6px) + 8px); }
 .mobile-send-status .message-delivery-failure .message-delivery-failure__dismiss { background: transparent; padding: 0; border: 0; }
 .mobile-send-status[data-phase='unknown'] { color: var(--status-warning-text); }
@@ -138,7 +138,7 @@
 .mobile-send-status__diagnosis dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 2px 8px; margin: 0 0 4px; }
 .mobile-send-status__diagnosis dt { color: var(--text-3); }
 .mobile-send-status__diagnosis dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
-.mobile-send-status__diagnosis > pre { margin: 2px 0 4px; max-height: 72px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; user-select: text; }
+.mobile-send-status__diagnosis pre { margin: 2px 0 4px; max-height: 72px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; user-select: text; }
 .mobile-send-status[data-manual='true'] > .message-delivery-failure,
 .mobile-send-status[data-manual='true'] > .mobile-send-status__actions,
 .mobile-send-status[data-manual='true'] > .mobile-send-status__diagnosis { grid-column: 1 / -1; }

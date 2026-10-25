@@ -33,7 +33,6 @@
 .mobile-region-content > details { margin-block: 8px; font-size: 11px; color: var(--text-muted); }
 .mobile-region-content > details code, .mobile-region-content > details small { display: block; overflow-wrap: anywhere; }
 .mobile-region-content > p[role='status'] { font-size: 13px; line-height: 1.5; }
-.mobile-region-source { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.55; }
 .mobile-note-body { line-height: 1.7; overflow-wrap: anywhere; }
 .mobile-note-body h1, .mobile-note-body h2, .mobile-note-body h3 { margin: 1em 0 .5em; }
 .mobile-note-body ul { list-style: disc; padding-left: 1.5em; }

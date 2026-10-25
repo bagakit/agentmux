@@ -12,9 +12,21 @@ import { isAffirmative, permissionPlan, permissionTierClassName, questionPlan } 
 import { AgentQuestionChoices } from './AgentQuestionChoices.js'
 import { presentError } from '../lib/error-presentation.js'
 
+const defaultLabels = {
+  readOnly: 'Read-only · Answer in the original Session', sending: 'Sending answer…',
+  completed: 'Original request completed', unknown: 'Delivery unknown · Check the original operation',
+  saved: 'Answer saved · Dispatch not confirmed', awaiting: 'Answer sent · Waiting for confirmation',
+  pending: 'Confirmation pending', unavailable: 'Answer unavailable · Check this Session', needed: 'Needs your answer',
+  inspect: 'Check original response', details: 'Details', tool: 'Tool', terminal: 'Open terminal',
+  retry: 'Choose an option to retry.', cancel: 'Cancel', question: 'Agent question',
+  permission: 'Agent permission request', native: 'Agent interaction needs native confirmation'
+}
+export type AgentInteractionLabels = { [K in keyof typeof defaultLabels]: string }
+
 /** The single typed plan owns answer semantics; this card owns presentation and submission state. */
 export function AgentInteractionCard({
   request,
+  labels = defaultLabels,
   surfaceRef,
   disabled = false,
   readOnly = false,
@@ -29,6 +41,8 @@ export function AgentInteractionCard({
 }: {
   surfaceRef?: Ref<HTMLElement>
   request: AgentMuxInteractionRequest
+  /** Client-owned chrome only; native request and option text stay unchanged. */
+  labels?: AgentInteractionLabels
   disabled?: boolean
   readOnly?: boolean
   responseUnavailableReason?: string | undefined
@@ -79,40 +93,40 @@ export function AgentInteractionCard({
   }
 
   const reason = responseUnavailableReason ?? (request.kind === 'question' ? request.responseUnavailableReason : undefined)
-  const status = readOnly ? 'Read-only · Answer in the original Session'
-    : phase === 'sending' ? 'Sending answer…'
-    : phase === 'awaiting' ? receipt?.nativeCompleted ? 'Original request completed'
-      : receipt?.delivery === 'unknown' ? 'Delivery unknown · Check the original operation'
-      : receipt?.delivery === 'saved' ? 'Answer saved · Dispatch not confirmed'
-      : 'Answer sent · Waiting for confirmation'
-    : reason ? 'Confirmation pending'
-    : disabled ? 'Answer unavailable · Check this Session'
-    : 'Needs your answer'
+  const status = readOnly ? labels.readOnly
+    : phase === 'sending' ? labels.sending
+    : phase === 'awaiting' ? receipt?.nativeCompleted ? labels.completed
+      : receipt?.delivery === 'unknown' ? labels.unknown
+      : receipt?.delivery === 'saved' ? labels.saved
+      : labels.awaiting
+    : reason ? labels.pending
+    : disabled ? labels.unavailable
+    : labels.needed
   const requestStatus = responseStatus ?? <div>
     <p className="agent-interaction__status" role="status" aria-live="polite">{status}</p>
     {receipt && renderReceipt ? renderReceipt(receipt) : null}
     {onInspect && operation.current && (receipt?.delivery === 'unknown' || receipt?.delivery === 'saved') ?
       <button type="button" onClick={() => { const original = operation.current!; void onInspect(original.operationId).then(value => {
         if (value && operation.current === original) setReceipt(value)
-      }).catch(error => setFailure(presentError(error))) }}>Check original response</button> : null}
+      }).catch(error => setFailure(presentError(error))) }}>{labels.inspect}</button> : null}
   </div>
 
   if (reason) return (
-    <section ref={surfaceRef} className="agent-interaction agent-interaction--native" aria-label="Agent interaction needs native confirmation" data-request-id={request.id}>
+    <section ref={surfaceRef} className="agent-interaction agent-interaction--native" aria-label={labels.native} data-request-id={request.id}>
       <div className="agent-interaction__native-heading">
         {request.kind === 'permission' ? <SemanticIcon name="status.permission" size={15} /> : <SemanticIcon name="status.unknown" size={15} />}
         <div>
-          <strong>{request.kind === 'permission' ? request.title : request.questions[0]?.title || request.questions[0]?.prompt || 'Agent question'}</strong>
+          <strong>{request.kind === 'permission' ? request.title : request.questions[0]?.title || request.questions[0]?.prompt || labels.question}</strong>
           {requestStatus}
         </div>
       </div>
       <details className="agent-interaction__native-details">
-        <summary>Details</summary>
+        <summary>{labels.details}</summary>
         <div>
           <p>{reason}</p>
           {sourceNotice ? <p>{sourceNotice}</p> : null}
           {request.kind === 'permission' ? <>
-            {request.toolName ? <p>Tool: {request.toolName}</p> : null}
+            {request.toolName ? <p>{labels.tool}: {request.toolName}</p> : null}
             {request.toolInput ? <pre>{request.toolInput}</pre> : null}
           </> : request.questions.map(question => (
             <div key={question.id}>
@@ -122,7 +136,7 @@ export function AgentInteractionCard({
           ))}
         </div>
       </details>
-      {!readOnly && onOpenTerminal ? <button className="agent-interaction__native-terminal" type="button" onClick={onOpenTerminal}>Open terminal</button> : null}
+      {!readOnly && onOpenTerminal ? <button className="agent-interaction__native-terminal" type="button" onClick={onOpenTerminal}>{labels.terminal}</button> : null}
     </section>
   )
 
@@ -133,7 +147,7 @@ export function AgentInteractionCard({
     // 否则塌回紧凑动作行。判据与「答的是什么」同住一处，不在这里重算。
     const { choices, allows, rejects, scoped, dismiss } = permissionPlan(request)
     return (
-      <section ref={surfaceRef} className="agent-interaction" aria-label="Agent permission request" data-request-id={request.id}>
+      <section ref={surfaceRef} className="agent-interaction" aria-label={labels.permission} data-request-id={request.id}>
         {requestStatus}
         {sourceNotice ? <p className="agent-interaction__source-notice">{sourceNotice}</p> : null}
         <div className="agent-interaction__heading">
@@ -144,7 +158,7 @@ export function AgentInteractionCard({
           </div>
         </div>
         {request.toolInput ? <pre>{request.toolInput}</pre> : null}
-        {failure ? <p className="agent-interaction__error" role="status" aria-live="polite">{failure} Choose an option to retry.</p> : null}
+        {failure ? <p className="agent-interaction__error" role="status" aria-live="polite">{failure} {labels.retry}</p> : null}
         {scoped ? (
           <div className="agent-interaction__grants">
             {allows.map(({ option, response }) => (
@@ -177,7 +191,7 @@ export function AgentInteractionCard({
             disabled={unavailable}
             onClick={() => void respond(dismiss)}
           >
-            Cancel
+            {labels.cancel}
           </button>
           {/* 升列时紧凑行只剩否决；没升列时按 Core 的声明顺序画全部——顺序由取值层给，不在这里拼。 */}
           {(scoped ? rejects : choices).map(({ option, response }) => (
@@ -200,7 +214,7 @@ export function AgentInteractionCard({
 
   const { question, choices, dismiss } = questionPlan(request)
   return (
-    <section ref={surfaceRef} className="agent-interaction" aria-label="Agent question" data-request-id={request.id}>
+    <section ref={surfaceRef} className="agent-interaction" aria-label={labels.question} data-request-id={request.id}>
       {requestStatus}
       {sourceNotice ? <p className="agent-interaction__source-notice">{sourceNotice}</p> : null}
       <div className="agent-interaction__heading">
@@ -210,7 +224,7 @@ export function AgentInteractionCard({
           <span>{question.prompt}</span>
         </div>
       </div>
-      {failure ? <p className="agent-interaction__error" role="status" aria-live="polite">{failure} Choose an option to retry.</p> : null}
+      {failure ? <p className="agent-interaction__error" role="status" aria-live="polite">{failure} {labels.retry}</p> : null}
       <AgentQuestionChoices options={choices.map(choice => choice.option)} selectedId={selectedOption} disabled={unavailable}
         onChoose={id => { const choice = choices.find(choice => choice.option.id === id); if (choice) void respond(choice.response) }} />
       <div className="agent-interaction__actions">
@@ -220,7 +234,7 @@ export function AgentInteractionCard({
           disabled={unavailable}
           onClick={() => void respond(dismiss)}
         >
-          Cancel
+          {labels.cancel}
         </button>
       </div>
     </section>

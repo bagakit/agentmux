@@ -1,0 +1,10 @@
+.mobile-goal-evidence { list-style: none; margin: var(--sp-3) 0; padding: 0; }
+.mobile-goal-evidence > li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; column-gap: var(--sp-3); }
+.mobile-goal-evidence > li > svg { grid-column: 1; grid-row: 1; color: var(--text-3); }
+.mobile-goal-evidence > li > :is(code, a) { display: block; min-width: 0; grid-column: 2; margin: 0; padding: 0; background: transparent; overflow-wrap: anywhere; white-space: pre-wrap; font-size: var(--fs-meta); }
+.mobile-goal-evidence > li > small { grid-column: 2; color: var(--text-3); font-size: var(--fs-meta); }
+.mobile-goal-evidence > li > :is(details, [role=status], pre) { grid-column: 1 / -1; }
+.mobile-goal-evidence button { min-width: 44px; min-height: 44px; padding: 0 var(--sp-2); border: 0; background: transparent; box-shadow: none; color: var(--text-2); font: inherit; font-size: var(--fs-meta); cursor: pointer; text-align: left; }
+.mobile-goal-evidence button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.mobile-goal-evidence > li > button { grid-column: 2; }
+.mobile-goal-evidence > li > .mobile-icon-button { grid-row: 1; grid-column: 3; }

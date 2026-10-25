@@ -419,7 +419,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           initialContext={topicsRoute.context} onContextChange={updateTopicsContext}
           {...(source?.kind === 'topic' ? { onLeaveTopic: leaveSource, topicBackLabel: '返回知识' } : {})}
           onOpenTopic={topic => updateTopicsContext({ ...topicsRoute.context, topicId: topic.topicId, mode: 'discussion' })} openSource={openSource} openHttpLink={openBrowserHttpLink} onBackChange={registerTopicsBack}
-          renderWorkface={(topic, visible) => <MobileZoneWorkface loadWhen={!showSession && secondary === 'topics'} onLoadReturn={returnToConversation} key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible} onCreateAgent={createAgent}
+          renderWorkface={(topic, visible) => <MobileZoneWorkface loadWhen={visible} onLoadReturn={returnToConversation} key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible} onCreateAgent={createAgent}
             {...(source?.kind === 'topic' && source.topicId === topic.topicId ? { tabId: source.chatId, regionId: source.threadId } : {})} openSession={openSession} />} /></div>
         <div hidden={showSession || secondary !== 'survey'}><MobileSurveySurface loadWhen={!showSession && secondary === 'survey'} onLoadReturn={returnToConversation} client={client} connected={connected} visible={exposed && !showSession && secondary === 'survey'} openSession={openSession}
           openTopic={openSurveyTopic} initialContext={surveyContext} onContextChange={updateSurveyContext} onBackChange={registerSurveyBack} openHttpLink={openBrowserHttpLink} /></div>
@@ -502,7 +502,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           <MobileNoticeRestore onRestored={() => setSheet(null)} />
         </> : sheet === 'identity' && profileIdentity ? <>
           <Dialog.Description id="mobile-sheet-description">原资料与当前工作</Dialog.Description>
-          <MobileMoteProfile loadWhen={sheet === 'identity'} onLoadReturn={requestBack} identity={profileIdentity} client={client} copyText={platform.copyText} visible={sheet === 'identity'} sourcePath={profileSourcePath} onSourceChange={setProfileSourcePath} onBackChange={registerProfileBack} onOpenGoals={id => {
+          <MobileMoteProfile loadWhen={sheet === 'identity'} loadingReturn={false} onLoadReturn={requestBack} identity={profileIdentity} client={client} copyText={platform.copyText} visible={sheet === 'identity'} sourcePath={profileSourcePath} onSourceChange={setProfileSourcePath} onBackChange={registerProfileBack} onOpenGoals={id => {
             openSession(id, profileIdentity); setShowGoalWork(true); setSheet(null)
           }} />
         </> : sheet === 'agent' && menuTarget ? <>

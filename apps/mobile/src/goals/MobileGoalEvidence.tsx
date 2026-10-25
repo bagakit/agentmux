@@ -6,6 +6,7 @@ import { readGoalFileEvidence } from '@agentmux/core/goal-evidence'
 import { demandEvidenceLabel, demandEvidenceText, type DemandEvidence } from '@agentmux/demand/goals'
 import { useMarkdownCopyText, type ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
+import './evidence.css'
 
 export function MobileGoalEvidence({ evidence, client, copyText }: { evidence: readonly DemandEvidence[]; client: AgentMuxHostedClient | null; copyText?: ClientUiPlatform['copyText'] | undefined }) {
   return <ul className="mobile-goal-evidence">{evidence.map((reference, index) => <Evidence key={`${index}:${demandEvidenceText(reference)}`} reference={reference} client={client} copyText={copyText} />)}</ul>
@@ -39,6 +40,7 @@ function Evidence({ reference, client, copyText }: { reference: DemandEvidence; 
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
   return <li>
+    <SemanticIcon name="object.file" size={14} />
     {typeof reference !== 'string' ? <button type="button" disabled={busy} onClick={() => void read()}>{busy ? '读取中…' : `查看证据 ${label}`}</button>
       : url ? <a href={url} target="_blank" rel="noopener noreferrer">{label}</a> : <code>{label}</code>}
     <button type="button" className="mobile-icon-button" aria-label="复制完整引用" title="复制完整引用" onClick={() => void copyReference()}><SemanticIcon name="action.copy" size={16} /></button>

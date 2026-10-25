@@ -37,6 +37,7 @@ import { useMobileInteractionController } from './use-mobile-interaction-control
 import './conversation.css'
 import { DELIVERY_DISMISSAL_STORAGE, MobileNotice, MobileNoticeScope, useMobileNotices } from '../notices/MobileNotice'
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
+import { mobileInteractionLabels } from '../presentation/interaction'
 
 export type { MobileConnection } from './use-hosted-conversation'
 export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
@@ -338,12 +339,15 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             </div> : null}
           </div>
           {original.phase !== 'sending' ? <details className="mobile-send-status__diagnosis"><summary>发送详情</summary>
-            <pre>{original.draft}</pre>
-            <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(`原正文未复制：${errorMessage(error)}`))
-              .then(copied => { if (copied) setCopyNotice('已复制原正文。') }) }}>复制原正文</button>
-            <dl><dt>原操作</dt><dd>{original.operationId}</dd><dt>原 Run</dt><dd>{original.runId ?? '尚未确认'}</dd></dl>
-            <p role="alert">{original.message}</p>
-            {original.logId ? <DeliveryLogDetails log={diagnostics.get(original.logId)} logId={original.logId} copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} /> : null}
+            <p>{original.phase === 'unknown' ? 'Mac 尚未确认这次发送；正文已保留。核对后可重试同一次请求。' : '这条消息尚未发送；正文已保留，可核对原因后重试。'}</p>
+            <details><summary>消息正文</summary><pre>{original.draft}</pre>
+              <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(`原正文未复制：${errorMessage(error)}`))
+                .then(copied => { if (copied) setCopyNotice('已复制原正文。') }) }}>复制原正文</button>
+            </details>
+            <details><summary>技术信息</summary><p role="alert">{original.message}</p>
+              <dl><dt>操作</dt><dd>{original.operationId}</dd><dt>Run</dt><dd>{original.runId ?? '尚未确认'}</dd></dl>
+              {original.logId ? <DeliveryLogDetails log={diagnostics.get(original.logId)} logId={original.logId} copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} /> : null}
+            </details>
             {onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
           </details> : null}</>}
         </aside>
@@ -439,7 +443,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         else if (feed.current) feed.current.scrollTop = feed.current.scrollHeight
       }}>{reading.newerAvailable ? '有新回复 · 回到最新' : '回到最新'}</button>}
       {request && requestKey ? <div className="mobile-conversation__interaction">
-        <AgentInteractionCard key={requestKey} request={request} disabled={responseDisabled}
+        <AgentInteractionCard key={requestKey} request={request} labels={mobileInteractionLabels} disabled={responseDisabled}
           {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : responseUnavailableReason ? { responseUnavailableReason } : {})}
           responseStatus={responseAttempt?.original ? responseStatus(responseEntry![0], responseAttempt) : undefined}
           {...(onShowTerminal ? { onOpenTerminal: onShowTerminal } : {})}
@@ -504,6 +508,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           onDropFiles={files => { void attachmentControls.current?.stageFiles(files) }}
           {...(readPastedImage ? { readPastedImage } : {})}
           />
+        <div className="mobile-composer-feedback">
         {preparationIssue ? <MobileNotice identity={[agentSessionId,preparationIssue]} role="status" className="mobile-compact-notice">{preparationDetail
           ? <details><summary>{preparationIssue}</summary><p className="mobile-compact-notice__detail">{preparationDetail}</p></details>
           : <p>{preparationIssue}</p>}</MobileNotice> : null}
@@ -512,6 +517,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           {retainedAttempts.map(renderPromptAttempt)}
         </details> : null}
         {copyNotice ? <MobileNotice kind="feedback" identity={[copyNotice]} role="status">{copyNotice}</MobileNotice> : null}
+        </div>
       </div>
     </section>
   </MobileNoticeScope></ClientUiProvider>
