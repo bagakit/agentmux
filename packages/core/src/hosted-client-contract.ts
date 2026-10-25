@@ -163,6 +163,7 @@ export type AgentMuxHostedInvocation = { [M in AgentMuxHostedMethod]: {
   method: M; args: HostedArguments<M>
 } }[AgentMuxHostedMethod]
 type DelegatedMethods = { [M in AgentMuxHostedMethod]:
+  M extends 'readMessage' ? AgentMuxClient[M] :
   (...args: HostedArguments<M>) => Promise<Awaited<ReturnType<AgentMuxClient[M]>>> }
 
 /** The original Core observation contract; all opening facts belong to its one output lease. */
