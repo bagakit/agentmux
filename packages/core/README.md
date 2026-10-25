@@ -295,6 +295,12 @@ queue 的 superseded／cancelled 与原平台 receipt 分开，不能把未知�
 列表可附当前 Binding 范围的 worker `observation`，没有 delivery 时也可查 source Gap；
 它是当前进程服务窗，不代表平台 ACK、送达、原生采用或 Agent 健康结论。
 
+`queryFeedback` 保留原 query 的阶段事实；`effect: upsert` 是添加阶段标记，
+`effect: withdraw` 是撤掉 `predecessorOperationId` 指向的旧标记，沿原准确 `reactionId` 映射执行。
+两笔操作与各自回执分别可查，旧添加成功的历史不会因撤掉标记而改写。
+阶段反馈及其撤回均不代表正文送达；替换的行为边界见
+[共同来源与双向交付](../../docs/design/behavior/conversation-mode.md#共同来源与双向交付)。
+
 retry 是准确 Host 对已确认 not-applied 的原 operation 执行一次明确重试，
 保原身份和受众；未知先 inspect，不换 ID 重放。当前授权由原 Host owner 复核，
 操作者及其有效性来自可信 user／device 运输上下文，不能在参数中冒充。
