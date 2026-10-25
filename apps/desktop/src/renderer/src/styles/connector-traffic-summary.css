@@ -1,11 +1,11 @@
 .connector-traffic-summary { display: grid; gap: var(--sp-3); min-width: 0; container-type: inline-size; }
 .connector-traffic-summary__directions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
-.connector-traffic-summary__tile { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-content: start; align-items: start; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--surface-1); }
+.connector-traffic-summary__tile { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-content: start; align-items: start; gap: var(--sp-2) var(--sp-3); min-width: 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--surface-1); }
 .connector-traffic-summary__leading { display: grid; place-items: center; color: var(--text-3); padding-top: 2px; }
 .connector-traffic-summary__copy { display: grid; gap: var(--sp-1); min-width: 0; }
 .connector-traffic-summary__direction { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .connector-traffic-summary__direction svg { flex: none; }
-.connector-traffic-summary__tile strong { font-size: var(--fs-meta); line-height: 1.45; color: var(--text); font-weight: 500; }
+.connector-traffic-summary__tile strong { font-size: var(--fs-meta); line-height: 1.45; color: var(--text); font-weight: 550; }
 .connector-traffic-summary__tile small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.45; }
 .connector-traffic-summary__tile :is(strong, small) { white-space: normal; overflow-wrap: anywhere; }
 .connector-traffic-summary__tile[data-tone='warning'] strong { color: var(--amber-text); }
@@ -20,7 +20,7 @@
 .connector-traffic-summary__problems span { overflow-wrap: anywhere; }
 .connector-traffic-summary__retained { margin: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
 .connector-traffic-summary__inspect { justify-self: start; }
-.agent-connector-dialog .connector-traffic-summary__action { grid-column: 2; justify-self: start; white-space: nowrap; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-soft); color: var(--text-2); background: var(--surface-1); font-size: var(--fs-micro); }
+.agent-connector-dialog .connector-traffic-summary__action { grid-column: 2; justify-self: start; white-space: normal; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-soft); color: var(--text-2); background: var(--surface-1); font-size: var(--fs-micro); }
 .agent-connector-dialog .connector-traffic-summary__action:hover:not(:disabled) { border-color: var(--line); background: var(--surface-2); }
 @container (max-width: 560px) {
   .connector-traffic-summary__directions { grid-template-columns: minmax(0, 1fr); }

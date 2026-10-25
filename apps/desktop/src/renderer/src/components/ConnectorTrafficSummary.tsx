@@ -27,14 +27,14 @@ export function ConnectorTrafficSummary({ summary, compact = false, onInspect, a
         return <section className="connector-traffic-summary__tile" key={direction.direction} data-direction={direction.direction} data-tone={direction.tone} aria-label={direction.title}>
           {compact ? <><span className="connector-traffic-summary__direction">{direction.direction === 'outgoing' ? <OutgoingIcon size={14} /> : <IncomingIcon size={14} />}{direction.direction === 'outgoing' ? 'To group' : 'To Agent'}</span><div className="connector-traffic-summary__copy"><strong>{direction.value}</strong>{direction.secondary ? <small>{direction.secondary}</small> : null}</div></>
             : <><span className="connector-traffic-summary__leading" aria-hidden="true">{direction.direction === 'outgoing' ? <OutgoingIcon size={16} /> : <IncomingIcon size={16} />}</span>
-              <div className="connector-traffic-summary__copy"><span className="connector-traffic-summary__direction">{direction.title}</span><strong>{direction.value}</strong>{direction.secondary ? <small>{direction.secondary}</small> : null}<small>{direction.detail}</small></div>{action(problem)}</>}
+              <div className="connector-traffic-summary__copy"><span className="connector-traffic-summary__direction">{direction.title}</span><strong>{direction.value}</strong>{direction.secondary ? <small>{direction.secondary}</small> : null}<small className="connector-traffic-summary__context">{problem?.detail ?? direction.detail}</small></div>{action(problem)}</>}
         </section>
       })}
     </div>
     {!compact && problems.length ? <ul className="connector-traffic-summary__problems" aria-label="Connection observations">{problems.map(problem => <li key={problem.kind} data-problem-kind={problem.kind} data-tone={problem.tone}>
       <span className="connector-traffic-summary__problem-icon"><ConnectorProblemIcon kind={problem.kind} /></span><div><strong>{problem.title}</strong><small>{problem.detail}</small></div>{action(problem)}
     </li>)}</ul> : null}
-    {compact && summary.note ? <p className="connector-traffic-summary__retained">{summary.note}</p> : !compact && summary.retained ? <p className="connector-traffic-summary__retained">Earlier matching observations are kept; the latest check is incomplete.</p> : null}
+    {compact && summary.note ? <p className="connector-traffic-summary__retained">{summary.note}</p> : !compact && summary.retained && !primary.has('outgoing-read-unavailable') && !primary.has('incoming-read-unavailable') ? <p className="connector-traffic-summary__retained">Earlier matching observations are kept; the latest check is incomplete.</p> : null}
     {onInspect ? <button type="button" className="agent-connector-text-action connector-traffic-summary__inspect" onClick={onInspect}>View original receipts</button> : null}
   </div>
 }

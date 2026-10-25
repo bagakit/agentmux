@@ -9,8 +9,8 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 const JoinIcon = semanticIconComponent('object.link')
 
 /** Joining and Agent access remain separate facts; this view never guesses the local person's account. */
-export function ConnectorRoomJoinLink({ submitted, operation, pending, prominent, canContinue, onCreate, onInspect, onContinue, onRegenerate, initialOpen = false }: {
-  initialOpen?: boolean; submitted: boolean; operation: RoomLinkOperation | null; pending: boolean; prominent: boolean; canContinue: boolean; onCreate(): void; onInspect(): void; onContinue(): void; onRegenerate(): void
+export function ConnectorRoomJoinLink({ submitted, operation, pending, prominent, canContinue, onCreate, onInspect, onContinue, onRegenerate, initialOpen = false, heading = true }: {
+  heading?: boolean; initialOpen?: boolean; submitted: boolean; operation: RoomLinkOperation | null; pending: boolean; prominent: boolean; canContinue: boolean; onCreate(): void; onInspect(): void; onContinue(): void; onRegenerate(): void
 }) {
   const [feedback, setFeedback] = useState('')
   const disclosure = useRef<HTMLDetailsElement>(null)
@@ -52,7 +52,7 @@ export function ConnectorRoomJoinLink({ submitted, operation, pending, prominent
       </>}
     {feedback ? <p role="status" className="agent-connector-note">{feedback}</p> : null}
   </div>
-  return prominent ? <section className="agent-connector-fields" aria-label="Joining this group"><h3><JoinIcon size={16} />Join this group</h3>{body}</section>
+  return prominent ? <section className="agent-connector-fields" aria-label="Joining this group">{heading ? <h3><JoinIcon size={16} />Join this group</h3> : null}{body}</section>
     : <details ref={disclosure} className="agent-connector-disclosure" aria-label="Joining this group"><summary>Join this group</summary>{body}</details>
 }
 
