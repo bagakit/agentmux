@@ -15,6 +15,7 @@ const evidence = resolve(root, '.tmp/agentmux-private-mobile-client/shared-ui/vi
 const privateRoot = await mkdtemp(resolve(tmpdir(), 'agentmux-client-ui-'))
 const require = createRequire(resolve(root, 'apps/desktop/package.json'))
 const conversationOnly = process.argv.includes('--conversation-only')
+const processSummary = process.argv.includes('--process-summary')
 const hash = data => createHash('sha256').update(data).digest('hex')
 const receipt = { schema: 'agentmux.shared-conversation-visual-capture.v1', passed: false,
   scope: 'Actual compiled Desktop component gallery in a private Electron profile. Shared UI and Desktop adapter; no mobile auth, device, user App or healthy Run claim.',
@@ -59,12 +60,12 @@ try {
   await new Promise(done => server.listen(0, '127.0.0.1', done))
   const url = `http://127.0.0.1:${server.address().port}/agentmux-gallery/gallery.html`
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-  receipt.process = await runProbeProcess(require('electron'), [resolve(root, 'packages/client-ui/scripts/shared-conversation-electron.cjs'), url, privateRoot, evidence, ...conversationOnly ? ['--conversation-only'] : []],
+  receipt.process = await runProbeProcess(require('electron'), [resolve(root, 'packages/client-ui/scripts/shared-conversation-electron.cjs'), url, privateRoot, evidence, ...conversationOnly ? ['--conversation-only'] : [], ...processSummary ? ['--process-summary'] : []],
     { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 45_000, onLine: line => receipt.stderr.push(line) })
   assert.equal(receipt.process.exitCode, 0, 'Private Electron capture failed')
   const actual = JSON.parse(await readFile(resolve(evidence, 'actual.json'), 'utf8'))
   assert.equal(actual.passed, true, JSON.stringify(actual.failure))
-  assert.equal(actual.frames.length, conversationOnly ? 4 : 6)
+  assert.equal(actual.frames.length, processSummary ? 8 : conversationOnly ? 4 : 6)
   for (const frame of actual.frames) {
     const bytes = await readFile(resolve(evidence, frame.file))
     assert.ok(bytes.length > 1000)

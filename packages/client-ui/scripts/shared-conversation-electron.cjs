@@ -4,6 +4,7 @@ const path = require('node:path')
 const { app, BrowserWindow } = require('electron')
 const [url, privateRoot, evidence] = process.argv.slice(2)
 const conversationOnly = process.argv.includes('--conversation-only')
+const processSummary = process.argv.includes('--process-summary')
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { schema: 'agentmux.shared-conversation-electron-actual.v1', passed: false, frames: [], console: [], scope: 'Actual compiled Gallery and shared components; private Electron profile, no user Run or App lifecycle.' }
@@ -24,7 +25,44 @@ app.whenReady().then(async () => {
       await new Promise(done => setTimeout(done, 30))
     }
     await read('document.fonts.ready')
-    for (const width of [1280, 390]) {
+    if (processSummary) {
+      for (const width of [1280, 390]) for (const theme of ['dark', 'light']) {
+        win.setContentSize(width, 900)
+        await read(`Array.from(document.querySelectorAll('[aria-label="主题切换"] button')).find(button => button.textContent === ${JSON.stringify(theme === 'dark' ? '深色' : '浅色')}).click()`)
+        await settle()
+        for (const expanded of [false, true]) {
+          await read(`(() => { const head = document.querySelector('.observation-sample--conversation .wf-head'); if ((head.getAttribute('aria-expanded') === 'true') !== ${expanded}) head.click(); })()`)
+          await settle()
+          if (expanded) {
+            await read(`(() => { const row = document.querySelector('[data-native-step-id="gallery-tool-result"] > button'); if (row && row.getAttribute('aria-expanded') !== 'true') row.click(); })()`)
+            await settle()
+            await read(`(() => { const row = document.querySelector('[data-native-record-id="gallery-tool-result"] .conversation-tool-trace__row'); if (row && row.getAttribute('aria-expanded') !== 'true') row.click(); })()`)
+            await settle()
+          }
+          const height = await read(`Math.ceil(document.querySelector('.observation-sample--conversation').getBoundingClientRect().height)`)
+          win.setContentSize(width, Math.max(900, height + 160))
+          await read(`document.querySelector('.observation-sample--conversation').scrollIntoView({ block: 'center', behavior: 'instant' })`)
+          await settle()
+          const actual = await read(`(() => { const host = document.querySelector('.observation-sample--conversation'); return {
+            width: innerWidth, theme: document.documentElement.dataset.appearance,
+            expanded: host.querySelector('.wf-head').getAttribute('aria-expanded') === 'true',
+            issue: host.querySelector('.native-process-observation__issue')?.textContent,
+            failureHidden: !!host.querySelector('.conversation-turn-failure').closest('[hidden],[inert]'),
+            publicText: host.querySelector('[data-native-record-id="gallery-next-turn"]').textContent,
+            originalResult: host.querySelector('[data-native-record-id="gallery-tool-result"]')?.textContent,
+            overflow: host.scrollWidth > host.clientWidth
+          } })()`)
+          assert.equal(actual.width, width); assert.equal(actual.theme, theme); assert.equal(actual.expanded, expanded)
+          assert.equal(actual.failureHidden, false); assert.ok(actual.publicText.includes('新一轮已开始'))
+          assert.equal(actual.overflow, false)
+          if (expanded) assert.ok(actual.originalResult.includes('Original tool result:'))
+          else assert.ok(actual.issue.includes('1 条已加载记录标记为失败'))
+          const file = `process-summary-${theme}-${width}-${expanded ? 'expanded' : 'folded'}.png`
+          await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG())
+          result.frames.push({ file, name: 'process-summary', width, theme, expanded, actual })
+        }
+      }
+    } else for (const width of [1280, 390]) {
       win.setContentSize(width, 900)
       await settle()
       for (const [name, selector] of [['conversation', '.observation-sample--conversation'], ...conversationOnly ? [] : [['composer', '#composer-details']]]) {
