@@ -32,6 +32,14 @@ reasoning, tools and platform notices are not answers. message ls/read cover ori
 participation. Read leaf help for the exact Host, source, cursor and authorization contract.
 Discovery never grants access to another Agent's private messages or working surface.
 
+For ordinary continuous progress, `agent progress --help` exposes exact-target list,
+create, action and update. A person or device may update only the original loop's interval
+and prompt. The next check and an already claimed or unconfirmed input keep their original
+identity and content; Goal-bound progress stays with its Goal owner. Use the original
+expectedLoop and operationId. A list is a current observation, not a disk receipt. If a
+save response is unknown, retain the exact request and explicitly retry that same operation
+to confirm its save; a changed or superseded operation is not automatically replayed.
+
 agent conversation checkpoint cuts current native and captured positions by default.
 Use --native-position beginning only when the consuming owner explicitly needs the original
 native source start. It returns a Provider-owned beginning cursor without reading or skipping
