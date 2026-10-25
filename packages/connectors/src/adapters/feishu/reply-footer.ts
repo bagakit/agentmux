@@ -14,15 +14,18 @@ export function feishuReplyFooter(metadata: Readonly<ReplyPublicationMetadata>):
   if (metadata.outcome) parts.push({ completed: '本轮已结束', interrupted: '本轮中断', failed: '本轮失败' }[metadata.outcome])
   if (metrics?.durationMs !== undefined) parts.push(`${metrics.scope === 'response' ? '本次响应耗时' : '本轮耗时'} ${duration(metrics.durationMs)}`)
   if (metrics?.usage?.outputTokens !== undefined) parts.push(`${metrics.scope === 'response' ? '本次响应输出' : '本轮输出'} ${metrics.usage.outputTokens.toLocaleString('en-US', { maximumFractionDigits: 0 })} tokens`)
-  return [
-    { tag: 'hr', margin: '4px 0px' },
-    ...(parts.length ? [{ tag: 'div', text_size: 'notation',
-      text: { tag: 'plain_text', content: parts.join(' · '), text_size: 'notation', text_color: 'grey' } }] : []),
-    { tag: 'button', type: 'text', size: 'small', margin: '0px',
-      text: { tag: 'plain_text', content: '打开原对话' },
-      icon: { tag: 'standard_icon', token: 'chat_outlined' },
-      url: `amux://agent/${encodeURIComponent(metadata.agentSessionId)}` }
-  ]
+  return [{ tag: 'column_set', flex_mode: 'none', horizontal_spacing: '4px', margin: '4px 0px 0px 0px', columns: [
+    { tag: 'column', width: 'auto', vertical_align: 'center', elements: [
+      { tag: 'button', type: 'text', size: 'small', margin: '0px',
+        text: { tag: 'plain_text', content: '打开原对话' },
+        icon: { tag: 'standard_icon', token: 'chat_outlined' },
+        url: `amux://agent/${encodeURIComponent(metadata.agentSessionId)}` }
+    ] },
+    ...(parts.length ? [{ tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', elements: [
+      { tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: parts.join(' · '),
+        text_size: 'notation', text_color: 'grey', lines: 1 } }
+    ] }] : [])
+  ] }]
 }
 
 /** Budget-only maximum numeric display, never stored or published as facts. */
