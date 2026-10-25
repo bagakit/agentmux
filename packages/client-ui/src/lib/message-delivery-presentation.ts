@@ -1,7 +1,7 @@
 import { describeError } from './error-presentation.js'
 import type { ClientDeliveryLog } from './delivery-diagnostics.js'
 import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparation'
-import type { AgentInputSubmissionReceipt, AgentInputWaitStopReceipt } from '@agentmux/core'
+import type { AgentInputSubmissionReceipt, AgentInputWaitStopReceipt, AgentSessionUserMessage } from '@agentmux/core'
 
 export type MessageDeliveryDiagnostic = {
   error: unknown
@@ -13,6 +13,8 @@ export type MessageDeliveryDiagnostic = {
   inputUnconfirmed?: boolean | undefined
   /** Original Core receipts; an error or a waiting phase cannot stand in for these facts. */
   inputReceipt?: AgentInputSubmissionReceipt | undefined
+  /** Core's typed conversation projection; it does not invent the omitted operation or waiting phase. */
+  inputSubmission?: AgentSessionUserMessage['inputSubmission'] | undefined
   inputStopReceipt?: AgentInputWaitStopReceipt | undefined
   context?: 'delivery' | 'tool' | undefined
 }
@@ -28,13 +30,14 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
   const code = input.errorCode ?? (typeof failure?.code === 'string' ? failure.code : presented.code)
   const control = fields(failure?.controlFailure)
   const receipt = input.inputReceipt
+  const status = receipt?.status ?? input.inputSubmission?.status
   // A terminal original-owner receipt resolves prior uncertainty. The old error remains in the report.
-  if (receipt?.status === 'terminal-confirmed') return { kind: 'terminal-confirmed', title: '终端输入已确认',
-    state: '原终端已确认输入字节；Native 是否采用尚未确认。这不是任务完成回执。', action: '请在原对话或终端查看 Agent 后续处理。' }
-  if (receipt?.status === 'admitted') return { kind: 'admitted', title: '输入已确认',
-    state: '原消息已由 Native 接纳；这不是 Agent 完成任务的回执。', action: '可在原对话查看 Agent 回复。' }
-  if (receipt?.status === 'not-applied') return { kind: 'not-applied', title: '原输入未接纳',
-    state: 'Core 已确认这条原输入未被接纳，原消息与回执保留。', action: '需要替换时，创建一条明确的新消息。' }
+  if (status === 'terminal-confirmed') return { kind: 'terminal-confirmed', title: '终端输入已确认',
+    state: '原终端已确认输入；Agent 是否接收尚未确认。', action: '请在原对话或终端查看 Agent 后续处理。' }
+  if (status === 'admitted') return { kind: 'admitted', title: '输入已确认',
+    state: '原消息已接收；Agent 后续处理尚未确认。', action: '可在原对话查看 Agent 回复。' }
+  if (status === 'not-applied') return { kind: 'not-applied', title: '尚未送出',
+    state: '这次输入尚未送达，原消息已保留。', action: '可重试这条消息。' }
   const stop = input.inputStopReceipt
   const key = receipt?.ref.key, stoppedKey = stop?.ref.key
   const stopped = stop?.outcome === 'stopped-before-dispatch' && receipt && stop.ref.waitGeneration === receipt.ref.waitGeneration &&
@@ -45,7 +48,7 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
     state: 'Core 已确认停止这一代等待，原消息保留。', action: '再次发送会重新确认这条原消息。' }
   const unknown = input.inputUnconfirmed || control?.disposition === 'unknown' ||
     typeof control?.confirmedInputBytes === 'number' && control.confirmedInputBytes > 0 ||
-    receipt?.status === 'unknown' || receipt && (receipt.admission !== null || receipt.control.state === 'dispatch-authorized')
+    status === 'unknown' || receipt && (receipt.admission !== null || receipt.control.state === 'dispatch-authorized')
   const noInput = !unknown && control?.disposition === 'not_applied' && control.confirmedInputBytes === 0
   const reason = input.preparationReason ?? readAgentPromptPreparationWait(failure)?.reason
   if (code === 'AGENT_PROMPT_CONDITION_CHANGED') return { kind: 'condition-changed', title: '发送条件已变化',
@@ -70,6 +73,10 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
         action: owned && (wait?.wake === 'runtime-restored' || wait?.wake === 'session-restored') ? '可停止这一代等待。' : '可继续确认原环境，或停止这一代等待。' }
     }
   }
+  if (!receipt && input.inputSubmission?.status === 'waiting') return { kind: 'saved-waiting', title: '已保存 · 等待确认',
+    state: '原消息已保存，正在等待输入条件确认。', action: '可查看原输入记录。' }
+  if (!receipt && input.inputSubmission?.status === 'stopped') return { kind: 'stopped', title: '已停止等待',
+    state: '原输入已停止等待，原消息保留。', action: '可查看原输入记录。' }
   if (reason && noInput) return { kind: 'waiting',
     title: reason === 'context-compaction' ? '正在整理上下文' : 'Agent 暂时忙碌',
     state: '本次尝试尚未写入输入，原消息已保留。', action: '稍后重试这条原消息。' }

@@ -13,6 +13,10 @@ import type { AgentSessionUserMessage, AgentTimelineSnapshot } from '@agentmux/c
 import { conversationRecordId, projectSessionInputs } from '@agentmux/core/conversation'
 import { projectMailboxInputs, type MailboxInputRow } from '../lib/mailbox-input-projection'
 import { InputHistoryList, InputHistoryOriginalRecords } from '@agentmux/client-ui/components/InputHistoryList'
+import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
+import { presentMessageDeliveryFailure } from '@agentmux/client-ui/message-delivery-presentation'
+import { useClientUiPlatform } from '@agentmux/client-ui/platform'
+import type { AgentInputMailboxItem } from '@agentmux/core/agent-input-mailbox'
 import { describeConversationInputSource } from '@agentmux/client-ui/conversation-input-source'
 import type { useComposerInputHistory } from '../lib/use-composer-input-history'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -71,7 +75,7 @@ function latestFirst(a: number | undefined, b: number | undefined) {
 const speakerIdentityKey = (speaker: ConversationSpeaker) => speaker.external
   ? channelProfileKey(speaker.external) : JSON.stringify([speaker.role, speaker.id])
 
-function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, reading, sessionId, renderNavigation, historyResourceReader, rowsOnly = false, renderContributions, copyInParent = false }: {
+function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, reading, sessionId, renderNavigation, historyResourceReader, rowsOnly = false, renderContributions, copyInParent = false, originalInput, inputFailure }: {
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   items: readonly MailboxDisplayItem[]; selectedKey: string | null
   onOpen: (key: string, event: MouseEvent<HTMLButtonElement>) => void
@@ -82,7 +86,10 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
   rowsOnly?: boolean
   renderContributions?(item: MailboxDisplayItem): ReactNode
   copyInParent?: boolean
+  originalInput?: AgentInputMailboxItem | undefined
+  inputFailure?: AgentInputMailboxItem | undefined
 }) {
+  const platform = useClientUiPlatform()
   // Only the current reading page mounts. Rows read bounded prefixes, never full Markdown.
   const recent = useMemo(() => [...items].sort((a, b) => latestFirst(
     a.message.recordedAt, b.message.recordedAt)), [items])
@@ -112,7 +119,13 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
   const authorLabel = (item: MailboxDisplayItem) => identity(item).name
   const time = (item: MailboxDisplayItem) => item.message.recordedAt
   const state = (item: MailboxDisplayItem) => item.message.deliveryStatus
+  const submission = (item: MailboxDisplayItem) => item.message.source.kind === 'captured' && item.message.inputSubmission
+    ? presentMessageDeliveryFailure({ error: null, inputSubmission: item.message.inputSubmission }) : undefined
   const selected = selectedKey ? recent.find(item => messageKey(item) === selectedKey) : undefined
+  const selectedInput = selected?.message.source.kind === 'captured' ? originalInput : undefined
+  const receipt = !inputFailure && selectedInput?.kind === 'controlled' ? selectedInput.receipt : undefined
+  const observation = selected && !inputFailure ? submission(selected) : undefined
+  const delivery = selectedInput ? inputFailure ? '原输入观察未确认' : inputMailboxPresentation(selectedInput).state : observation?.title
   if (selected) return <MailboxLocationContext origin={mailboxOrigin} sessionId={sessionId}>{(locationSummary, locationDetails) => <article className="composer-mailbox__detail" data-record-key={messageKey(selected)}>
     <ConversationMessage {...reading} compact recordedIdentity detailsOnlyMetadata copyInParent={copyInParent} messageActions={renderNavigation(selected, true)} {...(sessionId ? { conversationSessionId: sessionId } : {})}
       messageId={messageKey(selected)} {...(selected.reference ? { itemRef: selected.reference } : {})} speaker={identity(selected).speaker} name={authorLabel(selected)}
@@ -128,17 +141,20 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
       messageDetails={<>{locationSummary}<dl className="composer-mailbox__record-facts">
         {!isUserMessage(selected.original) ? <><dt>Source</dt><dd>Captured input</dd><dt>Recorded author</dt><dd>{authorLabel(selected)}</dd></> : null}
         <dt>Time</dt><dd><MailboxTime value={time(selected)} complete /></dd>
-        <dt>Delivery</dt><dd>{selected.message.source.kind === 'native' ? 'Recorded · not a delivery receipt' : state(selected) === 'complete' ? 'Submission confirmed · CLI acceptance and reply are separate' : 'Delivery not confirmed'}</dd>
+        <dt>Delivery</dt><dd>{selected.message.source.kind === 'native' ? 'Recorded · not a delivery receipt' : delivery ?? (state(selected) === 'complete' ? 'Submission confirmed · CLI acceptance and reply are separate' : 'Delivery not confirmed · Original receipt unavailable')}</dd>
       </dl>{locationDetails}</>} />
     {renderContributions?.(selected)}
     {!selected.message.content && !(isUserMessage(selected.original) && selected.message.contentParts.length) ? <MailboxEmpty title="No text recorded" /> : null}
-    {state(selected) !== 'complete' && !(selected.message.source.kind === 'native')
-      ? <p className="composer-mailbox__risk">Delivery not confirmed. Check the Agent’s response before sending again.</p> : null}
+    {receipt ? <MessageDeliveryFailure compact error={selectedInput?.failure ?? null} inputReceipt={receipt} copyText={onCopy ?? (text => platform.copyText(text, () => {}))} />
+      : observation ? <p className={['saved-waiting', 'stopped', 'admitted', 'terminal-confirmed'].includes(observation.kind) ? undefined : 'composer-mailbox__risk'} data-input-observation={observation.kind}>{observation.title} · {observation.state}</p>
+      : (inputFailure || state(selected) !== 'complete') && selected.message.source.kind !== 'native'
+        ? <p className="composer-mailbox__risk">Original delivery receipt is unavailable. The message is retained.</p> : null}
   </article>}</MailboxLocationContext>
   const records = recent.map(item => <li key={messageKey(item)}><MailboxRecordRow recordKey={messageKey(item)} label={authorLabel(item)} text={item.message.content}
     avatar={identity(item).avatar} source={<span title={describeConversationInputSource(item.message.source).title}>{describeConversationInputSource(item.message.source).caption}</span>}
     metadata={time(item) === undefined ? null : <MailboxTime value={time(item)} />}
-    status={state(item) !== 'complete' && !(item.message.source.kind === 'native') ? <span className="composer-mailbox__risk">Delivery not confirmed</span> : null}
+    status={submission(item) ? <span>{submission(item)!.title}</span>
+      : state(item) !== 'complete' && item.message.source.kind !== 'native' ? <span className="composer-mailbox__risk">Delivery not confirmed</span> : null}
     actions={renderNavigation(item)} onOpen={onOpen} /></li>)
   return rowsOnly ? records : records.length ? <ol className="composer-mailbox__messages" aria-label="Recorded input history">{records}</ol>
     : <MailboxEmpty title="No recorded messages" />
@@ -440,8 +456,11 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       onCopy={message => inputHistory ? inputHistory.copy(message) : onCopyQueued ? onCopyQueued(message.content) : Promise.resolve(false)}
       {...(inputHistory && inputHistory.canFill !== false ? { onFill: inputHistory.fill } : {})}
       onRead={message => {
+        const group = inputGroups.find(group => group.messages.some(original => sameOriginalReading(original, message)))
+        const originalInput = group?.mailbox.length === 1 ? group.mailbox[0] : undefined
         const original = mailboxInputMessages([{ id: message.id, primary: message, messages: [message], mailbox: [], author: message.author }], sourceHostId)[0]
         return original ? <MessageHistory mailboxOrigin={mailboxOrigin} items={[original]} selectedKey={messageKey(original)} copyInParent
+          originalInput={originalInput} inputFailure={originalInput ? journalFailures.get(inputMailboxItemKey(inputMailboxHost, originalInput)) : undefined}
           onOpen={selectRecord} reading={reading} sessionId={mailboxSessionId} renderNavigation={item => renderReveal(item)}
           historyResourceReader={historyResourceReader} /> : null
       }} />
@@ -654,6 +673,8 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
           <InputMailboxFrame compact refreshInParent={Boolean(inputHistory)} coverageInParent={Boolean(inputHistory)}
             selected={Boolean(selectedJournal)} mailbox={groupedMailbox} hostId={inputMailboxHost}>
           {selectedJournal ? renderJournal(selectedJournal, true) : selectedMessage ? <MessageHistory mailboxOrigin={mailboxOrigin} items={[selectedMessage]} selectedKey={wanted}
+            originalInput={selectedGroup?.mailbox.length === 1 ? selectedGroup.mailbox[0] : undefined}
+            inputFailure={selectedGroup?.mailbox.length === 1 ? journalFailures.get(inputMailboxItemKey(inputMailboxHost, selectedGroup.mailbox[0]!)) : undefined}
             onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={mailboxSessionId} renderNavigation={renderNavigation}
             historyResourceReader={historyResourceReader} renderContributions={renderContributions} /> : <>
             {observationError ? <SourceNotice title="Automatic native updates are unavailable" message={observationError.message} action="Refresh source" onAction={() => void refresh()} /> : null}
