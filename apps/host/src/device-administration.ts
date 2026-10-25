@@ -11,7 +11,7 @@ export function createDeviceAdministration(authority: Promise<DeviceAuthority>, 
     if (method === 'device.ls') result = { hostId: owner.hostId, devices: owner.devices(), mobileAccess: state() }
     else if (method === 'device.link') {
       const url = link(), offer = parseConnectionOfferUrl(url)
-      if (!offer || offer.serverId !== owner.hostId) throw new AgentMuxError('The original Host connection offer is unavailable.', 'CONTROL_UNAVAILABLE')
+      if (!offer) throw new AgentMuxError('The original Host connection offer is unavailable.', 'CONTROL_UNAVAILABLE')
       const page = new URL(url); page.hash = ''
       result = { hostId: owner.hostId, url, pageUrl: page.href, relay: { ...offer.relay }, mobileAccess: { ...state(url), origin: page.origin } }
     }
