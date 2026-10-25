@@ -65,7 +65,7 @@ async function fixture(scope: RoomBinding['scope']['publication'] = 'future-shar
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {}
   } })
   const port = createPublicationConversationPort(f.coreClients), portrait = imagePng()
-  const speaker = vi.fn(async (reference: { hostId: string; agentSessionId: string }) => ({ name: 'Current ' + reference.agentSessionId,
+  const speaker = vi.fn(async (reference: { hostId: string; agentSessionId: string }, _signal: AbortSignal) => ({ name: 'Current ' + reference.agentSessionId,
     avatar: { target: { workspaceId: 'resource', topicId: reference.agentSessionId, objectKey: reference.agentSessionId }, revision: reference.agentSessionId, observation: 'available' as const,
       image: { dataBase64: portrait.toString('base64'), byteLength: portrait.length, mimeType: 'image/png' as const, width: 2, height: 2,
         sha256: createHash('sha256').update(portrait).digest('hex') } } }))
@@ -114,6 +114,95 @@ async function fixture(scope: RoomBinding['scope']['publication'] = 'future-shar
     async flushNative() { if (nativeInput) await vi.waitFor(() => expect(pendingNative.length).toBeGreaterThan(0), { timeout: 10_000 }); await appendFile(transcript, pendingNative.splice(0).join('')); refresh() },
     async reopen() { await services.close(); services = await createConnectionServices(options) } }
 }
+
+it('optional speaker observation releases native body delivery while the original cross-channel read stays in flight', async () => {
+  const f = await fixture(), original = f.speaker.getMockImplementation()!
+  let release!: (value: Awaited<ReturnType<typeof original>>) => void
+  const pending = new Promise<Awaited<ReturnType<typeof original>>>(resolve => { release = resolve })
+  const signals: AbortSignal[] = []
+  f.speaker.mockImplementation((_reference, signal) => { signals.push(signal); return pending })
+  const body = 'Native body with optional speaker still reading'
+  await appendFile(f.transcript, native('optional-native-first', body)); f.refresh()
+  await vi.waitFor(() => expect(f.speaker).toHaveBeenCalledTimes(1), { timeout: 10_000 })
+  // This is the visible body outcome after the optional observation allowance,
+  // not a harness timeout or a fabricated completion of the pending read.
+  await new Promise(resolve => setTimeout(resolve, 2_000))
+  expect(f.copies(body), 'Optional display reading must not hold native body delivery').toEqual({ feishu: 1, discord: 1 })
+  const next = 'Another public body uses the same unresolved optional read'
+  await appendFile(f.transcript, native('optional-native-next', next)); f.refresh()
+  await vi.waitFor(() => expect(f.copies(next)).toEqual({ feishu: 1, discord: 1 }), { timeout: 10_000 })
+  expect(f.speaker).toHaveBeenCalledTimes(1)
+  for (const binding of f.bindings) {
+    const operation = f.service().publication!.store.list(binding, 100).find(value => value.payload.kind === 'speech' && value.payload.text === body)!
+    expect(operation.speaker).toMatchObject({ kind: 'agent', reference: { hostId: 'local', agentSessionId: 'recipient' } })
+    expect(operation.speaker?.name).toBeUndefined()
+    expect(operation.state).toBe('confirmed')
+  }
+  expect(signals[0]!.aborted).toBe(false)
+  release(await original({ hostId: 'local', agentSessionId: 'recipient' }, signals[0]!))
+  await pending
+  f.speaker.mockImplementation(original)
+  const later = 'New public body gets the now available original profile'
+  await appendFile(f.transcript, native('optional-native-later', later)); f.refresh()
+  await vi.waitFor(() => { expect(f.copies(later)).toEqual({ feishu: 1, discord: 1 }); expect(JSON.stringify(f.feishu.calls.filter(call => JSON.stringify(call.body).includes(later)))).toContain('Current recipient') }, { timeout: 10_000 })
+})
+
+it('optional speaker observation keeps authenticated A2A bodies independent of held profiles and disposes shared reads with the Host', async () => {
+  const f = await fixture(), original = f.speaker.getMockImplementation()!
+  const calls = new Map<string, AbortSignal[]>()
+  f.speaker.mockImplementation((reference, signal) => {
+    const values = calls.get(reference.agentSessionId) ?? []; values.push(signal); calls.set(reference.agentSessionId, values)
+    return new Promise((_resolve, reject) => { signal.addEventListener('abort', () => reject(signal.reason), { once: true }) })
+  })
+  const first = 'Original peer A with optional display unavailable', second = 'Original peer B with its own optional display unavailable'
+  await f.send('optional-peer-a', first); await f.notify(['optional-peer-a'], 'optional-notice-a'); f.refresh()
+  await vi.waitFor(() => expect(f.copies(first)).toEqual({ feishu: 1, discord: 1 }), { timeout: 10_000 })
+  await f.send('optional-peer-b', second, 1); await f.notify(['optional-peer-b'], 'optional-notice-b'); f.refresh()
+  await vi.waitFor(() => expect(f.copies(second)).toEqual({ feishu: 1, discord: 1 }), { timeout: 10_000 })
+  expect(calls.get('peer-a')).toHaveLength(1); expect(calls.get('peer-b')).toHaveLength(1)
+  expect(f.operations().map(value => value.speaker?.reference?.agentSessionId).sort()).toEqual(['peer-a', 'peer-b'])
+  expect(f.operations().every(value => value.speaker?.kind === 'agent' && value.state === 'confirmed')).toBe(true)
+  const selected = calls.get('peer-a')![0]!
+  expect(selected.aborted).toBe(false)
+  await f.service().close()
+  expect(selected.aborted).toBe(true)
+  expect(calls.get('peer-b')![0]!.aborted).toBe(true)
+  f.speaker.mockImplementation(original)
+})
+
+it('optional speaker observation keeps an independent binding eligible when the first lane is paused', async () => {
+  const f = await fixture()
+  let originalSignal: AbortSignal | undefined
+  f.speaker.mockImplementation((_reference, signal) => {
+    originalSignal = signal
+    return new Promise((_resolve, reject) => { signal.addEventListener('abort', () => reject(signal.reason), { once: true }) })
+  })
+  const first = 'Independent channel continues after its sibling is paused'
+  await appendFile(f.transcript, native('optional-pause-first', first)); f.refresh()
+  await vi.waitFor(() => expect(f.speaker).toHaveBeenCalledTimes(1), { timeout: 10_000 })
+  const binding = f.bindings[0]!
+  const paused = await f.service().connections.bindings!.pause({ operationId: 'pause-original-optional-lane', bindingId: binding.bindingId, expectedRevision: binding.revision }, context)
+  expect(paused.state).toBe('applied'); f.refresh()
+  await vi.waitFor(() => expect(f.copies(first).discord).toBe(1), { timeout: 10_000 })
+  expect(originalSignal!.aborted).toBe(false)
+  const next = 'New body after pause uses the same optional original read'
+  await appendFile(f.transcript, native('optional-pause-next', next)); f.refresh()
+  await vi.waitFor(() => expect(f.copies(next)).toEqual({ feishu: 0, discord: 1 }), { timeout: 10_000 })
+  expect(f.speaker).toHaveBeenCalledTimes(1)
+  await f.service().close(); expect(originalSignal!.aborted).toBe(true)
+})
+
+it('optional speaker observation retries a settled profile failure on a later real publication demand', async () => {
+  const f = await fixture(), original = f.speaker.getMockImplementation()!
+  f.speaker.mockRejectedValue(new Error('Original optional display source unavailable'))
+  const first = 'Body is still delivered when the optional display source fails'
+  await appendFile(f.transcript, native('optional-failed-first', first)); f.refresh()
+  await vi.waitFor(() => expect(f.copies(first)).toEqual({ feishu: 1, discord: 1 }), { timeout: 10_000 })
+  f.speaker.mockImplementation(original)
+  const next = 'Later real demand reads the recovered profile'
+  await appendFile(f.transcript, native('optional-failed-next', next)); f.refresh()
+  await vi.waitFor(() => { expect(f.copies(next)).toEqual({ feishu: 1, discord: 1 }); expect(JSON.stringify(f.feishu.calls.filter(call => JSON.stringify(call.body).includes(next)))).toContain('Current recipient') }, { timeout: 10_000 })
+})
 
 it('shares canonical speech with exact authors while Hook snapshots and native child reports remain locally readable', async () => {
   const f = await fixture('future-shared-conversation', true)
