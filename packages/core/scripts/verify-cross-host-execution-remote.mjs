@@ -282,7 +282,8 @@ async function useTerminal(agent, session) { release?.(); terminal?.dispose(); t
     terminal.write(chunk.dataBytes); }
 async function exitCli(agent, session) { await agent.client.writeAgent({ agentSessionId: session.agentSessionId, expectedRun: session.run, data: '\x04', source: 'user' }); await until(async () => (await agent.client.statusAgent(session.agentSessionId)).run.state === 'exited', 'Original native CLI natural exit'); release?.(); release = undefined; terminal?.dispose(); terminal = undefined; }
 async function helperFacts(agent, resource, originalPair) { const result = {}; for (const [side, host] of [['frontend', agent], ['executor', resource]]) {
-    const observed = await host.client.readRunReplay({ runId: originalPair[side].runId }, 0, 'raw');
+    const observed = await host.client.runtimeSubject({ kind: 'terminal-run', runId: originalPair[side].runId });
+    assert.equal(observed.run.runId, originalPair[side].runId, 'Helper metadata must identify its exact original Run');
     result[side] = { run: observed.run, ctxmux: host.client.runtimeIdentity(), core: host.client.runtimeOwnerIdentity() };
 } return result; }
 function sameHelpers(before, after) { for (const side of ['frontend', 'executor']) {
