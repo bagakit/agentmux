@@ -62,7 +62,7 @@ async function fixture() {
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   inner.ensureManagedHooks = async () => {}
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
-  vi.spyOn(target, 'probeAgent').mockImplementation(async providerId => ({ providerId, executable: '/bin/sh', installed: true,
+  vi.spyOn(target as unknown as { probePreparedAgent: typeof target.probeAgent }, 'probePreparedAgent').mockImplementation(async providerId => ({ providerId, executable: '/bin/sh', installed: true,
     capabilities: target.providers.get(providerId).catalog.capabilities }))
   const identity = await source.agentCreationAuthority()
   const targetIdentity = await target.agentCreationAuthority()

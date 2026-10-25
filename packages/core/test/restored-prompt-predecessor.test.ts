@@ -86,7 +86,7 @@ describe('exact native resume predecessor', () => {
       status: async (id: string) => run(id), start, stop: vi.fn(), input: vi.fn() })
     inner.hookServer.isRunning = () => true
     inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
-    vi.spyOn(core, 'probeAgent').mockResolvedValue({ providerId, executable: providerId, installed: true, capabilities: provider.catalog.capabilities })
+    vi.spyOn(core as unknown as { probePreparedAgent: typeof core.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId, executable: providerId, installed: true, capabilities: provider.catalog.capabilities })
     inner.ensureManagedHooks = async () => {}; inner.ensureTerminalHandshakeOrDegrade = async (s: AgentMuxAgentSession) => s
     try {
       const resumed = await core.resumeAgent({ agentSessionId: old.agentSessionId, operationId: 'resume-exact', prompt: 'private at-launch input' })

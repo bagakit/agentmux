@@ -51,7 +51,7 @@ it('continues one exact native conversation through the real CLI, public service
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   const provider = new AgentProviderRegistry().get('codex')
-  vi.spyOn(core, 'probeAgent').mockResolvedValue({ providerId: 'codex', executable: provider.executable, installed: true, capabilities: provider.catalog.capabilities })
+  vi.spyOn(core as unknown as { probePreparedAgent: typeof core.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: 'codex', executable: provider.executable, installed: true, capabilities: provider.catalog.capabilities })
   inner.ensureManagedHooks = async () => {}
   inner.ensureTerminalHandshakeOrDegrade = async (session: unknown) => session
   const runtime = new RuntimeController(store, async () => core)

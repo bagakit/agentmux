@@ -54,7 +54,7 @@ it.each(historicalSources)('reloads and publicly rejoins the original %s intent 
   inner.kernel.identity = f.inner.kernel.identity
   const start = vi.fn(async () => { throw new Error('Unexpected replacement Run') }), input = vi.fn(async () => { throw new Error('Unexpected input replay') })
   inner.kernel.start = start; inner.kernel.input = input
-  const probe = vi.spyOn(client, 'probeAgent').mockRejectedValue(new Error('Unexpected executable probe'))
+  const probe = vi.spyOn(client as unknown as { probePreparedAgent: typeof client.probeAgent }, 'probePreparedAgent').mockRejectedValue(new Error('Unexpected executable probe'))
   const originalInput = { agentSessionId: before.agentSessionId, run: before.run, admission }
   expect(await client.inspectAgentPromptSubmission(key)).toEqual(originalInput)
   expect(parseRpcAgentSession(client.agentSession(before.agentSessionId)).continuity).toEqual(operation)

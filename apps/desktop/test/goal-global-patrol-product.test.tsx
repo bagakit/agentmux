@@ -55,7 +55,7 @@ async function prepared() {
   boundary.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   boundary.ensureManagedHooks = async () => {}
   boundary.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
-  vi.spyOn(f.client, 'probeAgent').mockImplementation(async providerId => ({ providerId, executable: '/bin/sh', installed: true,
+  vi.spyOn(f.client as unknown as { probePreparedAgent: typeof f.client.probeAgent }, 'probePreparedAgent').mockImplementation(async providerId => ({ providerId, executable: '/bin/sh', installed: true,
     capabilities: f.client.providers.get(providerId).catalog.capabilities }))
   useAppStore.setState({ config: { ...state.config!, executors: { 'global-fixture': { label: 'Saved PMO executor', providerId: 'claude', command: '/bin/sh', args: [], env: {}, injectAgentMuxGuide: false } },
     workspaces: [workspace, state.config!.workspaces.find(item => item.id === 'project')!] },

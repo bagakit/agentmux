@@ -32,7 +32,7 @@ it('public native resume preserves the original request and separates host conte
     status: async (id: string) => run(id), start, stop, input })
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
-  vi.spyOn(core, 'probeAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true,
+  vi.spyOn(core as unknown as { probePreparedAgent: typeof core.probeAgent }, 'probePreparedAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true,
     capabilities: new AgentProviderRegistry().get(id).catalog.capabilities }))
   inner.ensureManagedHooks = async () => {}; inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
   const prompt = '  Original <User> & &amp;\r\nKeep final whitespace.  \n', agentMuxNote = 'Runtime context <literal>\r\nPlatform only.'

@@ -21,7 +21,7 @@ it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume'
     const internals = client as unknown as {
       connected: boolean; kernel: Record<string, unknown>; hookServer: Record<string, unknown>
       registry: { load(hostId: string): Promise<void> }
-      probeAgent: unknown; ensureManagedHooks: unknown; ensureTerminalHandshakeOrDegrade: unknown
+      probePreparedAgent: unknown; ensureManagedHooks: unknown; ensureTerminalHandshakeOrDegrade: unknown
       promptSubmission: { submitInputPlan: unknown }
     }
     const provider = new AgentProviderRegistry().get(providerId)
@@ -43,7 +43,7 @@ it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume'
     internals.hookServer.isRunning = () => true
     internals.hookServer.createBinding = () => ({ bindingId: 'binding'.padEnd(43, 'b'),
       endpoint: { url: 'http://127.0.0.1:0', token: 'token'.padEnd(43, 't') }, bindRun: async () => {}, close: async () => {} })
-    internals.probeAgent = async () => ({ providerId, executable: providerId, installed: true, capabilities: provider.catalog.capabilities })
+    internals.probePreparedAgent = async () => ({ providerId, executable: providerId, installed: true, capabilities: provider.catalog.capabilities })
     internals.ensureManagedHooks = async () => {}
     internals.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
     let submitted = 0

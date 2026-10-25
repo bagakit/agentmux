@@ -42,7 +42,7 @@ async function fixture(options: { deferManagedInput?: boolean; managedDelivery?:
   inner.hookServer.createBinding = () => ({ bindingId: 'binding'.padEnd(43, 'D'),
     endpoint: { url: 'http://127.0.0.1:0', token: 'endpoint'.padEnd(43, 'C') }, bindRun: async () => {}, close: async () => {} })
   const managedDispatch = options.deferManagedInput ? vi.spyOn(inner, 'deliverPostLaunchPrompt').mockResolvedValue(false) : undefined
-  inner.probeAgent = async () => ({ providerId, executable: providerId, installed: true, capabilities: provider.catalog.capabilities })
+  inner.probePreparedAgent = async () => ({ providerId, executable: providerId, installed: true, capabilities: provider.catalog.capabilities })
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxStoredAgentSession) => {
     if (options.nativeObservation) await inner.registry.update('recipient', session.run, (current: AgentMuxStoredAgentSession) => {
       const observedAt = Math.max(current.updatedAt + 1, Date.now())

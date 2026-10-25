@@ -49,7 +49,7 @@ it.each([{ guide: false, pending: false, exited: false, recover: null }, { guide
     // Keep the original Provider payload + Enter plan, rather than the journey's single-phase leaf.
     vi.mocked(previous.providers.get('claude').planPromptInput).mockRestore()
     expect(inner.providers.get('claude').planPromptInput('Original controlled input')).toMatchObject({ kind: 'render-then-submit', submit: '\r' })
-    this.probeAgent = previous.probeAgent
+    inner.probePreparedAgent = previous.probePreparedAgent
   })
   let runtime: Awaited<ReturnType<typeof core.startHeadlessAgentMux>> | undefined
   try {

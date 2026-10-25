@@ -40,7 +40,7 @@ async function originalSession() {
   host.kernel.isConnected = () => true
   const start = vi.spyOn(host.kernel, 'start').mockRejectedValue(new Error('Unexpected replacement Run'))
   const status = vi.spyOn(host.kernel, 'status').mockResolvedValue(run)
-  const probe = vi.spyOn(client, 'probeAgent').mockRejectedValue(new Error('Unexpected executable probe'))
+  const probe = vi.spyOn(client as unknown as { probePreparedAgent: typeof client.probeAgent }, 'probePreparedAgent').mockRejectedValue(new Error('Unexpected executable probe'))
   return { client, store, start, status, probe, session }
 }
 

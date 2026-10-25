@@ -66,7 +66,7 @@ export async function injectedContextCore(root: string, initial?: AgentMuxStored
     inner.hookServer.isRunning = () => true
     inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) },
       bindRun: async () => {}, close: async () => {} })
-    vi.spyOn(core, 'probeAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true,
+    vi.spyOn(core as unknown as { probePreparedAgent: typeof core.probeAgent }, 'probePreparedAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true,
       capabilities: new AgentProviderRegistry().get(id).catalog.capabilities }))
     inner.ensureManagedHooks = async () => {}
     inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session

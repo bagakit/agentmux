@@ -129,7 +129,7 @@ it('cancels an unknown original Runtime observation without Native target while 
   await consumer('runtime-unknown-healthy-raw', { originalRun: await actual(f.previous.run.runId), root: await f.rootOf(), rawVerified: true })
 })
 it('cancels initial Provider uncertainty without waiting for its observation to recover', async () => {
-  const f = await fixture(); vi.spyOn(f.client, 'probeAgent').mockRejectedValueOnce(new core.AgentMuxError('Exact Provider read unavailable', 'CONTROL_UNAVAILABLE'))
+  const f = await fixture(); vi.spyOn(f.client as unknown as { probePreparedAgent: typeof f.client.probeAgent }, 'probePreparedAgent').mockRejectedValueOnce(new core.AgentMuxError('Exact Provider read unavailable', 'CONTROL_UNAVAILABLE'))
   await expect(f.client.ensureAgentContinuity({ ...f.request, policy: { ...f.request.policy, activeRecoveryDelayMs: 0 } })).resolves.toMatchObject({ kind: 'pending', reason: 'provider-unverified', continuity: { supervision: { attemptCount: 0 } } })
   await expect(f.client.controlAgentContinuity(await f.packet())).resolves.toMatchObject({ receipt: { outcome: 'cancelled', attemptCount: 0 } })
   f.noLifecycle(); expect(f.input).not.toHaveBeenCalled()
@@ -155,7 +155,7 @@ it('the same Store claim refuses a cancelled initial attempt before any Native S
   await f.barrier(); f.noLifecycle(); expect(f.input).not.toHaveBeenCalled(); expect((await f.rootOf())?.supervision?.phase).toBe('cancelled')
 })
 it.each(['paused', 'cancelled'] as const)('a fresh automatic startup joins the original %s intent without resetting its budget or input', async expected => {
-  const f = await fixture(); const probe = vi.spyOn(f.client, 'probeAgent').mockRejectedValueOnce(new core.AgentMuxError('Exact Provider read unavailable', 'CONTROL_UNAVAILABLE'))
+  const f = await fixture(); const probe = vi.spyOn(f.client as unknown as { probePreparedAgent: typeof f.client.probeAgent }, 'probePreparedAgent').mockRejectedValueOnce(new core.AgentMuxError('Exact Provider read unavailable', 'CONTROL_UNAVAILABLE'))
   await f.client.ensureAgentContinuity({ ...f.request, policy: { ...f.request.policy, activeRecoveryDelayMs: 0 } })
   if (expected === 'cancelled') await f.client.controlAgentContinuity(await f.packet())
   const original = await f.rootOf(); expect(original?.supervision?.phase).toBe(expected); probe.mockRestore()
@@ -164,7 +164,7 @@ it.each(['paused', 'cancelled'] as const)('a fresh automatic startup joins the o
   expect((await f.rootOf())?.supervision).toEqual(original!.supervision); expect((await f.saved()).continuityOperations?.['fresh-startup-identity']).toBeUndefined(); f.noLifecycle(); expect(f.input).not.toHaveBeenCalled()
 })
 it('explicit continuation rechecks the original zero-count paused observation without replacing its intent', async () => {
-  const f = await fixture(); const probe = vi.spyOn(f.client, 'probeAgent').mockRejectedValueOnce(new core.AgentMuxError('Exact Provider read unavailable', 'CONTROL_UNAVAILABLE'))
+  const f = await fixture(); const probe = vi.spyOn(f.client as unknown as { probePreparedAgent: typeof f.client.probeAgent }, 'probePreparedAgent').mockRejectedValueOnce(new core.AgentMuxError('Exact Provider read unavailable', 'CONTROL_UNAVAILABLE'))
   await expect(f.client.ensureAgentContinuity({ ...f.request, policy: { ...f.request.policy, activeRecoveryDelayMs: 0 } })).resolves.toMatchObject({ kind: 'pending', reason: 'provider-unverified' })
   const original = await f.rootOf(); expect(original?.supervision).toMatchObject({ attemptCount: 0, attemptLimit: 1, phase: 'paused' }); probe.mockRestore()
   const packet = { ...await f.packet('explicit-initial-continue'), action: 'continue' as const, additionalAttempts: 1 }
@@ -176,7 +176,7 @@ it('explicit continuation rechecks the original zero-count paused observation wi
   expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
 })
 it('explicit public refresh reobserves the original zero-count Provider wait and admits its first Native attempt', async () => {
-  const f = await fixture(); const probe = vi.spyOn(f.client, 'probeAgent').mockRejectedValueOnce(new core.AgentMuxError('Exact Provider read unavailable', 'CONTROL_UNAVAILABLE'))
+  const f = await fixture(); const probe = vi.spyOn(f.client as unknown as { probePreparedAgent: typeof f.client.probeAgent }, 'probePreparedAgent').mockRejectedValueOnce(new core.AgentMuxError('Exact Provider read unavailable', 'CONTROL_UNAVAILABLE'))
   await expect(f.client.ensureAgentContinuity({ ...f.request, policy: { ...f.request.policy, activeRecoveryDelayMs: 0 } })).resolves.toMatchObject({ kind: 'pending', reason: 'provider-unverified' })
   const original = await f.rootOf(); expect(original?.supervision).toMatchObject({ attemptCount: 0, attemptLimit: 1, phase: 'paused' }); probe.mockRestore()
   await expect(f.client.refreshAgentSession(f.previous.agentSessionId)).resolves.toBeDefined()

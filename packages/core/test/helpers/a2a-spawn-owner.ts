@@ -43,7 +43,7 @@ export async function spawnOwnerFixture(cleanups: Array<() => Promise<void>>, re
     endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   inner.ensureManagedHooks = async () => {}
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
-  vi.spyOn(h.client, 'probeAgent').mockImplementation(async providerId => ({ providerId, executable: providerId,
+  vi.spyOn(h.client as unknown as { probePreparedAgent: typeof h.client.probeAgent }, 'probePreparedAgent').mockImplementation(async providerId => ({ providerId, executable: providerId,
     installed: true, capabilities: h.client.providers.get(providerId).catalog.capabilities }))
   const spatial = new AgentMuxSpatialStateStore(join(h.root, 'spatial.json'))
   await spatial.commit({ expectedRevision: 0, graph: { spaces: [], zones: [], bindings: [], layouts: {},

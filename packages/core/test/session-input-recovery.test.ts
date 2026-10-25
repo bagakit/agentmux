@@ -125,7 +125,7 @@ async function fixture() {
     const providers = Reflect.get(client, 'providers') as AgentProviderRegistry, builtin = providers.get('codex')
     const { discoverNativeSession: _discovery, observeSessionStatus: _status, ...provider } = builtin
     providers.replace(provider)
-    vi.spyOn(client, 'probeAgent').mockResolvedValue({ providerId: 'codex', executable: 'codex', installed: true, capabilities: builtin.catalog.capabilities })
+    vi.spyOn(client as unknown as { probePreparedAgent: typeof client.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: 'codex', executable: 'codex', installed: true, capabilities: builtin.catalog.capabilities })
     ended.add(currentRun)
     return await client.resumeAgent({ agentSessionId: 'recipient', operationId: 'public-resume', prompt: 'Explicit resume task' })
   }

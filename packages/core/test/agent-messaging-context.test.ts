@@ -28,7 +28,7 @@ async function fixture(postLaunch = false, owner: Pick<typeof core, 'AgentMuxCli
   inner.ensureManagedHooks = async () => {}
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxStoredAgentSession) => session
   inner.screenEvidence.wait = vi.fn(async () => 0)
-  const probe = vi.spyOn(h.client, 'probeAgent').mockResolvedValue({ providerId: 'codex', executable: 'codex', installed: true, capabilities: provider.catalog.capabilities })
+  const probe = vi.spyOn(h.client as unknown as { probePreparedAgent: typeof h.client.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: 'codex', executable: 'codex', installed: true, capabilities: provider.catalog.capabilities })
   const submit = vi.spyOn(inner.promptSubmission, 'submitInputPlan').mockResolvedValue(undefined)
   const create = { agentSessionId: 'created-session', createOperationId: 'original-create', providerId: 'codex', executorId: 'codex', workspacePath: h.root, injectAgentMuxGuide: true }
   return { ...h, inner, provider, started, probe, submit, create }
@@ -142,7 +142,7 @@ it('preserves the previous generation frozen resume wire and platform source aft
   for (const key of ['isConnected', 'identity', 'status', 'list', 'start', 'stop', 'input']) inner.kernel[key] = h.inner.kernel[key]
   inner.hookServer.isRunning = h.inner.hookServer.isRunning; inner.hookServer.createBinding = h.inner.hookServer.createBinding
   inner.ensureManagedHooks = h.inner.ensureManagedHooks; inner.ensureTerminalHandshakeOrDegrade = h.inner.ensureTerminalHandshakeOrDegrade
-  vi.spyOn(reader, 'probeAgent').mockResolvedValue({ providerId: 'codex', executable: 'codex', installed: true, capabilities: h.provider.catalog.capabilities })
+  vi.spyOn(reader as unknown as { probePreparedAgent: typeof reader.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: 'codex', executable: 'codex', installed: true, capabilities: h.provider.catalog.capabilities })
   await expect(reader.ensureAgentContinuity(request)).resolves.toMatchObject({ kind: 'resumed' })
   expect(h.started[0].args).toContain(original.prompt)
   expect(reader.agentSession('original-session').continuityOperations!['previous-resume']!.launchInput!.message).toEqual(original.message)

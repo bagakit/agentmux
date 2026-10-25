@@ -84,7 +84,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   inner.ensureManagedHooks = async () => {}
   inner.ensureTerminalHandshakeOrDegrade = async (session: core.AgentMuxAgentSession) => session
-  vi.spyOn(client, 'probeAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true, capabilities: new core.AgentProviderRegistry().get(id).catalog.capabilities }))
+  vi.spyOn(client as unknown as { probePreparedAgent: typeof client.probeAgent }, 'probePreparedAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true, capabilities: new core.AgentProviderRegistry().get(id).catalog.capabilities }))
   const provider = inner.providers.get(nativeProvider) as core.AgentProvider & Required<Pick<core.AgentProvider, 'discoverNativeSession'>>
   if (nativeProvider === 'claude') {
     expect(typeof provider.discoverNativeSession).toBe('function')

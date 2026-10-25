@@ -70,7 +70,7 @@ it('admits one winner across independent Clients sharing the same durable retire
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'second-fresh-binding', endpoint: { url: 'http://127.0.0.1:0', token: 'second-fresh-token' },
     bindRun: async (id: string) => { second.agentSession(f.old.agentSessionId); f.binds.push(id) }, close: async () => {} })
-  vi.spyOn(second, 'probeAgent').mockResolvedValue({ providerId: 'claude', executable: 'claude', installed: true, capabilities: second.providers.get('claude').catalog.capabilities })
+  vi.spyOn(second as unknown as { probePreparedAgent: typeof second.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: 'claude', executable: 'claude', installed: true, capabilities: second.providers.get('claude').catalog.capabilities })
   vi.spyOn(second as any, 'ensureManagedHooks').mockResolvedValue(undefined)
   inner.ensureTerminalHandshakeOrDegrade = async (session: unknown) => session
   await inner.registry.load('local')
