@@ -85,6 +85,17 @@ the exact Connection's adapterService policy (adapterId, enabled and revision),
 transport, binding scope/grant counts and newest application/group intake with original Core
 outcome/waiting reasons, including receiver aliases. Outgoing diagnosis reads the newest five
 original delivery operations, retaining independent unknown effects and source gaps.
+Follow a discovered ingressId with connection ingress inspect --ingress ID to read the exact
+original intake and Core receipt. Managed callers may read their own frozen Host/Session/Binding
+targets without owning the bot enrollment or having created the binding. An unassigned action
+may instead be read under the caller's exact current bound application/group audience; this
+does not assign the event to that Session or grant input authority. A frozen foreign target
+takes precedence over sharing the same audience. Pausing sharing does not revoke original reads.
+This path keeps the original caller and grants no general ingress ls, authority, record-authority
+or administration access. The general list retains its receiver-Connection/frozen-binding filter
+and cursor contract. Typed actionRef/answers describe the received action fields; inspect questionReceipt for the
+original submission outcome. Absent fields do not identify whether a person selected an option
+or submitted a form, and raw callbacks are not exposed.
 Diagnosis distinguishes bindingRevision from publicationRevision after trigger-only configuration
 changes; original intake authors and receipts retain their own configuration revision. For explicit
 delivery pages use connection delivery ls --order oldest|newest (default oldest); --after continues
