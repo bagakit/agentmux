@@ -104,7 +104,13 @@ export async function createConnectionServices(options: { directory: string | un
           ...(publicationStore ? { contextPublications: publicationStore, queryReceived: (binding, record) => publication?.receiveQuery(binding, record) } : {}),
           ...(moteChat ? { prepareInput: async (record: import('@agentmux/core/connections').ConnectionIngressMessage) => {
             if (record.conversationKind === 'direct') {
-              try { const binding = await moteChat.prepareIncoming({ ...record, conversationKind: 'direct' }); if (binding) publication?.refresh() }
+              try {
+                const binding = await moteChat.prepareIncoming({ ...record, conversationKind: 'direct' })
+                if (binding) {
+                  publication?.refresh()
+                  publication?.receiveQuery(binding, record, () => moteChat.hasAdmission(record.ingressId, binding.bindingId, record.actor))
+                }
+              }
               catch (error) {
                 if (error instanceof AgentMuxError && error.code === 'MOTE_CHAT_QUOTA_EXHAUSTED') return { state: 'refused' as const, code: error.code }
                 throw new AgentMuxError('The original private-chat preparation is unavailable. Its intake and creation are retained.',

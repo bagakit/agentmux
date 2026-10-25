@@ -318,7 +318,8 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
   /** The original quota decision survives exhaustion and rollover; explicit route shutdown still applies. */
   hasAdmission(ingressId: string, bindingId: string, actor: ConnectionActor): boolean {
     const a = this.store.admissionByIngress(ingressId), row = a ? this.store.generation(a.generationId) : null
-    return !!row?.binding && row.binding.bindingId === bindingId && same(a!.actor, actor) && this.active(row)
+    return !!row?.binding && row.binding.bindingId === bindingId && same(a!.actor, actor) && this.active(row) &&
+      this.store.configuration(row.generation.target.spaceId)?.values.connection?.connectionId === row.connectionId
   }
 }
 
