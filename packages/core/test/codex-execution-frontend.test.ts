@@ -2,7 +2,7 @@ import { once } from 'node:events'
 import { PassThrough, Writable } from 'node:stream'
 import { WebSocket } from 'ws'
 import { afterEach, expect, it, vi } from 'vitest'
-import { runCodexExecutionFrontend } from '../src/providers/codex-execution-frontend.js'
+import { runAgentExecutionFrontend } from '../src/agent-execution-frontend.js'
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
@@ -20,7 +20,7 @@ async function fixture(maxPendingRequests = 8, maxFrameBytes?: number, agentSess
       text = text.slice(newline + 1)
     }
   })
-  const frontend = await runCodexExecutionFrontend({ input, output, onError: error => errors.push(error), maxPendingRequests, ...(agentSessionId ? { agentSessionId } : {}), ...(maxFrameBytes === undefined ? {} : { maxFrameBytes }) })
+  const frontend = await runAgentExecutionFrontend({ input, output, onError: error => errors.push(error), maxPendingRequests, ...(agentSessionId ? { agentSessionId } : {}), ...(maxFrameBytes === undefined ? {} : { maxFrameBytes }) })
   cleanups.push(async () => { await frontend.close(); input.destroy(); output.destroy() })
   const connect = async (url = frontend.url) => {
     const socket = new WebSocket(url)
@@ -148,7 +148,7 @@ it('waits for stdout writes instead of growing an unbounded forward queue', asyn
     else done()
   } })
   const errors: Error[] = []
-  const frontend = await runCodexExecutionFrontend({ input, output, onError: error => errors.push(error), maxFrameBytes: 512 })
+  const frontend = await runAgentExecutionFrontend({ input, output, onError: error => errors.push(error), maxFrameBytes: 512 })
   cleanups.push(async () => { unblock?.(); await frontend.close(); input.destroy(); output.destroy() })
   const peer = new WebSocket(frontend.url)
   await once(peer, 'open')
