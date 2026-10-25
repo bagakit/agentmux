@@ -128,17 +128,25 @@ export function useConnectorRoomFacts(connection: Connection | undefined, extern
   return { ...facts, identity, profiles, pending, refresh }
 }
 
-/** Current native metadata stays separate from the name frozen in a creation request. */
-export function ConnectorRoomOverview({ facts, groupId, requestedName }: {
+type ConnectorRoomOverviewProps = {
   facts: ReturnType<typeof useConnectorRoomFacts>; groupId: string; requestedName?: string | undefined
-}) {
-  const room = facts.room?.room, observation = facts.room?.observation
+}
+
+/** Current native metadata stays separate from the name frozen in a creation request. */
+export function ConnectorRoomIdentity({ facts, groupId }: ConnectorRoomOverviewProps) {
+  const room = facts.room?.room
   const profileRead = facts.profiles.get(channelMetadataSubjectKey({ kind: 'conversation', externalConversationId: groupId })), profile = profileRead?.observation?.profile
   return <div className="agent-connector-room-overview" aria-busy={facts.pending}>
     <ConnectorEntityIdentity identityKey={facts.identity} kind="group" profileRead={profileRead} name={profile?.name ?? room?.name} avatarUrl={profile?.avatarUrl} missingName="Group name not confirmed" actions={<button type="button" className="agent-connector-text-action agent-connector-room-refresh" aria-label="Refresh group details" title="Refresh group details" disabled={facts.pending} onClick={() => void facts.refresh()}>
       {facts.pending ? <LoadingIcon size={13} animation="spin" /> : <RefreshIcon size={14} />}
     </button>} />
     <ConnectorProfileUpdates reads={facts.profiles} />
+  </div>
+}
+
+export function ConnectorRoomDetails({ facts, groupId, requestedName }: ConnectorRoomOverviewProps) {
+  const room = facts.room?.room, observation = facts.room?.observation
+  return <div className="agent-connector-room-overview">
     {facts.pending ? <p className="agent-connector-note" role="status">Reading group details…</p> : null}
     {observation && observation.state !== 'ready' ? <p className="agent-connector-note" role="status">
       {observation.reason === 'permission-denied' ? 'This bot cannot read the group details. Review its application permissions.' : observation.reason === 'room-unavailable' ? 'The platform could not find an accessible group for this bot.' : 'Current group details could not be confirmed. Check this original group again.'}
@@ -152,6 +160,10 @@ export function ConnectorRoomOverview({ facts, groupId, requestedName }: {
     {facts.issue ? <p className="agent-connector-note" role="status">The group and member refresh could not complete. Earlier observed details are kept. {facts.issue}</p> : null}
     <details className="agent-connector-disclosure"><summary>Group identity</summary><ConnectorIdentityField identityKey={facts.identity} label="Group ID" value={groupId} /></details>
   </div>
+}
+
+export function ConnectorRoomOverview(props: ConnectorRoomOverviewProps) {
+  return <div className="agent-connector-room-overview"><ConnectorRoomIdentity {...props} /><ConnectorRoomDetails {...props} /></div>
 }
 
 export function ConnectorRoomPeople({ facts, onSelect, prominent = false }: { facts: ReturnType<typeof useConnectorRoomFacts>; onSelect?: ((idType: string, userId: string) => void) | undefined; prominent?: boolean }) {
