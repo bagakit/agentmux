@@ -10,7 +10,7 @@ These Markdown files are the source of the system instructions read by people an
   and the other files in [modules/](modules/) are exposed by `amux MODULE --skill`.
 - [actions/](actions/) contains longer instructions attached to the relevant help or manual,
   including [Browser programs](actions/browser-run.md), [Agent opening](actions/agent-open.md)
-  and the [PMO manual](actions/mote-pmo.md).
+  and its [remote execution workflow](actions/remote-execution.md), and the [PMO manual](actions/mote-pmo.md).
 - [shared/](shared/) holds text with more than one real consumer, including the
   [communication contract](shared/messaging/contract.md), short
   [entry](shared/messaging/entry.md) and [reminder](shared/messaging/reminder.md), and

@@ -61,6 +61,8 @@ CLI/RPC 历史分页复用原 `agent history` / `agent.history`；Native Resume 
 
 ## Agent 与工具分端执行
 
+从项目启动、选择两端和继续原工作的步骤见[远程执行使用指南](guides/actions/remote-execution.md)。Settings 和原 CLI 帮助消费同一正文；本节只说明实现接线与适配范围。
+
 现有 `agent.execution.create`、`agent.execution.binding`、`agent.execution.rejoin` 与 `agent.execution.inspect` RPC／同名对象 CLI 复用 [Core 执行协调器](src/agent-execution-coordinator.ts)。Provider 贡献原生接法；客户端继续使用同一绑定、原 Session 与操作回执。`rejoin` 重接原 reader，不重发未知的工具操作。
 
 [Claude Provider](src/providers/claude.ts) 的分端适配当前限定于 Claude Code 2.1.314 的原生模块与 `mcp serve` 合同。原文件工具由资源端原生服务执行，`Bash`／资源任务 `TaskStop` 由该原 helper 的进程句柄执行；资源授权为绑定中明确给出的 `host-user`。原工具池、主 Agent 的原生权限查询与资源 MCP 许可分别成立，不添加整类工具自动授权。用户已有 MCP、插件、提示与原生会话配置继续由 Claude 加载。
