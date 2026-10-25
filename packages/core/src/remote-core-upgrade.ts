@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, open, readFile, readdir, rm, type FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
+import { ctxmuxOwnerReceiptPath } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
 import { SshExecutionHost, type ExecutionHost } from './execution-host.js'
@@ -46,7 +47,9 @@ export type RemoteCoreMaintenanceObservation = { owner: RemoteCoreMaintenanceOwn
   /** Exact typed Native run_not_found observations; never Session terminal facts. */
   missingRunIds: string[]
   nativeRuntime: AgentMuxRuntimeCompatibilityInput & { daemonInstanceId: string; runtimeId: string } }
-type Observed = RemoteCoreMaintenanceObservation & { launch: Launch }
+type OwnerReceiptObservation = { status: 'matching' | 'missing' | 'mismatch' | 'unreadable'; path: string; detail?: string }
+type LaunchInspection = Omit<Launch, 'nativeInstanceId' | 'nativeRuntimeId' | 'nativeBuildId'>
+type Observed = RemoteCoreMaintenanceObservation & { launch: Launch; ownerReceipt: OwnerReceiptObservation }
 type RetainedOperation = { receipt: RemoteCoreUpgradeReceipt; observed?: Observed; releaseDirectory?: string; nativeRuns?: RemoteCoreUpgradeNativeRun[] }
 export type RemoteCoreUpgradeOptions = {
   stateDirectory: string; packageRoot?: string
@@ -118,26 +121,33 @@ export class RemoteCoreUpgradeManager {
     if (input.kind !== 'ssh' || !input.remoteCommand?.startsWith('/') || !input.remoteSocketPath?.startsWith('/') || !input.runtimeId) {
       throw new AgentMuxError('Save an explicit remote Core command, socket and verified Runtime identity before upgrading.', 'CORE_UPGRADE_UNAVAILABLE')
     }
-    const launch = await this.program<Launch>(input, '/usr/bin/python3', ['-c', INSPECT_CORE_OWNER], {
+    const physical = await this.program<LaunchInspection>(input, '/usr/bin/python3', ['-c', INSPECT_CORE_OWNER], {
       socket: input.remoteSocketPath, runtimeId: input.runtimeId })
-    if (launch.platform !== 'linux-x64' || !/^\d+$/u.test(launch.startTicks) || !/^\d+$/u.test(launch.nativeStartTicks) ||
-      !Number.isSafeInteger(launch.processId) || launch.processId < 1 || !Number.isSafeInteger(launch.nativeProcessId) || launch.nativeProcessId < 1 ||
-      !launch.node.startsWith('/') || !/^[a-f0-9]{64}$/u.test(launch.deploymentDigest)) {
+    if (physical.platform !== 'linux-x64' || !/^\d+$/u.test(physical.startTicks) || !/^\d+$/u.test(physical.nativeStartTicks) ||
+      !Number.isSafeInteger(physical.processId) || physical.processId < 1 || !Number.isSafeInteger(physical.nativeProcessId) || physical.nativeProcessId < 1 ||
+      !physical.node.startsWith('/') || !/^[a-f0-9]{64}$/u.test(physical.deploymentDigest)) {
       throw new AgentMuxError('The original process launch identity is not qualified.', 'CORE_UPGRADE_UNAVAILABLE')
     }
-    const observed = parseRemoteCoreMaintenanceObservation(await this.program(input, launch.node, ['-e', READ_CORE_MAINTENANCE], {
-      launch, socket: input.remoteSocketPath, runtimeId: input.runtimeId }))
-    if (observed.owner.runtimeId !== input.runtimeId || observed.owner.processId !== launch.processId || observed.bootstrap.storePath !== launch.storePath ||
-      observed.nativeRuntime.daemonInstanceId !== launch.nativeInstanceId || observed.nativeRuntime.runtimeId !== launch.nativeRuntimeId || observed.nativeRuntime.buildId !== launch.nativeBuildId) {
+    const observed = parseRemoteCoreMaintenanceObservation(await this.program(input, physical.node, ['-e', READ_CORE_MAINTENANCE], {
+      launch: physical, socket: input.remoteSocketPath, runtimeId: input.runtimeId }))
+    if (observed.owner.runtimeId !== input.runtimeId || observed.owner.processId !== physical.processId || observed.bootstrap.storePath !== physical.storePath) {
       throw new AgentMuxError('The maintenance observation belongs to another process, Native or Store.', 'CORE_UPGRADE_UNAVAILABLE')
     }
     assertAgentMuxRuntimeCompatibility(observed.nativeRuntime)
     // Recheck OS leases, image and package after the producer's strict read.
-    const after = await this.program<Launch>(input, '/usr/bin/python3', ['-c', INSPECT_CORE_OWNER], {
-      pid: launch.processId, startTicks: launch.startTicks, nativePid: launch.nativeProcessId,
-      socket: input.remoteSocketPath, store: launch.storePath, runtimeId: input.runtimeId })
-    if (JSON.stringify(after) !== JSON.stringify(launch)) throw new AgentMuxError('The original process or software changed during observation.', 'CORE_UPGRADE_UNAVAILABLE')
-    return { ...observed, launch }
+    const after = await this.program<LaunchInspection & { ownerReceipt: OwnerReceiptObservation }>(input, '/usr/bin/python3', ['-c', INSPECT_CORE_OWNER], {
+      pid: physical.processId, startTicks: physical.startTicks, nativePid: physical.nativeProcessId,
+      socket: input.remoteSocketPath, store: physical.storePath, runtimeId: input.runtimeId,
+      receipt: { path: ctxmuxOwnerReceiptPath(join(physical.runtimeDirectory, 'ctxmux.sock'), observed.nativeRuntime, physical.nativeManifestSha256), identity: observed.nativeRuntime } })
+    const { ownerReceipt, ...afterPhysical } = after
+    if (JSON.stringify(afterPhysical) !== JSON.stringify(physical)) throw new AgentMuxError('The original process or software changed during observation.', 'CORE_UPGRADE_UNAVAILABLE')
+    if (!ownerReceipt || !['matching', 'missing', 'mismatch', 'unreadable'].includes(ownerReceipt.status) ||
+      ownerReceipt.path !== ctxmuxOwnerReceiptPath(join(physical.runtimeDirectory, 'ctxmux.sock'), observed.nativeRuntime, physical.nativeManifestSha256)) {
+      throw new AgentMuxError('The product receipt diagnostic belongs to another Native observation.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
+    }
+    const launch = { ...physical, nativeInstanceId: observed.nativeRuntime.daemonInstanceId,
+      nativeRuntimeId: observed.nativeRuntime.runtimeId, nativeBuildId: observed.nativeRuntime.buildId }
+    return { ...observed, launch, ownerReceipt }
   }
   private expected(input: RemoteCoreUpgradeHost, artifact: PortableCoreArtifact, observed: Observed): RemoteCoreUpgradeExpected {
     return { targetDigest: remoteCoreUpgradeTargetDigest(input), runtimeId: observed.owner.runtimeId,
@@ -157,7 +167,8 @@ export class RemoteCoreUpgradeManager {
     try {
       const observed = await this.observe(captured)
       return { input: captured, candidate, ...prior, eligible: true, reason: 'ready', expected: this.expected(captured, artifact, observed),
-        detail: '已核对原 Core、启动目录和 Runtime。升级仅重启 Core 服务，保留原 Session 和运行进程。' }
+        detail: '已核对原 Core、启动目录和 Runtime。升级仅重启 Core 服务，保留原 Session 和运行进程。' +
+          (observed.ownerReceipt.status === 'matching' ? '' : ` 产品来源回执${observed.ownerReceipt.status === 'missing' ? '缺失' : '未确认'}；当前进程、映像与公开身份已独立核对，健康 Runtime 保持可用。`) }
     } catch (error) { return { input: captured, candidate, ...prior, eligible: false,
       reason: error instanceof AgentMuxError && error.code === 'CTXMUX_OWNER_IDENTITY_UNPROVEN' ? 'runtime-update-required' : 'unverified', detail: errorText(error) } }
   }

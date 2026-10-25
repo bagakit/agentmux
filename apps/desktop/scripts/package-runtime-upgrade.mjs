@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
+import { ctxmuxOwnerReceiptPath } from '../../../packages/core/src/runtime-paths.ts'
 import { probeSocketLiveness } from '../../../packages/core/src/socket-liveness.ts'
 
 const exec = promisify(execFile)
@@ -569,7 +570,15 @@ export async function createPrivateRuntimeScope(corePath) {
         { code: 'PRIVATE_RUNTIME_CLEANUP_UNCONFIRMED', detail: { directory, socketPath, originalOwner, signals } })
     }
   }
-  return Object.freeze({ directory, socketPath, stateDirectory, daemonPath: selected.daemonPath, observeOwner, cleanup })
+  const ownerReceiptPath = async () => {
+    const scratch = await mkdtemp(join(directory, 'receipt-sdk-'))
+    try {
+      const sdk = await extractSdk(selected, join(scratch, 'sdk'))
+      const observed = await inspect(sdk, socketPath, selected.corePath, [])
+      return ctxmuxOwnerReceiptPath(socketPath, observed.runtime, selected.manifestSha256)
+    } finally { await rm(scratch, { recursive: true, force: true }) }
+  }
+  return Object.freeze({ directory, socketPath, stateDirectory, daemonPath: selected.daemonPath, observeOwner, ownerReceiptPath, cleanup })
 }
 
 /** Bind a serving socket to the installed artifact's actual mapped image and state lock. */
@@ -730,7 +739,7 @@ export async function prepareRuntimeUpgrade(currentApp, candidateApp, { coldOnly
       before.runtime.runtimeIdPersistence === 'state_dir' && before.runtime.capabilities[capability] >= 1,
     'The existing Runtime does not declare persistent planned-exec continuity.')
     const owner = await processOwner(old.socketPath, old)
-    const receiptPath = join(dirname(old.socketPath), 'owner.json')
+    const receiptPath = ctxmuxOwnerReceiptPath(old.socketPath, before.runtime, old.manifestSha256)
     const ownerReceipt = await ownerReceiptDiagnostic(receiptPath, old, before, owner)
     return { old, candidate, oldSdk, newSdk, before, owner, ownerReceipt, receiptPath, temporary }
   } catch (error) {
@@ -741,7 +750,8 @@ export async function prepareRuntimeUpgrade(currentApp, candidateApp, { coldOnly
 
 async function writeUpgradedReceipt(plan, owner, runtime) {
   const { mintObjectId } = await import('@agentmux/core/object-id')
-  const temporary = join(dirname(plan.receiptPath), `.owner-install-${mintObjectId()}.json`)
+  const receiptPath = ctxmuxOwnerReceiptPath(plan.old.socketPath, runtime, plan.candidate.manifestSha256)
+  const temporary = join(dirname(receiptPath), `.owner-install-${mintObjectId()}.json`)
   const receipt = { schema: 'agentmux.ctxmux-owner.v1', sourceCommit: plan.candidate.manifest.source.commit,
     sourceTree: plan.candidate.manifest.source.tree, manifestSha256: plan.candidate.manifestSha256,
     daemonSha256: plan.candidate.daemonSha256, daemonPath: owner.executable, socketPath: plan.old.socketPath,
@@ -749,8 +759,8 @@ async function writeUpgradedReceipt(plan, owner, runtime) {
     runtimeId: runtime.runtimeId, runtimeBuildId: runtime.buildId }
   try {
     await writeFile(temporary, `${JSON.stringify(receipt)}\n`, { flag: 'wx', mode: 0o600 })
-    await rename(temporary, plan.receiptPath)
-    await chmod(plan.receiptPath, 0o600)
+    await rename(temporary, receiptPath)
+    await chmod(receiptPath, 0o600)
   } finally { await rm(temporary, { force: true }) }
 }
 

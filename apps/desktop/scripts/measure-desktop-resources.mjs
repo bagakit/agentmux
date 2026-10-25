@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createRequire } from 'node:module'
-import { access, chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -48,8 +48,7 @@ async function assertProbePathsRemoved() {
     ...measuredWorkspaces.map(({ path }) => path),
     reportPath,
     socketPath,
-    stateDirectory,
-    join(runtimeDirectory, 'owner.json')
+    stateDirectory
   ]
   const remaining = []
   for (const path of paths) {
@@ -61,20 +60,8 @@ async function assertProbePathsRemoved() {
 }
 
 async function ownedDaemonPids() {
-  let receipt = null
-  try {
-    receipt = JSON.parse(await readFile(join(runtimeDirectory, 'owner.json'), 'utf8'))
-  } catch (error) {
-    if (!(error && typeof error === 'object' && error.code === 'ENOENT')) throw error
-  }
-  if (receipt && (
-    receipt.schema !== 'agentmux.ctxmux-owner.v1' ||
-    receipt.daemonPath !== daemonPath ||
-    receipt.socketPath !== socketPath ||
-    receipt.stateDirectory !== stateDirectory
-  )) {
-    throw new Error('Desktop resource probe found an invalid ctxmux owner receipt.')
-  }
+  // Private cleanup is authorized by this invocation's exact socket/process scope.
+  // Product provenance files are independent observations, not cleanup ownership.
   const processes = await execFileAsync('/usr/sbin/lsof', ['-n', '-P', '-a', '-U', '-Fpcn'], {
     timeout: 5_000,
     maxBuffer: 4 * 1024 * 1024
@@ -128,12 +115,8 @@ async function exerciseReceiptlessDaemonCleanup() {
     if (owned.length !== 1 || owned[0] !== child.pid) {
       throw new Error('Desktop resource probe could not prove its exact receiptless ctxmuxd owner.')
     }
-    const unexpectedReceipt = await readFile(join(runtimeDirectory, 'owner.json'), 'utf8').catch((error) => {
-      if (error && typeof error === 'object' && error.code === 'ENOENT') return null
-      throw error
-    })
-    if (unexpectedReceipt !== null) {
-      throw new Error('Receiptless cleanup fixture unexpectedly created an owner receipt.')
+    if ((await readdir(runtimeDirectory)).some(name => /^owner-[a-f0-9]{64}\.json$/u.test(name))) {
+      throw new Error('Receiptless cleanup fixture unexpectedly created a product owner receipt.')
     }
     if (await stopOwnedDaemons() !== 1) {
       throw new Error('Desktop resource probe did not clean exactly one receiptless ctxmuxd owner.')

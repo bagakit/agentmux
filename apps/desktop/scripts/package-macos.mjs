@@ -603,7 +603,6 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   const privateRuntime = await createPrivateRuntimeScope(join(canonicalAppPath, 'Contents', 'Resources', 'app', 'node_modules', '@agentmux', 'core'))
   const runtimeRoot = privateRuntime.directory
   const endpointPath = privateRuntime.socketPath
-  const ownerReceiptPath = join(runtimeRoot, 'owner.json')
   const executable = join(canonicalAppPath, 'Contents', 'MacOS', PRODUCT_NAME)
   const daemonEntrypoint = privateRuntime.daemonPath
   await mkdir(userData, { recursive: true })
@@ -641,6 +640,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     assert(await realpath(ready.executable) === executable,
       'LaunchServices ready receipt did not come from the exact relocated application.')
     verificationStage = 'runtime-owner-receipt'
+    const ownerReceiptPath = await privateRuntime.ownerReceiptPath()
     assert(await waitForPath(ownerReceiptPath, verificationDeadline, isAppAlive), 'Packaged CtxMux did not publish its ownership receipt.')
     const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8'))
     assert(await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
