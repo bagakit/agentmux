@@ -173,7 +173,7 @@ export async function readRetainedMode(ref, mode, candidate, authorizationSha256
   assert.deepEqual(input.installedObservation, preflight.installedObservation, 'Retained mode used different installed artifacts')
   assert.equal(execution.schema, 'agentmux.remote-mode-execution.v1')
   assert(execution.completed === true && execution.exitCode === 0 && execution.mode === mode)
-  assert(['exec-tool', 'complete-child-close'].includes(execution.source?.kind) && nonempty(execution.source), 'Original process observation is required')
+  assert(['exec-tool', 'complete-child-close', 'node-child-close'].includes(execution.source?.kind) && nonempty(execution.source), 'Original process observation is required')
   assert.equal(execution.evidenceRoot, input.root)
   assert.equal(ref.summary.path, join(input.root, 'summary.json'))
   assert.equal(ref.input.path, join(input.root, 'input.json'))
@@ -187,6 +187,11 @@ export async function readRetainedMode(ref, mode, candidate, authorizationSha256
     assert.equal(parent.candidateCommit, candidate.sourceCommit)
     assert(parent.failure || parent.modes?.some(row => row.mode === mode), 'Original full join did not retain the mode outcome')
     assert(typeof source.observation === 'string' && source.observation.length > 0, 'Distinguish direct child close from control-flow-derived evidence')
+  } else if (source.kind === 'node-child-close') {
+    const original = await readEvidence(source.receipt)
+    await readEvidenceBytes(source.driver)
+    assert(original.exitCode === 0 && original.signal === null && original.closedAt && original.startedAt && Number.isInteger(original.pid), 'The original Node child must confirm normal close')
+    assert.equal(execution.signal, null)
   } else {
     const original = await readEvidence(source.receipt)
     assert(original.exit_code === 0 && original.session_id === undefined, 'The original executor must report completed success')
@@ -207,6 +212,9 @@ export async function runComplete({ authorization, receiptPath, candidate, build
   await save()
   try {
     assert(preflight.installationQualification.bin === 'verified' && preflight.installationQualification.vendor === 'verified', 'Complete installed-artifact qualification is required')
+    const preflightPath = join(root, 'preflight.json'), preflightBytes = JSON.stringify(preflight, null, 2)
+    await writeFile(preflightPath, preflightBytes, { mode: 0o600 })
+    summary.preflight = { path: preflightPath, sha256: hash(preflightBytes) }; summary.authorizationSha256 = initial
     const core = await coreEvidence(candidate, buildReceipt); summary.localSemantics = core.references
     const verification = authorization.executionQualification?.verificationInputs
     if (verification) {

@@ -133,6 +133,12 @@ test('retained mode requires the same original authorization, installed bytes an
       const bad = structuredClone(execution); bad.source.receipt = await save('bad-exec.json', result)
       await assert.rejects(readRetainedMode({ ...ref, execution: await save('bad-execution.json', bad) }, 'reader-gap', candidate, sha, { installedObservation }))
     }
+    const nodeChild = { ...execution, signal: null, source: { kind: 'node-child-close', log: execution.source.log, driver: execution.source.log, receipt: await save('node-close.json', { pid: 123, startedAt: 'start', closedAt: 'end', exitCode: 0, signal: null }) } }
+    await readRetainedMode({ ...ref, execution: await save('node-child.json', nodeChild) }, 'reader-gap', candidate, sha, { installedObservation })
+    for (const result of [{ pid: 123, startedAt: 'start', exitCode: 0 }, { pid: 123, startedAt: 'start', closedAt: 'end', exitCode: 0, signal: 'SIGTERM' }]) {
+      const bad = structuredClone(nodeChild); bad.source.receipt = await save('node-bad-close.json', result)
+      await assert.rejects(readRetainedMode({ ...ref, execution: await save('node-bad-child.json', bad) }, 'reader-gap', candidate, sha, { installedObservation }))
+    }
     const child = { ...execution, signal: null, source: { kind: 'complete-child-close', log: execution.source.log, observation: 'Derived from original accepted child close before aggregation failed', summary: await save('parent.json', { candidateCommit: commit, failure: 'aggregation rejected the digest encoding' }) } }
     await readRetainedMode({ ...ref, execution: await save('child.json', child) }, 'reader-gap', candidate, sha, { installedObservation })
     for (const change of [value => { delete value.signal }, value => { value.signal = 'SIGKILL' }, value => { delete value.source.summary }, value => { value.source.summary.sha256 = '0'.repeat(64) }]) {
