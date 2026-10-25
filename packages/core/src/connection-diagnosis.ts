@@ -26,7 +26,7 @@ export function deliveryMatches(delivery: ConnectionDelivery, target: GroupTarge
     delivery.target.externalConversationId === target.externalConversationId && applicationMatches(delivery.target.application, target)
 }
 export function deliveryFacts(delivery: ConnectionDelivery) {
-  const kind = delivery.reference.source.kind === 'binding-operation' ? 'binding-notice' as const : delivery.reference.source.kind === 'interaction' ? 'permission' as const : 'conversation' as const
+  const kind = delivery.reference.source.kind === 'binding-operation' ? 'binding-notice' as const : delivery.reference.source.kind === 'interaction' ? 'permission' as const : delivery.reference.source.kind === 'ingress' ? 'query-feedback' as const : 'conversation' as const
   const record = delivery.reference.source.kind === 'native' || delivery.reference.source.kind === 'captured' ? delivery.reference as ConversationItemRef : undefined
   return { kind, association: association(delivery.reference, { ...(record ? { record } : {}), ...(delivery.event ? { event: delivery.event } : {}) }), operationId: delivery.operationId, state: delivery.state, receipt: delivery.receipt?.state ?? null,
     platformMessageId: delivery.receipt?.state === 'confirmed' ? delivery.receipt.mapping.messageId : null,
