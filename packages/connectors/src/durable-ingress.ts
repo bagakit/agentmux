@@ -193,8 +193,10 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
         return { ingress: this.read(String(originalEvent.ingress_id))!, duplicate: 'event' as const }
       }
       if (event.kind === 'action') {
-        const ingress = parseConnectionIngressRecord({ ...event, ingressId: mintObjectId(), connectionId: input.connectionId,
-          application: current.config.application, ...(this.permissions.supports(event) ? { state: 'received' } : { state: 'refused', code: 'INGRESS_ACTION_UNSUPPORTED' }) })
+        const original: ConnectionIngressAction = { ...event, ingressId: mintObjectId(), connectionId: input.connectionId,
+          application: current.config.application, state: 'received' }
+        const code = this.permissions.intakeCode(original)
+        const ingress = parseConnectionIngressRecord({ ...original, ...(code ? { state: 'refused', code } : {}) })
         this.database.prepare('INSERT INTO connection_ingress_event (domain,app_id,event_id,ingress_id,event_json,raw_payload,record_json,connection_id,intake_sequence) VALUES (?,?,?,?,?,?,?,?,?)')
           .run(domain, appId, event.eventId, ingress.ingressId, encoded, input.raw, JSON.stringify(ingress), input.connectionId, this.nextSequence())
         return { ingress, duplicate: null }
@@ -531,8 +533,8 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       catch (error) {
         // A service or storage observation gap cannot consume this already acknowledged original event.
         if (error instanceof AgentMuxError && ['INGRESS_SERVICE_DISABLED', 'INGRESS_SERVICE_UNCONFIRMED', 'INGRESS_STORAGE_UNCONFIRMED'].includes(error.code)) return
-        if (!(error instanceof AgentMuxError) || !CONNECTION_INGRESS_AUTHORITY_CODES.includes(error.code as never)) throw error
-        this.write({ ...record, state: 'refused', code: error.code as ConnectionIngressAuthorityCode })
+        if (!(error instanceof AgentMuxError) || error.code !== 'INGRESS_QUESTION_ANSWER_INVALID' && !CONNECTION_INGRESS_AUTHORITY_CODES.includes(error.code as never)) throw error
+        this.write({ ...record, state: 'refused', code: error.code as NonNullable<ConnectionIngressAction['code']> })
       }
     })
     if (claimed?.own) {

@@ -49,7 +49,7 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
       ...(p.sourceMessageId === undefined ? {} : { sourceMessageId: text(p.sourceMessageId) }), ...(p.actionRef === undefined ? {} : { actionRef: text(p.actionRef) }),
       ...(p.answers === undefined ? {} : { answers: parseConnectionQuestionAnswerSubmissions(p.answers) }),
       }
-    if (p.state === 'refused') { if (p.input !== undefined || p.code !== 'INGRESS_ACTION_UNSUPPORTED' && !CONNECTION_INGRESS_AUTHORITY_CODES.includes(p.code as never)) fail(); return { ...base, state: 'refused', code: p.code as NonNullable<import('./ingress-contract.js').ConnectionIngressAction['code']> } }
+    if (p.state === 'refused') { if (p.input !== undefined || p.code !== 'INGRESS_ACTION_UNSUPPORTED' && p.code !== 'INGRESS_QUESTION_ANSWER_INVALID' && !CONNECTION_INGRESS_AUTHORITY_CODES.includes(p.code as never)) fail(); return { ...base, state: 'refused', code: p.code as NonNullable<import('./ingress-contract.js').ConnectionIngressAction['code']> } }
     if (!base.actor || !base.externalConversationId || !base.sourceMessageId || !base.actionRef || p.code !== undefined) fail()
     if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...base, state: 'received' } }
     const input = object(p.input, ['hostId','agentSessionId','expectedRun','operationId','intentDigest','author','responseKind']), run = object(input.expectedRun, ['runId']), author = parseAgentExternalInteractionAuthor(input.author)

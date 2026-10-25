@@ -68,7 +68,7 @@ export type ConnectionIngressAction = {
   actionRef?: string
   answers?: ConnectionQuestionAnswerSubmission[]
   state: 'received' | 'refused' | 'claimed'
-  code?: 'INGRESS_ACTION_UNSUPPORTED' | ConnectionIngressAuthorityCode
+  code?: 'INGRESS_ACTION_UNSUPPORTED' | 'INGRESS_QUESTION_ANSWER_INVALID' | ConnectionIngressAuthorityCode
   input?: { hostId: string; agentSessionId: string; expectedRun: { runId: string }; operationId: string; intentDigest: string; author: AgentExternalInteractionAuthor; responseKind?: 'question' }
   body?: never
   externalMessageId?: never

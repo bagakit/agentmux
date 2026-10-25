@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto'
 import { mintObjectId, AgentMuxError, agentPromptCondition, agentInteractionResponseUnavailableReason, agentQuestionReplyIntentDigest, agentInteractionIntentDigest, agentInteractionRequestDigest, agentInteractionRequestTarget, parseAgentExternalInteractionAuthor,
   type AgentMuxAgentInteractionInput, type AgentMuxSessionQuestionReplyInput, type AgentMuxPermissionRequest, type AgentMuxAgentSession, type AgentSessionHistoryQuestion } from '@agentmux/core'
 import type { ConversationUnit } from '@agentmux/core/conversation'
-import { parseConnectionIngressRecord, type ConnectionGrant, type ConnectionEffectiveGrant, type ConnectionEffectiveGrants, type ConnectionIngressAction, type RoomBinding } from '@agentmux/core/connections'
-import type { ConnectionQuestionForm, ConnectionQuestionFormInput, DurableIngressOptions, VerifiedIngressAction } from './durable-ingress.js'
+import { CONNECTION_INGRESS_AUTHORITY_CODES, parseConnectionIngressRecord, type ConnectionGrant, type ConnectionEffectiveGrant, type ConnectionEffectiveGrants, type ConnectionIngressAction, type RoomBinding } from '@agentmux/core/connections'
+import type { ConnectionQuestionForm, ConnectionQuestionFormInput, DurableIngressOptions } from './durable-ingress.js'
 import type { PublicationPermissionsPort } from './publication-host.js'
 import type { PermissionPublicationPayload, QuestionPublicationPayload, PublicationOperation, PublicationStore } from './publication-store.js'
 
@@ -41,10 +41,24 @@ export class ConversationActions implements PublicationPermissionsPort {
     const row = this.options.connections.database.prepare('SELECT reference_json FROM connection_ingress_action_reference WHERE action_ref=?').get(actionRef)
     return row ? JSON.parse(String(row.reference_json)) as Reference : null
   }
-  supports(event: VerifiedIngressAction): boolean {
-    if (!event.actor || !event.actionRef || !event.externalConversationId || !event.sourceMessageId) return false
-    const ref = this.reference(event.actionRef)
-    return !!ref && (ref.kind !== 'question' || !!event.answers)
+  /** Routing and full-answer validation are separate; no Core work belongs in the native ACK. */
+  intakeCode(record: ConnectionIngressAction): ConnectionIngressAction['code'] {
+    if (!record.actor || !record.actionRef || !record.externalConversationId || !record.sourceMessageId) return 'INGRESS_ACTION_UNSUPPORTED'
+    const ref = this.reference(record.actionRef)
+    if (!ref) return 'INGRESS_ACTION_UNSUPPORTED'
+    if (ref.kind !== 'question' || this.completeQuestionAnswers(ref, record)) return undefined
+    try {
+      // Only a known invalid form needs immediate local feedback. Valid actions keep deferred admission.
+      this.authorize(record)
+      return this.questionClaimed(ref.actionRef) ? 'INGRESS_AUTHORITY_REVISED' : 'INGRESS_QUESTION_ANSWER_INVALID'
+    } catch (error) {
+      if (error instanceof AgentMuxError && CONNECTION_INGRESS_AUTHORITY_CODES.includes(error.code as never) &&
+          !['INGRESS_SERVICE_DISABLED', 'INGRESS_SERVICE_UNCONFIRMED', 'INGRESS_STORAGE_UNCONFIRMED'].includes(error.code)) return error.code as ConnectionIngressAction['code']
+      return undefined // An observation gap retains the original received event for existing recovery.
+    }
+  }
+  private questionClaimed(actionRef: string): boolean {
+    return !!this.options.connections.database.prepare("SELECT 1 FROM connection_ingress_event WHERE json_extract(record_json,'$.kind')='action' AND json_extract(record_json,'$.input.author.actionRef')=? AND json_extract(record_json,'$.state')='claimed' LIMIT 1").get(actionRef)
   }
   observe(binding: RoomBinding, wake: () => void): () => void {
     const core = this.options.core(binding.executionHostId)
@@ -165,7 +179,7 @@ export class ConversationActions implements PublicationPermissionsPort {
     const grant = this.current(ref!, record.actor).find(value => same(value.actor, record.actor))
     if (!grant) failure('INGRESS_ACTOR_NOT_AUTHORIZED')
     const mapping = ref!.kind === 'question'
-      ? this.options.connections.database.prepare("SELECT operation_json FROM connector_publication_operation WHERE json_extract(operation_json,'$.payload.actionRef')=? AND state='confirmed' ORDER BY ordinal DESC LIMIT 1").get(ref!.actionRef)
+      ? this.options.connections.database.prepare("SELECT operation_json FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND json_extract(operation_json,'$.payload.actionRef')=? AND state='confirmed' ORDER BY ordinal DESC LIMIT 1").get(ref!.binding.bindingId, ref!.binding.revision, ref!.actionRef)
       : this.options.connections.database.prepare("SELECT operation_json FROM connector_publication_operation WHERE projection_id=? AND state='confirmed' ORDER BY ordinal DESC LIMIT 1").get(ref!.projectionId)
     if (!mapping || JSON.parse(String(mapping.operation_json)).mapping?.messageId !== record.sourceMessageId) failure('INGRESS_AUTHORITY_REVISED')
     if (record.input && (record.input.hostId !== ref!.binding.executionHostId || record.input.agentSessionId !== ref!.binding.agentSessionId || record.input.expectedRun.runId !== ref!.run.runId ||
@@ -181,7 +195,7 @@ export class ConversationActions implements PublicationPermissionsPort {
           !same({ providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, ref.target.source) ||
           agentPromptCondition(session).afterSubmissionId !== ref.target.afterSubmissionId ||
           core?.providers?.get(ref.target.source.providerId).catalog.capabilities.asyncQuestionReply !== 'native-input') return null
-      if (this.options.connections.database.prepare("SELECT 1 FROM connection_ingress_event WHERE json_extract(record_json,'$.kind')='action' AND json_extract(record_json,'$.input.author.actionRef')=? AND json_extract(record_json,'$.state')='claimed' LIMIT 1").get(ref.actionRef)) return null
+      if (this.questionClaimed(ref.actionRef)) return null
       return { questions: structuredClone(ref.questions), status: 'pending' }
     } catch { return null }
   }
@@ -217,18 +231,24 @@ export class ConversationActions implements PublicationPermissionsPort {
     return input
   }
   private questionAnswers(ref: QuestionReference, record: ConnectionIngressAction): AgentMuxSessionQuestionReplyInput['answers'] {
-    if (!record.answers || record.answers.length !== ref.questions.length) failure('INGRESS_AUTHORITY_REVISED')
-    return ref.questions.map(question => {
-      const answer = record.answers!.find(answer => answer.questionId === question.id)
-      if (!answer) return failure('INGRESS_AUTHORITY_REVISED')
+    return this.completeQuestionAnswers(ref, record) ?? failure(this.questionClaimed(ref.actionRef) ? 'INGRESS_AUTHORITY_REVISED' : 'INGRESS_QUESTION_ANSWER_INVALID')
+  }
+  private completeQuestionAnswers(ref: QuestionReference, record: ConnectionIngressAction): AgentMuxSessionQuestionReplyInput['answers'] | null {
+    if (!record.answers || record.answers.length !== ref.questions.length) return null
+    const answers: AgentMuxSessionQuestionReplyInput['answers'] = []
+    for (const question of ref.questions) {
+      const answer = record.answers.find(answer => answer.questionId === question.id)
+      if (!answer) return null
       if (answer.text !== undefined) {
-        if (!question.acceptsText) return failure('INGRESS_AUTHORITY_REVISED')
-        return { questionId: question.id, answer: answer.text }
+        if (!question.acceptsText) return null
+        answers.push({ questionId: question.id, answer: answer.text })
+      } else {
+        const options = answer.optionIds?.map(id => question.options.find(option => option.id === id))
+        if (!options?.length || options.some(value => !value)) return null
+        answers.push({ questionId: question.id, answer: options.map(option => option!.label).join('\n') })
       }
-      const options = answer.optionIds?.map(id => question.options.find(option => option.id === id))
-      if (!options?.length || options.some(value => !value)) return failure('INGRESS_AUTHORITY_REVISED')
-      return { questionId: question.id, answer: options.map(option => option!.label).join('\n') }
-    })
+    }
+    return answers
   }
   questions(binding: RoomBinding, units: readonly ConversationUnit[]): ReadonlyMap<string, QuestionPublicationPayload> {
     this.initialize()
