@@ -14,6 +14,10 @@ import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import * as CoreModule from '@agentmux/core'
+import { FileUploadOwner } from '../../host/src/file-upload-owner'
+import { fileUploadRevision } from '@agentmux/core/files'
+import { encodeSelectedImageReference, expandComposerInput } from '@agentmux/client-ui/composer-semantic-reference'
 import { AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, agentPromptCondition, issueAgentCapability, hashAgentCapability,
   type AgentMuxStoredAgentSession } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
@@ -28,17 +32,17 @@ const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
   storageDirectory: _hygiene_fixturePath("private-explicit-steer"), invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
 // Electron transport and unrelated startup services are isolated. The target's Renderer, Store,
 // preload, registered IPC, RuntimeController and public Core submission all execute below.
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => {
     bridge.api = api; Object.assign(window, { [name]: api })
   } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), removeListener: vi.fn(), send: vi.fn() },
   webFrame: { getZoomFactor: () => 1 }, app: {
-    getPath: () => bridge.storageDirectory, getAppPath: () => resolve(dirname(fileURLToPath(import.meta.url)), '..'), isPackaged: false
+    once: vi.fn(), getPath: () => bridge.storageDirectory, getAppPath: () => resolve(dirname(fileURLToPath(import.meta.url)), '..'), isPackaged: false
   },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
-    removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
+    removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, globalShortcut: { register: () => true, unregister: vi.fn() }
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} }
@@ -48,7 +52,7 @@ vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: c
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} setPresentationWindowOwner() {} release() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import { RuntimeController } from '../src/main/runtime-controller'
 import { registerIpc } from '../src/main/ipc'
@@ -69,6 +73,7 @@ let writes: string[], holdInput: ((data: string) => Promise<void>) | undefined
 let loseSubmitAck: boolean
 let privateQueueDirectory: string, capability: string
 let immediateCapability: boolean
+let selectedImages: FileUploadOwner
 
 function deferred() {
   let resolve!: () => void
@@ -108,7 +113,8 @@ beforeEach(async () => {
     createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), semanticStatus: { state: 'working', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 1) }
   }
   await store.compareAndSwap(null, durable)
-  client = new AgentMuxClient({ store })
+  selectedImages = new FileUploadOwner(join(privateQueueDirectory, 'selected-images'))
+  client = new AgentMuxClient({ store, inputResources: selectedImages })
   // A connected private in-memory fixture replaces ctxmux's native facts/receipt boundary. It does
   // not connect a daemon, install hooks, start a provider, or call a model. Core's guard stays real.
   const inner = client as any
@@ -143,10 +149,10 @@ beforeEach(async () => {
   }, workspaces: [{ id: 'private', name: 'Fixture', hostId: 'local', path: durable.workspacePath, kind: 'folder' }] }
   const sender = Object.assign(new EventEmitter(), { id: 772, isDestroyed: () => false, send: vi.fn(),
     session: { getStoragePath: () => privateQueueDirectory, flushStorageData: vi.fn() } })
-  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
+  disposeIpc = await registerIpc({ workbenchWindows: { setNativeOwner: () => () => {}, windowForDocument: () => null } as never, initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as unknown as ContinuousProgressLoopManager,
-    configStore: { get: async () => config } as unknown as ConfigStore,
-    scratchTopics: { setNameAudit: vi.fn() } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    configStore: { get: async () => config, validate: (value: unknown) => value, save: async () => config } as unknown as ConfigStore,
+    scratchTopics: { setNameAudit: vi.fn() } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {}, listFiles: async () => [] } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel)
     expect(handler).toBeTypeOf('function')
@@ -170,7 +176,7 @@ beforeEach(async () => {
     const {promptExecution:_native,...ordinary}=current.capabilities
     return {...current,capabilities:{...ordinary,...(immediateCapability ? {promptExecution:{immediate:'interrupt-before-input' as const}} : {})}}
   })
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockImplementation(async options => options?.observation ? { catalog: [], warnings: [] } : [] as never)
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   disposeStore = await useAppStore.getState().initialize()
   useAppStore.setState({ config, sessions: [session], timelines: {}, agentComposerDrafts: {},
@@ -183,15 +189,15 @@ afterEach(async () => {
   // Bounded fixtures settle every input gate within its test; no native children or live Run exist.
   for (const gate of gates) gate.resolve()
   await settled()
-  await act(async () => root.unmount())
-  container.remove()
+  await act(async () => root?.unmount())
+  container?.remove()
   disposeStore?.(); disposeStore = undefined
   await disposeIpc?.(); disposeIpc = undefined
   await runtime.dispose()
   useAppStore.setState(initial, true)
   bridge.invoke.mockReset(); vi.restoreAllMocks()
   vi.unstubAllEnvs()
-  await rm(privateQueueDirectory, { recursive: true, force: true })
+  await rm(privateQueueDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
 })
 
 it('real Cmd/Ctrl+Enter steers the exact new intent through Main/Core despite an older queue-only head', async () => {
@@ -586,4 +592,43 @@ it('Core refuses the final Enter when a new permission arrived during render, re
   expect(ack.runId).toBe(RUN)
   expect(writes).toEqual(['prompt before permission', 'n\r'])
   expect(client.agentSession(ID).pendingInteraction?.request).toEqual(pending.request)
+})
+
+
+it.each([{ oversized: false, edit: false }, { oversized: true, edit: false }, { oversized: false, edit: true }])('shares selected paste bytes through the actual draft, queue, preload and Main input consumer ($oversized / queue edit $edit)', async ({ oversized, edit }) => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64')
+  const bytes = oversized ? Buffer.concat([png, Buffer.alloc(5 * 1024 * 1024 - png.length)]) : png
+  const service = new CoreModule.AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client }], fileUploads: selectedImages })
+  vi.spyOn(CoreModule, 'connectAgentMuxRpc').mockResolvedValue({ call: (method: string, input: unknown) => service.call(method as never, input as never, { principal: { kind: 'user', id: 'selected-person' } }), dispose: async () => {} } as never)
+  await draft('Inspect this image ')
+  const file = new File([bytes], 'image.png', { type: 'image/png' })
+  const paste = new Event('paste', { bubbles: true, cancelable: true })
+  Object.defineProperty(paste, 'clipboardData', { value: { items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }], getData: () => '' } })
+  await act(async () => {
+    container.querySelector('[contenteditable="true"]')!.dispatchEvent(paste)
+    await vi.waitFor(() => expect(bridge.invoke.mock.calls.some(call => call[0] === 'ui:retainInputImage')).toBe(true))
+    await vi.waitFor(() => expect(useAppStore.getState().agentComposerDrafts[ID]).toContain(oversized ? '@' : 'agentmux-image:'))
+  })
+  const draftText = useAppStore.getState().agentComposerDrafts[ID]!, expanded = expandComposerInput(draftText)
+  expect(expanded.inputImages).toHaveLength(oversized ? 0 : 1)
+  expect(expanded.text).toContain('Inspect this image')
+  expect(expanded.text).not.toContain('agentmux-image')
+  if (oversized) expect(draftText).not.toContain('agentmux-image')
+  let expectedPrompt = expanded.text
+  if (edit) {
+    await enter(); await settled()
+    const entry = queue()[0]!
+    expectedPrompt = 'Additional user context ' + entry.text
+    useAppStore.getState().editQueuedAgentSteer(ID, entry.operationId, entry.text, expectedPrompt)
+    await act(async () => useAppStore.getState().sendQueuedAgentSteer(ID, entry.operationId))
+  } else await enter('metaKey')
+  await settled()
+  const calls = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
+  expect(calls).toHaveLength(1)
+  const [, , prompt, operationId] = calls[0]!
+  expect(prompt).toBe(expectedPrompt)
+  const key = { kind: 'prompt' as const, agentSessionId: ID, expectedRun: { runId: RUN }, submissionId: operationId as string }
+  const resource = await client.readAgentInputResource({ key, index: 0, revision: fileUploadRevision(bytes), maxBytes: png.length })
+  expect(resource).toMatchObject(oversized ? { status: 'unavailable' } : { status: 'available', dataBase64: bytes.toString('base64'), width: 1, height: 1 })
+  expect(writes.join('')).toContain(expectedPrompt.trim())
 })
