@@ -88,15 +88,10 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     const state = useAppStore.getState()
     const project = state.config?.workspaces.find(workspace => workspace.id === projectId && !isScratchWorkspaceId(workspace.id))
     if (!project) { setActionError('Choose a registered project for its files and tools.'); return }
-    const tabId = state.openLauncher({ workspaceId: project.id, reveal: true })
+    const tabId = state.openLauncher({ workspaceId: project.id, reveal: true,
+      initialExecution: { resourceWorkspaceId: project.id, agentWorkspaceId: project.id } })
     if (!tabId) { setActionError('The project workface could not be opened. Its existing work is retained; check the workspace notice and try again.'); return }
-    const tab = useAppStore.getState().tabs[tabId]!
-    try {
-      useAppStore.getState().setLauncherAgentWorkspace({ tabId, regionId: tab.layout.activeRegionId }, project.id)
-      onClose()
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error))
-    }
+    onClose()
   }
   function openOriginal(session: BoundAgent) {
     setActionError(null)

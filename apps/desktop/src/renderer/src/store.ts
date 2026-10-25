@@ -114,7 +114,7 @@ import { captureDesktopInput, readDesktopPresentation, readFocusAgentPresentatio
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
-import { directoryIdentity, topicSpatialAddress } from '../../shared/space-addresses'
+import { directoryIdentity, topicSpatialAddress, workspaceZoneId } from '../../shared/space-addresses'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { observeAgentInputOccupation } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
@@ -869,6 +869,19 @@ export function agentSteerExecution(entry: AgentSteerQueueEntry,
 function reactionIntentKey(reaction?: AgentSteerReaction): string | undefined {
   return reaction ? JSON.stringify([reaction.code, conversationReplySourceKey(reaction.replySource)]) : undefined
 }
+export type LauncherExecutionSelection = {
+  resourceWorkspaceId: string
+  /** Null follows the project; an explicit ID retains a split binding even on the same Host. */
+  agentWorkspaceId: string | null
+}
+
+export type LauncherExecutionDestination = WorkbenchProjectionSelection & { projectChanged: boolean }
+export type LauncherExecutionSource = WorkbenchProjectionSelection | {
+  displayWorkspaceId: string
+  groupId: string
+  resourceWorkspaceId: string
+}
+
 export type AppState = {
   runtimeOwnershipWarnings: string[] | undefined
   runtimeEndpointWarnings: RuntimeEndpointWarning[] | undefined
@@ -1249,6 +1262,7 @@ export type AppState = {
   setZoneSpaceRelation(zoneId: string, spaceId: string, linked: boolean): Promise<AgentMuxSpaceBindingReport>
   setTabDisplayPlacement(tabId: string, displayWorkspaceId: string, groupId: string, present: boolean): Promise<AgentMuxSpaceBindingReport>
   openLauncher(target: { workspaceId: string; displayWorkspaceId?: string; tabGroupId?: string; topicId?: string; zoneId?: string; reveal: boolean;
+    initialExecution?: LauncherExecutionSelection
     /** Claim an empty Group's original input in its new real Region, without navigating another surface. */
     initialInputs?: { prompt: string; names: LauncherNames; optionsByProvider: LauncherProviderOptions; sourceLauncherId?: string }
   }): string | undefined
@@ -1513,6 +1527,9 @@ export type AppState = {
    * 一格一个 setter 会让"启动成功要清掉这个 region 的名字草稿"变成两处要记得改的地方。
    */
   setLauncherExecutionWorkspace(launcher: { tabId: string; regionId: string }, workspaceId: string, executorId?: string): void
+  /** Commit a complete future execution target; another project retains its own input owners. */
+  selectLauncherExecution(source: LauncherExecutionSource, selection: LauncherExecutionSelection,
+    options?: { navigateProject?: boolean; reveal?: boolean }): LauncherExecutionDestination
   setLauncherAgentWorkspace(launcher: { tabId: string; regionId: string }, workspaceId: string | null): void
   setLauncherAgentExecutor(launcher: { tabId: string; regionId: string }, executorId: string): void
   setLauncherNameDraft(regionId: string, field: LauncherNameField, value: string): void
@@ -3711,6 +3728,37 @@ function newLauncherTab(workspaceId: string, topicId?: string): WorkbenchTab {
   }
   const tab = createWorkbenchTab(tabId, surface)
   return topicId ? { ...tab, topicId } : tab
+}
+
+/** A client projection of existing targets, never a mode or another configuration owner. */
+function launcherWithExecution(config: AppConfig | null, surface: LauncherWorkbenchSurface,
+  selection: LauncherExecutionSelection): LauncherWorkbenchSurface {
+  const project = config?.workspaces.find(workspace => workspace.id === selection.resourceWorkspaceId)
+  const runtime = selection.agentWorkspaceId === null ? project
+    : config?.workspaces.find(workspace => workspace.id === selection.agentWorkspaceId)
+  const runtimeHost = config?.hosts.find(host => host.id === runtime?.hostId)
+  if (!config || !project || !config.hosts.some(host => host.id === project.hostId) || !runtime || !runtimeHost) {
+    throw new Error('Select the exact registered project and Agent environment on their configured Hosts. The original work is kept.')
+  }
+  const oldRuntime = config.workspaces.find(workspace => workspace.id === (surface.agentWorkspaceId ?? surface.workspaceId))
+  const oldHost = config.hosts.find(host => host.id === oldRuntime?.hostId)
+  const split = selection.agentWorkspaceId !== null
+  const wasSplit = surface.agentWorkspaceId !== undefined
+  const sameSource = oldHost?.id === runtimeHost.id &&
+    (wasSplit || oldHost?.kind !== 'local') === (split || runtimeHost.kind !== 'local')
+  const { agentWorkspaceId: _workspace, agentExecutor, executorId, ...projectSurface } = surface
+  return { ...projectSurface, workspaceId: project.id,
+    ...(split ? { agentWorkspaceId: runtime.id,
+      ...(wasSplit && sameSource && agentExecutor?.hostId === runtime.hostId ? { agentExecutor } : {}) }
+      : !wasSplit && sameSource && executorId ? { executorId } : {}) }
+}
+
+function retainLayoutSelection(layout: WorkspaceLayout, next: WorkspaceLayout): WorkspaceLayout {
+  return { ...next, activeGroupId: layout.activeGroupId,
+    groups: next.groups.map(group => {
+      const original = layout.groups.find(candidate => candidate.id === group.id)
+      return original ? { ...group, activeTabId: original.activeTabId, recentTabIds: original.recentTabIds } : group
+    }) }
 }
 
 type PersistedAppState = {
@@ -6940,8 +6988,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (result.operation !== 'space.bind' && result.operation !== 'space.unbind') throw new Error('The binding owner returned a different operation.')
     return result
   },
-  openLauncher({ workspaceId, displayWorkspaceId, tabGroupId, topicId: requestedTopicId, zoneId, reveal, initialInputs }) {
+  openLauncher({ workspaceId, displayWorkspaceId, tabGroupId, topicId: requestedTopicId, zoneId, reveal, initialInputs, initialExecution }) {
     const state = get()
+    if (initialExecution && initialExecution.resourceWorkspaceId !== workspaceId) {
+      throw new Error('Initial execution must use this Launcher project. Open the other project with its own draft instead.')
+    }
     const displayId = displayWorkspaceId ?? workspaceId
     const layout = state.layouts[displayId]
     if (!layout) {
@@ -6983,7 +7034,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ? requestedTopicId ?? inheritedTopicIdForNewTab(workspaceId, layout, state.tabs, targetTabGroupId)
         : undefined
     }
-    const created = newLauncherTab(workspaceId, topicId)
+    let created = newLauncherTab(workspaceId, topicId)
+    if (initialExecution) created = updateWorkbenchRegion(created, created.layout.activeRegionId,
+      surface => launcherWithExecution(state.config, surface as LauncherWorkbenchSurface, initialExecution))
     const tab = space ? { ...created, space } : created
     // Placement failure is visible without leaving an orphan View or throwing from a UI handler.
     const nextLayout = addTabPlacement(layout, targetTabGroupId, tab.id)
@@ -7012,14 +7065,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         launcherNameDrafts: { ...state.launcherNameDrafts, [tab.layout.activeRegionId]: initialInputs.names },
         launcherOptionDrafts: { ...state.launcherOptionDrafts, [tab.layout.activeRegionId]: initialInputs.optionsByProvider }
       } : {}),
-      layouts: { ...state.layouts, [displayId]: reveal || initialInputs ? nextLayout : {
-        ...nextLayout,
-        activeGroupId: layout.activeGroupId,
-        groups: nextLayout.groups.map(group => {
-          const original = layout.groups.find(candidate => candidate.id === group.id)
-          return original ? { ...group, activeTabId: original.activeTabId, recentTabIds: original.recentTabIds } : group
-        })
-      } }
+      layouts: { ...state.layouts, [displayId]: reveal || initialInputs ? nextLayout : retainLayoutSelection(layout, nextLayout) }
     }))
     // Publish the durable Region owner before releasing only its unchanged Group inputs.
     // Utility drafts and Note receipts retain the original Group record.
@@ -10692,6 +10738,81 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (surface.workspaceId === workspaceId && (executorId === undefined || surface.executorId === executorId)) return
     // Only this resource changes. Display, other Regions and all unsent inputs retain their owners.
     set({ tabs: { ...state.tabs, [tab.id]: updateWorkbenchRegion(tab, launcher.regionId, current => ({ ...current, workspaceId, ...(executorId ? { executorId } : {}) })) } })
+  },
+  selectLauncherExecution(source, selection, options) {
+    const state = get()
+    const original = 'tabId' in source ? state.tabs[source.tabId] : undefined
+    const surface = original && 'regionId' in source ? original.regions[source.regionId] : undefined
+    if ('tabId' in source && (!original || surface?.kind !== 'launcher')) {
+      throw new Error('Only the original unstarted Launcher can change its execution target. Existing work is kept.')
+    }
+    if ('tabId' in source && !workbenchSelectionCatalog(state).locations.some(location => sameWorkbenchProjectionSelection(source, location))) {
+      throw new Error('The original Launcher position is unconfirmed. Choose its current position; the project and draft are kept.')
+    }
+    const originalProject = surface?.workspaceId ?? ('resourceWorkspaceId' in source ? source.resourceWorkspaceId : undefined)
+    const projectChanged = originalProject !== selection.resourceWorkspaceId
+    if (!projectChanged && original && surface?.kind === 'launcher' && 'regionId' in source) {
+      if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, original.id)) throw new Error('The original Launcher View is closing. Its work is kept.')
+      const next = launcherWithExecution(state.config, surface, selection)
+      set({ tabs: { ...state.tabs, [original.id]: updateWorkbenchRegion(original, source.regionId, () => next) } })
+      return { ...source, projectChanged: false }
+    }
+    // Another project owns another input. Empty sources stay empty; source drafts and
+    // Note/Browser receipts are never copied into a different filesystem root.
+    const displayWorkspaceId = options?.navigateProject === false ? source.displayWorkspaceId : selection.resourceWorkspaceId
+    const layout = state.layouts[displayWorkspaceId] ?? createWorkspaceLayout(newTabGroupId())
+    const requestedGroupId = options?.navigateProject === false ? source.groupId : layout.activeGroupId
+    const group = layout.groups.find(candidate => candidate.id === requestedGroupId && groupIds(layout.root).includes(candidate.id))
+    if (!group) throw new Error('The exact destination Tab Group is unavailable. The original project and draft are kept.')
+    const groups = options?.navigateProject === false ? [group] : [group, ...layout.groups.filter(candidate => candidate.id !== group.id && groupIds(layout.root).includes(candidate.id))]
+    let destination: { tab: WorkbenchTab; region: LauncherWorkbenchSurface; groupId: string } | undefined
+    for (const candidateGroup of groups) {
+      const order = [candidateGroup.activeTabId, ...candidateGroup.tabOrder.filter(id => id !== candidateGroup.activeTabId)]
+      for (const id of order) {
+        const tab = id ? state.tabs[id] : undefined
+        if (!tab || tab.workspaceId !== selection.resourceWorkspaceId || !workbenchViewCloseAllowsView(state.closingWorkbenchViews, tab.id)) continue
+        const order = [tab.layout.activeRegionId, ...regionIds(tab.layout.root).filter(id => id !== tab.layout.activeRegionId)]
+        const region = order.map(id => tab.regions[id]).find(region => region?.kind === 'launcher' && region.workspaceId === selection.resourceWorkspaceId)
+        if (region?.kind === 'launcher') { destination = { tab, region, groupId: candidateGroup.id }; break }
+      }
+      if (destination) break
+    }
+    const targetTab = destination?.tab ?? newLauncherTab(selection.resourceWorkspaceId)
+    const targetRegion = destination?.region ?? targetTab.regions[targetTab.layout.activeRegionId] as LauncherWorkbenchSurface
+    const nextSurface = launcherWithExecution(state.config, targetRegion, selection)
+    const reveal = options?.reveal !== false
+    const tab = reveal ? replaceWorkbenchRegion(targetTab, targetRegion.regionId, nextSurface)
+      : updateWorkbenchRegion(targetTab, targetRegion.regionId, () => nextSurface)
+    const groupId = destination?.groupId ?? group.id
+    const nextLayout = destination ? activateLayoutTab(layout, groupId, tab.id) : addTabPlacement(layout, groupId, tab.id)
+    if (!nextLayout) throw new Error('The exact destination placement is unavailable. The original project and draft are kept.')
+    const tabs = { ...state.tabs, [tab.id]: tab }, layouts = { ...state.layouts,
+      [displayWorkspaceId]: reveal ? nextLayout : retainLayoutSelection(layout, nextLayout) }
+    const next = { ...state, tabs, layouts }
+    const choice = reveal ? resolveWorkbenchOccurrenceSelection(next, workbenchSelectionCatalog(next),
+      { workspaceId: displayWorkspaceId, groupId, tabId: tab.id, regionId: targetRegion.regionId }, 'navigation') : null
+    const project = state.config!.workspaces.find(workspace => workspace.id === selection.resourceWorkspaceId)!
+    const catalog = !destination && group.tabOrder.length === 0 ? workbenchSelectionCatalog(next) : undefined
+    const defaultZoneId = workspaceZoneId(workspaceProjectId(project), project.id)
+    const zone = catalog?.zones.find(zone => zone.zoneId === defaultZoneId && zone.workspaceId === project.id &&
+      zone.hostId === project.hostId && zone.directoryPath === project.path && zone.kind !== 'unknown' &&
+      catalog.bindings.some(binding => binding.zoneId === zone.zoneId && binding.spaceId === workspaceProjectId(project)))
+    const zoneLauncherId = zone ? `zone:${JSON.stringify([zone.zoneId, displayWorkspaceId, groupId])}` : undefined
+    const groupLauncherId = displayWorkspaceId === project.id && catalog ? warmLauncherId({ tabGroupId: groupId, regionId: undefined }) : undefined
+    const launcherState = useLauncherState.getState()
+    const sourceLauncherId = zoneLauncherId && launcherState.drafts[zoneLauncherId] ? zoneLauncherId : groupLauncherId
+    const draft = sourceLauncherId ? launcherState.drafts[sourceLauncherId] : undefined
+    const initialInputs = draft ? { prompt: draft.prompt ?? '', names: draft.names ?? EMPTY_LAUNCHER_NAMES,
+      optionsByProvider: draft.optionsByProvider ?? EMPTY_LAUNCHER_OPTIONS } : undefined
+    if (initialInputs) launcherState.copyUtilityDraft(sourceLauncherId!, warmLauncherId({ tabGroupId: groupId, regionId: targetRegion.regionId }))
+    set({ tabs, layouts, ...(initialInputs ? {
+      agentComposerDrafts: { ...state.agentComposerDrafts, [targetRegion.regionId]: initialInputs.prompt },
+      launcherNameDrafts: { ...state.launcherNameDrafts, [targetRegion.regionId]: initialInputs.names },
+      launcherOptionDrafts: { ...state.launcherOptionDrafts, [targetRegion.regionId]: initialInputs.optionsByProvider }
+    } : {}), ...(reveal ? { activeWorkspaceId: displayWorkspaceId, mainSurface: 'workbench' as const,
+      regionCaretFocus: null, workbenchSpaceSelection: choice, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null } : {}) })
+    if (initialInputs) useLauncherState.getState().clearAgentInputsIfUnchanged(sourceLauncherId!, initialInputs)
+    return { displayWorkspaceId, groupId, tabId: tab.id, regionId: targetRegion.regionId, projectChanged }
   },
   setLauncherAgentWorkspace(launcher, workspaceId) {
     const state = get(), tab = state.tabs[launcher.tabId], surface = tab?.regions[launcher.regionId]

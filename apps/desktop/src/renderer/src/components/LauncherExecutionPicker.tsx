@@ -10,7 +10,9 @@ const ThemeActionManageProjectsIcon = semanticIconComponent('action.manage-proje
 
 
 /** Browsing a machine is local to the disclosure; only an exact project selects execution. */
-export function LauncherExecutionPicker({ hosts, workspaces, selected, disabled, onSelect, onManageProjects }: {
+export function LauncherExecutionPicker({ hosts, workspaces, selected, disabled, onSelect, onManageProjects, purpose = 'project', autoFocus = false }: {
+  purpose?: 'project' | 'runtime'
+  autoFocus?: boolean
   hosts: readonly HostConfig[]
   workspaces: readonly WorkspaceRecord[]
   selected: WorkspaceRecord | undefined
@@ -19,19 +21,19 @@ export function LauncherExecutionPicker({ hosts, workspaces, selected, disabled,
   onManageProjects(): void
 }) {
   const displayPath = usePathDisplay()
-  const [hostId, setHostId] = useState(selected?.hostId ?? hosts[0]?.id ?? '')
+  const [hostId, setHostId] = useState(hosts.some(host => host.id === selected?.hostId) ? selected!.hostId : hosts[0]?.id ?? '')
   const [filter, setFilter] = useState('')
   const projects = workspaces.filter(project => project.hostId === hostId &&
     `${project.name} ${project.path}`.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase()))
-  return <section className="launcher-target" aria-label="Execution target">
-    <label className="launcher-target__machine"><span>Machine</span><select aria-label="Machine for new session" value={hostId}
+  return <section className="launcher-target" aria-label={purpose === 'runtime' ? 'Agent runtime directory' : 'Execution target'}>
+    <label className="launcher-target__machine"><span>{purpose === 'runtime' ? 'Agent machine' : 'Machine'}</span><select aria-label="Machine for new session" value={hostId}
       onChange={event => { setHostId(event.target.value); setFilter('') }}>
       {!hosts.some(host => host.id === hostId) ? <option value={hostId}>Host not configured</option> : null}
       {hosts.map(host => <option key={host.id} value={host.id}>{host.label} · {host.kind === 'local' ? 'Local' : 'Remote'}</option>)}
     </select></label>
-    <TextInput type="search" className="launcher-target__filter" aria-label="Find a project on this machine"
-      placeholder="Find a project…" value={filter} onChange={event => setFilter(event.target.value)} />
-    <div className="launcher-target__projects" aria-label="Registered projects">
+    <TextInput type="search" className="launcher-target__filter" autoFocus={autoFocus} aria-label={purpose === 'runtime' ? 'Find a working directory on this machine' : 'Find a project on this machine'}
+      placeholder={purpose === 'runtime' ? 'Find a working directory…' : 'Find a project…'} value={filter} onChange={event => setFilter(event.target.value)} />
+    <div className="launcher-target__projects" aria-label={purpose === 'runtime' ? 'Registered working directories' : 'Registered projects'}>
       {projects.map(project => <button key={project.id} type="button" className="launcher-target__project"
         data-workspace-id={project.id} aria-pressed={project.id === selected?.id} disabled={disabled}
         onClick={() => onSelect(project.id)} title={`${project.name}\n${displayPath(project.path, project.hostId)}`}>
@@ -39,7 +41,7 @@ export function LauncherExecutionPicker({ hosts, workspaces, selected, disabled,
         {project.id === selected?.id ? <ThemeStatusSelectedIcon size={14} aria-label="Selected project" /> : null}
       </button>)}
       {projects.length === 0 ? <p role="status">{workspaces.some(project => project.hostId === hostId)
-        ? 'No matching projects.' : 'No project registered on this machine yet.'}</p> : null}
+        ? purpose === 'runtime' ? 'No matching working directories.' : 'No matching projects.' : purpose === 'runtime' ? 'Register a working directory on this machine first.' : 'No project registered on this machine yet.'}</p> : null}
     </div>
     <button type="button" className="launcher-target__manage" onClick={onManageProjects}><ThemeActionManageProjectsIcon size={13} />Manage projects</button>
   </section>
