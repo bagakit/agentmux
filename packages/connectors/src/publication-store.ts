@@ -221,6 +221,12 @@ export class PublicationStore {
         WHERE state IN ('pending','dispatching','unknown','not-applied');
       CREATE INDEX IF NOT EXISTS connector_publication_audit
         ON connector_publication_operation(binding_id, binding_revision, ordinal);
+      CREATE INDEX IF NOT EXISTS connector_publication_question_candidate
+        ON connector_publication_operation(binding_id, binding_revision, ordinal)
+        WHERE json_extract(operation_json,'$.payload.kind')='question'
+          AND json_extract(operation_json,'$.payload.status') IN ('pending','unconfirmed');
+      CREATE INDEX IF NOT EXISTS connector_publication_projection_latest
+        ON connector_publication_operation(binding_id, binding_revision, projection_id, ordinal);
       CREATE INDEX IF NOT EXISTS connector_publication_fragments
         ON connector_publication_operation(projection_id, fragment_ordinal, ordinal);
       CREATE INDEX IF NOT EXISTS connector_publication_avatar
