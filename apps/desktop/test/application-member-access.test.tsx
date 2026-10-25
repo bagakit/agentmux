@@ -44,10 +44,8 @@ async function app() {
 const actor = () => ({ application: f.config.application, idType: 'open_id', userId: creatorId })
 const applicationWrites = () => f.calls.filter(call => call.method === 'connection.application.access.configure')
 
-it('copies the observed original person name and full actor ID through Settings while a failed avatar preserves the original access proposal', async () => {
+it('loads the first visible original person through Settings and copies their identity while a failed avatar preserves the original access proposal', async () => {
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-  await f.forward('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1,
-    subject: { kind: 'actor', actor: actor() } }, f.hostingTarget)
   const forward = f.forward
   vi.mocked(api.connections.call).mockImplementation(async (method, input, owner) => {
     const result = await forward(method, input, owner)
