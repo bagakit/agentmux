@@ -39,6 +39,9 @@ Agents, user input and permission waits keep the original occurrence pending.
 Inspect the current help for supported triggers and complete input. Pause/resume/cancel
 change the exact schedule; they do not stop unrelated healthy Agents or accept its results.
 Creation/activation, a timer firing, input delivery and completed business work are separate.
+lastTickAt is the last recorded check, not necessarily the latest identical busy observation;
+lastTickId identifies the last claimed tick, whose durability may be unconfirmed, and is not an
+identity for read-only checks.
 Inspect original schedule facts after an unknown result rather than making a duplicate.
 Unavailable scheduler observations retain original schedules, Sessions and requests; report
 the failed read and the same-owner recovery action. Goal supervision does not itself authorize
