@@ -1164,6 +1164,7 @@ async function main() {
       await sha256(join(desktopRoot, 'resources', 'bin', 'agentmux-workspace-move')))
     await verifyNativeDesktopCopy(stagedApp, repositoryRoot)
     await signMacosApplication(stagedApp, signingPlan)
+    process.stdout.write('Verifying signed macOS candidate...\n')
     const signature = await verifyMacosSigning(stagedApp, signingPlan)
     await verifyNativeDesktopSigning(stagedApp, signingPlan)
     const signedWorkspaceMoveHelperSha256 = await sha256(stagedWorkspaceMoveHelper)

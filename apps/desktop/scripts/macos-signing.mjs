@@ -10,6 +10,8 @@ const exec = promisify(execFile)
 const recovery = 'Set AGENTMUX_MACOS_SIGN_IDENTITY to an available Developer ID Application certificate SHA1, or run node apps/desktop/scripts/macos-local-signing.mjs --setup once and --trust to authenticate local code-signing trust. Restore the original Keychain identity if it is missing; packaging never regenerates it. --ad-hoc is only for an uninstalled development candidate. The existing App and healthy Runs are kept.'
 const reject = message => { throw new Error(`${message} ${recovery}`) }
 const runNative = (command, args) => exec(command, args, { encoding: 'utf8', timeout: 30_000, maxBuffer: 1_048_576 })
+// Deep verification grows with the signed bundle; it must receive the native result.
+const runDeepVerification = (command, args) => exec(command, args, { encoding: 'utf8', maxBuffer: 1_048_576 })
 function requireSigningPlan(plan) {
   if (plan?.kind === 'ad-hoc') return
   if (plan?.kind === 'certificate' && /^[A-F0-9]{40}$/.test(plan.identity) &&
@@ -56,7 +58,8 @@ export async function verifyMacosSigning(appPath, plan, { run = runNative, bundl
   if (plan.kind === 'certificate') verification.push('--test-requirement',
     plan.profile === 'local' ? `=identifier "${bundleId}" and certificate leaf = H"${plan.identity}" and certificate leaf trusted` :
       `=identifier "${bundleId}" and anchor apple generic and certificate leaf[subject.OU] = "${plan.teamId}" and certificate leaf = H"${plan.identity}"`)
-  await run('/usr/bin/codesign', [...verification, appPath])
+  const verify = run === runNative ? runDeepVerification : run
+  await verify('/usr/bin/codesign', [...verification, appPath])
   const metadataResult = await run('/usr/bin/codesign', ['--display', '--verbose=4', appPath])
   const metadata = `${metadataResult.stdout ?? ''}\n${metadataResult.stderr ?? ''}`
   if (!metadata.split('\n').includes(`Identifier=${bundleId}`)) reject('The signed candidate has an unexpected bundle identity.')
