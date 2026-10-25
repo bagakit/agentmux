@@ -7,6 +7,7 @@ vi.mock('react-resizable-panels', async () => { const { createRequire } = await 
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Controlled terminal rendering</div> }))
 vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
 import { connectorJourneyFixture } from './fixtures/connector-journey'
+import type { ConnectionParamsMap } from '@agentmux/core/connections'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 
@@ -21,6 +22,7 @@ const wait = (assert: () => void) => vi.waitFor(async () => { await act(async ()
 const row = (id: string) => [...document.querySelectorAll<HTMLElement>('[data-member-row]')].find(node => node.dataset.memberRow === JSON.stringify(['open_id', id]))!
 const checkbox = (id: string, permission: 'Send requests' | 'Answer questions') => [...row(id).querySelectorAll<HTMLLabelElement>('label')].find(node => node.textContent === permission)!.querySelector<HTMLInputElement>('input')!
 async function toggle(id: string, permission: 'Send requests' | 'Answer questions') {
+  if (!row(id).querySelector('[data-member-editor]')) await act(async () => { const panel = row(id).closest('details')!; panel.open = true; row(id).querySelector<HTMLButtonElement>('[data-member-edit]')!.click() })
   const source = row(id).querySelector<HTMLSelectElement>('select')
   if (source && source.value !== 'room') await act(async () => { source.value = 'room'; source.dispatchEvent(new Event('change', { bubbles: true })) })
   await act(async () => checkbox(id, permission).click())
@@ -106,10 +108,10 @@ it('keeps the original unknown request, inspects a terminal refusal and explicit
   let originalOperation = '', lose = true
   vi.spyOn(api.connections, 'call').mockImplementation(async (method, input, target) => {
     if (method === 'connection.grant' && lose) {
-      lose = false; originalOperation = input.operationId
+      lose = false; originalOperation = (input as ConnectionParamsMap['connection.grant']).operationId
       await forward('connection.grant', { operationId: 'competing-original', bindingId: binding.bindingId, expectedBindingRevision: 1, grantId: 'confirmed-ada', expectedRevision: null,
         actor: { application: binding.application, idType: 'open_id', userId: 'ou_ada' }, capabilities: ['answer'], state: 'active' }, target)
-      const refused = await forward(method, input, target)
+      const refused = await forward(method, input as ConnectionParamsMap['connection.grant'], target)
       expect(refused).toMatchObject({ state: 'refused', code: 'ROOM_GRANT_ACTOR_CONFLICT' })
       throw Error('Controlled lost original refusal ACK')
     }
@@ -141,7 +143,7 @@ it('keeps earlier draft choices visible across a binding revision and sends no i
   await toggle('ou_ada', 'Send requests')
   await f.button('Pause sync')
   await wait(() => expect(document.querySelector('[data-member-earlier]')).not.toBeNull())
-  expect(document.querySelector('[data-member-access]')?.textContent).toContain('Original group revision 1: input')
+  expect(document.querySelector('[data-member-access]')?.textContent).toContain('Original group revision 1: Send requests')
   expect(document.querySelector('[data-member-access]')?.textContent).toContain('Resume sharing')
   expect(row('ou_ada').querySelector('[data-member-save]')).toBeNull()
   expect(grantCalls()).toHaveLength(0)
