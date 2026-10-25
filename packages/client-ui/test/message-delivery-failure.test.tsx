@@ -193,7 +193,7 @@ it.each(['admitted', 'not-applied'] as const)('reports the original %s receipt a
     inputUnconfirmed inputReceipt={inputReceipt} onRetry={retry} copyText={async () => true} />)
   expect(container.querySelector('section')!.dataset.kind).toBe(status)
   if (status === 'not-applied') {
-    expect(container.querySelector('.message-delivery-failure__state')!.textContent).toContain('Core 已确认')
+    expect(container.querySelector('.message-delivery-failure__state')!.textContent).toContain('原消息已保留')
     expect(container.querySelector('.message-delivery-failure__state')!.textContent).not.toContain('Native 明确拒绝')
   }
   expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('重试'))).toBe(false)
@@ -314,8 +314,8 @@ it('presents terminal byte confirmation as information, without Native admission
   const surface = container.querySelector('section')!
   expect(surface.dataset.kind).toBe('terminal-confirmed')
   expect(surface.textContent).toContain('终端输入已确认')
-  expect(surface.textContent).toContain('Native 是否采用尚未确认')
-  expect(surface.textContent).toContain('不是任务完成')
+  expect(surface.textContent).toContain('Agent 是否接收尚未确认')
+  expect(surface.textContent).not.toContain('任务已完成')
   expect(surface.querySelector('[role="alert"]')).toBeNull()
   expect([...surface.querySelectorAll('button')].some(button => button.textContent?.includes('重试'))).toBe(false)
   expect(retry).not.toHaveBeenCalled()
