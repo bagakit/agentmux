@@ -29,7 +29,7 @@ import { ConversationFiles } from './ConversationFiles.js'
 import { ConversationQuestionReply } from './ConversationQuestionReply.js'
 import { conversationReplyPreview } from '../lib/conversation-reply-preview.js'
 import { ConversationToolPayload } from './ConversationToolPayload.js'
-import { ConversationSpeechCard, SubagentReportCard, SystemRecordCard } from './ConversationMessageCard.js'
+import { ConversationSpeechCard, ConversationProcessCard, SubagentReportCard, SystemRecordCard } from './ConversationMessageCard.js'
 import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.js'
 import { ChannelProfileAvatar } from './ChannelProfileAvatar.js'
 import type { ConversationTraceDisclosure } from '../lib/conversation-trace-disclosure.js'
@@ -47,6 +47,8 @@ export type ConversationMessageProps = {
   recordTitle?: string
   /** A compact record face, without changing ordinary conversation defaults. */
   compact?: boolean
+  /** An exact process step already supplies the record heading; retain this body and its original actions. */
+  processContent?: boolean
   /** Presentation continuity for an exact same-author progress group; not a record association. */
   continuation?: boolean
   /** An already-open original disclosure owns the full body, including long human input. */
@@ -187,7 +189,7 @@ function ConversationCollaborationOriginal({ parts, identity, hasResources }: {
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  active = true, compact = false, continuation = false, expandedContent = false, detailsOnlyMetadata = false, sourceLabelsInDetails = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy, copyInParent = false,
+  active = true, compact = false, processContent = false, continuation = false, expandedContent = false, detailsOnlyMetadata = false, sourceLabelsInDetails = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy, copyInParent = false,
   speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, notificationRecords, locatedSourceKey, messageTiming, contextInDetails, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
@@ -385,6 +387,7 @@ export function ConversationMessage({
     <ContentCopyIntentContext.Provider value={messageCopy.cancelPreparation}><div
       className={primaryNotice ? "conversation-a2a-notice" : "log-turn"}
       data-compact={compact || undefined}
+      data-process-content={processContent || undefined}
       data-native-collaboration={nativeCollaboration ? true : undefined}
       data-conversation-event-id={conversationEvent?.id}
       data-conversation-event-revision={conversationEvent?.revision}
@@ -419,6 +422,7 @@ export function ConversationMessage({
       </> : nativeCollaboration ? <SubagentReportCard {...card} identity={readingIdentity} collaboration={nativeCollaboration} located={located}
         preview={collaborationPreview} hasResources={collaborationHasResources} emptyText={!collaborationPreview && parts.every(part => part.kind === 'text')} />
         : isSystemContext ? <SystemRecordCard {...card} identity={readingIdentity} title={recordTitle || '系统记录'} summary={systemSummary} hasContent={hasContent} />
+        : processContent ? <ConversationProcessCard {...card} />
         : <ConversationSpeechCard {...card} sender={<>
           <span className="log-turn__who">{recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
           {!detailsOnlyMetadata ? senderIdentity : null}

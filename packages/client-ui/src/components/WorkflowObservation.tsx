@@ -40,6 +40,8 @@ type ObservedToolProps = {
   expanded?: boolean
   onToggle?: () => void
   controls?: string
+  /** The native step owns a readable missing-status explanation in its original details. */
+  missingStatusInDetails?: boolean
 }
 
 export function WorkflowStatusGlyph({ status, size = 12, recorded = false }: { status: 'running' | 'completed' | 'failed' | 'interrupted' | 'killed' | 'paused' | 'queued'; size?: number; recorded?: boolean }) {
@@ -92,7 +94,7 @@ export function RecordedStepsCard({ observation, compact = false, keepContentVis
   </article>
 }
 
-export function RecordedToolRow({ observation, className, icon, expanded, onToggle, controls }: ObservedToolProps) {
+export function RecordedToolRow({ observation, className, icon, expanded, onToggle, controls, missingStatusInDetails = false }: ObservedToolProps) {
   const { recordedTime, status } = observation
   const content = <>
     <span className="log-row__node">{icon}</span>
@@ -105,7 +107,7 @@ export function RecordedToolRow({ observation, className, icon, expanded, onTogg
       {status === 'interrupted' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="interrupted" recorded />Interrupted</span> : null}
       {status === 'failed' ? <span className="log-row__chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
       {status === 'recorded' ? <span className="wf-observation__recorded">Recorded</span> : null}
-      {status === undefined ? <span className="wf-observation__recorded">Status not recorded</span> : null}
+      {status === undefined && !missingStatusInDetails ? <span className="wf-observation__recorded">Status not recorded</span> : null}
       <span className="log-row__source" data-persistent={observation.persistentSource ? '' : undefined}>{observation.source}</span>
       {onToggle ? <SemanticIcon name="navigation.disclosure" size={12} className="log-row__chevron" data-open={expanded ? '' : undefined} /> : null}
     </span>
