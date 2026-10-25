@@ -1,3 +1,4 @@
+import { createExecutionProofCleanup } from './fixtures/execution-proof-cleanup.mjs'
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -18,6 +19,8 @@ assert.equal(process.argv.length, 2, 'This bounded helper proof accepts no flags
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const root = await mkdtemp('/tmp/amx-native-execution-')
 const owners = [], diagnostics = []
+const cleanup = createExecutionProofCleanup(root)
+let success, primaryFailure, failed = false
 let bridge, socket, ownerTerminal, releaseTerminalObserver
 const deadline = (promise, label, ms = 30000) => {
   let timer
@@ -34,9 +37,11 @@ async function startOwner(name) {
     ['--socket', join(base, 'runtime', 'ctxmux.sock'), '--state-dir', join(base, 'state', 'ctxmux'), '--readiness-fd', '3'],
     { env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
   const owner = { name, base, env, native, runs: [], sessions: [] }; owners.push(owner)
+  cleanup.trackChild(owner, 'native', native)
   native.stderr.on('data', bytes => diagnostics.push({ owner: name, lane: 'native', bytes: bytes.toString() }))
   await deadline(Promise.race([once(native.stdio[3], 'data'), once(native, 'exit').then(() => { throw new Error('Test-owned Native exited before readiness') })]), 'Native readiness')
   const core = owner.core = spawn(process.execPath, [join(packageRoot, 'dist/headless-runtime-cli.js'), 'serve'], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  cleanup.trackChild(owner, 'core', core)
   core.stderr.on('data', bytes => diagnostics.push({ owner: name, lane: 'core', bytes: bytes.toString() }))
   const line = await deadline(new Promise((resolve, reject) => {
     let text = ''
@@ -134,10 +139,12 @@ try {
   assert.match(sdkInspection.resultDigest, /^sha256:[0-9a-f]{64}$/u)
   assert(Number.isSafeInteger(sdkInspection.resultBytes) && sdkInspection.resultBytes > 0)
   const inspectCli = async nativeRequestId => {
-    const output = await promisify(execFile)(process.execPath, [join(packageRoot, 'bin/amux'), '--endpoint', resource.endpoint,
+    const executing = promisify(execFile)(process.execPath, [join(packageRoot, 'bin/amux'), '--endpoint', resource.endpoint,
       'agent', 'execution', 'inspect', '--host', 'local', '--binding', operationKey.bindingId,
       '--generation', operationKey.streamGeneration, '--request-json', JSON.stringify(nativeRequestId)],
     { cwd: join(resource.base, 'workspace'), env: resource.env, timeout: 15000, maxBuffer: 64 * 1024 })
+    cleanup.trackChild(resource, 'cli', executing.child)
+    const output = await executing
     const envelope = JSON.parse(output.stdout)
     assert.equal(envelope.ok, true)
     assert.equal(envelope.operation, 'agent.execution.inspect')
@@ -214,30 +221,30 @@ try {
   }
   assert(nativeRequests.length > 0, 'Ordinary Agent CLI did not address its resource workspace through native execution')
   assert.equal(errors.length, 0, errors.join('\n'))
-  console.log(JSON.stringify({ scope: 'isolated-two-Core-native-helper-proof', actualMachines: 1,
+  success = { scope: 'isolated-two-Core-native-helper-proof', actualMachines: 1,
     providerVersion: initialized.environmentInfo.executorVersion, helperRuns: [frontend.runId, executor.runId],
     fileOnResource: true, commandOnResource: true, originalSocketAfterReaderDetach: true,
     publicOperationInspection: { operationKey, phase: sdkInspection.phase, sdkRpcCliAgree: true, metadataOnly: true, typedIdPreserved: true, evidence: inspectionEvidence },
-    originalNativeSessionId: initialized.sessionId, ordinaryAgentCreatedThroughHostedCore: true, exactBindingRetained: true, fullAgentAcceptance: false }))
+    originalNativeSessionId: initialized.sessionId, ordinaryAgentCreatedThroughHostedCore: true, exactBindingRetained: true, fullAgentAcceptance: false }
 } catch (error) {
-  for (const owner of owners) for (const session of owner.sessions) {
-    const replay = await owner.client.readRunReplay(session.run, 0, 'raw').catch(() => null)
-    if (replay) await writeFile(join(root, `agent-${session.agentSessionId}.raw`), Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))), { mode: 0o600 })
-  }
-  await writeFile(join(root, 'diagnostics.json'), JSON.stringify({ diagnostics, error: String(error) }, null, 2), { mode: 0o600 })
-  console.error(`Native helper proof failed. Private evidence: ${root}`)
-  throw error
-} finally {
-  releaseTerminalObserver?.(); ownerTerminal?.dispose()
-  socket?.close()
-  await bridge?.close().catch(() => {})
-  for (const owner of owners) {
-    for (const session of owner.sessions) await owner.client?.stopAgent(session.agentSessionId, session.run).catch(error => { console.error('Test-owned Agent stop unconfirmed:', error.message) })
-    for (const runId of owner.runs) await owner.client?.stopTerminal({ runId }).catch(error => { console.error('Test-owned Run stop unconfirmed:', error.message) })
-    await owner.client?.dispose().catch(() => {})
-    await owner.rpc?.dispose().catch(() => {})
-    for (const child of [owner.core, owner.native]) if (child && child.exitCode === null && child.signalCode === null) {
-      const exited = once(child, 'exit'); child.kill('SIGTERM'); await deadline(exited, 'Test-owned process exit', 10000).catch(() => {})
+  failed = true; primaryFailure = error
+  await cleanup.step({ action: 'retain-primary-diagnostics' }, async () => {
+    for (const owner of owners) for (const session of owner.sessions) {
+      const replay = await owner.client.readRunReplay(session.run, 0, 'raw').catch(() => null)
+      if (replay) await writeFile(join(root, `agent-${session.agentSessionId}.raw`), Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))), { mode: 0o600 })
     }
-  }
+    await writeFile(join(root, 'diagnostics.json'), JSON.stringify({ diagnostics, error: String(error) }, null, 2), { mode: 0o600 })
+    console.error(`Native helper proof failed. Private evidence: ${root}`)
+  })
+} finally {
+  await cleanup.step({ action: 'release-terminal-observer' }, () => releaseTerminalObserver?.())
+  await cleanup.step({ action: 'dispose-terminal' }, () => ownerTerminal?.dispose())
+  await cleanup.step({ action: 'close-native-socket' }, async () => {
+    if (socket && socket.readyState !== WebSocket.CLOSED) {
+      const closed = once(socket, 'close'); socket.close(); await closed
+    }
+  })
+  await cleanup.step({ action: 'close-bridge-reader' }, () => bridge?.close())
+  await cleanup.finish(owners, { failed, error: primaryFailure })
 }
+console.log(JSON.stringify({ ...success, evidence: root, cleanup: join(root, 'cleanup.json') }))
