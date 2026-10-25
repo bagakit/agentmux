@@ -1,19 +1,48 @@
-.conversation-capsule{margin:var(--sp-3) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-0);overflow:hidden;min-width:0;position:relative;color:var(--text)}
-.conversation-capsule__header{display:flex;align-items:center;gap:8px;padding:9px 11px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
-.conversation-capsule__header strong{font-size:var(--fs-body);font-weight:600;min-width:0;overflow-wrap:anywhere}
-.conversation-capsule__mode{font-size:var(--fs-micro);color:var(--text-2)}
-.conversation-capsule__actions{display:flex;align-items:center;gap:6px;margin-left:auto;flex-wrap:wrap}
-.conversation-capsule .browser-presentation{height:clamp(180px,40vh,320px);min-height:0;display:flex;flex-direction:column}
-.conversation-capsule--expanded .browser-presentation{height:clamp(300px,65vh,700px)}
-.conversation-capsule .browser-stage{min-height:0;flex:1;position:relative;overflow:hidden}
-.conversation-capsule__notice{display:flex;align-items:center;gap:var(--sp-2);padding:10px var(--sp-3);flex-wrap:wrap;font-size:var(--fs-meta);color:var(--text-2)}
-.conversation-capsule__notice span{flex:1;min-width:140px;overflow-wrap:anywhere}
-.conversation-capsule__placeholder{min-height:160px;display:grid;place-items:center;padding:var(--sp-4);font-size:var(--fs-meta);color:var(--text-2)}
-.conversation-capsule__source{padding:7px 11px;font-size:var(--fs-micro);color:var(--text-2);border-top:1px solid var(--line-soft)}
-.conversation-capsule__source summary{cursor:pointer;width:fit-content}
-.conversation-capsule__source code{display:block;margin-top:6px;overflow-wrap:anywhere;user-select:text}
-.conversation-capsule__questions{display:flex;padding:6px 10px;border-top:1px solid var(--line-soft)}
-.conversation-capsule .capsule-chrome{position:relative;inset:auto;width:auto;max-height:300px;overflow:auto;box-shadow:none;border:0;border-top:1px solid var(--line-soft)}
-@media(max-width:600px){.conversation-capsule__actions{width:100%;margin-left:0}.conversation-capsule__header{gap:6px}}
-.conversation-capsule__reference { display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-2); font-size:var(--fs-meta); }
-.conversation-capsule__reference [role='status'] { color:var(--text-3); }
+.conversation-capsule {
+  container: capsule-card / inline-size;
+  min-width: 0;
+  margin: var(--sp-3) 0;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-0);
+  color: var(--text);
+}
+.conversation-capsule__header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line-soft);
+}
+.conversation-capsule__identity { display: flex; align-items: center; gap: var(--sp-2); flex: 1 1 auto; min-width: 0; }
+.conversation-capsule__identity > svg { flex: none; color: var(--text-2); }
+.conversation-capsule__identity > strong { min-width: 0; font-size: var(--fs-body); font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.conversation-capsule__mode { flex: none; padding: 2px 6px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.conversation-capsule__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1); margin-left: auto; }
+.conversation-capsule__actions > .small-button { min-height: 28px; padding: var(--sp-1) var(--sp-2); gap: var(--sp-1); background: transparent; color: var(--text-2); box-shadow: none; font-size: var(--fs-meta); font-weight: 500; white-space: nowrap; }
+.conversation-capsule__actions > .small-button:hover:not(:disabled) { background: var(--surface-2); color: var(--text); box-shadow: none; }
+.conversation-capsule__actions > .small-button[aria-pressed='true'] { background: var(--surface-2); color: var(--text); }
+.conversation-capsule__actions > .small-button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.conversation-capsule .browser-presentation { height: clamp(180px, 40vh, 320px); min-height: 0; display: flex; flex-direction: column; }
+.conversation-capsule--expanded .browser-presentation { height: clamp(300px, 65vh, 700px); }
+.conversation-capsule .browser-stage { min-height: 0; flex: 1; position: relative; overflow: hidden; }
+.conversation-capsule__notice { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); flex-wrap: wrap; font-size: var(--fs-meta); line-height: 1.5; color: var(--text-2); }
+.conversation-capsule__notice > span { flex: 1; min-width: 140px; overflow-wrap: anywhere; }
+.conversation-capsule__notice > .small-button { padding: var(--sp-1) var(--sp-2); background: transparent; box-shadow: none; }
+.conversation-capsule__placeholder { min-height: 160px; display: grid; place-items: center; padding: var(--sp-4); font-size: var(--fs-meta); color: var(--text-2); }
+.conversation-capsule__source { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-micro); color: var(--text-3); border-top: 1px solid var(--line-soft); }
+.conversation-capsule__source > summary { cursor: pointer; width: fit-content; }
+.conversation-capsule__source > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.conversation-capsule__source code { display: block; margin-top: var(--sp-2); overflow-wrap: anywhere; user-select: text; }
+.conversation-capsule__questions { display: flex; padding: var(--sp-1) var(--sp-2); border-top: 1px solid var(--line-soft); }
+.conversation-capsule .capsule-chrome { position: relative; inset: auto; width: auto; max-height: 320px; overflow: auto; box-shadow: none; border: 0; border-top: 1px solid var(--line-soft); padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+.conversation-capsule__reference { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-meta); }
+.conversation-capsule__reference [role='status'] { color: var(--text-3); }
+@container capsule-card (max-width: 520px) {
+  .conversation-capsule__identity { flex-basis: 100%; }
+  .conversation-capsule__actions { width: 100%; justify-content: flex-end; }
+  .conversation-capsule__header { gap: var(--sp-1); }
+}
