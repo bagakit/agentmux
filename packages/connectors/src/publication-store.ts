@@ -104,6 +104,16 @@ const sourceKey = (source: RoomBinding['sourceCheckpoints'][number]['source']) =
 const scopeKey = (boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>) => [boundary.bindingId, boundary.revision] as const
 const ref = (boundary: PublicationBoundary): ConversationRef => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId })
 const same = (a: unknown, b: unknown) => encode(a) === encode(b)
+/** A neighboring observation revision does not replace an unchanged original image effect. */
+function sameImageEffect(a: PublicationPayload, b: PublicationPayload): boolean {
+  const effect = ({ part, image, phase, relay }: ImagePublicationPayload) => ({
+    part: { record: part.record, selector: part.selector }, image, phase,
+    relay: relay && { ...relay, sources: relay.sources.map(({ part, ...source }) => ({
+      ...source, part: { record: part.record, selector: part.selector }
+    })) }
+  })
+  return a.kind === 'image' && b.kind === 'image' && same(effect(a), effect(b))
+}
 type RepresentationIntent = { kind: 'representation'; projectionId: string } & PublicationContentPlan['pieces'][number]
 type LegacyRepresentationIntent = { kind: 'legacy-representation'; projectionId: string; record: ConversationItemRef; operations: string[]; text: string }
 type RepresentationRow = { ordinal: number; id: string; value: RepresentationIntent | LegacyRepresentationIntent }
@@ -141,10 +151,11 @@ type RepresentationPayload = Extract<PublicationPayload, { kind: 'speech' }> | {
 type MaterializedPlan = PublicationContentPlan & { resourceParts?: RepresentationPart[] }
 function representation(parts: readonly RepresentationPart[], phase?: 'progress' | 'final', relay?: ConnectionDelivery['relay'], separator = '\n\n', inputSubmission?: import('@agentmux/core').AgentInputSubmissionObservation): RepresentationPayload {
   parts = parts.flatMap<RepresentationPart>(part => part.segments ? part.segments.map(segment => ({ ...segment, ...(part.part ? { part: part.part } : {}) })) : [part])
-  const fields = { ...(phase ? { phase } : {}), ...(relay ? { relay } : {}), ...(inputSubmission ? { inputSubmission } : {}) }
-  if (!parts.some(part => part.image || part.file)) return { kind: 'speech', text: parts.map(part => part.text).filter(Boolean).join(separator), ...fields }
+  const fields = { ...(phase ? { phase } : {}), ...(relay ? { relay } : {}) }
+  const speechFields = { ...fields, ...(inputSubmission ? { inputSubmission } : {}) }
+  if (!parts.some(part => part.image || part.file)) return { kind: 'speech', text: parts.map(part => part.text).filter(Boolean).join(separator), ...speechFields }
   const result: ContentPayload[] = [], texts: string[] = []
-  const flush = () => { if (texts.length) result.push({ kind: 'speech', text: texts.splice(0).join(separator), ...fields }) }
+  const flush = () => { if (texts.length) result.push({ kind: 'speech', text: texts.splice(0).join(separator), ...speechFields }) }
   for (const part of parts) {
     if (part.image) { flush(); result.push({ kind: 'image', part: part.part!, image: part.image, ...fields }) }
     else if (part.file) { flush(); result.push({ kind: 'file', part: part.part!, file: part.file, ...fields }) }
@@ -680,7 +691,7 @@ export class PublicationStore {
     const previous = new Map(latest.map(o => [o.fragment.ordinal, o])), count = Math.max(parts.length, ...latest.map(o => o.fragment.ordinal + 1))
     for (let ordinal = 0; ordinal < count; ordinal++) {
       const prior = previous.get(ordinal), body = parts[ordinal]
-      if (body && prior?.effect === 'upsert' && same(prior.payload, body) && (['confirmed', 'unknown', 'dispatching'].includes(prior.state) || prior.attempt !== undefined || !!prior.uploads?.length)) continue
+      if (body && prior?.effect === 'upsert' && (same(prior.payload, body) || sameImageEffect(prior.payload, body)) && (['confirmed', 'unknown', 'dispatching'].includes(prior.state) || prior.attempt !== undefined || !!prior.uploads?.length)) continue
       if (!body && prior?.effect === 'withdraw' && prior.state !== 'cancelled') continue
       // Keep an already queued withdrawal as the barrier for a replacement.
       const direct = prior?.predecessorOperationId ? this.inspect(prior.predecessorOperationId) : null
@@ -918,15 +929,19 @@ export class PublicationStore {
         const frozen = [...new Map(original.map(value => [value.fragment.ordinal, value])).values()]
         const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal')
           .all(operation.projectionId).map(row => this.read(row)!).filter(value => value.effect === 'upsert')
-        const assemble = (operations: PublicationOperation[]) => {
+        const assemble = (operations: PublicationOperation[], currentImages = false) => {
           const questions = operations.filter(value => value.payload.kind === 'question')
           if (questions.length > 1 || questions.length && operations.at(-1) !== questions[0]) return
-          const body = representation(operations.filter(value => value.payload.kind !== 'question').map(value => value.payload.kind === 'image' ? { text: '', part: value.payload.part, image: value.payload.image }
+          // Qualification above still owns every accepted part. Compare its current observation
+          // with a retained identical image without rewriting that image's original effect.
+          const currentPart = (image: ImagePublicationPayload) => currentImages && payload.kind === 'sequence'
+            ? payload.parts.find((part): part is ImagePublicationPayload => part.kind === 'image' && sameImageEffect(part, image))?.part ?? image.part : image.part
+          const body = representation(operations.filter(value => value.payload.kind !== 'question').map(value => value.payload.kind === 'image' ? { text: '', part: currentPart(value.payload), image: value.payload.image }
             : value.payload.kind === 'file' ? { text: '', part: value.payload.part, file: value.payload.file }
             : { text: value.payload.kind === 'speech' ? value.payload.text : '' }), content.phase, content.relay, '', content.kind === 'speech' ? content.inputSubmission : undefined)
           return { body, whole: questions.length ? questionRepresentation(body, questions[0]!.payload as QuestionPublicationPayload) : body }
         }
-        const retained = assemble(latest), prior = assemble(frozen)
+        const retained = assemble(latest, true), prior = assemble(frozen)
         const current = latest.some(value => value.operationId === operation.operationId && same(value.payload, operation.payload))
         if (current && operation.payload.kind === 'question' && operation.payload.text === questionText(payload) &&
             digest(operation.payload) === operation.sourceRevision && frozen.length === 1 && same(frozen[0]!.payload, operation.payload)) return 'qualified'
