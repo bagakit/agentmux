@@ -26,7 +26,8 @@ type Cursor = {
   continuation?: string
 }
 
-export type NativeJsonlHistoryRecord = { value: Record<string, unknown>; start: number }
+/** Physical source boundaries; end includes the original newline when present. */
+export type NativeJsonlHistoryRecord = { value: Record<string, unknown>; start: number; end: number }
 
 export type NativeHistoryReadBudget = { bytesRead: number; startedAt: number }
 
@@ -96,10 +97,25 @@ export class NativeJsonlHistoryReader {
   private cacheStart = 0
   private head = ''
   private tail = ''
+  private readonly stringSources = new WeakMap<object, Map<string, { value: string | NativeText; start: number; end: number; text?: NativeText }>>()
   private readonly permitsPartialTail: boolean
   readonly continuation: string | undefined
   materializeItem(item: NativeHistoryItem): Promise<AgentSessionHistoryItem> {
     return materializeNativeContent(this.context, item)
+  }
+
+  /** Exact original string backing, retained only while its parsed holder is reachable. */
+  sourceText(holder: Record<string, unknown> | unknown[], key: string): NativeText | undefined {
+    const slot = this.stringSources.get(holder)?.get(key)
+    if (!slot || Reflect.get(holder, key) !== slot.value) return undefined
+    if (typeof slot.value !== 'string') return slot.value
+    if (!slot.text) {
+      const metadata = nativeStringMetadata()
+      appendNativeStringMetadata(metadata, slot.value)
+      slot.text = nativeSourceText({ path: this.context.transcriptPath!, ...this.identity, cut: this.cut,
+        head: this.head, tail: this.tail, start: slot.start, end: slot.end }, metadata)
+    }
+    return slot.text
   }
 
   private constructor(
@@ -185,11 +201,19 @@ export class NativeJsonlHistoryReader {
   /** Streaming tokens retain small metadata while large strings stay at their exact physical extent. */
   private async parseRange(start: number, end: number, partialTail = false): Promise<Record<string, unknown> | null> {
     let deferred: NativeText | undefined
+    let stringRange: { start: number; end: number } | undefined
+    const sources = this.stringSources
     // The public reviver inserts the physical value at exactly this string's slot. No
     // placeholder text can enter Provider interpretation, concatenation or encoding.
-    const assembler = new Assembler<unknown>({ reviver: (_key, value) => {
-      if (!deferred) return value
-      const result = deferred; deferred = undefined; return result
+    const assembler = new Assembler<unknown>({ reviver: function (this: object, key, value) {
+      const result = deferred ?? value
+      if (stringRange && this && typeof this === 'object') {
+        let slots = sources.get(this)
+        if (!slots) { slots = new Map(); sources.set(this, slots) }
+        slots.set(String(key), { value: result, ...stringRange })
+      }
+      deferred = undefined; stringRange = undefined
+      return result
     } }), stream = parser.asStream({ packKeys: true, streamKeys: false,
       packStrings: false, streamStrings: true, packNumbers: true, streamNumbers: false })
     const strings: Array<{ start: number; end: number }> = []
@@ -213,6 +237,7 @@ export class NativeJsonlHistoryReader {
             if (valueBytes > SESSION_HISTORY_MAX_PAGE_BYTES / 2) { value = ''; big = true }
           }
         } else if (token.name === 'endString') {
+          stringRange = currentRange
           if (big || currentRange && currentRange.end - currentRange.start > SESSION_HISTORY_MAX_PAGE_BYTES / 2) {
             if (!currentRange || currentRange.end <= currentRange.start) return failure('INVALID_TRANSCRIPT', 'A native string extent is incomplete.')
             deferred = nativeSourceText({ path: this.context.transcriptPath!, ...this.identity, cut: this.cut,
@@ -292,7 +317,7 @@ export class NativeJsonlHistoryReader {
         continue
       }
       this.lastRecordEnd = end
-      return { value, start }
+      return { value, start, end }
     }
     return null
   }
@@ -361,7 +386,7 @@ export class NativeJsonlHistoryReader {
           this.forwardPosition = end + 1
           if (end === start) break
           const value = await this.parseRange(start, end)
-          if (value) { this.lastForwardStart = start; return { value, start } }
+          if (value) { this.lastForwardStart = start; return { value, start, end: this.forwardPosition } }
           break
         }
         position += block.length

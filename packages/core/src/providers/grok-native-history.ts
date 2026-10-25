@@ -7,7 +7,8 @@ import { AgentMuxError } from '../errors.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import {
   NativeJsonlHistoryReader,
-  readNativeConversationChanges,
+  NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES,
+  type NativeJsonlHistoryRecord,
   readNativeHistoryBytes,
   type NativeHistoryReadBudget
 } from '../native-jsonl-history-reader.js'
@@ -20,11 +21,14 @@ import {
   type NativeHistoryContentPart as AgentSessionHistoryContentPart,
   type NativeHistoryItem as AgentSessionHistoryItem
 } from '../native-history-value.js'
+import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
 import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../session-history-changes.js'
 import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryObservationContext,
   AgentProviderSessionHistoryPage,
+  AgentProviderSessionHistoryRecordContext,
+  AgentSessionHistoryItem as MaterializedHistoryItem,
   AgentSessionHistoryObservationHandle
 } from '../types.js'
 
@@ -287,48 +291,181 @@ function groupMetadata(row: Update): boolean {
   return row.method === 'session/update' ? row.kind === 'current_mode_update'
     : ['hook_annotation', 'hook_run_started', 'hook_execution', 'turn_usage', 'response_completed'].includes(row.kind)
 }
-async function finalText(reader: NativeJsonlHistoryReader, start: number, sessionId: string, terminalPrompt: string): Promise<NativeTextValue | undefined> {
-  const chunks: NativeTextValue[] = []
-  let position = start
-  while (position > 0) {
-    const previous = await reader.readBefore(position)
-    if (!previous) break
-    position = previous.start
-    const row = updateRecord(previous.value, sessionId)
-    const associated = promptId(row.params)
-    if (associated !== undefined && associated !== terminalPrompt) break
-    if (groupMetadata(row)) continue
-    if (row.method === 'session/update' && row.kind === 'agent_message_chunk') {
-      const content = isRecord(row.update.content) ? row.update.content : undefined
-      // An unknown or incomplete member cannot prove where the public group
-      // begins. Do not publish only the suffix as a complete answer.
-      if (associated !== terminalPrompt || hostTurn(row.update) || content?.type !== 'text' || !isNativeText(content.text)) return undefined
-      chunks.push(content.text)
-      continue
-    }
-    if (row.method === 'session/update' && ['user_message_chunk', 'agent_thought_chunk', 'tool_call', 'tool_call_update'].includes(row.kind) ||
-        row.method === '_x.ai/session/update' && row.kind === 'turn_completed') break
-    return undefined
-  }
-  const text = nativeTextJoin(chunks.reverse(), '')
-  return nativeTextHasSpeech(text) ? text : undefined
+type GrokTextGroup = {
+  first: NativeJsonlHistoryRecord
+  last: NativeJsonlHistoryRecord
+  prompt: string
+  texts: NativeTextValue[]
+  sources: NativeTextValue[]
+  inlineBytes: number
+  beginningKnown: boolean
+  hasSpeech: boolean
+  final?: { at?: number }
+}
+function recordedTime(record: Record<string, unknown>): number | undefined {
+  const value = record.timestamp
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && Number.isSafeInteger(value * 1000)
+    ? value * 1000 : undefined
+}
+function publicChunk(row: Update): { prompt: string; text: NativeTextValue } | undefined {
+  const prompt = promptId(row.params), content = row.update.content
+  return row.method === 'session/update' && row.kind === 'agent_message_chunk' && prompt && !hostTurn(row.update)
+    && isRecord(content) && content.type === 'text' && isNativeText(content.text) ? { prompt, text: content.text } : undefined
+}
+function knownGroupBoundary(row: Update): boolean {
+  return row.method === 'session/update' && ['user_message_chunk', 'agent_thought_chunk', 'tool_call', 'tool_call_update'].includes(row.kind)
+    || row.method === '_x.ai/session/update' && row.kind === 'turn_completed'
+}
+function successfulTerminal(row: Update, prompt: string): boolean {
+  return row.method === '_x.ai/session/update' && row.kind === 'turn_completed' && row.update.prompt_id === prompt
+    && (promptId(row.params) === undefined || promptId(row.params) === prompt)
+    && row.update.stop_reason === 'end_turn' && row.update.error_kind == null
+}
+function groupItem(group: GrokTextGroup): AgentSessionHistoryItem | undefined {
+  if (!group.hasSpeech) return undefined
+  const text = nativeTextJoin(group.inlineBytes > SESSION_HISTORY_MAX_PAGE_BYTES / 2 ? group.sources : group.texts, '')
+  const startedAt = recordedTime(group.first.value)
+  return { id: `grok-update:${group.first.start}`, kind: 'assistant-message', turnId: group.prompt,
+    messagePhase: group.final ? 'final' : 'progress', contentParts: [{ kind: 'text', text, contentEligibility: 'public' }],
+    ...(startedAt === undefined ? {} : { startedAt }), ...(group.final?.at === undefined ? {} : { completedAt: group.final.at }) }
 }
 
-async function convertGrokRecord(reader: NativeJsonlHistoryReader, record: Record<string, unknown>, start: number, sessionId: string): Promise<AgentSessionHistoryItem> {
-  const row = updateRecord(record, sessionId), { params, update, kind, method } = row
-  const id = `grok-update:${start}`
-  const timestamp = typeof record.timestamp === 'number' && Number.isSafeInteger(record.timestamp) && record.timestamp >= 0
-    && Number.isSafeInteger(record.timestamp * 1000) ? record.timestamp * 1000 : undefined
-  const time = timestamp === undefined ? {} : { startedAt: timestamp }
-  if (method === '_x.ai/session/update' && kind === 'turn_completed') {
-    const turnId = extractString(update.prompt_id)
-    // agent_result is null for success in the native producer, and may contain
-    // backend error details for failure. Only the original text group is speech.
-    const text = turnId && (promptId(params) === undefined || promptId(params) === turnId) && update.stop_reason === 'end_turn' && update.error_kind == null
-      ? await finalText(reader, start, sessionId, turnId) : undefined
-    if (text !== undefined) return { id, kind: 'assistant-message', turnId: turnId!, messagePhase: 'final', ...time,
-      contentParts: [{ kind: 'text', text, contentEligibility: 'public' }] }
+/** Grok's Text and Narration channels both produce public ACP message chunks.
+ * The Provider combines that original stream; tools and thoughts remain separate records.
+ * Source: grok-build 2bdd1d6a, sampling_events.rs and updates.rs. This is a read-local
+ * accumulator, never a second durable conversation or a Runtime state detector. */
+class GrokMessageProjection {
+  private readonly groups = new Map<number, GrokTextGroup>()
+  private active: GrokTextGroup | undefined
+  constructor(private readonly reader: NativeJsonlHistoryReader, private readonly sessionId: string) {}
+  private row(entry: NativeJsonlHistoryRecord): Update { return updateRecord(entry.value, this.sessionId) }
+  private source(row: Update, text: NativeTextValue): NativeTextValue {
+    return this.reader.sourceText(row.update.content as Record<string, unknown>, 'text') ?? text
   }
+  private inlineBytes(text: NativeTextValue): number {
+    return typeof text === 'string' ? Buffer.byteLength(JSON.stringify(text)) : SESSION_HISTORY_MAX_PAGE_BYTES
+  }
+  private async prefix(entry: NativeJsonlHistoryRecord): Promise<GrokTextGroup> {
+    const row = this.row(entry), chunk = publicChunk(row)!
+    const entries = [entry], texts = [chunk.text], sources = [this.source(row, chunk.text)]
+    let first = entry, beginningKnown = first.start === 0
+    while (first.start > 0) {
+      const previous = await this.reader.readBefore(first.start)
+      if (!previous) { beginningKnown = true; break }
+      const row = this.row(previous), associated = promptId(row.params), prior = publicChunk(row)
+      if (associated !== undefined && associated !== chunk.prompt) { beginningKnown = true; break }
+      if (prior?.prompt === chunk.prompt) { entries.push(previous); texts.push(prior.text); sources.push(this.source(row, prior.text)); first = previous; continue }
+      if (groupMetadata(row)) { first = previous; continue }
+      beginningKnown = knownGroupBoundary(row)
+      break
+    }
+    if (first.start === 0) beginningKnown = true
+    const group: GrokTextGroup = { first: entries.at(-1)!, last: entry, prompt: chunk.prompt, texts: texts.reverse(), sources: sources.reverse(),
+      inlineBytes: texts.reduce((bytes, text) => bytes + this.inlineBytes(text), 0), beginningKnown, hasSpeech: texts.some(nativeTextHasSpeech) }
+    for (const member of entries) this.groups.set(member.start, group)
+    return group
+  }
+  private append(group: GrokTextGroup, entry: NativeJsonlHistoryRecord, text: NativeTextValue): void {
+    group.texts.push(text); group.sources.push(this.source(this.row(entry), text)); group.inlineBytes += this.inlineBytes(text)
+    group.hasSpeech ||= nativeTextHasSpeech(text); group.last = entry; this.groups.set(entry.start, group)
+  }
+  async before(terminal: NativeJsonlHistoryRecord): Promise<GrokTextGroup | undefined> {
+    const boundary = this.row(terminal), prompt = extractString(boundary.update.prompt_id)
+    if (!prompt || !successfulTerminal(boundary, prompt)) return undefined
+    let position = terminal.start
+    while (position > 0) {
+      const entry = await this.reader.readBefore(position)
+      if (!entry) break
+      position = entry.start
+      const row = this.row(entry), associated = promptId(row.params)
+      if (associated !== undefined && associated !== prompt) break
+      if (groupMetadata(row)) continue
+      if (publicChunk(row)?.prompt !== prompt) break
+      const group = this.groups.get(entry.start) ?? await this.prefix(entry)
+      if (!group.beginningKnown) return undefined
+      group.final = { ...(recordedTime(terminal.value) === undefined ? {} : { at: recordedTime(terminal.value)! }) }
+      return group
+    }
+    return undefined
+  }
+  async complete(entry: NativeJsonlHistoryRecord): Promise<GrokTextGroup> {
+    const cached = this.groups.get(entry.start)
+    if (cached) return cached
+    const group = await this.prefix(entry)
+    let next = group.last.end
+    for (let after = await this.reader.readAt(next); after; after = await this.reader.readAt(next)) {
+      const row = this.row(after), associated = promptId(row.params), chunk = publicChunk(row)
+      if (associated !== undefined && associated !== group.prompt) break
+      if (chunk?.prompt === group.prompt) this.append(group, after, chunk.text)
+      else if (!groupMetadata(row)) {
+        if (group.beginningKnown && successfulTerminal(row, group.prompt)) group.final = { ...(recordedTime(after.value) === undefined ? {} : { at: recordedTime(after.value)! }) }
+        break
+      }
+      next = after.end
+    }
+    return group
+  }
+  async history(entry: NativeJsonlHistoryRecord): Promise<AgentSessionHistoryItem | null> {
+    const row = this.row(entry), chunk = publicChunk(row)
+    if (chunk) {
+      // A non-first speech member contributes no history item. Inspect only its
+      // adjoining predecessor before assembling a body this page will not return.
+      if (!this.groups.has(entry.start) && nativeTextHasSpeech(chunk.text)) {
+        let position = entry.start
+        for (let prior = await this.reader.readBefore(position); prior; prior = await this.reader.readBefore(position)) {
+          const previous = this.row(prior), associated = promptId(previous.params)
+          if (associated !== undefined && associated !== chunk.prompt) break
+          if (publicChunk(previous)?.prompt === chunk.prompt) return null
+          if (!groupMetadata(previous)) break
+          position = prior.start
+        }
+      }
+      const group = await this.complete(entry)
+      if (!group.hasSpeech) return rawRecord(entry, row)
+      return group.first.start === entry.start ? groupItem(group)! : null
+    }
+    if (row.kind === 'turn_completed' && (await this.before(entry))?.hasSpeech) return null
+    return rawRecord(entry, row)
+  }
+  async change(): Promise<GrokProjectionChange | null> {
+    const entry = await this.reader.readNext()
+    if (!entry) return null
+    const row = this.row(entry), chunk = publicChunk(row)
+    if (chunk) {
+      let group = this.active
+      if (!group || group.prompt !== chunk.prompt) group = await this.prefix(entry)
+      else this.append(group, entry, chunk.text)
+      this.active = group
+      // Coalesce a contiguous batch before materializing. Work follows original
+      // bytes, not every growing prefix or the number of unrelated Sessions.
+      for (let next = await this.reader.readNext(); next; next = await this.reader.readNext()) {
+        const nextChunk = publicChunk(this.row(next))
+        if (nextChunk?.prompt !== group.prompt) { this.reader.repeatNext(); break }
+        this.append(group, next, nextChunk.text)
+      }
+      return groupChange(group) ?? originalChange(rawRecord(entry, row))
+    }
+    const final = row.kind === 'turn_completed' ? await this.before(entry) : undefined
+    if (!groupMetadata(row) || promptId(row.params) !== undefined && promptId(row.params) !== this.active?.prompt) this.active = undefined
+    return final && groupChange(final) || originalChange(rawRecord(entry, row))
+  }
+}
+function groupItemIfPresent(group: GrokTextGroup | undefined): AgentSessionHistoryItem | undefined { return group && groupItem(group) }
+
+type GrokProjectionChange = { id: string; value(): AgentSessionHistoryItem }
+function originalChange(item: AgentSessionHistoryItem): GrokProjectionChange { return { id: item.id, value: () => item } }
+/** Keep a versioned slice of the read-local accumulator, not a copied growing body. */
+function groupChange(group: GrokTextGroup): GrokProjectionChange | undefined {
+  if (!group.hasSpeech) return undefined
+  const { texts, sources, final, ...fields } = group, count = texts.length
+  return { id: `grok-update:${group.first.start}`, value: () => groupItem({ ...fields, texts: texts.slice(0, count), sources: sources.slice(0, count), ...(final ? { final } : {}) })! }
+}
+
+
+/** Exact non-group originals remain readable at their original physical IDs. */
+function rawRecord(entry: NativeJsonlHistoryRecord, row: Update): AgentSessionHistoryItem {
+  const { update, kind, method } = row, id = `grok-update:${entry.start}`, timestamp = recordedTime(entry.value)
+  const time = timestamp === undefined ? {} : { startedAt: timestamp }
   if (method === 'session/update') {
     if (kind === 'user_message_chunk') return { id, kind: hostTurn(update) ? 'activity' : 'user-message', ...time,
       contentParts: textPart(update.content, hostTurn(update) ? 'private' : 'unconfirmed') }
@@ -349,7 +486,7 @@ async function convertGrokRecord(reader: NativeJsonlHistoryReader, record: Recor
         output: nativeJsonStringify(update.rawOutput ?? update.content ?? []), contentEligibility: 'unconfirmed' }] }
   }
   return { id, kind: 'activity', title: `Grok ${kind}`, ...time,
-    contentParts: [{ kind: 'text', text: nativeJsonStringify(record), contentEligibility: 'unconfirmed' }] }
+    contentParts: [{ kind: 'text', text: nativeJsonStringify(entry.value), contentEligibility: 'unconfirmed' }] }
 }
 
 async function openGrokReader(context: AgentProviderSessionHistoryContext): Promise<NativeJsonlHistoryReader> {
@@ -369,11 +506,12 @@ export async function observeGrokSessionHistory(context: AgentProviderSessionHis
 export async function readGrokSessionHistoryPage(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage> {
   const reader = await openGrokReader(context)
   try {
-    const items: AgentSessionHistoryItem[] = []
+    const items: AgentSessionHistoryItem[] = [], projection = new GrokMessageProjection(reader, context.source.nativeSessionId)
     while (items.length < context.limit) {
       const entry = await reader.readPrevious()
       if (!entry) break
-      items.push(await convertGrokRecord(reader, entry.value, entry.start, context.source.nativeSessionId))
+      const item = await projection.history(entry)
+      if (item) items.push(item)
     }
     const nextCursor = await reader.nextCursor()
     return { source: context.source, items: await Promise.all(items.reverse().map(item => reader.materializeItem(item))), nextCursor,
@@ -383,7 +521,67 @@ export async function readGrokSessionHistoryPage(context: AgentProviderSessionHi
 export async function readGrokConversationChanges(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage> {
   const reader = await openGrokReader(context)
   try {
-    return await readNativeConversationChanges(reader, context,
-      (record, start) => convertGrokRecord(reader, record, start, context.source.nativeSessionId))
+    if (context.head && (context.after !== undefined || context.tail)) throw new AgentMuxError('A beginning checkpoint cannot include another source position.', 'AGENT_SESSION_HISTORY_INVALID_CURSOR')
+    await reader.seekChanges(context.after, context.tail === true)
+    const initialCursor = await reader.changesCursor(), projection = new GrokMessageProjection(reader, context.source.nativeSessionId)
+    const steps: { change: GrokProjectionChange; cursor: string }[] = [], ids = new Set<string>()
+    if (!context.tail && !context.head) while (ids.size < context.limit) {
+      const change = await projection.change()
+      if (!change) break
+      ids.add(change.id); steps.push({ change, cursor: await reader.changesCursor() })
+    }
+    const cache = new Map<GrokProjectionChange, MaterializedHistoryItem>()
+    const materialize = async (count: number) => {
+      const latest = new Map<string, GrokProjectionChange>()
+      for (const step of steps.slice(0, count)) latest.set(step.change.id, step.change)
+      const items: MaterializedHistoryItem[] = []
+      for (const change of latest.values()) {
+        let item = cache.get(change)
+        if (!item) { item = await reader.materializeItem(change.value()); cache.set(change, item) }
+        items.push(item)
+      }
+      return { items, bytes: Buffer.byteLength(JSON.stringify(items)) }
+    }
+    const budget = SESSION_HISTORY_MAX_PAGE_BYTES - NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES
+    let count = steps.length, page = await materialize(count)
+    if (page.bytes > budget) {
+      // Every retained cursor precedes exactly the following original step. Pick a
+      // fitting prefix without rescanning source bytes or dropping its later updates.
+      let lower = 0, upper = count - 1
+      while (lower < upper) {
+        const candidate = Math.ceil((lower + upper) / 2), rendered = await materialize(candidate)
+        if (rendered.bytes <= budget) lower = candidate; else upper = candidate - 1
+      }
+      count = lower
+      if (!count) throw new AgentMuxError('The original change cannot fit its materialized page.', 'AGENT_SESSION_HISTORY_TOO_LARGE')
+      page = await materialize(count)
+    }
+    return { source: context.source, items: page.items, cursor: steps[count - 1]?.cursor ?? initialCursor,
+      more: count < steps.length || !(context.tail || context.head) && await reader.hasMoreChanges() }
+  } finally { await reader.close() }
+}
+
+/** Locate the original byte identity, then read only its own adjoining text group. */
+export async function readGrokSessionHistoryRecord(context: AgentProviderSessionHistoryRecordContext): Promise<MaterializedHistoryItem> {
+  const reader = await openGrokReader({ ...context, limit: 1 })
+  try {
+    const match = /^grok-update:(0|[1-9][0-9]*)$/u.exec(context.recordId), start = match ? Number(match[1]) : NaN
+    const entry = Number.isSafeInteger(start) ? await reader.readAt(start) : null
+    if (!entry) throw new AgentMuxError('The original Grok record is unavailable.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
+    const row = updateRecord(entry.value, context.source.nativeSessionId), projection = new GrokMessageProjection(reader, context.source.nativeSessionId)
+    let item = rawRecord(entry, row)
+    if (publicChunk(row)) {
+      const group = await projection.complete(entry)
+      if (group.first.start === entry.start) item = groupItem(group) ?? item
+    } else if (row.kind === 'turn_completed') {
+      const originalFinal = groupItemIfPresent(await projection.before(entry))
+      if (originalFinal) {
+        const { startedAt: _startedAt, completedAt: _completedAt, ...reply } = originalFinal, time = recordedTime(entry.value)
+        item = { ...reply, id: context.recordId, ...(time === undefined ? {} : { startedAt: time }) }
+      }
+    }
+    if (context.turnId !== undefined && item.turnId !== context.turnId) throw new AgentMuxError('The original Grok record is unavailable.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
+    await reader.verifyUnchanged()
+    return await reader.materializeItem(item)
   } finally { await reader.close() }
 }
