@@ -1710,17 +1710,35 @@ export async function registerIpc(args: {
     requireTrustedSender('continuousProgress:goalAction', event)
     return (await callUserRpc('goal.continuation-action', { goalId, loopId, action, expectedRevision, operationId })).continuation
   })
+  // Continuous terminal typing is one editing intent; the design forbids turning every key into
+  // another pause transaction (agent-capabilities-and-messaging: manual input cancelling automatic
+  // progress). Per exact Session/Run the first key of a burst starts the original cancel-only pause
+  // and later keys of the same burst join it whatever its outcome. Keys are always sent at once:
+  // this never gates or delays input. A gap of TYPING_BURST_GAP_MS ends the burst, and an explicit
+  // progress change made through this Main ends it at once, so the next key pauses afresh.
+  // Paste, prompts, interrupt, restart and stop stay discrete explicit pauses.
+  const TYPING_BURST_GAP_MS = 2_000
+  const typingBursts = new Map<string, number>()
+  const endInputBursts = (target: { hostId: string; agentSessionId: string }): void => {
+    for (const key of [...typingBursts.keys()]) {
+      const [hostId, agentSessionId] = JSON.parse(key) as [string, string, string]
+      if (hostId === target.hostId && agentSessionId === target.agentSessionId) typingBursts.delete(key)
+    }
+  }
   handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => {
     requireTrustedSender('continuousProgress:create', event)
     if (taskSource?.kind === 'goal') throw new AgentMuxError('Goal continuation requires its original explicit Goal Start.', 'INVALID_CONTROL_REQUEST')
+    endInputBursts(target)
     return (await callUserRpc('agent.progress.create', { target, intervalMs, prompt, ...(taskSource ? { taskSource } : {}), operationId: mintObjectId() })).loop
   })
   handleWithEvent('continuousProgress:action', async (event, target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', expectedLoop: import('@agentmux/core').ContinuousProgressLoop, operationId: string) => {
     requireTrustedSender('continuousProgress:action', event)
+    endInputBursts(target)
     return (await callUserRpc('agent.progress.action', { target, loopId, action, expectedLoop, operationId })).loop
   })
   handleWithEvent('continuousProgress:update', async (event, input: import('../shared/continuous-progress').ProgressUpdateRequest): Promise<import('../shared/continuous-progress').ProgressUpdateResult> => {
     requireTrustedSender('continuousProgress:update', event)
+    endInputBursts(input.target)
     try { return { ok: true, loop: (await callUserRpc('agent.progress.update', input)).loop } }
     catch (error) {
       return { ok: false, error: { ...(error instanceof AgentMuxError ? { code: error.code } : {}), message: error instanceof Error ? error.message : String(error) } }
@@ -1736,6 +1754,13 @@ export async function registerIpc(args: {
   const pauseUserProgress = (session: SessionControl, _reason: string): void => {
     if (session.kind === 'agent') void pauseAutomaticInput(session).catch(error => console.warn('Original automatic pause is unconfirmed; manual input remains available:', error))
   }
+  const pauseForTyping = (session: SessionControl): void => {
+    if (session.kind !== 'agent') return
+    const key = JSON.stringify([session.hostId, session.agentSessionId, session.run.runId]), now = Date.now()
+    const lastInputAt = typingBursts.get(key)
+    typingBursts.set(key, now)
+    if (lastInputAt === undefined || now - lastInputAt >= TYPING_BURST_GAP_MS) pauseUserProgress(session, 'Paused for your terminal input.')
+  }
   handleWithEvent('continuousProgress:pauseForInput', async (event, control: AgentSessionControl) => {
     requireTrustedSender('continuousProgress:pauseForInput', event)
     await pauseAutomaticInput(control)
@@ -1745,7 +1770,7 @@ export async function registerIpc(args: {
     await pauseAutomaticInput(control)
   })
   handleWithEvent('sessions:write', async (event, session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source'], observation?: import('@agentmux/core/control').InputObservationReference): Promise<SessionInputWriteResult> => {
-    if (source === 'user' && data.length > 0 && !isTerminalMouseReportPayload(data)) pauseUserProgress(session, 'Paused for your terminal input.')
+    if (source === 'user' && data.length > 0 && !isTerminalMouseReportPayload(data)) pauseForTyping(session)
     return await sessionInputWriteResult(() => args.runtime.write(session, data, source, readInputObservation(observation) ?? undefined,
       inputSender(event)))
   })
