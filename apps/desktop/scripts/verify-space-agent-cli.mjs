@@ -124,18 +124,17 @@ try {
   await fs.copyFile(path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(privateRoot, 'fake-codex-cli.mjs'))
   let reusedRenderer = false
   if (toolMode && process.env.AGENTMUX_PROOF_RENDERER_RECEIPT) {
-    const previous = JSON.parse(await fs.readFile(process.env.AGENTMUX_PROOF_RENDERER_RECEIPT, 'utf8'))
-    const relevant = name => creationConsumer(name) && !name.startsWith('apps/desktop/src/main/') || name.startsWith('apps/host/src/') || name === 'pnpm-lock.yaml' ||
-      name.startsWith('apps/desktop/scripts/fixtures/') && !name.endsWith('/main.ts') && !name.endsWith('/tool-cores.mjs')
-    const exact = Object.entries(receipt.inputs).filter(([name]) => relevant(name))
-    assert(exact.length > 100 && exact.every(([name, digest]) => previous.inputs?.[name] === digest), 'A retained renderer must belong to these exact current source/compiled inputs')
+    const previousBytes = await fs.readFile(process.env.AGENTMUX_PROOF_RENDERER_RECEIPT)
+    const previous = JSON.parse(previousBytes)
+    assert.equal(previous.passed, true, 'A retained renderer requires its original successful proof')
+    assert.deepEqual(previous.inputs, receipt.inputs, 'A retained renderer must belong to all exact current source and compiled inputs')
     const retained = previous.rendererArtifact?.directory ?? path.join(previous.privateRoot, 'renderer')
     await fs.cp(retained, path.join(privateRoot, 'renderer'), { recursive: true, errorOnExist: true })
     const actualRenderer = Object.fromEntries(await Promise.all((await files(path.join(privateRoot, 'renderer'))).map(async file => [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
     const originalRenderer = Object.fromEntries(Object.entries(previous.builtInputs ?? {}).filter(([name]) => name.startsWith('renderer/')))
     assert(Object.keys(originalRenderer).length > 0, 'Original renderer build hashes are required')
     assert.deepEqual(actualRenderer, originalRenderer, 'Retained renderer artifacts changed after the original build receipt')
-    receipt.rendererReuse = { receipt: path.resolve(process.env.AGENTMUX_PROOF_RENDERER_RECEIPT), originalDirectory: retained, qualifiedInputs: exact.length }
+    receipt.rendererReuse = { receipt: path.resolve(process.env.AGENTMUX_PROOF_RENDERER_RECEIPT), receiptSha256: hash(previousBytes), qualification: 'all-inputs', originalDirectory: retained, qualifiedInputs: Object.keys(receipt.inputs).length }
     reusedRenderer = true
   }
   if (!reusedRenderer) await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' },
