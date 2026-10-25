@@ -281,7 +281,7 @@ async function packageProof(root, expected) {
   const cli = join(installed, 'bin/amux')
   let reads = 0
   async function read(args, expectedText) {
-    const result = await exec(process.execPath, [cli, '--endpoint', `unix:${socketPath}`, ...args], {
+    const result = await exec(process.execPath, ['--disable-warning=ExperimentalWarning', cli, '--endpoint', `unix:${socketPath}`, ...args], {
       cwd: consumer, env, maxBuffer: 8 * 1024 * 1024
     })
     assert.equal(result.stderr, '')
@@ -301,7 +301,7 @@ async function packageProof(root, expected) {
       assert(help, `Missing command help for ${path}`)
       await read(['--help', ...path.split('.')], help)
     }
-    const manual = await exec(process.execPath, [cli, '--endpoint', `unix:${socketPath}`, 'mote', 'playbook', 'pmo'], {
+    const manual = await exec(process.execPath, ['--disable-warning=ExperimentalWarning', cli, '--endpoint', `unix:${socketPath}`, 'mote', 'playbook', 'pmo'], {
       cwd: consumer, env, maxBuffer: 8 * 1024 * 1024
     })
     assert.equal(manual.stderr, '')
@@ -497,7 +497,8 @@ async function mutationProof(root, original) {
       assert(!actual.includes(item.expected), `${item.label} retained its supposedly removed contract`)
     }
     if (item.cli) {
-      const result = await exec(process.execPath, [join(compiled, 'agentmux.js'), '--endpoint',
+      // Node 24's experimental SQLite notice is unrelated to guide output; all other stderr stays asserted empty.
+      const result = await exec(process.execPath, ['--disable-warning=ExperimentalWarning', join(compiled, 'agentmux.js'), '--endpoint',
         `unix:${join(destination, 'never-started.sock')}`, ...item.cli], { cwd: destination, env: ambientFree, maxBuffer: 8 * 1024 * 1024 })
       assert.equal(result.stderr, '')
       assert(result.stdout.includes(actual.trim()), 'Compiled CLI did not consume the mutated guide')
@@ -578,7 +579,7 @@ async function mutationProof(root, original) {
     const actual = item.read(await capture(compiled))
     assert.equal(typeof actual, 'string')
     if (item.cli) {
-      const result = await exec(process.execPath, [join(compiled, 'agentmux.js'), '--endpoint',
+      const result = await exec(process.execPath, ['--disable-warning=ExperimentalWarning', join(compiled, 'agentmux.js'), '--endpoint',
         `unix:${join(destination, 'never-started.sock')}`, ...item.cli], { cwd: destination, env: ambientFree, maxBuffer: 8 * 1024 * 1024 })
       assert.equal(result.stderr, '')
       assert(result.stdout.includes(actual.trim()), 'Compiled CLI did not consume the altered module')
