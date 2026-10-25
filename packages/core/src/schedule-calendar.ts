@@ -46,6 +46,18 @@ export function latestCalendarOccurrence(input: AgentScheduleCalendar, due: numb
   return due
 }
 
+/** The original due timestamp anchors the cadence; missed occurrences collapse to the latest. */
+export function latestIntervalOccurrence(due: number, now: number, everyMs: number): number {
+  if (due > now) return due
+  return due + Math.floor((now - due) / everyMs) * everyMs
+}
+
+/** Null keeps the schedule recoverable when its next absolute time is not representable. */
+export function nextIntervalOccurrence(due: number, now: number, everyMs: number): number | null {
+  const next = latestIntervalOccurrence(due, now, everyMs) + everyMs
+  return Number.isSafeInteger(next) && Number.isFinite(new Date(next).getTime()) ? next : null
+}
+
 export type ScheduleOccurrenceWindow = Readonly<{ from: number; to: number }>
 /** A display reference to the original record, never an input claim or mutation receipt. */
 export type ScheduleOccurrence = Readonly<{
@@ -53,6 +65,8 @@ export type ScheduleOccurrence = Readonly<{
   revision?: number
   at: number
   kind: 'next-due' | 'projected' | 'last-accepted'
+  /** Future interval occurrences in this half-open range are not individually projected. */
+  omittedRepeat?: Readonly<{ from: number; to: number }>
 }>
 
 /** Read-only visible-window projection. Actual deadlines and accepted occurrences keep
@@ -62,11 +76,14 @@ export function projectScheduleOccurrences(records: readonly Readonly<Continuous
     throw new RangeError('Schedule projection requires a finite half-open UTC window and an explicit clock.')
   }
   const projected = new Map<string, ScheduleOccurrence>()
-  const add = (record: Readonly<ContinuousProgressLoop>, at: number, kind: ScheduleOccurrence['kind']) => {
+  const add = (record: Readonly<ContinuousProgressLoop>, at: number, kind: ScheduleOccurrence['kind'], omittedRepeat?: ScheduleOccurrence['omittedRepeat']) => {
     if (at < window.from || at >= window.to) return
     const key = JSON.stringify([record.loopId, at]), previous = projected.get(key)
-    if (previous?.kind === 'last-accepted' || previous && kind === 'projected') return
-    projected.set(key, { scheduleId: record.loopId, ...(record.revision === undefined ? {} : { revision: record.revision }), at, kind })
+    if (previous?.kind === 'last-accepted' || previous && kind === 'projected') {
+      if (omittedRepeat && previous) projected.set(key, { ...previous, omittedRepeat })
+      return
+    }
+    projected.set(key, { scheduleId: record.loopId, ...(record.revision === undefined ? {} : { revision: record.revision }), at, kind, ...(omittedRepeat ? { omittedRepeat } : {}) })
   }
   for (const record of records) {
     if (!isAgentSchedule(record)) continue
@@ -74,6 +91,15 @@ export function projectScheduleOccurrences(records: readonly Readonly<Continuous
     // This is the plan's timestamp of the last Host-accepted input, not its actual
     // delivery wall clock, a completed Agent task or a replay of all past occurrences.
     if (record.lastOccurrenceAt !== undefined) add(record, record.lastOccurrenceAt, 'last-accepted')
+    if (record.everyMs !== undefined && record.status === 'active' && record.lastOutcome !== 'unknown' && !record.pendingCompletion) {
+      const start = Math.max(now, record.nextCheckAt, window.from)
+      const first = record.nextCheckAt + Math.ceil((start - record.nextCheckAt) / record.everyMs) * record.everyMs
+      if (Number.isSafeInteger(first) && first < window.to) {
+        const omittedFrom = first + record.everyMs
+        add(record, first, 'projected', Number.isSafeInteger(omittedFrom) && omittedFrom < window.to ? { from: omittedFrom, to: window.to } : undefined)
+      }
+      continue
+    }
     if (record.status !== 'active' || record.lastOutcome === 'unknown' || record.pendingCompletion || !record.calendar || record.calendar.kind === 'once') continue
     let cursor = Math.max(now, record.nextCheckAt, window.from - 1)
     while (cursor < window.to) {

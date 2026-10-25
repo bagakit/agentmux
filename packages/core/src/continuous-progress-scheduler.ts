@@ -19,6 +19,7 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   loopId: string
   calendar?: AgentScheduleCalendar
   afterMs?: number
+  everyMs?: number
   checkIn?: AgentScheduleCheckInPolicy
   checkInState?: AgentScheduleCheckInState
   revision?: number
@@ -50,8 +51,8 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
 }
 
 /** Distinguish saved future messages from completion-driven Goal/interval loops. */
-export function isAgentSchedule(loop: Pick<ContinuousProgressLoop, 'calendar' | 'afterMs'>): boolean {
-  return loop.calendar !== undefined || loop.afterMs !== undefined
+export function isAgentSchedule(loop: Pick<ContinuousProgressLoop, 'calendar' | 'afterMs' | 'everyMs'>): boolean {
+  return loop.calendar !== undefined || loop.afterMs !== undefined || loop.everyMs !== undefined
 }
 
 export type ContinuousProgressSchedulerOptions = {
@@ -97,7 +98,7 @@ export class ContinuousProgressScheduler {
 
   createSchedule(input: ContinuousProgressTarget & AgentScheduleTiming & { prompt: string; nextDue: number; operationId: string }): ContinuousProgressLoop {
     if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim() || (!Number.isSafeInteger(input.nextDue) || input.nextDue < 0)) throw new Error('An exact schedule target, message and next occurrence are required.')
-    const timing = parseAgentScheduleTiming({ calendar: input.calendar, afterMs: input.afterMs, checkIn: input.checkIn })
+    const timing = parseAgentScheduleTiming({ calendar: input.calendar, afterMs: input.afterMs, everyMs: input.everyMs, checkIn: input.checkIn })
     const loopId = this.id()
     const loop: ContinuousProgressLoop = { loopId, hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath,
       ...timing, revision: 1, creationOperationId: input.operationId, futureIntentId: `${loopId}-1`, intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
@@ -157,7 +158,7 @@ export class ContinuousProgressScheduler {
 export function parseGoalContinuationLoop(value: unknown): ContinuousProgressLoop {
   const loop = value as ContinuousProgressLoop | null
   const validId = (v: unknown): v is string => typeof v === 'string' && !!v.trim() && !/[\0\r\n]/u.test(v)
-  if (!loop || typeof loop !== 'object' || Array.isArray(loop) || (Object.hasOwn(loop, 'calendar') || Object.hasOwn(loop, 'afterMs')) ||
+  if (!loop || typeof loop !== 'object' || Array.isArray(loop) || (Object.hasOwn(loop, 'calendar') || Object.hasOwn(loop, 'afterMs') || Object.hasOwn(loop, 'everyMs')) ||
       ![loop.loopId, loop.hostId, loop.agentSessionId, loop.providerId, loop.workspacePath, loop.creationOperationId].every(validId) ||
       !Number.isSafeInteger(loop.revision) || loop.revision! < 1 || !Number.isFinite(loop.intervalMs) || loop.intervalMs <= 0 ||
       !Number.isFinite(loop.nextCheckAt) || typeof loop.prompt !== 'string' || !loop.prompt.trim() || !['active', 'paused', 'stopped'].includes(loop.status) ||

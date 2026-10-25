@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, type ContinuousProgressLoop, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
 import { parseScheduleRpcParams, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
-import { nextCalendarOccurrence, latestCalendarOccurrence } from '@agentmux/core/schedule-calendar'
+import { nextCalendarOccurrence, latestCalendarOccurrence, nextIntervalOccurrence, latestIntervalOccurrence } from '@agentmux/core/schedule-calendar'
 import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord } from './continuous-progress-task-source.js'
 import type { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
 import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE } from '@agentmux/core/schedule'
@@ -289,7 +289,7 @@ export class ContinuousProgressLoopManager {
       await this.authorizeCaller(p.target, context)
       const existing = this.list().find(loop => loop.creationOperationId === p.operationId)
       if (existing) {
-        if (existing.prompt !== p.prompt || JSON.stringify(existing.calendar) !== JSON.stringify(p.calendar) || existing.afterMs !== p.afterMs || JSON.stringify(existing.checkIn) !== JSON.stringify(p.checkIn) || ['hostId','agentSessionId','providerId','workspacePath'].some(key => existing[key as keyof ContinuousProgressTarget] !== p.target[key as keyof ContinuousProgressTarget])) throw new AgentMuxError('Schedule operation was reused with conflicting target or content.', 'SCHEDULE_OPERATION_CONFLICT')
+        if (existing.prompt !== p.prompt || JSON.stringify(existing.calendar) !== JSON.stringify(p.calendar) || existing.afterMs !== p.afterMs || existing.everyMs !== p.everyMs || JSON.stringify(existing.checkIn) !== JSON.stringify(p.checkIn) || ['hostId','agentSessionId','providerId','workspacePath'].some(key => existing[key as keyof ContinuousProgressTarget] !== p.target[key as keyof ContinuousProgressTarget])) throw new AgentMuxError('Schedule operation was reused with conflicting target or content.', 'SCHEDULE_OPERATION_CONFLICT')
         if (!this.futureInputs) throw new AgentMuxError('Future-message admission durability is unconfirmed.', 'SCHEDULE_INPUT_OWNER_UNAVAILABLE')
         const retryCreation = existing.status === 'paused' && existing.lastOutcome === 'unknown' && !existing.lastTickId && !existing.lastMutation
         try { await this.saveFutureIntent(existing, retryCreation || existing.status === 'active', context); assertCurrent?.() }
@@ -306,11 +306,11 @@ export class ContinuousProgressLoopManager {
       }
       if (!this.futureInputs) throw new AgentMuxError('The connected Host cannot save future-message admission. The Agent and manual input remain available.', 'SCHEDULE_INPUT_OWNER_UNAVAILABLE')
       if (p.checkIn && this.list().some(loop => loop.checkIn && loop.status !== 'stopped' && ['hostId','agentSessionId','providerId','workspacePath'].every(key => loop[key as keyof ContinuousProgressTarget] === p.target[key as keyof ContinuousProgressTarget]))) throw new AgentMuxError('This Agent already has a saved quiet follow-up. Inspect, pause or cancel that original arrangement.', 'SCHEDULE_CHECK_IN_EXISTS')
-      const nextDue = p.calendar ? nextCalendarOccurrence(p.calendar, this.now()) : this.now() + p.afterMs
-      if (nextDue !== null && (!Number.isSafeInteger(nextDue) || nextDue < 0)) throw new AgentMuxError('The requested delay exceeds the safe absolute schedule clock. Choose a representable afterMs; the Agent and manual input remain available.', 'INVALID_CONTROL_REQUEST')
+      const nextDue = p.calendar ? nextCalendarOccurrence(p.calendar, this.now()) : this.now() + (p.afterMs ?? p.everyMs!)
+      if (nextDue !== null && (!Number.isSafeInteger(nextDue) || nextDue < 0 || p.everyMs !== undefined && !Number.isFinite(new Date(nextDue).getTime()))) throw new AgentMuxError('The requested delay exceeds the safe absolute schedule clock. Choose a representable delay; the Agent and manual input remain available.', 'INVALID_CONTROL_REQUEST')
       if (nextDue === null) throw new AgentMuxError('This one-time civil occurrence is past or falls in a skipped DST gap. Choose a valid future time.', 'SCHEDULE_NO_FUTURE_OCCURRENCE')
       assertCurrent?.()
-      const loop = this.scheduler.createSchedule({ ...p.target, prompt: p.prompt, nextDue, operationId: p.operationId, ...(p.calendar ? { calendar: p.calendar, ...(p.checkIn ? { checkIn: p.checkIn } : {}) } : { afterMs: p.afterMs }) })
+      const loop = this.scheduler.createSchedule({ ...p.target, prompt: p.prompt, nextDue, operationId: p.operationId, ...(p.calendar ? { calendar: p.calendar, ...(p.checkIn ? { checkIn: p.checkIn } : {}) } : p.afterMs !== undefined ? { afterMs: p.afterMs } : { everyMs: p.everyMs! }) })
       this.patch(loop.loopId, { status: 'paused' })
       try { await this.persist(loop.loopId); assertCurrent?.(); await this.saveFutureIntent(loop, true, context); assertCurrent?.(); this.patch(loop.loopId, { status: 'active' }); await this.persist(loop.loopId) }
       catch (error) { this.patch(loop.loopId, { status: 'paused', lastOutcome: 'unknown', lastDecision: 'Saving the future-message intent is unconfirmed. Inspect the original operation; manual input remains available.' }); await this.persist(loop.loopId); await this.saveFutureIntent(this.require(loop.loopId), false, context); throw error }
@@ -497,6 +497,10 @@ export class ContinuousProgressLoopManager {
         const latest = latestCalendarOccurrence(loop.calendar, loop.nextCheckAt, checkAt)
         if (latest !== loop.nextCheckAt) this.patch(loop.loopId, { nextCheckAt: latest, lastDecision: 'Missed older occurrences; only the latest due occurrence is eligible.' })
       }
+      if (loop.everyMs !== undefined && !loop.pendingCompletion) {
+        const latest = latestIntervalOccurrence(loop.nextCheckAt, checkAt, loop.everyMs)
+        if (latest !== loop.nextCheckAt) this.patch(loop.loopId, { nextCheckAt: latest, lastDecision: 'Missed older occurrences; only the latest due occurrence is eligible.' })
+      }
     }
     const claims = this.scheduler.recover(now)
     if (claims.length === 0) return
@@ -599,11 +603,14 @@ export class ContinuousProgressLoopManager {
             if (current.taskSource && settled.lastDecision) settled.lastDecision += ' Host accepted the request; a new Agent turn is not yet confirmed.'
             else delete settled.lastDecision
             if (isAgentSchedule(current) && pending?.futureIntent) {
-              const nextDue = current.calendar ? nextCalendarOccurrence(current.calendar, checkAt) : null
+              const nextDue = current.calendar ? nextCalendarOccurrence(current.calendar, checkAt) : current.everyMs !== undefined ? nextIntervalOccurrence(pending.futureIntent.occurrenceAt, checkAt, current.everyMs) : null
               settled.lastOccurrenceAt = pending.futureIntent.occurrenceAt
               settled.nextCheckAt = nextDue ?? current.nextCheckAt
-              if (nextDue === null) settled.status = 'stopped'
-              settled.lastDecision = 'Host accepted the original future message; a new Agent turn is not yet confirmed.'
+              if (nextDue === null && current.everyMs !== undefined) settled.status = 'paused'
+              else if (nextDue === null) settled.status = 'stopped'
+              settled.lastDecision = nextDue === null && current.everyMs !== undefined
+                ? 'Host accepted the original message; the next occurrence is unrepresentable. Inspect the original arrangement.'
+                : 'Host accepted the original future message; a new Agent turn is not yet confirmed.'
             }
           }
           this.scheduler.restore(this.scheduler.list().map((loop) => loop.loopId === current.loopId

@@ -14,21 +14,27 @@ export type AgentScheduleCalendar = {
 }
 /** Relative requests freeze one absolute nextCheckAt on their first admission. */
 export type AgentScheduleTiming =
-  | { calendar: AgentScheduleCalendar; afterMs?: never; checkIn?: AgentScheduleCheckInPolicy }
-  | { afterMs: number; calendar?: never; checkIn?: never }
+  | { calendar: AgentScheduleCalendar; afterMs?: never; everyMs?: never; checkIn?: AgentScheduleCheckInPolicy }
+  | { afterMs: number; calendar?: never; everyMs?: never; checkIn?: never }
+  | { everyMs: number; calendar?: never; afterMs?: never; checkIn?: never }
 
 export function parseAgentScheduleAfterMs(value: unknown, code = 'INVALID_CONTROL_REQUEST'): number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) throw new AgentMuxError('afterMs must be a positive safe integer number of milliseconds.', code)
   return value as number
 }
 
+export function parseAgentScheduleEveryMs(value: unknown, code = 'INVALID_CONTROL_REQUEST'): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 60_000 || (value as number) % 60_000 !== 0) throw new AgentMuxError('everyMs must be a positive whole number of minutes.', code)
+  return value as number
+}
+
 /** One timing contract shared by direct Core callers and public schedule requests. */
 export function parseAgentScheduleTiming(value: unknown, code = 'INVALID_CONTROL_REQUEST'): AgentScheduleTiming {
-  const p = rpcRecord(value, ['calendar', 'afterMs', 'checkIn'], code)
-  if ((p.calendar !== undefined) === (p.afterMs !== undefined)) throw new AgentMuxError('Choose exactly one calendar or afterMs timing.', code)
+  const p = rpcRecord(value, ['calendar', 'afterMs', 'everyMs', 'checkIn'], code)
+  if ([p.calendar, p.afterMs, p.everyMs].filter(item => item !== undefined).length !== 1) throw new AgentMuxError('Choose exactly one calendar, afterMs or everyMs timing.', code)
   if (p.calendar !== undefined) return { calendar: parseAgentScheduleCalendar(p.calendar, code), ...(p.checkIn !== undefined ? { checkIn: parseAgentScheduleCheckIn(p.checkIn, code) } : {}) }
-  if (p.checkIn !== undefined) throw new AgentMuxError('Quiet follow-up requires calendar timing; afterMs is one-shot.', code)
-  return { afterMs: parseAgentScheduleAfterMs(p.afterMs, code) }
+  if (p.checkIn !== undefined) throw new AgentMuxError('Quiet follow-up requires calendar timing.', code)
+  return p.everyMs !== undefined ? { everyMs: parseAgentScheduleEveryMs(p.everyMs, code) } : { afterMs: parseAgentScheduleAfterMs(p.afterMs, code) }
 }
 
 export type AgentScheduleCheckInPolicy = { silenceMs: number; minIntervalMs: number; dailyBudget: number; quiet: { start: string; end: string } }
