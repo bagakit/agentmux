@@ -47,7 +47,8 @@ api.browser.release = async (id, navigationId) => {
 }
 api.browser.restoreResource = async () => { throw Error('Native Browser restoration is outside this visual fixture') }
 api.toolkit.observe = () => { throw Error('Performance must consume its provided snapshot, not start another observer') }
-const usage = (sizeBytes: number): RendererCacheSnapshot => ({ sampledAt: 100,
+const sampledAt = snapshot.observation!.observedAt
+const usage = (sizeBytes: number): RendererCacheSnapshot => ({ sampledAt,
   usage: { images: { count: 12, sizeBytes, decodedBytes: Math.floor(sizeBytes / 2) }, scripts: { count: 8, sizeBytes: 2097152, decodedBytes: 0 },
     cssStyleSheets: { count: 3, sizeBytes: 524288, decodedBytes: 0 }, xslStyleSheets: { count: 0, sizeBytes: 0, decodedBytes: 0 },
     fonts: { count: 2, sizeBytes: 1048576, decodedBytes: 524288 }, other: { count: 1, sizeBytes: 262144, decodedBytes: 0 } } })
@@ -56,7 +57,7 @@ function cacheReceipt(input: RendererCacheInput, action: 'inspect' | 'reclaim'):
   actions.push({ kind: 'cache-' + action })
   const unknown = action === 'reclaim' && cacheUnknown
   return parseRendererCacheResult({ ...input, schema: 'agentmux.renderer-cache.v1', scope: 'renderer-process-platform-cache', units: 'bytes',
-    action, status: unknown ? 'unknown' : 'completed', timing: { requestedAt: 100, finishedAt: 101 },
+    action, status: unknown ? 'unknown' : 'completed', timing: { requestedAt: sampledAt, finishedAt: sampledAt + 1 },
     sourceVerified: { before: true, after: !unknown }, clear: { requested: action === 'reclaim', completed: action === 'reclaim' },
     before: usage(25165824), after: action === 'inspect' || unknown ? null : usage(1048576),
     issues: unknown ? [{ stage: 'after', code: 'CONTROL_OWNER_LOST', message: 'Native cleanup returned; the final observation could not confirm this original Renderer. No automatic retry was made.', messageTruncated: false }] : [] }, input, action)
