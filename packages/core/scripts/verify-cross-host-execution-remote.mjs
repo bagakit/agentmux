@@ -62,18 +62,25 @@ const packageRoot = candidate.local.packageRoot, remoteRoot = candidate.remote.i
 const buildReceipt = JSON.parse(await fs.readFile(candidate.candidateReceipt, 'utf8'));
 assert.equal(buildReceipt.sourceCommit, candidateCommit, 'Requested candidate differs from its original build receipt');
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
-const criticalFiles = ['client.js', 'agent-execution-coordinator.js', 'agent-execution-bridge.js', 'agent-execution-journal.js',
-    'agent-execution-executor.js', 'agent-execution-helper.js', 'agent-execution-protocol.js', 'agent-execution-channel.js',
-    'headless-runtime.js', 'public-rpc-service.js', 'public-rpc-agent-execution.js', 'agent-native-process.js', 'ctxmux-run-adapter.js',
-    'providers/app-server-native-session.js', 'providers/codex-execution-helper.js', 'providers/codex-execution-run.js',
-    'providers/codex-execution-protocol.js', 'providers/codex-tool-execution-launch.js'];
-// Earlier qualified candidates predate the Linux-specific observer module.
-if (buildReceipt.compiledHashes?.['packages/core/dist/agent-native-process-linux.js']) criticalFiles.push('agent-native-process-linux.js');
-const consumerHashes = Object.fromEntries(criticalFiles.map(file => {
-    const digest = buildReceipt.compiledHashes?.['packages/core/dist/' + file];
-    assert(typeof digest === 'string' && /^[a-f0-9]{64}$/.test(digest), 'Build receipt lacks consumer ' + file);
-    return ['dist/' + file, digest];
+const consumerHashes = Object.fromEntries(Object.entries(buildReceipt.compiledHashes ?? {}).filter(([file]) => file.startsWith('packages/core/dist/')).map(([file,digest]) => {
+    assert(/^[a-f0-9]{64}$/.test(digest)); return [file.slice('packages/core/'.length),digest];
 }));
+assert(Object.keys(consumerHashes).length > 0, 'Original complete Core dist identity is absent');
+let installationQualification = {scope:'Core dist only',bin:'unknown',vendor:'unknown'};
+if (candidate.buildReceipt) {
+    assert(absolute(candidate.buildReceipt));
+    const provenance=JSON.parse(await fs.readFile(candidate.buildReceipt,'utf8'));
+    assert.equal(provenance.sourceCommit,candidateCommit);
+    assert.deepEqual(provenance.compiledHashes,buildReceipt.compiledHashes);
+    const bins=Object.entries(provenance.coreBinHashes??{});assert(bins.length>0,'Core bin identities absent');
+    for(const [file,digest] of bins) { assert(file.startsWith('packages/core/bin/')&&/^[a-f0-9]{64}$/.test(digest));consumerHashes[file.slice('packages/core/'.length)]=digest; }
+    for(const platform of [process.platform+'-'+process.arch,authorization.remote.platform+'-'+(authorization.remote.architecture==='x86_64'?'x64':authorization.remote.architecture)]) {
+        const vendor=provenance.vendorManifests?.[platform];assert(vendor&&/^[a-f0-9]{64}$/.test(vendor.sha256),'Exact native manifest absent');
+        consumerHashes['vendor/ctxmux/'+platform+'/manifest.json']=vendor.sha256;
+        for(const binary of vendor.manifest.binaries) { assert(/^bin\/[a-z0-9-]+$/.test(binary.path)&&/^[a-f0-9]{64}$/.test(binary.sha256));consumerHashes['vendor/ctxmux/'+platform+'/'+binary.path]=binary.sha256; }
+    }
+    installationQualification={scope:'All Core dist and bin plus exact two platform native manifests/binaries',bin:'verified',vendor:'verified',buildReceipt:candidate.buildReceipt};
+}
 for (const [file, expected] of Object.entries(consumerHashes))
     assert.equal(sha256(await fs.readFile(join(packageRoot, file))), expected, 'Local installed consumer changed: ' + file);
 assert(Array.isArray(buildReceipt.archives) && buildReceipt.archives.length > 0, 'Original published archive identities are absent');
@@ -115,7 +122,7 @@ const owners = [], requests = [], cliReceipts = [], results = [], errors = [], c
 let active, terminal, release, summary;
 const localBase = join(root, 'local'), remoteBase = join(remoteRoot, 'run-' + randomUUID().slice(0, 8));
 const save = async (name, value) => fs.writeFile(join(root, name), JSON.stringify(value, null, 2), { mode: 0o600 });
-await save('input.json', { ...input, root, localBase, remoteBase, authorization: { receiptPath, sha256: sha256(authorizationBytes), source: authorization.source }, installedObservation, consumerHashes, archives, startedAt: new Date().toISOString(), harnessHashes: { verifier: sha256(await fs.readFile(fileURLToPath(import.meta.url))), owner: sha256(await fs.readFile(ownerFixture)) } });
+await save('input.json', { ...input, root, localBase, remoteBase, authorization: { receiptPath, sha256: sha256(authorizationBytes), source: authorization.source }, installedObservation, installationQualification, consumerHashes, archives, startedAt: new Date().toISOString(), harnessHashes: { verifier: sha256(await fs.readFile(fileURLToPath(import.meta.url))), owner: sha256(await fs.readFile(ownerFixture)) } });
 const model = createServer(async (req, res) => {
     try {
         if (req.method === 'GET') {
@@ -274,9 +281,17 @@ try {
     }
     for (const direction of [{ name: 'remote-agent', agent: remote, resource: local }, { name: 'local-agent', agent: local, resource: remote }].filter(d => !input.directions || input.directions.includes(d.name))) {
         const directionStarted = performance.now();
-        const { agent, resource, name } = direction, bindingId = randomUUID(), agentSessionId = randomUUID(), workspace = join(resource.base, 'workspace');
+        const { agent, resource, name } = direction, bindingId = randomUUID(), agentSessionId = randomUUID(), workspace = mode === 'native' ? '/tmp/amx-native-'+randomUUID() : join(resource.base, 'workspace');
+        let collision;
+        if (mode === 'native') {
+            await fs.mkdir(workspace,{mode:0o700});
+            await ssh([remoteNodePath,'-e','require("node:fs").mkdirSync(process.argv[1],{mode:0o700})',workspace]);
+            const markers={local:'MAC_'+randomUUID(),remote:'LINUX_'+randomUUID()};
+            for(const owner of [local,remote]) { await writeResource(owner,join(workspace,'resource-marker.txt'),markers[owner.name]);await writeResource(owner,join(workspace,'note.txt'),markers[owner.name]+'\n'); }
+            collision={requestedAbsolutePath:join(workspace,'note.txt'),agentOriginal:markers[agent.name]+'\n',resourceOriginal:markers[resource.name]+'\n'};
+        }
         active = { name, marker: 'FLOW_' + randomUUID(), workspace, nodePath: resource.name === 'local' ? process.execPath : remoteNodePath };
-        assert.equal(await exists(agent, workspace), false, 'Resource absolute path must not exist on Agent machine');
+        assert.equal(await exists(agent, workspace), mode === 'native', 'Exact requested path presence on Agent machine');
         const create = { bindingId, agentHostId: agent.name, agentRuntimeId: agent.client.runtimeOwnerIdentity().runtimeId, resourceHostId: resource.name, resourceRuntimeId: resource.client.runtimeOwnerIdentity().runtimeId, resourceWorkspacePath: workspace, resourceGrant: { scope: 'host-user', bindingId }, agent: { agentSessionId, createOperationId: randomUUID(), executorId: agent.configured.executor.executorId, executorRevision: agent.configured.executor.configRevision, workspacePath: join(agent.base, 'workspace'), prompt: active.marker + ': execute the controlled native tools.' } };
         const file = join(root, name + '-create.json');
         await fs.writeFile(file, JSON.stringify(create), { mode: 0o600 });
@@ -298,7 +313,8 @@ try {
         await until(async () => await read(resource, join(workspace, 'note.txt')).catch(() => null) === 'modified\n', name + ' file effect');
         await until(() => requests.some(r => JSON.stringify(r.input).includes('call_initial_modify_' + name)), name + ' tool result');
         assert.equal(await read(resource, join(workspace, 'effects.txt')), 'once\n');
-        assert.equal(await exists(agent, workspace), false);
+        assert.equal(await exists(agent, workspace), mode === 'native');
+        if(collision) { assert.equal(await read(agent,collision.requestedAbsolutePath),collision.agentOriginal);collision.agentUnchanged=true;collision.resourceAfter=await read(resource,collision.requestedAbsolutePath);assert.equal(collision.resourceAfter,'modified\n');await save(name+'-same-path.json',collision); }
         const originalFrames = await frames(agent, originalPair.frontend.runId);
         await save(name + '-frames.json', originalFrames);
         const op = originalFrames.find(f => f.payload?.method === 'process/start' && f.payload.params.metadata?.toolCallId === 'call_initial_effect_' + name);
@@ -314,7 +330,7 @@ try {
         assert.equal(binding.code, 0);
         assert.equal(binding.packet.result.state, 'connected');
         const stages = { initialMs: performance.now() - directionStarted };
-        const nativeResult = { name, bindingId, agentSessionId, originalRun: session.run, toolExecution: session.toolExecution, agentPlatform: agent.platform, resourcePlatform: resource.platform, originalHelperRuns: [originalPair.frontend.runId, originalPair.executor.runId], resourcePathAbsentOnAgent: true, originalEffectCount: 1, operation: inspection.packet.result, stages };
+        const nativeResult = { name, bindingId, agentSessionId, originalRun: session.run, toolExecution: session.toolExecution, agentPlatform: agent.platform, resourcePlatform: resource.platform, originalHelperRuns: [originalPair.frontend.runId, originalPair.executor.runId], resourcePathAbsentOnAgent: mode !== 'native', ...(collision?{samePathIsolation:collision}:{}), originalEffectCount: 1, operation: inspection.packet.result, stages };
         if (mode === 'native') {
             results.push(nativeResult);
             await save('results.json', results);
