@@ -1,0 +1,30 @@
+// Public entry coverage. These are actual source consumers, never copied implementations.
+export const tests = [
+  'agent-execution-journal', 'agent-execution-journal-retained', 'agent-execution-channel',
+  'agent-execution-executor', 'agent-execution-helper-store', 'agent-execution-bridge',
+  'agent-execution-coordinator', 'agent-tool-execution-binding', 'agent-execution-tool-context-cli',
+  'codex-execution-protocol', 'codex-execution-frontend', 'codex-execution-helper',
+  'codex-tool-execution-launch', 'public-rpc-agent-execution', 'public-rpc-execution-bindings',
+  'client-event-publisher', 'hosted-run-event.integration', 'agent-open-tool-workspace', 'remote-execution-workspace',
+  'agent-execution-rpc-relay', 'agent-native-process-linux',
+].map(name => `packages/core/test/${name}.test.ts`)
+
+export const mutations = [
+  { id: 'journal-repeat-dispatch', file: 'agent-execution-journal.ts', test: 'agent-execution-journal',
+    before: "if (previous.phase !== 'prepared') return { value: { dispatch: false, operation: previous }, changed: false }",
+    after: "if (previous.phase !== 'prepared') return { value: { dispatch: true, operation: previous }, changed: false }" },
+  { id: 'bridge-before-durability', file: 'agent-execution-bridge.ts', test: 'agent-execution-bridge',
+    before: 'await this.options.persist(structuredClone(next))', after: 'await this.options.persist(structuredClone(next)).catch(() => {})' },
+  { id: 'unrelated-run-scan', file: 'client-event-publisher.ts', test: 'client-event-publisher',
+    before: 'if (runId) this.deliver(event, [...(this.runListeners.get(runId) ?? [])])',
+    after: 'if (runId) this.deliver(event, [...([...this.runListeners].find(([key]) => key === runId)?.[1] ?? [])])' },
+  { id: 'native-write-as-read', file: 'providers/codex-execution-protocol.ts', test: 'codex-execution-protocol',
+    before: "intent.kind = 'write'; path(p.path, 'write')", after: "intent.kind = 'read'; path(p.path, 'read')" },
+  { id: 'original-tool-binding-lost', file: 'agent-execution-helper-store.ts', test: 'agent-execution-helper-store',
+    before: '...(toolExecution === undefined ? {} : { toolExecution }),', after: '' },
+  { id: 'public-create-replayed', file: 'public-rpc-service.ts', test: 'public-rpc-execution-bindings',
+    before: "await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput)",
+    after: "await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput).catch(() => owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput))" },
+  { id: 'tool-open-permission', file: 'public-rpc-service.ts', test: 'agent-open-tool-workspace',
+    before: "throw new AgentMuxError('Opening an Agent with a tool Workspace requires a transport-approved user or device without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')", after: ';' },
+]
