@@ -1,3 +1,4 @@
+import { isTerminalMouseReportPayload } from '@agentmux/core'
 import { registerExecutionBindingIpc } from './execution-binding-ipc.js'
 import { ExecutionBindingReaders } from './execution-binding-readers.js'
 import { AgentExecutionBindingService } from '@agentmux/core'
@@ -1740,7 +1741,7 @@ export async function registerIpc(args: {
     await pauseAutomaticInput(control)
   })
   handleWithEvent('sessions:write', async (event, session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source'], observation?: import('@agentmux/core/control').InputObservationReference): Promise<SessionInputWriteResult> => {
-    if (source === 'user' && data.length > 0) pauseUserProgress(session, 'Paused for your terminal input.')
+    if (source === 'user' && data.length > 0 && !isTerminalMouseReportPayload(data)) pauseUserProgress(session, 'Paused for your terminal input.')
     return await sessionInputWriteResult(() => args.runtime.write(session, data, source, readInputObservation(observation) ?? undefined,
       inputSender(event)))
   })

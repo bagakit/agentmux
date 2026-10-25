@@ -1,3 +1,4 @@
+export { isTerminalMouseReportPayload } from './terminal-input-protocol.js'
 export * from './author-profile.js'
 export * from './agent-terminal-frontend.js'
 export type * from './startup-diagnostic.js'
