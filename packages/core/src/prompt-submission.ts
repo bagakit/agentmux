@@ -7,6 +7,7 @@ import { hasSelectedNativeTarget } from './agent-native-source.js'
 import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
 import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
+import { normalizePromptInputIntent } from './prompt-submission-record.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import type { AgentCapabilityBinding } from './agent-capability.js'
 import {
@@ -24,6 +25,7 @@ import type {
   AgentMuxRunRef,
   AgentMuxStoredAgentSession,
   AgentPromptInputPlan,
+  AgentNativePromptInputPlan,
   AgentPromptExecution,
   AgentPromptMessageContent,
   AgentFuturePromptOccurrence,
@@ -530,6 +532,14 @@ export class AgentPromptSubmissionCoordinator {
     let newClaim: { admission: NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']>;
       terminal: AgentMuxStoredAgentSession['terminalPromptSubmission'] } | undefined
     let inputAttempted = false
+    // Reuse the durable decoder before any journal dispatch claim. The selected
+    // carrier plan and complete producer content must remain readable together.
+    const freezeIntent = (selectedPlan: AgentPromptInputPlan | AgentNativePromptInputPlan) => normalizePromptInputIntent({
+      run: { ...session.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId,
+      prompt, plan: selectedPlan, execution,
+      ...(admissionIntent ? { admissionIntent: structuredClone(admissionIntent) } : {}),
+      ...(message === undefined ? {} : { message: structuredClone(message) })
+    })
     // Future admission reads and CAS only this intent, alongside the original Session/Run.
     const updateSession: PromptSubmissionDeps['updateExactAgentSession'] = (id, expectedRun, update) => {
       const claim = () => this.deps.updateExactAgentSession(id, expectedRun, update, expectedFutureIntent?.intentId)
@@ -755,6 +765,7 @@ export class AgentPromptSubmissionCoordinator {
         await prepared.assertCurrent()
         await assertNativeIdle()
         const frozenPlan = { ...prepared.plan, clientCorrelation: createNativeInputCorrelation(inputKey) }
+        const intent = freezeIntent(frozenPlan)
         const claimed = await claimSession(session.agentSessionId, session.run, stored => {
           assertAdmission(stored)
           if (source && (!isDeepStrictEqual(defaultNativeSource(stored), source) || !sessionConversation && (admissionIntent?.kind !== 'exact-condition' ||
@@ -766,8 +777,7 @@ export class AgentPromptSubmissionCoordinator {
               ...(expectedCompletionId === undefined ? {} : { completionId: expectedCompletionId }),
               ...(expectedFutureIntent === undefined ? {} : { futureIntent: { ...expectedFutureIntent } }),
               ...(inputDispatch ? { inputDispatch: structuredClone(inputDispatch) } : {}),
-              intent: { run: { ...stored.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId,
-                prompt, plan: frozenPlan, execution, admissionIntent: structuredClone(admissionIntent!), message: structuredClone(message) },
+              intent,
               transport: 'native', acknowledged: false, native: { plan: frozenPlan, outcome: 'claimed' } } }
           delete next.terminalPromptSubmission
           if (expectedFutureIntent) {
@@ -827,6 +837,7 @@ export class AgentPromptSubmissionCoordinator {
         }
       }
     }
+    const intent = freezeIntent(plan)
     const assertTurnBoundary = (current: AgentMuxAgentSession, hasPreviousPrompt: boolean): boolean => {
       // Native cancellation ends a turn without completing it successfully. Both input
       // plans consume that boundary in the same admission; composer observations do not prove it.
@@ -889,9 +900,7 @@ export class AgentPromptSubmissionCoordinator {
       const next: AgentMuxStoredAgentSession = { ...invalidateAgentIdleEvidence(current), updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
         submissionId, inputKey: structuredClone(inputKey), ...(inputDispatch ? { inputDispatch: structuredClone(inputDispatch) } : {}),
         ...(completionId ? { completionId } : {}), ...(expectedFutureIntent ? { futureIntent: { ...expectedFutureIntent } } : {}), operationId, startByte, endByte, outputCursorBytes: run.latestOutputBytes,
-        intent: { run: { ...current.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId, prompt, plan: structuredClone(plan), execution,
-          ...(admissionIntent ? { admissionIntent: structuredClone(admissionIntent) } : {}),
-          ...(message === undefined ? {} : { message: structuredClone(message) }) },
+        intent,
         acknowledged: false,
         ...(current.promptCompletionAdmission?.submissionId === submissionId && current.promptCompletionAdmission.frameRefresh
           ? { frameRefresh: current.promptCompletionAdmission.frameRefresh } : {}),
