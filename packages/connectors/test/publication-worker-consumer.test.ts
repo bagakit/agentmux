@@ -1,11 +1,13 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { createConnectionServices } from '../src/connection-services.js'
 import { ConnectionHost } from '../src/connection-host.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
 import type { PublicationAdapter } from '../src/publication-adapter.js'
 import type { PublicationReceipt, PublicationMapping } from '../src/publication-store.js'
+import { PublicationStore } from '../src/publication-store.js'
 import { config, roomBindingFixture, core } from './fixtures/room-binding.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { AgentMuxError } from '../../core/dist/errors.js'
@@ -14,7 +16,9 @@ import { connectionDiagnosisRecordKey, connectionDiagnosisEventKey, connectionDi
 
 const cleanup: Array<() => void | Promise<void>> = []
 let recentDeliveryFacts: unknown
+const recoveryCostFacts: unknown[] = []
 afterAll(async () => { if (process.env.AGENTMUX_TEST_DELIVERY_ORDER_FACTS) await writeFile(process.env.AGENTMUX_TEST_DELIVERY_ORDER_FACTS, JSON.stringify(recentDeliveryFacts ?? null, null, 2) + '\n') })
+afterAll(async () => { if (process.env.AGENTMUX_TEST_PUBLICATION_RECOVERY_FACTS) await writeFile(process.env.AGENTMUX_TEST_PUBLICATION_RECOVERY_FACTS, JSON.stringify(recoveryCostFacts, null, 2) + '\n') })
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 const row = (id: string, text = 'Same original reply', content?: unknown[]) => JSON.stringify({ sessionId: 'original-native', uuid: id,
   type: 'assistant', message: { role: 'assistant', content: content ?? [{ type: 'text', text }] } }) + '\n'
@@ -56,6 +60,111 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
   }
   return { ...original, services, dispatched, adapter, conversation, binding: binding.binding, cli, speech, sdk, diagnose }
 }
+
+it('publication recovery keeps original effects while its loaded Host query excludes completed and unrelated history ranges', async () => {
+  const f = await fixture(async request => JSON.parse(request.request.body!).text === 'Original uncertain reply'
+    ? { state: 'unknown', reason: 'effect-unconfirmed' }
+    : { state: 'confirmed', mapping: { messageId: 'native-' + request.requestKey } })
+  const inspections: string[] = []
+  f.adapter.inspect = async request => { inspections.push(request.requestKey); return null }
+  const database = f.services.database!, store = f.services.publication!.store
+  const prepare = database.prepare.bind(database)
+  const reads: Array<{ sql: string; parameters: unknown[]; result: string | null; host: boolean }> = []
+  vi.spyOn(database, 'prepare').mockImplementation(sql => {
+    const statement = prepare(sql), stack = new Error().stack ?? ''
+    if (stack.includes('nextUnconfirmed') && sql.includes('operation_json')) {
+      const get = statement.get.bind(statement), host = stack.includes('reconcile')
+      statement.get = (...parameters: Parameters<typeof get>) => {
+        const value = get(...parameters)
+        reads.push({ sql, parameters, result: value ? JSON.parse(String(value.operation_json)).operationId : null, host })
+        return value
+      }
+    }
+    return statement
+  })
+  await appendFile(f.transcript, row('recovery-original', 'Original uncertain reply') + row('recovery-independent', 'Independent original reply'))
+  await vi.waitFor(() => expect(f.dispatched).toHaveLength(2))
+  const originalId = f.dispatched.find(effect => JSON.parse(effect.request.request.body!).text === 'Original uncertain reply')!.request.requestKey
+  const independentId = f.dispatched.find(effect => effect.request.requestKey !== originalId)!.request.requestKey
+  await vi.waitFor(() => expect(store.inspect(originalId)?.state).toBe('unknown'))
+  await vi.waitFor(() => expect(store.inspect(independentId)?.state).toBe('confirmed'))
+  const original = structuredClone(store.inspect(originalId)!)
+  await vi.waitFor(() => expect(inspections).toContain(originalId))
+  await new Promise<void>(resolve => setImmediate(resolve)) // Let the original null observation release its in-flight slot.
+  const insert = prepare('INSERT INTO connector_publication_operation(operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
+  // Historical fixture rows never participate in live body dispatch: ordinary
+  // recovery excludes binding notices, and foreign rows retain another audience.
+  const seed = (label: string, state: string, bindingId = f.binding.bindingId) => {
+    database.exec('BEGIN')
+    for (let i = 0; i < 5_000; i++) {
+      const operationId = label + '-' + i
+      insert.run(operationId, label, 'fixture-revision', 0, bindingId, f.binding.revision,
+        JSON.stringify({ operationId, reference: { source: { kind: 'binding-operation' } }, payload: { kind: 'binding-lifecycle' } }), state)
+    }
+    database.exec('COMMIT')
+  }
+  const costs: Array<{ label: string; medianMs: number; result: null }> = []
+  const measure = (label: string) => {
+    const samples: number[] = []
+    for (let i = 0; i < 24; i++) {
+      const before = performance.now(), result = store.nextUnconfirmed(f.binding, originalId)
+      const elapsed = performance.now() - before
+      expect(result, 'A cursor after the sole unresolved original has no later eligible effect').toBeNull()
+      if (i >= 3) samples.push(elapsed)
+    }
+    samples.sort((a, b) => a - b); costs.push({ label, medianMs: samples[10]!, result: null })
+  }
+  measure('no-extra-history')
+  for (const state of ['confirmed', 'pending', 'not-applied']) { seed(state, state); measure(state + '-growth') }
+  seed('foreign-unknown', 'unknown', 'another-binding'); measure('other-binding-growth')
+  const beforeWake = inspections.length
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(inspections.length).toBeGreaterThan(beforeWake))
+  expect(inspections.every(id => id === originalId)).toBe(true)
+  expect(store.inspect(originalId)).toEqual(original)
+  expect(f.dispatched).toHaveLength(2)
+  const rpc = await f.sdk.call('connection.delivery.inspect', { operationId: originalId })
+  expect(rpc.delivery).toMatchObject({ operationId: originalId, state: 'unknown', receipt: { state: 'unknown' } })
+  expect(await f.cli(['inspect', '--operation-id', originalId])).toEqual(rpc)
+  const delivered = await f.sdk.call('connection.delivery.inspect', { operationId: independentId })
+  expect(delivered.delivery).toMatchObject({ operationId: independentId, state: 'confirmed' })
+  expect(await f.cli(['inspect', '--operation-id', independentId])).toEqual(delivered)
+  const hostRead = reads.findLast(read => read.host && read.result === null)
+  expect(hostRead, 'The normal Host reconciliation actually executes the no-result cursor lookup and wraps to the original effect').toBeDefined()
+  const plans = prepare('EXPLAIN QUERY PLAN ' + hostRead!.sql).all(...hostRead!.parameters as Parameters<ReturnType<typeof prepare>['all']>)
+  recoveryCostFacts.push({ case: 'actual-host', originalId, independentId, inspections, dispatchCount: f.dispatched.length,
+    costs, sql: hostRead!.sql, parameters: hostRead!.parameters, plans, publicReceipts: [rpc, delivered], compiledCliMatches: true,
+    hostReads: reads.filter(read => read.host), sqliteVersion: prepare('SELECT sqlite_version() version').get()!.version })
+  const ranges = plans.map(plan => String(plan.detail)).filter(detail => detail.includes('binding_id=?') && detail.includes('binding_revision=?'))
+  expect(ranges.length, 'The real SQLite plan contains scoped original recovery ranges').toBeGreaterThan(0)
+  expect(ranges.every(range => range.includes('state=?') && range.includes('ordinal>?')),
+    'Recovery work must seek only unresolved states after the original cursor, not walk completed/pending/not-applied audit history').toBe(true)
+  expect(plans.some(plan => /SCAN .*connector_publication_operation/u.test(String(plan.detail)))).toBe(false)
+}, 35_000)
+
+it('publication recovery preserves both state orders, exact cursor scope and the original projection branch', () => {
+  const database = new DatabaseSync(':memory:'); cleanup.push(() => database.close())
+  const store = new PublicationStore(database), boundary = { bindingId: 'original-binding', revision: 1 }
+  const insert = database.prepare('INSERT INTO connector_publication_operation(operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
+  const add = (id: string, state: string, binding = boundary.bindingId, revision = 1, kind = 'native', projection = 'original-projection') =>
+    insert.run(id, projection, 'original-revision', 0, binding, revision, JSON.stringify({ operationId: id, reference: { source: { kind } } }), state)
+  add('foreign', 'unknown', 'another-binding'); add('revision', 'dispatching', boundary.bindingId, 2)
+  add('notice', 'dispatching', boundary.bindingId, 1, 'binding-operation'); add('confirmed', 'confirmed')
+  add('first', 'unknown'); add('pending', 'pending'); add('second', 'dispatching'); add('rejected', 'not-applied')
+  add('third', 'unknown', boundary.bindingId, 1, 'captured', 'another-projection')
+  const cases = [
+    [undefined, undefined, 'first'], ['first', undefined, 'second'], ['second', undefined, 'third'], ['third', undefined, null],
+    ['foreign', undefined, 'first'], ['revision', undefined, 'first'], ['missing', undefined, 'first'],
+    [undefined, 'original-projection', 'notice'], ['first', 'original-projection', 'second'], ['second', 'original-projection', null],
+    [undefined, 'another-projection', 'third']
+  ] as const
+  for (const [after, projection, expected] of cases) expect(store.nextUnconfirmed(boundary, after, projection)?.operationId ?? null).toBe(expected)
+  database.prepare("UPDATE connector_publication_operation SET state='dispatching' WHERE operation_id='first'").run()
+  database.prepare("UPDATE connector_publication_operation SET state='unknown' WHERE operation_id='second'").run()
+  expect(store.nextUnconfirmed(boundary)?.operationId).toBe('first')
+  expect(store.nextUnconfirmed(boundary, 'first')?.operationId).toBe('second')
+  recoveryCostFacts.push({ case: 'scope-order-projection', cases, swappedStates: ['first', 'second'] })
+})
 
 it('recent delivery ordering follows scoped original ordinals through SDK and compiled CLI while diagnosis retains independent unknown effects', async () => {
   const f = await fixture(async request => JSON.parse(request.request.body!).text === 'Old unknown original'
