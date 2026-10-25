@@ -161,3 +161,111 @@ if(args.includes('app-server')){
       readCount: 1, nativeCreationCount: 1, initialInputCount: 1, unknownInputCount: 1, freshInputCount: 1, unknownInputReceiptUnchanged: true }) + '\n')
   }
 }, 90_000)
+
+it.runIf(process.platform === 'darwin')('public CLI continues a settled original resume after a post-load rejection without replacing its Run or backend', async () => {
+  const scope = await headlessFixture(); cleanups.push(scope.cleanup)
+  const sdk = await scope.client(), store = new AgentMuxFileAgentSessionStore(scope.env.AGENTMUX_AGENT_SESSION_STORE!)
+  const command = join(scope.root, 'resume-native.mjs'), rejected = join(scope.root, 'resume-rejected'), calls = join(scope.root, 'resume-calls.ndjson')
+  const loaded = join(scope.root, 'resume-loaded.json'), transcript = join(scope.root, 'rollout-original.jsonl')
+  const nativeId = '00000000-0000-4000-8000-000000000094'
+  await writeFile(command, `#!/usr/bin/env node
+import {appendFileSync,existsSync,writeFileSync} from 'node:fs'
+import WS from ${JSON.stringify(createRequire(import.meta.url).resolve('ws'))}
+const args=process.argv.slice(2),nativeId=${JSON.stringify(nativeId)}
+if(args.includes('--version')){console.log('codex-cli 0.163.0');process.exit(0)}
+if(args.includes('--help')){console.log('codex resume --no-alt-screen --sandbox --ask-for-approval');process.exit(0)}
+if(args.includes('app-server')){
+ let effective,thread
+ const server=new WS.WebSocketServer({port:0,host:'127.0.0.1'})
+ server.on('connection',(ws,request)=>{
+  if(request.headers.authorization!=='Bearer '+process.env.AGENTMUX_CODEX_ACTOR_TOKEN)return ws.close()
+  ws.on('message',bytes=>{
+   const p=JSON.parse(String(bytes));if(!Object.hasOwn(p,'id'))return
+   appendFileSync(${JSON.stringify(calls)},JSON.stringify({method:p.method,params:p.params,pid:process.pid})+'\\n')
+   if(p.method==='thread/start'||p.method==='thread/resume'){
+    if(!thread){
+     thread={id:nativeId,sessionId:'loaded-execution-'+process.pid,canAcceptDirectInput:true,status:{type:'idle'}}
+     effective={thread,cwd:p.params.cwd,model:p.params.model,approvalPolicy:p.params.approvalPolicy,sandbox:{type:p.params.sandbox==='read-only'?'readOnly':p.params.sandbox==='workspace-write'?'workspaceWrite':'dangerFullAccess'}}
+     writeFileSync(${JSON.stringify(loaded)},JSON.stringify({pid:process.pid,thread,effective}))
+    }
+    if(p.method==='thread/start')appendFileSync(${JSON.stringify(transcript)},JSON.stringify({type:'session_meta',payload:{id:nativeId,source:'cli',thread_source:'user',cwd:process.cwd()}})+'\\n')
+    if(p.method==='thread/resume'&&existsSync(${JSON.stringify(rejected)}))return ws.send(JSON.stringify({jsonrpc:'2.0',id:p.id,error:{code:-32600,message:'Private response hydration failed after loading the original object'}}))
+   }
+   const result=p.method==='account/read'?{account:null,requiresOpenaiAuth:false}:p.method==='thread/read'?{thread}:p.method==='thread/start'||p.method==='thread/resume'?effective:p.method==='turn/start'?{turn:{id:'private-original-turn'}}:{}
+   ws.send(JSON.stringify({jsonrpc:'2.0',id:p.id,result}))
+  })
+ })
+}else{
+ appendFileSync(${JSON.stringify(calls)},JSON.stringify({method:'frontend',args,pid:process.pid})+'\\n')
+ process.stdin.setRawMode(true)
+ process.stdin.on('data',bytes=>{if(String(bytes).includes('\\x1b[?0u'))process.stdout.write('\\x1b[?2026h› \\x1b[?2026l')})
+ setTimeout(()=>process.stdout.write('\\x1b[?u'),0)
+}
+`, { mode: 0o700 })
+  const original = await sdk.createAgent({ providerId: 'codex', executorId: 'codex', agentSessionId: 'settled-resume-original',
+    createOperationId: 'create-original', workspacePath: scope.root, commandOverride: command, prompt: 'PRIVATE_ORIGINAL_SETUP', injectAgentMuxGuide: false })
+  cleanups.push(async () => {
+    const current = await sdk.statusAgent(original.agentSessionId)
+    if (current.run.state === 'running') await sdk.stopAgent(original.agentSessionId, current.session.run)
+  })
+  await until(() => sdk.statusAgent(original.agentSessionId), value => value.session.nativeHandle?.sessionId === nativeId && value.session.terminalHandshake?.acknowledged === true, 'private original thread and frontend').catch(async error => {
+    if (process.env.AGENTMUX_INITIALIZATION_PUBLIC_EVIDENCE) {
+      const value = await sdk.statusAgent(original.agentSessionId)
+      await appendFile(process.env.AGENTMUX_INITIALIZATION_PUBLIC_EVIDENCE, JSON.stringify({ failedStage: 'original-private-bootstrap', run: value.run, frontend: value.session.terminalFrontend, handshake: value.session.terminalHandshake, native: value.session.nativeHandle, creation: value.session.creation, calls: await rows(calls) }) + '\n')
+    }
+    throw error
+  })
+  await sdk.stopTerminal(original.run)
+  await until(() => sdk.listRuns(), values => values.find(value => value.runId === original.run.runId)?.state !== 'running', 'private original Run ended before authorized resume')
+  await writeFile(rejected, 'reject the response after loading the original thread')
+  await sdk.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: original.run,
+    operationId: 'original-native-resume', trigger: 'manual', commandOverride: command, policy: { retryMaxAttempts: 0, recheckMaxAttempts: 0 } })
+  const failed = await until(() => sdk.statusAgent(original.agentSessionId), value => value.session.terminalFrontend?.initialization?.phase === 'failed', 'settled native resume rejection')
+  expect(failed.session.terminalFrontend!.initialization).toMatchObject({ native: { state: 'unknown' }, failure: { step: 'native-session', code: -32600 } })
+  expect(failed.run.state).toBe('running'); expect(failed.run.runId).not.toBe(original.run.runId)
+  const originalActor = (await store.readMetadata(original.agentSessionId))!.nativeActor!, loadedBefore = await readFile(loaded, 'utf8')
+  const backend = JSON.parse(loadedBefore), beforeCalls = await rows(calls)
+  const exactResumes = beforeCalls.filter(value => value.method === 'thread/resume' && value.pid === backend.pid)
+  expect(exactResumes.length).toBeGreaterThan(0)
+  expect(beforeCalls.filter(value => value.method === 'frontend')).toHaveLength(1)
+  const inspectArgs = ['--endpoint', `unix:${scope.socketPath}`, 'agent', 'inspect', '--session', original.agentSessionId]
+  const cliBefore = await runCompiledObjectCli(inspectArgs, scope.env)
+  expect(cliBefore.code, cliBefore.stdout + cliBefore.stderr).toBe(0)
+  expect(JSON.parse(cliBefore.stdout).result.session.terminalFrontend.initialization).toMatchObject({ phase: 'failed', native: { state: 'unknown' }, failure: { code: -32600 } })
+  const beforeReadCount = (await rows(calls)).filter(value => value.method === 'thread/resume').length
+  expect(beforeReadCount).toBe(beforeCalls.filter(value => value.method === 'thread/resume').length)
+  await rm(rejected)
+  const resumed = await runCompiledObjectCli(['--endpoint', `unix:${scope.socketPath}`, 'agent', 'resume', '--session', original.agentSessionId,
+    '--operation-id', 'continue-original-initialization'], scope.env)
+  expect(resumed.code, resumed.stdout + resumed.stderr).toBe(0)
+  const ready = await until(() => sdk.statusAgent(original.agentSessionId), value => value.session.terminalFrontend?.initialization?.phase === 'ready' && value.session.terminalHandshake?.acknowledged === true, 'same original resume frontend ready')
+  expect(ready.run).toMatchObject({ runId: failed.run.runId, pid: failed.run.pid, state: 'running' })
+  expect(ready.session.nativeHandle!.sessionId).toBe(nativeId)
+  expect((await store.readMetadata(original.agentSessionId))!.nativeActor).toEqual(originalActor)
+  expect(await readFile(loaded, 'utf8')).toBe(loadedBefore)
+  expect(ready.session.terminalFrontend!.initialization!.lifecycleOperationId).toBe(originalActor.lifecycleOperationId)
+  const cliAfter = await runCompiledObjectCli(inspectArgs, scope.env)
+  expect(cliAfter.code, cliAfter.stdout + cliAfter.stderr).toBe(0)
+  expect(JSON.parse(cliAfter.stdout).result.session.terminalFrontend.initialization).toMatchObject({ phase: 'ready', native: { state: 'confirmed', sessionId: nativeId } })
+  const finalCalls = await rows(calls), finalResumes = finalCalls.filter(value => value.method === 'thread/resume' && value.pid === backend.pid)
+  expect(finalResumes).toHaveLength(exactResumes.length + 1)
+  for (const call of finalResumes) expect(call.params).toEqual(exactResumes[0].params)
+  expect(finalCalls.filter(value => value.method === 'thread/start')).toHaveLength(1)
+  expect(finalCalls.filter(value => value.method === 'frontend')).toHaveLength(2)
+  expect(finalCalls.filter(value => value.method === 'turn/start')).toHaveLength(1)
+  expect(finalCalls.filter(value => value.method === 'turn/start')).toEqual(beforeCalls.filter(value => value.method === 'turn/start'))
+  expect(finalCalls.some(value => ['turn/steer', 'thread/queue/add'].includes(value.method))).toBe(false)
+  const loadedCommand = await promisify(execFile)('ps', ['-p', String(ready.run.pid), '-o', 'args='])
+  expect(loadedCommand.stdout).toContain(resolve(import.meta.dirname, '../dist/providers/codex-managed-run.js'))
+  if (process.env.AGENTMUX_INITIALIZATION_PUBLIC_EVIDENCE) {
+    const paths = ['src/providers/codex-managed-run.ts', 'src/providers/codex-native-rpc.ts', 'dist/providers/codex-managed-run.js',
+      'dist/providers/codex-native-rpc.js', 'dist/agentmux.js', 'dist/hosted-runtime-service.js', 'test/fixtures/frontend-recovery-owner.mjs']
+    const artifacts = await Promise.all(paths.map(async path => ({ path, sha256: createHash('sha256').update(await readFile(resolve(import.meta.dirname, '..', path))).digest('hex') })))
+    await appendFile(process.env.AGENTMUX_INITIALIZATION_PUBLIC_EVIDENCE, JSON.stringify({ schema: 'agentmux.settled-resume-public-proof.v1', artifacts,
+      original: { agentSessionId: original.agentSessionId, runId: failed.run.runId, pid: failed.run.pid, backendPid: backend.pid,
+        actorId: originalActor.actorId, lifecycleOperationId: originalActor.lifecycleOperationId, nativeSessionId: nativeId },
+      owner: scope.owner, cliBeforePhase: 'failed', nativeBeforeState: 'unknown', cliAfterPhase: 'ready', sameRun: true,
+      sameActor: true, sameLoadedObject: true, originalResumeCount: exactResumes.length, finalResumeCount: finalResumes.length,
+      nativeCreationCount: 1, frontendCount: 2, setupTurnCount: 1, resumedTurnCount: 0, userRuntimeTouched: false }) + '\n')
+  }
+}, 60_000)
