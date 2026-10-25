@@ -74,15 +74,17 @@ test('performance qualifies the exact one-MiB and four-MiB streams without inven
   const direction = name => ({ name, qualification: { independentBindings: 2, unchangedHelpers: true, oneInitializationPerBinding: true,
     exactFileAndOutputBytes: true, healthyRequestsDuringProducer: true, noNewIdleNativeRequests: true, noNewIdleProcesses: true },
     bindings: ['producer', 'healthy'].map(role => ({ bindingId: name + role, agentSessionId: name + role, nativeHandle: role, initializeCount: 1,
-      protocolRequestBytes: 100, protocolOutputBytes: 200, samples: [{ label: 'original', roundtripMs: 4 }],
+      protocolRequestBytes: 100, protocolOutputBytes: 200, samples: role === 'producer' ? [{ label: 'slow-output', emittedAt: 1, completedAt: 100, roundtripMs: 99 }] : Array.from({ length: 6 }, (_, i) => ({ label: 'under-load', callId: String(i), emittedAt: i + 2, completedAt: i + 6, roundtripMs: 4 })),
       outputs: role === 'producer' ? [['output-1mib', 1], ['slow-output', 4]].map(([label, size]) => ({ label, bytes: size * 1024 * 1024, sha256: sha, roundtripMs: 100 })) : [] })),
     file: { bytes: 1024 * 1024, sha256: sha, roundtripMs: 20 }, idle: { durationMs: 10_001, samples: ['local', 'remote'].map(owner => ({ owner, intervalMs: 10_001, cpuSeconds: 0.1, rssKiB: 50_000 })) },
+    concurrencyWindow: { producer: { emittedAt: 1, completedAt: 100 }, totalCount: 6, overlapCount: 6, overlappingCallIds: ['0', '1', '2', '3', '4', '5'], excludedSamples: [] }, healthyWithStoppedIndependentReader: { count: 6 },
     medianLatencyRatio: 1.2, network: { syntheticLatency: false } })
   const receipt = { passed: true, mode: 'performance', actualMachines: 2, bothDirectionsPassed: true, cleanupErrors: [], candidateCommit: commit, results: ['remote-agent', 'local-agent'].map(direction) }
   validateRemote(receipt, 'performance', commit)
   for (const change of [value => { value.results[0].bindings[0].outputs[1].bytes-- },
     value => { value.results[0].qualification.healthyRequestsDuringProducer = false },
     value => { value.results[0].qualification.noNewIdleNativeRequests = false },
+    value => { value.results[0].bindings[1].samples[0].completedAt = 200 },
     value => { value.results[0].bindings[1].bindingId = value.results[0].bindings[0].bindingId }]) {
     const bad = structuredClone(receipt); change(bad); assert.throws(() => validateRemote(bad, 'performance', commit))
   }
