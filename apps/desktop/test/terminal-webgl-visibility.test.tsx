@@ -12,7 +12,7 @@ import type { Terminal as HeadlessTerminal } from '@xterm/headless'
 import type { IBufferRange, ISelectionSnapshot } from '@xterm/xterm'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
-import { TerminalView } from '../src/renderer/src/components/TerminalView'
+import { HIDDEN_LIVE_OUTPUT_WINDOW_MS, TerminalView } from '../src/renderer/src/components/TerminalView'
 import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
 import * as terminalResourceOwners from '../src/renderer/src/lib/terminal-resource-owners'
 
@@ -547,6 +547,40 @@ it('mounts an initially hidden terminal without allocating a GPU context', async
   expect(fixture.terminals).toHaveLength(1)
   expect(fixture.webgl).toHaveLength(1)
   expect(fixture.terminals[0]!.refresh).toHaveBeenCalledWith(0, 23)
+})
+
+function liveOutput(data: string, startByte: number): RuntimeEvent {
+  return { type: 'core', hostId: 'local', event: { type: 'terminal-output', run: session.control.run, data,
+    dataBytes: new TextEncoder().encode(data), evidence: { outputByteRange: { startByte, endByte: startByte + data.length } } } } as RuntimeEvent
+}
+
+it('parses a hidden terminal status-redraw burst as one bounded write, in order, without losing a byte', async () => {
+  await render(false)
+  const terminal = fixture.terminals[0]!
+  const frames = Array.from({ length: 40 }, (_, index) => `\r frame ${String(index).padStart(2, '0')} `)
+  let byte = 7
+  const received = performance.now()
+  await act(async () => { for (const frame of frames) { fixture.receive!(liveOutput(frame, byte)); byte += frame.length } })
+  expect(terminal.written, 'hidden bytes wait for the bounded window instead of one parse task per redraw').toEqual(['before '])
+  await act(async () => { await vi.waitFor(() => expect(terminal.completed.join('')).toBe('before ' + frames.join('')),
+    { timeout: HIDDEN_LIVE_OUTPUT_WINDOW_MS * 6 }) })
+  expect(performance.now() - received, 'parsing waits for the window, not for the next reveal').toBeGreaterThanOrEqual(HIDDEN_LIVE_OUTPUT_WINDOW_MS - 50)
+  expect(terminal.written.length, 'the burst coalesces into one write').toBe(2)
+  expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({ visible: false, liveReady: true, acceptsInput: true, queuedBytes: 0 })
+})
+
+it('parses deferred hidden bytes as soon as the terminal becomes visible', async () => {
+  await render(false)
+  const terminal = fixture.terminals[0]!
+  await act(async () => { fixture.receive!(liveOutput('waiting', 7)) })
+  expect(terminal.written).toEqual(['before '])
+  const revealed = performance.now()
+  await render(true)
+  await act(async () => { await vi.waitFor(() => expect(terminal.completed).toContain('waiting')) })
+  expect(performance.now() - revealed, 'reveal does not wait out the hidden window').toBeLessThan(HIDDEN_LIVE_OUTPUT_WINDOW_MS)
+  expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('before waiting')
+  fixture.receive!(liveOutput(' now', 14))
+  await act(async () => { await vi.waitFor(() => expect(terminal.completed).toContain(' now')) })
 })
 
 it('reports a visible terminal awaiting attachment as unready, then observes the same Run becoming interactive', async () => {
