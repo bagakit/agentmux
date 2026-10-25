@@ -1758,14 +1758,21 @@ export class RuntimeController {
     const diagnostic = this.inputPerformance.begin({ sessionId: control.kind === 'agent' ? control.agentSessionId : null,
       hostId: control.hostId, runId: control.run.runId, kind: source === 'terminal-protocol' ? 'protocol' : 'user',
       bytes: typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength, parent, sender: sender ?? null, stage: 'received' })
+    let client: AgentMuxClient | undefined
     try {
-      const client = await diagnostic.measure('connected-client', () => this.connectedClient(control.hostId, 'runtime'))
-      try { diagnostic.executionOwner(client.runtimeIdentity().instanceId) } catch { /* Diagnostic identity is optional. */ }
-      await diagnostic.measure('host-call', () => control.kind === 'agent' ? client.writeAgent({
+      client = await diagnostic.measure('connected-client', () => this.connectedClient(control.hostId, control.kind === 'agent' ? 'agent-input' : 'runtime'))
+      // Hosted Agent execution identity is observed at its Host after preparation,
+      // not from this consumer's potentially older Native observation.
+      if (control.kind !== 'agent' || !('runtimeOwnerIdentity' in client)) {
+        try { diagnostic.executionOwner(client.runtimeIdentity().instanceId) } catch { /* Diagnostic identity is optional. */ }
+      }
+      const inputClient = client
+      await diagnostic.measure('host-call', () => control.kind === 'agent' ? inputClient.writeAgent({
         agentSessionId: control.agentSessionId, expectedRun: control.run, data, source, ...(parent ? { observation: parent } : {})
-      }).then(() => {}) : this.writeTerminalInput(client, control, data, diagnostic, parent))
+      }).then(() => {}) : this.writeTerminalInput(inputClient, control, data, diagnostic, parent))
+      this.observeInputHost(control, client)
       diagnostic.stage('reply-ready'); diagnostic.settle(true)
-    } catch (error) { diagnostic.settle(false); throw error }
+    } catch (error) { this.observeInputHost(control, client, { error }); diagnostic.settle(false); throw error }
   }
 
   async paste(control: SessionControl, text: string, terminalData: string,
@@ -1774,14 +1781,31 @@ export class RuntimeController {
     const diagnostic = this.inputPerformance.begin({ sessionId: control.kind === 'agent' ? control.agentSessionId : null,
       hostId: control.hostId, runId: control.run.runId, kind: 'paste', bytes: Buffer.byteLength(terminalData), parent,
       sender: sender ?? null, stage: 'received' })
+    let client: AgentMuxClient | undefined
     try {
-      const client = await diagnostic.measure('connected-client', () => this.connectedClient(control.hostId, 'runtime'))
-      try { diagnostic.executionOwner(client.runtimeIdentity().instanceId) } catch { /* Diagnostic identity is optional. */ }
-      await diagnostic.measure('host-call', () => control.kind === 'agent' ? client.pasteAgent({ agentSessionId: control.agentSessionId,
+      client = await diagnostic.measure('connected-client', () => this.connectedClient(control.hostId, control.kind === 'agent' ? 'agent-input' : 'runtime'))
+      if (control.kind !== 'agent' || !('runtimeOwnerIdentity' in client)) {
+        try { diagnostic.executionOwner(client.runtimeIdentity().instanceId) } catch { /* Diagnostic identity is optional. */ }
+      }
+      const inputClient = client
+      await diagnostic.measure('host-call', () => control.kind === 'agent' ? inputClient.pasteAgent({ agentSessionId: control.agentSessionId,
         expectedRun: control.run, text, terminalData, ...(parent ? { observation: parent } : {}) }).then(() => {})
-        : this.writeTerminalInput(client, control, terminalData, diagnostic, parent))
+        : this.writeTerminalInput(inputClient, control, terminalData, diagnostic, parent))
+      this.observeInputHost(control, client)
       diagnostic.stage('reply-ready'); diagnostic.settle(true)
-    } catch (error) { diagnostic.settle(false); throw error }
+    } catch (error) { this.observeInputHost(control, client, { error }); diagnostic.settle(false); throw error }
+  }
+
+  private observeInputHost(control: SessionControl, client: AgentMuxClient | undefined, failure?: { error: unknown }): void {
+    if (control.kind !== 'agent' || !client || !('runtimeOwnerIdentity' in client) || this.hosts.get(control.hostId)?.client !== client) return
+    const step = 'Confirming input Host'
+    // Discovery itself marks its original owner unverified. A business refusal
+    // with a freshly confirmed owner is not a connection failure.
+    if (failure && runtimeOwner(client)?.availability !== 'connected') {
+      this.endpointWarnings.set(control.hostId, endpointWarning(control.hostId, step, failure.error))
+    } else if (!failure && runtimeOwner(client)?.availability === 'connected' && this.endpointWarnings.get(control.hostId)?.step === step) {
+      this.endpointWarnings.delete(control.hostId)
+    }
   }
 
   async submitPrompt(
@@ -2346,10 +2370,13 @@ export class RuntimeController {
     }
   }
 
-  private async connectedClient(hostId: string, scope: 'runtime' | 'session' = 'session'): Promise<AgentMuxClient> {
+  private async connectedClient(hostId: string, scope: 'runtime' | 'session' | 'agent-input' = 'session'): Promise<AgentMuxClient> {
     const client = this.configuredClient(hostId)
+    // Hosted input owns fresh Host discovery and Native admission in its original
+    // invocation. Direct Core clients and Terminal cursor preparation stay local.
+    if (scope === 'agent-input' && 'runtimeOwnerIdentity' in client) return client
     try {
-      if (scope === 'runtime') await client.connectRuntime()
+      if (scope !== 'session') await client.connectRuntime()
       else await client.connect()
     } catch (error) {
       this.endpointWarnings.set(hostId, endpointWarning(hostId, 'Connecting to Runtime', error))
