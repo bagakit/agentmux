@@ -29,6 +29,28 @@ async function openWithBudget(context: AgentProviderSessionHistoryContext, budge
 }
 const lines = (...ids: string[]) => ids.map((id) => JSON.stringify({ id, text: `exact 中 ${id}` })).join('\n') + '\n'
 
+it('retains exact small-string source slots without replacing ordinary parsed values', async () => {
+  const original = '{"text":"same \\u4e2d","nested":{"text":"same 中"},"values":["same 中",7]}\n'
+  const { context, path } = await fixture(original), reader = await open(context)
+  const record = (await reader.readPrevious())!.value
+  expect(record).toEqual({ text: 'same 中', nested: { text: 'same 中' }, values: ['same 中', 7] })
+  const nested = record.nested as Record<string, unknown>, values = record.values as unknown[]
+  const sources = [reader.sourceText(record, 'text'), reader.sourceText(nested, 'text'), reader.sourceText(values, '0')]
+  const bytes = await readFile(path), ranges: number[] = []
+  for (const source of sources) {
+    expect(source).toBeInstanceOf(NativeText)
+    const segment = source!.segments[0]!
+    if ('literal' in segment) throw new Error('Expected original string span')
+    expect(JSON.parse(bytes.subarray(segment.source.start, segment.source.end).toString('utf8'))).toBe('same 中')
+    ranges.push(segment.source.start)
+  }
+  expect(new Set(ranges).size).toBe(3)
+  expect(reader.sourceText(values, '1')).toBeUndefined()
+  expect(reader.sourceText({ text: 'same 中' }, 'text')).toBeUndefined()
+  record.text = 'changed'
+  expect(reader.sourceText(record, 'text')).toBeUndefined()
+})
+
 it('reads newest-first bounded records and keeps older pages fixed across append without writing', async () => {
   const { path, context } = await fixture(lines('one', 'two', 'three'))
   const reader = await open(context)
@@ -85,7 +107,7 @@ it('repeats the complete record at its true end after partial UTF8 exclusion and
   const partial = Buffer.concat([complete, Buffer.from('{"text":"'), Buffer.from([0xe4, 0xb8])])
   const { path, context } = await fixture(partial)
   const reader = await open(context)
-  const expectedRecord = { value: batch, start: Buffer.byteLength(prefix) }
+  const expectedRecord = { value: batch, start: Buffer.byteLength(prefix), end: complete.length }
   expect(await reader.readPrevious()).toEqual(expectedRecord)
   reader.repeatPrevious()
   const firstCursor = await reader.nextCursor('batch:1')
@@ -139,14 +161,14 @@ it.each([true, false])('can repeat the sole complete record with a trailing newl
   const value = { messages: ['一', '二🙂'] }
   const { context } = await fixture(JSON.stringify(value) + (terminated ? '\n' : ''))
   const reader = await open(context)
-  expect(await reader.readPrevious()).toEqual({ value, start: 0 })
+  expect(await reader.readPrevious()).toEqual({ value, start: 0, end: Buffer.byteLength(JSON.stringify(value)) + Number(terminated) })
   expect(await reader.nextCursor()).toBeNull()
   reader.repeatPrevious()
   const cursor = await reader.nextCursor('remaining:1')
   expect(cursor).toBeTypeOf('string')
   const resumed = await open({ ...context, cursor: cursor! })
   expect(resumed.continuation).toBe('remaining:1')
-  expect(await resumed.readPrevious()).toEqual({ value, start: 0 })
+  expect(await resumed.readPrevious()).toEqual({ value, start: 0, end: Buffer.byteLength(JSON.stringify(value)) + Number(terminated) })
   expect(await resumed.nextCursor()).toBeNull()
 })
 
@@ -595,4 +617,17 @@ it('enforces real deadline, preserves short read diagnostics without refund, and
   expect((await reader.readPrevious())?.value.id).toBe('item-one')
   await reader.close()
   await expect(reader.readFirst()).rejects.toThrow()
+})
+
+
+it('keeps exact physical end boundaries across forward, backward and addressed reads without moving the caller cursor', async () => {
+  const data = lines('one', '二', 'three'), { context } = await fixture(data), reader = await open(context)
+  const one = await reader.readNext(), two = await reader.readNext(), three = await reader.readNext()
+  expect(one!.end).toBe(two!.start); expect(two!.end).toBe(three!.start)
+  expect(three!.end).toBe(Buffer.byteLength(data))
+  expect(await reader.readPrevious()).toEqual(three)
+  expect(await reader.readAt(one!.end)).toEqual(two)
+  expect(await reader.readBefore(three!.start)).toEqual(two)
+  expect(await reader.readPrevious()).toEqual(two)
+  expect(await reader.readNext()).toBeNull()
 })
