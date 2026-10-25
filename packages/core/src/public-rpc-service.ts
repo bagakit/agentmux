@@ -27,7 +27,7 @@ import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-
 import { runAgentMessageBroadcast, normalizeBroadcastInput } from './agent-message-broadcast.js'
 import { parseAgentInputContextCaptureReference, parseAgentInputContextCaptureRead, type AgentInputContextCaptureReader } from './agent-input-context-capture.js'
 import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult, parseFileShareUndoParams, parseFileShareUndoResult } from './public-rpc-file-share.js'
-import { assertAgentConnectionAccess } from './connection-agent-access.js'
+import { assertAgentConnectionAccess, readAgentConnectionDelivery } from './connection-agent-access.js'
 import { parseRendererAllocationsResult } from './renderer-allocations.js'
 import { parseRendererSceneCaptureResult, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicationAccessResult, type ApplicationAccessPort, type ApplicationAccessMethod } from './application-access.js'
@@ -830,6 +830,11 @@ export class AgentMuxRpcService {
         const result = method === 'connection.api.identities' ? await api.identities(parseConnectionApiParams(method, input), original)
           : method === 'connection.api.request' ? await api.request(parseConnectionApiParams(method, input), original)
           : await api.inspect(parseConnectionApiParams(method, input), original)
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
+      if (caller && (method === 'connection.delivery.ls' || method === 'connection.delivery.inspect')) {
+        const result = await readAgentConnectionDelivery(owner, method, parseConnectionDeliveryParams(method, input), { hostId: caller.hostId, agentSessionId: caller.agentSessionId })
+        await administration.assertCurrent(); await this.assertRuntimeFence(context)
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
       if (caller) await assertAgentConnectionAccess(owner, method, input, caller.agentSessionId)
