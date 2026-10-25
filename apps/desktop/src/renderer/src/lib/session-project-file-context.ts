@@ -13,6 +13,7 @@ import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch
 import { zoneContext } from './space-agent-control'
 import { workbenchNavigationCatalog, workbenchNavigationTabs } from './workbench-navigation-catalog'
 import { workspaceRootForPath, type WorkbenchTab } from './workbench-tabs'
+import { sessionResourceContext } from './session-resource-context'
 
 type Facts = {
   config: AppConfig | null
@@ -32,6 +33,8 @@ export type SessionProjectFileContext = {
   kind: 'session' | 'goal' | 'unassigned' | 'unconfirmed'
   workspaceRoot: string
   homeDir: string
+  /** Exact registered file owner; an address may have more than one client registration. */
+  workspaceId?: string
   /** File owner address prefix when the parsing root is a Topic's physical directory. */
   pathPrefix?: string
   goalId?: string
@@ -72,7 +75,10 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
     const inputs = [state.config, state.localHome, ids, goal, graph, navigationTabs, state.layouts,
       state.spaceZoneBindings, state.spatialRequests, state.scratchTopicSnapshots,
       state.topicCategories, state.projectGroups, session?.id, session?.kind,
-      session?.hostId, session?.workspacePath, session?.control.run.runId]
+      session?.hostId, session?.workspacePath, session?.control.run.runId,
+      session?.kind === 'agent' ? session.toolExecution?.bindingId : undefined,
+      session?.kind === 'agent' ? session.toolExecution?.resourceHostId : undefined,
+      session?.kind === 'agent' ? session.toolExecution?.workspacePath : undefined]
     if (previous && relatedInputs && inputs.every((input, index) => input === relatedInputs![index])) return previous
     relatedInputs = inputs
     let canonical = false
@@ -81,7 +87,10 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
     }
     const tab = origin.tabId ? state.tabs[origin.tabId] : undefined
     const region = origin.regionId ? tab?.regions[origin.regionId] : undefined
-    const resourceWorkspace = state.config?.workspaces.find(workspace => workspace.id === tab?.workspaceId)
+    const tabWorkspace = state.config?.workspaces.find(workspace => workspace.id === tab?.workspaceId)
+    const binding = session?.kind === 'agent' ? session.toolExecution : undefined
+    const boundResource = binding ? sessionResourceContext(state.config, session, undefined, tabWorkspace?.id) : undefined
+    const resourceWorkspace = binding ? boundResource?.workspace : tabWorkspace
     const layout = state.layouts[origin.workspaceId]
     const group = layout?.groups.find(candidate => candidate.id === origin.tabGroupId)
     const occurrence = Boolean(origin.sessionId === sessionId && group?.tabOrder.includes(origin.tabId ?? '') &&
@@ -104,15 +113,16 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
       const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, resourceWorkspace)
       const inputs = [state.config, navigationTabs, state.layouts, state.spaceZoneBindings, topics,
         state.spatialRequests, state.topicCategories, state.projectGroups,
-        resourceWorkspace, session?.id, session?.hostId, session?.workspacePath, session?.control.run.runId, occurrence]
+        resourceWorkspace, session?.id, session?.hostId, session?.workspacePath, session?.control.run.runId, occurrence,
+        binding?.bindingId, binding?.resourceHostId, binding?.workspacePath]
       if (!metadataInputs || inputs.some((input, index) => input !== metadataInputs![index])) {
         metadataInputs = inputs
         originalSpace = undefined
         topicDirectory = undefined
-        if (occurrence && session && resourceWorkspace?.hostId === session.hostId && tab) {
+        if (occurrence && session && resourceWorkspace && (binding || resourceWorkspace.hostId === session.hostId) && tab) {
           // Directory facts own this mapping. The Scratch container is not the physical
           // root of a Topic/Mote, and optional sidecar reads do not change that identity.
-          if (resourceWorkspace.id === SCRATCH_WORKSPACE_ID) {
+          if (!binding && resourceWorkspace.id === SCRATCH_WORKSPACE_ID) {
             const topicId = scratchTopicIdFromWorkspacePath(resourceWorkspace.path, session.workspacePath, topics)
             const topic = topics?.find(item => item.id === topicId)
             const prefix = topic && scratchTopicLogicalPath(resourceWorkspace, topic)
@@ -123,7 +133,7 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
             ...(state.topicCategories ? { topicCategories: state.topicCategories } : {}),
             ...(state.projectGroups ? { projectGroups: state.projectGroups } : {}) }
           const catalog = workbenchNavigationCatalog(spatialState, topics)
-          const originalTab = catalog.tabs.find(candidate => candidate.tabId === tab.id)
+          const originalTab = resourceWorkspace.id === tabWorkspace?.id ? catalog.tabs.find(candidate => candidate.tabId === tab.id) : undefined
           const zone = catalog.zones.find(candidate => candidate.zoneId === originalTab?.zoneId)
           const confirmed = zone?.workspaceId === resourceWorkspace.id && zone.hostId === resourceWorkspace.hostId &&
             catalog.locations.some(location => location.zoneId === zone.zoneId && location.workspaceId === resourceWorkspace.id &&
@@ -137,20 +147,24 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
               }
             } catch { /* Keep the original resource and prose visible while its context is unconfirmed. */ }
           }
+          if (binding && resourceWorkspace.id !== tabWorkspace?.id) {
+            const spaceId = directoryIdentity(resourceWorkspace.hostId, resourceWorkspace.repoPath ?? resourceWorkspace.path)
+            originalSpace = { spaceId, zoneId: workspaceZoneId(spaceId, resourceWorkspace.id) }
+          }
         }
       }
     }
     const sessionPlacement: FileOpenPlacement | undefined = !seenGoal && occurrence && session &&
-      resourceWorkspace?.hostId === session.hostId && originalSpace
+      resourceWorkspace && (binding || resourceWorkspace.hostId === session.hostId) && originalSpace
       ? { displayWorkspaceId: origin.workspaceId, space: originalSpace,
           resource: { hostId: resourceWorkspace.hostId, path: resourceWorkspace.path } }
       : undefined
-    if (!seenGoal && !sessionPlacement) issue = 'The original Session file resource, Space or display occurrence is unconfirmed.'
+    if (!seenGoal && !sessionPlacement) issue = boundResource?.issue ?? 'The original Session file resource, Space or display occurrence is unconfirmed.'
     const kind = seenGoal ? issue ? 'unconfirmed' : project ? 'goal' : 'unassigned' : issue ? 'unconfirmed' : 'session'
     const root = kind === 'goal' ? project!.path : kind === 'session' && session
-      ? topicDirectory?.root ?? workspaceRootForPath(state.config, session) ?? '' : ''
+      ? binding?.workspacePath ?? topicDirectory?.root ?? workspaceRootForPath(state.config, session) ?? '' : ''
     const pathPrefix = kind === 'session' ? topicDirectory?.prefix : undefined
-    const hostId = kind === 'goal' ? project!.hostId : session?.hostId
+    const hostId = kind === 'goal' ? project!.hostId : binding?.resourceHostId ?? session?.hostId
     const hosts = state.config?.hosts.filter(host => host.id === hostId) ?? []
     const homeDir = hosts.length === 1 && hosts[0]?.kind === 'local' ? state.localHome : ''
     const key = JSON.stringify([kind, goalId, goal?.projectId, project, root, pathPrefix, homeDir, issue,
@@ -159,6 +173,7 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
     previousKey = key
     previous = {
       kind, workspaceRoot: root, homeDir,
+      ...(kind === 'session' && resourceWorkspace ? { workspaceId: resourceWorkspace.id } : {}),
       ...(pathPrefix ? { pathPrefix } : {}),
       ...(goalId ? { goalId } : {}),
       ...(kind === 'goal' ? { project: project!, placement: {

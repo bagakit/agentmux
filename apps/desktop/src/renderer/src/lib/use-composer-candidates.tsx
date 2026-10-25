@@ -32,13 +32,17 @@ export function skillComposerSuggestion(skill: AgentSkill): ComposerSuggestion {
 }
 
 /** Data from existing owners, read only for the actual open completion or explicit tool action. */
-export function useComposerCandidates({ scope: callerScope, active, config, workspace, providerId, sessionId, commands, insertion }: {
-  scope: string; active: boolean; config: AppConfig | null; workspace?: WorkspaceRecord | undefined
+export function useComposerCandidates({ scope: callerScope, active, config, resourceWorkspace, runtimeWorkspace, resourceIssue, providerId, sessionId, commands, insertion }: {
+  scope: string; active: boolean; config: AppConfig | null
+  resourceWorkspace: WorkspaceRecord | undefined; runtimeWorkspace: WorkspaceRecord | undefined
+  resourceIssue?: string | undefined
   providerId?: string | undefined; sessionId?: string | undefined
   commands: readonly { text: string; description: string }[]
   insertion: RefObject<ComposerInsertionHandle | null>
 }) {
-  const scope = JSON.stringify([callerScope, sessionId, providerId, workspace?.id, workspace?.hostId, workspace?.path])
+  const workspace = resourceWorkspace
+  const scope = JSON.stringify([callerScope, sessionId, providerId, workspace?.id, workspace?.hostId, workspace?.path,
+    runtimeWorkspace?.id, runtimeWorkspace?.hostId, runtimeWorkspace?.path])
   const inputConfig = resolveComposerInputConfig(config?.messageToolCompletion)
   const [request, setRequest] = useState<{ scope: string; query: ComposerCandidateQuery | null } | null>(null)
   const query = request?.scope === scope && active ? request.query : null
@@ -54,14 +58,14 @@ export function useComposerCandidates({ scope: callerScope, active, config, work
     setSkills(previous => ({ scope, value: previous?.scope === scope ? previous.value : [], loading: true, error: null }))
     try {
       const value = sessionId ? await api.ui.listAgentSkills(sessionId)
-        : workspace && providerId ? await api.ui.listWorkspaceSkills(workspace.id, providerId) : []
+        : runtimeWorkspace && providerId ? await api.ui.listWorkspaceSkills(runtimeWorkspace.id, providerId) : []
       if (!isCurrent()) return []
       setSkills({ scope, value, loading: false, error: null }); return value
     } catch (error) {
       if (isCurrent()) setSkills(previous => ({ scope, value: previous?.scope === scope ? previous.value : [], loading: false, error: presentError(error) }))
       throw error
     }
-  }, [scope, sessionId, workspace?.id, providerId])
+  }, [scope, sessionId, runtimeWorkspace?.id, providerId])
   const kind = active ? query?.kind : undefined
   useEffect(() => {
     if (kind === 'skill') void loadSkills().catch(() => {})
@@ -138,7 +142,8 @@ export function useComposerCandidates({ scope: callerScope, active, config, work
   const skillState = skills?.scope === scope ? skills : null
   const fileState = files?.scope === fileScope ? files : null
   const source = kind === 'skill' ? skillState : kind === 'reference' && workspace ? fileState : null
-  const completionFeedback = source?.loading ? <span role="status">{kind === 'skill' ? 'Reading skills…' : 'Reading this directory…'}</span>
+  const completionFeedback = kind === 'reference' && !workspace && resourceIssue ? <span role="status">{resourceIssue}</span>
+    : source?.loading ? <span role="status">{kind === 'skill' ? 'Reading skills…' : 'Reading this directory…'}</span>
     : source?.error ? <span role="status">{kind === 'skill' ? 'Skills' : 'Files'}: {source.error} <button type="button" onClick={() => retry(value => value + 1)}>Retry</button></span> : null
   return { scope, completionConfig: inputConfig, commands: commandCandidates, promptKeywords: keywordCandidates, prompts: shortcuts,
     skills: skillState?.value.map(skillComposerSuggestion) ?? [], references, onCompletionQuery, completionFeedback,

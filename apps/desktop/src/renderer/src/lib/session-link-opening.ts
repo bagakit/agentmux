@@ -38,7 +38,8 @@ export async function openSessionFileLink(origin: OpenHttpLinkOrigin, context: S
   const state = useAppStore.getState()
   const placement = context.placement
   if (!placement || context.kind === 'unconfirmed' || context.kind === 'unassigned') throw new Error(context.issue ?? 'The original file resource is unconfirmed. The Agent keeps running.')
-  const workspace = state.config?.workspaces.find(item => item.hostId === placement.resource.hostId && item.path === placement.resource.path)
+  const workspaceId = context.workspaceId ?? context.project?.workspaceId
+  const workspace = state.config?.workspaces.find(item => item.id === workspaceId && item.hostId === placement.resource.hostId && item.path === placement.resource.path)
   if (!workspace) throw new Error('The original file Workspace is unavailable. The Agent keeps running.')
   if (destination === 'system') { await api.files.openSystem(workspace.id, path); return }
   const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace) ?? []
@@ -169,7 +170,11 @@ export function useSessionLinkOpening(origin: OpenHttpLinkOrigin, onService?: (m
       setRequest({ id: ++next.current, origin, presentation: filePresentation, url: path, x: event?.clientX ?? 0, y: event?.clientY ?? 0,
         file: { context, ...(location ? { location } : {}) } })
     } else if (local || state.mainSurface === 'agents') void openSessionFileLink(origin, context, path, location, destination, surface, filePresentation).catch(failure)
-    else void state.openFile(path, origin.tabGroupId, location, context.project?.workspaceId ?? origin.workspaceId, undefined, context.placement).catch(failure)
+    else {
+      const workspaceId = context.workspaceId ?? context.project?.workspaceId
+      if (!workspaceId) { failure(new Error(context.issue ?? 'The original project file Workspace is unconfirmed. The Agent keeps running.')); return }
+      void state.openFile(path, origin.tabGroupId, location, workspaceId, undefined, context.placement).catch(failure)
+    }
   }
   return { activateHttp, activateFile, request,
     canSplit: request?.file ? sessionFileRegionAvailable(origin, request.file.context) : Boolean(origin.tabId && origin.regionId),

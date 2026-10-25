@@ -11,6 +11,7 @@ import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
 import type { ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
+import { sessionResourceContext } from '../lib/session-resource-context'
 import { api } from '../lib/api'
 import { useComposerAttachments } from '../lib/use-composer-attachments'
 import { ComposerFileReferences } from './ComposerFileReferences'
@@ -64,6 +65,7 @@ export function agentComposerAvailability(
 export function AgentSessionComposer({
   pendingLayout,
   sessionId,
+  resourceWorkspaceId,
   disabled = false,
   readOnly = false,
   tabName,
@@ -76,6 +78,7 @@ export function AgentSessionComposer({
 }: {
   pendingLayout?: PendingDeliveryLayout | undefined
   sessionId: string
+  resourceWorkspaceId?: string | undefined
   disabled?: boolean
   readOnly?: boolean
   // Authored Tab name is contextual; the Session identity remains primary.
@@ -131,9 +134,14 @@ export function AgentSessionComposer({
   const config = useObservedAppStore('composer', visible, consumerScope, state => state.config)
   const topicSnapshots = useObservedAppStore('composer', visible, consumerScope, state => state.scratchTopicSnapshots)
   const topics = useMemo(() => scratchTopicsForConfig(config, topicSnapshots), [config, topicSnapshots])
-  const workspace = useMemo(() => config?.workspaces.find(item =>
+  const toolExecution = session?.kind === 'agent' ? session.toolExecution : undefined
+  const runtimeWorkspace = useMemo(() => config?.workspaces.find(item =>
     session?.kind === 'agent' && workspaceOwnsSessionPath(item, session, topics)
   ), [config, topics, session?.kind, session?.hostId, session?.workspacePath])
+  const resource = useMemo(() => sessionResourceContext(config, session, topics, resourceWorkspaceId),
+    [config, topics, resourceWorkspaceId, session?.kind, session?.hostId, session?.workspacePath,
+      toolExecution?.resourceHostId, toolExecution?.workspacePath])
+  const workspace = resource.workspace
   const activeFile = useObservedAppStore('composer', visible, consumerScope, (state) =>
     workspace ? state.lastActiveFileByWorkspace[workspace.id] : undefined
   )
@@ -155,7 +163,7 @@ export function AgentSessionComposer({
   // Send or Stop. availability stays for other consumers; this component reads only submitMode.
   const submitMode = composerSubmitMode(session, disabled || readOnly)
   const completion = useComposerCandidates({ scope: JSON.stringify([sessionId, session?.hostId, workspace?.id, session?.kind === 'agent' ? session.providerId : null]),
-    active: visible && submitMode.canType, config, workspace, sessionId,
+    active: visible && submitMode.canType, config, resourceWorkspace: workspace, runtimeWorkspace, resourceIssue: resource.issue, sessionId,
     providerId: session?.kind === 'agent' ? session.providerId : undefined, commands: composerOptions?.commands ?? [], insertion: insertionRef })
   const queueStatusPrompt = submitMode.canType && session?.kind === 'agent' && Boolean(session.pendingInteraction)
 
@@ -212,10 +220,14 @@ export function AgentSessionComposer({
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
 
   const [fileReferencesOpen, setFileReferencesOpen] = useState(false)
-  const attachmentScope = JSON.stringify([sessionId, session?.hostId, session?.workspacePath])
+  const attachmentScope = JSON.stringify([sessionId, session?.hostId, session?.workspacePath, resource.address, workspace?.id])
   useEffect(() => { setFileReferencesOpen(false) }, [attachmentScope, visible])
   const attachments = useComposerAttachments({ scope: attachmentScope, sessionControl: session?.kind === 'agent' ? session.control : undefined, hostId: session?.hostId,
-    workspacePath: session?.workspacePath, disabled: !submitMode.canType, insertion: insertionRef, feedback,
+    workspacePath: session?.workspacePath,
+    ...(session?.kind === 'agent' && session.toolExecution ? {
+      fileResource: workspace ? { hostId: workspace.hostId, workspacePath: workspace.path } : null
+    } : {}),
+    disabled: !submitMode.canType, insertion: insertionRef, feedback,
     document: dialogDocument, shortcutActive: visible && !readOnly, ...(workspace ? { onRemoteFiles: () => setFileReferencesOpen(true) } : {}) })
 
   const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId,
@@ -302,12 +314,14 @@ export function AgentSessionComposer({
             ? 'Send to restore this Session.' : 'Send a message to this Session.'}
         onSelect={sendStatusPrompt} resultReview={resultReview} /> : null}
       contextUsage={<AgentContextUsage visible={visible} source={session?.kind === 'agent' ? JSON.stringify([session.hostId, session.id, session.providerId, session.control.run.runId]) : sessionId} usage={session?.kind === 'agent' ? session.turnUsage : undefined} />}
-      {...(workspace ? { onActivateSemanticReference: (reference: ComposerSemanticReference) => {
+      {...(workspace || runtimeWorkspace ? { onActivateSemanticReference: (reference: ComposerSemanticReference) => {
         if (reference.kind === 'agent') { void api.ui.openObjectLink(reference.reference).catch(reportError); return }
+        const target = reference.kind === 'file' ? workspace : runtimeWorkspace
+        if (!target) { feedback.report(new Error(resource.issue ?? 'The original file Workspace is unconfirmed. Your draft and Agent are kept.')); return }
         const path = reference.reference.startsWith('@') ? reference.reference.slice(1) : reference.reference
         const store = useAppStore.getState()
-        void store.selectWorkspace(workspace.id).catch(reportError)
-        void store.openFile(path, undefined, undefined, workspace.id).catch(reportError)
+        void store.selectWorkspace(target.id).catch(reportError)
+        void store.openFile(path, undefined, undefined, target.id).catch(reportError)
       } } : {})}
       completionConfig={completion.completionConfig}
       commands={completion.commands} skills={completion.skills} references={completion.references}

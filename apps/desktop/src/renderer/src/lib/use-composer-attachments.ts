@@ -11,9 +11,11 @@ import { api } from './api'
 import { selectScreenshotTarget, releaseScreenshotTarget } from './screenshot-attachment'
 
 /** Host resource IO only. The maintained editor owns insertion, selection, Undo and the draft. */
-export function useComposerAttachments({ scope, sessionControl, hostId, workspacePath, disabled, insertion, feedback, document, onRemoteFiles, shortcutActive = true }: {
+export function useComposerAttachments({ scope, sessionControl, hostId, workspacePath, fileResource, disabled, insertion, feedback, document, onRemoteFiles, shortcutActive = true }: {
   sessionControl?: AgentSessionControl | undefined
   scope: string; hostId: string | undefined; workspacePath: string | undefined; disabled: boolean
+  /** Omitted for a single-context Launcher; null preserves an unconfirmed original resource. */
+  fileResource?: { hostId: string; workspacePath: string } | null
   insertion: RefObject<ComposerInsertionHandle | null>; feedback: ReturnType<typeof useComposerFeedback>
   document?: WorkbenchWindowDocument | undefined; onRemoteFiles?: (() => void) | undefined
   shortcutActive?: boolean
@@ -23,6 +25,11 @@ export function useComposerAttachments({ scope, sessionControl, hostId, workspac
   else latest.current.disabled = disabled
   const target = latest.current
   const isCurrent = () => latest.current === target && !target.disabled && feedback.isCurrent()
+  const files = fileResource === undefined ? { hostId, workspacePath } : fileResource
+  function requireFileResource() {
+    if (!files) throw new Error('The original project file Workspace is unconfirmed. Your draft and Agent are kept; restore its registered project to use Files.')
+    return files
+  }
   function requireLocal() {
     if (hostId !== 'local') throw new Error('This resource has not been transferred to the selected machine. Your draft is kept; use Files to reference a resource in that project.')
   }
@@ -62,16 +69,17 @@ export function useComposerAttachments({ scope, sessionControl, hostId, workspac
       const failures: string[] = []
       try {
         await insertResolved(async () => {
-          requireLocal()
           const references: string[] = []
           for (const file of files) {
             if (!isCurrent()) return null
             try {
               if (file.type.startsWith('image/')) references.push(await imageReference(file))
               else {
+                const resource = requireFileResource()
+                if (resource.hostId !== 'local') throw new Error('This local file has not been transferred to the project machine. Your draft is kept; use Files to reference a file in that project.')
                 const path = api.ui.pathForFile(file)
                 if (!path) throw new Error('The original local file path is unavailable. Use Files to reference the original file.')
-                references.push(appendSelectedFileReferences('', [path], workspacePath))
+                references.push(appendSelectedFileReferences('', [path], resource.workspacePath))
               }
             } catch (error) { failures.push(`${file.name || 'Resource'}: ${presentError(error)}`) }
           }
@@ -82,13 +90,14 @@ export function useComposerAttachments({ scope, sessionControl, hostId, workspac
     })()
   }
   const chooseFiles = () => feedback.run(async () => {
-    if (hostId !== 'local') {
+    const resource = requireFileResource()
+    if (resource.hostId !== 'local') {
       if (onRemoteFiles) { onRemoteFiles(); return }
-      requireLocal()
+      throw new Error('The original project file browser is unavailable. Your draft is kept.')
     }
     await insertResolved(async () => {
-      const paths = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined, document)
-      return paths?.length ? appendSelectedFileReferences('', paths, workspacePath) : null
+      const paths = await api.ui.chooseFiles(resource.workspacePath ? { defaultPath: resource.workspacePath } : undefined, document)
+      return paths?.length ? appendSelectedFileReferences('', paths, resource.workspacePath) : null
     })
   })
   const shortcutKey = JSON.stringify([scope, document?.windowId, document?.documentGeneration])
@@ -142,6 +151,6 @@ export function useComposerAttachments({ scope, sessionControl, hostId, workspac
       selectScreenshotTarget(shortcutTarget)
     } else selectScreenshotTarget(null)
   }
-  const referencePaths = (paths: readonly string[]) => feedback.run(() => insertResolved(() => appendSelectedFileReferences('', paths, workspacePath)))
+  const referencePaths = (paths: readonly string[]) => feedback.run(() => insertResolved(() => appendSelectedFileReferences('', paths, requireFileResource().workspacePath)))
   return { pasteImage, dropFiles, chooseFiles, capture, referencePaths, claimScreenshotTarget }
 }

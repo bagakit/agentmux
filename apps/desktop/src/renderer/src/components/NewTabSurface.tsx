@@ -260,7 +260,7 @@ export function NewTabSurface({
   const toolsScope = JSON.stringify([regionId, workspace?.id, workspace?.hostId, workspace?.path, selectedProviderId])
   useEffect(() => { setFileReferencesOpen(false) }, [toolsScope, motionActive])
   const feedback = useComposerFeedback(toolsScope)
-  const completion = useComposerCandidates({ scope: toolsScope, active: motionActive && sections.agents === 'expanded' && busy === null, config, workspace,
+  const completion = useComposerCandidates({ scope: toolsScope, active: motionActive && sections.agents === 'expanded' && busy === null, config, resourceWorkspace: workspace, runtimeWorkspace: agentWorkspace,
     providerId: selectedProviderId, commands: providerCatalog.find(entry => entry.id === selectedProviderId)?.composer?.commands ?? [], insertion: insertionRef })
   const launchOptions = useMemo(
     () => providerCatalog.find((entry) => entry.id === selectedProviderId)?.launchOptions ?? [],
