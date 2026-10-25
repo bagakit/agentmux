@@ -55,7 +55,7 @@ async function mount(forwardRpc = vi.fn().mockImplementation(async (method: stri
   const root = createRoot(element); mounted.push({ root, element })
   const openSession = vi.fn(), openTopic = vi.fn()
   await act(async () => root.render(<MobileSurveySurface client={{ forwardRpc } as any} connected openSession={openSession} openTopic={openTopic} />))
-  const click = async (text: string) => { const button = [...element.querySelectorAll('button')].find(button => !button.closest('[hidden]') && button.textContent?.includes(text)); expect(button).toBeDefined(); await act(async () => button!.click()) }
+  const click = async (text: string) => { const button = [...element.querySelectorAll('button')].find(button => !button.closest('[hidden]') && (button.textContent?.includes(text) || button.getAttribute('aria-label') === text)); expect(button).toBeDefined(); await act(async () => button!.click()) }
   return { element, forwardRpc, openSession, openTopic, click }
 }
 describe('original Survey mobile slice', () => {
@@ -81,12 +81,12 @@ describe('original Survey mobile slice', () => {
     const view = await mount()
     await view.click('原命名研究')
     view.forwardRpc.mockRejectedValueOnce(new Error('probe failed'))
-    await view.click('刷新原研究')
+    await view.click('刷新研究')
     expect(view.element.textContent).toContain('probe failed')
     await view.click('继续对话'); expect(view.openSession).toHaveBeenCalledTimes(1)
     const { survey: omitted, ...withoutSurvey } = catalog
     view.forwardRpc.mockResolvedValueOnce({ catalog: parsed(withoutSurvey) })
-    await view.click('刷新原研究')
+    await view.click('刷新研究')
     expect(view.element.textContent).toContain('原 Survey 呈现尚未确认')
     expect(view.element.textContent).toContain('原命名研究')
     await view.click('返回研究列表'); await view.click('图暂缺的原研究')

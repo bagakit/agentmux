@@ -63,7 +63,7 @@ async function fixture(initialContext?: MobileSurveyContext) {
   const render = async (change: Partial<MobileSurveyProps> = {}) => act(async () => root.render(<MobileSurveySurface {...props} {...change} />))
   await render()
   const click = async (text: string) => {
-    const found = [...element.querySelectorAll<HTMLButtonElement>('button')].find(button => !button.closest('[hidden]') && button.textContent?.includes(text))
+    const found = [...element.querySelectorAll<HTMLButtonElement>('button')].find(button => !button.closest('[hidden]') && (button.textContent?.includes(text) || button.getAttribute('aria-label') === text))
     expect(found, text).toBeDefined(); await act(async () => { found!.click(); await new Promise(resolve => setTimeout(resolve, 30)) })
   }
   const stepBack = async () => { const callback = back.mock.calls.at(-1)?.[0]; expect(callback).toBeTypeOf('function'); await act(async () => callback()) }
@@ -90,10 +90,10 @@ describe('T-007 original Survey selected content frame', () => {
     const reads = view.fileRead.mock.calls.length
     await view.stepBack(); expect(view.element.querySelector('[aria-label="研究工作面"]')).not.toBeNull()
     await view.click('original.md'); expect(view.fileRead).toHaveBeenCalledTimes(reads)
-    view.empty(); await view.click('刷新原研究')
+    view.empty(); await view.click('刷新研究')
     expect(view.element.textContent).toContain('当前绑定尚未重新确认')
     expect(view.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确原 Markdown')
-    view.failDirectory(); await view.click('刷新原研究')
+    view.failDirectory(); await view.click('刷新研究')
     expect(view.element.textContent).toContain('原目录观察暂缺')
     expect(view.fileRead).toHaveBeenCalledTimes(reads)
   })
@@ -132,7 +132,7 @@ describe('T-007 original Survey selected content frame', () => {
     await vi.waitFor(async () => { await act(async () => new Promise(resolve => setTimeout(resolve, 10))); expect(view.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确原 Markdown') })
     expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['docs/original.md'])
     expect(view.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确原 Markdown')
-    await view.click('刷新原研究')
+    await view.click('刷新研究')
     expect(view.changed).toHaveBeenLastCalledWith({ zoneId: view.zone.zoneId, tabId: view.tabId, regionId: 'original-region' })
     expect(view.fileRead).toHaveBeenCalledTimes(1)
     await view.stepBack(); await view.stepBack()
@@ -169,7 +169,7 @@ describe('T-007 original Survey selected content frame', () => {
     const observed = await view.rpc('space.ls', { target: {}, presentation: true })
     let resolve!: (value: unknown) => void
     view.rpc.mockImplementationOnce(() => new Promise(value => { resolve = value }))
-    await view.click('刷新原研究'); await view.stepBack(); await view.stepBack()
+    await view.click('刷新研究'); await view.stepBack(); await view.stepBack()
     await act(async () => resolve(observed))
     expect(view.changed).toHaveBeenLastCalledWith({ zoneId: null, tabId: null, regionId: null })
     expect(view.element.querySelector('nav[aria-label="原研究列表"]')).not.toBeNull()
