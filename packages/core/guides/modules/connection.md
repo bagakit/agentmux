@@ -235,7 +235,9 @@ when the exact application exposes one. A creator has idType and userId; null me
 was returned, while an absent field in an original saved observation means it was not recorded.
 Use that exact member with room.create.members only after reviewing the invitation. It grants no Agent access.
 For necessary permissions select --application-configuration add-application-permissions with
---permission-purpose agent-conversation (messages, create/bind groups and this application’s creator lookup)
+--permission-purpose agent-conversation (messages, create/bind groups, participant names and avatars,
+and this application’s creator lookup). New-bot setup, binding an existing bot and completing a saved
+bot’s missing permissions share this purpose; native endpoint access does not imply profile-field access.
 Consume offered read-permission-catalog and
 read-application-permissions separately. Each original read owns its receipt and recovery; an incomplete
 review cannot authorize additions. Confirm only the exact offered add-application-permissions action;
