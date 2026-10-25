@@ -137,7 +137,8 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
   if (p.resourceUpload !== undefined) {
     const upload = object(p.resourceUpload, ['kind', 'part', 'attempt', 'state']), selected = part(upload.part), attempt = integer(upload.attempt, 0)
     if (p.effect !== 'upsert' || ['dispatching', 'unknown', 'confirmed'].includes(String(p.state)) && upload.state !== 'confirmed' || (upload.kind !== 'image' && upload.kind !== 'file') || !['pending', 'dispatching', 'unknown', 'confirmed'].includes(upload.state as string) ||
-      selected.record.source.kind !== 'native' || selected.selector.kind !== 'native-part' ||
+      !(selected.record.source.kind === 'native' && selected.selector.kind === 'native-part' ||
+        upload.kind === 'image' && selected.record.source.kind === 'captured' && selected.selector.kind === 'captured-field' && selected.selector.field === 'content') ||
       selected.record.hostId !== original.hostId || selected.record.agentSessionId !== original.agentSessionId ||
       (upload.state === 'pending' ? attempt !== 0 : attempt < 1)) fail()
     resourceUpload = { kind: upload.kind as NonNullable<ConnectionDelivery['resourceUpload']>['kind'], part: selected, attempt, state: upload.state as NonNullable<ConnectionDelivery['resourceUpload']>['state'] }
