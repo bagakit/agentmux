@@ -3,6 +3,7 @@ import { createClientUiRoot } from '../../../test/helpers/client-ui-render'
 import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
+import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-control'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { workbenchDocuments } from '../../../src/renderer/src/lib/workbench-window-registry'
 import { updateThemeSelection } from '@agentmux/client-ui/theme'
@@ -28,7 +29,10 @@ for (const key of ['workbenchWindows', 'publishNativeOverlays', 'nativeOverlayFo
 api.ui.requestStorageFlush = async () => boundary.request('flush')
 const state = () => useAppStore.getState()
 const facts = () => ({ ...projectPersistedWorkbench(state()), loading: state().loading, mainSurface: state().mainSurface,
-  activeWorkspaceId: state().activeWorkspaceId, errors: state().notificationEvents.map(event => event.message), error: state().error,
+  activeWorkspaceId: state().activeWorkspaceId, surveyZoneSelection: state().surveyZoneSelection, workbenchSpaceSelection: state().workbenchSpaceSelection, surveyCollectedZones: state().surveyCollectedZones,
+  surveyTabs: [...document.querySelectorAll('[data-survey-tab-id]')].map(e => ({ id: (e as HTMLElement).dataset.surveyTabId, current: e.getAttribute('aria-current'), label: e.getAttribute('aria-label') })),
+  tabButtons: [...document.querySelectorAll('[role=tab]')].map(e => ({ text: e.textContent, current: e.getAttribute('aria-selected'), label: e.getAttribute('aria-label'), html: e.outerHTML.slice(0,700) })),
+  errors: state().notificationEvents.map(event => event.message), error: state().error,
   documents: workbenchDocuments().map(document => ({ title: document.title, url: document.URL,
     browserPanes: document.querySelectorAll('.browser-surface').length, text: document.body.textContent?.slice(0, 9000),
     sourceButtons: [...document.querySelectorAll('button[aria-label="Go to source Browser"]')].map(element => ({ title: element.getAttribute('title'), text: element.textContent })) })) })
@@ -39,6 +43,21 @@ const facts = () => ({ ...projectPersistedWorkbench(state()), loading: state().l
     await current.createBrowser(layout.activeGroupId, undefined, setup.pageUrl, undefined, 'repo', 'repo')
     return facts()
   },
+  async prepareSurveyAlias(sourceId: string) {
+    await state().selectWorkspace('alias')
+    const source = Object.values(state().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'browser' && region.browserId === sourceId))!
+    const canonical = state().layouts.repo.groups.find(group => group.tabOrder.includes(source.id))!
+    const alias = state().layouts.alias.groups.find(group => group.id === state().layouts.alias.activeGroupId)!
+    const bound = await state().setTabDisplayPlacement(source.id, 'alias', alias.id, true)
+    const unbound = await state().setTabDisplayPlacement(source.id, 'repo', canonical.id, false)
+    await state().selectWorkspace('repo')
+    const zone = spatialCatalog(state(), []).tabs.find(tab => tab.tabId === source.id)!.zoneId!
+    state().setSurveyZoneCollected(zone, true)
+    state().setSurveyZoneSelection({ zoneId: zone, selection: [{ tabId: source.id, regionId: sourceId }], active: { tabId: source.id, regionId: sourceId } })
+    state().setMainSurface('survey')
+    return { sourceTabId: source.id, aliasGroupId: alias.id, zoneId: zone, bound, unbound, facts: facts() }
+  },
+  async createSibling() { const current = state(); await current.createBrowser(current.layouts.repo.activeGroupId, undefined, setup.pageUrl.replace('/source', '/sibling'), undefined, 'repo', 'repo'); return facts() },
   select(tabId: string, regionId: string) {
     const current = state(), group = current.layouts.repo.groups.find(group => group.tabOrder.includes(tabId))!
     current.activateTab('repo', group.id, tabId, 'navigation'); state().focusRegion('repo', tabId, regionId, 'navigation', group.id)

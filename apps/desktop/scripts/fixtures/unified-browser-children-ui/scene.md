@@ -69,3 +69,28 @@ Image kinds are explicit: `original-renderer-layer` excludes sibling native page
 Failed composed capture remains a warning, never a fabricated composite. The driver
 records `aestheticReview: not-performed`; an independent reviewer must actually open the
 complete normal/narrow/recovery/closed-source images and record their judgment separately.
+
+
+## Survey alias-only child navigation
+
+Run the same driver with `<private-output> --survey-alias` for the bounded Survey
+regression. It uses one fresh private Electron process and the same real native
+owners; it does not repeat the unrelated operation-handoff/restart series above.
+The original Browser is bound to a second display and unbound from its canonical
+display through the original Store binding actions before entering Survey.
+A second original Browser stays available in the same resource Zone.
+
+Trusted native Guest CDP mouse input clicks an actual `target=_blank` link and an
+actual `method=POST target=_blank` form. The local private HTTP server records
+method/body and renders an editable child page. Before/after observations bind
+`mainSurface`, local Survey and Work selection, exact original Guest identity,
+child source relationship, readable actual DOM, and actual page text input.
+While each child is still borrowed by its native window, actual main-window Tab
+clicks switch to the sibling and back to the source; the same child Guest must
+stay visible in its original native shell throughout those selections.
+After returning each borrowed window, real left Survey columns and right
+Workbench Tab controls must select the exact visible native Guest and preserve
+page drafts. These are full App/preload/Main interactions, not happy-dom or
+manually invoked child callbacks. Screenshots retain the driver’s explicit
+Renderer-layer versus actual-composed native-window provenance and need an
+independent actual-image review. No user application/profile/Runtime is touched.

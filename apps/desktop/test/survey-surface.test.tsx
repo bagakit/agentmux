@@ -152,6 +152,138 @@ afterEach(async () => {
 })
 async function renderApp() { await dom.render(<DesktopClientUiProvider><App /></DesktopClientUiProvider>) }
 
+it.each(['native-child', 'agent-region', 'whole-tab', 'two-regions'] as const)('[survey-native-child] prepares an alias-only %s from pending window descriptors without navigating Survey or Work', async kind => {
+  type Target = import('@agentmux/core/control').AppWindowTarget
+  type Descriptor = import('@agentmux/core/control').AppWindowDescriptor
+  type Request = import('../src/shared/workbench-windows').WorkbenchWindowRequest
+  type Response = import('../src/shared/workbench-windows').WorkbenchWindowResponse
+  let receiveRequest: ((request: Request) => void) | undefined
+  let receiveWindows: ((snapshot: import('../src/shared/workbench-windows').WorkbenchWindowSnapshot) => void) | undefined
+  let prepared: ((response: Response) => void) | undefined
+  let target: Target | undefined
+  const responses: Response[] = []
+  const pendingWindowId = 'survey-native-child-window'
+  vi.spyOn(api.ui.workbenchWindows, 'onRequest').mockImplementation(listener => {
+    receiveRequest = listener; return () => { receiveRequest = undefined }
+  })
+  vi.spyOn(api.ui.workbenchWindows, 'onChanged').mockImplementation(listener => {
+    receiveWindows = listener; return () => { receiveWindows = undefined }
+  })
+  vi.spyOn(api.ui.workbenchWindows, 'respond').mockImplementation(response => {
+    responses.push(response); prepared?.(response)
+  })
+  const call = vi.spyOn(api.ui.workbenchWindows, 'call').mockImplementation(async (method, input) => {
+    if (method !== 'app.window.open' || !('target' in input)) return { windows: [], recordedOperation: null }
+    target = input.target
+    const descriptor: Descriptor = { windowId: pendingWindowId, documentGeneration: null, target,
+      presentation: 'pending', bounds: null, focused: null }
+    // Main publishes its retained exact target before requesting prepare. The real App must
+    // supply the background host from this observation; no test registers or mounts a host.
+    const reply = new Promise<Response>(resolve => { prepared = resolve })
+    receiveWindows!({ windows: [descriptor], issue: null })
+    receiveRequest!({ requestId: 'survey-native-child-prepare', windowId: pendingWindowId,
+      documentGeneration: 'survey-native-child-document', target, action: 'prepare' })
+    await reply
+    return { windows: [descriptor], recordedOperation: null }
+  })
+  const state = useAppStore.getState()
+  const workTab = createWorkbenchTab('survey-original-work-tab', { kind: 'launcher', regionId: 'survey-original-work-region', workspaceId: SCRATCH_WORKSPACE_ID })
+  useAppStore.setState({ config: { ...state.config!, workspaces: [...state.config!.workspaces, otherWorkspace] },
+    tabs: { ...state.tabs, [workTab.id]: workTab },
+    layouts: { ...state.layouts, [workspace.id]: createWorkspaceLayout('resource-empty', []),
+      [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('survey-original-work-group', [workTab.id]),
+      [otherWorkspace.id]: createWorkspaceLayout('alias-only-group', [mixed.id]) } })
+  useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'survey-original-work-group', workTab.id, 'navigation')
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
+  expect(receiveRequest).toBeDefined(); expect(receiveWindows).toBeDefined()
+  const before = useAppStore.getState()
+  expect(before.workbenchSpaceSelection?.tabId).toBe(workTab.id)
+  const source = { browserId: pageA.browserId, navigationId: pageA.navigationId,
+    location: { displayWorkspaceId: workspace.id, groupId: `zone-unplaced:${originalZoneId()}`, tabId: mixed.id, regionId: pageA.regionId } }
+  try {
+    await act(async () => {
+      if (kind === 'native-child') useAppStore.getState().applyBrowserEvent({ type: 'native-opened',
+        browser: { ...browser, id: 'survey-native-child-page', source, navigationId: 'survey-native-child-navigation', url: 'https://child.example.test/original' },
+        workspaceId: workspace.id, window: { width: 800, height: 600 } })
+      else {
+        const { openWorkbenchWindow } = await import('../src/renderer/src/lib/workbench-windows')
+        void openWorkbenchWindow({ displayWorkspaceId: otherWorkspace.id, groupId: 'alias-only-group', tabId: mixed.id,
+          ...(kind === 'whole-tab' ? { kind: 'tab' as const } : { kind: 'region' as const, regionId: agent.regionId }) }, { focus: false })
+      }
+    })
+    await vi.waitFor(() => expect(responses).toContainEqual(expect.objectContaining({ requestId: 'survey-native-child-prepare', outcome: 'applied', message: null })))
+    expect(target).toMatchObject({ kind: kind === 'whole-tab' ? 'tab' : 'region', displayWorkspaceId: otherWorkspace.id, groupId: 'alias-only-group',
+      ...(kind === 'native-child' ? { regionId: 'survey-native-child-page' } : kind !== 'whole-tab' ? { tabId: mixed.id, regionId: agent.regionId } : { tabId: mixed.id }) })
+    expect(call).toHaveBeenCalledWith('app.window.open', expect.objectContaining({ target, focus: false }))
+    if (kind === 'two-regions') {
+      // Main permits two different Regions of the same Tab to have independent windows.
+      // A later pending target cannot replace the first exact host before its open/place.
+      await act(async () => receiveWindows!({ windows: [
+        { windowId: pendingWindowId, documentGeneration: null, target: target!, presentation: 'pending', bounds: null, focused: null },
+        { windowId: 'survey-second-region-window', documentGeneration: null,
+          target: { kind: 'region', displayWorkspaceId: otherWorkspace.id, groupId: 'alias-only-group', tabId: mixed.id, regionId: file.regionId },
+          presentation: 'pending', bounds: null, focused: null }
+      ], issue: null }))
+      const { originalWorkbenchHost } = await import('../src/renderer/src/lib/workbench-window-registry')
+      expect(originalWorkbenchHost(target!), 'first original Region host survives another pending Region window').not.toBeNull()
+    }
+    const after = useAppStore.getState()
+    expect(after.mainSurface).toBe('survey')
+    expect(after.surveyZoneSelection).toBe(before.surveyZoneSelection)
+    expect(after.workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(after.activeWorkspaceId).toBe(before.activeWorkspaceId)
+    expect(after.retainedSpatialFocus).toBe(before.retainedSpatialFocus)
+    expect(after.regionCaretFocus).toBe(before.regionCaretFocus)
+    expect(after.tabs[mixed.id]).toBe(before.tabs[mixed.id])
+    expect(after.tabs[workTab.id]).toBe(before.tabs[workTab.id])
+    expect(after.layouts[SCRATCH_WORKSPACE_ID]).toBe(before.layouts[SCRATCH_WORKSPACE_ID])
+    expect(after.layouts[otherWorkspace.id]!.groups[0]!.activeTabId).toBe(mixed.id)
+    expect(after.sessions).toBe(before.sessions); expect(after.agentFocus).toBe(before.agentFocus)
+    expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(after.documents).toBe(before.documents); expect(after.dirtyDocuments).toBe(before.dirtyDocuments)
+    if (kind === 'native-child') {
+      const child = after.tabs[target!.tabId]!
+      expect(child.regions['survey-native-child-page']).toMatchObject({ kind: 'browser', browserId: 'survey-native-child-page', source })
+    }
+    expect(api.browser.create).not.toHaveBeenCalled(); expect(api.browser.navigate).not.toHaveBeenCalled()
+    healthy()
+    if (kind !== 'native-child') {
+      const { placeWorkbenchWindow } = await import('../src/renderer/src/lib/workbench-window-registry')
+      const originalTerminal = dom.container.querySelector<HTMLElement>(`[data-terminal-probe="${session.id}"]`)!
+      expect(originalTerminal).not.toBeNull()
+      const originalInput = originalTerminal.querySelector('textarea')!
+      // Exact placement and retained visibility need an independent destination, not a
+      // simulated Native document. Real cross-document adoption has separate coverage.
+      const destination = document.createElement('div'); destination.id = 'survey-test-window-slot'; document.body.append(destination)
+      let moving!: Promise<void>, placed = false
+      try {
+        await act(() => { moving = placeWorkbenchWindow(target!, { destination,
+          window: { windowId: pendingWindowId, documentGeneration: 'survey-native-child-document' } }); void moving.catch(() => {}) })
+        await act(async () => { await moving }); placed = true
+        await choose(catalog().tabs.find(tab => tab.tabId === workTab.id)!.zoneId!)
+        expect(destination.querySelector(`[data-terminal-probe="${session.id}"]`)).toBe(originalTerminal)
+        expect(originalTerminal.dataset.visible).toBe('true')
+        expect(originalTerminal.querySelector('textarea')).toBe(originalInput)
+        expect(originalInput.value).toBe('Original terminal input')
+        expect(useAppStore.getState().mainSurface).toBe('survey')
+        expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+        healthy()
+      } finally {
+        try {
+          await choose(originalZoneId())
+          if (placed) {
+            let returning!: Promise<void>
+            await act(() => { returning = placeWorkbenchWindow(target!, null); void returning.catch(() => {}) })
+            await act(async () => { await returning })
+          }
+        } finally { destination.remove() }
+      }
+    }
+  } finally {
+    await act(async () => receiveWindows?.({ windows: [], issue: null }))
+  }
+})
+
 it('[icon-role] Survey Note identity follows object.note while ordinary files and the original selection stay independent', async () => {
   const { GRAPHITE_THEME, previewTheme } = await import('@agentmux/client-ui/theme')
   const { semanticIconHref } = await import('@agentmux/client-ui/icons')

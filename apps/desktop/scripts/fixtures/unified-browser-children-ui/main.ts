@@ -18,19 +18,20 @@ import { browserColdDescriptor } from '../../../src/main/browser-cold-descriptor
 import { senderTrust, assertSenderTrusted } from '../../../src/main/ipc-sender-trust'
 import { DEFAULT_CONFIG } from '../../../src/main/config-store'
 import { WORKBENCH_WINDOW_RESPONSE } from '../../../src/shared/workbench-windows'
+import { surveyAliasScene } from './survey-alias'
 import { THEME_BOOTSTRAP_CHANNEL } from '../../../src/shared/theme-bootstrap'
 
-const [compiled, privateRoot, output, phase, pageUrl] = process.argv.slice(2)
-assert.ok(privateRoot.includes('amx-child-ui-') && ['seed', 'restore'].includes(phase))
+const [compiled, privateRoot, output, phase, pageUrl, scenario = 'unified-children'] = process.argv.slice(2)
+assert.ok(privateRoot.includes('amx-child-ui-') && ['seed', 'restore', 'survey'].includes(phase))
 app.setPath('userData', join(privateRoot, 'userData'))
 app.setPath('sessionData', join(privateRoot, 'sessionData'))
 app.commandLine.appendSwitch('no-proxy-server')
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const exec = promisify(execFile)
 const spatial = new AgentMuxSpatialStateStore(join(privateRoot, 'spatial.json'))
-const config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', name: 'Browser child UI proof', hostId: 'local', kind: 'folder', path: privateRoot }],
+const config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'repo', name: 'Browser child UI proof', hostId: 'local', kind: 'folder', path: privateRoot }, ...(scenario === 'survey-alias' ? [{ id: 'alias', name: 'Research display', hostId: 'local', kind: 'folder', path: join(privateRoot, 'alias') }] : [])],
   browser: { ...structuredClone(DEFAULT_CONFIG.browser), agentAutomation: true } }
-const receipt: any = { schema: 'agentmux.unified-browser-children-ui.phase.v1', phase, pid: process.pid, passed: false,
+const receipt: any = { schema: 'agentmux.unified-browser-children-ui.phase.v1', phase, scenario, pid: process.pid, passed: false,
   calls: [], assertions: [], images: [], warnings: [], boundary: 'Actual App/Store/WorkspaceWorkbench/StableWorkbenchView/BrowserPane, production preload mappings, WorkbenchWindows shell/portal, NativeOverlayWindows, exact BVM presentations and Core spatial durability. Unrelated provider/files/settings data uses existing browser-preview APIs; no user App, Agent Session, Runtime or clipboard.' }
 let main: BrowserWindow, browsers: BrowserViewManager, windows: WorkbenchWindows, overlays: NativeOverlayWindows, profiles: BrowserProfileManager
 let activationRequestCount = 0
@@ -120,7 +121,7 @@ async function capture(window: BrowserWindow, label: string) {
   }
   }
   if (captureHold) {
-    const captureProvider = process.env.AGENTMUX_CHILD_UI_CAPTURE_PROVIDER === 'orca' ? 'orca' : 'cua'
+    const captureProvider = process.env.AGENTMUX_CHILD_UI_CAPTURE_PROVIDER === 'agentmux' ? 'agentmux' : process.env.AGENTMUX_CHILD_UI_CAPTURE_PROVIDER === 'orca' ? 'orca' : 'cua'
     const release = join(output, `${phase}-${label}-capture-release`)
     const independentFilename = `${phase}-${label}-${captureProvider}.png`
     const request = { pid: process.pid, title: window.getTitle(), browserWindowId: window.id, mediaSourceId: window.getMediaSourceId(), nativeId,
@@ -132,11 +133,17 @@ async function capture(window: BrowserWindow, label: string) {
       const bytes = await readFile(join(output, independentFilename)), signature = bytes.subarray(0, 8).toString('hex')
       const mimeType = signature === '89504e470d0a1a0a' ? 'image/png' : signature.startsWith('ffd8ff') ? 'image/jpeg' : null
       assert.ok(mimeType, 'Raw independent capture file has an original PNG or JPEG signature')
+      const provenance = captureProvider === 'agentmux' ? JSON.parse(await readFile(release, 'utf8')).provenance : undefined
+      if (captureProvider === 'agentmux') {
+        assert.equal(mimeType, 'image/png', 'AgentMux native capture retains its original PNG bytes')
+        assert.ok(provenance && typeof provenance === 'object' && !Array.isArray(provenance) && Object.keys(provenance).length > 0, 'AgentMux capture release preserves its original operation and target provenance')
+      }
       const pixels = nativeImage.createFromBuffer(bytes); assert.ok(!pixels.isEmpty(), 'Independent capture image has actual pixels')
       const filename = mimeType === 'image/jpeg' ? `${phase}-${label}-${captureProvider}.jpg` : independentFilename
       if (filename !== independentFilename) await rename(join(output, independentFilename), join(output, filename))
       receipt.images.push({ label, kind: `actual-composed-native-window-${captureProvider}`, method: `actual-composed-native-window-${captureProvider}`, filename, mimeType,
-        bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), size: pixels.getSize(), pid: process.pid, nativeId, windowId: window.id, sourceId: window.getMediaSourceId() })
+        bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), size: pixels.getSize(), pid: process.pid, nativeId, windowId: window.id, sourceId: window.getMediaSourceId(),
+        ...(provenance === undefined ? {} : { provenance }) })
       composed = true
     } catch (error: any) { receipt.warnings.push({ step: 'independent-composed-capture', provider: captureProvider, label, message: error.message }) }
     assert.ok(composed, 'The exact private window requires a real independent compositor image in capture-hold mode')
@@ -193,7 +200,7 @@ async function run() {
   ipcMain.handle('children-ui:request', async (event, operation, ...args) => {
     assert.equal(event.sender, main.webContents, 'Private fixture operations address only the original privileged Renderer')
     assert.equal(event.senderFrame?.frameToken, main.webContents.mainFrame.frameToken, 'Private fixture operations preserve their exact original frame')
-    if (operation === 'setup') return { config, phase, pageUrl }
+    if (operation === 'setup') return { config, phase, pageUrl, scenario }
     if (operation === 'spatial-read') return spatial.read()
     if (operation === 'spatial-commit') return spatial.commit(args[0])
     if (operation === 'flush') { main.webContents.session.flushStorageData(); return }
@@ -214,6 +221,10 @@ async function run() {
   handle('browser:recordInputHistory', (_event, target) => ({ scope: browsers.inputHistoryScope(target.browserId, target.profileId), entries: [], outcome: 'recorded' }))
   await main.loadFile(join(compiled, 'renderer/index.html')); main.showInactive()
   await until('real App initialized', async () => await js('!!window.childrenUi?.ready && !window.childrenUi.facts().loading'))
+  if (scenario === 'survey-alias') {
+    await surveyAliasScene({ main, browsers, windows, receipt, js, facts, until, wait, click, capture, output, pageUrl })
+    receipt.passed = true; return
+  }
   if (phase === 'seed') {
     await js('window.childrenUi.create()')
     const source = await until('source Browser', () => browsers.targets()[0])
@@ -349,6 +360,10 @@ run().catch(async error => {
   try { receipt.final = main && !main.isDestroyed() ? await facts() : null } catch {}
   await mkdir(output, { recursive: true }); await writeFile(join(output, phase + '.json'), JSON.stringify(receipt, null, 2))
   try {
+    if (scenario === 'survey-alias') {
+      for (const target of browsers?.targets() ?? []) { const contents = browsers.nativeOwner(target.id)?.view.webContents; if (contents && !contents.isDestroyed() && contents.debugger.isAttached()) contents.debugger.detach() }
+      for (const window of BrowserWindow.getAllWindows()) if (!window.webContents.isDestroyed() && window.webContents.debugger.isAttached()) window.webContents.debugger.detach()
+    }
     windows?.dispose(); overlays?.dispose(); browsers?.dispose()
     for (const window of BrowserWindow.getAllWindows()) window.destroy()
     void profiles?.dispose().catch(() => {})
