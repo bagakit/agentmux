@@ -5,6 +5,7 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const [html, ownerFile, privateRoot, evidence, stage] = process.argv.slice(2)
+const connectionProgress = process.env.AGENTMUX_CONNECTION_PROGRESS_PROOF === '1' && stage === 'restart'
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const receipt = { schema: 'agentmux.startup-agent-product-scene.v1', stage, pid: process.pid, completed: false, frames: [], inputs: [], consoleErrors: [], userRuntimeTouched: false,
@@ -30,13 +31,16 @@ app.whenReady().then(async () => {
     receipt.initialSpatial = await spatial.readForLayout()
     ipcMain.handle('startup-proof:config:get', () => owner.current)
     ipcMain.handle('startup-proof:config:save', (_event, next, expected) => owner.edit(expected, next))
-    ipcMain.handle('startup-proof:spatial:read', () => spatial.readForLayout())
+    let releaseSpatial
+    const spatialGate = connectionProgress ? new Promise(resolve => { releaseSpatial = resolve }) : Promise.resolve()
+    let spatialRequested = false
+    ipcMain.handle('startup-proof:spatial:read', async () => { spatialRequested = true; await spatialGate; return spatial.readForLayout() })
     ipcMain.handle('startup-proof:spatial:commit', (_event, input) => spatial.commit(input))
     ipcMain.handle('startup-proof:spatial:retain', (_event, values) => spatial.retainDisplayLabels(values))
     ipcMain.handle('startup-proof:flush', async () => { await win.webContents.session.flushStorageData() })
     win = new BrowserWindow({ width: 1280, height: 900, minWidth: 980, minHeight: 660, show: false,
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true,
-        backgroundThrottling: false, additionalArguments: ['--startup-proof-stage=' + stage] } })
+        backgroundThrottling: false, additionalArguments: ['--startup-proof-stage=' + stage, ...(connectionProgress ? ['--startup-proof-connection-progress'] : [])] } })
     unsubscribeSpatial = spatial.subscribe(value => { if (!win.isDestroyed()) win.webContents.send('startup-proof:spatial:changed', value) })
     win.webContents.on('console-message', details => { if (details.level === 'error') receipt.consoleErrors.push(details.message) })
     await win.loadFile(html)
@@ -62,7 +66,7 @@ app.whenReady().then(async () => {
       await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0, buttons: 0 })
       const actualCSS = await read('({width:innerWidth,height:innerHeight,pixelRatio:devicePixelRatio,scrollWidth:document.documentElement.scrollWidth})')
       assert.ok(actualCSS.scrollWidth <= actualCSS.width, 'Actual product has no page horizontal overflow')
-      const geometry = await read(`(()=>{const box=n=>{const r=n.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};return{shell:box(document.querySelector('.app-shell')),regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.checkVisibility()).map(box)}})()`)
+      const geometry = await read(`(()=>{const box=n=>{const r=n.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};return{shell:box(document.querySelector('.app-shell')||document.querySelector('[data-loading-scope="app"]')),regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.checkVisibility()).map(box)}})()`)
       assert.equal(geometry.shell.width, actualCSS.width, 'The real App fills its viewport; fixture CSS must not shrink it')
       if (name === 'workface-pending') {
         assert.equal(geometry.regions.length, 2)
@@ -75,6 +79,23 @@ app.whenReady().then(async () => {
     const node = selector => `document.querySelector(${JSON.stringify(selector)})`
     const button = label => `Array.from(document.querySelectorAll('button')).find(n=>n.textContent.trim()===${JSON.stringify(label)})`
     const startup = node('[data-loading-scope="app"]')
+    const connectionStep = 'Core to ctxmux connection'
+    const sendConnection = warning => win.webContents.send('startup-proof:runtime', {
+      type: 'core', hostId: 'local', endpointObservation: { step: connectionStep, warning },
+      event: { type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' },
+        ...(warning ? { diagnostic: { code: warning.code, message: warning.message } } : {}), evidence: { source: 'run-process', observedAt: 1 } }
+    })
+    if (connectionProgress) {
+      await until('window.startupScene?.ready && window.startupScene.state().progress.step === "saved-workspace"')
+      assert.equal(spatialRequested, true)
+      sendConnection({ hostId: 'local', step: connectionStep, scope: 'observation', availability: 'unverified',
+        code: 'CTXMUX_STARTUP_PENDING', message: 'The original Runtime is awaiting readiness. Its daemon and readiness observation have been retained.',
+        recovery: 'The same Runtime connection will complete when readiness arrives.',
+        observationOrigin: { kind: 'runtime-connection', boundary: 'core-ctxmux' } })
+      await until(`${node('[aria-label="Runtime startup observations"]')}?.textContent.includes('awaiting readiness')`)
+      for (const width of [1280, 980]) await picture('connection-startup', width)
+      releaseSpatial()
+    }
     await until('window.startupScene?.ready && window.startupScene.calls.length===2 && !window.startupScene.state().loading')
     const initial = await read('window.startupScene.state()')
     assert.equal(initial.agents.pending, true, 'Detection remains deliberately unresolved')
@@ -148,7 +169,26 @@ app.whenReady().then(async () => {
       }
       if (stage === 'restart') for (const width of [1280, 980]) await picture('workface-pending', width)
       win.setContentSize(1280, 900); await until('innerWidth===1280')
+      if (connectionProgress) {
+        const indicator = node('.global-system-notices__connection')
+        const inbox = node('.global-system-notices__details')
+        assert.equal(await read(`${indicator}?.checkVisibility()`), true, 'Pending connection is visible without opening notifications')
+        const retained = await read('window.startupScene.surface()')
+        await click(indicator)
+        await until(`${inbox}?.matches(':popover-open') && ${inbox}.dataset.state==='open'`)
+        await click(`${inbox}.querySelector('.notification-item summary')`)
+        await picture('connection-details', 1280)
+        await click(node('.global-system-notices__trigger'))
+        await until(`!${inbox}.matches(':popover-open')`)
+        assert.equal(await read(`${indicator}?.checkVisibility()`), true, 'Reading does not dismiss the unresolved connection')
+        assert.deepEqual(await read('window.startupScene.surface()'), retained)
+        sendConnection(null)
+        await until(`!${indicator}`)
+        assert.deepEqual(await read('window.startupScene.surface()'), retained)
+        receipt.connectionProgress = { loadingVisible: true, workfaceVisible: true, readKeptVisible: true, resolvedCleared: true }
+      }
       await read('window.startupScene.release()'); await until('!window.startupScene.state().agents.pending')
+      if (!connectionProgress) {
       await click(node('.window-status-bar [aria-label="Settings"]'))
       await until('!!document.querySelector(".settings-page")')
       await click(node('[data-settings-target="general"]'))
@@ -165,6 +205,7 @@ app.whenReady().then(async () => {
         const reloaded = configStore.validate(JSON.parse(await fs.readFile(configFile, 'utf8')))
         assert.equal(reloaded.copyPathsAsAbsolute, true)
         receipt.actualSettingsSaveReadback = true
+      }
       }
     }
     receipt.checkpoint = await read('window.startupScene.checkpoint()')

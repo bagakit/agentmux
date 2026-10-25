@@ -7,7 +7,7 @@ import { dirname, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
-export async function captureStartupProduct({ root, evidence, rendererMutation }) {
+export async function captureStartupProduct({ root, evidence, rendererMutation, connectionProgress = false }) {
   const fixture = resolve(root, 'apps/desktop/scripts/fixtures/startup-agent-availability')
   const desktop = resolve(root, 'apps/desktop'), compiled = resolve(evidence, 'compiled')
   const require = createRequire(resolve(desktop, 'package.json')), vitePath = require.resolve('vite')
@@ -30,12 +30,22 @@ export async function captureStartupProduct({ root, evidence, rendererMutation }
     for (const file of ['package.json', 'pnpm-lock.yaml', 'apps/desktop/package.json', 'apps/desktop/scripts/probe-process.mjs']) await bind(resolve(root, file))
     for (const entry of await readdir(fixture, { withFileTypes: true })) if (entry.isFile()) await bind(resolve(fixture, entry.name))
     const aliases = new Map()
-    for (const name of ['core', 'demand', 'layout', 'identity']) {
-      const directory = resolve(root, 'packages', name), pkg = JSON.parse(await bind(resolve(directory, 'package.json')))
+    for (const name of ['core', 'demand', 'layout', 'identity', 'host', 'client-ui']) {
+      const directory = resolve(root, name === 'host' ? 'apps' : 'packages', name), pkg = JSON.parse(await bind(resolve(directory, 'package.json')))
       for (const [key, value] of Object.entries(pkg.exports)) {
-        const target = typeof value === 'string' ? value : value.import
+        const target = typeof value === 'string' ? value : value.browser ?? value.import
         if (!target) continue
         aliases.set('@agentmux/' + name + (key === '.' ? '' : key.slice(1)), resolve(directory, target.replace('./dist/src/', './src/').replace('./dist/', './src/').replace(/\.js$/u, '.ts')))
+      }
+    }
+    aliases.set('@agentmux/identity/runtime', resolve(root, 'packages/identity/src/runtime-entry.ts'))
+    aliases.set('@agentmux/identity/runtime-source', resolve(root, 'packages/identity/dist/runtime-source.js'))
+    function resolveAlias(name) {
+      if (aliases.has(name)) return aliases.get(name)
+      for (const [pattern, replacement] of [...aliases].sort(([a], [b]) => b.length - a.length)) {
+        if (!pattern.includes('*')) continue
+        const [prefix, suffix] = pattern.split('*')
+        if (name.startsWith(prefix) && name.endsWith(suffix)) return replacement.replace('*', name.slice(prefix.length, name.length - suffix.length))
       }
     }
     aliases.set('@agentmux/client-ui/theme', resolve(root, 'packages/client-ui/src/theme/index.ts'))
@@ -43,7 +53,7 @@ export async function captureStartupProduct({ root, evidence, rendererMutation }
     await bind(resolve(root, 'packages/client-ui/package.json'))
     await esbuild({ entryPoints: [resolve(fixture, 'owner-entry.ts')], outfile: resolve(compiled, 'owner.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external', logLevel: 'error',
       plugins: [{ name: 'bind-actual-startup-durable-owners', setup(builder) {
-        builder.onResolve({ filter: /^@agentmux\// }, args => args.path === '@agentmux/core' ? { path: resolve(fixture, 'core-entry.ts') } : aliases.has(args.path) ? { path: aliases.get(args.path) } : undefined)
+        builder.onResolve({ filter: /^@agentmux\// }, args => args.path === '@agentmux/core' ? { path: resolve(fixture, 'core-entry.ts') } : resolveAlias(args.path) ? { path: resolveAlias(args.path) } : undefined)
         builder.onResolve({ filter: /^[^./]/ }, args => {
           assert.notEqual(args.path, '@ctxmux/sdk', 'A startup UI proof never loads a Runtime SDK')
           if (args.path === 'electron' || isBuiltin(args.path) || aliases.has(args.path)) return
@@ -60,7 +70,8 @@ export async function captureStartupProduct({ root, evidence, rendererMutation }
     const nativeRoot = dirname(coreRequire.resolve('fs-native-extensions/package.json'))
     await bind(resolve(nativeRoot, 'package.json'))
     await mkdir(resolve(compiled, 'node_modules')); await symlink(nativeRoot, resolve(compiled, 'node_modules/fs-native-extensions'), 'dir')
-    const alias = [...aliases.entries()].map(([name, replacement]) => ({ find: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&') + '$'), replacement }))
+    const alias = [...aliases.entries()].sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)
+      .map(([name, replacement]) => ({ find: new RegExp('^' + name.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('(.*)') + '$'), replacement: replacement.replace('*', '$1') }))
     for (const name of ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom/client']) alias.push({ find: new RegExp('^' + name + '$'), replacement: require.resolve(name) })
     const dialog = createRequire(createRequire(resolve(root, 'packages/client-ui/package.json')).resolve('@radix-ui/react-dialog'))
     for (const name of ['@radix-ui/react-dismissable-layer', '@radix-ui/react-focus-scope']) alias.push({ find: name, replacement: dialog.resolve(name) })
@@ -81,8 +92,10 @@ export async function captureStartupProduct({ root, evidence, rendererMutation }
         }
       } }],
       build: { target: 'esnext', outDir: resolve(compiled, 'renderer'), sourcemap: false, emptyOutDir: false } })
-    for (const stage of ['control', 'failure-restart', 'restart']) {
+    const stages = connectionProgress ? ['control', 'restart'] : ['control', 'failure-restart', 'restart']
+    for (const stage of stages) {
       const lines = [], env = { ...process.env, AGENTMUX_STATE_DIRECTORY: resolve(privateRoot, 'agentmux-state'), AGENTMUX_RUNTIME_DIRECTORY: resolve(privateRoot, 'runtime') }
+      if (connectionProgress) env.AGENTMUX_CONNECTION_PROGRESS_PROOF = '1'
       delete env.ELECTRON_RUN_AS_NODE
       const facts = await runProbeProcess(require('electron'), [resolve(fixture, 'main.cjs'), resolve(compiled, 'renderer/index.html'), resolve(compiled, 'owner.mjs'), privateRoot, evidence, stage],
         { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 120_000, onLine: line => lines.push(line) })
@@ -93,11 +106,15 @@ export async function captureStartupProduct({ root, evidence, rendererMutation }
       assert.equal(scene.completed, true); frames.push(...scene.frames)
     }
     const scenes = await Promise.all(phases.map(phase => readFile(resolve(evidence, phase.stage + '-scene.json')).then(JSON.parse)))
-    assert.equal(new Set(scenes.map(scene => scene.pid)).size, 3, 'Three independent Electron main processes')
+    assert.equal(new Set(scenes.map(scene => scene.pid)).size, stages.length, 'Independent Electron main processes')
     for (const scene of scenes.slice(1)) assert.deepEqual(scenes[0].checkpoint.surface, scene.checkpoint.surface)
-    assert.equal(scenes[1].failureRecovery.pendingCauseRetained, true); assert.equal(scenes[1].failureRecovery.clearedAfterSuccessfulChecks, true)
-    assert.equal(scenes[2].restart.noReseed, true); assert.equal(scenes[2].actualSettingsSaveReadback, true)
-    assert.equal(frames.length, 5, 'Normal/narrow restored workface and General settings plus actual failed-check System notification captures are nonempty')
+    if (!connectionProgress) {
+      assert.equal(scenes[1].failureRecovery.pendingCauseRetained, true); assert.equal(scenes[1].failureRecovery.clearedAfterSuccessfulChecks, true)
+    }
+    assert.equal(scenes.at(-1).restart.noReseed, true)
+    if (!connectionProgress) assert.equal(scenes.at(-1).actualSettingsSaveReadback, true)
+    assert.equal(frames.length, 5, 'Normal/narrow restored workface and loading/settings plus observation details captures are nonempty')
+    if (connectionProgress) assert.deepEqual(scenes.at(-1).connectionProgress, { loadingVisible: true, workfaceVisible: true, readKeptVisible: true, resolvedCleared: true })
     assert.ok(Object.keys(inputs).some(file => file.endsWith('/App.tsx')))
     assert.ok(Object.keys(inputs).some(file => file.endsWith('/StartupLoadingSurface.tsx')))
     assert.ok(Object.keys(inputs).some(file => file.endsWith('/GeneralSettingsPane.tsx')))
