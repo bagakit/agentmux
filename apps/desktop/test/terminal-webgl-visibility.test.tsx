@@ -12,7 +12,8 @@ import type { Terminal as HeadlessTerminal } from '@xterm/headless'
 import type { IBufferRange, ISelectionSnapshot } from '@xterm/xterm'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
-import { HIDDEN_LIVE_OUTPUT_WINDOW_MS, TerminalView } from '../src/renderer/src/components/TerminalView'
+import { TerminalView } from '../src/renderer/src/components/TerminalView'
+import { yieldTerminalWork } from '@agentmux/client-ui/terminal/replay'
 import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
 import * as terminalResourceOwners from '../src/renderer/src/lib/terminal-resource-owners'
 
@@ -34,6 +35,7 @@ const fixture = vi.hoisted(() => ({
   webgl: [] as FixtureWebgl[],
   receive: null as ((event: RuntimeEvent) => void) | null,
   attach: vi.fn(),
+  refreshAttachment: vi.fn(),
   detach: vi.fn(),
   unsubscribe: vi.fn(),
   resize: vi.fn(),
@@ -107,6 +109,7 @@ vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class {
 } }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
   attach: fixture.attach,
+  refreshAttachment: fixture.refreshAttachment,
   detach: fixture.detach,
   resize: fixture.resize,
   write: fixture.write,
@@ -169,6 +172,7 @@ beforeEach(() => {
   fixture.renderDispose.mockReset()
   fixture.unsubscribe.mockReset()
   fixture.detach.mockReset()
+  fixture.refreshAttachment.mockReset()
   fixture.write.mockResolvedValue(undefined)
   fixture.selection = undefined
   fixture.snapshot = undefined
@@ -191,10 +195,10 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-async function render(visible: boolean) {
+async function render(visible: boolean, observation: Pick<Parameters<typeof TerminalView>[0], 'onObservationRefresh' | 'onRefreshSession'> = {}) {
   await act(async () => {
     root!.render(<WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null, reference, surface: 'space' }}>
-      <TerminalView session={session} themeId="graphite" interactiveResize={false} visible={visible} autoFocus={false} linkOrigin={linkOrigin} />
+      <TerminalView session={session} themeId="graphite" interactiveResize={false} visible={visible} autoFocus={false} linkOrigin={linkOrigin} {...observation} />
     </WorkbenchPresentationContext.Provider>)
   })
   await act(async () => {
@@ -549,38 +553,89 @@ it('mounts an initially hidden terminal without allocating a GPU context', async
   expect(fixture.terminals[0]!.refresh).toHaveBeenCalledWith(0, 23)
 })
 
-function liveOutput(data: string, startByte: number): RuntimeEvent {
-  return { type: 'core', hostId: 'local', event: { type: 'terminal-output', run: session.control.run, data,
-    dataBytes: new TextEncoder().encode(data), evidence: { outputByteRange: { startByte, endByte: startByte + data.length } } } } as RuntimeEvent
+function liveOutput(data: string | Uint8Array, startByte: number): RuntimeEvent {
+  const dataBytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
+  return { type: 'core', hostId: 'local', event: { type: 'terminal-output', run: session.control.run,
+    data: typeof data === 'string' ? data : new TextDecoder().decode(data), dataBytes,
+    evidence: { outputByteRange: { startByte, endByte: startByte + dataBytes.byteLength } } } } as RuntimeEvent
 }
 
-it('parses a hidden terminal status-redraw burst as one bounded write, in order, without losing a byte', async () => {
+it('sends accepted hidden output to the original write owner while ordinary timers are suspended', async () => {
   await render(false)
   const terminal = fixture.terminals[0]!
-  const frames = Array.from({ length: 40 }, (_, index) => `\r frame ${String(index).padStart(2, '0')} `)
-  let byte = 7
-  const received = performance.now()
-  await act(async () => { for (const frame of frames) { fixture.receive!(liveOutput(frame, byte)); byte += frame.length } })
-  expect(terminal.written, 'hidden bytes wait for the bounded window instead of one parse task per redraw').toEqual(['before '])
-  await act(async () => { await vi.waitFor(() => expect(terminal.completed.join('')).toBe('before ' + frames.join('')),
-    { timeout: HIDDEN_LIVE_OUTPUT_WINDOW_MS * 6 }) })
-  expect(performance.now() - received, 'parsing waits for the window, not for the next reveal').toBeGreaterThanOrEqual(HIDDEN_LIVE_OUTPUT_WINDOW_MS - 50)
-  expect(terminal.written.length, 'the burst coalesces into one write').toBe(2)
+  const text = Array.from({ length: 40 }, (_, index) => `\r frame ${index} 中🙂\u001b[31mred\u001b[0m `).join('')
+  const data = new TextEncoder().encode(text)
+  let events = 0
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    await act(async () => {
+      for (let offset = 0; offset < data.byteLength; offset += 7) {
+        fixture.receive!(liveOutput(data.subarray(offset, offset + 7), 7 + offset))
+        events++
+      }
+      // A FIFO barrier on the original host-task owner; no ordinary timer advances.
+      await yieldTerminalWork()
+    })
+    expect(events).toBeGreaterThan(1)
+    expect(terminal.written.join(''), 'accepted hidden bytes must reach the original write owner without advancing a timer').toBe('before ' + text)
+    expect(terminal.written).toHaveLength(2)
+  } finally {
+    // Let the headless parser finish its own callback before releasing this fixture.
+    await act(async () => { await vi.runAllTimersAsync() })
+    vi.useRealTimers()
+  }
+  await act(async () => { await vi.waitFor(() => expect(terminal.completed.join('')).toBe('before ' + text)) })
   expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({ visible: false, liveReady: true, acceptsInput: true, queuedBytes: 0 })
+  if (process.env.AGENTMUX_TERMINAL_T084_SAMPLES) appendFileSync(process.env.AGENTMUX_TERMINAL_T084_SAMPLES,
+    JSON.stringify({ phase: 'hidden-no-timer', events, bytes: data.byteLength, writes: terminal.written.length - 1,
+      originalBytesPreserved: terminal.completed.join('') === 'before ' + text, ordinaryTimerAdvancesBeforeWrite: 0 }) + '\n')
 })
 
-it('parses deferred hidden bytes as soon as the terminal becomes visible', async () => {
+it('refresh waits for accepted hidden bytes and reveal preserves the same original terminal', async () => {
+  let refresh: (() => Promise<void>) | null = null
+  const data = 'hidden 中🙂'
+  const endByte = 7 + new TextEncoder().encode(data).byteLength
+  const observation = { onObservationRefresh: (value: (() => Promise<void>) | null) => { refresh = value },
+    onRefreshSession: async () => ({ ...session, latestOutputBytes: endByte }) }
+  await render(false, observation)
+  const terminal = fixture.terminals[0]!
+  fixture.refreshAttachment.mockImplementation(async (control, attachmentId, cursor) => {
+    expect(terminal.completed).toContain(data)
+    expect(control).toEqual(session.control)
+    expect(attachmentId).toBe('attachment-retained')
+    expect(cursor).toBe(endByte)
+    return { attachmentId, currentSize: { cols: 80, rows: 24 }, session: { ...session, latestOutputBytes: endByte },
+      terminal: { type: 'unavailable', reason: 'source_gap' }, resizeRevision: 0, gap: null, replay: [] }
+  })
+  await act(async () => {
+    fixture.receive!(liveOutput(data, 7))
+    expect(refresh).not.toBeNull()
+    await refresh!()
+  })
+  expect(fixture.refreshAttachment).toHaveBeenCalledOnce()
+  await render(true, observation)
+  expect(fixture.terminals).toEqual([terminal])
+  expect(fixture.attach).toHaveBeenCalledOnce()
+  expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('before ' + data)
+  fixture.receive!(liveOutput(' now', endByte))
+  await act(async () => { await vi.waitFor(() => expect(terminal.completed).toContain(' now')) })
+  expect(terminal.written.join('')).toBe('before ' + data + ' now')
+})
+
+it('retires a queued hidden drain before its original host task can write', async () => {
   await render(false)
   const terminal = fixture.terminals[0]!
-  await act(async () => { fixture.receive!(liveOutput('waiting', 7)) })
+  await act(async () => {
+    fixture.receive!(liveOutput('retired bytes', 7))
+    root!.unmount()
+    root = null
+    await yieldTerminalWork()
+  })
   expect(terminal.written).toEqual(['before '])
-  const revealed = performance.now()
-  await render(true)
-  await act(async () => { await vi.waitFor(() => expect(terminal.completed).toContain('waiting')) })
-  expect(performance.now() - revealed, 'reveal does not wait out the hidden window').toBeLessThan(HIDDEN_LIVE_OUTPUT_WINDOW_MS)
-  expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('before waiting')
-  fixture.receive!(liveOutput(' now', 14))
-  await act(async () => { await vi.waitFor(() => expect(terminal.completed).toContain(' now')) })
+  expect(terminal.dispose).toHaveBeenCalledOnce()
+  expect(fixture.detach).toHaveBeenCalledExactlyOnceWith('attachment-retained')
+  expect(fixture.unsubscribe).toHaveBeenCalledOnce()
+  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 0, terminalAddons: 0, terminalListeners: 0 })
 })
 
 it('reports a visible terminal awaiting attachment as unready, then observes the same Run becoming interactive', async () => {
