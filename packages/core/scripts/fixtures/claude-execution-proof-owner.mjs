@@ -47,6 +47,8 @@ async function stop() {
   try {
     rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: receipt.socketPath } }); client = await connectHostedAgentMux({ rpc }); await client.connectRuntime()
     assert.equal(client.runtimeOwnerIdentity().runtimeId, receipt.owner.runtimeId)
+    const running = new Set((await client.listRuns()).filter(run => run.state === 'running').map(run => run.runId))
+    for (const session of await client.readAgentSessions()) if (running.has(session.run.runId)) await client.stopAgent(session.agentSessionId, session.run).catch(error => errors.push(String(error)))
     for (const run of await client.listRuns()) if (run.state === 'running') await client.stopTerminal({ runId: run.runId }).catch(error => errors.push(String(error)))
   } catch (error) { errors.push(String(error)) }
   await client?.dispose(); await rpc?.dispose()

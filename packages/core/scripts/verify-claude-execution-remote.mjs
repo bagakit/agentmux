@@ -89,7 +89,9 @@ async function assertResourceMissing(owner, file) {
 }
 async function runDirection(direction) {
   const evidence = join(root, direction); await mkdir(evidence)
-  const localBase = join(root, direction + '-local'), remoteBase = join(remote.root, 'run-' + randomUUID())
+  // AF_UNIX endpoints have a small platform path budget. Keep the private
+  // runtime owner short; its exact identity is retained in every result/receipt.
+  const localBase = join(root, direction + '-local'), remoteBase = '/tmp/amx-claude-run-' + randomUUID().slice(0, 12)
   const resourceWorkspace = join(direction === 'remote-agent' ? localBase : remoteBase, 'workspace')
   const model = await createClaudeExecutionProofModel({ root: evidence, workspace: resourceWorkspace, nativeTools: process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1' }); models.push(model)
   const remotePort = Number((await ssh([remote.nodePath, '-e', 'const net=require("net");const s=net.createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'])).trim())
@@ -118,6 +120,7 @@ async function runDirection(direction) {
     assert.equal(created.code, 0, JSON.stringify(created.packet)); const first = created.packet.result.session; assert.equal(first.agentSessionId, agentSessionId)
     await wait(async () => (await resourceRead(resource, join(resourceWorkspace, 'background.txt')).catch(() => null)) === 'background-complete', 'Physical resource effects')
     assert.equal(await resourceRead(resource, join(resourceWorkspace, 'note.txt')), 'modified\n'); assert.equal(await resourceRead(resource, join(resourceWorkspace, 'effect-count.txt')), 'once\n')
+    assert(JSON.stringify(JSON.parse(await resourceRead(resource, join(resourceWorkspace, 'fixture.ipynb'))).cells).includes('modified'))
     await assertResourceMissing(agent, join(agent.base, 'workspace/note.txt'))
     let original
     await wait(async () => { original = await agent.client.refreshAgentSession(agentSessionId, first.run); return original.nativeHandle?.kind === 'provider' }, 'Exact physical Agent identity')
@@ -135,6 +138,10 @@ async function runDirection(direction) {
     const replay = await agent.client.readRunReplay({ runId: helpers.frontend.runId }, 0, 'raw'); assert.equal(replay.gap, null)
     const text = Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))).toString()
     const frames = text.slice(0, text.lastIndexOf('\n') + 1).split('\n').filter(Boolean).map(line => JSON.parse(line))
+    for (const step of model.steps) {
+      const routed = frames.filter(frame => frame.type === 'request' && frame.payload?.method === 'tools/call' && frame.payload.params?.name === step.name && Object.entries(step.input).every(([key, value]) => frame.payload.params.arguments?.[key] === value))
+      assert.equal(routed.length, 1, 'Every original native physical resource tool must cross its binding: ' + step.id)
+    }
     const originalEffect = frames.filter(frame => frame.type === 'request' && frame.payload?.method === 'tools/call' && frame.payload.params?.name === 'Bash' && frame.payload.params.arguments?.command === model.steps.find(step => step.id === 'toolu_remote_effect').input.command)
     assert.equal(originalEffect.length, 1)
     const operation = await cli(coordinator, ['agent', 'execution', 'inspect', '--host', resource.name, '--binding', bindingId, '--generation', originalEffect[0].generation, '--request-json', JSON.stringify(originalEffect[0].payload.id)], receipts)
@@ -165,6 +172,10 @@ async function runDirection(direction) {
     const resumed = await agent.client.resumeAgent({ agentSessionId, operationId: randomUUID(), prompt: 'PRIVATE_CLAUDE_RESUMED_CONTEXT: confirm original resource and conversation.' })
     assert.equal(resumed.agentSessionId, agentSessionId); assert.equal(resumed.nativeHandle?.sessionId, nativeId)
     await wait(async () => (await resourceRead(agent, transcript)).includes(model.finalNames.resumed), 'Physical native conversation resume')
+    await writeFile(join(evidence, 'native-transcript.jsonl'), await resourceRead(agent, transcript), { mode: 0o600 })
+    const resumedRequest = model.modelRequests.find(value => JSON.stringify(value.body.messages).includes('PRIVATE_CLAUDE_RESUMED_CONTEXT'))
+    assert(JSON.stringify(resumedRequest.body.messages).includes('PRIVATE_CLAUDE_ORIGINAL_CONTEXT'))
+    assert(JSON.stringify(resumedRequest.body.messages).includes(model.finalNames.first))
     assert.equal(await resourceRead(resource, join(resourceWorkspace, 'effect-count.txt')), 'once\n')
     const afterReplay = await agent.client.readRunReplay({ runId: helpers.frontend.runId }, 0, 'raw'); assert.equal(afterReplay.gap, null)
     const afterText = Buffer.concat(afterReplay.replay.map(chunk => Buffer.from(chunk.dataBytes))).toString()
