@@ -1,3 +1,4 @@
+import { TopicPromotionOwner } from './topic-promotion.js'
 import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { constants, lstat, open, readdir, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -37,6 +38,7 @@ function isOriginalDocument(path: string): boolean {
 
 export type TopicSpatialInspection = {
   zoneId: string; categorySpaceIds: string[]; chatIds: string[]; spatialRevision: number;
+  moteSpaceId?: string
   contentIdentity?: string
   contentKind?: 'topic' | 'mote'
 }
@@ -44,6 +46,8 @@ export type TopicSpatialIdentity = Pick<ScratchTopicSnapshot, 'id' | 'directoryP
 /** Borrows the original Core graph; content metadata never copies membership. */
 export interface TopicSpatialPort {
   inspect(topic: TopicSpatialIdentity): Promise<TopicSpatialInspection>
+  promotedTopicIds(): Promise<string[]>
+  promoteTopic(topic: ScratchTopicSnapshot, source: { zoneId: string; contentIdentity: string }): Promise<TopicSpatialInspection>
   ensureCategory(category: TopicCategory): Promise<unknown>
   ensureTopic(topic: ScratchTopicSnapshot, categoryId?: string): Promise<TopicSpatialInspection>
   moveTopic(topicId: string, categoryId: string, expectedRevision: number): Promise<TopicSpatialInspection & { previousCategorySpaceIds: string[] }>
@@ -92,11 +96,12 @@ async function syncDirectory(path: string): Promise<void> {
 /** The same filesystem and revision-aware save owners are consumed by GUI and public CUI. */
 export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
   private spatial?: TopicSpatialPort
+  private promotion?: TopicPromotionOwner
   private originalFiles?: Pick<FileReadOwner, 'list' | 'read'>
-  constructor(private readonly scratch: Pick<ScratchTopics, 'list' | 'read' | 'ensure' | 'topicAppearanceIdentity'>,
+  constructor(private readonly scratch: Pick<ScratchTopics, 'list' | 'read' | 'ensure' | 'topicAppearanceIdentity' | 'prepareMotePromotion' | 'promoteMoteDirectory'>,
     private readonly files: Pick<WorkspaceFiles, 'write'>, private readonly workspace: () => WorkspaceRecord,
     private readonly history?: TopicSearchHistoryOwner) {}
-  setSpatialPort(port: TopicSpatialPort): void { this.spatial = port }
+  setSpatialPort(port: TopicSpatialPort): void { this.spatial = port; this.promotion = new TopicPromotionOwner(this.scratch, () => this.scope(), port) }
   setFileReadPort(port: Pick<FileReadOwner, 'list' | 'read'>): void { this.originalFiles = port }
   private scope(): WorkspaceRecord {
     const workspace = this.workspace()
@@ -196,18 +201,18 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
   private async confirmKnowledgeTopic(topic: ScratchTopicSnapshot): Promise<TopicSpatialInspection> {
     if (topic.readError) throw new AgentMuxError('This content scope is unconfirmed. Repair the original metadata before reading its knowledge; the original files and work remain available.', 'TOPIC_SCOPE_UNCONFIRMED')
     const original = await this.spatialPort().inspect(topic)
-    if (original.contentKind !== 'topic') throw new AgentMuxError('The original Topic kind is not confirmed. Refresh its original spatial identity before this knowledge operation; content, workfaces and healthy Agents remain available.', 'TOPIC_IDENTITY_UNCONFIRMED')
+    if (original.contentKind !== 'topic' && original.contentKind !== 'mote') throw new AgentMuxError('The original Topic kind is not confirmed. Refresh its original spatial identity before this knowledge operation; content, workfaces and healthy Agents remain available.', 'TOPIC_IDENTITY_UNCONFIRMED')
     return original
   }
   private async requireKnowledgeTopic(topicId: string): Promise<ScratchTopicSnapshot | null> {
-    const topic = await this.requireTopic(topicId)
+    const topic = await this.scratch.read(this.scope(), topicId)
     if (topic) await this.confirmKnowledgeTopic(topic)
     return topic
   }
   private topicFact(topic: ScratchTopicSnapshot, spatial: TopicSpatialInspection): KnowledgeTopic {
     return { topicId: topic.id, hostId: this.scope().hostId, zoneId: spatial.zoneId,
       directoryPath: scratchTopicPhysicalPath(this.scope(), topic), title: topic.title, summary: topic.summary,
-      categorySpaceIds: spatial.categorySpaceIds, chatIds: spatial.chatIds, spatialRevision: spatial.spatialRevision,
+      categorySpaceIds: spatial.categorySpaceIds, chatIds: spatial.chatIds, spatialRevision: spatial.spatialRevision, ...(spatial.contentKind ? { contentKind: spatial.contentKind } : {}),
       ...(topic.readError ? { readError: topic.readError } : {}) }
   }
   private async knowledgeDirectory(topic: ScratchTopicSnapshot, create = false): Promise<string> {
@@ -331,9 +336,14 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
     context?.signal?.throwIfAborted()
     const discovery = topicId ? null : await this.listTopicSnapshots()
     for (const message of discovery?.issues ?? []) unavailable.push(issue(new AgentMuxError(message, 'TOPIC_SCOPE_UNCONFIRMED')))
-    const exact = topicId ? await this.requireTopic(topicId) : null
-    if (topicId && !exact) throw new AgentMuxError('The exact Topic does not exist. Choose an existing ordinary Topic before searching its knowledge.', 'TOPIC_NOT_FOUND')
-    const topics = topicId ? [exact!] : discovery!.filter(topic => !this.isMote(topic))
+    const exact = topicId ? await this.scratch.read(this.scope(), topicId) : null
+    if (topicId && !exact) throw new AgentMuxError('The exact Topic does not exist. Choose existing exact Topic or Mote content before searching its knowledge.', 'TOPIC_NOT_FOUND')
+    let promoted = new Set<string>()
+    if (discovery?.some(topic => this.isMote(topic))) {
+      try { promoted = new Set(await this.spatialPort().promotedTopicIds()) }
+      catch (cause) { unavailable.push(issue(cause)) }
+    }
+    const topics = topicId ? [exact!] : discovery!.filter(topic => !this.isMote(topic) || promoted.has(topic.id))
     for (const topic of topics) {
       context?.signal?.throwIfAborted()
       if (!this.canContinue(topic, budget, entries.length + documents.length, limit, unavailable)) break
@@ -417,18 +427,25 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
         if (p.categoryId && (!category || category.readError)) throw new AgentMuxError('The exact Topic Category is unavailable. Existing Topics remain available through topic ls.', 'TOPIC_CATEGORY_UNAVAILABLE')
         const topics: KnowledgeTopic[] = [], unavailable = []
         for (const snapshot of await this.listTopicSnapshots()) {
-          if (this.isMote(snapshot) || p.topicId && snapshot.id !== p.topicId) continue
+          if (p.topicId && snapshot.id !== p.topicId) continue
           try {
             const topic = this.topicFact(snapshot, await this.spatialPort().inspect(snapshot))
-            if (!category || topic.categorySpaceIds.includes(category.spaceId)) topics.push(topic)
+            if ((!this.isMote(snapshot) || topic.categorySpaceIds.length > 0 || p.topicId) && (!category || topic.categorySpaceIds.includes(category.spaceId))) topics.push(topic)
             if (snapshot.readError) unavailable.push(issue(new Error(snapshot.readError), snapshot.id))
           } catch (error) { unavailable.push(issue(error, snapshot.id)) }
         }
         result = { topics, unavailable }; break
       }
       case 'topic.inspect': {
-        const topic = await this.requireTopic(p.topicId as string)
+        const topic = await this.scratch.read(this.scope(), p.topicId as string)
         result = { topic: topic ? this.topicFact(topic, await this.spatialPort().inspect(topic)) : null, unavailable: [] }; break
+      }
+      case 'topic.promote.inspect':
+      case 'topic.promote.apply': {
+        this.spatialPort()
+        result = { promotion: method === 'topic.promote.apply'
+          ? await this.promotion!.apply(p.topicId as string, p.operationId as string)
+          : await this.promotion!.inspect(p.topicId as string, p.operationId as string | undefined) }; break
       }
       case 'topic.create': {
         let topic = await this.requireTopic(p.topicId as string)

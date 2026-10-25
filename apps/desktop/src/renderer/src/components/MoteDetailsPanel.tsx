@@ -1,3 +1,4 @@
+import { TopicKnowledgePanel } from './TopicKnowledgePanel'
 import { MoteQuickMode } from './MoteQuickMode'
 import { useMoteSpace } from './MoteSpaceFrame'
 import { MoteDiscussions } from './MoteDiscussions'
@@ -178,6 +179,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
   }, [active, revision, tree.rootCache?.loading])
   const [selected, setSelected] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false)
   const [reading, setReading] = useState(false)
   const [preferencesOpen, setPreferencesOpen] = useState(false)
   const noteList = useRef<HTMLDivElement>(null)
@@ -274,6 +276,10 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
     </div>
     <div className="mote-details__ideas" hidden={section !== 'ideas'} data-reading={reading}>
       <header className="mote-ideas__heading"><h3>Saved ideas</h3>{onCreateNote ? <button type="button" className="small-button" onClick={onCreateNote}><ThemeActionCreateNoteIcon size={14} /> New note</button> : null}</header>
+      <details className="mote-ideas__knowledge" onToggle={event => setKnowledgeOpen(event.currentTarget.open)}>
+        <summary><ThemeSearchIcon size={14} /><span>知识与来源</span><ThemeNavigationDownIcon size={14} /></summary>
+        {knowledgeOpen ? <TopicKnowledgePanel workspace={scope.workspace} topic={scope.topic} active={ideasActive && knowledgeOpen} /> : null}
+      </details>
       <MoteIdeaControls scope={scope} reference={reference} material={note?.path === selected && !issue && !loading ? note : null} onOpenPath={onOpenPath} active={ideasActive} />
       <div className="mote-ideas__browser">
       <aside className="mote-ideas__library" aria-label="Saved notes">

@@ -62,20 +62,55 @@ export class TopicSpatialOwner implements TopicSpatialPort {
   async inspect(topic: TopicSpatialIdentity) {
     const workspace = this.ports.workspace()
     const state = await this.ports.state.read()
-    if (state?.graph.spaces.some(space => space.kind === 'mote' && space.topicId === topic.id))
-      error('The original Core identity belongs to a Mote. Its workface and content are retained.', 'TOPIC_TARGET_IS_MOTE')
     const original = state?.graph.zones.filter(zone => { const origin = state.graph.resources['zone:' + zone.zoneId]; return origin && typeof origin === 'object' && !Array.isArray(origin) && origin.topicId === topic.id && zone.workspaceId === workspace.id }) ?? []
     if (topic.readError && original.length !== 1) error('The original Topic identity is currently unconfirmed. Its workface and content are retained.', 'TOPIC_IDENTITY_UNCONFIRMED')
     const zoneId = topic.readError ? original[0]!.zoneId : topicContentZoneId(workspace, topic)
     const origin = state?.graph.resources['zone:' + zoneId]
-    if (origin && typeof origin === 'object' && !Array.isArray(origin) && origin.contentKind === 'mote')
-      error('The original Core identity belongs to a Mote. Its workface and content are retained.', 'TOPIC_TARGET_IS_MOTE')
     const ids = new Set(state ? categoriesFromSpatial(state.graph).map(category => category.spaceId) : [])
-    return { zoneId, categorySpaceIds: state?.graph.bindings.filter(binding => binding.zoneId === zoneId && ids.has(binding.spaceId)).map(binding => binding.spaceId) ?? [],
+    const contentId = topic.readError && origin && typeof origin === 'object' && !Array.isArray(origin) && typeof origin.spaceId === 'string'
+      ? origin.spaceId : topicContentSpaceId(workspace, topic)
+    const moteSpace = state?.graph.spaces.find(space => space.spaceId === contentId && space.kind === 'mote' && space.topicId === topic.id && space.hostId === workspace.hostId)
+    const moteBinding = moteSpace && state?.graph.bindings.some(binding => binding.spaceId === contentId && binding.zoneId === zoneId)
+    return { zoneId, ...(moteBinding ? { moteSpaceId: contentId } : {}), categorySpaceIds: state?.graph.bindings.filter(binding => binding.zoneId === zoneId && ids.has(binding.spaceId)).map(binding => binding.spaceId) ?? [],
       chatIds: state?.graph.tabs.filter(tab => tab.zoneId === zoneId).map(tab => tab.tabId) ?? [], spatialRevision: state?.revision ?? 0,
-      ...(origin && typeof origin === 'object' && !Array.isArray(origin) && origin.contentKind === 'topic' &&
+      ...(origin && typeof origin === 'object' && !Array.isArray(origin) && (origin.contentKind === 'topic' || origin.contentKind === 'mote') &&
         origin.topicId === topic.id && origin.workspaceId === workspace.id && original.some(zone => zone.zoneId === zoneId)
-        ? { contentKind: 'topic' as const } : {}) }
+        ? { contentKind: origin.contentKind as 'topic' | 'mote', contentIdentity: contentId } : {}) }
+  }
+  /** One graph observation selects promoted entries before knowledge search charges its content budget. */
+  async promotedTopicIds(): Promise<string[]> {
+    const state = await this.ports.state.read()
+    if (!state) error('The original Topic membership is unconfirmed. Existing exact knowledge remains available.', 'TOPIC_IDENTITY_UNCONFIRMED')
+    const categoryIds = new Set(categoriesFromSpatial(state.graph).map(category => category.spaceId))
+    const categoryZones = new Set(state.graph.bindings.filter(binding => categoryIds.has(binding.spaceId)).map(binding => binding.zoneId))
+    return state.graph.zones.filter(zone => zone.workspaceId === this.ports.workspace().id && categoryZones.has(zone.zoneId)).flatMap(zone => {
+      const origin = state.graph.resources['zone:' + zone.zoneId]
+      return origin && typeof origin === 'object' && !Array.isArray(origin) && (origin.contentKind === 'topic' || origin.contentKind === 'mote') && typeof origin.topicId === 'string' ? [origin.topicId] : []
+    })
+  }
+  /** Register a personality on the same content and Zone; every workface and execution stays intact. */
+  async promoteTopic(topic: ScratchTopicSnapshot, source: { zoneId: string; contentIdentity: string }): Promise<TopicSpatialInspection> {
+    const workspace = this.ports.workspace(), state = await this.ports.state.read()
+    const zoneId = topicContentZoneId(workspace, topic), spaceId = topicContentSpaceId(workspace, topic)
+    if (zoneId !== source.zoneId || spaceId !== source.contentIdentity)
+      error('The original promotion identity changed. Inspect this operation; original work is retained.', 'TOPIC_PROMOTION_IDENTITY_CONFLICT')
+    const graph = structuredClone(state?.graph ?? emptyGraph()), zone = graph.zones.find(item => item.zoneId === zoneId)
+    const origin = graph.resources['zone:' + zoneId]
+    if (!zone || zone.workspaceId !== workspace.id || zone.hostId !== workspace.hostId || !origin || typeof origin !== 'object' || Array.isArray(origin) ||
+      origin.topicId !== topic.id || origin.workspaceId !== workspace.id || (origin.contentKind !== 'topic' && origin.contentKind !== 'mote'))
+      error('The original Topic Zone is unconfirmed. Inspect the same operation after restoring its spatial owner; all work is retained.', 'TOPIC_IDENTITY_UNCONFIRMED')
+    const existing = graph.spaces.find(item => item.spaceId === spaceId)
+    if (existing && (existing.topicId !== topic.id || existing.hostId !== workspace.hostId || (existing.kind !== 'topic' && existing.kind !== 'mote')))
+      error('The original Mote Space conflicts with another object. No workface was changed.', 'TOPIC_PROMOTION_IDENTITY_CONFLICT')
+    const mote = { spaceId, kind: 'mote' as const, topicId: topic.id, name: topic.title, hostId: workspace.hostId,
+      directoryPath: scratchTopicPhysicalPath(workspace, topic), projectId: null }
+    if (existing) Object.assign(existing, mote)
+    else graph.spaces.push(mote)
+    if (!graph.bindings.some(binding => binding.spaceId === spaceId && binding.zoneId === zoneId)) graph.bindings.push({ spaceId, zoneId })
+    zone.directoryPath = mote.directoryPath
+    graph.resources['zone:' + zoneId] = resource({ ...origin, spaceId, contentKind: 'mote' })
+    if (JSON.stringify(graph) !== JSON.stringify(state?.graph)) await this.ports.state.commit({ expectedRevision: state?.revision ?? 0, graph })
+    return this.inspect(topic)
   }
   async ensureCategory(category: TopicCategory): Promise<void> {
     const current = await this.ports.state.read(), graph = structuredClone(current?.graph ?? emptyGraph())

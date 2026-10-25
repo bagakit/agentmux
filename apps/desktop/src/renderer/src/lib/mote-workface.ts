@@ -24,6 +24,13 @@ export function useMoteWorkfaceScope(workspaceId: string | undefined, explicitTo
     const layout = workspaceId ? state.layouts[workspaceId] : undefined
     return layout ? activeTopicIdFromLayout(layout, state.tabs) : null
   })
+  // Promotion adds an identity, not navigation. An existing Category presentation
+  // remains the Topic/knowledge surface until the user chooses the Mote entrance.
+  const categoryPresentation = useAppStore(state => {
+    const choice = state.workbenchSpaceSelection
+    return !explicitTopicId && choice?.workspaceId === workspaceId && choice.topicId === topicId &&
+      state.topicCategories.some(category => category.spaceId === choice.spaceId)
+  })
   const workspace = useAppStore(state => topicId ? state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID) : undefined)
   const { topics } = useScratchTopics(topicId ? workspace?.id ?? null : null, active)
   const bindings = useAppStore(state => topicId ? state.spaceZoneBindings : null)
@@ -35,6 +42,7 @@ export function useMoteWorkfaceScope(workspaceId: string | undefined, explicitTo
   }, [bindings, topicId, workspace?.id])
   const retained = useRef<MoteWorkfaceScope | null>(null)
   return useMemo(() => {
+    if (categoryPresentation) return null
     if (!workspace || !topicId) { retained.current = null; return null }
     const held = retained.current?.workspace.hostId === workspace.hostId && retained.current.workspace.path === workspace.path &&
       retained.current.topic.id === topicId ? retained.current : null
@@ -63,5 +71,5 @@ export function useMoteWorkfaceScope(workspaceId: string | undefined, explicitTo
     }
     retained.current = null
     return null
-  }, [workspace, topicId, topics, origin])
+  }, [workspace, topicId, topics, origin, categoryPresentation])
 }

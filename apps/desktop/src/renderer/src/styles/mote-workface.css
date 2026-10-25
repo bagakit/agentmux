@@ -342,3 +342,9 @@
 @container mote-details (min-width: 720px) {
   .mote-details:not([data-shared-navigation="true"])[data-section="profile"] > .mote-details__profile { top: 62px; max-height: calc(100% - 78px); }
 }
+
+.mote-ideas__knowledge { border: 1px solid var(--line); border-radius: var(--radius-sm); margin: 0 0 var(--sp-3); background: var(--surface-1); }
+.mote-ideas__knowledge > summary { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3); color: var(--text-2); font-size: var(--fs-body); cursor: pointer; list-style: none; }
+.mote-ideas__knowledge > summary::-webkit-details-marker { display: none; }
+.mote-ideas__knowledge > summary > span { flex: 1; }
+.mote-ideas__knowledge[open] > .topic-knowledge-panel { min-height: 280px; max-height: 480px; border-top: 1px solid var(--line); }
