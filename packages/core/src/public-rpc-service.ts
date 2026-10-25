@@ -993,7 +993,9 @@ export class AgentMuxRpcService {
     if (isAgentMuxRpcDeviceMethod(method)) {
       const local = context.caller === undefined && context.transport === 'unix' && context.principal?.kind === 'user'
       const device = context.caller === undefined && context.transport === 'relay' && context.principal?.kind === 'device'
-      if (method === 'device.hello' ? !device : !local) throw new AgentMuxError('This device operation requires its authorized transport principal.', 'CONTROL_PERMISSION_DENIED')
+      const caller = method === 'device.link' ? await this.authenticated(context, true) : undefined
+      const linkReader = method === 'device.link' && caller?.hostId === 'local'
+      if (method === 'device.hello' ? !device : !local && !linkReader) throw new AgentMuxError('This device operation requires its authorized transport principal.', 'CONTROL_PERMISSION_DENIED')
       const input = parseAgentMuxRpcDeviceParams(method, params)
       if (!this.ports.deviceAdministration) throw new AgentMuxError('The original Host device administration owner is unavailable.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted()
