@@ -11,6 +11,7 @@ import { TERMINAL_FONT_SIZE_DEFAULT, isScratchWorkspaceId } from '../../../share
 import { lifecycleNotification, notificationEventIdentity, useAppStore, warmTerminalKey } from '../store'
 import { useWorkbenchBrowserPresentation, useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { mainRegionReference } from '../lib/desktop-focus-navigation'
+import { workbenchTabDisplayWorkspaceId } from '../lib/workbench-resource-display'
 import { currentHostCheck } from '../lib/host-check'
 import { formatPathForDisplay } from '../lib/copy-path-display'
 import { hostExecutorInventoryMatches, executorsForHost } from '../lib/executors'
@@ -372,8 +373,7 @@ export function NewTabSurface({
     try {
       const state = useAppStore.getState()
       if (launcherRef) {
-        const displayWorkspaceId = projection?.displayWorkspaceId ?? Object.entries(state.layouts).find(([, layout]) =>
-          layout.groups.some(group => group.id === tabGroupId && group.tabOrder.includes(launcherRef.tabId)))?.[0]
+        const displayWorkspaceId = projection?.displayWorkspaceId ?? workbenchTabDisplayWorkspaceId(state.layouts, launcherRef.tabId, tabGroupId)
         if (!displayWorkspaceId) throw new Error('The original Launcher location is still restoring. Your draft is kept.')
         const result = state.selectLauncherExecution({ ...launcherRef, displayWorkspaceId, groupId: tabGroupId }, selection, { ...options, reveal: !projection || options.navigateProject })
         if (projection && (!result.projectChanged || !options.navigateProject)) projection.onSelect(result)
