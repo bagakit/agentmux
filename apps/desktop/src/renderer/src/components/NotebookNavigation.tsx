@@ -1,6 +1,8 @@
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
+import { Button } from '@agentmux/client-ui/components/Button'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -112,12 +114,12 @@ export function NotebookCreateDialog({ open, active, onClose, onCreated, onCreat
         const stillInDialog = (event.target as Node | null)?.nodeType === 1 && (event.target as HTMLElement).contains(ownerDocument.activeElement)
         if (active && (stillInDialog || ownerDocument.activeElement === ownerDocument.body)) restoreFocus?.()
       }} onEscapeKeyDown={event => { if (operation.busy) event.preventDefault() }} onInteractOutside={event => { if (operation.busy) event.preventDefault() }}>
-        <header><Dialog.Title>New notebook</Dialog.Title><button type="button" className="icon-button" aria-label="Close notebook creation" disabled={operation.busy} onClick={close}><ThemeActionCloseIcon size={15} /></button></header>
+        <header><Dialog.Title>New notebook</Dialog.Title><IconButton type="button" aria-label="Close notebook creation" disabled={operation.busy} onClick={close}><ThemeActionCloseIcon size={15} /></IconButton></header>
         <Dialog.Description className="notebook-create-description">A home for related notes.</Dialog.Description>
         <form aria-label="Create notebook" onSubmit={event => { event.preventDefault(); void create() }}>
           <label>Name<TextInput ref={input} aria-label="New notebook name" placeholder="e.g. Reading notes" value={name} maxLength={160} disabled={operation.busy || Boolean(operation.pending)} onChange={event => setName(event.target.value)} /></label>
           {operation.issue ? <p role="status" className="notebook-create-issue">{operation.issue}</p> : null}
-          <footer><button type="button" className="small-button" disabled={operation.busy} onClick={close}>Cancel</button><button type="submit" className="primary-button" disabled={operation.busy || !name.trim()}>{operation.busy ? 'Creating…' : operation.pending ? 'Retry creation' : 'Create notebook'}</button></footer>
+          <footer><Button type="button" disabled={operation.busy} onClick={close}>Cancel</Button><Button type="submit" variant="primary" disabled={operation.busy || !name.trim()}>{operation.busy ? 'Creating…' : operation.pending ? 'Retry creation' : 'Create notebook'}</Button></footer>
         </form>
       </Dialog.Content>
     </DocumentOverlayPortal>

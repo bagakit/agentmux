@@ -1,4 +1,5 @@
 import * as Dialog from '@agentmux/client-ui/components/Modal'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
@@ -66,21 +67,22 @@ export function ConfirmationDialog({
           <Dialog.Description className="confirmation-dialog__description">{description}</Dialog.Description>
           {feedback}
           <footer>
-            <button ref={cancelRef} type="button" className="small-button confirmation-dialog__cancel" disabled={busy} onClick={onCancel}>Cancel</button>
+            <Button ref={cancelRef} type="button" className="confirmation-dialog__cancel" disabled={busy} onClick={onCancel}>Cancel</Button>
             {secondaryLabel && onSecondary ? (
-              <button type="button" className="small-button" disabled={busy} onClick={onSecondary}>
+              <Button type="button" disabled={busy} onClick={onSecondary}>
                 {secondaryLabel}
-              </button>
+              </Button>
             ) : null}
-            <button
+            <Button
               type="button"
-              className={intent === 'danger' ? 'danger-button' : 'small-button confirmation-dialog__confirm--neutral'}
+              variant={intent === 'danger' ? 'danger' : 'secondary'}
+              className={intent === 'neutral' ? 'confirmation-dialog__confirm--neutral' : undefined}
               data-confirm-label={confirmLabel}
               disabled={busy}
               onClick={onConfirm}
             >
               <span>{busy ? 'Working…' : confirmLabel}</span>
-            </button>
+            </Button>
           </footer>
         </Dialog.Content>
       </DocumentOverlayPortal>
