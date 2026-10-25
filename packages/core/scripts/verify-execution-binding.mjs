@@ -1,3 +1,4 @@
+import { createExecutionProofCleanup } from './fixtures/execution-proof-cleanup.mjs'
 import { createServer } from 'node:http'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
@@ -19,6 +20,8 @@ const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 // macOS Unix socket paths need a short temporary root; no user paths or credentials are reused.
 const root = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'amx-binding-')))
 const owners = [], diagnostics = []
+const cleanup = createExecutionProofCleanup(root)
+let success, primaryFailure, failed = false
 let ownerTerminal, releaseTerminalObserver, bindingId
 const cliReceipts = []
 const deadline = (promise, label, ms = 30000) => {
@@ -75,6 +78,7 @@ async function startOwner(name, agentOwner) {
     ['--socket', join(base, 'runtime', 'ctxmux.sock'), '--state-dir', join(base, 'state', 'ctxmux'), '--readiness-fd', '3'],
     { env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
   const owner = { name, base, env, native, runs: [], sessions: [] }; owners.push(owner)
+  cleanup.trackChild(owner, 'native', native)
   native.stderr.on('data', bytes => diagnostics.push({ owner: name, lane: 'native', bytes: bytes.toString() }))
   await deadline(Promise.race([once(native.stdio[3], 'data'), once(native, 'exit').then(() => { throw new Error('Test-owned Native exited before readiness') })]), 'Native readiness')
   return await startCore(owner, agentOwner)
@@ -95,6 +99,7 @@ async function startCore(owner, agentOwner) {
   const coreArgs = agentOwner ? ['--input-type=module', '-e', runner, agentOwner.socketPath]
     : [join(packageRoot, 'dist/headless-runtime-cli.js'), 'serve']
   const core = owner.core = spawn(process.execPath, coreArgs, { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  cleanup.trackChild(owner, 'core', core)
   core.stderr.on('data', bytes => diagnostics.push({ owner: name, lane: 'core', bytes: bytes.toString() }))
   const line = await deadline(new Promise((resolve, reject) => {
     let text = ''
@@ -111,6 +116,7 @@ async function startCore(owner, agentOwner) {
 async function cli(owner, args) {
   const child = spawn(process.execPath, [join(packageRoot, 'bin/amux'), '--endpoint', `unix:${owner.socketPath}`, ...args],
     { env: owner.env, stdio: ['ignore', 'pipe', 'pipe'] })
+  cleanup.trackChild(owner, 'cli', child)
   let stdout = '', stderr = ''
   child.stdout.on('data', bytes => { stdout += bytes }); child.stderr.on('data', bytes => { stderr += bytes })
   try {
@@ -131,7 +137,11 @@ async function cli(owner, args) {
     cliReceipts.push(receipt)
     await writeFile(join(root, 'cli-receipts.json'), JSON.stringify(cliReceipts, null, 2), { mode: 0o600 })
     return receipt
-  } finally { if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM') }
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) await cleanup.step({ owner: owner.name, ownerRoot: owner.base, action: 'signal-cli', childPid: child.pid }, () => {
+      if (!child.kill('SIGTERM')) throw new Error('The exact CLI child exit is unconfirmed')
+    })
+  }
 }
 function readPair(resource, id) {
   const db = new DatabaseSync(join(resource.base, 'state/execution-bindings/bindings.sqlite'), { readOnly: true })
@@ -331,37 +341,33 @@ try {
   await writeFile(join(root,'native-frames.json'),JSON.stringify(frames,null,2),{mode:0o600});
   await writeFile(join(root,'diagnostics.json'),JSON.stringify(diagnostics,null,2),{mode:0o600});
   await writeFile(join(root,'summary.json'),JSON.stringify({actualMachines:1,controlledOfflineModel:true,nativeConversationId:originalId,originalPath,originalCoreSession:agentSessionId,firstRun:created.session.run,resumedRun:restored.runId,helperRuns:[frontend.runId,executor.runId],toolWorkspace:join(resource.base,'workspace'),launchWorkspace:join(agent.base,'workspace'),originalContextRetained:true,originalEffectCount:1,nativeInitializations:frames.filter(f=>f.payload?.method==='initialize').map(f=>({generation:f.generation,params:f.payload.params})),errors,publicCreation:true,resourceCoreRestarted:true,automaticReadersRestored:true,originalHelperPidsRetained:true,bindingAfterResume:bindingAfterResume.packet.result,cliActions:cliReceipts.map(receipt=>receipt.args.slice(0,3).join(' ')),scope:'Single-machine controlled model: compiled CLI public creation/rejoin/inspection, real resource Core restart with automatic original readers, and original Agent Session/native conversation resume; not full remote acceptance'},null,2),{mode:0o600});
-  console.log(JSON.stringify({passed:true,evidence:root,nativeConversationId:originalId,modelRequests:requests.length,errors}));
+  success = {passed:true,evidence:root,nativeConversationId:originalId,modelRequests:requests.length,errors};
 } catch (error) {
-  for (const owner of owners) for (const session of owner.sessions) {
-    const replay = await owner.client.readRunReplay(session.run, 0, 'raw').catch(() => null)
-    if (replay) await writeFile(join(root, `agent-${session.agentSessionId}.raw`), Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))), { mode: 0o600 })
-  }
-  await writeFile(join(root, 'diagnostics.json'), JSON.stringify({ diagnostics, error: String(error) }, null, 2), { mode: 0o600 })
-  console.error(`Public execution binding proof failed. Private evidence: ${root}`)
-  throw error
-} finally {
-  for(const connection of modelSockets)connection.destroy();
-  await new Promise(resolve=>modelEndpoint.close(resolve));
-  releaseTerminalObserver?.(); ownerTerminal?.dispose()
-  // Read only our exact test binding to discover any helper admitted before an unknown reply.
-  const resource = owners.find(owner => owner.name === 'resource'), agent = owners.find(owner => owner.name === 'agent')
-  if (bindingId && resource && agent) {
-    try {
-      const retained = readPair(resource, bindingId)
-      if (retained.frontend && !agent.runs.includes(retained.frontend.runId)) agent.runs.push(retained.frontend.runId)
-      if (retained.executor && !resource.runs.includes(retained.executor.runId)) resource.runs.push(retained.executor.runId)
-      const originalSession = await agent.client?.readAgentSession(retained.input.agent.agentSessionId)
-      if (originalSession && !agent.sessions.some(session => session.run.runId === originalSession.run.runId)) agent.sessions.push(originalSession)
-    } catch (error) { diagnostics.push({ cleanupObservation: String(error) }) }
-  }
-  for (const owner of owners) {
-    for (const session of owner.sessions) await owner.client?.stopAgent(session.agentSessionId, session.run).catch(error => { console.error('Test-owned Agent stop unconfirmed:', error.message) })
-    for (const runId of owner.runs) await owner.client?.stopTerminal({ runId }).catch(error => { console.error('Test-owned Run stop unconfirmed:', error.message) })
-    await owner.client?.dispose().catch(() => {})
-    await owner.rpc?.dispose().catch(() => {})
-    for (const child of [owner.core, owner.native]) if (child && child.exitCode === null && child.signalCode === null) {
-      const exited = once(child, 'exit'); child.kill('SIGTERM'); await deadline(exited, 'Test-owned process exit', 10000).catch(() => {})
+  failed = true; primaryFailure = error
+  await cleanup.step({ action: 'retain-primary-diagnostics' }, async () => {
+    for (const owner of owners) for (const session of owner.sessions) {
+      const replay = await owner.client.readRunReplay(session.run, 0, 'raw').catch(() => null)
+      if (replay) await writeFile(join(root, `agent-${session.agentSessionId}.raw`), Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))), { mode: 0o600 })
     }
-  }
+    await writeFile(join(root, 'diagnostics.json'), JSON.stringify({ diagnostics, error: String(error) }, null, 2), { mode: 0o600 })
+    console.error(`Public execution binding proof failed. Private evidence: ${root}`)
+  })
+} finally {
+  await cleanup.step({ action: 'close-controlled-model' }, async () => {
+    for (const connection of modelSockets) connection.destroy()
+    await new Promise((resolve, reject) => modelEndpoint.close(error => error ? reject(error) : resolve()))
+  })
+  await cleanup.step({ action: 'release-terminal-observer' }, () => releaseTerminalObserver?.())
+  await cleanup.step({ action: 'dispose-terminal' }, () => ownerTerminal?.dispose())
+  // Read only the exact private binding, including a latest Run admitted before an unknown reply.
+  const resource = owners.find(owner => owner.name === 'resource'), agent = owners.find(owner => owner.name === 'agent')
+  if (bindingId && resource && agent) await cleanup.step({ owner: resource.name, ownerRoot: resource.base, action: 'observe-exact-binding', bindingId }, async () => {
+    const retained = readPair(resource, bindingId)
+    if (retained.frontend && !agent.runs.includes(retained.frontend.runId)) agent.runs.push(retained.frontend.runId)
+    if (retained.executor && !resource.runs.includes(retained.executor.runId)) resource.runs.push(retained.executor.runId)
+    const originalSession = await agent.client.readAgentSession(retained.input.agent.agentSessionId)
+    if (originalSession) agent.sessions.push(originalSession)
+  })
+  await cleanup.finish(owners, { failed, error: primaryFailure })
 }
+console.log(JSON.stringify({ ...success, cleanup: join(root, 'cleanup.json') }))
