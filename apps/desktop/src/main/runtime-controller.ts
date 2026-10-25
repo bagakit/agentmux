@@ -375,12 +375,10 @@ export class RuntimeController {
   // timed-out pane is recreated; a client deadline must not accumulate transient attachments.
   private readonly sessionReplayReads = new Map<string, Promise<SessionReplayResult>>()
   private readonly rendererGenerations = new Map<number, number>()
-  private readonly hostLifecycleOperations = new Map<string, Set<Promise<void>>>()
+  private readonly hostOperations = new Map<string, Set<Promise<void>>>()
   private readonly hostReconfigurationReservations = new Set<string>()
   private readonly executorConfigReservations = new Set<string>()
   private readonly admittedExecutorLaunches = new Map<string, number>()
-  private readonly terminalInputCursors = new Map<string, number | null>()
-  private readonly terminalInputTails = new Map<string, Promise<void>>()
   private readonly terminalColorQueryRemainders = new Map<string, string>()
   private readonly pendingAgentColorQueryReplies = new Map<string, string>()
   private readonly readyAgentColorQueryRuns = new Map<string, string>()
@@ -872,15 +870,6 @@ export class RuntimeController {
       }
       return []
     })
-    for (const { hostId, projection } of projections) {
-      for (const subject of projection.subjects) {
-        if (subject.kind !== 'terminal') continue
-        this.terminalInputCursors.set(
-          terminalInputKey(hostId, subject.run.runId),
-          subject.run.acceptedInputBytes
-        )
-      }
-    }
     const sessions = projections.flatMap(({ hostId, client, projection, timelineFailures }) => {
       const failures = new Map(timelineFailures.map(failure => [failure.agentSessionId, failure.reason]))
       return projection.subjects.map((subject) => {
@@ -1092,7 +1081,7 @@ export class RuntimeController {
   }
 
   private async launchAdmittedAgent(request: AgentLaunchInput, config: AppConfig, spatialIntent?: import('@agentmux/core').AgentMuxAgentCreationSpatialIntent, executionBindings?: Pick<AgentExecutionBindingService, 'create'>): Promise<AgentLaunchResult> {
-    return await this.trackHostLifecycleOperation(request.hostId, async () => {
+    return await this.trackHostOperation(request.hostId, async () => {
       const client = await this.connectedClient(request.hostId)
       const resource = request.toolWorkspace
       if (resource) {
@@ -1523,8 +1512,8 @@ export class RuntimeController {
     const client = await this.connectedClient(hostId, 'runtime')
     return {
       prepare: async input => await client.prepareTerminal(input),
-      createPrepared: async input => await this.trackHostLifecycleOperation(hostId, async () => await client.createPreparedTerminal(input)),
-      create: async (input, onEvent, output = 'raw') => await this.trackHostLifecycleOperation(hostId, async () => {
+      createPrepared: async input => await this.trackHostOperation(hostId, async () => await client.createPreparedTerminal(input)),
+      create: async (input, onEvent, output = 'raw') => await this.trackHostOperation(hostId, async () => {
         const run = await client.createTerminal(input)
         if (output === 'raw') this.toolkitRuns.set(terminalInputKey(hostId, run.runId), onEvent)
         return run
@@ -1555,7 +1544,7 @@ export class RuntimeController {
   }
 
   async launchTerminal(request: TerminalLaunchInput, config: AppConfig): Promise<SessionSnapshot> {
-    return await this.trackHostLifecycleOperation(request.hostId, async () => {
+    return await this.trackHostOperation(request.hostId, async () => {
       const client = await this.connectedClient(request.hostId, 'runtime')
       const run = await client.createTerminal({
         createOperationId: request.createOperationId ?? mintObjectId(),
@@ -1569,10 +1558,6 @@ export class RuntimeController {
         ...(request.cols === undefined ? {} : { cols: request.cols }),
         ...(request.rows === undefined ? {} : { rows: request.rows })
       })
-      this.terminalInputCursors.set(
-        terminalInputKey(request.hostId, run.runId),
-        run.acceptedInputBytes
-      )
       return await this.sessionByTarget(
         client,
         { kind: 'terminal-run', runId: run.runId },
@@ -1624,12 +1609,6 @@ export class RuntimeController {
         )
         if ((this.rendererGenerations.get(webContentsId) ?? 0) !== rendererGeneration) {
           throw new Error('The Desktop Renderer changed before its Session Attachment was delivered.')
-        }
-        if (control.kind === 'terminal') {
-          this.terminalInputCursors.set(
-            terminalInputKey(control.hostId, control.runId),
-            attached.run.acceptedInputBytes
-          )
         }
         const attachmentId = refresh?.attachmentId ?? mintObjectId()
         if (refresh?.attachmentId) this.requireSessionAttachmentLease(webContentsId, refresh.attachmentId, key)
@@ -1782,50 +1761,54 @@ export class RuntimeController {
 
   async write(control: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source'],
     observation?: InputObservationReference, sender?: InputPerformanceSender): Promise<void> {
-    const parent = readInputObservation(observation)
-    const diagnostic = this.inputPerformance.begin({ sessionId: control.kind === 'agent' ? control.agentSessionId : null,
-      hostId: control.hostId, runId: control.run.runId, kind: source === 'terminal-protocol' ? 'protocol' : 'user',
-      bytes: typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength, parent, sender: sender ?? null, stage: 'received' })
-    let client: AgentMuxClient | undefined
-    try {
-      client = await diagnostic.measure('connected-client', () => this.connectedClient(control.hostId, control.kind === 'agent' ? 'agent-input' : 'runtime'))
-      // Hosted Agent execution identity is observed at its Host after preparation,
-      // not from this consumer's potentially older Native observation.
-      if (control.kind !== 'agent' || !('runtimeOwnerIdentity' in client)) {
-        try { diagnostic.executionOwner(client.runtimeIdentity().instanceId) } catch { /* Diagnostic identity is optional. */ }
-      }
-      const inputClient = client
-      await diagnostic.measure('host-call', () => control.kind === 'agent' ? inputClient.writeAgent({
-        agentSessionId: control.agentSessionId, expectedRun: control.run, data, source, ...(parent ? { observation: parent } : {})
-      }).then(() => {}) : this.writeTerminalInput(inputClient, control, data, diagnostic, parent))
-      this.observeInputHost(control, client)
-      diagnostic.stage('reply-ready'); diagnostic.settle(true)
-    } catch (error) { this.observeInputHost(control, client, { error }); diagnostic.settle(false); throw error }
+    return await this.trackHostOperation(control.hostId, async () => {
+      const parent = readInputObservation(observation)
+      const diagnostic = this.inputPerformance.begin({ sessionId: control.kind === 'agent' ? control.agentSessionId : null,
+        hostId: control.hostId, runId: control.run.runId, kind: source === 'terminal-protocol' ? 'protocol' : 'user',
+        bytes: typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength, parent, sender: sender ?? null, stage: 'received' })
+      let client: AgentMuxClient | undefined
+      try {
+        client = await diagnostic.measure('connected-client', () => this.connectedClient(control.hostId, 'raw-input'))
+        // Hosted Agent execution identity is observed at its Host after preparation,
+        // not from this consumer's potentially older Native observation.
+        if (!('runtimeOwnerIdentity' in client)) {
+          try { diagnostic.executionOwner(client.runtimeIdentity().instanceId) } catch { /* Diagnostic identity is optional. */ }
+        }
+        const inputClient = client
+        await diagnostic.measure('host-call', () => control.kind === 'agent' ? inputClient.writeAgent({
+          agentSessionId: control.agentSessionId, expectedRun: control.run, data, source, ...(parent ? { observation: parent } : {})
+        }).then(() => {}) : inputClient.writeTerminalBytes(control.run, data, parent ?? undefined).then(() => {}))
+        this.observeInputHost(control, client)
+        diagnostic.stage('reply-ready'); diagnostic.settle(true)
+      } catch (error) { this.observeInputHost(control, client, { error }); diagnostic.settle(false); throw error }
+    })
   }
 
   async paste(control: SessionControl, text: string, terminalData: string,
     observation?: InputObservationReference, sender?: InputPerformanceSender): Promise<void> {
-    const parent = readInputObservation(observation)
-    const diagnostic = this.inputPerformance.begin({ sessionId: control.kind === 'agent' ? control.agentSessionId : null,
-      hostId: control.hostId, runId: control.run.runId, kind: 'paste', bytes: Buffer.byteLength(terminalData), parent,
-      sender: sender ?? null, stage: 'received' })
-    let client: AgentMuxClient | undefined
-    try {
-      client = await diagnostic.measure('connected-client', () => this.connectedClient(control.hostId, control.kind === 'agent' ? 'agent-input' : 'runtime'))
-      if (control.kind !== 'agent' || !('runtimeOwnerIdentity' in client)) {
-        try { diagnostic.executionOwner(client.runtimeIdentity().instanceId) } catch { /* Diagnostic identity is optional. */ }
-      }
-      const inputClient = client
-      await diagnostic.measure('host-call', () => control.kind === 'agent' ? inputClient.pasteAgent({ agentSessionId: control.agentSessionId,
-        expectedRun: control.run, text, terminalData, ...(parent ? { observation: parent } : {}) }).then(() => {})
-        : this.writeTerminalInput(inputClient, control, terminalData, diagnostic, parent))
-      this.observeInputHost(control, client)
-      diagnostic.stage('reply-ready'); diagnostic.settle(true)
-    } catch (error) { this.observeInputHost(control, client, { error }); diagnostic.settle(false); throw error }
+    return await this.trackHostOperation(control.hostId, async () => {
+      const parent = readInputObservation(observation)
+      const diagnostic = this.inputPerformance.begin({ sessionId: control.kind === 'agent' ? control.agentSessionId : null,
+        hostId: control.hostId, runId: control.run.runId, kind: 'paste', bytes: Buffer.byteLength(terminalData), parent,
+        sender: sender ?? null, stage: 'received' })
+      let client: AgentMuxClient | undefined
+      try {
+        client = await diagnostic.measure('connected-client', () => this.connectedClient(control.hostId, 'raw-input'))
+        if (!('runtimeOwnerIdentity' in client)) {
+          try { diagnostic.executionOwner(client.runtimeIdentity().instanceId) } catch { /* Diagnostic identity is optional. */ }
+        }
+        const inputClient = client
+        await diagnostic.measure('host-call', () => control.kind === 'agent' ? inputClient.pasteAgent({ agentSessionId: control.agentSessionId,
+          expectedRun: control.run, text, terminalData, ...(parent ? { observation: parent } : {}) }).then(() => {})
+          : inputClient.writeTerminalBytes(control.run, terminalData, parent ?? undefined).then(() => {}))
+        this.observeInputHost(control, client)
+        diagnostic.stage('reply-ready'); diagnostic.settle(true)
+      } catch (error) { this.observeInputHost(control, client, { error }); diagnostic.settle(false); throw error }
+    })
   }
 
   private observeInputHost(control: SessionControl, client: AgentMuxClient | undefined, failure?: { error: unknown }): void {
-    if (control.kind !== 'agent' || !client || !('runtimeOwnerIdentity' in client) || this.hosts.get(control.hostId)?.client !== client) return
+    if (!client || !('runtimeOwnerIdentity' in client) || this.hosts.get(control.hostId)?.client !== client) return
     const step = 'Confirming input Host'
     // Discovery itself marks its original owner unverified. A business refusal
     // with a freshly confirmed owner is not a connection failure.
@@ -1855,7 +1838,7 @@ export class RuntimeController {
       if (automation || choice?.execution !== 'immediate' || choice.preparationRetry || choice.allowUncertainTurn) throw new AgentMuxError(
         'The original automatic or conditional prompt cannot become a new manual input.', 'INVALID_AGENT_PROMPT')
       if (control.run.runId !== capturedCondition.expectedRun.runId) throw new AgentMuxError('Prompt intent targets another Run.', 'STALE_AGENT_SESSION')
-      return await this.trackHostLifecycleOperation(control.hostId, async () => await this.configuredClient(control.hostId).submitAgentPrompt({
+      return await this.trackHostOperation(control.hostId, async () => await this.configuredClient(control.hostId).submitAgentPrompt({
         agentSessionId: control.agentSessionId, ...capturedCondition, execution: 'immediate', operationId, prompt,
         ...(agentMuxNote === undefined ? {} : { agentMuxNote }), sourceChannel,
         ...(inputContextCapture ? { inputContextCapture } : {}),
@@ -1863,7 +1846,7 @@ export class RuntimeController {
         ...(authorHuman === true ? { authorHuman: true, ...(authorProfile ? { authorProfile } : {}) } : {})
       }))
     }
-    await this.trackHostLifecycleOperation(control.hostId, async () => {
+    await this.trackHostOperation(control.hostId, async () => {
       const client = await observeProgressRead(automation?.signal, () => this.connectedClient(control.hostId))
       if (control.run.runId !== capturedCondition.expectedRun.runId) {
         throw new AgentMuxError('Prompt intent targets another Run.', 'STALE_AGENT_SESSION')
@@ -1926,7 +1909,7 @@ export class RuntimeController {
     const original = { source: { ...input.source }, turnId: input.turnId, recordId: input.recordId,
       answers: input.answers.map(answer => ({ ...answer })), operationId: input.operationId,
       ...(input.allowUncertainTurn === undefined ? {} : { allowUncertainTurn: input.allowUncertainTurn }) }
-    return await this.trackHostLifecycleOperation(hostId, async () => {
+    return await this.trackHostOperation(hostId, async () => {
       const client = await this.connectedClient(hostId)
       const executor = this.sessionExecutorOptions(hostId, client, config, client.agentSession(agentSessionId))
       return await client.replySessionQuestion({ ...condition, ...original, agentSessionId,
@@ -1957,7 +1940,7 @@ export class RuntimeController {
   }
   async rejoinInputWaiting(control: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef) {
     this.assertInputControl(control, ref.key)
-    return await this.trackHostLifecycleOperation(control.hostId, async () => await this.configuredClient(control.hostId).rejoinAgentInputWaiting({ ref }))
+    return await this.trackHostOperation(control.hostId, async () => await this.configuredClient(control.hostId).rejoinAgentInputWaiting({ ref }))
   }
 
   async respondInteraction(
@@ -1965,7 +1948,7 @@ export class RuntimeController {
     response: AgentMuxInteractionResponse,
     intent: import('@agentmux/core').AgentMuxInteractionOperationIntent
   ): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt> {
-    return await this.trackHostLifecycleOperation(control.hostId, async () => {
+    return await this.trackHostOperation(control.hostId, async () => {
       return await this.configuredClient(control.hostId).respondAgentInteraction({
         agentSessionId: control.agentSessionId,
         expectedRun: control.run,
@@ -1982,7 +1965,7 @@ export class RuntimeController {
     control: Extract<SessionControl, { kind: 'agent' }>,
     modeId: string
   ): Promise<void> {
-    await this.trackHostLifecycleOperation(control.hostId, async () => {
+    await this.trackHostOperation(control.hostId, async () => {
       await (await this.connectedClient(control.hostId)).setAgentPosture({
         agentSessionId: control.agentSessionId,
         expectedRun: control.run,
@@ -1997,7 +1980,7 @@ export class RuntimeController {
     operationId: string,
     config: AppConfig
   ): Promise<SessionSnapshot> {
-    return await this.trackHostLifecycleOperation(reference.hostId, async () => {
+    return await this.trackHostOperation(reference.hostId, async () => {
       let dispatched = false
       try {
       const client = await this.connectedClient(reference.hostId)
@@ -2026,7 +2009,7 @@ export class RuntimeController {
   }
 
   async reconcileRetiredSession(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string, config: AppConfig): Promise<SessionSnapshot> {
-    return await this.trackHostLifecycleOperation(reference.hostId, async () => {
+    return await this.trackHostOperation(reference.hostId, async () => {
       const client = await this.connectedClient(reference.hostId)
       const canonical = await client.reconcileAgentReopen({ agentSessionId: reference.agentSessionId, expectedRetiredAt, operationId })
       if (canonical.agentSessionId !== reference.agentSessionId || canonical.hostId !== 'local' || canonical.reopenedFrom?.observedAt !== expectedRetiredAt) {
@@ -2043,7 +2026,7 @@ export class RuntimeController {
     config: AppConfig,
     agentMuxNote?: string
   ): Promise<SessionSnapshot> {
-    return await this.trackHostLifecycleOperation(control.hostId, async () => {
+    return await this.trackHostOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId, 'runtime')
       const status = await client.statusAgent(control.agentSessionId)
       if (status.run.runId !== control.run.runId) {
@@ -2143,7 +2126,7 @@ export class RuntimeController {
     operationId: string = mintObjectId(),
     request?: Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>
   ): Promise<SessionRecoveryResult> {
-    return await this.trackHostLifecycleOperation(
+    return await this.trackHostOperation(
       control.hostId,
       async () => await this.performRecovery(control, config, workspacePath, operationId, request)
     )
@@ -2169,10 +2152,6 @@ export class RuntimeController {
         action: request?.trigger === 'startup' || request?.trigger === 'attachment' ? 'recover' : 'continue' })
       if (recovery.kind === 'pending') return { kind: 'terminal-pending', recovery }
       const run = recovery.run
-      this.terminalInputCursors.set(
-        terminalInputKey(control.hostId, run.runId),
-        run.acceptedInputBytes
-      )
       return {
         kind: 'terminal-restarted',
         session: await this.sessionByTarget(
@@ -2242,7 +2221,7 @@ export class RuntimeController {
   async restartSession(
     control: AgentSessionControl, config: AppConfig, operationId: string, observeOnly = false
   ): Promise<import('../shared/contracts.js').SessionRestartResult> {
-    return await this.trackHostLifecycleOperation(control.hostId, async () => {
+    return await this.trackHostOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId, 'runtime')
       const identity = { agentSessionId: control.agentSessionId, expectedRun: control.run, operationId }
       if (!observeOnly) {
@@ -2286,9 +2265,6 @@ export class RuntimeController {
       await client.stopAgent(control.agentSessionId, control.run)
     } else {
       await client.stopTerminal(control.run)
-      const inputKey = terminalInputKey(control.hostId, control.runId)
-      this.terminalInputCursors.delete(inputKey)
-      this.terminalInputTails.delete(inputKey)
     }
   }
 
@@ -2311,12 +2287,10 @@ export class RuntimeController {
       this.sessionAttachmentLeases.clear()
       this.sessionAttachmentTails.clear()
       this.rendererGenerations.clear()
-      this.hostLifecycleOperations.clear()
+      this.hostOperations.clear()
       this.hostSignatures.clear()
       this.endpointWarnings.clear()
       this.observationWarnings.clear()
-      this.terminalInputCursors.clear()
-      this.terminalInputTails.clear()
       this.terminalColorQueryRemainders.clear()
       this.pendingAgentColorQueryReplies.clear()
       this.readyAgentColorQueryRuns.clear()
@@ -2398,11 +2372,11 @@ export class RuntimeController {
     }
   }
 
-  private async connectedClient(hostId: string, scope: 'runtime' | 'session' | 'agent-input' = 'session'): Promise<AgentMuxClient> {
+  private async connectedClient(hostId: string, scope: 'runtime' | 'session' | 'raw-input' = 'session'): Promise<AgentMuxClient> {
     const client = this.configuredClient(hostId)
-    // Hosted input owns fresh Host discovery and Native admission in its original
-    // invocation. Direct Core clients and Terminal cursor preparation stay local.
-    if (scope === 'agent-input' && 'runtimeOwnerIdentity' in client) return client
+    // Hosted raw input discovers its Host and prepares Native in the original
+    // invocation. Direct Core clients retain their connection prerequisite.
+    if (scope === 'raw-input' && 'runtimeOwnerIdentity' in client) return client
     try {
       if (scope !== 'session') await client.connectRuntime()
       else await client.connect()
@@ -2645,80 +2619,31 @@ export class RuntimeController {
   }
 
 
-  private async trackHostLifecycleOperation<T>(hostId: string, operation: () => Promise<T>): Promise<T> {
+  private async trackHostOperation<T>(hostId: string, operation: () => Promise<T>): Promise<T> {
     if (this.hostReconfigurationReservations.has(hostId)) {
       throw new Error(`Runtime host is being reconfigured: ${hostId}`)
     }
     const result = operation()
     const settled = result.then(() => {}, () => {})
-    const operations = this.hostLifecycleOperations.get(hostId) ?? new Set<Promise<void>>()
+    const operations = this.hostOperations.get(hostId) ?? new Set<Promise<void>>()
     operations.add(settled)
-    this.hostLifecycleOperations.set(hostId, operations)
+    this.hostOperations.set(hostId, operations)
     try {
       return await result
     } finally {
       operations.delete(settled)
-      if (operations.size === 0 && this.hostLifecycleOperations.get(hostId) === operations) {
-        this.hostLifecycleOperations.delete(hostId)
+      if (operations.size === 0 && this.hostOperations.get(hostId) === operations) {
+        this.hostOperations.delete(hostId)
       }
     }
   }
 
   private async waitForHostQuiescence(hostId: string): Promise<void> {
-    const lifecycle = [...(this.hostLifecycleOperations.get(hostId) ?? [])]
+    const lifecycle = [...(this.hostOperations.get(hostId) ?? [])]
     const attachments = [...this.sessionAttachmentTails.entries()].flatMap(([key, tail]) => (
       sessionAttachmentHostId(key) === hostId ? [tail] : []
     ))
-    const terminalInputs = [...this.terminalInputTails.entries()].flatMap(([key, tail]) => (
-      sessionAttachmentHostId(key) === hostId ? [tail] : []
-    ))
-    await Promise.all([...lifecycle, ...attachments, ...terminalInputs])
-  }
-
-  private async writeTerminalInput(
-    client: AgentMuxClient,
-    control: Extract<SessionControl, { kind: 'terminal' }>,
-    data: AgentMuxRunInputData,
-    diagnostic: InputPerformanceHandle,
-    parent: InputObservationReference | null
-  ): Promise<void> {
-    const key = terminalInputKey(control.hostId, control.runId)
-    diagnostic.stage('queued')
-    const previous = this.terminalInputTails.get(key) ?? Promise.resolve()
-    const operation = previous.catch(() => {}).then(async () => {
-      diagnostic.dequeue()
-      let expectedByte = this.terminalInputCursors.get(key)
-      if (expectedByte == null) {
-        const run = (await diagnostic.measure('current-run', () => client.listRuns())).find((candidate) => candidate.runId === control.runId)
-        if (!run || run.acceptedInputBytes === null) {
-          throw new Error(`Terminal Input cursor is unavailable: ${control.runId}`)
-        }
-        expectedByte = run.acceptedInputBytes
-      }
-      diagnostic.stage('operation')
-      try {
-        const ownerInstanceId = client.runtimeIdentity().instanceId
-        diagnostic.executionOwner(ownerInstanceId)
-        const accepted = await diagnostic.measure('native-input', () => client.writeTerminal(control.run, {
-          ownerInstanceId,
-          operationId: mintObjectId(),
-          expectedByte,
-          data
-        }, parent ?? undefined))
-        if (accepted.acceptedThroughByte !== null) {
-          this.terminalInputCursors.set(key, accepted.acceptedThroughByte)
-        }
-      } catch (error) {
-        this.terminalInputCursors.delete(key)
-        throw error
-      }
-    })
-    const tail = operation.then(() => {}, () => {})
-    this.terminalInputTails.set(key, tail)
-    void tail.finally(() => {
-      if (this.terminalInputTails.get(key) === tail) this.terminalInputTails.delete(key)
-    })
-    await operation
+    await Promise.all([...lifecycle, ...attachments])
   }
 
   private async sessionByTarget(

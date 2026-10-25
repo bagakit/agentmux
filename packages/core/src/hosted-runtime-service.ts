@@ -278,7 +278,7 @@ export class AgentMuxHostedRuntimeService {
     }
     const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'broadcastMessages' || invocation.method === 'notifyMessages' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction' || invocation.method === 'replySessionQuestion'
     const rawAgentInput = invocation.method === 'writeAgent' || invocation.method === 'pasteAgent'
-    const rawTerminalInput = invocation.method === 'writeTerminal'
+    const rawTerminalInput = invocation.method === 'writeTerminal' || invocation.method === 'writeTerminalBytes'
     if ((controlledInput || rawAgentInput) && invocation.args.length !== 1 || rawTerminalInput && (invocation.args.length < 2 || invocation.args.length > 3)) throw new AgentMuxError('Input call context is supplied only by the original Host, never by wire arguments.', 'INVALID_CONTROL_REQUEST')
     const attachment = invocation.method === 'reattachAgent' || invocation.method === 'attachTerminal' || invocation.method === 'refreshRunAttachment'
     // Direct attachment invocations borrow an existing exact event destination;

@@ -194,7 +194,7 @@ export async function connectHostedAgentMux(options: {
     } else {
       // Raw Agent input discovers the original Host here. Its service invocation
       // prepares Native at the owner; callers need no separate Native preflight.
-      await observeRead(connectControl(method === 'connectRuntime' || method === 'writeAgent' || method === 'pasteAgent'), sourceSignal)
+      await observeRead(connectControl(method === 'connectRuntime' || method === 'writeAgent' || method === 'pasteAgent' || method === 'writeTerminalBytes'), sourceSignal)
     }
     if (method === 'runtimeProjection' && !bootstrap) {
       // Main needs the original Provider declarations to present these Subjects.
