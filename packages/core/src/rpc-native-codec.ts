@@ -1016,7 +1016,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         record(p, ['ok', 'host', 'runtime', 'runtimeAction', 'runtimeStorage', 'runtimeStorageUnavailable', 'hosts', 'agents', 'integration']); bool(p.ok)
         const host = record(p.host); if (host.kind !== 'local') fail(); bool(host.reachable)
         for (const key of ['hostId', 'buildIdentity', 'runtimeInstanceId', 'error', 'action']) { if (host[key] !== null) text(host[key]) }
-        count(host.protocolVersion, true); const hosts = record(p.hosts); member(record(hosts.local).status, ['available', 'unavailable']); if (record(hosts.remote).status !== 'unsupported') fail()
+        count(host.protocolVersion, true); const hosts = record(p.hosts); member(record(hosts.local).status, ['available', 'unavailable']); if (record(hosts.remote).status !== 'not-checked') fail()
         array(p.agents, item => { const a = record(item); string(a.id); string(a.label); string(a.executable); member(a.probe, ['found', 'missing', 'unverifiable', 'blocked']); record(a.capabilities); record(a.hook); record(a.hookInstallation); record(a.acp) })
         if (record(p.integration).hookIngress !== 'authenticated-loopback') fail()
         for (const key of ['runtimeAction', 'runtimeStorageUnavailable']) if (p[key] !== null) text(p[key])

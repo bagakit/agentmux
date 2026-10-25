@@ -115,11 +115,11 @@ async function probeAgent(
 ): Promise<AgentMuxDoctorAgent> {
   try {
     const capability = await client.probeAgent(catalog.id, commandOverride, context)
-    // 三态探测问的是同一个 Executor 的同一件事，但它区分「查不成」与「没装」，而 `capability.installed`
-    // 把两者折成 false。诊断恰恰是最不能折的地方：用户来这里就是为了知道病因。两次探测共用
-    // probeCapabilities 里那一份命令解析（commandOverride 优先，否则 catalog executable），所以它们
-    // 看的一定是同一条命令，不会各自解析出不同的东西。
-    const result = await client.probeExecutorAvailability(catalog.id, commandOverride, context)
+    // The capability carries this exact execution observation. A second probe could
+    // retry preparation and report another environment in the same Doctor result.
+    const result = capability.executableObservation?.executable === capability.executable
+      ? capability.executableObservation
+      : await client.probeExecutorAvailability(catalog.id, commandOverride, context)
     const probe = result.availability === 'available'
       ? 'found'
       : result.availability === 'check-failed' ? 'unverifiable' : 'missing'
