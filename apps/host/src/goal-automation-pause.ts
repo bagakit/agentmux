@@ -65,8 +65,13 @@ export function createGoalAutomationPause(options: {
           afterIntentId = page.nextIntentId ?? undefined
         } while (afterIntentId)
         const effects = await Promise.allSettled([
-          ...loops.map(async loop => { await options.progress.pause(loop.loopId, 'Paused for your explicit input intent. Resume the original arrangement explicitly.', originalContext,
-            { prepare: assertTarget, assertCurrent: assertTargetSync }); receipt.pausedLoopIds.push(loop.loopId) }),
+          options.progress.pauseMany(loops.map(loop => loop.loopId), 'Paused for your explicit input intent. Resume the original arrangement explicitly.', originalContext,
+            { prepare: assertTarget, assertCurrent: assertTargetSync }).then(results => {
+              for (const result of results) {
+                if (result.status === 'fulfilled') receipt.pausedLoopIds.push(result.value.loopId)
+                else receipt.issues.push({ stage: 'pause-original-automatic-input', message: result.reason instanceof Error ? result.reason.message : String(result.reason) })
+              }
+            }),
           ...intents.map(async intentId => {
             const original = await options.client.readAgentFuturePromptIntent(input.agentSessionId, intentId)
             if (!original?.active) return

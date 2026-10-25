@@ -442,16 +442,39 @@ export class ContinuousProgressLoopManager {
     return loop
   }
   async pause(loopId: string, reason = 'Paused by you.', context?: AgentMuxRpcCallContext, fence?: LoopMutationFence): Promise<ContinuousProgressLoop> {
+    const [result] = await this.pauseMany([loopId], reason, context, fence)
+    if (result!.status === 'rejected') throw result!.reason
+    return result!.value
+  }
+  /** One original cancellation batch shares a durable write, retaining each
+   * loop's result and its schedule's separate Future Intent outcome. */
+  async pauseMany(loopIds: readonly string[], reason: string, context?: AgentMuxRpcCallContext, fence?: LoopMutationFence): Promise<PromiseSettledResult<ContinuousProgressLoop>[]> {
     await this.start()
-    await fence?.prepare()
-    fence?.assertCurrent()
-    const original = this.require(loopId)
-    if (isAgentSchedule(original) && original.status === 'stopped') throw new AgentMuxError('An ended arrangement cannot pause or resume. Save a new arrangement explicitly.', 'SCHEDULE_CANCELLED')
-    if (original.taskSource?.kind === 'goal' && original.status === 'stopped') return original
-    this.scheduler.pause(loopId); this.patch(loopId, { lastDecision: reason }); this.cancelDelivery(loopId)
-    await this.persist(loopId)
-    if (isAgentSchedule(this.require(loopId))) await this.saveFutureIntent(this.require(loopId), false, context)
-    return this.require(loopId)
+    const prepared = await Promise.allSettled(loopIds.map(async loopId => {
+      await fence?.prepare()
+      fence?.assertCurrent()
+      const original = this.require(loopId)
+      if (isAgentSchedule(original) && original.status === 'stopped') throw new AgentMuxError('An ended arrangement cannot pause or resume. Save a new arrangement explicitly.', 'SCHEDULE_CANCELLED')
+      if (original.taskSource?.kind === 'goal' && original.status === 'stopped') return { loopId, persist: false }
+      this.scheduler.pause(loopId); this.patch(loopId, { lastDecision: reason }); this.cancelDelivery(loopId)
+      // Paused memory is not a save receipt. A new explicit operation also
+      // persists an already paused loop, confirming a previously failed write.
+      return { loopId, persist: true }
+    }))
+    const pending = prepared.flatMap(result => result.status === 'fulfilled' && result.value.persist ? [result.value.loopId] : [])
+    let persistence: PromiseSettledResult<void> = { status: 'fulfilled', value: undefined }
+    if (pending.length) [persistence] = await Promise.allSettled([this.saveLoops()])
+    return await Promise.allSettled(prepared.map(async result => {
+      if (result.status === 'rejected') throw result.reason
+      const { loopId, persist } = result.value
+      if (persist && persistence.status === 'rejected') {
+        this.persistenceFailed(loopId, persistence.reason)
+        throw persistence.reason
+      }
+      if (persist) for (const listener of this.listeners) listener(this.require(loopId))
+      if (persist && isAgentSchedule(this.require(loopId))) await this.saveFutureIntent(this.require(loopId), false, context)
+      return this.require(loopId)
+    }))
   }
   async resume(loopId: string, context?: AgentMuxRpcCallContext): Promise<ContinuousProgressLoop> {
     return this.activation(loopId, async assertCurrent => {
@@ -511,13 +534,16 @@ export class ContinuousProgressLoopManager {
     return loop
   }
   private async persist(loopId: string): Promise<void> {
-    try { await this.store.save(this.scheduler.list()) }
-    catch (error) {
-      const original = this.require(loopId)
-      this.patch(loopId, { status: original.taskSource?.kind === 'goal' && original.status === 'stopped' ? 'stopped' : 'paused', lastDecision: `Loop persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
-      for (const listener of this.listeners) listener(this.require(loopId))
-      throw error
-    }
+    try { await this.saveLoops() }
+    catch (error) { this.persistenceFailed(loopId, error); throw error }
+    for (const listener of this.listeners) listener(this.require(loopId))
+  }
+  private saveLoops(): Promise<void> {
+    return this.store.save(this.scheduler.list())
+  }
+  private persistenceFailed(loopId: string, error: unknown): void {
+    const original = this.require(loopId)
+    this.patch(loopId, { status: original.taskSource?.kind === 'goal' && original.status === 'stopped' ? 'stopped' : 'paused', lastDecision: `Loop persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
     for (const listener of this.listeners) listener(this.require(loopId))
   }
   async check(now?: number, onlyLoopId?: string): Promise<void> {
