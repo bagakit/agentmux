@@ -52,10 +52,16 @@ it('resolves the exact Host PATH candidate before version qualification and free
   expect(config.executable).toBe('codex')
 })
 
+it('retains qualified native version capability when stderr contains an ordinary launcher warning', async () => {
+  const config = await context()
+  vi.mocked(runProcess).mockResolvedValue({ exitCode: 0, stdout: 'codex-cli 0.165.0\n', stderr: 'warning: optional PATH aliases were not installed\n' })
+  expect(parseCodexExecutionRunArguments((await prepareCodexExecutionHelper(config)).args.slice(2)).executable).toBe(config.executable)
+  expect(runProcess).toHaveBeenCalledWith(config.executable, ['--version'], expect.objectContaining({ timeoutMs: 2000, maxOutputBytes: 4096 }))
+})
+
 it.each([
   { exitCode: 0, stdout: 'codex-cli 0.163.0', stderr: '' },
   { exitCode: 0, stdout: 'codex-cli 0.165.1', stderr: '' },
-  { exitCode: 0, stdout: 'codex-cli 0.165.0', stderr: 'unconfirmed launcher' },
   { exitCode: 1, stdout: 'codex-cli 0.165.0', stderr: '' },
 ])('does not qualify another release or a failed version observation', async result => {
   vi.mocked(runProcess).mockResolvedValue(result)
