@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { stripVTControlCharacters } from 'node:util'
+import { JSONRPCErrorException } from 'json-rpc-2.0'
 import { CODEX_NATIVE_TOKEN_ENV, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV, openCodexFrontendControl } from './codex-managed-frontend.js'
 import type { AgentTerminalFrontendObservation, AgentTerminalInitialization } from '../agent-terminal-frontend.js'
 import { resolve } from 'node:path'
@@ -151,7 +152,13 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
           // This one native request is retained even after an observer times out.
           // There is no thread/start idempotency key; retrying a reader cannot repeat it.
           const prepared = await nativeConnection.request(plan.resume ? 'thread/resume' : 'thread/start',
-            { ...expected, ...(plan.resume ? { excludeTurns: true } : { threadSource: 'user' }) }, { retainPending: true })
+            { ...expected, ...(plan.resume ? { excludeTurns: true } : { threadSource: 'user' }) }, { retainPending: true }).catch(error => {
+            // A settled resume rejection may follow loading the original thread.
+            // Continuing this exact resume rejoins that backend's object; it does
+            // not prove not-applied. Creation and uncertain transport stay latched.
+            if (plan.resume && error instanceof JSONRPCErrorException && [-32600, -32602].includes(error.code)) nativeRequested = false
+            throw error
+          })
           if (!live()) return
           const id = prepared?.thread?.id
           const sandboxType = expected.sandbox === 'read-only' ? 'readOnly' : expected.sandbox === 'workspace-write' ? 'workspaceWrite' : 'dangerFullAccess'
@@ -205,8 +212,8 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
         if (request.target.kind === 'initialization') {
           if (request.target.lifecycleOperationId !== lifecycleOperationId) throw new ManagedNativeLaunchError('The original initialization belongs to another lifecycle.')
           if (!previous && !exact(request.expectedFrontendId)) throw new ManagedNativeLaunchError('The original frontend generation changed. Re-read this Session before reconnecting.')
-          // Each read observes the original promise. Only a preflight with no native
-          // request may be continued; a late native result updates this same actor.
+          // Join an outstanding request, or continue preflight / a settled rejected
+          // exact resume. Unknown creation and late results keep the original latch.
           const result = observeInitialization()
           operations.set(request.operationId, { request: key, result, applied: nativeRequested, failed: false })
           return result
