@@ -43,7 +43,7 @@ function incomingStatus(report: GroupDiagnosis): string {
   if (!row.inputOperationId) return recorded + (row.state === 'refused' ? ' · ' + incomingRefusal(row.code).title : ' · no Agent submission recorded')
   if (row.coreObservation === 'unavailable') return recorded + ' · Agent submission observation unavailable'
   const status = row.coreStatus
-  const input = status === 'admitted' ? 'Accepted by Agent' : status === 'waiting' ? 'Waiting for Agent' : status === 'stopped' ? 'Input delivery stopped' :
+  const input = status === 'admitted' ? 'Accepted by Agent' : status === 'waiting' ? row.waiting?.wake === 'explicit-rejoin' ? 'Input recovery needed' : 'Waiting for Agent' : status === 'stopped' ? 'Input delivery stopped' :
     status === 'not-applied' ? 'Not delivered to Agent' : status === 'terminal-confirmed' || status === 'bytes-accepted' ? 'Input sent; Agent acceptance unconfirmed' : 'Input outcome unconfirmed'
   return `${recorded} · ${input}`
 }
@@ -114,7 +114,12 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
       tone = row.state === 'refused' ? 'warning' : 'neutral'
     } else if (row.coreObservation === 'unavailable') { value = 'Agent receipt could not be checked'; incomingProblem = 'agent-unconfirmed'; add('agent-unconfirmed', value, 'The original input remains recorded; its current Agent receipt could not be read.') }
     else if (row.coreStatus === 'admitted') value = 'Accepted by Agent'
-    else if (row.coreStatus === 'waiting') { value = 'Waiting for Agent'; incomingProblem = 'agent-waiting'; add('agent-waiting', value, 'The original input is saved and waiting. This does not mean Agent acceptance.', 'muted') }
+    else if (row.coreStatus === 'waiting') {
+      const explicit = row.waiting?.wake === 'explicit-rejoin'
+      value = explicit ? 'Input recovery needed' : 'Waiting for Agent'; incomingProblem = 'agent-waiting'; tone = explicit ? 'warning' : 'neutral'
+      detail += explicit ? ' This saved input needs an explicit rejoin. Open its original receipt to review and recover the same input.' : ' The original input is waiting for its automatic recovery condition.'
+      add('agent-waiting', value, detail, explicit ? 'warning' : 'muted', { kind: 'incoming', label: explicit ? 'Review original input' : 'View input details' })
+    }
     else if (row.coreStatus === 'stopped') { value = 'Input delivery stopped'; incomingProblem = 'agent-stopped'; add('agent-stopped', value, 'The original saved input remains available.', 'muted') }
     else if (row.coreStatus === 'not-applied') { value = 'Not delivered to Agent'; tone = 'warning'; incomingProblem = 'agent-not-applied'; add('agent-not-applied', value, 'Check the original input receipt.', 'warning') }
     else { value = row.coreStatus === 'terminal-confirmed' || row.coreStatus === 'bytes-accepted' ? 'Sent to Agent · awaiting confirmation' : 'Agent acceptance not confirmed'; incomingProblem = 'agent-unconfirmed'; add('agent-unconfirmed', value, 'Input transport or recording is separate from Agent acceptance.') }
