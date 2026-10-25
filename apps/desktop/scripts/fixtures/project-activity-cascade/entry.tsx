@@ -90,7 +90,7 @@ function Scene({ scope }: { scope: ActivityScope }) {
   const scoped = scope === 'all' ? current : current.filter(session => scope === 'zone' ? ['activity-a', 'activity-b'].includes(session.id) : session.id === 'activity-orphan')
   return <div style={{ height: '100%', background: 'var(--bg-0)', padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
     <header style={{ display: 'flex', alignItems: 'center', gap: '16px' }}><strong>AgentMux</strong><ProjectActivity sessions={scoped} /></header>
-    <main style={{ flex: 1, padding: '20px', border: '1px solid var(--border-0)', borderRadius: 'var(--radius-md)' }}>
+    <main style={{ flex: 1, padding: '20px', border: '1px solid var(--border-0)', borderRadius: 'var(--radius-sm)' }}>
       <h2>Core runtime</h2><p>The workface stays available while inspecting Agent activity.</p>
       <input aria-label="Original workface input" defaultValue="保留原输入和选区" style={{ width: '100%', maxWidth: '520px', padding: '10px' }} />
     </main><AgentInformationPreviewHost /><WindowOverlayHost />

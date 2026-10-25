@@ -6,5 +6,5 @@ body { display: block; overflow: auto; }
 .original-reading-probe__header > span { color: var(--text-3); font-size: var(--fs-meta); }
 .original-reading-probe__messages { padding: 10px 12px; min-width: 0; }
 .original-reading-probe__draft { display: grid; gap: 6px; margin: 12px 16px; color: var(--text-3); font-size: var(--fs-meta); }
-.original-reading-probe__draft textarea { width: 100%; min-height: 56px; resize: none; padding: 8px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--radius-md); color: var(--text); font: inherit; }
+.original-reading-probe__draft textarea { width: 100%; min-height: 56px; resize: none; padding: 8px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text); font: inherit; }
 .original-reading-probe__draft textarea:focus { outline: 1px solid var(--focus-line); outline-offset: 1px; }

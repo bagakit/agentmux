@@ -109,7 +109,7 @@ function recordScene(name:string){
 it('current card is genuinely connected to real producer and typed Core answer', async () => {
   await act(async () => ingress()); await mount()
   expect(container.querySelectorAll('.agent-interaction')).toHaveLength(1)
-  expect(container.querySelector('.agent-body > .agent-interaction')?.textContent).toContain('Choose the next action')
+  expect(container.querySelector('.agent-body > .agent-interaction-source > .agent-interaction')?.textContent).toContain('Choose the next action')
   const options = [...container.querySelectorAll<HTMLButtonElement>('.agent-interaction__options button')]
   expect(options.map(one => one.textContent)).toEqual(['First', 'Second'])
   await act(async () => options[1]!.click())
@@ -124,7 +124,7 @@ it('pending choices appear within the conversation reading surface', async () =>
   const body = container.querySelector('.activity-feed')
   expect(body).not.toBeNull()
   expect(body!.textContent).toContain('Original native message')
-  expect(container.querySelector('.agent-body > [data-request-id="question-1"]')).not.toBeNull()
+  expect(container.querySelector('.agent-body > .agent-interaction-source > [data-request-id="question-1"]')).not.toBeNull()
   expect(container.querySelector('.agent-input-stack .agent-interaction')).toBeNull()
   expect(container.querySelector('.agent-interaction__status')?.textContent).toBe('Needs your answer')
 })
