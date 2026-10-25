@@ -8,6 +8,7 @@ const packages = new Map<string, { exports: Record<string, any>; keys: string[] 
 const changes: Record<string, [string, string, string]> = {
   'drop-host-owner': ['apps/host/src/host.ts', 'inputResources: { inspect: identity => fileUploads.inspect(identity), read: (identity, maxBytes) => fileUploads.read?.(identity, maxBytes) ?? Promise.resolve(null) }, ', ''],
   'raw-publication': ['packages/connectors/src/publication-content.ts', "if (resolved?.kind === 'markdown') { value = resolved.text;", "if (false && resolved?.kind === 'markdown') { value = resolved.text;"],
+  'replay-observed-image': ['packages/connectors/src/publication-store.ts', ' || sameImageEffect(prior.payload, body)', ''],
   'ignore-membership': ['packages/core/src/client.ts', "image.upload.revision !== input.revision || !inputImageMatches(image, key, body)", 'false'],
   'freeze-unavailable': ['packages/core/src/client.ts', "if (!this.inputResources || image.upload.byteLength > input.maxBytes)", "if (image.observation !== 'confirmed' || !this.inputResources || image.upload.byteLength > input.maxBytes)"],
   'drop-image-input': ['apps/desktop/src/renderer/src/store.ts', 'entry.browserInput?.capture.reference, entry.inputImages)', 'entry.browserInput?.capture.reference)']
