@@ -24,11 +24,12 @@ const hash = value => createHash('sha256').update(value).digest('hex')
 const densityMutation = process.argv.includes('--density-mutation')
 const interactionStates = process.argv.includes('--interaction-states'), recovery = process.argv.includes('--notification-recovery'), resumed = process.argv.includes('--notification-resumed'), manualNotify = process.argv.includes('--manual-notify') || recovery || resumed
 const emptyStates = process.argv.includes('--empty-states'), emptyMutation = process.argv.includes('--empty-mutation')
-assert.ok([densityMutation, interactionStates, manualNotify, emptyStates, emptyMutation, process.argv.includes('--mutations')].filter(Boolean).length <= 1, 'Renderer and mutation modes are separate')
+const automation = process.argv.includes('--automation')
+assert.ok([densityMutation, interactionStates, manualNotify, emptyStates, emptyMutation, automation, process.argv.includes('--mutations')].filter(Boolean).length <= 1, 'Renderer and mutation modes are separate')
 const selectedMutation = process.argv.includes('--mutation') ? process.argv[process.argv.indexOf('--mutation') + 1] : undefined
 assert.ok(!selectedMutation || mutations.some(item => item.name === selectedMutation), 'The named mutation exists')
 const result = { schema: 'agentmux.message-workspace-proof.v1', passed: false, userRunTouched: false, productionWritten: false,
-  mode: resumed ? 'notification-resumed' : recovery ? 'notification-recovery' : manualNotify ? 'manual-notify' : emptyMutation ? 'empty-mutation' : emptyStates ? 'empty-states' : densityMutation ? 'density-mutation' : interactionStates ? 'interaction-states' : process.argv.includes('--mutations') ? 'mutations' : 'renderer', aestheticReview: 'not-performed', cleanup: {} }
+  mode: resumed ? 'notification-resumed' : recovery ? 'notification-recovery' : manualNotify ? 'manual-notify' : emptyMutation ? 'empty-mutation' : emptyStates ? 'empty-states' : densityMutation ? 'density-mutation' : interactionStates ? 'interaction-states' : automation ? 'automation' : process.argv.includes('--mutations') ? 'mutations' : 'renderer', aestheticReview: 'not-performed', cleanup: {} }
 await mkdir(evidence, { recursive: true })
 
 async function mounted(label, mutation) {
@@ -108,7 +109,7 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
   await writeFile(join(directory, 'compilation.json'), JSON.stringify(proof.compilation, null, 2) + '\n')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const log = []
-  result.process = proof.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, directory, resumed ? 'notification-resumed' : recovery ? 'notification-recovery' : manualNotify ? 'manual-notify' : empty ? mutate ? 'empty-mutation' : 'empty-states' : density ? 'density' : interactions ? 'interaction-states' : 'full'],
+  result.process = proof.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, directory, resumed ? 'notification-resumed' : recovery ? 'notification-recovery' : manualNotify ? 'manual-notify' : empty ? mutate ? 'empty-mutation' : 'empty-states' : density ? 'density' : interactions ? 'interaction-states' : automation ? 'automation' : 'full'],
     { cwd: root, env, timeoutMs: 180000, onLine: line => log.push(line) })
   await writeFile(join(directory, 'process.log'), log.join('\n'))
   proof.render = JSON.parse(await readFile(join(directory, 'render.json'), 'utf8'))
@@ -125,11 +126,14 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
   }
   assert.equal(proof.process.exitCode, 0, JSON.stringify(proof.render.failure))
   assert.equal(proof.render.passed, true)
-  assert.equal(proof.render.scenes.length, manualNotify ? 3 : density || interactions ? 1 : 6)
+  assert.equal(proof.render.scenes.length, manualNotify || automation ? 3 : density || interactions ? 1 : 6)
   if (density) return proof
   result.render = proof.render
   assert.ok(result.render.frames.length > 0)
-  if (manualNotify) {
+  if (automation) {
+    assert.ok(result.render.scenes.every(scene => scene.originalSurfacePreserved && scene.retainedAutomation && scene.controlsReachable))
+    assert.equal(result.render.frames.length, 12, 'Each actual workface provides list, controls, minute-form and save captures')
+  } else if (manualNotify) {
     assert.equal(result.render.frames.length, recovery ? 15 : 9)
     if (recovery) assert.equal(result.render.scenes.find(scene => scene.width === 640)?.reloadedIdentity, true)
     assert.ok(result.render.scenes.every(scene => scene.explicitNotification && scene.observationOnlyRefresh && scene.originalSurfacePreserved && (!recovery || scene.retainedUnknown && scene.keyboardReceipt && scene.sentRecipient)))

@@ -44,6 +44,18 @@ api.sessions.messageEvents = async (reference, query = {}) => {
 const observers = new Set<(event: AgentSessionHistoryObservation) => void>()
 const readDispatches = api.sessions.dispatches
 let emptyViews = false
+let automationScene = false
+const originalScheduleList = api.schedule.list
+api.schedule.list = async query => {
+  if (!automationScene || !original || original.kind !== 'agent') return originalScheduleList(query)
+  const target = { hostId: original.hostId, agentSessionId: original.control.agentSessionId, providerId: original.providerId, workspacePath: original.workspacePath }
+  const expected = query.target ?? query.scope
+  if (expected && !Object.entries(expected).every(([key, value]) => target[key as keyof typeof target] === value))
+    return { schedules: [], executionScope: 'connected-host' }
+  return { schedules: [{ ...target, loopId: 'private-minute-arrangement', intervalMs: 1000, everyMs: 300000,
+    prompt: '请检查当前任务并报告真实进展。', status: 'active', nextCheckAt: fixtureEpoch(0, 0, 3600000),
+    revision: 1, creationOperationId: 'private-automation-create', futureIntentId: 'private-automation-intent' }], executionScope: 'connected-host' }
+}
 let original = useAppStore.getState().sessions.find(session => session.kind === 'agent')!
 if (original.kind !== 'agent') throw new Error('The private production scene has an original Agent')
 api.sessions.dispatches = async (reference, query) => {
@@ -70,6 +82,7 @@ api.continuousProgress.create = async () => { calls.push({ action: 'automation-c
 api.continuousProgress.action = async () => { calls.push({ action: 'automation-action' }); throw new Error('Reading cannot operate automation') }
 Object.assign(window, { messageWorkspace: {
   seed(theme: 'dark' | 'light', tag: string, empty = false, retainNotificationIntents = false) {
+    automationScene = false
     emptyViews = empty
     base.appearance(theme)
     const generation = base.mode('terminal')
@@ -92,6 +105,7 @@ Object.assign(window, { messageWorkspace: {
     resumedScene = false
     return { generation, ...a2a, journalWire, draft: '保留这份尚未发送的草稿。' }
   },
+  automation() { automationScene = true; base.progress('paused', true) },
   resumed() { resumedScene = true },
   forgetNotification(operationId: string) { notificationRecords.delete(operationId); localStorage.setItem(fixtureNoticeStorage, JSON.stringify([...notificationRecords])) },
   async restore(theme: 'dark' | 'light', tag: string) { await useAppStore.persist.rehydrate(); return this.seed(theme, tag, false, true) },

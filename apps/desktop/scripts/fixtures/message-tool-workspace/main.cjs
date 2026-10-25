@@ -185,6 +185,39 @@ async function emptyStates(width, theme, original, before, geometry) {
   await originalSurfacePreserved(original, before)
   result.scenes.push({ width, theme, geometry, notices, collaboration, automation, automationReturn: true, keyboardClose: true, originalSurfacePreserved: true })
 }
+async function automationScene(width, theme, short, original, before) {
+  const suffix = short ? '-short' : ''
+  const automation = `${panel}.querySelector('[aria-label="Automation settings"]')`
+  await click(buttons('Automation'))
+  await waitFor(`${automation} && !${automation}.hidden && ${automation}.querySelector('[data-schedule-id="private-minute-arrangement"]') && ${automation}.querySelector('[data-progress-details="interval"]')`)
+  const bounds = await evaluate(`(()=>{const p=${panel},r=p.getBoundingClientRect();return {top:r.top,bottom:r.bottom,width:p.clientWidth,scroll:p.scrollWidth}})()`)
+  assert.ok(bounds.top >= 0 && bounds.bottom <= await evaluate('innerHeight') && bounds.scroll <= bounds.width + 1, 'The real Automation popover remains within its workface')
+  await frame(width, theme, 'automation-list' + suffix)
+  await click(`${automation}.querySelector('[data-progress-details="interval"] > summary')`)
+  const resume = `${automation}.querySelector('[aria-label="Resume continuous progress"]')`
+  await waitFor(visible(resume))
+  await evaluate(`${resume}.scrollIntoView({block:'nearest'})`); await painted()
+  const control = await evaluate(`(()=>{const n=${resume},p=${panel},r=n.getBoundingClientRect(),b=p.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {enabled:!n.disabled,inside:r.top>=b.top&&r.bottom<=b.bottom&&r.left>=b.left&&r.right<=b.right,hit:n===hit||n.contains(hit)}})()`)
+  assert.deepEqual(control, { enabled: true, inside: true, hit: true }, 'The original paused-loop action is visible and hit-testable without activating it')
+  await frame(width, theme, 'automation-controls' + suffix)
+  await click(`${automation}.querySelector('.automation-create > summary')`)
+  const interval = `${automation}.querySelector('[aria-label="Repeat interval in minutes"]' )`
+  const message = `${automation}.querySelector('[aria-label="Arranged message"]')`
+  await waitFor(visible(interval)); await replace(interval, '7'); await replace(message, '请检查当前任务，保留原会话。')
+  await evaluate(`window.automationInterval=${interval};window.automationMessage=${message}`)
+  await frame(width, theme, 'automation-minute-form' + suffix)
+  const save = `${automation}.querySelector('.schedule-create[data-embedded] button[type="submit"]')`
+  await waitFor(visible(save)); await evaluate(`${save}.scrollIntoView({block:'nearest'})`); await painted()
+  const saveControl = await evaluate(`(()=>{const n=${save},p=${panel},r=n.getBoundingClientRect(),b=p.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {enabled:!n.disabled,inside:r.top>=b.top&&r.bottom<=b.bottom&&r.left>=b.left&&r.right<=b.right,hit:n===hit||n.contains(hit)}})()`)
+  assert.deepEqual(saveControl, { enabled: true, inside: true, hit: true }, 'The unsent minute-form save is visible and hit-testable without activating it')
+  await frame(width, theme, 'automation-save' + suffix)
+  await click(buttons('Back to messages')); await click(buttons('Automation'))
+  assert.equal(await evaluate(`window.automationInterval===${interval}&&${interval}.value==='7'&&window.automationMessage===${message}&&${message}.value==='请检查当前任务，保留原会话。'`), true, 'Navigation retains the exact form nodes and unsent automation draft')
+  await key('Escape', 'Escape', 27); await waitFor(`!${panel}.matches(':popover-open')`)
+  assert.equal(await evaluate(`document.activeElement===${surface}.querySelector('.composer__mailbox')`), true)
+  await originalSurfacePreserved(original, before)
+  result.scenes.push({ width, theme, short, controlsReachable: true, retainedAutomation: true, originalSurfacePreserved: true })
+}
 async function interactionStates(width, theme, original, before, geometry) {
   result.stage.action = 'ordinary-record-hover'
   const ordinary = `${visiblePanel}.querySelector('.composer-mailbox__record:has(.composer-mailbox__record-actions):not(:has(.composer-mailbox__record-status, .composer-outbox__send, [role="status"]))')`
@@ -394,12 +427,14 @@ async function scenario(width, theme, short = false) {
   result.stage = { width, theme, short, action: 'seed' }
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: width * 2 + 1, height: short ? 540 : 800, deviceScaleFactor: 1, mobile: false })
   const original = await evaluate(`messageWorkspace.seed(${JSON.stringify(theme)},${JSON.stringify(theme + '-' + width + (short ? '-short' : ''))},${mode === 'empty-states' || mode === 'empty-mutation'})`)
+  if (mode === 'automation') await evaluate('messageWorkspace.automation()')
   await waitFor(`${surface}?.querySelector('.xterm') && ${editor}?.textContent.includes('尚未发送')`)
   await painted()
   await evaluate(`window.workspaceEditor=${editor}`)
   const before = await evaluate('({terminal:messageWorkspace.terminal(),facts:messageWorkspace.facts()})')
   await click(`${surface}.querySelector('.composer__mailbox')`)
   await waitFor(`${panel}.matches(':popover-open')`)
+  if (mode === 'automation') { await automationScene(width, theme, short, original, before); return }
   if (mode === 'notification-resumed') { await resumedNotification(width, theme, original, before); return }
   if (mode === 'notification-recovery') { await notificationRecovery(width, theme, original, before); return }
   if (mode === 'manual-notify') { await manualNotification(width, theme, original, before); return }
@@ -537,7 +572,8 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor('Boolean(window.messageWorkspace)')
-    if (mode === 'manual-notify' || mode === 'notification-recovery' || mode === 'notification-resumed') { for (const [width, theme] of [[380,'dark'],[320,'dark'],[640,'light']]) await scenario(width, theme, mode === 'notification-recovery' && width === 320) }
+    if (mode === 'automation') { await scenario(640, 'light'); await scenario(320, 'dark'); await scenario(320, 'dark', true) }
+    else if (mode === 'manual-notify' || mode === 'notification-recovery' || mode === 'notification-resumed') { for (const [width, theme] of [[380,'dark'],[320,'dark'],[640,'light']]) await scenario(width, theme, mode === 'notification-recovery' && width === 320) }
     else if (mode === 'empty-mutation') await scenario(320, 'dark')
     else if (mode === 'empty-states') for (const theme of ['dark', 'light']) for (const width of [320, 380, 440]) await scenario(width, theme)
     else if (mode === 'density') await scenario(320, 'dark', true)
