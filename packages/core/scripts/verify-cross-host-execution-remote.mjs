@@ -180,7 +180,7 @@ const model = createServer(async (req, res) => {
             }
             else if (!text.includes(effect)) {
                 const code = phase === 'initial' ? "const f=require('node:fs');f.appendFileSync('effects.txt','once\\n');f.writeFileSync('note.txt','initial\\n');console.log(JSON.stringify({platform:process.platform,cwd:process.cwd(),marker:f.readFileSync('resource-marker.txt','utf8')}))" : phase === 'resume' ? "const f=require('node:fs');f.appendFileSync('resume-effects.txt','once\\n');console.log(f.readFileSync('note.txt','utf8')+f.readFileSync('effects.txt','utf8'))" : "const f=require('node:fs');f.appendFileSync('long-effects.txt','once\\n');f.writeFileSync('long-started.txt','started');const timer=setInterval(()=>{if(f.existsSync('release-long.txt')){clearInterval(timer);f.writeFileSync('long-done.txt','done');console.log('ORIGINAL_LONG_RESULT_'+f.readFileSync('resource-marker.txt','utf8'))}},100)";
-                item = call('exec_command', { cmd: quote(active.nodePath) + ' -e ' + quote(code) + '; ' + nativeControlCommand(phase), workdir: active.workspace, yield_time_ms: phase === 'cut' ? 30000 : 1000, max_output_tokens: 1000 }, effect);
+                item = call('exec_command', { cmd: quote(active.nodePath) + ' -e ' + quote(code) + (phase === 'cut' ? '' : '; ' + nativeControlCommand(phase)), workdir: active.workspace, yield_time_ms: phase === 'cut' ? 30000 : 1000, max_output_tokens: 1000 }, effect);
             }
             else if (!text.includes(modify)) {
                 const before = phase === 'initial' ? 'initial' : phase === 'resume' ? 'modified' : 'resumed', after = phase === 'initial' ? 'modified' : phase === 'resume' ? 'resumed' : 'after-cut';
