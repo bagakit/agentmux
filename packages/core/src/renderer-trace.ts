@@ -9,6 +9,7 @@ export const RENDERER_TRACE_MAX_BYTES = 8 * 1024 * 1024
 export const RENDERER_TRACE_METADATA_BYTES = 64 * 1024
 export const RENDERER_TRACE_MAX_GZIP_BYTES = 3 * Math.floor((RENDERER_TRACE_MAX_BYTES - RENDERER_TRACE_METADATA_BYTES) / 4)
 export const RENDERER_TRACE_CATEGORIES = ['toplevel', 'devtools.timeline', 'disabled-by-default-devtools.timeline',
+  'disabled-by-default-devtools.timeline.stack',
   'blink', 'blink.user_timing', 'cc', 'gpu', 'viz', 'input', 'latencyInfo'] as const
 export type RendererTraceResult = RendererTraceInput & {
   schema: 'agentmux.renderer-trace.v2'; scope: 'chromium-target-related-timeline'; status: 'completed' | 'failed' | 'unknown'
@@ -71,7 +72,9 @@ export function parseRendererTraceResult(value: unknown, input?: RendererTraceIn
   if (input && (!sameRendererV8ProfileTarget(actual.target, input.target) || actual.durationMs !== input.durationMs)) invalid()
   if (r.schema !== 'agentmux.renderer-trace.v2' || r.scope !== 'chromium-target-related-timeline' ||
     !['completed', 'failed', 'unknown'].includes(String(r.status)) || r.transferMode !== 'ReturnAsStream' || r.streamFormat !== 'json' || r.streamCompression !== 'gzip' || r.traceTimeUnit !== 'microseconds' ||
-    array(r.requestedCategories).length !== RENDERER_TRACE_CATEGORIES.length || (r.requestedCategories as unknown[]).some((category, index) => category !== RENDERER_TRACE_CATEGORIES[index])) invalid()
+    !array(r.requestedCategories).length || (r.requestedCategories as unknown[]).some(category => typeof category !== 'string' || !category.length)) invalid()
+  // These are the original producer's filters, not this reader's current capture policy.
+  // The existing metadata byte budget below also bounds this retained array.
   const timing = fields(r.timing, ['requestedAt', 'startedAt', 'endAcknowledgedAt', 'completedAt', 'finishedAt', 'startMonotonicMs', 'endMonotonicMs', 'completeMonotonicMs'])
   for (const key of ['requestedAt', 'finishedAt']) if (!numeric(timing[key])) invalid()
   for (const key of ['startedAt', 'endAcknowledgedAt', 'completedAt', 'startMonotonicMs', 'endMonotonicMs', 'completeMonotonicMs']) if (timing[key] !== null && !numeric(timing[key])) invalid()
