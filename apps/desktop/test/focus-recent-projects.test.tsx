@@ -10,6 +10,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { chooseFocusFilter } from './fixtures/focus-filter-menu'
+import { historySourcesReader } from './helpers/startup-observation-api-fixture'
 import * as ProjectRows from '../src/renderer/src/components/FocusProjectLanes'
 
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ sessionId }: { sessionId: string }) => createElement('output', { 'data-private-pty': sessionId }) }))
@@ -46,7 +47,7 @@ beforeEach(async () => {
     sessions: [], tabs: {}, layouts: {}, timelines: {}, scratchTopicSnapshots: {}, providerCatalog: [], recoveryCandidates: [], spaceObjectIcons: {}, agentNames: {}, demands: {},
     mainSurface: 'agents', error: null, activeWorkspaceId: null, agentComposerDrafts: { healthy: 'Original unsent draft' },
     agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, focusTimelineRuler: { ...initial.focusTimelineRuler, timeZone: 'UTC' } }, true)
-  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
   vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'generic', nativeSessionId: `native-${control.agentSessionId}` }, items: [], nextCursor: null }))
   vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'generic', nativeSessionId: `native-${control.agentSessionId}` }, dispose: vi.fn() }))
   vi.spyOn(api.sessions, 'timeline').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, revision: 0, items: [] }))
@@ -62,14 +63,14 @@ afterEach(async () => {
 })
 
 it('keeps 36h and exactly 48h observations in the original board despite a saved 24h sort, while closed/49h observations remain Past and old healthy Context stays', async () => {
-  vi.mocked(api.sessions.historySources).mockResolvedValue([source('recent'), source('edge'), source('closed', 'retired'), source('old')])
+  vi.mocked(api.sessions.historySources).mockImplementation(historySourcesReader([source('recent'), source('edge'), source('closed', 'retired'), source('old')]))
   const healthy = agent('healthy')
   await mount([visit('recent'), visit('edge', 'edge', 48), visit('old', 'old', 49), visit('closed', 'closed', 1)], { sessions: [healthy] })
   expect(recent().map(row => row.dataset.recentProject).sort()).toEqual([key('edge'), key('recent')])
   expect(past().map(row => row.dataset.retainedProject).sort()).toEqual([key('closed'), key('old')])
   expect(container.querySelectorAll('.focus-project-board__live .focus-project-lanes__row')).toHaveLength(3)
-  expect(container.querySelectorAll('.focus-context')).toHaveLength(1)
-  expect(container.querySelector('.focus-context')?.getAttribute('data-session-id')).toBe('healthy')
+  expect(container.querySelectorAll('.focus-context[data-session-id]')).toHaveLength(1)
+  expect(container.querySelector('.focus-context[data-session-id]')?.getAttribute('data-session-id')).toBe('healthy')
   expect(recent()[0]!.title).toContain('observed-branch'); expect(recent()[0]!.title).toContain('observed-topic')
   expect(useAppStore.getState().config?.focus?.recentActivityHours).toBe(24)
   expect(useAppStore.getState().sessions).toEqual([healthy]); expect(useAppStore.getState().agentComposerDrafts.healthy).toBe('Original unsent draft')
@@ -78,15 +79,15 @@ it('keeps 36h and exactly 48h observations in the original board despite a saved
 
 it('keeps recent unknown during catalogue wait and missing/error facts, and a late retired catalogue cannot erase a newer current Run', async () => {
   let resolve!: (sources: AgentSessionHistoryDescriptor[]) => void
-  vi.mocked(api.sessions.historySources).mockImplementation(() => new Promise(done => { resolve = done }))
+  vi.mocked(api.sessions.historySources).mockImplementation((options => new Promise<AgentSessionHistoryDescriptor[]>(done => { resolve = done }).then(sources => options ? { sources, warnings: [] } : sources)) as typeof api.sessions.historySources)
   await mount([visit('newborn'), visit('missing')])
-  expect(recent()).toHaveLength(2); expect(recent().every(row => row.textContent?.includes('Current status unknown'))).toBe(true)
+  expect(recent()).toHaveLength(2); expect(recent().every(row => row.title.includes('Current status unknown'))).toBe(true)
   const current = agent('newborn')
   await act(async () => useAppStore.setState({ sessions: [current] }))
   await act(async () => resolve([source('newborn', 'retired')]))
   expect(container.querySelector('.focus-context[data-session-id="newborn"]')).not.toBeNull()
   expect(recent().map(row => row.dataset.recentProject)).toEqual([key('missing')])
-  expect(recent()[0]!.textContent).toContain('Current status unknown')
+  expect(recent()[0]!.title).toContain('Current status unknown')
   expect(useAppStore.getState().sessions[0]!.control.run.runId).toBe('new-current-newborn')
 })
 
@@ -102,7 +103,7 @@ it('uses held real task timestamps as well as visits, without promoting future v
 })
 
 it('requires every recorded Host/SID source to be retired, isolates equal project IDs across Hosts, and filters the same lightweight board rows', async () => {
-  vi.mocked(api.sessions.historySources).mockResolvedValue([source('old-local', 'retired'), source('active-local'), source('closed-remote', 'retired', 'remote')])
+  vi.mocked(api.sessions.historySources).mockImplementation(historySourcesReader([source('old-local', 'retired'), source('active-local'), source('closed-remote', 'retired', 'remote')]))
   await mount([visit('old-local', 'shared'), visit('active-local', 'shared'), visit('closed-remote', 'shared', 1, 'remote')])
   expect(recent().map(row => row.dataset.recentProject)).toEqual([key('shared')])
   expect(past().map(row => row.dataset.retainedProject)).toEqual([key('shared', 'remote')])
@@ -123,7 +124,7 @@ it('shares exactly one actual catalogue read with Timeline, keeps errors visible
   await act(async () => root.render(<GlobalFocusSurface visible />))
   await act(async () => new Promise<void>(resolve => setTimeout(resolve, 25)))
   expect(api.sessions.historySources).toHaveBeenCalledTimes(1)
-  expect(recent()).toHaveLength(1); expect(recent()[0]!.textContent).toContain('Current status unknown')
+  expect(recent()).toHaveLength(1); expect(recent()[0]!.title).toContain('Current status unknown')
   const notice = container.querySelector('.focus-filters .focus-source-status')!
   expect(notice).not.toBeNull()
   expect(notice.querySelector('[title="Catalogue service unavailable"]')).not.toBeNull()
@@ -155,14 +156,14 @@ it('keeps a failed project source visible during retry and clears it only on con
   await mount([visit('missing')], { sessions: [agent('healthy')] })
   const card = container.querySelector('[data-session-id="healthy"]'), project = recent()[0]!, before = useAppStore.getState()
   let finish!: (sources: AgentSessionHistoryDescriptor[]) => void
-  vi.mocked(api.sessions.historySources).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  vi.mocked(api.sessions.historySources).mockImplementationOnce((options => new Promise<AgentSessionHistoryDescriptor[]>(resolve => { finish = resolve }).then(sources => options ? { sources, warnings: [] } : sources)) as typeof api.sessions.historySources)
   const retry = [...container.querySelectorAll<HTMLButtonElement>('.focus-source-status button')].find(button => button.textContent === 'Retry project sources')!
   await act(async () => retry.click())
   expect(api.sessions.historySources).toHaveBeenCalledTimes(2)
   expect(container.querySelector('.focus-source-status__cause')).not.toBeNull()
   expect(container.querySelector('.focus-source-status__cause')!.textContent).toBe('Original source failure')
   expect(container.querySelector('.focus-source-status')!.textContent).toContain('Retrying project sources')
-  expect(project.textContent).toContain('Current status unknown')
+  expect(project.title).toContain('Current status unknown')
   expect(container.querySelector('[data-session-id="healthy"]')).toBe(card)
   expect(recent()[0]).toBe(project)
   await act(async () => finish([]))
