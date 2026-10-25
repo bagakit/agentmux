@@ -1,5 +1,10 @@
 // Each substitution changes a real product boundary; tests remain unchanged.
 export const collaborationMutations = [
+  { scope: 'discovery-hosted', name: 'namespace-without-bootstrap', file: 'packages/core/src/agent-discovery.ts',
+    before: 'const namespaces = await Promise.allSettled(scopes.map(async scope => await scope.client.readAgentMessageQueuePath()))',
+    after: "const namespaces = scopes.map(scope => ({ status: 'fulfilled' as const, value: scope.client.agentMessageQueuePath() }))" },
+  { scope: 'discovery-hosted', name: 'namespace-binds-cursor', file: 'packages/core/src/agent-discovery.ts',
+    before: "return [scope.hostId, namespace.status === 'fulfilled' ? namespace.value : null]", after: 'return [scope.hostId]' },
   { scope: 'discovery', name: 'candidate-budget', file: 'packages/core/src/agent-discovery.ts',
     before: 'await Promise.all(selected.map(async candidate => {',
     after: 'await Promise.all(relevant.filter(candidate => candidate.session).map(candidate => candidate.scope.client.statusAgent(candidate.session!.agentSessionId)))\n  await Promise.all(selected.map(async candidate => {' },
@@ -31,6 +36,7 @@ export const collaborationMutations = [
 ]
 
 export const collaborationTests = {
+  'discovery-hosted': 'packages/core/test/agent-discovery-hosted.test.ts',
   discovery: 'packages/core/test/a2a-agent-discovery.test.ts',
   broadcast: 'packages/core/test/a2a-broadcast-events.test.ts',
   spawn: ['packages/core/test/a2a-spawn.test.ts', 'packages/core/test/a2a-spawn-product.test.ts']

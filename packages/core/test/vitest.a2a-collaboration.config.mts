@@ -15,6 +15,8 @@ if (mutationName && !mutation) throw new Error('Unknown collaboration source mut
 export default defineConfig({
   root,
   plugins: [{ name: 'a2a-collaboration-source', enforce: 'pre', resolveId(id) {
+    // This export is generated runtime text and has no TypeScript source module.
+    if (id === '@agentmux/identity/runtime-source') return resolve(root, 'packages/identity/dist/runtime-source.js')
     const match = id.match(/^@agentmux\/([^/]+)(.*)$/u)
     if (!match) return
     const directory = resolve(root, 'packages', match[1]!)
@@ -41,7 +43,7 @@ export default defineConfig({
     if (input !== code) return { code: input, map: null }
   } }],
   test: {
-    include: ['packages/core/test/a2a-agent-discovery.test.ts', 'packages/core/test/a2a-broadcast-events.test.ts', 'packages/core/test/a2a-spawn.test.ts',
+    include: ['packages/core/test/a2a-agent-discovery.test.ts', 'packages/core/test/agent-discovery-hosted.test.ts', 'packages/core/test/a2a-broadcast-events.test.ts', 'packages/core/test/a2a-spawn.test.ts',
       'packages/core/test/a2a-spawn-product.test.ts',
       'packages/core/test/a2a-collaboration-cli.test.ts', 'packages/core/test/a2a-collaboration-spawn-native.test.ts'],
     setupFiles: [resolve(root, 'vitest.setup.ts')],
