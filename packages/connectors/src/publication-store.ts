@@ -283,9 +283,9 @@ export class PublicationStore {
     }
     return known
   }
-  /** Called only after the original ingress owner authorizes this addressed group query. */
-  queueQueryReceived(boundary: PublicationBoundary, query: import('@agentmux/core/connections').ConnectionIngressMessage): void {
-    queueQueryFeedback(this, boundary, query, 'received')
+  /** Called only after the original ingress/admission owner authorizes this exact query. */
+  queueQueryReceived(boundary: PublicationBoundary, query: import('@agentmux/core/connections').ConnectionIngressMessage, directBinding?: RoomBinding): void {
+    queueQueryFeedback(this, boundary, query, 'received', undefined, undefined, directBinding)
   }
   /** A new relationship boundary skips only ordinary effects that never crossed the dispatch boundary. */
   retireBindingPending(boundary: RoomBinding): void {
