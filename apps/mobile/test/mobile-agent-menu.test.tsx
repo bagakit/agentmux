@@ -67,6 +67,26 @@ const usage = { scope: 'response' as const, inputTokens: 12, outputTokens: 4, to
 const cachedUsage = { ...usage, observedAt: 900, context: { usedTokens: 5, capacityTokens: 20 } }
 const connection = { state: 'connected' as const, message: '已连接' }
 function usageSession(id = 'session-original', value = usage) { return { ...session(id), turnUsage: value } }
+it('keeps both native usage scopes readable in one table without repeating metric columns', async () => {
+  const f = fixture(); f.sessions.set('session-original', usageSession())
+  const view = await mount(<MobileAgentUsage client={f.client} agentSessionId="session-original" connected />)
+  const table = view.element.querySelector<HTMLTableElement>('table[aria-label="Token 用量"]')!
+  expect(table).not.toBeNull()
+  expect([...table.querySelectorAll('thead th')].map(value => value.textContent)).toEqual(['范围', '输入', '输出', '合计'])
+  const rows = [...table.querySelectorAll('tbody tr')]
+  expect(rows).toHaveLength(2)
+  expect(rows.map(row => row.querySelector('th[scope="row"]')?.textContent)).toEqual(['原生 Session 累计', '最近回复'])
+  expect(rows.map(row => [...row.querySelectorAll('td')].map(value => value.textContent))).toEqual([['100', '30', '130'], ['12', '4', '16']])
+})
+it('distinguishes missing usage scopes and invalid counts from measured zero', async () => {
+  const { cumulative: _cumulative, scope: _scope, ...unscoped } = usage
+  const f = fixture(); f.sessions.set('session-original', { ...session('session-original'), turnUsage: { ...unscoped, inputTokens: -1, outputTokens: 0 } })
+  const view = await mount(<MobileAgentUsage client={f.client} agentSessionId="session-original" connected />)
+  const rows = [...view.element.querySelectorAll('table[aria-label="Token 用量"] tbody tr')]
+  expect(rows[0]!.querySelector('td[colspan="3"]')?.textContent).toBe('累计用量尚未上报')
+  expect(rows[1]!.querySelector('th')?.textContent).toBe('最近样本 · 范围未确认')
+  expect([...rows[1]!.querySelectorAll('td')].map(value => value.textContent)).toEqual(['未上报', '0', '16'])
+})
 async function appMenu(inspect: (id: string) => Promise<unknown>, initial = cachedUsage) {
   const f = fixture(), copy = vi.fn().mockResolvedValue(true), ensure = vi.fn()
   f.sessions.set('peer', usageSession('peer', initial))
@@ -84,6 +104,7 @@ async function appMenu(inspect: (id: string) => Promise<unknown>, initial = cach
   const app = () => <MobileApp client={f.client} connection={connection} platform={{ ...createBrowserPlatform(), copyText: copy }} />
   const view = await mount(app())
   await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+  await vi.waitFor(() => expect(button(view.element, '另一个原 Agent · 更多操作')).toBeDefined())
   return { ...f, ...view, copy, ensure, original, app }
 }
 it.each(['close', 'Escape', 'Back'])('opens the actual App menu before delayed inspect, allows Copy and preserves the original workface on %s', async dismissal => {

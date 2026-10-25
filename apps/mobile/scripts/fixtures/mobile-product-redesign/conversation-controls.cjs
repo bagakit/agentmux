@@ -32,6 +32,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
       assert.equal(await visiblePanel('conversation'),true)
       await tap('.mobile-conversation__goal','Floating original Goal'); await flush()
       assert.equal(await visiblePanel('goal'),true,'Actual floating Goal action opens the original Goal owner')
+      await until(`mobileProductScene.facts().calls.some(c=>c.method==="goal.ls"&&c.params.agentSessionId===${JSON.stringify(original.sid)})`)
       assert.equal(await read('mobileProductScene.facts().calls.filter(c=>c.method==="goal.ls").at(-1).params.agentSessionId'),original.sid)
       await tap('.mobile-header [data-mobile-back]','Return from original Goal'); await flush()
       assert.equal(await visiblePanel('conversation'),true)

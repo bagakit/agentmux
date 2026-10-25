@@ -26,6 +26,7 @@ app.whenReady().then(async () => {
   const resize = async (width, height) => { win.setContentSize(width, height); await until(`innerWidth===${width}&&innerHeight===${height}&&Math.round(document.querySelector('.mobile-app').getBoundingClientRect().height)===${height}`) }
   const tap = async (selector, label = selector) => {
     await read(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'nearest'})`)
+    await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
     await until(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n?.getClientRects().length)return false;const r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return hit===n||n.contains(hit)})()`)
     const observed = await read(`(()=>{const nodes=[...document.querySelectorAll(${JSON.stringify(selector)})].filter(n=>n.getClientRects().length);if(nodes.length!==1)throw Error('Actual visible control must be unique: '+${JSON.stringify(selector)}+' ('+nodes.length+')');const n=nodes[0];n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);if(hit!==n&&!n.contains(hit))throw Error('Actual touch target is covered: '+${JSON.stringify(label)});window.mobileTapFacts={clicked:false,events:[]};window.mobileTapTarget=n;if(!window.mobileTapRecorder){window.mobileTapRecorder=true;for(const type of ['touchstart','touchend','click'])document.addEventListener(type,event=>{if(window.mobileTapTarget===event.target||window.mobileTapTarget?.contains(event.target)){window.mobileTapFacts.events.push({type,observedAt:performance.now()});if(type==='click')window.mobileTapFacts.clicked=true}},{capture:true})}return {x,y,label:n.getAttribute('aria-label')||n.textContent,tag:n.tagName,rect:r.toJSON(),disabled:!!n.disabled}})()`)
     assert.equal(observed.disabled, false, 'Selected actual control is enabled')
@@ -35,9 +36,13 @@ app.whenReady().then(async () => {
     await until('window.mobileTapFacts.clicked')
     result.operations.push({ action: 'touch-receipt', target: label, ...await read('window.mobileTapFacts') })
   }
-  const hasButton = (label, scope = 'body') => read(`(()=>{const ns=[...document.querySelectorAll(${JSON.stringify(scope)}+' button')].filter(n=>n.getClientRects().length);return ns.some(n=>n.getAttribute('aria-label')===${JSON.stringify(label)}||n.textContent.trim()===${JSON.stringify(label)}||n.textContent.trim().startsWith(${JSON.stringify(label)}))})()`)
+  const namedButton = (label, scope) => `(()=>{const ns=[...document.querySelectorAll(${JSON.stringify(scope)}+' button')].filter(n=>n.getClientRects().length);return ns.find(n=>n.getAttribute('aria-label')===${JSON.stringify(label)}||n.textContent.trim()===${JSON.stringify(label)})||ns.find(n=>n.querySelector('strong')?.textContent.trim()===${JSON.stringify(label)})||ns.find(n=>n.textContent.trim().startsWith(${JSON.stringify(label)}))||null})()`
+  const hasButton = (label, scope = 'body') => read(`Boolean(${namedButton(label, scope)})`)
   const button = async (label, scope = 'body') => {
-    const selected = await read(`(()=>{const ns=[...document.querySelectorAll(${JSON.stringify(scope)}+' button')].filter(n=>n.getClientRects().length);const n=ns.find(n=>n.getAttribute('aria-label')===${JSON.stringify(label)}||n.textContent.trim()===${JSON.stringify(label)})||ns.find(n=>n.querySelector('strong')?.textContent.trim()===${JSON.stringify(label)})||ns.find(n=>n.textContent.trim().startsWith(${JSON.stringify(label)}));if(!n)throw Error('Actual named button unavailable '+${JSON.stringify(label)}+'; visible='+ns.map(n=>n.getAttribute('aria-label')||n.textContent.trim()).join(' / '));const marker='capture-control-'+Math.random().toString(36).slice(2);n.setAttribute('data-capture-control',marker);return marker})()`)
+    // Explicit navigation may load its original workface asynchronously. Wait for
+    // that exact visible action; a missing action still fails the bounded read.
+    await until(`Boolean(${namedButton(label, scope)})`)
+    const selected = await read(`(()=>{const n=${namedButton(label, scope)};if(!n)throw Error('Actual named button unavailable '+${JSON.stringify(label)});const marker='capture-control-'+Math.random().toString(36).slice(2);n.setAttribute('data-capture-control',marker);return marker})()`)
     await tap('[data-capture-control=' + JSON.stringify(selected) + ']', label)
   }
   const capture = async name => {
@@ -219,6 +224,9 @@ app.whenReady().then(async () => {
       await action()
       await until('window.mobileFrameMeasure.ready!==null')
       const timing = await read('window.mobileFrameMeasure')
+      // Keep first-frame latency independent of module loading. Attribute the
+      // visible Goals owner's startup read to this visit before another begins.
+      if (label === 'Primary goals') await until(`document.querySelector('.mobile-goals:not([hidden])')?.getClientRects().length>0&&mobileProductScene.facts().calls.slice(${before.calls.length}).some(call=>call.method==='app.snapshot')`)
       await flush()
       const after = await read('mobileProductScene.facts()')
       const calls = after.calls.slice(before.calls.length)
