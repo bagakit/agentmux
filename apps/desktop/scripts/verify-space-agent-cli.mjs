@@ -1,3 +1,4 @@
+import { createExecutionProofCleanup } from '../../../packages/core/scripts/fixtures/execution-proof-cleanup.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFile as execFileCallback } from 'node:child_process'
@@ -50,7 +51,7 @@ const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scri
   path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture),
   ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'apps/host/src')), ...await files(path.join(root, 'packages/core/src')),
   ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/core/vendor/ctxmux')),
-  path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'),
+  path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'), path.join(root, 'packages/core/scripts/fixtures/execution-proof-cleanup.mjs'),
   path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml')]
 const criticalConsumers = new Set(['apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/main/control-ipc-bridge.ts',
   'apps/desktop/src/renderer/src/lib/api.ts', 'apps/desktop/src/renderer/src/lib/control-api.ts',
@@ -64,11 +65,12 @@ const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'AGENTMUX_SPATIAL_STATE_STORE'].map(name => [name, process.env[name]]))
 let client
 const toolOwners = []
+const toolCleanup = createExecutionProofCleanup(evidence)
 await fs.mkdir(evidence, { recursive: true })
 try {
   process.env.AGENTMUX_SPATIAL_STATE_STORE = path.join(privateRoot, 'runtime', 'state', 'spatial-state.json')
   receipt.inputs = await hashes()
-  if (toolMode) receipt.limitations = ['Single machine; two real isolated Headless Core/ctxmux owners, ordinary native Codex TUI with no submitted model turn.', 'Compiled CLI -> public RPC -> DesktopControlIpcBridge -> production Renderer space control/store -> RuntimeController -> real AgentExecutionBindingService/Coordinator -> original native helper Runs and Agent Session.', 'Fixture IPC is a bounded private sender boundary, not the entire production registerIpc installation. No model tool effect, WAN or visual-quality qualification is claimed here.', 'Tool data effects and original native conversation recovery are separately qualified by packages/core/scripts/verify-execution-binding.mjs, not simulated here.', 'No user App, profile, Session, Run or shared Runtime is accessed.']
+  if (toolMode) receipt.limitations = ['Single machine; two real isolated Headless Core/ctxmux owners connected through explicitly injected Unix endpoints (not SSH). Two real Electron processes share the original durable workface and native Agent/helper Runs; no model turn is submitted.', 'Compiled CLI -> public RPC -> DesktopControlIpcBridge -> production Renderer space control/store -> RuntimeController -> real AgentExecutionBindingService/Coordinator -> original native helper Runs and Agent Session.', 'Fixture IPC is a bounded private sender boundary, not the entire production registerIpc installation. No model tool effect, WAN or visual-quality qualification is claimed here.', 'Tool data effects and original native conversation recovery are separately qualified by packages/core/scripts/verify-execution-binding.mjs, not simulated here.', 'No user App, profile, Session, Run or shared Runtime is accessed.']
   receipt.tools = { electron: { path: electron, sha256: hash(await fs.readFile(electron)) } }
   for (const directory of ['repo', 'caller', 'other', 'topics', 'directory']) await fs.mkdir(path.join(privateRoot, directory))
   await execFile('git', ['init', '-b', 'main', path.join(privateRoot, 'repo')])
@@ -111,22 +113,26 @@ try {
     AGENTMUX_SPATIAL_STATE_STORE: path.join(privateRoot, 'runtime', 'state', 'spatial-state.json'),
     AGENTMUX_MESSAGE_QUEUE_PATH: path.join(privateRoot, 'messages.ndjson') })
   receipt.builtInputs = Object.fromEntries(await Promise.all((await files(path.join(privateRoot, 'renderer'))).concat(await files(path.join(privateRoot, 'main')), await files(path.join(privateRoot, 'preload'))).map(async file => [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
-  if (toolMode) await startToolCores(privateRoot, path.join(root, 'packages/core'), evidence, toolOwners)
-  for (const phase of toolMode ? ['tool-workspace'] : ['seed', 'restore', 'empty-restore', 'admission', 'after-admission']) {
+  if (toolMode) await startToolCores(privateRoot, path.join(root, 'packages/core'), evidence, toolOwners, toolCleanup)
+  for (const phase of toolMode ? ['tool-workspace', 'tool-workspace-restore'] : ['seed', 'restore', 'empty-restore', 'admission', 'after-admission']) {
     const phaseRoot = path.join(privateRoot, `phase-${phase}`)
     await fs.mkdir(phaseRoot)
     await fs.rm(path.join(evidence, `${phase}.json`), { force: true })
     const stderr = []
     const exit = await runProbeProcess(electron, [path.join(privateRoot, 'main/main.mjs'), path.join(privateRoot, 'renderer/index.html'),
       privateRoot, phase, path.join(privateRoot, 'preload/preload.cjs'), evidence, process.execPath, path.join(root, 'packages/core/bin/amux'), phaseRoot],
-      { temporaryRoot: phaseRoot, cwd: root, env, timeoutMs: 150000, onLine: line => { stderr.push(line.slice(0, 1800)); process.stderr.write(`${phase}: ${line.slice(0, 350)}\n`) } })
+      { temporaryRoot: phaseRoot, cwd: root, env, timeoutMs: 150000, onSpawn: (_identity, child) => { if (toolMode) toolCleanup.trackChild({ name: phase, base: phaseRoot }, 'electron', child) }, onLine: line => { stderr.push(line.slice(0, 1800)); process.stderr.write(`${phase}: ${line.slice(0, 350)}\n`) } })
     const entry = { phase, exit, stderr }; receipt.phases.push(entry)
     await fs.writeFile(path.join(evidence, `${phase}-stderr.log`), stderr.join('\n'))
     const native = JSON.parse(await fs.readFile(path.join(evidence, `${phase}.json`), 'utf8')); entry.native = native
     assert.equal(exit.timedOut, false, `${phase} watchdog fired`)
     assert.equal(exit.exitCode, 0, native.failure?.message)
     assert.equal(native.passed, true)
-    if (toolMode) { receipt.toolBinding = native.toolBinding; continue }
+    if (toolMode) {
+      if (phase === 'tool-workspace') receipt.toolBinding = native.toolBinding
+      else { receipt.toolRestart = native.toolRestart; assert.equal(receipt.toolRestart.passed, true); assert.notEqual(receipt.phases[0].native.pid, native.pid) }
+      continue
+    }
     process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
     process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
     process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
@@ -160,7 +166,7 @@ try {
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack } }
 finally {
-  const errors = await stopToolCores(toolOwners, evidence)
+  const errors = toolMode ? await stopToolCores(toolOwners, evidence, toolCleanup) : []
   try {
     if (!toolMode && !client && receipt.phases.length > 0) {
       process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
@@ -170,8 +176,9 @@ finally {
     }
     if (client) { for (const run of await client.listRuns()) if (run.state === 'running') await client.stopTerminal({ runId: run.runId }); await client.dispose() }
   } catch (error) { errors.push(error.message) }
-  try { await stopProbeProcesses(process.pid + 1_000_000_000, privateRoot) } catch (error) { errors.push(error.message) }
-  receipt.cleanup = { errors, remaining: await listProbeProcesses(-1, privateRoot), temporaryRootRemoved: false }
+  if (!toolMode) try { await stopProbeProcesses(process.pid + 1_000_000_000, privateRoot) } catch (error) { errors.push(error.message) }
+  receipt.cleanup = { errors, remaining: toolMode ? toolCleanup.report.records.filter(record => record.kind === 'child' && !record.closed).map(record => record.childPid) : await listProbeProcesses(-1, privateRoot), temporaryRootRemoved: false, ...(toolMode ? { report: path.join(evidence, 'cleanup.json') } : {}) }
+  if (errors.length || receipt.cleanup.remaining.length) receipt.passed = false
   if (receipt.cleanup.remaining.length === 0 && (!toolMode || receipt.passed)) { await fs.rm(privateRoot, { recursive: true, force: true }); receipt.cleanup.temporaryRootRemoved = true }
   for (const [name, value] of previousEnvironment) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
   await fs.writeFile(path.join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2))

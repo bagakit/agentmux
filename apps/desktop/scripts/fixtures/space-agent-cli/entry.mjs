@@ -27,6 +27,7 @@ api.spatial = {
 const setup = await request('setup')
 api.config.get = async () => setup.config
 api.providers.list = async options => request('providers', options)
+api.executors.discover = async hostId => request('discover-executors', hostId)
 api.demands.list = async () => []
 api.files.readDirectory = async () => []
 api.files.observe = async () => {}
@@ -40,7 +41,7 @@ api.sessions.launchAgent = async input => request('launch', input)
 // NewTabSurface legitimately try prewarming again, which would create a fixture-only render loop.
 api.sessions.launchTerminal = async () => new Promise(() => {})
 api.sessions.creation = async (host, id) => request('creation', host, id)
-api.sessions.recover = async (control, cwd) => request('recover', control, cwd)
+api.sessions.recover = async (...args) => request('recover', ...args)
 api.sessions.attach = async (control, byte) => request('attach', control, byte)
 api.sessions.replay = async (id, byte) => request('replay', id, byte)
 api.sessions.detach = async id => request('detach', id)
@@ -61,6 +62,7 @@ window.spaceState = () => {
   return { ...workbench, loading: state.loading, activeWorkspaceId: state.activeWorkspaceId,
     agentFocus: state.agentFocus, retainedSpatialFocus: state.retainedSpatialFocus,
     spaceZoneBindings: state.spaceZoneBindings, spatialRequests: state.spatialRequests,
+    agentComposerDrafts: state.agentComposerDrafts, launcherNameDrafts: state.launcherNameDrafts,
     focusedSessionId: focusedSessionId(state), sessions: state.sessions, error: state.error,
     caretRegionId: document.activeElement?.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId ?? null,
     caretElementTag: document.activeElement?.tagName ?? null,
@@ -129,3 +131,17 @@ window.spaceReady = true
 createRoot(document.getElementById('root')).render(createElement(App))
 
 window.spaceExecution = { read: id => api.sessions.executionBinding(id), observe(id) { const values = []; const errors = []; const stop = api.sessions.observeExecutionBinding(id, value => values.push(value), error => errors.push(error)); window.spaceExecutionReader = { values, errors, stop }; } }
+
+window.spaceSeedToolDraft = async (address, executorId) => {
+  await useAppStore.getState().discoverHostExecutors('agent')
+  const state = useAppStore.getState()
+  const regionId = state.splitRegion(address.workspaceId, address.tabId, address.regionId, 'right', { prompt: 'Unsent original cross-host draft' })
+  if (!regionId) throw new Error('The original Tab did not admit its adjacent draft Region')
+  const launcher = { tabId: address.tabId, regionId }
+  useAppStore.getState().setLauncherExecutionWorkspace(launcher, 'repo')
+  useAppStore.getState().setLauncherAgentWorkspace(launcher, 'agent-launch')
+  useAppStore.getState().setLauncherAgentExecutor(launcher, executorId)
+  useAppStore.getState().setLauncherNameDraft(regionId, 'agentName', 'Unsent native agent')
+  window.spaceFocus(address)
+  return launcher
+}

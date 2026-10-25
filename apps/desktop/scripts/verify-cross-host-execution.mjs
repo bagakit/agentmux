@@ -36,10 +36,20 @@ export function validateEvidence(id, value) {
     assert.deepEqual(value.map(item => item.mutation).sort(), [...mutantNames].sort(), 'Exact mutation coverage is required')
     assert(value.every(item => item.killed === true && Number.isInteger(item.exitCode) && item.exitCode !== 0), 'Every mutant must hit the product source and fail its assertions')
   } else if (id === 'native-ipc') {
-    assert(value.passed === true && value.phases?.length === 1 && value.phases[0].phase === 'tool-workspace', 'The actual tool-workspace IPC phase is required')
-    const phase = value.phases[0], observation = phase.native?.bindingObservation
-    assert(phase.exit?.exitCode === 0 && phase.exit.timedOut === false && phase.native.passed === true && observation?.originalRunRetained === true, 'The native IPC reader must retain the original Run')
-    assert(observation.observedBinding?.bindingId && observation.observedBinding.bindingId === observation.rendererBinding?.bindingId && observation.observedBinding.agentSessionId === observation.rendererBinding.agentSessionId, 'Read and subscription must identify the same original binding and Session')
+    assert(value.passed === true && value.phases?.length === 2, 'Both actual tool-workspace Electron generations are required')
+    assert.deepEqual(value.phases.map(phase => phase.phase), ['tool-workspace', 'tool-workspace-restore'])
+    const [seed, restored] = value.phases
+    assert(seed.native?.pid !== restored.native?.pid, 'Restart must be a different real Electron process')
+    for (const phase of value.phases) {
+      const observation = phase.native?.bindingObservation
+      assert(phase.exit?.exitCode === 0 && phase.exit.timedOut === false && phase.native.passed === true && observation?.originalRunRetained === true, 'Each native IPC reader must retain the original Run')
+      assert(observation.observedBinding?.bindingId && observation.observedBinding.bindingId === observation.rendererBinding?.bindingId && observation.observedBinding.agentSessionId === observation.rendererBinding.agentSessionId, 'Read and subscription must identify the same original binding and Session')
+    }
+    const restart = restored.native.toolRestart, original = seed.native.toolBinding?.original
+    assert(restart?.passed === true && restart.noCreateOrResume === true && restart.originalTerminalAttached === true &&
+      restart.originalSessionId === original?.agentSessionId && restart.originalRunId === original?.run?.runId &&
+      restart.bindingId === original?.toolExecution?.bindingId, 'The restored workface must retain the exact native Session, Run and binding without create/resume')
+    assert(value.cleanup?.errors?.length === 0 && value.cleanup.remaining?.length === 0 && value.cleanup.report, 'Exact test-owned cleanup evidence is required')
   } else if (id === 'visual-capture-and-restart') {
     assert(value.passed === true && value.captureOnly === true && value.frames?.length > 0 && value.restart?.passed === true, 'Actual captures and separate-process restart are required')
     assert(value.process?.exitCode === 0 && value.restartProcess?.exitCode === 0 && value.ui?.pid !== value.restart.pid, 'Both independent private Electron processes must complete')

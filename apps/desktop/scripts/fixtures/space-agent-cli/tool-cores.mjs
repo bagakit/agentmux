@@ -1,12 +1,11 @@
 import { spawn } from 'node:child_process'
-import { once } from 'node:events'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { connectAgentMuxRpc } from '../../../../../packages/core/dist/public-rpc-client.js'
 import { connectHostedAgentMux } from '../../../../../packages/core/dist/hosted-client.js'
 
 // Two real isolated owners for the existing Desktop consumer fixture. No model requests or tools are simulated.
-export async function startToolCores(root, packageRoot, evidence, owners) {
+export async function startToolCores(root, packageRoot, evidence, owners, cleanup) {
   for (const name of ['local', 'agent']) {
     const base = path.join(root, name)
     for (const dir of ['home', 'codex', 'runtime', 'state', 'workspace']) await fs.mkdir(path.join(base, dir), { recursive: true, mode: 0o700 })
@@ -14,10 +13,10 @@ export async function startToolCores(root, packageRoot, evidence, owners) {
     Object.assign(env, { HOME: path.join(base, 'home'), CODEX_HOME: path.join(base, 'codex'), AGENTMUX_RUNTIME_DIRECTORY: path.join(base, 'runtime'),
       AGENTMUX_STATE_DIRECTORY: path.join(base, 'state'), AGENTMUX_AGENT_SESSION_STORE: path.join(base, 'state', 'sessions.json') })
     await fs.writeFile(path.join(base, 'codex/config.toml'), `cli_auth_credentials_store = "file"\nmodel = "gpt-5.4"\nmodel_provider = "unrequested"\n[model_providers.unrequested]\nname = "No model turn in this proof"\nbase_url = "http://127.0.0.1:1/v1"\nwire_api = "responses"\nrequires_openai_auth = false\nsupports_websockets = false\n[projects.${JSON.stringify(path.join(root, 'repo'))}]\ntrust_level = "trusted"\n`, { mode: 0o600 })
-    const owner = { name, base, env, children: [], logs: [] }; owners.push(owner)
+    const owner = { name, base, env, children: [], logs: [], sessions: [], runs: [] }; owners.push(owner)
     const start = async (command, args, readyFd = false) => {
       const child = spawn(command, args, { env, stdio: readyFd ? ['ignore', 'ignore', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'] })
-      owner.children.push(child); child.stderr.on('data', bytes => owner.logs.push(bytes.toString()))
+      owner.children.push(child); cleanup.trackChild(owner, readyFd ? 'native' : 'core', child); child.stderr.on('data', bytes => owner.logs.push(bytes.toString()))
       const stream = readyFd ? child.stdio[3] : child.stdout
       const data = await new Promise((resolve, reject) => {
         let pending = ''; const timer = setTimeout(() => reject(new Error(`Private ${name} owner readiness unavailable`)), 30000)
@@ -37,24 +36,23 @@ export async function startToolCores(root, packageRoot, evidence, owners) {
   const configured = await agent.client.configureHostExecutor({ executorId: 'native-tool-proof', config: {
     label: 'Private native tool creation', providerId: 'codex', command: 'codex', args: ['--no-alt-screen', '--dangerously-bypass-approvals-and-sandbox'], env: {}, injectAgentMuxGuide: false,
   } })
-  const description = { endpoints: Object.fromEntries(owners.map(owner => [owner.name, owner.socketPath])), executor: configured.executor,
+  const description = { endpoints: Object.fromEntries(owners.map(owner => [owner.name, { transport: 'unix', path: owner.socketPath }])), actualMachines: 1, agentWorkspacePath: path.join(root, 'agent/workspace'), executor: configured.executor,
     identities: Object.fromEntries(owners.map(owner => [owner.name, owner.client.runtimeOwnerIdentity()])) }
   await fs.writeFile(path.join(root, 'tool-owners.json'), JSON.stringify(description), { mode: 0o600 })
   await fs.writeFile(path.join(evidence, 'tool-owners.json'), JSON.stringify(description, null, 2), { mode: 0o600 })
   return description
 }
-export async function stopToolCores(owners, evidence) {
-  const errors = []
-  for (const owner of owners.slice().reverse()) {
-    try {
-      if (owner.client) for (const run of await owner.client.listRuns()) if (run.state === 'running') await owner.client.stopTerminal({ runId: run.runId })
-    } catch (error) { errors.push(String(error)) }
-    await owner.client?.dispose().catch(error => errors.push(String(error)))
-    await owner.rpc?.dispose().catch(error => errors.push(String(error)))
-    for (const child of owner.children.slice().reverse()) if (child.exitCode === null && child.signalCode === null) {
-      const stopped = once(child, 'exit'); child.kill('SIGTERM'); await stopped
-    }
-    await fs.writeFile(path.join(evidence, `tool-owner-${owner.name}.log`), owner.logs.join(''), { mode: 0o600 })
+export async function stopToolCores(owners, evidence, cleanup) {
+  for (const owner of owners) {
+    await cleanup.step({ owner: owner.name, ownerRoot: owner.base, action: 'observe-private-owner-runs' }, async () => {
+      if (!owner.client) return
+      owner.sessions = owner.client.agentSessions()
+      const agentRuns = new Set(owner.sessions.map(session => session.run.runId))
+      owner.runs = (await owner.client.listRuns()).filter(run => run.state === 'running' && !agentRuns.has(run.runId)).map(run => run.runId)
+    })
+    await cleanup.step({ owner: owner.name, ownerRoot: owner.base, action: 'save-owner-log' },
+      () => fs.writeFile(path.join(evidence, `tool-owner-${owner.name}.log`), owner.logs.join(''), { mode: 0o600 }))
   }
-  return errors
+  try { await cleanup.finish(owners) } catch { /* Exact errors remain in the required cleanup receipt. */ }
+  return cleanup.report.errors
 }
