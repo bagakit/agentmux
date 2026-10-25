@@ -10,24 +10,25 @@ import { join, dirname, basename, resolve, isAbsolute, normalize } from 'node:pa
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { randomUUID, createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { performanceModelItem, runPerformance } from './fixtures/cross-host-execution-performance.mjs';
 // Two physical Hosts, controlled model, installed public Core/CLI and real native tools.
 // This script never installs/upgrades packages or uses an existing Core service.
 // --receipt is the original target authorization plus one explicitly installed candidate;
-// old execution evidence is not consumed as a current result. The default reader-gap mode
-// includes native file/process work and original-session recovery before the transport gap.
+// old execution evidence is not consumed as a current result. Default full qualification
+// consumes exact local/UI evidence and runs both physical directions; explicit modes stay narrow.
 const flags = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
     const flag = process.argv[index];
     if (flag === '--help' && process.argv.length === 3) {
-        console.log('node verify-cross-host-execution-remote.mjs --receipt FILE [--mode native|recovery|reader-gap] [--direction both|remote-agent|local-agent]\nThe receipt must retain agentmux.cross-host-target-authorization.v1 and executionCandidate: {schema:"agentmux.cross-host-installed-candidate.v1", sourceCommit, scopeId, candidateReceipt, local:{packageRoot,nodePath,codexDirectory}, remote:{installedRoot,packageRoot,nodePath,codexDirectory,profileRoot,command,endpoint:{transport:"ssh",host,user?}}}. The installed root must contain .agentmux-cross-host-test-root.json with the same scopeId/sourceCommit/hostId/profileRoot/nodePath. No package installation or old success adoption occurs.');
+        console.log('node verify-cross-host-execution-remote.mjs --receipt FILE [--mode full|native|recovery|reader-gap|performance] [--direction both|remote-agent|local-agent]\nThe receipt must retain agentmux.cross-host-target-authorization.v1 and executionCandidate: {schema:"agentmux.cross-host-installed-candidate.v1", sourceCommit, scopeId, candidateReceipt, local:{packageRoot,nodePath,codexDirectory}, remote:{installedRoot,packageRoot,nodePath,codexDirectory,profileRoot,command,endpoint:{transport:"ssh",host,user?}}}. The installed root must contain .agentmux-cross-host-test-root.json with the same scopeId/sourceCommit/hostId/profileRoot/nodePath. No package installation or old success adoption occurs.');
         process.exit(0);
     }
     assert(['--receipt', '--mode', '--direction'].includes(flag) && !flags.has(flag) && process.argv[index + 1], 'Unknown, duplicate or incomplete verifier argument');
     flags.set(flag, process.argv[index + 1]);
 }
 assert(flags.has('--receipt'), 'An original target authorization receipt is required; no service was created');
-const mode = flags.get('--mode') ?? 'reader-gap', direction = flags.get('--direction') ?? 'both';
-assert(['native', 'recovery', 'reader-gap'].includes(mode), 'Unknown verification mode');
+const mode = flags.get('--mode') ?? 'full', direction = flags.get('--direction') ?? 'both';
+assert(['full', 'native', 'recovery', 'reader-gap', 'performance'].includes(mode), 'Unknown verification mode');
 assert(['both', 'remote-agent', 'local-agent'].includes(direction), 'Unknown verification direction');
 const receiptPath = resolve(flags.get('--receipt'));
 const authorizationBytes = await fs.readFile(receiptPath);
@@ -106,6 +107,12 @@ for (const archive of archives)
 const input = { packageRoot, remoteRoot, remotePackageRoot, remoteNodePath, sshTarget, candidateCommit,
     localCodexDirectory: candidate.local.codexDirectory, remoteCodexDirectory: candidate.remote.codexDirectory,
     remoteProfileRoot: candidate.remote.profileRoot, remoteEndpoint, mode, directions: direction === 'both' ? ['remote-agent', 'local-agent'] : [direction] };
+if(mode==='full') {
+    assert.equal(direction,'both','The complete remote gate requires both exact physical directions');
+    const {runComplete}=await import('./fixtures/cross-host-execution-complete.mjs');
+    await runComplete({authorization,receiptPath,candidate,buildReceipt,verifierPath:fileURLToPath(import.meta.url),preflight:{installedObservation,consumerHashes,installationQualification}});
+    process.exit(0);
+}
 const { connectAgentMuxRpc } = await import(pathToFileURL(join(packageRoot, 'dist/public-rpc-client.js')));
 const { connectHostedAgentMux } = await import(pathToFileURL(join(packageRoot, 'dist/hosted-client.js')));
 const resolveCandidate = createRequire(join(packageRoot, 'package.json'));
@@ -113,16 +120,22 @@ const xterm = (await import(pathToFileURL(resolveCandidate.resolve('@xterm/headl
 const ownerFixture = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/cross-host-execution-owner.mjs');
 const root = await fs.realpath(await fs.mkdtemp('/tmp/amx-gap-'));
 const deadline = (promise, label, ms = 60000) => { let timer; return Promise.race([promise, new Promise((_, rej) => timer = setTimeout(() => rej(Error(label + ' timeout')), ms))]).finally(() => clearTimeout(timer)); };
-const until = async (fn, label) => { const end = Date.now() + 60000; while (Date.now() < end) {
+const until = async (fn, label, ms = 60000) => { const end = Date.now() + ms; while (Date.now() < end) {
     if (await fn())
         return;
     await new Promise(r => setTimeout(r, 100));
 } throw Error(label + ' timeout'); };
 const owners = [], requests = [], cliReceipts = [], results = [], errors = [], connections = new Set();
 let active, terminal, release, summary;
+const performanceContexts = [];
 const localBase = join(root, 'local'), remoteBase = join(remoteRoot, 'run-' + randomUUID().slice(0, 8));
 const save = async (name, value) => fs.writeFile(join(root, name), JSON.stringify(value, null, 2), { mode: 0o600 });
-await save('input.json', { ...input, root, localBase, remoteBase, authorization: { receiptPath, sha256: sha256(authorizationBytes), source: authorization.source }, installedObservation, installationQualification, consumerHashes, archives, startedAt: new Date().toISOString(), harnessHashes: { verifier: sha256(await fs.readFile(fileURLToPath(import.meta.url))), owner: sha256(await fs.readFile(ownerFixture)) } });
+await save('input.json', { ...input, root, localBase, remoteBase, authorization: { receiptPath, sha256: sha256(authorizationBytes), source: authorization.source }, installedObservation, installationQualification, consumerHashes, archives, startedAt: new Date().toISOString(), harnessHashes: { verifier: sha256(await fs.readFile(fileURLToPath(import.meta.url))), owner: sha256(await fs.readFile(ownerFixture)), ...(mode==='performance'?{performance:sha256(await fs.readFile(join(dirname(ownerFixture),'cross-host-execution-performance.mjs')))}:{}) } });
+function nativeControlCommand(phase) {
+    let command='"$AGENTMUX_CLI" whoami > control-'+phase+'.json 2> control-'+phase+'.err; echo $? > control-'+phase+'-status';
+    if(phase==='initial') command+='; "$AGENTMUX_CLI" device ls > control-device.json 2> control-device.err; echo $? > control-device-status; env -u AGENTMUX_AGENT_CAPABILITY "$AGENTMUX_CLI" whoami > control-missing.json 2> control-missing.err; echo $? > control-missing-status';
+    return command;
+}
 const model = createServer(async (req, res) => {
     try {
         if (req.method === 'GET') {
@@ -133,24 +146,41 @@ const model = createServer(async (req, res) => {
         for await (const c of req)
             chunks.push(c);
         const value = JSON.parse(Buffer.concat(chunks).toString());
-        requests.push(value);
-        await save('model-requests.json', requests);
+        const modelReceivedAt=performance.now();
+        if(mode==='performance') {
+            const metadata={receivedAt:modelReceivedAt,bytes:chunks.reduce((sum,chunk)=>sum+chunk.length,0),sha256:sha256(Buffer.concat(chunks)),callIds:(value.input??[]).flatMap(item=>item.call_id?[{type:item.type,callId:item.call_id}]:[])};
+            requests.push(metadata);
+            await fs.appendFile(join(root,'model-request-metadata.jsonl'),JSON.stringify(metadata)+'\n',{mode:0o600});
+        } else {requests.push(value);await save('model-requests.json', requests);}
         const text = JSON.stringify(value.input), tools = (value.tools ?? []).flatMap(t => t.type === 'namespace' ? t.tools.map(child => ({ ...child, namespace: t.name })) : [t]);
         let item;
         const call = (name, args, id) => { const tool = tools.find(t => t.name === name); assert(tool, 'Declared ' + name); return { type: 'function_call', call_id: id, name, arguments: JSON.stringify(args), ...(tool.namespace ? { namespace: tool.namespace } : {}) }; };
         if (!tools.length)
             item = { type: 'message', id: 'title-' + requests.length, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Two-host execution', annotations: [] }] };
+        else if (mode === 'performance') {
+            const context = performanceContexts.find(value => text.includes(value.marker));
+            assert(context, 'Exact performance binding prompt context required');
+            item = await performanceModelItem(context, value, tools, quote, modelReceivedAt);
+        }
         else {
             assert(active && text.includes(active.marker), 'Native request must retain original prompt');
-            const phase = text.includes('CUT_' + active.marker) ? 'cut' : text.includes('RESUME_' + active.marker) ? 'resume' : 'initial';
+            const phase = text.includes('CUT_' + active.marker) ? 'cut' : text.includes('RESUME_' + active.marker) ? 'resume' : text.includes('CONTROL_' + active.marker) ? 'control' : 'initial';
             const effect = 'call_' + phase + '_effect_' + active.name, modify = 'call_' + phase + '_modify_' + active.name;
             if (phase !== 'initial')
                 assert(text.includes('COMPLETE_INITIAL_' + active.marker), 'Resumed model request must contain original completion');
             if (phase === 'cut')
                 assert(text.includes('COMPLETE_RESUME_' + active.marker), 'Third turn must retain resumed completion');
-            if (!text.includes(effect)) {
+            if (phase==='control') {
+                const fenceCall='call_control_fence_'+active.name;
+                if(!text.includes(effect)) item=call('exec_command',{cmd:nativeControlCommand(phase),workdir:active.workspace,yield_time_ms:10000,max_output_tokens:1000},effect);
+                else if(!text.includes(fenceCall)) {
+                    active.controlAtGate=true;await active.ownerRestartGate;
+                    item=call('exec_command',{cmd:nativeControlCommand('fence')+'; '+quote(active.nodePath)+' -e '+quote("require('node:fs').writeFileSync('control-fence-native.txt','native-retained')"),workdir:active.workspace,yield_time_ms:10000,max_output_tokens:1000},fenceCall);
+                } else item={type:'message',id:'answer-'+requests.length,role:'assistant',status:'completed',content:[{type:'output_text',text:'COMPLETE_CONTROL_'+active.marker,annotations:[]}]};
+            }
+            else if (!text.includes(effect)) {
                 const code = phase === 'initial' ? "const f=require('node:fs');f.appendFileSync('effects.txt','once\\n');f.writeFileSync('note.txt','initial\\n');console.log(JSON.stringify({platform:process.platform,cwd:process.cwd(),marker:f.readFileSync('resource-marker.txt','utf8')}))" : phase === 'resume' ? "const f=require('node:fs');f.appendFileSync('resume-effects.txt','once\\n');console.log(f.readFileSync('note.txt','utf8')+f.readFileSync('effects.txt','utf8'))" : "const f=require('node:fs');f.appendFileSync('long-effects.txt','once\\n');f.writeFileSync('long-started.txt','started');const timer=setInterval(()=>{if(f.existsSync('release-long.txt')){clearInterval(timer);f.writeFileSync('long-done.txt','done');console.log('ORIGINAL_LONG_RESULT_'+f.readFileSync('resource-marker.txt','utf8'))}},100)";
-                item = call('exec_command', { cmd: quote(active.nodePath) + ' -e ' + quote(code), workdir: active.workspace, yield_time_ms: phase === 'cut' ? 30000 : 1000, max_output_tokens: 1000 }, effect);
+                item = call('exec_command', { cmd: quote(active.nodePath) + ' -e ' + quote(code) + '; ' + nativeControlCommand(phase), workdir: active.workspace, yield_time_ms: phase === 'cut' ? 30000 : 1000, max_output_tokens: 1000 }, effect);
             }
             else if (!text.includes(modify)) {
                 const before = phase === 'initial' ? 'initial' : phase === 'resume' ? 'modified' : 'resumed', after = phase === 'initial' ? 'modified' : phase === 'resume' ? 'resumed' : 'after-cut';
@@ -177,6 +207,7 @@ const model = createServer(async (req, res) => {
     }
     catch (e) {
         errors.push(String(e));
+        await save('model-errors.json',errors);
         res.writeHead(500);
         res.end('Fixture rejected request');
     }
@@ -236,14 +267,14 @@ async function cli(local, args) { const started = performance.now(); const p = s
 catch {
     return [];
 } })[0]; const receipt = { args, code, packet, stderr, elapsedMs: performance.now() - started }; cliReceipts.push(receipt); await save('cli-receipts.json', cliReceipts); return receipt; }
-async function control(owner, action) { const id = randomUUID(); const reply = deadline(new Promise((resolve, reject) => { const onLine = line => { const value = JSON.parse(line); if (value.error) {
+async function control(owner, action, details = {}) { const id = randomUUID(); const reply = deadline(new Promise((resolve, reject) => { const onLine = line => { const value = JSON.parse(line); if (value.error) {
     owner.lines.off('line', onLine);
     reject(Error(value.error));
 }
 else if (value.id === id) {
     owner.lines.off('line', onLine);
     resolve(value.result);
-} }; owner.lines.on('line', onLine); }), 'owner ' + action); owner.proc.stdin.write(JSON.stringify({ id, action }) + '\n'); return await reply; }
+} }; owner.lines.on('line', onLine); }), 'owner ' + action); owner.proc.stdin.write(JSON.stringify({ id, action, ...details }) + '\n'); return await reply; }
 async function restart(owner) { owner.releaseDiagnostics?.(); await owner.client.dispose(); await owner.rpc.dispose(); const before = ownerResult(owner), result = await control(owner, 'restart-core'); Object.assign(owner, result.receipt); await connect(owner, owner.endpoint); assert.notEqual(result.oldPid, owner.corePid); assert.equal(before.nativePid, owner.nativePid); assert.equal(before.owner.runtimeId, owner.owner.runtimeId); assert.notEqual(before.owner.ownerInstanceId, owner.owner.ownerInstanceId); return { before, result, after: ownerResult(owner) }; }
 async function useTerminal(agent, session) { release?.(); terminal?.dispose(); terminal = new xterm.Terminal({ cols: 120, rows: 40, allowProposedApi: true }); terminal.onData(data => { void agent.client.writeAgent({ agentSessionId: session.agentSessionId, expectedRun: session.run, data, source: 'terminal-protocol' }).catch(e => errors.push(String(e))); }); release = agent.client.onEvent(event => { if (event.type === 'terminal-output' && event.run.runId === session.run.runId)
     terminal.write(event.dataBytes); }, { observeMessages: false }); const attached = await agent.client.reattachAgent(session.agentSessionId, 0, 'raw'); for (const chunk of attached.attachment.replay)
@@ -260,6 +291,20 @@ function sameHelpers(before, after) { for (const side of ['frontend', 'executor'
     assert.equal(after[side].ctxmux.instanceId, before[side].ctxmux.instanceId);
     assert.equal(after[side].core.runtimeId, before[side].core.runtimeId);
 } }
+async function nativeWhoami(resource,workspace,phase,expected,required) {
+    const status=(await read(resource,join(workspace,'control-'+phase+'-status'))).trim();
+    const stdout=await read(resource,join(workspace,'control-'+phase+'.json'));
+    const stderr=await read(resource,join(workspace,'control-'+phase+'.err'));
+    const packets=(text)=>text.trim().split('\n').filter(Boolean).flatMap(line=>{try{return [JSON.parse(line)]}catch{return []}});
+    if(required) {
+        assert.equal(status,'0',stderr);const receipt=JSON.parse(stdout);assert.equal(receipt.ok,true);
+        assert.equal(receipt.result.session.agentSessionId,expected.agentSessionId);assert.deepEqual(receipt.result.session.run,expected.run);assert.deepEqual(receipt.result.session.toolExecution,expected.toolExecution);assert.equal(receipt.result.session.workspacePath,expected.workspacePath);
+        return {state:'available',receipt,status};
+    }
+    assert.notEqual(status,'0','Original changed owner must not be silently adopted');
+    const error=packets(stderr).find(packet=>packet.ok===false&&packet.error?.code==='AGENT_TOOL_CONTEXT_UNAVAILABLE');assert(error,'Changed owner requires an exact public machine failure');
+    return {state:'unavailable',code:error.error.code,status};
+}
 async function writeResource(owner, path, text) { if (owner.name === 'local')
     await fs.writeFile(path, text);
 else
@@ -280,10 +325,15 @@ try {
             await ssh([remoteNodePath, '-e', 'require("node:fs").writeFileSync(process.argv[1],process.argv[2])', join(owner.base, 'workspace/resource-marker.txt'), randomUUID()]);
     }
     for (const direction of [{ name: 'remote-agent', agent: remote, resource: local }, { name: 'local-agent', agent: local, resource: remote }].filter(d => !input.directions || input.directions.includes(d.name))) {
+        if (mode === 'performance') {
+            results.push(await runPerformance({ direction, local, remote, root, packageRoot, remoteNodePath, candidateCommit, performanceContexts, xterm, cli, pair, frames, rangedFrames, helperFacts, sameHelpers, until, deadline, save, read, exists, writeResource, ssh, exec, control, errors }));
+            await save('results.json', results);
+            continue;
+        }
         const directionStarted = performance.now();
-        const { agent, resource, name } = direction, bindingId = randomUUID(), agentSessionId = randomUUID(), workspace = mode === 'native' ? '/tmp/amx-native-'+randomUUID() : join(resource.base, 'workspace');
+        const { agent, resource, name } = direction, bindingId = randomUUID(), agentSessionId = randomUUID(), workspace = '/tmp/amx-native-'+randomUUID();
         let collision;
-        if (mode === 'native') {
+        {
             await fs.mkdir(workspace,{mode:0o700});
             await ssh([remoteNodePath,'-e','require("node:fs").mkdirSync(process.argv[1],{mode:0o700})',workspace]);
             const markers={local:'MAC_'+randomUUID(),remote:'LINUX_'+randomUUID()};
@@ -291,7 +341,7 @@ try {
             collision={requestedAbsolutePath:join(workspace,'note.txt'),agentOriginal:markers[agent.name]+'\n',resourceOriginal:markers[resource.name]+'\n'};
         }
         active = { name, marker: 'FLOW_' + randomUUID(), workspace, nodePath: resource.name === 'local' ? process.execPath : remoteNodePath };
-        assert.equal(await exists(agent, workspace), mode === 'native', 'Exact requested path presence on Agent machine');
+        assert.equal(await exists(agent, workspace), true, 'Exact requested path presence on Agent machine');
         const create = { bindingId, agentHostId: agent.name, agentRuntimeId: agent.client.runtimeOwnerIdentity().runtimeId, resourceHostId: resource.name, resourceRuntimeId: resource.client.runtimeOwnerIdentity().runtimeId, resourceWorkspacePath: workspace, resourceGrant: { scope: 'host-user', bindingId }, agent: { agentSessionId, createOperationId: randomUUID(), executorId: agent.configured.executor.executorId, executorRevision: agent.configured.executor.configRevision, workspacePath: join(agent.base, 'workspace'), prompt: active.marker + ': execute the controlled native tools.' } };
         const file = join(root, name + '-create.json');
         await fs.writeFile(file, JSON.stringify(create), { mode: 0o600 });
@@ -313,8 +363,15 @@ try {
         await until(async () => await read(resource, join(workspace, 'note.txt')).catch(() => null) === 'modified\n', name + ' file effect');
         await until(() => requests.some(r => JSON.stringify(r.input).includes('call_initial_modify_' + name)), name + ' tool result');
         assert.equal(await read(resource, join(workspace, 'effects.txt')), 'once\n');
-        assert.equal(await exists(agent, workspace), mode === 'native');
+        assert.equal(await exists(agent, workspace), true);
         if(collision) { assert.equal(await read(agent,collision.requestedAbsolutePath),collision.agentOriginal);collision.agentUnchanged=true;collision.resourceAfter=await read(resource,collision.requestedAbsolutePath);assert.equal(collision.resourceAfter,'modified\n');await save(name+'-same-path.json',collision); }
+        const originalControl=await nativeWhoami(resource,workspace,'initial',session,true);
+        for(const negative of ['device','missing']) {
+            assert.notEqual((await read(resource,join(workspace,'control-'+negative+'-status'))).trim(),'0','A managed or missing caller cannot acquire user/device authority');
+            const failure=(await read(resource,join(workspace,'control-'+negative+'.err'))).split('\n').flatMap(line=>{try{return [JSON.parse(line)]}catch{return []}}).find(packet=>packet.ok===false);
+            assert.equal(failure?.error?.code,'AGENT_CAPABILITY_INVALID','The exact relay must reject invalid authority, not merely fail a command');
+        }
+        await save(name+'-original-control.json',originalControl);
         const originalFrames = await frames(agent, originalPair.frontend.runId);
         await save(name + '-frames.json', originalFrames);
         const op = originalFrames.find(f => f.payload?.method === 'process/start' && f.payload.params.metadata?.toolCallId === 'call_initial_effect_' + name);
@@ -330,7 +387,7 @@ try {
         assert.equal(binding.code, 0);
         assert.equal(binding.packet.result.state, 'connected');
         const stages = { initialMs: performance.now() - directionStarted };
-        const nativeResult = { name, bindingId, agentSessionId, originalRun: session.run, toolExecution: session.toolExecution, agentPlatform: agent.platform, resourcePlatform: resource.platform, originalHelperRuns: [originalPair.frontend.runId, originalPair.executor.runId], resourcePathAbsentOnAgent: mode !== 'native', ...(collision?{samePathIsolation:collision}:{}), originalEffectCount: 1, operation: inspection.packet.result, stages };
+        const nativeResult = { name, bindingId, agentSessionId, originalRun: session.run, toolExecution: session.toolExecution, agentPlatform: agent.platform, resourcePlatform: resource.platform, originalHelperRuns: [originalPair.frontend.runId, originalPair.executor.runId], resourcePathAbsentOnAgent: false, ...(collision?{samePathIsolation:collision}:{}), originalEffectCount: 1, agentControl:{original:originalControl,deviceRejected:true,missingCallerRejected:true}, operation: inspection.packet.result, stages };
         if (mode === 'native') {
             results.push(nativeResult);
             await save('results.json', results);
@@ -347,6 +404,11 @@ try {
         const transcriptPath = retained.nativeHandle.transcriptPath;
         await until(async () => (await read(agent, transcriptPath)).includes('COMPLETE_INITIAL_' + active.marker), 'Original native final transcript');
         await exitCli(agent, session);
+        active.ownerRestartGate=new Promise(resolve=>active.releaseOwnerRestart=resolve);
+        const controlResume=await agent.client.resumeAgent({agentSessionId,operationId:randomUUID(),prompt:'CONTROL_'+active.marker+': verify the original Agent identity through the native resource tool.'});
+        assert.equal(controlResume.nativeHandle?.sessionId,nativeId);await useTerminal(agent,controlResume);
+        await until(()=>active.controlAtGate,'Original native control response before owner change');
+        const resumedControl=await nativeWhoami(resource,workspace,'control',controlResume,true);await save(name+'-resumed-control.json',resumedControl);
         const beforeRestart = await helperFacts(agent, resource, originalPair), restartStarted = performance.now(), restarts = [];
         // Both physical semantic owners restart; original ctxmux and helper Runs remain.
         restarts.push(await restart(remote));
@@ -358,6 +420,12 @@ try {
         const retainedAfterRestart = await agent.client.readAgentSession(agentSessionId);
         assert.equal(retainedAfterRestart.nativeHandle?.sessionId, nativeId);
         assert.deepEqual(retainedAfterRestart.toolExecution, session.toolExecution);
+        assert.deepEqual(retainedAfterRestart.run,controlResume.run,'The active original CLI Run survives both Core owners');
+        await useTerminal(agent,controlResume);active.releaseOwnerRestart();
+        await until(async()=> (await read(agent,transcriptPath)).includes('COMPLETE_CONTROL_'+active.marker),'Original old-generation authority refusal and healthy native continuation');
+        const ownerChangedControl=await nativeWhoami(resource,workspace,'fence',controlResume,false);
+        assert.equal(await read(resource,join(workspace,'control-fence-native.txt')),'native-retained');
+        await save(name+'-owner-changed-control.json',ownerChangedControl);await exitCli(agent,controlResume);
         const resumed = await agent.client.resumeAgent({ agentSessionId, operationId: randomUUID(), prompt: 'RESUME_' + active.marker + ': retain original context and check resource state.' });
         assert.equal(resumed.agentSessionId, agentSessionId);
         assert.equal(resumed.nativeHandle?.sessionId, nativeId);
@@ -367,6 +435,8 @@ try {
         await until(async () => (await read(agent, transcriptPath)).includes('COMPLETE_RESUME_' + active.marker), 'Original native resume final transcript');
         assert.equal(await read(resource, join(workspace, 'effects.txt')), 'once\n');
         assert.equal(await read(resource, join(workspace, 'resume-effects.txt')), 'once\n');
+        const newOwnerControl=await nativeWhoami(resource,workspace,'resume',resumed,true);
+        await save(name+'-new-owner-control.json',newOwnerControl);
         stages.restartAndResumeMs = performance.now() - restartStarted;
         const resumedFrames = await frames(agent, originalPair.frontend.runId), resumeOp = resumedFrames.find(f => f.payload?.method === 'process/start' && f.payload.params.metadata?.toolCallId === 'call_resume_effect_' + name);
         assert(resumeOp);
@@ -375,7 +445,7 @@ try {
         await save(name + '-resume.json', { bindingId, agentSessionId, nativeId, transcriptPath, original: session, resumed, beforeRestart, afterRestart, restarts, restoredBinding, resumeOp, stages });
         await exitCli(agent, resumed);
         if (mode === 'recovery') {
-            results.push({ ...nativeResult, nativeId, resumedRun: resumed.run, beforeRestart, afterRestart, coreRestarts: restarts, contextRetained: true, resumeEffectCount: 1 });
+            results.push({ ...nativeResult, nativeId, resumedRun: resumed.run, beforeRestart, afterRestart, coreRestarts: restarts, contextRetained: true, resumeEffectCount: 1, agentControl:{original:originalControl,resumed:resumedControl,ownerChanged:ownerChangedControl,newInvocation:newOwnerControl,nativeToolsRetained:true} });
             await save('results.json', results);
             continue;
         }
@@ -401,7 +471,7 @@ try {
         let nativeExit;
         await until(async () => { nativeExit = (await rangedFrames(resource, originalPair.executor.runId)).find(f => f.frame.payload?.method === 'process/exited' && f.frame.payload.params.processId === longOp.payload.params.processId); return !!nativeExit; }, 'Original exit notification retained while SSH is stopped');
         const gapPair = pair(local, bindingId);
-        assert(gapPair.bridge.executor.outputByte < nativeExit.endByte, 'Original exit bytes must remain beyond the coordinator acknowledged cursor');
+        assert(gapPair.bridge.executor.outputByte <= nativeExit.startByte, 'Original exit bytes must remain beyond the coordinator acknowledged cursor');
         const cutBinding = await local.rpc.call('agent.execution.binding', { bindingId });
         const cut = await control(local, 'drop-transport');
         assert.equal(cut.cut.pid, pause.cut.pid);
@@ -430,6 +500,8 @@ try {
         assert.equal(finalFrames.filter(f => f.payload?.method === 'process/start' && f.payload.params.metadata?.toolCallId === 'call_cut_effect_' + name).length, 1);
         assert.equal(await read(resource, join(workspace, 'long-effects.txt')), 'once\n');
         assert.equal(await read(resource, join(workspace, 'effects.txt')), 'once\n');
+        collision.agentFinal=await read(agent,collision.requestedAbsolutePath);assert.equal(collision.agentFinal,collision.agentOriginal,'Other Host same-path copy remains unchanged through recovery');
+        collision.resourceAfterCut=await read(resource,collision.requestedAbsolutePath);assert.equal(collision.resourceAfterCut,'after-cut\n');
         const finalOperation = await resource.client.inspectAgentExecutionOperation(key);
         assert.equal(finalOperation.phase, 'completed');
         assert.equal(finalOperation.payloadDigest, beforeCutOperation.payloadDigest);
@@ -442,7 +514,12 @@ try {
             assert.equal(finalPair.bridge[side].ownerInstanceId, originalPair.bridge[side].ownerInstanceId);
         }
         stages.inFlightCutAndRejoinMs = performance.now() - cutStarted;
-        const resultRecord = { name, bindingId, agentSessionId, nativeId, originalRun: session.run, resumedRun: resumed.run, longRun: inFlight.run, toolExecution: session.toolExecution, agentPlatform: agent.platform, resourcePlatform: resource.platform, nativeCodexVersion: '0.165.0', originalHelperRuns: [originalPair.frontend.runId, originalPair.executor.runId], resourcePathAbsentOnAgent: !(await exists(agent, workspace)), originalEffectCount: 1, resumeEffectCount: 1, longEffectCount: 1, coreRestarts: restarts, contextRetained: true, beforeCutOperation, duringCutOperation, finalOperation, longOp, pause, nativeExit, pausedOutputByte: pausedPair.bridge.executor.outputByte, gapOutputByte: gapPair.bridge.executor.outputByte, cut, cutBinding, rejoined: rejoined.packet.result, beforeCut, afterCut, stages, protocolFrames: finalFrames.length, protocolJsonBytes: Buffer.byteLength(JSON.stringify(finalFrames)) };
+        const resultRecord = { name, bindingId, agentSessionId, nativeId, originalRun: session.run, resumedRun: resumed.run, longRun: inFlight.run, toolExecution: session.toolExecution, agentPlatform: agent.platform, resourcePlatform: resource.platform, nativeCodexVersion: '0.165.0', originalHelperRuns: [originalPair.frontend.runId, originalPair.executor.runId], resourcePathAbsentOnAgent: false, samePathIsolation:collision, agentControl:{original:originalControl,resumed:resumedControl,ownerChanged:ownerChangedControl,newInvocation:newOwnerControl,deviceRejected:true,missingCallerRejected:true,nativeToolsRetained:true}, originalEffectCount: 1, resumeEffectCount: 1, longEffectCount: 1, coreRestarts: restarts, contextRetained: true, beforeCutOperation, duringCutOperation, finalOperation, longOp, pause, nativeExit, pausedOutputByte: pausedPair.bridge.executor.outputByte, gapOutputByte: gapPair.bridge.executor.outputByte, cut, cutBinding, rejoined: rejoined.packet.result, beforeCut, afterCut, stages, protocolFrames: finalFrames.length, protocolJsonBytes: Buffer.byteLength(JSON.stringify(finalFrames)) };
+        resultRecord.qualification={
+            bothCoreRestarts:restarts.map(value=>({host:value.before.name,previousPid:value.before.corePid,currentPid:value.after.corePid,runtimeId:value.before.owner.runtimeId,nativePid:value.before.nativePid})),
+            amux:{originalSessionId:originalControl.receipt.result.session.agentSessionId,originalRun:originalControl.receipt.result.session.run,resumedSessionId:newOwnerControl.receipt.result.session.agentSessionId,resumedRun:newOwnerControl.receipt.result.session.run,beforeOwnerResumeRun:resumedControl.receipt.result.session.run,deviceRejected:true,missingCallerRejected:true,ownerUnavailableCode:ownerChangedControl.code,newInvocationSessionId:newOwnerControl.receipt.result.session.agentSessionId,newInvocationRun:newOwnerControl.receipt.result.session.run,nativeToolsRetained:true},
+            readerGap:{originalRequest:key,originalRange:{startByte:nativeExit.startByte,endByte:nativeExit.endByte},acknowledgedByte:gapPair.bridge.executor.outputByte,pausedPid:pause.cut.pid,kernelState:stoppedState,payloadDigest:finalOperation.payloadDigest,resultDigest:finalOperation.resultDigest,effectCount:1,originalStartCount:finalFrames.filter(f=>f.payload?.method==='process/start'&&f.payload.params.metadata?.toolCallId==='call_cut_effect_'+name).length}
+        };
         results.push(resultRecord);
         await save('results.json', results);
         await save(name + '-cut.json', resultRecord);
@@ -451,7 +528,7 @@ try {
     assert.equal(results.length, input.directions.length);
     assert(results.length > 0);
     assert.deepEqual(errors, []);
-    summary = { passed: true, mode, candidateCommit, actualMachines: 2, controlledModel: true, bothDirectionsPassed: results.length === 2, fullRemoteGatePassed: false, scope: mode === 'native' ? 'Native file and process operations only' : mode === 'recovery' ? 'Native file/process operations and original SID/native conversation after exact test Core restarts' : 'Native work, original SID/native conversation recovery and original exit notifications across an exact SSH reader byte gap; excludes strictly-dispatched unknown effects, amux relay, hooks/MCP/skills, performance and UI', results };
+    summary = { passed: true, mode, candidateCommit, actualMachines: 2, controlledModel: true, bothDirectionsPassed: results.length === 2, fullRemoteGatePassed: false, ...(mode==='performance'?{performance:{measurementChecksPassed:true,numericalBudgetVerdict:'unassigned',performanceAccepted:false}}:{}), scope: mode === 'performance' ? 'Two bindings per direction: cold/reused native requests, 1MiB file and long output, independent stopped reader, idle process/socket observations. Measurements do not assert universal latency/throughput budgets; fsync is unknown. Includes exact same-path resource isolation. Excludes full remote acceptance.' : mode === 'native' ? 'Native file and process operations only' : mode === 'recovery' ? 'Native file/process operations and original SID/native conversation after exact test Core restarts' : 'Native work, original SID/native conversation recovery and original exit notifications across an exact SSH reader byte gap; includes original native amux identity and explicit owner-change refusal; excludes strictly-dispatched unknown effects, hooks/MCP/skills qualification, performance and UI', results };
 }
 catch (error) {
     await save('failure.json', { error: String(error), stack: error.stack, errors, owners: owners.map(ownerResult) });
