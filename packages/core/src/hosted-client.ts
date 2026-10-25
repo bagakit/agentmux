@@ -21,7 +21,7 @@ import { AGENTMUX_HOSTED_METHODS, type AgentMuxRuntimeOwnerIdentity, type AgentM
   type AgentMuxHostedBootstrap, type AgentMuxHostedMethod, type AgentMuxHostedInvocation,
   type AgentMuxHostedSubscription, type AgentMuxRuntimeFence, type AgentMuxHostedForwardRpc, type AgentMuxHostedSubscribeRpc,
   type AgentMuxHostedAttachmentTarget, type AgentMuxHostedStreamValue } from './hosted-client-contract.js'
-import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedAgentSessionRead, parseHostedRuntimeOwnerIdentity, parseHostedNativeConnection, parseHostedMessageEvent } from './hosted-value.js'
+import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedMessageQueuePath, parseHostedAgentSessionRead, parseHostedRuntimeOwnerIdentity, parseHostedNativeConnection, parseHostedMessageEvent } from './hosted-value.js'
 import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { createHostedOutputObservation } from './hosted-output-observer.js'
@@ -235,6 +235,7 @@ export async function connectHostedAgentMux(options: {
       invocation: encodeHostedValue({ method, args: wireArgs }) as AgentMuxHostedInvocation }, { signal: observationSignal(signal) })
     if (method === 'connectRuntime') await connectControl(true)
     const decoded = decodeHostedValue(response.value)
+    if (method === 'readAgentMessageQueuePath') return parseHostedMessageQueuePath(decoded)
     if (method === 'recoverTerminal') return parseTerminalRecoveryResult(decoded, parseTerminalRecoveryInput(wireArgs[0]))
     if (method === 'findAgentStartupDiagnostics') return parseStartupDiagnosticRead(decoded, wireArgs[0] as AgentStartupDiagnosticRecentTarget)
     if (method === 'readAgentStartupDiagnostic') {

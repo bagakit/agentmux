@@ -201,9 +201,11 @@ export function parseHostedTransferChunk(value: unknown): AgentMuxHostedTransfer
       'Runtime transfer frame is malformed.', 'CONTROL_PROTOCOL_ERROR')
   return p as AgentMuxHostedTransferChunk
 }
+export function parseHostedMessageQueuePath(value: unknown): string { return wireString(value) }
+
 export function parseHostedBootstrap(value: unknown): import('./hosted-client-contract.js').AgentMuxHostedBootstrap {
   const p = wireRecord(value, ['owner', 'connection', 'storePath', 'hostProcessId', 'catalog', 'sessions', 'messageQueuePath'])
-  parseHostedRuntimeOwnerIdentity(p.owner); wireCount(p.hostProcessId); wireString(p.messageQueuePath)
+  parseHostedRuntimeOwnerIdentity(p.owner); wireCount(p.hostProcessId); parseHostedMessageQueuePath(p.messageQueuePath)
   if (p.storePath !== null) wireString(p.storePath)
   if (!Array.isArray(p.sessions) || !Array.isArray(p.catalog)) throw new AgentMuxError(
     'Runtime bootstrap is malformed.', 'CONTROL_PROTOCOL_ERROR')
