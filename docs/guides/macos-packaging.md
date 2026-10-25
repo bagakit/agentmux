@@ -4,10 +4,10 @@
 
 ## 最短交付路径
 
-1. **锁定开包时最新的 committed main。** 记录 commit 与 tree；共享工作区有并行修改时，在该提交的独立干净 worktree 构建。保留他人的修改，不用 stash、切分支或清场换取干净目录。构建中 main 继续前进不触发自动重打；交付时说明本包锁定提交，不能称其包含开包后的提交。
-2. **准备锁定依赖，选择一个入口。** 缓存齐全时可用 `pnpm install --offline --frozen-lockfile`；缓存缺项则由正常锁定依赖安装补齐。只出包用 `pnpm package:mac`，同时安装用 `pnpm package:mac:install`。打包入口本身已执行依赖构建、组包、签名和产物检查，外层不再先跑一遍完整 build、typecheck 或测试套件。已有签名候选的安装续做不重新调用整条打包命令。
+1. **锁定开包时最新的 committed main。** 记录 commit 与 tree；共享工作区有并行修改时，在该提交的独立干净 worktree 构建。可复用一份明确由打包流程持有的专用 worktree，记录位置在 `.local/package-delivery/reusable-worktree.json`：先确认它仍为本仓库注册的 worktree，且没有在途构建、未提交或未跟踪工作，再只在该 worktree 更新到锁定的提交；记录缺失或状态不明时保留原内容并新建隔离 worktree。保留他人的修改，不用 stash、切共享分支或清场换取干净目录。构建中 main 继续前进不触发自动重打；交付时说明本包锁定提交，不能称其包含开包后的提交。
+2. **准备锁定依赖，选择一个入口。** 复用专用 worktree 中与锁定依赖相符的 `node_modules` 和原路径的原生构建缓存；依赖输入变化时按锁文件重新安装。缓存齐全时可用 `pnpm install --offline --frozen-lockfile`；缓存缺项则由正常锁定依赖安装补齐。只出包用 `pnpm package:mac`，同时安装用 `pnpm package:mac:install`。打包入口本身已执行依赖构建、组包、签名和产物检查，外层不再先跑一遍完整 build、typecheck 或测试套件。已有签名候选的安装续做不重新调用整条打包命令。
 3. **复用同一候选与已有结果。** App、DMG 和安装副本来自同次构建；按已完成阶段核对准确身份，复用功能任务已有验收。DMG 压缩和 App 复制会争用磁盘，不默认同时启动多个重 I/O 任务；同机其他 Agent 正在工作时优先控制并发和重复副本。只在阶段转换或具体失败时读取相关日志，不高频扫描全局进程、目录、工作面或重算整包散列。
-4. **安装后核对实际加载，再清理。** 从 `~/Applications/AgentMux.app` 正常启动，核对实际 Main、Renderer、必要持久保存、原工作面和相关 Runtime／Run 事实；磁盘身份或版本号不能代替已加载身份。然后清理本次不用的中间产物与 worktree，保留在用映像、未保存工作和必要原始回执。清理不能成为安装前置条件。
+4. **安装后核对实际加载，再清理。** 从 `~/Applications/AgentMux.app` 正常启动，核对实际 Main、Renderer、必要持久保存、原工作面和相关 Runtime／Run 事实；磁盘身份或版本号不能代替已加载身份。然后清理本次不用的中间产物与 worktree；可保留一份明确供后续打包复用的专用 worktree 和构建缓存，并保留在用映像、未保存工作和必要原始回执。清理不能成为安装前置条件。
 
 ## 必要核对与触发式补查
 
