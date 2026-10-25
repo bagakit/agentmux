@@ -42,7 +42,7 @@ it.each(['Focus', 'Workspace'] as const)('%s renders actual bounded recap throug
   expect(excerpt.textContent).not.toMatch(/\*\*|###|\]\(https/)
   expect(excerpt.querySelectorAll('button,a,input,img,table,pre')).toHaveLength(0)
   expect(card.querySelectorAll('button')).toHaveLength(0)
-  expect(card.querySelector('.focus-context__activity')).toBeNull()
+  expect(card.querySelector('.focus-context__activity')?.textContent).toBe(h.card.detail)
   expect(card.querySelector<HTMLElement>('.focus-context__state')!.title).toContain('No current work signal has been received')
   expect(card.getAttribute('aria-label')).toContain('Activity not confirmed')
   expect(card.getAttribute('aria-label')).toContain('Prompt readiness ready')
