@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { createDebouncedPersistentStorage, createWriteFencedStorage } from '../../src/renderer/src/lib/persisted-ui-writer'
+import { createBatchedPersistentStorage, createWriteFencedStorage } from '../../src/renderer/src/lib/persisted-ui-writer'
 import { readNoteDocument } from '../../src/shared/note-document'
 import { boundary, digest, groupId, noteRetentionFixture, restoreRetentionState, sources, store, unrelatedTabId, workspaceId } from './note-draft-retention'
 
@@ -12,7 +12,7 @@ it('runs one isolated persistence process against the original Store', async () 
   expect(root).toBeTruthy()
   const storagePath = join(root, 'storage.json'), reads: string[] = []
   type PersistedState = ReturnType<NonNullable<ReturnType<typeof store.persist.getOptions>['partialize']>>
-  const persistent = createDebouncedPersistentStorage<PersistedState>({
+  const persistent = createBatchedPersistentStorage<PersistedState>({
     getItem(name) {
       expect(name).toBe('agentmux-workbench-v1')
       try { const bytes = readFileSync(storagePath, 'utf8'); reads.push(digest(bytes)); return bytes }
