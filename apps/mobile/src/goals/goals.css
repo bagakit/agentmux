@@ -40,3 +40,14 @@
 .mobile-goals input, .mobile-goals select, .mobile-goals textarea { font-size: 16px; min-width: 0; }
 .mobile-goal-editor-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .mobile-goal-unknown > details pre { max-height: 35vh; overflow-y: auto; }
+/* One Primary per Goal screen: the decision the page exists for. */
+.mobile-goals .mobile-goal-decision { color: var(--bg); background: linear-gradient(180deg, var(--green), var(--green-2)); box-shadow: var(--elev-1), var(--hl-strong); font-weight: 600; }
+.mobile-goals .mobile-goal-decision:active:not(:disabled) { background: var(--green-2); }
+.mobile-goals .mobile-goal-alignment { display: flex; flex-wrap: wrap; gap: var(--sp-3); align-items: center; }
+.mobile-goals .mobile-goal-alignment > p, .mobile-goals .mobile-goal-alignment > [role=status] { flex-basis: 100%; }
+.mobile-goals .mobile-goal-evidence { list-style: none; padding: 0; }
+.mobile-goals .mobile-goal-evidence > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--sp-3); }
+.mobile-goals .mobile-goal-evidence > li > :is(code, a) { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-meta); }
+.mobile-goals .mobile-goal-evidence > li > small { grid-column: 1; color: var(--text-3); font-size: var(--fs-meta); }
+.mobile-goals .mobile-goal-evidence > li > :is(details, [role=status], pre) { grid-column: 1 / -1; }
+.mobile-goals .mobile-goal-evidence .mobile-icon-button { background: transparent; box-shadow: none; grid-row: 1; grid-column: 2; }

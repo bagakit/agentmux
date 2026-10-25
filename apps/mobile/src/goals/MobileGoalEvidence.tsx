@@ -1,3 +1,4 @@
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { MobileNotice } from '../notices/MobileNotice'
 import { useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -40,8 +41,8 @@ function Evidence({ reference, client, copyText }: { reference: DemandEvidence; 
   return <li>
     {typeof reference !== 'string' ? <button type="button" disabled={busy} onClick={() => void read()}>{busy ? '读取中…' : `查看证据 ${label}`}</button>
       : url ? <a href={url} target="_blank" rel="noopener noreferrer">{label}</a> : <code>{label}</code>}
-    <button type="button" onClick={() => void copyReference()}>复制完整引用</button>
-    {typeof reference === 'string' && !url ? <small>作者原文引用，未记录本地文件来源。</small> : null}
+    <button type="button" className="mobile-icon-button" aria-label="复制完整引用" title="复制完整引用" onClick={() => void copyReference()}><SemanticIcon name="action.copy" size={16} /></button>
+    {typeof reference === 'string' && !url ? <small>来源：作者引用</small> : null}
     {typeof reference !== 'string' ? <details><summary>文件来源与报告修订</summary><code>{original}</code></details> : null}
     {issue ? <MobileNotice identity={[issue]} role="status">{issue}</MobileNotice> : null}
     {content !== null ? <pre className="mobile-region-source">{content}</pre> : null}
