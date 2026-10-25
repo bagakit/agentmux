@@ -4,6 +4,9 @@
 .settings-survey .browser-start-settings__field { grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); margin-block: 0 var(--sp-4); }
 .settings-survey .browser-start-settings__field > span { font-size: var(--fs-meta); font-weight: 500; }
 .settings-survey .browser-start-settings__field input { min-width: 0; font-size: var(--fs-body); }
+.settings-survey .settings-survey__count { margin-top: var(--sp-4); }
+.settings-survey__count input { width: 88px; }
+.settings-survey__count > small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
 .settings-survey__image-field { min-width: 0; padding-block: var(--sp-3); border-top: 1px solid var(--line-soft); }
 .settings-survey__image-row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
 .settings-survey__thumbnail { display: grid; place-items: center; flex: none; width: 58px; height: 58px; border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: hidden; background: var(--surface-1); color: var(--text-3); }

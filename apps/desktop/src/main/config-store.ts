@@ -44,7 +44,7 @@ import { FOCUS_RECENT_ACTIVITY_HOURS, FOCUS_REPLY_LINES, FOCUS_PREVIEW_TRIGGERS,
 import { NOTE_CONTENT_WIDTHS, validNoteFontSize } from '../shared/notes-preferences.js'
 import { GOALS_VIEW_IDS } from '@agentmux/host/goals-preferences'
 import { validateAutomationPreferences } from '../shared/automation-preferences.js'
-import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, validBrowserStartPageText, validBrowserStartPageImage } from '../shared/browser-start-page.js'
+import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, validBrowserStartPageText, validBrowserStartPageImage, validBrowserStartPageHistoryLimit } from '../shared/browser-start-page.js'
 import { BROWSER_AGENT_CONTROL_LIMITS as EFFECT_LIMITS, BROWSER_AGENT_GLOW_BLENDS, BROWSER_AGENT_GLOW_ANIMATIONS, validBrowserAgentGlowColor } from '../shared/browser-agent-control.js'
 
 export const toolkitToolSchema = z.unknown().transform((value, context) => {
@@ -193,7 +193,9 @@ const browserSchema = z.object({
     subtitle: z.string().refine(value => validBrowserStartPageText(value, BROWSER_START_PAGE_SUBTITLE_LIMIT)).optional(),
     icon: z.string().refine(validBrowserStartPageImage).optional(),
     backgroundImage: z.string().refine(validBrowserStartPageImage).optional(),
-    showHistory: z.boolean().optional()
+    showHistory: z.boolean().optional(),
+    historyLimit: z.number().refine(validBrowserStartPageHistoryLimit).optional(),
+    interactiveBackground: z.boolean().optional()
   }).strict().optional(),
   /**
    * Agent 驱动页面的总授权位。默认关。

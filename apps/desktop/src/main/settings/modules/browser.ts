@@ -1,9 +1,9 @@
 import { BROWSER_TOOLBAR_ITEM_ORDER } from '../../../shared/browser-toolbar.js'
 import { DEFAULT_CONFIG } from '../../config-store.js'
-import { booleanSetting, textSetting } from '../scalar-setting.js'
+import { booleanSetting, textSetting, invalid } from '../scalar-setting.js'
 import type { ScalarSetting } from '../scalar-setting.js'
 import { browserAgentControlSettings } from './browser-agent-control.js'
-import { DEFAULT_BROWSER_START_PAGE, BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, resolveBrowserStartPage, validBrowserStartPageText, validBrowserStartPageImage, type BrowserStartPageConfig } from '../../../shared/browser-start-page.js'
+import { DEFAULT_BROWSER_START_PAGE, BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, BROWSER_START_PAGE_HISTORY_LIMIT, resolveBrowserStartPage, validBrowserStartPageText, validBrowserStartPageImage, validBrowserStartPageHistoryLimit, type BrowserStartPageConfig } from '../../../shared/browser-start-page.js'
 
 const writeStartPage = <K extends keyof BrowserStartPageConfig>(config: Parameters<ScalarSetting['entry']>[0], key: K, value: BrowserStartPageConfig[K]) =>
   ({ ...config, browser: { ...config.browser, startPage: { ...resolveBrowserStartPage(config.browser.startPage), [key]: value } } })
@@ -21,6 +21,19 @@ export const browserSettings = [
     config => resolveBrowserStartPage(config.browser.startPage)[key], (config, value) => writeStartPage(config, key, value), validBrowserStartPageImage)),
   booleanSetting('browser.startPage.showHistory', DEFAULT_BROWSER_START_PAGE.showHistory,
     config => resolveBrowserStartPage(config.browser.startPage).showHistory, (config, value) => writeStartPage(config, 'showHistory', value)),
+  {
+    key: 'browser.startPage.historyLimit',
+    entry(config) { return { key: this.key, kind: 'number' as const, value: resolveBrowserStartPage(config.browser.startPage).historyLimit,
+      default: DEFAULT_BROWSER_START_PAGE.historyLimit,
+      enum: Array.from({ length: BROWSER_START_PAGE_HISTORY_LIMIT.max - BROWSER_START_PAGE_HISTORY_LIMIT.min + 1 }, (_, index) => index + BROWSER_START_PAGE_HISTORY_LIMIT.min) } },
+    apply(config, text) {
+      const value = Number(text)
+      if (String(value) !== text || !validBrowserStartPageHistoryLimit(value)) throw invalid(this.key, text)
+      return this.entry(config).value === value ? config : writeStartPage(config, 'historyLimit', value)
+    }
+  },
+  booleanSetting('browser.startPage.interactiveBackground', DEFAULT_BROWSER_START_PAGE.interactiveBackground,
+    config => resolveBrowserStartPage(config.browser.startPage).interactiveBackground, (config, value) => writeStartPage(config, 'interactiveBackground', value)),
   booleanSetting('browser.agentAutomation', DEFAULT_CONFIG.browser.agentAutomation === true,
     (config) => config.browser.agentAutomation === true,
     (config, agentAutomation) => ({ ...config, browser: { ...config.browser, agentAutomation } })),

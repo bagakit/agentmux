@@ -1,7 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, resolveBrowserStartPage, validBrowserStartPageText, validBrowserStartPageImage, type BrowserStartPageConfig } from '../../../../shared/browser-start-page'
+import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, BROWSER_START_PAGE_HISTORY_LIMIT, resolveBrowserStartPage, validBrowserStartPageText, validBrowserStartPageImage, validBrowserStartPageHistoryLimit, type BrowserStartPageConfig } from '../../../../shared/browser-start-page'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { StartPageImageField } from './StartPageImageField'
@@ -16,7 +16,9 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
   onOpen(): void
   children?: ReactNode
 }) {
-  const draft = useSettingDraftRecord(resolveBrowserStartPage(config))
+  const saved = resolveBrowserStartPage(config)
+  // Keep the person's numeric text in the same draft, including an empty or invalid in-progress edit.
+  const draft = useSettingDraftRecord({ ...saved, historyLimit: String(saved.historyLimit) })
   const save = useSettingsSave()
   const [imagePreview, setImagePreview] = useState<{ icon: string; backgroundImage: string; revision: number } | null>(null)
   const [imageNotice, setImageNotice] = useState('')
@@ -42,7 +44,10 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
         throw new Error(`Use a single-line title up to ${BROWSER_START_PAGE_TITLE_LIMIT} characters and subtitle up to ${BROWSER_START_PAGE_SUBTITLE_LIMIT} characters. Your draft is kept.`)
       if (!validBrowserStartPageImage(value.icon) || !validBrowserStartPageImage(value.backgroundImage))
         throw new Error('Use an HTTP(S) image URL or an inline PNG, JPEG, WebP, GIF or AVIF image. Leave the field empty to hide it. Your draft is kept.')
-      await onSave(value, submitted.expected)
+      const historyLimit = Number(value.historyLimit)
+      if (String(historyLimit) !== value.historyLimit || !validBrowserStartPageHistoryLimit(historyLimit))
+        throw new Error(`Use a whole number from ${BROWSER_START_PAGE_HISTORY_LIMIT.min} to ${BROWSER_START_PAGE_HISTORY_LIMIT.max} for cards on first view. Your draft is kept.`)
+      await onSave({ ...value, historyLimit }, { ...submitted.expected, historyLimit: Number(submitted.expected.historyLimit) })
     }))
   }
   return <div className="settings-pane-stack settings-survey">
@@ -56,8 +61,13 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
       <StartPageImageField kind="icon" value={draft.value.icon} preview={iconPreview} revision={imagePreview?.revision ?? 0} onChange={value => { draft.setField('icon', value); setImageNotice('') }} />
       <StartPageImageField kind="background" value={draft.value.backgroundImage} preview={backgroundPreview} revision={imagePreview?.revision ?? 0} onChange={value => { draft.setField('backgroundImage', value); setImageNotice('') }} />
       </div>
+      <label className="browser-automation-toggle" data-settings-field="start-interactive-background"><input type="checkbox" aria-label="Interactive start page background" checked={draft.value.interactiveBackground} onChange={event => draft.setField('interactiveBackground', event.target.checked)} />
+        <span><strong>Interactive background</strong><small>Light follows your pointer. Reduced motion keeps it still.</small></span></label>
       <label className="browser-automation-toggle" data-settings-field="start-history"><input type="checkbox" aria-label="Show recent input cards" checked={draft.value.showHistory} onChange={event => draft.setField('showHistory', event.target.checked)} />
         <span><strong>Show recent addresses and searches</strong><small>Cards use this Browser's saved input history. Turning them off keeps your history.</small></span></label>
+      <label className="browser-start-settings__field settings-survey__count" data-settings-field="start-history-limit"><span>Cards on first view</span>
+        <TextInput aria-label="Cards on first view" inputMode="numeric" value={draft.value.historyLimit} onChange={event => draft.setField('historyLimit', event.target.value)} />
+        <small>Choose 1–50. Show all still reveals the rest of your saved history.</small></label>
       </div>
       <aside className="settings-survey__preview" aria-label="Start page draft preview">
         <header><strong>Draft preview</strong><small>{draft.dirty ? 'Unsaved changes' : 'Saved settings'}</small></header>
@@ -67,9 +77,9 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
           {draft.value.title && <h3>{draft.value.title}</h3>}
           {draft.value.subtitle && <p>{draft.value.subtitle}</p>}
           <div className="settings-survey__search" aria-hidden="true"><SearchIcon size={15} /><span>Search or enter an address</span></div>
-          {draft.value.showHistory && <div className="settings-survey__history"><span>Example recent input</span><div><span>Documentation</span><span>Research notes</span></div></div>}
+          {draft.value.showHistory && <div className="settings-survey__history"><span>Example recent input · up to {draft.value.historyLimit || '…'} on first view</span><div><span>Documentation</span><span>Research notes</span></div></div>}
         </div>
-        <p className="settings-survey__caption">{unloadedImages ? 'Choose Preview images to load the image addresses. ' : ''}Example history only. Save to apply your changes.</p>
+        <p className="settings-survey__caption">{unloadedImages ? 'Choose Preview images to load the image addresses. ' : ''}Example history only. Interactive background {draft.value.interactiveBackground ? 'on' : 'off'}. Save to apply your changes.</p>
         {imageNotice && <p role="status" className="settings-survey__image-notice">{imageNotice}</p>}
       </aside></div>
     </section>
