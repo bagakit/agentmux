@@ -34,6 +34,7 @@ export function feishuSpeakerIdentity(speaker: Readonly<FeishuRoleSpeaker>, purp
 /** Pure native layout; no identity lookup, upload, effect or source-text rewriting. */
 export function feishuRoleCard(text: string, speaker: Readonly<FeishuRoleSpeaker>, options: FeishuRoleCardOptions = {}): Record<string, unknown> {
   const card = feishuReplyCard(text, undefined, options.literal)
+  if (speaker.kind === 'human') Object.assign(card.config as object, { width_mode: 'fill' })
   const body = card.body as { elements: Record<string, unknown>[] }
   const surface = options.incoming ? 'peer-surface' : speaker.kind === 'human' ? 'user-surface' : 'bg-white'
   const compact = options.phase === 'progress' && surface === 'bg-white'
