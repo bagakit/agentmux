@@ -83,6 +83,17 @@ Do not upload material or fetch arbitrary source maps to explain a local capture
 For a bounded explicit Web Animation instance read in one exact Renderer document, use
 system metrics animations inspect --help. It does not attach a debugger or alter animations;
 labels and play state are observations, not CPU ownership or Agent control facts.
+For an explicit Renderer platform cache read or cleanup, use system metrics cache inspect
+or system metrics cache reclaim with the exact five-field target from system metrics get.
+inspect is read-only; reclaim is a side effect in that Renderer process. The window is its
+routing anchor, not a single-document scope. Native eviction and memory-pressure notification
+preserve user documents and state, but may pause briefly and require caches to refill.
+No Session/Run or conversation view is deleted, and website storage is untouched.
+Counter sizeBytes includes encoded, decoded and overhead bytes; decodedBytes maps Electron's
+native liveSize (decoded_size), not live/unused memory. Neither predicts RSS savings.
+Missing before/after counters do not undo a completed native call. Unknown receipts are never
+automatically retried; a later inspect reads current counters without reconstructing the old ACK.
+
 For explicit Renderer heap/backing counters, use system metrics memory inspect --help;
 that original command defines exact target, unknown coverage and debugger ownership boundaries.
 Crash-log reveal is a separate presentation action, not a recovery. Missing diagnostics
