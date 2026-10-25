@@ -198,6 +198,9 @@ function representationFragments(value: RepresentationPayload | QuestionRepresen
   return value.kind === 'question' || value.kind === 'failure' ? [value] : value.kind === 'speech' ? value.text ? fragments(value, bytes, fragmentText) : []
     : value.parts.flatMap<PublicationPayload>(part => part.kind === 'speech' ? fragments(part, bytes, fragmentText) : [part])
 }
+// Query and derived index use the same original recovery qualification.
+const recoverableGapPredicate = "json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.gap.reason') IN ('resource-unavailable','version-unavailable') AND json_type(decision_json,'$.gap.anchor')='object' AND (json_extract(decision_json,'$.gap.code')='PUBLICATION_A2A_ORIGINAL_UNAVAILABLE' OR (json_type(decision_json,'$.gap.part')='object' AND json_type(decision_json,'$.gap.event')='object'))"
+
 /** Connector-owned publication facts, not another Agent history or lifecycle. Borrows the Host database. */
 export class PublicationStore {
   private readonly decisionWrite: StatementSync
@@ -274,8 +277,9 @@ export class PublicationStore {
       database.exec('ALTER TABLE connector_publication_decision ADD COLUMN decision_json TEXT')
     database.exec(`CREATE INDEX IF NOT EXISTS connector_publication_content ON connector_publication_decision(binding_id,binding_revision)
       WHERE json_extract(decision_json,'$.kind')='origin' OR (json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved');
-      CREATE INDEX IF NOT EXISTS connector_publication_content_gap ON connector_publication_decision(binding_id,binding_revision)
-      WHERE json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved';
+      DROP INDEX IF EXISTS connector_publication_content_gap;
+      CREATE INDEX IF NOT EXISTS connector_publication_recoverable_gap ON connector_publication_decision(binding_id,binding_revision)
+        WHERE ${recoverableGapPredicate};
       CREATE INDEX IF NOT EXISTS connector_publication_gap_part ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.gap.part'))
         WHERE json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved';
       CREATE INDEX IF NOT EXISTS connector_publication_gap_source ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.sourceKey'))
@@ -965,7 +969,7 @@ export class PublicationStore {
   recoverableGaps(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, after = 0): Array<{ ordinal: number; gap: ConnectionDeliveryGap }> {
     // Qualification can retain a diagnostic gap without a readable original. Such
     // gaps remain in coverage, but must not occupy every slot before later media.
-    return this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND rowid>? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.gap.reason') IN ('resource-unavailable','version-unavailable') AND json_type(decision_json,'$.gap.anchor')='object' AND (json_extract(decision_json,'$.gap.code')='PUBLICATION_A2A_ORIGINAL_UNAVAILABLE' OR (json_type(decision_json,'$.gap.part')='object' AND json_type(decision_json,'$.gap.event')='object')) ORDER BY rowid LIMIT 4")
+    return this.database.prepare(`SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND rowid>? AND ${recoverableGapPredicate} ORDER BY rowid LIMIT 4`)
       .all(...scopeKey(boundary), after).map(row => ({ ordinal: Number(row.rowid), gap: JSON.parse(String(row.decision_json)).gap }))
   }
   /** Recovery admits only the missing exact part, with no read-cut movement or replay of represented bytes. */
