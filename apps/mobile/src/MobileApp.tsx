@@ -388,7 +388,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const serviceNotices = [...new Set([notice, projectionError, hostAppearance.issue,
     !conversationVisible ? connection.issue ?? (hasConnected && !connected ? connection.message : null) : null
   ].filter((message): message is string => Boolean(message)))]
-  return <MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-connection={connection.state} data-drawer={sheet === 'settings' ? 'open' : 'closed'} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
+  return <MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
     {!primaryHeader && <header className={`mobile-header${workspaceVisible && showSession ? ' mobile-header--session' : ''}`}>
       {workspaceVisible && showSession ? <div className="mobile-session-toolbar">
         <button type="button" className="mobile-session-origin" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={16} /><span>{pageName}</span></button>

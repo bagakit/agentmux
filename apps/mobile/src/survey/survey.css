@@ -6,7 +6,9 @@
 .mobile-survey h3 { font-size: 13px; }
 .mobile-survey ul { list-style: none; padding: 0; }
 .mobile-survey li, .mobile-survey article { margin-block: 8px; }
-.mobile-survey button { min-height: 44px; color: inherit; background: transparent; padding: 6px 10px; border: 1px solid var(--line-soft); border-radius: 8px; }
+.mobile-survey button { min-height: 44px; color: var(--text); background: var(--surface-2); box-shadow: var(--hl); padding: 6px 12px; border: 0; border-radius: var(--radius); font-weight: 500; }
+.mobile-survey button:active:not(:disabled) { background: var(--surface-3); }
+.mobile-survey .mobile-page-header .mobile-text-button { background: transparent; box-shadow: none; padding-inline: 0; color: var(--text-2); }
 .mobile-survey button[aria-pressed='true'] { background: color-mix(in srgb, currentColor 12%, transparent); }
 .mobile-survey-provenance code, .mobile-survey small { display: block; overflow-wrap: anywhere; opacity: .75; font-size: 11px; }
 .mobile-survey p { font-size: 13px; line-height: 1.5; }
@@ -24,7 +26,7 @@
 .mobile-region-content > button, .mobile-region-content a, .mobile-region-content .mobile-note-body button,
 .mobile-region-content [data-note-id] button { min-height: 44px; }
 .mobile-region-content > a { display: inline-flex; align-items: center; }
-.mobile-region-content > button, .mobile-region-content [data-note-id] button { margin-block: 4px; padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: 8px; color: inherit; background: transparent; }
+.mobile-region-content > button, .mobile-region-content [data-note-id] button { margin-block: 4px; padding: 8px 12px; border: 0; border-radius: var(--radius); color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
 .mobile-region-content > details { margin-block: 8px; font-size: 11px; color: var(--text-muted); }
 .mobile-region-content > details code, .mobile-region-content > details small { display: block; overflow-wrap: anywhere; }
 .mobile-region-content > p[role='status'] { font-size: 13px; line-height: 1.5; }
