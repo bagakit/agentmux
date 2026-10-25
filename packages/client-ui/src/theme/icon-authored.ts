@@ -27,9 +27,9 @@ export const MOTE_COMPANION_PARTS = {
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
   "space-workchamber": {
-    shapes: [["path", { "d": "M8 3.5h6a6.5 6.5 0 0 1 6.5 6.5v7" }], ["path", { "d": "M3.5 17v-6a4 4 0 0 1 4-4h5a5 5 0 0 1 5 5v5" }], ["path", { "d": "M2 21h20 M8 18v-4h5" }]],
+    shapes: [["path", { "d": "M6 5.5h13a2 2 0 0 1 2 2v6" }], ["path", { "d": "M3 14v-4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4" }], ["path", { "d": "M2 18.5h20 M7 14h6" }]],
     design: {
-      rest: "双层壳体与底座断开，留出进入工作面的负形；内部独立桌面不与壳体连成 G。",
+      rest: "低宽的双层壳体横向展开，开口与独立工作面留白清楚；平直舱顶避免竖向圆拱与立碑轮廓。",
       motion: { kind: "still", animation: "none", description: "对象导航身份完整静止，选中与焦点反馈归原宿主。", trigger: "按原 Space 目的地显示，不代表当前活动、完成、控制资格或新的 Agent 身份。" }
     }
   },
@@ -38,6 +38,20 @@ export const AUTHORED_ICON_DEFINITIONS = {
     design: {
       rest: "四角分离，中央保留横向内容面；以工作对象替代圆靶心。",
       motion: { kind: "still", animation: "none", description: "对象导航身份完整静止，选中与焦点反馈归原宿主。", trigger: "按原 Focus 目的地显示，不代表当前活动、完成、控制资格或新的 Agent 身份。" }
+    }
+  },
+  "survey-prism": {
+    shapes: [["path", { "d": "m9.5 6 5-1.5a1.5 1.5 0 0 1 1.8.8L21 16" }], ["path", { "d": "m7 8 7.5 2.5L21 20 4 14Z" }], ["path", { "d": "m4 14-1.5 3.5A1.8 1.8 0 0 0 4.2 20H21" }]],
+    design: {
+      rest: "前后错开的斜切光学面与连续承托形成探索棱镜，保留向外展开的方向和底部开口。",
+      motion: { kind: "still", animation: "none", description: "导航对象保持静止，选中与焦点归原宿主。", trigger: "按原 Survey 目的地显示，不表示成果写入、登记完成或执行状态。" }
+    }
+  },
+  "recall-fold": {
+    shapes: [["path", { "d": "M12 8c-2-2-5-3-8-3L2.5 17c4 0 7 1 9.5 3 2.5-2 5.5-3 9.5-3L20 5c-3 0-6 1-8 3Z M12 8v12" }], ["path", { "d": "m2.5 17 .5 3c3.5 0 6.5.5 9 1 2.5-.5 5.5-1 9-1l.5-3" }]],
+    design: {
+      rest: "两张宽阔展开的页面以中央折脊连为一体，下沿连续壳体表达可留存和回看的知识。",
+      motion: { kind: "still", animation: "none", description: "书页与折脊保持完整静止，选中与焦点归原宿主。", trigger: "按原 Recall 目的地显示，不表示数据保存、同步或阅读状态。" }
     }
   },
   "execution-split": {

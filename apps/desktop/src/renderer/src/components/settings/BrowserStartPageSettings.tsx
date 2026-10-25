@@ -5,6 +5,7 @@ import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, BROW
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { StartPageImageField } from './StartPageImageField'
+import { SurveyIntroduction } from './SettingsConceptIntro'
 import '../../styles/settings-survey.css'
 
 const SearchIcon = semanticIconComponent('action.search')
@@ -51,6 +52,7 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
     }))
   }
   return <div className="settings-pane-stack settings-survey">
+    <SurveyIntroduction />
     <section className="settings-group">
       <header><span>Start page</span><button type="button" className="small-button" onClick={onOpen}>Open Survey</button></header>
       <div className="settings-survey__workspace"><div className="settings-survey__fields">

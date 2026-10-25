@@ -3,6 +3,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useId, useState } from 'react'
 import { NOTE_CONTENT_WIDTHS, NOTE_FONT_SIZE_MIN, NOTE_FONT_SIZE_MAX, resolveNotesPreferences, validNoteFontSize, type NotesPreferences } from '../../../../shared/notes-preferences'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
+import { RecallIntroduction } from './SettingsConceptIntro'
 import { useSettingDraftRecord } from './use-setting-draft'
 import '../../styles/settings-workflows.css'
 import '../../styles/settings-recall.css'
@@ -40,6 +41,7 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
     }))
   }
   return <div className="settings-pane-stack settings-recall">
+    <RecallIntroduction />
     <section className="settings-group">
       <header><span>Reading</span><small>Saved: {saved.fontSize} px · {saved.contentWidth === 'wide' ? 'Wide' : 'Standard'}</small></header>
       <div className="settings-recall__reading"><div className="settings-recall__controls">

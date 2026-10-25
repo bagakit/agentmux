@@ -3,9 +3,37 @@ import capsuleArt from '../../assets/settings/capsule-keepsake.png'
 import goalsArt from '../../assets/settings/goals-companions.png'
 import spaceArt from '../../assets/settings/space-workchamber.png'
 import focusArt from '../../assets/settings/focus-workframe.png'
+import surveyArt from '../../assets/settings/survey-prism.png'
+import recallArt from '../../assets/settings/recall-fold.png'
 import './settings-concept-intro.css'
 
 /** Read-only illustrations. Configuration and execution remain with each pane. */
+export function SurveyIntroduction() {
+  const titleId = useId()
+  return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="survey" aria-labelledby={titleId}>
+    <div className="settings-concept-intro__copy">
+      <h3 className="settings-concept-intro__title" id={titleId}>发现新的线索。</h3>
+      <p className="settings-concept-intro__description">从一个问题出发，浏览资料、串起线索，继续探索。</p>
+    </div>
+    <div className="settings-concept-intro__art" aria-hidden="true">
+      <img src={surveyArt} alt="" width="1536" height="1024" loading="lazy" decoding="async" draggable={false} />
+    </div>
+  </section>
+}
+
+export function RecallIntroduction() {
+  const titleId = useId()
+  return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="recall" aria-labelledby={titleId}>
+    <div className="settings-concept-intro__copy">
+      <h3 className="settings-concept-intro__title" id={titleId}>把知识留在手边。</h3>
+      <p className="settings-concept-intro__description">整理笔记、页面与来源，需要时回到有用的发现。</p>
+    </div>
+    <div className="settings-concept-intro__art" aria-hidden="true">
+      <img src={recallArt} alt="" width="1536" height="1024" loading="lazy" decoding="async" draggable={false} />
+    </div>
+  </section>
+}
+
 export function SpaceIntroduction() {
   const titleId = useId()
   return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="space" aria-labelledby={titleId}>
