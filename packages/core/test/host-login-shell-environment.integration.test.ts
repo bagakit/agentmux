@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { build } from 'esbuild'
 import { describe, expect, it, vi } from 'vitest'
@@ -16,7 +16,7 @@ async function stop(child: ChildProcess | undefined): Promise<void> {
 }
 
 /** Compile the production entry and give it its own original Store and Native process. */
-async function withHost(mode: 'profile' | 'failed', check: (fixture: {
+async function withHost(mode: 'profile' | 'failed' | 'retry-failed' | 'retry-login', check: (fixture: {
   client: Awaited<ReturnType<typeof connectHostedAgentMux>>
   root: string
   executables: readonly string[]
@@ -42,10 +42,22 @@ async function withHost(mode: 'profile' | 'failed', check: (fixture: {
     // nor the Native daemon has them in PATH, so a probe in the wrong owner fails.
     await writeFile(join(home, '.zprofile'), 'export FIXTURE_LOGIN_VALUE=login\n')
     await writeFile(join(home, '.zshrc'), `export PATH='${bin}:/usr/bin:/bin'\nexport FIXTURE_SHELL_VALUE=interactive-profile\n`)
+    const retry = mode.startsWith('retry-')
+    const shell = join(root, 'fixture-shell')
+    if (retry) {
+      await writeFile(shell, `#!/bin/sh
+printf '%s\\n' "$1" >> '${root}/preparation-arms'
+if [ ! -f '${root}/repaired' ]; then
+  ${mode === 'retry-failed' ? 'exit 1' : '[ "$1" = "-ilc" ] && exit 1'}
+fi
+exec /bin/zsh "$@"
+`)
+      await chmod(shell, 0o755)
+    }
     const env: NodeJS.ProcessEnv = {
       ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))),
-      HOME: home, ZDOTDIR: home, SHELL: mode === 'profile' ? '/bin/zsh' : join(root, 'absent-shell'),
-      PATH: mode === 'profile' ? '/usr/bin:/bin' : `${bin}:/usr/bin:/bin`,
+      HOME: home, ZDOTDIR: home, SHELL: retry ? shell : mode === 'profile' ? '/bin/zsh' : join(root, 'absent-shell'),
+      PATH: mode !== 'failed' ? '/usr/bin:/bin' : `${bin}:/usr/bin:/bin`,
       FIXTURE_SHELL_VALUE: 'inherited-environment',
       AGENTMUX_AGENT_SESSION_STORE: join(state, 'sessions.json'),
       AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: state,
@@ -163,6 +175,38 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')('produ
         originalRunId: retained.runId, originalRunPid: retained.pid, nativeDaemonPid: nativePid, native: originalNative,
         originalOutputRetained: true, sameRunAcceptedNewInput: true, probesAfterRestart: executables }))
       expect(stderr()).not.toContain('Shell environment loading did not complete')
+    })
+  }, 20_000)
+
+  it.each(['retry-failed', 'retry-login'] as const)('retries %s in the original Host and reuses complete preparation', async mode => {
+    await withHost(mode, async ({ client, root, executables, stderr }) => {
+      const owner = client.runtimeOwnerIdentity()!
+      const native = client.runtimeIdentity()
+      await vi.waitFor(() => expect(stderr()).toContain(mode === 'retry-failed'
+        ? 'Shell environment loading did not complete' : 'Only the non-interactive login environment was loaded'))
+      const providerId = client.catalog()[0]!.id
+      // Both command forms are absent from the original inherited/login-only PATH.
+      for (const executable of executables) {
+        expect(await client.probeExecutorAvailability(providerId, executable)).toMatchObject({ executable, availability: 'missing' })
+      }
+      const arms = async () => (await readFile(join(root, 'preparation-arms'), 'utf8')).trim().split('\n')
+      const before = await arms()
+      await writeFile(join(root, 'repaired'), '')
+      const recovered = await Promise.all(executables.map(executable => client.probeAgent(providerId, executable)))
+      expect(recovered.map(value => value.installed)).toEqual([true, true])
+      const after = await arms()
+      expect(after.slice(before.length).sort()).toEqual(['-ilc', '-lc'])
+      for (const executable of executables) {
+        const run = await client.createTerminal({ workspacePath: root, command: executable, args: [] })
+        await vi.waitFor(async () => {
+          const replay = await client.readRunReplay({ runId: run.runId }, 0, 'raw')
+          expect(Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))).toString()).toContain('interactive-profile')
+        })
+        await client.removeTerminal({ runId: run.runId })
+      }
+      expect(await arms()).toEqual(after)
+      expect(client.runtimeOwnerIdentity()).toEqual(owner)
+      expect(client.runtimeIdentity()).toEqual(native)
     })
   }, 20_000)
 
