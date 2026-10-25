@@ -38,7 +38,7 @@ async function readPreview(row: LauncherResumeRow): Promise<LauncherRecap | null
 
 /** Read only visible candidates. Keep excerpts separate from the selected full conversation. */
 export function useLauncherResumePreviews(open: boolean, list: HTMLDivElement | null,
-  rows: readonly LauncherResumeRow[], selectedKey: string | null, retry: number) {
+  rows: readonly LauncherResumeRow[], selectedKey: string | null, retry: number, filterKey: string) {
   const [previews, setPreviews] = useState<Record<string, Preview>>({})
   const cache = useRef<Record<string, Preview>>({})
   const current = useRef({ rows, selectedKey, open })
@@ -47,6 +47,7 @@ export function useLauncherResumePreviews(open: boolean, list: HTMLDivElement | 
   const generation = useRef(0)
   const inFlight = useRef(0)
   const observer = useRef<IntersectionObserver | null>(null)
+  const observed = useRef(new Set<Element>())
   const pump = useRef(() => {})
 
   pump.current = () => {
@@ -86,15 +87,22 @@ export function useLauncherResumePreviews(open: boolean, list: HTMLDivElement | 
       }
       pump.current()
     }, { root: list })
-    for (const element of list.querySelectorAll('[data-resume-key]')) observer.current.observe(element)
-    return () => { generation.current += 1; observer.current?.disconnect(); observer.current = null; visible.current.clear() }
+    return () => { generation.current += 1; observer.current?.disconnect(); observer.current = null; visible.current.clear(); observed.current.clear() }
   }, [open, list, retry])
 
   useEffect(() => {
     const reading = observer.current
     if (!reading || !list) return
-    reading.disconnect(); visible.current.clear()
-    for (const element of list.querySelectorAll('[data-resume-key]')) reading.observe(element)
-  })
+    const elements = new Set(list.querySelectorAll('[data-resume-key]'))
+    for (const element of observed.current) if (!elements.has(element as HTMLElement)) {
+      reading.unobserve(element)
+      const key = (element as HTMLElement).dataset.resumeKey
+      if (key) visible.current.delete(key)
+    }
+    for (const element of elements) if (!observed.current.has(element)) reading.observe(element)
+    observed.current = elements
+    // Selection and data can change without changing the observed DOM nodes.
+    pump.current()
+  }, [open, list, rows, selectedKey, retry, filterKey])
   return previews
 }

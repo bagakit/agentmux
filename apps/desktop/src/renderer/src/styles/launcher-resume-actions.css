@@ -1,0 +1,2 @@
+.launcher-resume__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-top: var(--sp-4); }
+.launcher-resume__actions .content-copy { min-height: 26px; padding-inline: var(--sp-3); font-size: var(--fs-meta); }

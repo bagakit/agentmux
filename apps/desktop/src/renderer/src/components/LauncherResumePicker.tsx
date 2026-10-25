@@ -1,6 +1,5 @@
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { TextInput } from '@agentmux/client-ui/input'
-import { ConversationMessage } from '@agentmux/client-ui'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
@@ -17,6 +16,12 @@ import { agentProviderLabel } from './AgentProviderIcon'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { projectConversationRecords } from '@agentmux/core/conversation'
 import { AgentAvatar } from './AgentAvatar'
+import { LauncherResumeConversation } from './LauncherResumeConversation'
+import { LauncherResumeActions } from './LauncherResumeActions'
+import { launcherTakeoverSource } from '../lib/launcher-resume-actions'
+import { SessionTakeoverSurface } from './SessionTakeoverSurface'
+import type { TakeoverSource } from '../lib/session-takeover'
+import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { SettingsNavigation } from './SettingsNavigation'
 import { launcherCatalogWarnings, launcherDiscoveryKey, launcherNativeDiscovery, launcherNativeSourceKey, mergeLauncherNativeCatalog } from '../lib/launcher-native-discovery'
@@ -42,8 +47,10 @@ const EMPTY_CANDIDATES: ReturnType<typeof useAppStore.getState>['recoveryCandida
 const EMPTY_ROWS: LauncherResumeRow[] = []
 const EMPTY_FACTS = { timelines: {} as Record<string, AgentTimelineSnapshot>, sessions: [] as SessionSnapshot[], names: {} as Record<string, string> }
 
-export function LauncherResumePicker({ workspace, disabled = false, originalTarget = false }: { workspace?: WorkspaceRecord | undefined; disabled?: boolean; originalTarget?: boolean }) {
+export function LauncherResumePicker({ workspace, disabled = false, originalTarget = false, getTakeoverOrigin }: { workspace?: WorkspaceRecord | undefined; disabled?: boolean; originalTarget?: boolean; getTakeoverOrigin?(): OpenHttpLinkOrigin | undefined }) {
   const [open, setOpen] = useState(false)
+  const [takeover, setTakeover] = useState<{ source: TakeoverSource; trigger: HTMLButtonElement } | null>(null)
+  const takeoverOpened = useRef(false)
   const displayPath = usePathDisplay()
   const config = useAppStore(state => open ? state.config : null)
   const savedCandidates = useAppStore(state => open ? state.recoveryCandidates : EMPTY_CANDIDATES)
@@ -87,7 +94,7 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
     })
   ].sort((left, right) => right.candidate.updatedAt - left.candidate.updatedAt || launcherCandidateKey(left.candidate).localeCompare(launcherCandidateKey(right.candidate))) : EMPTY_ROWS,
   [open, candidates, catalogs, config, workspace, facts, reads, nativeReads, topics])
-  const previews = useLauncherResumePreviews(open, list, sourceRows, selectedId, recapRetry)
+  const previews = useLauncherResumePreviews(open, list, sourceRows, selectedId, recapRetry, JSON.stringify([scope, query]))
   const rows = useMemo(() => sourceRows.map(row => row.recap ? row : { ...row, recap: previews[launcherPreviewKey(row)]?.recap ?? null }), [sourceRows, previews])
   const filtered = useMemo(() => filterLauncherResumeRows(rows, scope, query), [rows, scope, query])
   const idLabels = useMemo(() => {
@@ -131,7 +138,6 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
   const projectCount = rows.filter(row => row.inProject).length
   const selectedHostConfigured = Boolean(config?.hosts.some(host => host.id === selectedHostId))
   const selectedNativeRead = selectedKey && nativeReads[selectedKey]?.sourceKey === nativeSourceKey ? nativeReads[selectedKey] : undefined
-  const nativeMessages = selectedNativeRead?.page?.items.filter(item => item.kind === 'user-message' || item.kind === 'assistant-message') ?? []
   const selectedRead = selectedSessionId ? reads[selectedSessionId] : selectedNativeRead
   const selectedProviderLabel = selected ? agentProviderLabel(selected.candidate.providerId) : ''
   const discoveryPlan = launcherNativeDiscovery(config, workspace, scope)
@@ -228,7 +234,9 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
   function changeOpen(value: boolean) {
     presentationOwner.current += 1
     setOpen(value)
+    if (!value) setTakeover(null)
     if (value) {
+      takeoverOpened.current = false
       setDiscoveryPaused(false)
       const state = useAppStore.getState()
       const ids = new Set(launcherManagedCandidates(state.recoveryCandidates, state.sessions).map(candidate => candidate.agentSessionId))
@@ -342,6 +350,7 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="dialog-scrim launcher-resume__scrim" />
       <Dialog.Content className="dialog-surface launcher-resume" aria-busy={busyId !== null}
+        onCloseAutoFocus={event => { if (takeoverOpened.current) { event.preventDefault(); takeoverOpened.current = false } }}
         onOpenAutoFocus={event => { event.preventDefault(); searchRef.current?.focus() }}>
         <header className="launcher-resume__header">
           <div><Dialog.Title>Resume a Session</Dialog.Title>
@@ -409,18 +418,18 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
           {selected ? <section className="launcher-resume__detail" aria-label="Selected Session details">
             <div className="launcher-resume__detail-heading"><AgentAvatar label={selected.name} providerId={selected.candidate.providerId} size={24} />
               <div><strong>{selected.name}</strong><span>{selectedProviderLabel === selected.executorName ? selectedProviderLabel : `${selectedProviderLabel} · ${selected.executorName}`}</span></div></div>
+            <LauncherResumeActions row={selected} disabled={busyId !== null || disabled} {...(getTakeoverOrigin ? { onTakeOver: (row: LauncherResumeRow, trigger: HTMLButtonElement) => {
+              try {
+                const origin = getTakeoverOrigin()
+                if (!origin) throw new Error('The Launcher location is still unconfirmed. Your saved conversation is kept; try Take over again.')
+                setTakeover({ source: launcherTakeoverSource(row, origin), trigger })
+              } catch (cause) { setFeedback({ id: launcherCandidateIdentity(row.candidate), name: row.name, outcome: 'failed', text: presentError(cause) }) }
+            } } : {})} />
             {nativeCandidate ? <div className="launcher-resume__conversation"><h3>Conversation</h3>
               {selectedNativeRead?.state === 'loading' ? <p className="launcher-resume__muted"><ThemeStatusLoadingIcon size={12} animation="spin" /> Reading this saved conversation…</p> : null}
               {selectedNativeRead?.page ? <>
-                {nativeMessages.map((item, index) => <article key={`${nativeSourceKey}:${item.id}`} ref={index === nativeMessages.length - 1 ? nativeLastMessageRef : undefined} className="launcher-resume__message">
-                  <ConversationMessage compact content={item.contentParts} messageId={item.id} providerId={selectedNativeRead.page!.source.providerId}
-                    {...(item.questionAnswers ? { questionAnswers: item.questionAnswers } : {})}
-                    {...(item.questionDiagnostic ? { questionDiagnostic: item.questionDiagnostic } : {})}
-                    name={item.kind === 'user-message' ? 'Input' : 'Assistant'} workspaceRoot={nativeCandidate.workspacePath}
-                    nativeResourceRecord={{ source: selectedNativeRead.page!.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }) }}
-                    readHistoryResource={readNativeResource} />
-                </article>)}
-                {!nativeMessages.length ? <p className="launcher-resume__muted">No user or assistant messages on this page.</p> : null}
+                <LauncherResumeConversation page={selectedNativeRead.page} sourceKey={nativeSourceKey!} workspacePath={nativeCandidate.workspacePath}
+                  readHistoryResource={readNativeResource} lastMessageRef={nativeLastMessageRef} />
                 {selectedNativeRead.page.nextCursor ? <button type="button" className="small-button" disabled={selectedNativeRead.loadingMore}
                   onClick={() => void readOlderNativeMessages()}>{selectedNativeRead.loadingMore ? 'Reading older messages…' : 'Read older messages'}</button> : null}
               </> : null}
@@ -467,6 +476,8 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
             {busyId ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionResumeSessionIcon size={13} />}
             {busyId ? 'Restoring…' : selectedSession?.status.continuityConflict === 'session-run-changed' ? 'Open current Session' : selected && !selected.workspace && selectedHostConfigured ? 'Open project & resume' : 'Resume Session'}
           </button></footer>
+        {takeover ? <SessionTakeoverSurface source={takeover.source} active={open} returnTrigger={takeover.trigger}
+          onClose={() => setTakeover(null)} onOpened={() => { takeoverOpened.current = true; changeOpen(false) }} /> : null}
       </Dialog.Content>
     </DocumentOverlayPortal>
   </Dialog.Root>

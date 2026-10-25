@@ -374,6 +374,14 @@ export function NewTabSurface({
     return target
   }
 
+  function getTakeoverOrigin() {
+    const target = materializeLauncher()
+    if (!target || !workspace) return undefined
+    const displayWorkspaceId = projection?.displayWorkspaceId ?? creationTarget?.displayWorkspaceId ??
+      workbenchTabDisplayWorkspaceId(useAppStore.getState().layouts, target.tabId, tabGroupId)
+    return displayWorkspaceId ? { workspaceId: displayWorkspaceId, tabGroupId, ...target } : undefined
+  }
+
   function chooseArrangement(selection: LauncherExecutionSelection, options: { navigateProject: boolean }): boolean {
     if (busy || !workspace) return false
     try {
@@ -468,7 +476,7 @@ export function NewTabSurface({
           <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={promptDisplayText}>{prompt ? promptDisplayText.split('\n')[0] : 'Start a task'}</small></span><ThemeNavigationDisclosureIcon size={14} />
         </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong></span>}
         <span className="launcher-section-actions">
-          {sections.agents === 'collapsed' ? <LauncherResumePicker workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} /> : null}
+          {sections.agents === 'collapsed' ? <LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} /> : null}
           <button type="button" className="icon-button" aria-label="Refresh agents on this host" title="Refresh agents on this host" disabled={!agentWorkspace || detecting} onClick={() => agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionRefreshIcon size={13} />}</button>
           {sections.agents === 'expanded' ? <button type="button" className="icon-button" aria-label="Collapse Agents" title="Collapse" onClick={() => setSection('agents', 'collapsed')}><ThemeActionCollapseIcon size={13} /></button> : null}
           <button type="button" className="icon-button" aria-label="Close Agents" title="Close Agents" onClick={() => setSection('agents', 'hidden')}><ThemeActionCloseIcon size={13} /></button>
@@ -504,7 +512,7 @@ export function NewTabSurface({
       </> : null}
       {sections.agents === 'expanded' ? <div className="launch-surface__footer">
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
-        <div className="launcher-primary-actions"><LauncherResumePicker workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} />
+        <div className="launcher-primary-actions"><LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} />
           <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busy === 'agent' ? 'Launching…' : 'Launch'}</button>
         </div>
       </div> : null}

@@ -15,11 +15,12 @@ const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 
 
 /** A local workface transition. The underlying Session and editor stay mounted. */
-export function SessionTakeoverSurface({ source, active, onClose, returnTrigger }: {
+export function SessionTakeoverSurface({ source, active, onClose, onOpened, returnTrigger }: {
   source: TakeoverSource
   returnTrigger?: HTMLButtonElement | null
   active: boolean
   onClose(): void
+  onOpened?(): void
 }) {
   const config = useAppStore(state => state.config)
   const detections = useAppStore(state => state.executorDetections)
@@ -100,8 +101,10 @@ export function SessionTakeoverSurface({ source, active, onClose, returnTrigger 
   async function accept(report: AgentMuxSpaceMutationReport) {
     if (!mounted.current) return
     if (report.outcome === 'opened') {
-      if (activeRef.current) focusTakeoverResult(source, report)
+      const current = activeRef.current
+      if (current) focusTakeoverResult(source, report)
       close(false)
+      if (current) onOpened?.()
       return
     }
     if (report.outcome === 'retired') {
