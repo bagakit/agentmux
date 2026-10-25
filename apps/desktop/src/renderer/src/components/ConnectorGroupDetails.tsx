@@ -19,7 +19,7 @@ export function ConnectorGroupDetailsHeader({ id, identity, relationship, config
   return <div className="connector-group-details__header">
     <div className="connector-group-details__identity">{identity}</div>
     <div className="connector-group-details__relationship" aria-label="Current conversation and group relationship">{relationship}</div>
-    <div className="connector-group-details__configuration">{configuration}</div>
+    {section !== 'sharing' ? <div className="connector-group-details__configuration">{configuration}</div> : null}
     <div className="connector-group-details__tabs" role="tablist" aria-label="Group connection sections">
       {sections.map(({ id: name, label, icon: Icon }, index) => <button key={name} ref={node => { tabs.current[index] = node }} type="button" role="tab" id={`${id}-${name}-tab`}
         aria-controls={`${id}-${name}-panel`} aria-selected={section === name} tabIndex={section === name ? 0 : -1}

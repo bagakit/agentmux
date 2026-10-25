@@ -26,12 +26,6 @@
 .connector-group-details__section { display: grid; gap: var(--sp-3); padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); min-width: 0; }
 .connector-group-details__section h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: var(--fs-body); font-weight: 600; color: var(--text); }
 .connector-group-details__section h3 > svg { color: var(--text-3); }
-.connector-group-details .agent-connector-audiences { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--sp-2); }
-.connector-group-details .agent-connector-audiences > span { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3); background: var(--surface-2); border: 0; border-radius: var(--radius-sm); }
-.connector-group-details .agent-connector-audiences > span > svg { flex: none; margin-top: 2px; color: var(--text-3); }
-.connector-group-details .agent-connector-audiences > span > span { display: grid; gap: var(--sp-1); min-width: 0; overflow-wrap: anywhere; }
-.connector-group-details .agent-connector-audiences strong { font-weight: 500; }
-.connector-group-details .agent-connector-audiences small { color: var(--text-3); }
 .connector-group-details .agent-connector-status { background: var(--surface-2); border-radius: var(--radius-sm); padding: var(--sp-3); }
 .connector-group-details .agent-connector-room-metadata { gap: var(--sp-2); }
 .connector-group-details .agent-connector-room-metadata > span { background: var(--surface-2); padding: var(--sp-2) var(--sp-3); }
