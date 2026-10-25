@@ -898,10 +898,24 @@ export class PublicationStore {
   /** Read-only recovery advances through this audience's retained open rows, never another queue or history. */
   nextUnconfirmed(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, after?: string, projectionId?: string): PublicationOperation | null {
     const cursor = after === undefined ? undefined : this.database.prepare('SELECT ordinal FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND operation_id=?').get(...scopeKey(boundary), after)
+    if (projectionId === undefined) {
+      const parameters = [...scopeKey(boundary), Number(cursor?.ordinal ?? 0)]
+      // Each state has an ordered range in the existing open-state index. Taking
+      // its first eligible ordinal avoids scanning completed history to merge them.
+      return this.read(this.database.prepare(`SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (
+        SELECT MIN(ordinal) FROM connector_publication_operation
+          WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied')
+            AND state='dispatching' AND ordinal>? AND json_extract(operation_json,'$.reference.source.kind')!='binding-operation'
+        UNION ALL
+        SELECT MIN(ordinal) FROM connector_publication_operation
+          WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied')
+            AND state='unknown' AND ordinal>? AND json_extract(operation_json,'$.reference.source.kind')!='binding-operation'
+      ) ORDER BY ordinal LIMIT 1`).get(...parameters, ...parameters))
+    }
     return this.read(this.database.prepare(`SELECT operation_json,state FROM connector_publication_operation
       WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied')
-        AND state IN ('dispatching','unknown') AND ordinal>? ${projectionId === undefined ? "AND json_extract(operation_json,'$.reference.source.kind')!='binding-operation'" : 'AND projection_id=?'}
-      ORDER BY ordinal LIMIT 1`).get(...scopeKey(boundary), Number(cursor?.ordinal ?? 0), ...(projectionId === undefined ? [] : [projectionId])))
+        AND state IN ('dispatching','unknown') AND ordinal>? AND projection_id=?
+      ORDER BY ordinal LIMIT 1`).get(...scopeKey(boundary), Number(cursor?.ordinal ?? 0), projectionId))
   }
   /** Aggregate effect facts cannot be overwritten by a newer successful independent message. */
   unresolvedState(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string): 'unknown' | 'not-applied' | null {
