@@ -179,14 +179,18 @@ afterEach(async () => {
 const target = () => ({ hostId: session.hostId, agentSessionId: session.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath })
 async function create() { return await api.continuousProgress.create(target(), 60_000, 'continue the assigned work') }
 async function showProgressForm() {
-  await act(async () => {
-    const panel = container.querySelector<HTMLDetailsElement>('.automation-create')!
-    panel.open = true; panel.dispatchEvent(new Event('toggle'))
-    const type = container.querySelector<HTMLSelectElement>('[aria-label="Automation type"]')!
-    type.value = 'progress'; type.dispatchEvent(new Event('change', { bubbles: true }))
-  })
+  const edit = container.querySelector<HTMLButtonElement>('[aria-label="Edit continuous progress"]')
+  if (edit) await act(async () => edit.click())
+  else {
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'New automation')!.click())
+    await act(async () => container.querySelector<HTMLInputElement>('[aria-label="Automation type"] input[value="progress"]')!.click())
+  }
+  expect(container.querySelector('form[aria-label="Continuous progress setup"]')!.closest('[hidden]')).toBeNull()
+  expect(container.querySelector<HTMLElement>('[data-automation-view="overview"]')!.hidden).toBe(true)
 }
 async function click(label: string) {
+  const editor = container.querySelector<HTMLElement>('[data-automation-view="editor"]')
+  if (editor && !editor.hidden) await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Back to automations"]')!.click())
   const button = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`); expect(button).not.toBeNull()
   const details = button!.closest('details')
   if (details && !details.open) await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
@@ -286,12 +290,9 @@ it('saved defaults reach both original Composer creation routes and durable task
   await act(async () => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
   await vi.waitFor(() => expect(manager.list().find(loop => !loop.calendar)).toMatchObject({ ...target(), intervalMs: 420000, prompt: 'Continue the precise saved task' }))
   const calendar = container.querySelector<HTMLElement>('.calendar-schedules')!
-  await act(async () => {
-    const type = calendar.querySelector<HTMLSelectElement>('[aria-label="Automation type"]')!
-    type.value = 'schedule'; type.dispatchEvent(new Event('change', { bubbles: true }))
-    const timing = calendar.querySelector<HTMLSelectElement>('[aria-label="Arrangement timing"]')!
-    timing.value = 'calendar'; timing.dispatchEvent(new Event('change', { bubbles: true }))
-  })
+  await act(async () => calendar.querySelector<HTMLButtonElement>('[aria-label="Back to automations"]')!.click())
+  await act(async () => [...calendar.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'New automation')!.click())
+  await act(async () => calendar.querySelector<HTMLInputElement>('[aria-label="Arrangement timing"] input[value="calendar"]')!.click())
   const topic = calendar.querySelector<HTMLTextAreaElement>('textarea')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(topic, 'One explicit calendar question'); topic.dispatchEvent(new Event('input', { bubbles: true })); calendar.querySelector<HTMLInputElement>('[aria-label="Enable quiet follow-up"]')!.click() })
   expect(calendar.textContent).toContain('2h silence')

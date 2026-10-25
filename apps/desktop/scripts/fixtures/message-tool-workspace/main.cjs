@@ -200,7 +200,14 @@ async function automationScene(width, theme, short, original, before) {
   const control = await evaluate(`(()=>{const n=${resume},p=${panel},r=n.getBoundingClientRect(),b=p.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {enabled:!n.disabled,inside:r.top>=b.top&&r.bottom<=b.bottom&&r.left>=b.left&&r.right<=b.right,hit:n===hit||n.contains(hit)}})()`)
   assert.deepEqual(control, { enabled: true, inside: true, hit: true }, 'The original paused-loop action is visible and hit-testable without activating it')
   await frame(width, theme, 'automation-controls' + suffix)
+  const overview = `${automation}.querySelector('[data-automation-view="overview"]')`
+  const editView = `${automation}.querySelector('[data-automation-view="editor"]')`
+  await evaluate(`(()=>{window.automationMotion=[];${automation}.addEventListener('animationstart',event=>{if(${editView}.contains(event.target))window.automationMotion.push({name:event.animationName,duration:getComputedStyle(event.target).animationDuration})})})()`)
   await click(buttons('Edit continuous progress', automation))
+  assert.equal(await evaluate(`${overview}.hidden&&!${editView}.hidden`), true, 'The editor replaces the overview without removing either retained form')
+  assert.equal(await evaluate(`(()=>{const chooser=${automation}.querySelector('[aria-label="Automation type"]');return !chooser||!!chooser.closest('[hidden]')})()`), true, 'Editing an existing task does not ask the user to select its type again')
+  const motion = await evaluate('window.automationMotion')
+  assert.ok(motion.length > 0 && motion.some(item => parseFloat(item.duration) > 0), 'Opening the actual editor produces a short animation')
   const progressForm = `${automation}.querySelector('form[aria-label="Continuous progress setup"]')`
   const progressInterval = `${progressForm}.querySelector('input[type="number"]')`
   const progressPrompt = `${progressForm}.querySelector('textarea')`
@@ -219,10 +226,13 @@ async function automationScene(width, theme, short, original, before) {
   assert.equal(progressResult.calls.length, 1, 'Exactly one private update is issued')
   assert.equal(progressResult.calls[0].query.intervalMs, 3600000); assert.equal(progressResult.calls[0].query.prompt, '检查新版本并报告真实进展。')
   assert.equal(progressResult.calls[0].query.loopId, 'visual-progress'); assert.equal(progressResult.calls[0].reference.agentSessionId, original.agentSessionId)
-  assert.match(progressResult.text, /Paused/); assert.match(progressResult.text, /every 60 min/)
+  assert.match(progressResult.text, /Paused/); assert.match(progressResult.text, /Every 60 min/)
   await frame(width, theme, 'automation-progress-saved' + suffix)
-  const kind = `${automation}.querySelector('[aria-label="Automation type"]')`
-  await evaluate(`(()=>{const n=${kind};n.value='schedule';n.dispatchEvent(new Event('change',{bubbles:true}))})()`); await painted()
+  await click(buttons('Back to automations', automation))
+  assert.equal(await evaluate(`document.activeElement===${buttons('Edit continuous progress', automation)}&&!${overview}.hidden&&${editView}.hidden`), true, 'Back returns keyboard focus to the exact edit entry')
+  await click(buttons('New automation', automation))
+  const timing = value => `${automation}.querySelector('[aria-label="Arrangement timing"] input[value="${value}"]')`
+  assert.deepEqual(await evaluate(`[...${automation}.querySelectorAll('[aria-label="Arrangement timing"] input')].map(n=>n.value)`), ['everyMs','calendar','afterMs'])
   const interval = `${automation}.querySelector('[aria-label="Repeat interval in minutes"]' )`
   const message = `${automation}.querySelector('[aria-label="Arranged message"]')`
   await waitFor(visible(interval)); await replace(interval, '7'); await replace(message, '请检查当前任务，保留原会话。')
@@ -233,12 +243,36 @@ async function automationScene(width, theme, short, original, before) {
   const saveControl = await evaluate(`(()=>{const n=${save},p=${panel},r=n.getBoundingClientRect(),b=p.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {enabled:!n.disabled,inside:r.top>=b.top&&r.bottom<=b.bottom&&r.left>=b.left&&r.right<=b.right,hit:n===hit||n.contains(hit)}})()`)
   assert.deepEqual(saveControl, { enabled: true, inside: true, hit: true }, 'The unsent minute-form save is visible and hit-testable without activating it')
   await frame(width, theme, 'automation-save' + suffix)
+  // Native radio keys choose the time model without a select popup or direct value mutation.
+  await click(`${timing('everyMs')}.closest('label')`)
+  await key('ArrowRight', 'ArrowRight', 39)
+  await waitFor(`${timing('calendar')}.checked`)
+  assert.equal(await evaluate(visible(`${automation}.querySelector('[aria-label="Arrangement local time"]')`)), true)
+  await frame(width, theme, 'automation-calendar-form' + suffix)
+  await key('ArrowRight', 'ArrowRight', 39)
+  await waitFor(`${timing('afterMs')}.checked`)
+  assert.equal(await evaluate(visible(`${automation}.querySelector('[aria-label="Countdown duration"]')`)), true)
+  await frame(width, theme, 'automation-countdown-form' + suffix)
+  await click(`${timing('everyMs')}.closest('label')`)
+  // The time-specific field may remount; the message editor is the retained user draft.
+  await evaluate(`window.automationInterval=${interval}`)
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+  await evaluate('window.automationMotion=[]')
+  await click(buttons('Back to automations', automation))
+  assert.equal(await evaluate(`document.activeElement===${buttons('New automation', automation)}&&!${overview}.hidden`), true, 'Back restores the original new-task entry')
+  await click(buttons('New automation', automation))
+  assert.equal(await evaluate(`matchMedia('(prefers-reduced-motion: reduce)').matches&&window.automationMotion.length===0&&${message}===window.automationMessage`), true, 'Reduced motion keeps the same editor and draft without replaying entrance animation')
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
   await click(buttons('Back to messages')); await click(buttons('Automation'))
   assert.equal(await evaluate(`window.automationInterval===${interval}&&${interval}.value==='7'&&window.automationMessage===${message}&&${message}.value==='请检查当前任务，保留原会话。'`), true, 'Navigation retains the exact form nodes and unsent automation draft')
+  await click(buttons('Back to automations', automation))
+  assert.equal(await evaluate(`document.activeElement===${buttons('New automation', automation)}&&!${overview}.hidden&&${editView}.hidden`), true, 'Reopening Automation returns to the current entry, not a disconnected prior DOM node')
+  await click(buttons('New automation', automation))
+  assert.equal(await evaluate(`${message}===window.automationMessage&&${message}.value==='请检查当前任务，保留原会话。'`), true)
   await key('Escape', 'Escape', 27); await waitFor(`!${panel}.matches(':popover-open')`)
   assert.equal(await evaluate(`document.activeElement===${surface}.querySelector('.composer__mailbox')`), true)
   await originalSurfacePreserved(original, before)
-  result.scenes.push({ width, theme, short, controlsReachable: true, retainedAutomation: true, originalSurfacePreserved: true })
+  result.scenes.push({ width, theme, short, controlsReachable: true, retainedAutomation: true, isolatedEditor: true, returnFocus: true, timingChoices: ['everyMs', 'calendar', 'afterMs'], motion, reducedMotion: true, originalSurfacePreserved: true })
 }
 async function interactionStates(width, theme, original, before, geometry) {
   result.stage.action = 'ordinary-record-hover'

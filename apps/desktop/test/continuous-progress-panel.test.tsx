@@ -28,19 +28,32 @@ async function mount(loop: ContinuousProgressLoop) {
   await vi.waitFor(() => expect(dom.container.querySelector('[data-progress-state]')?.getAttribute('data-progress-state')).not.toBe('unconfirmed'))
 }
 
+async function openNewAutomation() {
+  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'New automation')!.click())
+  expect(dom.container.querySelector<HTMLElement>('[data-automation-view="overview"]')!.hidden).toBe(true)
+  expect(dom.container.querySelector<HTMLElement>('[data-automation-view="editor"]')!.hidden).toBe(false)
+}
+async function showProgressEditor() {
+  const form = dom.container.querySelector<HTMLFormElement>('form[aria-label="Continuous progress setup"]')!
+  if (!form.closest('[hidden]')) return
+  const edit = dom.container.querySelector<HTMLButtonElement>('[aria-label="Edit continuous progress"]')
+  if (edit) await dom.click('[aria-label="Edit continuous progress"]')
+  else {
+    await openNewAutomation()
+    await dom.click('[aria-label="Automation type"] input[value="progress"]')
+  }
+  expect(form.closest('[hidden]')).toBeNull()
+}
+
 describe('continuous progress panel', () => {
   it('keeps the same composing continuation field when a late read finds an existing loop', async () => {
     let resolve!: (loops: ContinuousProgressLoop[]) => void
     vi.spyOn(api.continuousProgress, 'list').mockReturnValue(new Promise(done => { resolve = done }))
     await dom.render(<ContinuousProgressControl session={composerSession()} targetName="Original task agent" />)
     expect(dom.container.querySelector('.automation-target')!.textContent).toContain('Original task agent')
-    expect(dom.container.querySelector('.automation-target')!.textContent).toContain(target.agentSessionId)
-    const panel = dom.container.querySelector<HTMLDetailsElement>('.automation-create')!
-    await act(async () => {
-      panel.open = true; panel.dispatchEvent(new Event('toggle'))
-      const kind = dom.container.querySelector<HTMLSelectElement>('[aria-label="Automation type"]')!
-      kind.value = 'progress'; kind.dispatchEvent(new Event('change', { bubbles: true }))
-    })
+    expect(dom.container.querySelector('[data-progress-details="target"]')!.textContent).toContain(target.agentSessionId)
+    await openNewAutomation()
+    await dom.click('[aria-label="Automation type"] input[value="progress"]')
     const field = dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!
     await act(async () => {
       field.focus()
@@ -58,6 +71,7 @@ describe('continuous progress panel', () => {
   })
 
   async function edit(selector: string, value: string) {
+    await showProgressEditor()
     const element = dom.container.querySelector<HTMLInputElement | HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] ' + selector)!
     await act(async () => {
       const prototype = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
@@ -65,17 +79,18 @@ describe('continuous progress panel', () => {
       element.dispatchEvent(new Event('input', { bubbles: true }))
     })
   }
-  const submit = () => dom.click('form[aria-label="Continuous progress setup"] button[type="submit"]')
+  const submit = async () => { await showProgressEditor(); await dom.click('form[aria-label="Continuous progress setup"] button[type="submit"]') }
 
   it.each(['active', 'paused'] as const)('edits and saves the original %s loop without a second creation or state action', async status => {
     const original = saved(status), updated = { ...original, intervalMs: 3_600_000, prompt: '检查最新成果', revision: 1 }
     const update = vi.spyOn(api.continuousProgress, 'update').mockResolvedValue(updated)
     const create = vi.spyOn(api.continuousProgress, 'create'), action = vi.spyOn(api.continuousProgress, 'action')
     await mount(original)
-    const open = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Edit continuous progress')!
-    await act(async () => open.click())
-    expect(dom.container.querySelector<HTMLDetailsElement>('.automation-create')!.open).toBe(true)
-    expect(dom.container.querySelector<HTMLSelectElement>('[aria-label="Automation type"]')!.value).toBe('progress')
+    await showProgressEditor()
+    expect(dom.container.querySelector<HTMLElement>('[data-automation-view="overview"]')!.hidden).toBe(true)
+    expect(dom.container.querySelector<HTMLElement>('[data-automation-view="editor"]')!.hidden).toBe(false)
+    const chooser = dom.container.querySelector<HTMLElement>('[aria-label="Automation type"]')
+    expect(chooser === null || chooser.closest('[hidden]') !== null).toBe(true)
     expect(dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe(savedPrompt)
     expect(dom.container.querySelector<HTMLInputElement>('form[aria-label="Continuous progress setup"] input[type="number"]')!.value).toBe('17')
     await edit('input[type="number"]', '60'); await edit('textarea', '检查最新成果')
@@ -85,6 +100,27 @@ describe('continuous progress panel', () => {
     expect(dom.container.textContent).toContain('Changes saved.')
     if (status === 'paused') expect(dom.container.textContent).toContain('remains paused')
     expect(useLauncherState.getState().drafts['progress-update:' + JSON.stringify(Object.values(target))]?.progressUpdate).toBeUndefined()
+  })
+
+  it('shows a later observation failure in the current editor without hiding the confirmed save receipt', async () => {
+    const original = saved('paused')
+    await mount(original)
+    const updated = { ...original, prompt: 'Confirmed update', revision: 1 }
+    vi.spyOn(api.continuousProgress, 'update').mockResolvedValue(updated)
+    await edit('textarea', updated.prompt); await submit()
+    const editor = dom.container.querySelector<HTMLElement>('[data-automation-view="editor"]')!
+    expect(editor.hidden).toBe(false)
+    expect([...editor.querySelectorAll('[role="status"]')].filter(node => !node.closest('[hidden]')).map(node => node.textContent).join(' ')).toContain('Changes saved.')
+    vi.mocked(api.continuousProgress.list).mockRejectedValueOnce(new Error('Current observation unavailable'))
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    await vi.waitFor(() => {
+      const notices = [...editor.querySelectorAll('[role="status"]')].filter(node => !node.closest('[hidden]'))
+      expect(notices.length).toBeGreaterThan(0)
+      expect(notices.map(node => node.textContent).join(' ')).toContain('Current observation unavailable')
+      expect(notices.map(node => node.textContent).join(' ')).toContain('Changes saved.')
+    })
+    expect(editor.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe(updated.prompt)
+    expect(dom.draft()).toBe('Keep my draft')
   })
 
   it('keeps the exact failed save through observations and retries without sending a newer draft', async () => {
@@ -194,8 +230,7 @@ describe('continuous progress panel', () => {
     vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
     const create = vi.spyOn(api.schedule, 'create').mockRejectedValue(new Error('Original receipt unconfirmed'))
     await dom.render(<ContinuousProgressControl session={composerSession()} />)
-    const createPanel = dom.container.querySelector<HTMLDetailsElement>('.automation-create')!
-    await act(async () => { createPanel.open = true; createPanel.dispatchEvent(new Event('toggle')) })
+    await openNewAutomation()
     const interval = dom.container.querySelector<HTMLInputElement>('[aria-label="Repeat interval in minutes"]')!
     const message = dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Arranged message"]')!
     await act(async () => {
@@ -204,10 +239,10 @@ describe('continuous progress panel', () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(message, 'Check for the original result')
       message.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    const kind = dom.container.querySelector<HTMLSelectElement>('[aria-label="Automation type"]')!
-    await act(async () => { kind.value = 'progress'; kind.dispatchEvent(new Event('change', { bubbles: true })) })
-    expect(dom.container.textContent).toContain('Busy checks are skipped')
-    await act(async () => { kind.value = 'schedule'; kind.dispatchEvent(new Event('change', { bubbles: true })) })
+    await dom.click('[aria-label="Automation type"] input[value="progress"]')
+    expect(message.closest('[hidden]')).not.toBeNull()
+    await dom.click('[aria-label="Automation type"] input[value="schedule"]')
+    expect(message.closest('[hidden]')).toBeNull()
     expect(dom.container.querySelector('[aria-label="Arranged message"]')).toBe(message)
     expect(message.value).toBe('Check for the original result')
     const form = message.closest('form')!
@@ -217,10 +252,36 @@ describe('continuous progress panel', () => {
     expect(message.value).toBe('Check for the original result')
   })
 
+  it('returns from an isolated editor to its original entry without replacing the unsaved prompt', async () => {
+    await mount(saved('paused'))
+    const overview = dom.container.querySelector<HTMLElement>('[data-automation-view="overview"]')!
+    const editor = dom.container.querySelector<HTMLElement>('[data-automation-view="editor"]')!
+    const open = dom.container.querySelector<HTMLButtonElement>('[aria-label="Edit continuous progress"]')!
+    const field = editor.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!
+    expect(overview.hidden).toBe(false); expect(editor.hidden).toBe(true)
+    await showProgressEditor()
+    expect(overview.hidden).toBe(true); expect(editor.hidden).toBe(false)
+    await edit('textarea', 'Keep this original draft after returning')
+    await dom.render(<ContinuousProgressControl session={composerSession()} visible={false} />)
+    expect(open.isConnected).toBe(false)
+    await dom.render(<ContinuousProgressControl session={composerSession()} />)
+    const currentEntry = dom.container.querySelector<HTMLButtonElement>('[aria-label="Edit continuous progress"]')!
+    expect(currentEntry).not.toBe(open)
+    await dom.click('[aria-label="Back to automations"]')
+    expect(overview.hidden).toBe(false); expect(editor.hidden).toBe(true)
+    await vi.waitFor(() => expect(document.activeElement).toBe(currentEntry))
+    await showProgressEditor()
+    expect(editor.querySelector('form[aria-label="Continuous progress setup"] textarea')).toBe(field)
+    expect(field.value).toBe('Keep this original draft after returning')
+    expect(dom.draft()).toBe('Keep my draft')
+    expect(api.continuousProgress.list).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps an invalid fractional interval editable without creating an unknown operation', async () => {
     vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
     const create = vi.spyOn(api.schedule, 'create')
     await dom.render(<ContinuousProgressControl session={composerSession()} />)
+    await openNewAutomation()
     const interval = dom.container.querySelector<HTMLInputElement>('[aria-label="Repeat interval in minutes"]')!
     const message = dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Arranged message"]')!
     await act(async () => {
@@ -258,7 +319,7 @@ describe('continuous progress panel', () => {
     expect([...config.querySelectorAll('dd')].map(el => el.textContent)).toEqual(['17 minutes', 'f-current', _hygiene_fixturePath("tracker/root"), _hygiene_fixturePath("tracker/feature-tracker.sh")])
     const details = dom.container.querySelector<HTMLDetailsElement>('[data-progress-details="target"]')!
     await act(async () => { details.open = true })
-    expect([...details.querySelectorAll('dd')].map(el => el.textContent)).toEqual(['Codex (codex)', 'local', 'agent-1', _hygiene_fixturePath("repo")])
+    expect([...details.querySelectorAll('dd')].map(el => el.textContent)).toEqual(['codex', 'Codex (codex)', 'local', 'agent-1', _hygiene_fixturePath("repo")])
     expect(dom.container.querySelector('.continuous-progress-panel__decision p')!.textContent).toBe('Original decision\nwith its full reason.')
     expect(dom.container.querySelector('[aria-label="Continuation settings"]')).not.toBeNull()
     if (status !== 'stopped') {
@@ -287,8 +348,8 @@ describe('continuous progress panel', () => {
     vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([saved()])
     await dom.render(<div onToggle={ownerToggle}><ContinuousProgressControl session={composerSession()} /></div>)
     await vi.waitFor(() => expect(dom.container.querySelector('[data-progress-details="configuration"]')).not.toBeNull())
-    const details = [...dom.container.querySelectorAll<HTMLDetailsElement>('[data-progress-details]')]
-    expect(details).toHaveLength(3)
+    const details = [...dom.container.querySelectorAll<HTMLDetailsElement>('[data-progress-details], [aria-label="Optional task source"]')]
+    expect(details).toHaveLength(4)
     await act(async () => {
       for (const detail of details) {
         detail.open = true
