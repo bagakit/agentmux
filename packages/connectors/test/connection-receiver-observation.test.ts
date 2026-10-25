@@ -110,7 +110,9 @@ it('fairly rechecks later terminal records while earlier original dispatches kee
   await Promise.allSettled(f.dispatch.mock.results.map(result => result.value))
   const second = f.dispatch.mock.calls.length
   f.receivers.refresh()
-  await vi.waitFor(() => expect(f.dispatch.mock.calls.length).toBe(second + 30))
+  // The unfinished-observation cursor and failed-dispatch cursor both advance
+  // to these five originals; overlapping candidates are dispatched only once.
+  await vi.waitFor(() => expect(f.dispatch.mock.calls.length).toBe(second + 5))
   await Promise.allSettled(f.dispatch.mock.results.map(result => result.value))
   const rechecks = f.dispatch.mock.calls.slice(second).map(([id]) => id)
   for (const original of terminal) expect(rechecks).toContain(original.ingressId)
