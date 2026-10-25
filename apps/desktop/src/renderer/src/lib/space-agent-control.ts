@@ -304,6 +304,7 @@ export function applySpatialPlacement(state: SpatialWorkbench, topics: readonly 
 function snapshotFact(session: Extract<SessionSnapshot, { kind: 'agent' }>): AgentMuxSpaceAgentFact {
   return { agentSessionId: session.control.agentSessionId, runId: session.control.run.runId, providerId: session.providerId,
     executorId: session.executorId, hostId: session.control.hostId, cwd: session.workspacePath,
+    ...(session.toolExecution ? { toolExecution: structuredClone(session.toolExecution) } : {}),
     createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
     ...(session.creation?.executorRevision ? { executorRevision: session.creation.executorRevision } : {}),
     ...(session.creation?.initialMessageOrigin ? { initialMessageOrigin: session.creation.initialMessageOrigin } : {}),
@@ -479,6 +480,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     let existingAgent: Extract<SessionSnapshot, { kind: 'agent' }> | undefined
     let executorId: string | undefined
     let executionWorkspace: WorkspaceRecord | undefined
+    let toolWorkspace: AgentLaunchInput['toolWorkspace']
     let forkParent: AgentMuxAgentSession | undefined
     let forkExecutionHostId: string | undefined
     if (operation === 'space.mv') {
@@ -506,6 +508,14 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       sessionId = request.content.kind === 'agent-session' ? request.content.agentSessionId : mintObjectId()
       if (request.content.kind === 'new-agent') {
         executorId = request.content.executorId
+        const toolWorkspaceId = request.content.toolWorkspaceId
+        if (toolWorkspaceId !== undefined) {
+          const matches = ports.get().config!.workspaces.filter(workspace => workspace.id === toolWorkspaceId)
+          if (matches.length !== 1 || !matches[0]!.path || ports.get().config!.hosts.filter(host => host.id === matches[0]!.hostId).length !== 1) failure(
+            'SPACE_TOOL_WORKSPACE_UNKNOWN', 'The exact tool Workspace and Host are unavailable; the original workface was preserved.')
+          const selected = matches[0]!
+          toolWorkspace = { id: selected.id, hostId: selected.hostId, path: selected.path }
+        }
         const executionWorkspaceId = request.content.executionWorkspaceId
         if (executionWorkspaceId !== undefined) {
           if (request.destination.newZone) failure('SPACE_EXECUTION_RESOURCE_CONFLICT', 'Choose an existing execution Workspace or create a new Zone resource.')
@@ -568,7 +578,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       ? executionWorkspace?.hostId ?? resourceReference?.hostId ?? catalog.zones.find(zone => zone.zoneId === destination?.address.zoneId)?.hostId
       : existingAgent?.control.hostId)
     if (operation === 'agent.open' && request.content.kind === 'new-agent' &&
-      ports.get().config!.hosts.find(host => host.id === executionHostId)?.kind === 'local' && !ports.get().config!.executors[executorId!]) {
+      !toolWorkspace && ports.get().config!.hosts.find(host => host.id === executionHostId)?.kind === 'local' && !ports.get().config!.executors[executorId!]) {
       failure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Choose the exact saved local Executor template ID.')
     }
     if (operation === 'agent.open' && request.content.kind === 'new-agent' && request.content.nativeResumeSource) {
@@ -581,6 +591,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       tabId: destination?.address.tabId ?? mint.tabId, regionId: destination?.address.regionId ?? mint.regionId,
       agentSessionId: sessionId, createAgent: operation === 'agent.open' && request.content.kind !== 'agent-session',
       ...(executionHostId ? { executionHostId } : {}),
+      ...(toolWorkspace ? { toolWorkspace: structuredClone(toolWorkspace) } : {}),
       ...(options?.recovery ? { recovery: options.recovery } : {}),
       ...(options?.browserAgent ? { browserAgent: structuredClone(options.browserAgent) } : {}),
       ...(operation === 'agent.open' && request.content.kind === 'fork-agent' ? { forkSource: structuredClone(request.content.source) } : {}),
@@ -651,6 +662,8 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       const launched = await ports.launch({ executorId: executorId!, hostId: launchHostId, workspacePath: forkParent?.workspacePath ?? executionWorkspace?.path ?? (topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID
           ? ports.get().config!.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)!.path : zone.directoryPath),
         agentSessionId: sessionId, createOperationId: request.requestId,
+        ...(toolWorkspace && executionWorkspace ? { executionWorkspaceId: executionWorkspace.id } : {}),
+        ...(toolWorkspace ? { toolWorkspace: structuredClone(toolWorkspace) } : {}),
         ...(request.content.kind === 'fork-agent' ? { forkSource: request.content.source, launchOptions: forkParent!.launchOptions } : {}),
         ...(request.content.kind === 'new-agent' && request.content.nativeResumeSource ? { nativeResumeSource: request.content.nativeResumeSource } : {}),
         ...(!forkParent && topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID ? { scratchTopicId: topicId } : {}),

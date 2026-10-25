@@ -7,7 +7,8 @@ import { profileAgentContext } from '../shared/user-profile.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
 
 import { isAbsolute } from 'node:path'
-import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryDescriptor, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
+import { createHash } from 'node:crypto'
+import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, type AgentExecutionBindingService, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryDescriptor, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
 import { type AgentMuxAgentResumeInput } from '@agentmux/core/agent-session-recovery'
 import { callOriginalDesktopHost, subscribeOriginalDesktopHost } from './desktop-host.js'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from '@agentmux/core'
@@ -256,6 +257,7 @@ function projectSession(
       providerId: subject.providerId,
       executorId: subject.executorId,
       ...projectNativeSourceFacts(subject.agentSession),
+      ...(subject.agentSession.toolExecution ? { toolExecution: structuredClone(subject.agentSession.toolExecution) } : {}),
       ...(subject.agentSession.hookIngressObservation
         ? { hookIngressObservation: structuredClone(subject.agentSession.hookIngressObservation) }
         : {}),
@@ -908,6 +910,7 @@ export class RuntimeController {
           providerId: session.providerId,
           executorId: session.executorId,
           ...projectNativeSourceFacts(session),
+          ...(session.toolExecution ? { toolExecution: structuredClone(session.toolExecution) } : {}),
           ...(session.nativeHandle ? { nativeSessionId: session.nativeHandle.sessionId } : {}),
           capabilities: capabilitiesFor(session.providerId),
           ...(session.semanticStatus ? { semanticStatus: structuredClone(session.semanticStatus) } : {}),
@@ -1071,16 +1074,16 @@ export class RuntimeController {
       ...await client.readNativeAgentHistoryResource({ ...options, commandOverride: executor.command, args: executor.args, env: executor.env }) }
   }
 
-  async launchAgent(request: AgentLaunchInput, config: AppConfig, spatialIntent?: import('@agentmux/core').AgentMuxAgentCreationSpatialIntent): Promise<AgentLaunchResult> {
-    if (!request.forkSource && config.hosts.find(host => host.id === request.hostId)?.kind === 'ssh') {
-      return await this.launchAdmittedAgent(request, config, spatialIntent)
+  async launchAgent(request: AgentLaunchInput, config: AppConfig, spatialIntent?: import('@agentmux/core').AgentMuxAgentCreationSpatialIntent, executionBindings?: Pick<AgentExecutionBindingService, 'create'>): Promise<AgentLaunchResult> {
+    if (request.toolWorkspace || !request.forkSource && config.hosts.find(host => host.id === request.hostId)?.kind === 'ssh') {
+      return await this.launchAdmittedAgent(request, config, spatialIntent, executionBindings)
     }
     if (this.executorConfigReservations.has(request.executorId)) {
       throw Object.assign(new Error(`Executor “${request.executorId}” is being changed. Retry this new launch after its save completes.`), { code: 'SETTING_RESOURCE_IN_USE' })
     }
     this.admittedExecutorLaunches.set(request.executorId, (this.admittedExecutorLaunches.get(request.executorId) ?? 0) + 1)
     try {
-      return await this.launchAdmittedAgent(request, config, spatialIntent)
+      return await this.launchAdmittedAgent(request, config, spatialIntent, executionBindings)
     } finally {
       const remaining = this.admittedExecutorLaunches.get(request.executorId)! - 1
       if (remaining) this.admittedExecutorLaunches.set(request.executorId, remaining)
@@ -1088,10 +1091,20 @@ export class RuntimeController {
     }
   }
 
-  private async launchAdmittedAgent(request: AgentLaunchInput, config: AppConfig, spatialIntent?: import('@agentmux/core').AgentMuxAgentCreationSpatialIntent): Promise<AgentLaunchResult> {
+  private async launchAdmittedAgent(request: AgentLaunchInput, config: AppConfig, spatialIntent?: import('@agentmux/core').AgentMuxAgentCreationSpatialIntent, executionBindings?: Pick<AgentExecutionBindingService, 'create'>): Promise<AgentLaunchResult> {
     return await this.trackHostLifecycleOperation(request.hostId, async () => {
       const client = await this.connectedClient(request.hostId)
-      const remoteCreation = config.hosts.find(host => host.id === request.hostId)?.kind === 'ssh' && !request.forkSource
+      const resource = request.toolWorkspace
+      if (resource) {
+        if (!executionBindings || request.creationCaller || request.initialMessage || request.forkSource || request.nativeResumeSource || request.scratchTopicId) throw new AgentMuxError(
+          'This explicit tool resource requires its original user-authorized creation owner.', 'EXECUTION_RESOURCE_NOT_AUTHORIZED')
+        const selectedResource = config.workspaces.filter(workspace => workspace.id === resource.id)
+        const selectedLaunch = config.workspaces.filter(workspace => workspace.id === request.executionWorkspaceId)
+        if (selectedResource.length !== 1 || selectedResource[0]!.hostId !== resource.hostId || selectedResource[0]!.path !== resource.path ||
+            selectedLaunch.length !== 1 || selectedLaunch[0]!.hostId !== request.hostId || selectedLaunch[0]!.path !== request.workspacePath) throw new AgentMuxError(
+          'The original Agent or tool Workspace selection changed. Keep the original creation identity.', 'EXECUTION_BINDING_MISMATCH')
+      }
+      const remoteCreation = Boolean(resource) || config.hosts.find(host => host.id === request.hostId)?.kind === 'ssh' && !request.forkSource
       const inventory = remoteCreation ? await client.listHostExecutors() : undefined
       const selected = inventory?.executors.find(executor => executor.executorId === request.executorId)
       const executor = remoteCreation ? selected : Object.hasOwn(config.executors, request.executorId) ? config.executors[request.executorId] : undefined
@@ -1154,7 +1167,22 @@ export class RuntimeController {
           }
         }
         const localExecutor = !remoteCreation ? config.executors[request.executorId]! : undefined
-        const receipt = hostIntent ? await client.createHostAgentWithDelivery(hostIntent) : await client.createAgentWithDelivery({
+        const boundCreation = resource && hostIntent ? async () => {
+          const resourceClient = await this.connectedClient(resource.hostId)
+          const authority = await resourceClient.agentCreationAuthority()
+          // Public operation IDs are opaque, not filesystem-safe binding IDs.
+          // Keep the original intent intact and derive its stable private binding.
+          const bindingId = createHash('sha256').update(JSON.stringify([
+            request.hostId, hostIntent.agentSessionId, hostIntent.createOperationId
+          ])).digest('hex')
+          const created = await executionBindings!.create({ bindingId,
+            agentHostId: request.hostId, agentRuntimeId: inventory!.runtimeId,
+            resourceHostId: resource.hostId, resourceRuntimeId: authority.runtimeId, resourceWorkspacePath: resource.path,
+            resourceGrant: { scope: 'host-user', bindingId },
+            agent: { ...hostIntent, agentSessionId: hostIntent.agentSessionId!, createOperationId: hostIntent.createOperationId! } })
+          return { session: created.session, creation: created.session.creation! }
+        } : undefined
+        const receipt = boundCreation ? await boundCreation() : hostIntent ? await client.createHostAgentWithDelivery(hostIntent) : await client.createAgentWithDelivery({
           providerId: executor.providerId,
           executorId: request.executorId,
           ...(spatialIntent ? { spatialIntent } : {}),

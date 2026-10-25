@@ -96,6 +96,8 @@ export type SpatialRequestBinding = {
   originalFailure?: AgentMuxSpatialIssue
   /** Original Core owner, independent of any later display move. */
   executionHostId?: string
+  /** Original selected tool resource, independent of display and Agent Run cwd. */
+  toolWorkspace?: { id: string; hostId: string; path: string }
   /** User's recovery choice. Correlation only; Core remains the creation/history owner. */
   recovery?: {
     hostId: string; agentSessionId: string; tabId: string; regionId: string

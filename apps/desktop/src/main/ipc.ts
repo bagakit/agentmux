@@ -1,3 +1,4 @@
+import { AgentExecutionBindingService } from '@agentmux/core'
 import { preparePublicUserProfile } from '@agentmux/host/author-profile'
 import { fileUploadRevision, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
 import { captureGoalDiscussionLauncherLaunch, confirmGoalDiscussionLauncherLaunch, handoffGoalDiscussion, launcherCreationSpatialIntent } from './goal-discussion-handoff.js'
@@ -1542,7 +1543,7 @@ export async function registerIpc(args: {
   handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput, goalPmo?: GoalPmoIntent) => sessionAgentLaunchResult(input, async () => {
     let capturedLauncher: Awaited<ReturnType<typeof captureGoalDiscussionLauncherLaunch>> = null
     try {
-      if (input.agentMuxNote !== undefined || input.launcher !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
+      if (input.agentMuxNote !== undefined || input.launcher !== undefined || input.toolWorkspace !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
       capturedLauncher = await captureGoalDiscussionLauncherLaunch(input, { spatial: spatialState, workspaces: config.workspaces })
       if (goalPmo) {
         assertManualPromptSenderTrusted(event.sender, contents)
@@ -1555,7 +1556,7 @@ export async function registerIpc(args: {
         { controlFailure: { disposition: 'not_applied', confirmedInputBytes: null } })
     }
     const spatialIntent = launcherCreationSpatialIntent(input, config.workspaces)
-    const result = spatialIntent ? await args.runtime.launchAgent(input, config, spatialIntent) : await args.runtime.launchAgent(input, config)
+    const result = spatialIntent ? await args.runtime.launchAgent(input, config, spatialIntent, executionBindings) : await args.runtime.launchAgent(input, config, undefined, executionBindings)
     try {
       const issue = await confirmGoalDiscussionLauncherLaunch(capturedLauncher, result, { spatial: spatialState, agent: originalDiscussionAgent })
       if (issue) result.placementIssue = issue
@@ -2302,7 +2303,20 @@ export async function registerIpc(args: {
   registerMoteChatIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
   registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
   registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), runtime: args.runtime })
+  const executionBindings = new AgentExecutionBindingService(join(app.getPath('userData'), 'execution-bindings'), {
+    resolveHost: async hostId => {
+      const scopes = args.runtime.rpcClients().filter(scope => scope.hostId === hostId)
+      if (scopes.length !== 1) throw new AgentMuxError('Execution requires one exact configured Host route.', 'UNKNOWN_HOST')
+      const client = scopes[0]!.client
+      await client.connect()
+      const identity = await client.agentCreationAuthority()
+      return { runtimeId: identity.runtimeId, client }
+    }
+  })
+  // Rejoin only retained tool readers. Startup never creates or restores an Agent.
+  void executionBindings.restoreReaders().catch(error => console.warn('Original tool execution observation is unavailable:', error))
   const control = new AgentMuxControlServer({
+    executionBindings,
     forwardingPeer: { authoritySocketPath: defaultAgentMuxControlSocketPath() },
     capsules: capsulePresentation({ inspect: id => capsuleClient.call('capsule.inspect', { capsuleId: id }),
       graph: async () => (await spatialState.read())?.graph ?? null,
@@ -2414,6 +2428,7 @@ export async function registerIpc(args: {
       { owner: 'control-listener', dispose: () => { ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl) } },
       { owner: 'control-bridge', dispose: () => controlBridge.dispose() },
       { owner: 'control-server', dispose: () => control.stop() },
+      { owner: 'execution-binding-reader', dispose: () => executionBindings.dispose() },
       { owner: 'channel-metadata', dispose: () => channelMetadata?.dispose() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },

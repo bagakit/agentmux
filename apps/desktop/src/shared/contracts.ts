@@ -792,6 +792,8 @@ export type AgentLaunchInput = {
   launcher?: { tabId: string; regionId: string }
   /** Original explicit execution choice; independent of the displayed Launcher/Zone. */
   executionWorkspaceId?: string
+  /** Frozen user-selected tool resource; Main verifies the exact configured Workspace. */
+  toolWorkspace?: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>
   executorId: AgentExecutorId
   executorRevision?: string
   hostId: string
@@ -969,6 +971,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       nativeHandle?: NonNullable<AgentMuxAgentSession['nativeHandle']>
       nativeHandlePersistence?: NonNullable<AgentMuxAgentSession['nativeHandlePersistence']>
       nativeBinding?: NonNullable<AgentMuxAgentSession['nativeBinding']>
+      toolExecution?: NonNullable<AgentMuxAgentSession['toolExecution']>
       observedNativeHandle?: NonNullable<AgentMuxAgentSession['observedNativeHandle']>
       nativeSourceObservation?: NonNullable<AgentMuxAgentSession['nativeSourceObservation']>
       hookIngressObservation?: NonNullable<AgentMuxAgentSession['hookIngressObservation']>
@@ -1117,6 +1120,7 @@ export type RuntimeSnapshot = {
 }
 
 export type AgentSessionRecoveryCandidate = {
+  toolExecution?: NonNullable<AgentMuxAgentSession['toolExecution']>
   agentSessionId: string
   hostId: string
   workspacePath: string
