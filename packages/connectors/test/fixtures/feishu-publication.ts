@@ -7,7 +7,7 @@ export type FeishuHttpResponse = { status: number; body: unknown }
 /** Native columns retain ordered text; original-card reads still return exact authored JSON. */
 export function feishuCardElements(card: { elements?: any[]; body?: { elements?: any[] } }): any[] {
   const visit = (elements: any[]): any[] => elements.flatMap(element => element.tag === 'column_set'
-    ? element.columns.flatMap((column: { elements: any[] }) => visit(column.elements)) : [element])
+    ? element.columns.flatMap((column: { elements: any[] }) => visit(column.elements)) : element.tag === 'form' ? [element, ...visit(element.elements)] : [element])
   return visit(card.elements ?? card.body?.elements ?? [])
 }
 // The native message reading format is not the authored card JSON. Retain the

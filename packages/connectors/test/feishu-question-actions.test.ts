@@ -1,18 +1,25 @@
 // @vitest-environment happy-dom
-import { appendFile } from 'node:fs/promises'
+import { appendFile, mkdir, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxFileAgentSessionStore } from '../../core/dist/index.js'
 import type { AgentProviderPreparedNativeInput } from '../../core/src/agent-provider.js'
 import { codexQuestionAnswers } from '../../core/src/providers/codex-question.js'
 import { savedQuestionEvent, savedQuestionJsonl, savedQuestionId } from '../../core/test/helpers/codex-saved-question.js'
+import { imagePng } from '../../../apps/desktop/test/fixtures/mote-identity-image.js'
+import { feishuCardElements } from './fixtures/feishu-publication.js'
 import { permissionActionsFixture } from './fixtures/permission-actions.js'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
   const mutant = process.env.AGENTMUX_TEST_QUESTION_ACTION_MUTANT
-  const f = await permissionActionsFixture(); cleanup.push(f.close)
+  const portrait = imagePng()
+  const speaker = vi.fn(async (reference: { agentSessionId: string }) => ({ name: 'Original Question author', avatar: { observation: 'available' as const, image: {
+    dataBase64: portrait.toString('base64'), byteLength: portrait.length, mimeType: 'image/png' as const, width: 2, height: 2,
+    sha256: createHash('sha256').update(portrait).digest('hex') } } }))
+  const f = await permissionActionsFixture(true, speaker); cleanup.push(f.close)
   if (mutant) {
     const actions = f.services.ingress!.permissions
     expect(actions.constructor.name).toBe('ConversationActions')
@@ -41,6 +48,13 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
     plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), actorId: actor.actorId, threadId: source.nativeSessionId, operation: 'start-or-steer' },
     assertCurrent: async () => {}, send, dispose() {}
   })
+  // A genuine preceding message lets the existing nonblocking avatar upload settle.
+  // The Question must reuse that original receipt, not upload or invent its own identity.
+  await appendFile(join(f.original.root, 'native.jsonl'), JSON.stringify({ type: 'response_item', payload: { type: 'message', id: 'before-original-question',
+    role: 'assistant', phase: 'commentary', content: [{ type: 'output_text', text: 'Preparing the original question.' }] } }) + '\n')
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding).some(value => value.payload.kind === 'speech' && value.state === 'confirmed' && value.avatarUploads?.at(-1)?.state === 'confirmed')).toBe(true), { timeout: 8_000 })
+  f.effects.splice(0)
   const event = savedQuestionEvent(); event.payload.thread_id = 'original-native'
   event.payload.item.questions.push({ title: 'What should happen after the original work?', options: ['Proceed', 'Wait'] })
   const questionId2 = JSON.stringify(['request_user_input_async', event.payload.item.id, 1])
@@ -48,18 +62,44 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
     await appendFile(join(f.original.root, 'native.jsonl'), savedQuestionJsonl([event])); f.services.publication!.refresh()
     await vi.waitFor(() => { expect(f.card()?.schema).toBe('2.0'); expect(f.services.publication!.store.list(f.binding).some(value => value.payload.kind === 'question' && value.state === 'confirmed')).toBe(true) }, { timeout: 8_000 })
   }
-  const submit = () => ((f.card()?.body as { elements: Array<{ tag: string; elements?: unknown[] }> }).elements.find(value => value.tag === 'form')!.elements!.at(-1) as { value: Record<string, unknown> })
+  const card = () => {
+    const question = f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'question' && value.state === 'confirmed').at(-1)
+    return question?.mapping ? f.card(question.mapping.messageId) : undefined
+  }
+  const submit = () => feishuCardElements(card()!).find(value => value.name === 'submit_original_answer') as { value: Record<string, unknown> }
   const answer = (eventId = 'original-answer-action', fields: Record<string, unknown> = { question_0_option: '0', question_1_text: 'Continue with the original plan' }) => {
     const value = submit().value
     const mapping = f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'question' && value.state === 'confirmed').at(-1)!.mapping!
     return f.action(String(value.actionRef), eventId, { context: { open_chat_id: 'original-room', open_message_id: mapping.messageId }, action: { tag: 'button', value, form_value: fields } })
   }
-  return { ...f, send, publish, submit, answer, questionId2 }
+  return { ...f, card, send, publish, submit, answer, questionId2, speaker }
 }
 
 it('default Desktop and authenticated Feishu form answer exact original questions through Hosted Core once', async () => {
   const f = await fixture(); await f.grant(['answer']); await f.publish()
   expect(f.effects.filter(value => value.method === 'POST')).toHaveLength(1)
+  expect(f.speaker).toHaveBeenCalled()
+  expect(f.speaker.mock.calls.every(([reference]) => reference.agentSessionId === 'original-agent')).toBe(true)
+  expect(f.imageUploads).toHaveLength(1)
+  const card = f.card()!, elements = feishuCardElements(card)
+  expect(card.header).toBeUndefined()
+  expect(elements.find(value => value.text?.content?.startsWith('Choose one option'))).toMatchObject({ text_size: 'notation', text: { text_size: 'notation', text_color: 'grey' } })
+  expect(elements.filter(value => value.tag === 'form')).toHaveLength(1)
+  expect(elements.find(value => value.tag === 'div')).toMatchObject({ text_size: 'notation', text: { content: 'Original Question author · Agent · Question', text_color: 'grey' },
+    icon: { tag: 'custom_icon', img_key: 'original-question-portrait', size: '16px 16px' } })
+  expect(elements.filter(value => value.tag === 'input')).toMatchObject([{ input_type: 'multiline_text', show_icon: false }, { input_type: 'multiline_text', show_icon: false }])
+  expect(card.config).toMatchObject({ style: { color: { 'question-surface': { light_mode: 'rgba(30,130,130,0.06)', dark_mode: 'rgba(85,185,180,0.12)' } } } })
+  const question = f.services.publication!.store.list(f.binding).find(value => value.payload.kind === 'question' && value.state === 'confirmed')!
+  expect(question.speaker).toMatchObject({ kind: 'agent', reference: { agentSessionId: 'original-agent' }, name: 'Original Question author' })
+  expect(question.avatarSource).toMatchObject({ imageKey: 'original-question-portrait' })
+  const delivery = await f.cli(['connection', 'delivery', 'inspect', '--operation-id', question.operationId])
+  expect(JSON.stringify(delivery)).toContain(question.mapping!.messageId)
+  if (process.env.QUESTION_CARD_PROOF) {
+    await mkdir(process.env.QUESTION_CARD_PROOF, { recursive: true })
+    await writeFile(join(process.env.QUESTION_CARD_PROOF, 'pending-card.json'), JSON.stringify(card, null, 2) + '\n')
+    await writeFile(join(process.env.QUESTION_CARD_PROOF, 'pending-operation.json'), JSON.stringify({ question, delivery }, null, 2) + '\n')
+  }
+
   const wire = f.answer(), actionRef = f.submit().value.actionRef
   const formRead = { connectionId: 'feishu-connection', application: f.actor.application, actor: f.actor,
     externalConversationId: wire.event.context.open_chat_id, sourceMessageId: wire.event.context.open_message_id, actionRef: String(actionRef) }
@@ -88,8 +128,11 @@ it('default Desktop and authenticated Feishu form answer exact original question
   expect(JSON.stringify(f.card())).toContain('Answer 1: Keep the original work')
   expect(JSON.stringify(f.card())).toContain('Answer 2: Continue with the original plan')
   expect(JSON.stringify(f.card())).not.toContain('submit_original_answer')
+  expect(JSON.stringify(f.card())).toContain('original-question-portrait')
+  expect(f.imageUploads).toHaveLength(1)
+  if (process.env.QUESTION_CARD_PROOF) await writeFile(join(process.env.QUESTION_CARD_PROOF, 'response-sent-card.json'), JSON.stringify(f.card(), null, 2) + '\n')
   expect(f.original.client.agentSession('original-agent').run).toEqual({ runId: 'run-original-agent' })
-}, 25_000)
+}, 45_000)
 
 it('permission grants do not authorize answers, and revocation refuses the exact callback while local input stays available', async () => {
   const f = await fixture(); await f.grant(['permission']); await f.publish()
@@ -121,6 +164,10 @@ it('unknown native answer delivery preserves the original action and refuses a c
   await vi.waitFor(async () => expect((await f.services.ingress!.list({ connectionId: 'feishu-connection' })).ingresses[1]).toMatchObject({ state: 'refused', code: 'INGRESS_AUTHORITY_REVISED' }))
   await f.services.ingress!.dispatch(first.ingressId); await f.services.ingress!.rejoin(first.ingressId)
   expect(f.send).toHaveBeenCalledOnce(); expect(f.original.inner.kernel.input).not.toHaveBeenCalled()
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(JSON.stringify(f.card())).toContain('Answer delivery is unconfirmed'), { timeout: 8_000 })
+  expect(JSON.stringify(f.card())).not.toContain('submit_original_answer')
+  expect(JSON.stringify(f.card())).toContain('amux://agent/original-agent')
 }, 25_000)
 
 it('original live Hook question preserves the same unavailable route as local Conversation and opens its exact Agent', async () => {
