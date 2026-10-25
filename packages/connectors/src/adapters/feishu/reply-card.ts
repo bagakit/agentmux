@@ -1,12 +1,14 @@
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import remarkGfm from 'remark-gfm'
+import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
+import remarkStringify from 'remark-stringify'
 import { FEISHU_MESSAGE_BODY_BYTES } from './message.js'
 import type { Nodes, Table } from 'mdast'
 
 import type { PublicationTextFragment } from '../../publication-store.js'
 
-const parser = unified().use(remarkParse).use(remarkGfm)
+const parser = unified().use(remarkParse).use(remarkGfm).use(remarkCjkFriendly).use(remarkStringify)
 const source = (text: string, node: Nodes) => text.slice(node.position!.start.offset!, node.position!.end.offset!)
 function longestTicks(text: string, minimum = 0): number {
   let length = minimum
@@ -28,7 +30,10 @@ function markdown(text: string, nodes: readonly Nodes[], start = 0, end = text.l
   nodes.forEach(visit)
   let result = text.slice(start, end)
   for (const item of replacements.sort((a, b) => b.start - a.start)) result = result.slice(0, item.start - start) + item.value + result.slice(item.end - start)
-  return result
+  // Standard serialization encodes CJK delimiter boundaries as character
+  // references understood by the native renderer without adding visible spaces.
+  // Original source slices and resource positions remain outside this projection.
+  return String(parser.processSync(result)).slice(0, -1)
 }
 function table(text: string, node: Table): Record<string, unknown> {
   const [header, ...rows] = node.children
@@ -110,14 +115,19 @@ function splitBlock(raw: string, frame: (start: number, end: number) => Publicat
 export function fragmentFeishuReply(text: string, fits: (part: PublicationTextFragment) => boolean): PublicationTextFragment[] {
   if (fits({ text })) return [{ text }]
   const result: PublicationTextFragment[] = [], root = parser.parse(text)
-  let pending = ''
-  for (let index = 0; index < root.children.length; index++) {
+  for (let index = 0; index < root.children.length;) {
     const node = root.children[index]!, start = index ? node.position!.start.offset! : 0
-    const end = root.children[index + 1]?.position!.start.offset ?? text.length
-    const raw = text.slice(start, end)
-    if (fits({ text: pending + raw })) { pending += raw; continue }
-    if (pending) { result.push({ text: pending }); pending = '' }
-    if (fits({ text: raw })) { pending = raw; continue }
+    const boundary = (index: number) => root.children[index]?.position!.start.offset ?? text.length
+    // Search original block boundaries instead of rendering every growing
+    // prefix. Every chosen fragment still passes the actual native budget.
+    let low = index, high = root.children.length
+    while (low < high) {
+      const through = Math.ceil((low + high) / 2)
+      if (fits({ text: text.slice(start, boundary(through)) })) low = through
+      else high = through - 1
+    }
+    if (low > index) { result.push({ text: text.slice(start, boundary(low)) }); index = low; continue }
+    const end = boundary(++index), raw = text.slice(start, end)
     let frame: (start: number, end: number) => PublicationTextFragment['presentationContext'] = () => undefined
     let boundaries: number[] | undefined
     if (node.type === 'code') {
@@ -157,6 +167,5 @@ export function fragmentFeishuReply(text: string, fits: (part: PublicationTextFr
     }
     result.push(...splitBlock(raw, frame, fits, boundaries))
   }
-  if (pending) result.push({ text: pending })
   return result
 }
