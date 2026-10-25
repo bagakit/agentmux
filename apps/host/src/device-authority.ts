@@ -69,12 +69,13 @@ export class DeviceAuthority {
   }
 
   /** Open only after the original Host endpoint is owned. Invalid state is never regenerated. */
-  static async open(path: string, now: () => number = Date.now): Promise<DeviceAuthority> {
+  static async open(path: string, now: () => number = Date.now,
+    options: { createIfMissing?: boolean } = {}): Promise<DeviceAuthority> {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
     let state: AuthorityState
     try { state = stateFrom(JSON.parse(await readFile(path, 'utf8'))) }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || options.createIfMissing === false) throw error
       state = { schema: 'agentmux.device-authority.v1', hostId: mintObjectId(), devices: [] }
       await durableWriteFile(path, JSON.stringify(state) + '\n', { requireDirectorySync: true })
     }

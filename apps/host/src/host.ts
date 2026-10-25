@@ -60,13 +60,15 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const fileUploads = options.fileUploads ?? new FileUploadOwner()
   let runtime: Awaited<ReturnType<typeof startHeadlessAgentMux>> | undefined
   let authority: DeviceAuthority | undefined
+  let authorityOpening: Promise<DeviceAuthority> | undefined, authorityAttempted = false
+  let initializingMobile: Promise<void> | undefined, disposal: Promise<void> | undefined
   let relay: RelayTransportController | undefined
   let local: Awaited<ReturnType<typeof startLocalRelay>> | undefined
   let goals: ReturnType<typeof createHostGoals> | undefined
   let mobileIncidents: ReturnType<typeof createHostMobileIncidents> | undefined
   const closeResources = async () => {
     const errors: unknown[] = []
-    for (const close of [() => relay?.stop(), () => local?.stop(), () => authority?.flush(),
+    for (const close of [() => initializingMobile, () => authorityOpening?.catch(() => {}), () => relay?.stop(), () => local?.stop(), () => authority?.flush(),
       () => mobileIncidents?.flush(), () => goals?.dispose(), () => connectionOwner?.close(), () => runtime?.stop()]) {
       try { await close() } catch (error) { errors.push(error) }
     }
@@ -76,9 +78,22 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const mobileAssets = new MobileAssetsOwner('local')
   let mobileState: AgentMuxRpcMobileAccessState = { state: 'starting', message: '正在启动手机连接' }
   let offerUrl: (() => string) | undefined
-  let resolveAuthority!: (value: DeviceAuthority) => void, rejectAuthority!: (error: unknown) => void
-  const authorityReady = new Promise<DeviceAuthority>((resolve, reject) => { resolveAuthority = resolve; rejectAuthority = reject })
-  void authorityReady.catch(() => {})
+  const getAuthority = (): Promise<DeviceAuthority> => {
+    if (disposal) return Promise.reject(new AgentMuxError('This Host device owner is closed. Original Agents are retained.', 'CONTROL_CANCELLED'))
+    if (authority) return Promise.resolve(authority)
+    if (!(options.store instanceof AgentMuxFileAgentSessionStore)) return Promise.reject(new AgentMuxError(
+      'Mobile access requires the original durable File Store.', 'CONTROL_UNAVAILABLE'))
+    if (!authorityOpening) {
+      // Only the initial attempt may create a new identity. A failed read/write
+      // cannot turn a later missing original file into first-time enrollment.
+      const createIfMissing = !authorityAttempted
+      authorityAttempted = true
+      authorityOpening = DeviceAuthority.open(join(dirname(options.store.path), 'agentmux-devices.json'), Date.now, { createIfMissing })
+        .then(value => { authority = value; return value })
+        .finally(() => { authorityOpening = undefined })
+    }
+    return authorityOpening
+  }
   const desktopClient = async (context: AgentMuxRpcCallContext) => {
     if (context.principal?.kind === 'device' && !context.forwarding) throw new AgentMuxError(
       'The original device forwarding authority is unavailable. Keep this operation and reconnect to its original Host.', 'CONTROL_UNAVAILABLE')
@@ -143,7 +158,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         catch { authority.noteActivityIssue(source.deviceId) }
       }
     },
-    deviceAdministration: createDeviceAdministration(authorityReady, mobileAccessState, () => {
+    deviceAdministration: createDeviceAdministration(getAuthority, mobileAccessState, () => {
       if (!offerUrl) throw new AgentMuxError(mobileState.message, 'CONTROL_UNAVAILABLE')
       return offerUrl()
     }),
@@ -179,17 +194,17 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       } catch (error) { await desktop.dispose(); throw error }
     }
   }
-  let initializingMobile = false
-  const initializeMobile = async () => {
-    if (initializingMobile || local) return
-    initializingMobile = true
-    try {
-    if (authority && options.store instanceof AgentMuxFileAgentSessionStore) {
+  const initializeMobile = (): Promise<void> => {
+    if (initializingMobile) return initializingMobile
+    if (disposal || local) return Promise.resolve()
+    initializingMobile = (async () => {
+    if (options.store instanceof AgentMuxFileAgentSessionStore) {
       try {
+        const owner = await getAuthority()
         const keyPair = await loadOrCreateRelayKeyPair(join(dirname(options.store.path), 'agentmux-relay-keypair.json'))
         await mobileAssets.initialize(options.mobileBuildDirectory!)
-        local = await startLocalRelay({ serverId: authority.hostId, port: options.mobilePort ?? 8443, route: mobileAssets.route })
-        const owner = authority, originalServer = runtime!.server
+        local = await startLocalRelay({ serverId: owner.hostId, port: options.mobilePort ?? 8443, route: mobileAssets.route })
+        const originalServer = runtime!.server
         offerUrl = () => {
           const addresses = Object.entries(networkInterfaces()).sort(([a], [b]) => Number(!/^(en|eth|wlan)/.test(a)) - Number(!/^(en|eth|wlan)/.test(b))).flatMap(([, list]) => list ?? []).filter(a => a.family === 'IPv4' && !a.internal && isLocalNetworkHost(a.address))
           const address = addresses.find(a => !a.address.startsWith('169.254.')) ?? addresses[0]
@@ -225,10 +240,13 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
           } })
       } catch (error) {
         await relay?.stop(); await local?.stop(); relay = undefined; local = undefined; offerUrl = undefined
-        mobileState = { state: 'unavailable', message: `手机连接暂不可用：${error instanceof Error ? error.message : String(error)}。原 Agent 会话可继续使用。` }
+        mobileState = { state: 'unavailable', message: authority
+          ? `手机连接暂不可用：${error instanceof Error ? error.message : String(error)}。原 Agent 会话可继续使用。`
+          : '原设备身份文件无法读取；文件与 Agent 会话保留，请恢复原身份。' }
       }
-    }
-    } finally { initializingMobile = false }
+    } else mobileState = { state: 'unavailable', message: '手机连接需要原持久化存储；现有 Agent 会话可继续使用。' }
+    })().finally(() => { initializingMobile = undefined })
+    return initializingMobile
   }
   try {
     // Reserve the public endpoint before constructing/loading any Core owner. A live old owner
@@ -240,39 +258,24 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       ...(options.connections?.clients ? { coreClients: options.connections.clients } : {}),
       ...(options.providers ? { providers: options.providers } : {}), service,
       forwardingPeer: { authoritySocketPath: desktopPath, bindAuthority: async principal => principal.kind === 'device'
-        ? await (await authorityReady).bindForwardedDevice(principal) : undefined },
+        ? await (await getAuthority()).bindForwardedDevice(principal) : undefined },
       capsuleAdapters: createCapsuleDesktopAdapters({ connect: context => desktopClient(context ?? { transport: 'unix' }) }),
       inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
       ...(externalInputAuthority ? { externalInputAuthority } : {}) })
     await connectionOwner?.start(runtime)
     if (goals) void goals.start().catch(error => process.emitWarning(`Starting original Goal automation is unconfirmed: ${error instanceof Error ? error.message : String(error)}. Goal records and manual Agent input remain available.`, { code: 'GOAL_AUTOMATION_UNCONFIRMED' }))
-    if (options.store instanceof AgentMuxFileAgentSessionStore) {
-      try {
-        authority = await DeviceAuthority.open(join(dirname(options.store.path), 'agentmux-devices.json'))
-        resolveAuthority(authority)
-      } catch (error) {
-        mobileState = { state: 'unavailable', message: '原设备身份文件无法读取；文件与 Agent 会话保留，请恢复原身份。' }
-        rejectAuthority(error)
-      }
-    } else {
-      rejectAuthority(new AgentMuxError('Mobile access requires the original durable File Store.', 'CONTROL_UNAVAILABLE'))
-      mobileState = { state: 'unavailable', message: '手机连接需要原持久化存储；现有 Agent 会话可继续使用。' }
-    }
     await initializeMobile()
 
   } catch (error) {
-    rejectAuthority(error)
     try { await closeResources() }
     catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Host startup failed and some resource releases are unconfirmed. Original Agent Runs are retained.') }
     throw error
   }
-  let disposed = false
-  const retryMobile = setInterval(() => { if (!disposed && !local) void initializeMobile() }, 5000)
+  const retryMobile = setInterval(() => { if (!disposal && !local) void initializeMobile() }, 5000)
   retryMobile.unref()
 
-  return { client: runtime.client, hosted: runtime.hosted, server: runtime.server, mobileAccessState, deviceAuthority: () => authorityReady, async dispose() {
-    if (disposed) return; disposed = true; clearInterval(retryMobile)
-    await closeResources()
+  return { client: runtime.client, hosted: runtime.hosted, server: runtime.server, mobileAccessState, deviceAuthority: getAuthority, dispose(): Promise<void> {
+    return disposal ??= (async () => { clearInterval(retryMobile); await closeResources() })()
   } }
 }
 

@@ -2,10 +2,10 @@ import { AgentMuxError, type AgentMuxRpcDeviceAdministration, type AgentMuxRpcDe
 import type { DeviceAuthority } from './device-authority.js'
 import { parseConnectionOfferUrl } from '@agentmux/relay/offer'
 
-export function createDeviceAdministration(authority: Promise<DeviceAuthority>, state: (url?: string) => AgentMuxRpcMobileAccessState,
+export function createDeviceAdministration(authority: () => Promise<DeviceAuthority>, state: (url?: string) => AgentMuxRpcMobileAccessState,
   link: () => string): AgentMuxRpcDeviceAdministration {
   return { async call<M extends AgentMuxRpcDeviceMethod>(method: M, params: import('@agentmux/core').AgentMuxRpcDeviceParams<M>, context: import('@agentmux/core').AgentMuxRpcCallContext): Promise<AgentMuxRpcDeviceResult<M>> {
-    const owner = await authority
+    const owner = await authority()
     context.signal?.throwIfAborted()
     let result: unknown
     if (method === 'device.ls') result = { hostId: owner.hostId, devices: owner.devices(), mobileAccess: state() }
