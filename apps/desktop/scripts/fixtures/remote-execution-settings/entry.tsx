@@ -66,6 +66,7 @@ const facts = new Map<string, AgentExecutionInspection>(sessions.map(session => 
       message: 'Tool-side Agent control has not yet been verified.', action: 'Continue using the original Agent workface.' }
   ]
 }]))
+const originalFacts = new Map(facts)
 const readers = new Map<number, { bindingId: string; listener: (value: AgentExecutionInspection | null) => void; error: (error: string) => void }>()
 let nextReader = 0
 const readerEvents: { kind: string; id: number; bindingId: string }[] = []
@@ -97,7 +98,21 @@ flushSync(() => root.render(<DesktopClientUiProvider><Scene /></DesktopClientUiP
 Object.assign(window, { remoteExecutionVisual: {
   ready: true, sessions, project, remoteProject, trustedEvents,
   show(page: SettingsPageId = 'remote-execution') { flushSync(() => select(page)) },
-  theme(value: 'light' | 'dark') { updateThemeSelection({ appAppearance: value }) },
+  theme(value: 'light' | 'dark', themeId = 'graphite') { updateThemeSelection({ appAppearance: value, themeId }) },
+  many(value: boolean) {
+    const additional = Array.from({ length: 24 }, (_, index) => {
+      const original = sessions[0]!, id = `controlled-extra-${index + 1}`
+      return { ...original, id, label: `Retained work ${index + 1}`, control: { ...original.control, agentSessionId: id, run: { runId: `controlled-run-${index + 1}` } },
+        toolExecution: { ...original.toolExecution, bindingId: `controlled-binding-${index + 1}` } }
+    })
+    flushSync(() => useAppStore.setState({ sessions: value ? [...sessions, ...additional] : sessions }))
+  },
+  missing(value: boolean) {
+    const id = sessions[0]!.toolExecution.bindingId
+    if (value) facts.delete(id)
+    else facts.set(id, structuredClone(originalFacts.get(id)!))
+    for (const reader of readers.values()) if (reader.bindingId === id) reader.listener(structuredClone(facts.get(id) ?? null))
+  },
   empty(value: boolean) { flushSync(() => useAppStore.setState({ sessions: value ? [] : sessions })) },
   longLabels() {
     flushSync(() => useAppStore.setState(state => ({
