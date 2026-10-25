@@ -72,3 +72,10 @@ describe('read-only schedule occurrences', () => {
     expect(records).toEqual(original)
   })
 })
+
+it('bounds minute schedule projection and marks the omitted exact time range', () => {
+  const start = _batchFixtureEpoch(1)
+  const loop = { loopId: 'minute', hostId: 'local', agentSessionId: 'original', providerId: 'generic', workspacePath: '/private', intervalMs: 1000, everyMs: 60_000, prompt: 'check', nextCheckAt: start, status: 'active' as const }
+  const result = projectScheduleOccurrences([loop], { from: start, to: start + 31 * 86_400_000 }, start)
+  expect(result).toEqual([{ scheduleId: 'minute', at: start, kind: 'next-due', omittedRepeat: { from: start + 60_000, to: start + 31 * 86_400_000 } }])
+})

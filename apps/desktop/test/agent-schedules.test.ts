@@ -117,7 +117,8 @@ describe('original schedule owner', () => {
     const retried = await h.manager.call('schedule.create', request, context)
     expect(retried.schedule).toMatchObject({ loopId: original.loopId, revision: 1, status: 'active' })
     expect(retried.schedule.lastOutcome).toBeUndefined()
-    expect(calls.map(call => call.active)).toEqual([true, true]); expect(calls.every(call => call.context === context)).toBe(true)
+    // A failed admission is explicitly deactivated before the same operation is retried.
+    expect(calls.map(call => call.active)).toEqual([true, false, true]); expect(calls.every(call => call.context === context)).toBe(true)
     await h.manager.call('schedule.pause', { scheduleId: original.loopId, expectedRevision: 1, operationId: 'pause' }, context)
     const duplicate = await h.manager.call('schedule.create', request, context)
     expect(duplicate.schedule.status).toBe('paused'); expect(calls.at(-1)!.active).toBe(false)
@@ -283,7 +284,7 @@ describe('ended schedule boundary', () => {
     release.resolve()
     expect((await creating).schedule).toMatchObject({ loopId: original.loopId, status: 'stopped', revision: 2, lastMutation: { operationId: 'cancel' } })
     expect((await h.reload())[0]).toMatchObject({ status: 'stopped', revision: 2 })
-    expect(saves).toEqual([false, true, false]); expect(inactive).toBe(true)
+    expect(saves).toEqual(retry ? [false, false, true, false] : [false, true, false]); expect(inactive).toBe(true)
   })
 })
 
@@ -352,5 +353,50 @@ describe('one-shot relative schedule', () => {
     expect(h.manager.list()).toEqual([original.schedule])
     expect(() => parseScheduleRecord({ ...original.schedule, calendar: rules('daily') })).toThrow()
     expect(() => validateScheduleRpcResult('schedule.create', { ...original, schedule: { ...original.schedule, afterMs: 300000 } }, { target, afterMs: 90000, prompt: 'timer', operationId: 'valid' })).toThrow()
+  })
+})
+
+describe('minute repeating schedule', () => {
+  it('keeps the original future intent, collapses missed occurrences, and delivers repeated messages to the same target', async () => {
+    const seen: ContinuousProgressLoop[] = []
+    const h = await owner(async loop => { seen.push(structuredClone(loop)); return 'sent' })
+    const request = { target, everyMs: 60_000, prompt: 'check the original task', operationId: 'repeat-original' }
+    const created = await h.manager.call('schedule.create', request)
+    const { loopId, nextCheckAt: due, futureIntentId } = created.schedule
+    expect(created.schedule.everyMs).toBe(60_000)
+    expect(validateScheduleRpcResult('schedule.create', created, request)).toEqual(created)
+    h.set({ now: due, working: true }); await h.manager.check(due)
+    expect(seen).toHaveLength(0)
+    expect(h.manager.list()[0]!.nextCheckAt).toBe(due)
+    h.set({ now: due + 120_000, working: false }); await h.manager.check(due + 120_000)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ ...target, prompt: request.prompt, futureIntentId, pendingCompletion: { futureIntent: { intentId: futureIntentId, occurrenceAt: due + 120_000 } } })
+    expect(h.manager.list()[0]).toMatchObject({ loopId, status: 'active', nextCheckAt: due + 180_000, lastOccurrenceAt: due + 120_000 })
+    expect(await h.reload()).toEqual(h.manager.list())
+    const duplicate = await h.manager.call('schedule.create', request)
+    expect(duplicate.schedule.loopId).toBe(loopId)
+    await expect(h.manager.call('schedule.create', { ...request, everyMs: 120_000 })).rejects.toMatchObject({ code: 'SCHEDULE_OPERATION_CONFLICT' })
+    h.set({ now: due + 180_000 }); await h.manager.check(due + 180_000)
+    expect(seen).toHaveLength(2)
+    expect(seen[1]!.pendingCompletion!.futureIntent).toEqual({ intentId: futureIntentId, occurrenceAt: due + 180_000 })
+  })
+  it('retains an unknown occurrence and its original operation until explicit reconciliation', async () => {
+    const operations: string[] = []
+    const h = await owner(async (_loop, operation) => { operations.push(operation); return operations.length === 1 ? 'unknown' : 'sent' })
+    const created = await h.manager.call('schedule.create', { target, everyMs: 60_000, prompt: 'same message', operationId: 'repeat-unknown' })
+    const due = created.schedule.nextCheckAt
+    h.set({ now: due }); await h.manager.check(due)
+    expect(h.manager.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown', pendingCompletion: { operationId: operations[0], futureIntent: { occurrenceAt: due } } })
+    h.set({ now: due + 600_000 }); await h.manager.check(due + 600_000)
+    expect(operations).toHaveLength(1)
+    await h.manager.call('schedule.resume', { scheduleId: created.schedule.loopId, expectedRevision: 1, operationId: 'resume-repeat' })
+    await h.manager.check(due + 600_000)
+    expect(operations).toEqual([operations[0], operations[0]])
+    expect(h.manager.list()[0]).toMatchObject({ status: 'active', nextCheckAt: due + 660_000, lastOccurrenceAt: due })
+  })
+  it('rejects ambiguous or non-minute repetition at the public request boundary', () => {
+    for (const timing of [{ everyMs: 59_999 }, { everyMs: 60_001 }, { everyMs: 0 }, { everyMs: 60_000, afterMs: 60_000 }, { everyMs: 60_000, calendar: rules('daily') }, { everyMs: 60_000, checkIn: {} }]) {
+      expect(() => parseScheduleRpcParams('schedule.create', { target, prompt: 'x', operationId: 'x', ...timing })).toThrow()
+    }
   })
 })
