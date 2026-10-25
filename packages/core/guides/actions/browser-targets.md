@@ -15,6 +15,11 @@ and omission means unknown. Association is separate from input ownership and a l
 Agent working status does not acquire webpage input. Human handoff remains a trusted UI action;
 ordinary CLI input cannot grant it. External targets report unsupported isolation;
 an AgentMux visual border cannot block human input in an external browser.
+An optional `certificateRequest` describes the original pending main-document TLS request,
+including its navigation, address, error and SHA256 fingerprint. It is observation, not trust.
+Its `profile-connections` scope means other pages sharing that network context may reuse an accepted connection;
+it does not promise single-page isolation or a permanent exception. Only the person may answer in the trusted App surface.
+CLI and Browser programs have no certificate approval method. Keep the original request and let the person decide.
 Native child pages appear as ordinary Browser targets with their own ids and the same page capabilities.
 Their optional `openedFrom` records the original Browser/navigation and, when confirmed, the triggering Tab/Region occurrence.
 It is provenance, not input authority. Opening a child does not switch an existing program to it; discover and run against its exact id.
