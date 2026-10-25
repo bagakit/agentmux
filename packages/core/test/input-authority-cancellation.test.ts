@@ -26,14 +26,12 @@ async function fixture() {
   const h = await rpcOwnerFixture()
   h.inner.kernel.identity = () => ({ daemonInstanceId: 'original-runtime', protocolVersion: 1, buildIdentity: 'controlled' })
   const original = (await h.store.readMetadata('recipient'))!
-  let cursor = 0
-  h.inner.kernel.status = async (id: string) => ({ ...h.run(id), acceptedInputBytes: cursor })
   const dispatch = vi.fn((_body: string, _operationId: string) => {})
-  h.inner.kernel.input = async (id: string, operation: { expectedByte: number; data: string }) => {
-    expect(operation.expectedByte).toBe(cursor)
-    const startByte = cursor; cursor += Buffer.byteLength(operation.data)
+  const native = h.inner.kernel.input as (id: string, operation: { operationId: string; expectedByte: number; data: string }) => Promise<{ run: ReturnType<typeof h.run>; appliedByteRange: { startByte: number; endByte: number } }>
+  h.inner.kernel.input = async (id: string, operation: { operationId: string; expectedByte: number; data: string }) => {
+    const ack = await native(id, operation)
     if (operation.data === '\r') dispatch('', (await h.store.readMetadata('recipient'))!.promptCompletionAdmission!.submissionId!)
-    return { run: { ...h.run(id), acceptedInputBytes: cursor }, appliedByteRange: { startByte, endByte: cursor } }
+    return ack
   }
   vi.spyOn(Reflect.get(h.client, 'screenEvidence'), 'wait').mockImplementation(async () => { throw new Error('Current terminal input cannot wait on display.') })
   const input = (id: string): AgentMuxAgentPromptInput => ({ agentSessionId: 'recipient', expectedRun: original.run,

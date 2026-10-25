@@ -97,7 +97,8 @@ it('retains the original running semantic owner after a mouse flood through Core
     expect(evidence.recent.every(entry => entry.blockedBy?.id === first.id && entry.blockedBy.stage === 'provider-prepare'),
       'Queued mouse reports must retain the actual running owner, not another queued victim').toBe(true)
     expect(send).toHaveBeenCalledTimes(1)
-    expect(h.inner.kernel.input).toHaveBeenCalledTimes(71)
+    expect(h.rawInput).toHaveBeenCalledTimes(71)
+    expect(h.inner.kernel.input).not.toHaveBeenCalled()
     expect(h.inner.kernel.stop).not.toHaveBeenCalled()
     const toolkit = deepMetricsSnapshot(), observation = toolkit.observation!
     observation.diagnostics = { state: 'available', observedAt: 1000, lastSuccessAt: 1000, reason: null,
@@ -119,12 +120,12 @@ it('retains the original running semantic owner after a mouse flood through Core
     expect(() => parseClientPerformanceDiagnostics(missing)).toThrow()
     expect(JSON.stringify(evidence)).not.toContain('Private input')
     // An unknown raw receipt settles this observer; it never authorizes replay.
-    ;(h.inner.kernel.input as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Original ACK unknown'))
-    const beforeFailure = (h.inner.kernel.input as ReturnType<typeof vi.fn>).mock.calls.length
+    h.rawInput.mockRejectedValueOnce(new Error('Original ACK unknown'))
+    const beforeFailure = h.rawInput.mock.calls.length
     const raw = { agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, data: 'distinct input', source: 'user' as const }
     await expect(hosted.sdk.writeAgent(raw)).rejects.toThrow('Original ACK unknown')
     await hosted.sdk.writeAgent({ ...raw, data: 'later distinct input' })
-    expect((h.inner.kernel.input as ReturnType<typeof vi.fn>).mock.calls.length - beforeFailure).toBe(2)
+    expect(h.rawInput.mock.calls.length - beforeFailure).toBe(2)
     const afterFailure = (await hosted.sdk.clientPerformanceDiagnostics()).input
     expect(afterFailure.recent.slice(-2).map(entry => entry.result)).toEqual(['failed', 'completed'])
     expect(afterFailure.recent.at(-1)?.blockedBy).toBeNull()

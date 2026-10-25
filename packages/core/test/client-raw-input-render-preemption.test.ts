@@ -9,7 +9,7 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import type { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
 import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
-import type { CtxmuxAdapterRun, CtxmuxAdapterOutputObservation } from '../src/ctxmux-run-adapter.js'
+import type { CtxmuxAdapterRun, CtxmuxAdapterOutputObservation, CtxmuxAdapterInputChannel } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
 type Input = { operationId: string; expectedByte: number; data: string | Uint8Array }
@@ -23,11 +23,12 @@ type Inner = {
     identity(): { daemonInstanceId: string }
     status(runId: string): Promise<CtxmuxAdapterRun>
     input(runId: string, operation: Input): Promise<Ack>
+    openInput(runId: string): Promise<CtxmuxAdapterInputChannel>
     observeOutput: (...args: unknown[]) => Promise<CtxmuxAdapterOutputObservation>
     replay: (...args: unknown[]) => Promise<CtxmuxAdapterOutputObservation>
   }
   writeAgentInput(session: AgentMuxStoredAgentSession, data: string): Promise<unknown>
-  agentInputTails: Map<string, { renderObservations: Set<{ controller: AbortController }> }>
+  agentInputLanes: Map<string, { renderObservations: Set<{ controller: AbortController }> }>
 }
 const clients: AgentMuxClient[] = []
 const directories: string[] = []
@@ -80,15 +81,23 @@ async function fixture(providerId: 'codex' | 'claude') {
   // Screen evidence also reads the original ordered frame bytes. This fixture
   // owns a confirmed empty Run; keep that read local to the same synthetic owner.
   inner.kernel.replay = async () => blankTerminalObservation(run(), async () => {})
-  const writes: Input[] = []
+  const writes: Array<{ data: Input['data']; appliedByteRange: Ack['appliedByteRange']; transaction: Input | null }> = []
+  const send = (data: Input['data'], transaction: Input | null) => {
+    const startByte = acceptedBytes
+    acceptedBytes += typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength
+    const appliedByteRange = { startByte, endByte: acceptedBytes }
+    writes.push({ data, appliedByteRange, transaction })
+    return Promise.resolve({ appliedByteRange })
+  }
   inner.kernel.input = async (_runId, input) => {
     expect(input.expectedByte).toBe(acceptedBytes)
-    writes.push(input)
-    const startByte = acceptedBytes
-    acceptedBytes += typeof input.data === 'string' ? Buffer.byteLength(input.data) : input.data.byteLength
-    return { run: run(), appliedByteRange: { startByte, endByte: acceptedBytes } }
+    const accepted = await send(input.data, input)
+    return { run: run(), ...accepted }
   }
-  return { client, inner, stored, writes, status, run }
+  const rawInput = vi.fn((data: Input['data']) => send(data, null))
+  inner.kernel.openInput = vi.fn(async () => ({ run: run(),
+    waitWritable: async (_bytes: number, signal?: AbortSignal) => { signal?.throwIfAborted() }, input: rawInput }))
+  return { client, inner, stored, writes, rawInput, status, run }
 }
 
 
@@ -151,8 +160,9 @@ it.each(['codex', 'claude'] as const)('preempts optional %s rendering, preservin
     screen.release.resolve(1)
     await Promise.all([prompt, ...raw])
     expect(beforeRelease).toEqual([payload, '\r', '\x1b[<64;10;10M', 'z'])
-    expect(h.writes.map(write => write.expectedByte)).toEqual([0, 17, 18, 30])
-    expect(new Set(h.writes.map(write => write.operationId)).size).toBe(4)
+    expect(h.writes.map(write => write.appliedByteRange.startByte)).toEqual([0, 17, 18, 30])
+    expect(new Set(h.writes.flatMap(write => write.transaction ? [write.transaction.operationId] : [])).size).toBe(2)
+    expect(h.writes.map(write => write.transaction !== null)).toEqual([true, true, false, false])
     expect(h.client.agentSession(h.stored.agentSessionId).terminalPromptDelivery).toMatchObject({
       state: 'unverified', reason: 'screen-evidence-replaced', submissionId: 'synthetic-operation', run: h.stored.run
     })
@@ -169,33 +179,36 @@ it.each(['codex', 'claude'] as const)('preempts optional %s rendering, preservin
   }
 })
 
-it('registers observation cancellation before a prompt enters its queued render phase', async () => {
+it('cancels queued unclaimed preparation without sending prompt bytes or changing its Run', async () => {
   const h = await fixture('codex')
   const priorEntered = deferred<void>(), priorRelease = deferred<void>()
-  const originalInput = h.inner.kernel.input
-  h.inner.kernel.input = async (runId, input) => {
-    if (input.data === 'prior') { priorEntered.resolve(); await priorRelease.promise }
-    return await originalInput(runId, input)
-  }
+  const originalInput = h.rawInput.getMockImplementation()!
+  h.rawInput.mockImplementation(async data => {
+    const accepted = originalInput(data)
+    if (data === 'prior') { priorEntered.resolve(); await priorRelease.promise }
+    return accepted
+  })
   const screen = heldRender(h)
   const prior = h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.client.agentSession(h.stored.agentSessionId).run, data: 'prior', source: 'user' })
   await priorEntered.promise
   const prompt = h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(h.stored.agentSessionId)), agentSessionId: h.stored.agentSessionId,
-    expectedRun: h.stored.run, operationId: 'queued-operation', prompt: 'hello' })
-  await expect.poll(() => h.inner.agentInputTails.get(h.stored.agentSessionId)?.renderObservations.size).toBe(1)
-  const observation = [...h.inner.agentInputTails.get(h.stored.agentSessionId)!.renderObservations][0]!
+    expectedRun: h.stored.run, operationId: 'queued-operation', prompt: 'hello', execution: 'default' })
+  // Before claim, human input cancels preparation; only an already claimed
+  // payload may degrade its optional render wait and still send its CR.
+  const promptOutcome = prompt.then(() => null, error => error)
+  await expect.poll(() => h.inner.agentInputLanes.get(h.stored.agentSessionId)?.renderObservations.size).toBe(1)
+  const observation = [...h.inner.agentInputLanes.get(h.stored.agentSessionId)!.renderObservations][0]!
   const raw = h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.client.agentSession(h.stored.agentSessionId).run, data: 'z', source: 'user' })
   try {
     await expect.poll(() => observation.controller.signal.aborted).toBe(true)
     priorRelease.resolve()
-    await screen.entered.promise
-    const beforeRelease = await writesBeforeRelease(h, 4)
-    const abortedAtWait = screen.signals[0]?.aborted
-    screen.release.resolve(1)
-    await Promise.all([prior, prompt, raw])
-    expect(abortedAtWait).toBe(true)
-    expect(beforeRelease).toEqual(['prior', payload, '\r', 'z'])
-    expect(h.writes.map(write => write.expectedByte)).toEqual([0, 5, 22, 23])
+    expect(await promptOutcome).toMatchObject({ code: 'AGENT_INPUT_OBSERVATION_CANCELLED' })
+    await Promise.all([prior, raw])
+    expect(screen.signals).toEqual([])
+    expect(h.writes.map(write => write.data)).toEqual(['prior', 'z'])
+    expect(h.writes.map(write => write.appliedByteRange.startByte)).toEqual([0, 5])
+    expect(h.client.agentSession(h.stored.agentSessionId)).toMatchObject({ run: h.stored.run })
+    expect(h.client.agentSession(h.stored.agentSessionId).promptCompletionAdmission).toBeUndefined()
   } finally {
     priorRelease.resolve()
     screen.release.resolve(1)

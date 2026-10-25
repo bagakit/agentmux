@@ -33,6 +33,13 @@ const checkpoint = () => new Promise<void>(resolve => setImmediate(resolve))
 const outcome = <T>(promise: Promise<T>) => promise.then(value => ({ value, error: null }), error => ({ value: null, error }))
 const pasted = (text: string) => '\x1b[200~' + text + '\x1b[201~'
 
+function nativeRequest(run: { runId: string }) {
+  return { kind: 'permission' as const, id: 'original-permission', agentSessionId: 'recipient', title: 'Original request',
+    nativeToolCallId: 'original-call', toolName: 'tool', toolInput: '{}',
+    options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' as const }],
+    evidence: { source: 'native-hook' as const, observedAt: 1, run, hookReceiptId: 'original-receipt' } }
+}
+
 // Production Core/Store/Provider/public service/DeviceAuthority. Runtime byte I/O
 // is controlled at its machine port; this does not claim vendor consumption.
 async function fixture() {
@@ -42,10 +49,17 @@ async function fixture() {
   h.inner.kernel.connect = async () => { connected = true }
   h.inner.kernel.disconnect = () => { connected = false }
   for (const method of ['onEvent', 'onError', 'onConnectionLost', 'onConnectionAvailable']) h.inner.kernel[method] = () => () => {}
-  const native = h.inner.kernel.input as (id: string, operation: AgentMuxRunInputOperation) => Promise<{
+  const recoverableInput = h.inner.kernel.input as (id: string, operation: AgentMuxRunInputOperation) => Promise<{
     run: ReturnType<typeof h.run>; appliedByteRange: { startByte: number; endByte: number }
   }>
-  const writes = vi.fn(native); h.inner.kernel.input = writes
+  type Write = AgentMuxRunInputOperation | { data: AgentMuxRunInputOperation['data'] }
+  const rawInput = h.rawInput.getMockImplementation()!
+  const native = (id: string, operation: Write) => 'operationId' in operation
+    ? recoverableInput(id, operation)
+    : rawInput(id, operation.data).then(ack => ({ run: h.run(id), ...ack }))
+  const writes = vi.fn(native)
+  h.inner.kernel.input = writes
+  h.rawInput.mockImplementation((id, data) => writes(id, { data }))
   const original = h.client.agentSession('recipient'), run = original.run
   const owner = hostedTestOwner(h.client), fence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
   const hosted = new AgentMuxHostedRuntimeService(h.client, h.store.path, () => owner)
@@ -103,8 +117,8 @@ it.each(['writeAgent', 'pasteAgent', 'writeTerminal'] as const)('wire arguments 
 
 it.each(['writeAgent', 'pasteAgent'] as const)('rechecks queued %s after current Run observation and preserves the exact local suffix', async kind => {
   const h = await fixture(), entered = barrier(), release = barrier()
-  const status = h.inner.kernel.status as (id: string) => Promise<ReturnType<typeof h.currentRun>>
-  h.inner.kernel.status = vi.fn(async (id: string) => { entered.resolve(); await release.pending; return status(id) })
+  const openInput = h.inner.kernel.openInput as (id: string) => Promise<{ run: ReturnType<typeof h.currentRun> }>
+  h.inner.kernel.openInput = vi.fn(async (id: string) => { entered.resolve(); await release.pending; return openInput(id) })
   const pending = outcome(h.invoke(h.args(kind)))
   await entered.pending
   await h.authority.revoke(h.device.deviceId)
@@ -115,23 +129,28 @@ it.each(['writeAgent', 'pasteAgent'] as const)('rechecks queued %s after current
   expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
-it.each(['writeAgent', 'pasteAgent'] as const)('a revoked %s behind an actual prior write cannot dispatch or block the local suffix', async kind => {
-  const h = await fixture(), entered = barrier(), held = barrier(), authorized = barrier()
+it.each(['writeAgent', 'pasteAgent'] as const)('a revoked %s waiting for native capacity cannot dispatch or block the local suffix', async kind => {
+  const h = await fixture(), entered = barrier(), capacity = barrier(), ack = barrier()
   h.writes.mockImplementation(async (id, operation) => {
-    if (operation.data === 'prior') { entered.resolve(); await held.pending }
-    return h.native(id, operation)
+    const accepted = h.native(id, operation)
+    if (operation.data === 'prior') { entered.resolve(); await ack.pending }
+    return accepted
   })
   const prior = h.write('prior'); await entered.pending
-  const pending = outcome(h.invoke(h.args(kind), { ...h.context, assertCurrent: async () => {
-    await h.context.assertCurrent!(); authorized.resolve()
-  } }))
-  await authorized.pending; await checkpoint()
+  const waiting = barrier()
+  h.waitWritable.mockImplementationOnce(async (_bytes, signal) => {
+    waiting.resolve(); await capacity.pending; signal?.throwIfAborted()
+  })
+  const pending = outcome(h.invoke(h.args(kind)))
+  await waiting.pending
   await h.authority.revoke(h.device.deviceId)
   const next = h.write('local-suffix')
   expect(h.bytes()).toEqual(['prior'])
-  held.resolve(); await prior; const result = await pending; await next
+  capacity.resolve(); const result = await pending; await next
+  // Raw dispatch uses native capacity/order, independent from the prior ACK.
   expect(result.error).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   expect(h.bytes()).toEqual(['prior', 'local-suffix'])
+  ack.resolve(); await prior
   expect(h.client.agentSession('recipient').run).toEqual(h.run)
   expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
@@ -205,9 +224,9 @@ it.each(['request', 'disconnect'] as const)('ending the original Terminal %s aba
 
 it.each(['request', 'disconnect'] as const)('ending the original %s releases a held raw Run read without reviving it after reconnect', async reason => {
   const h = await fixture(), entered = barrier(), held = barrier(), controller = new AbortController()
-  const status = h.inner.kernel.status as (id: string) => Promise<ReturnType<typeof h.currentRun>>
+  const openInput = h.inner.kernel.openInput as (id: string) => Promise<{ run: ReturnType<typeof h.currentRun> }>
   let first = true
-  h.inner.kernel.status = async (id: string) => { if (first) { first = false; entered.resolve(); await held.pending }; return status(id) }
+  h.inner.kernel.openInput = async (id: string) => { if (first) { first = false; entered.resolve(); await held.pending }; return openInput(id) }
   const old = outcome(h.invoke(h.args('writeAgent', 'old'), { ...h.context, signal: controller.signal }))
   await entered.pending
   if (reason === 'request') controller.abort(new AgentMuxError('Request ended.', 'CONTROL_CANCELLED'))
@@ -223,7 +242,7 @@ it.each(['request', 'disconnect'] as const)('ending the original %s releases a h
   expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
-it.each(['ack', 'unknown'] as const)('disconnect preserves the shared raw/typed tail until an already dispatched %s settles once', async result => {
+it.each(['ack', 'unknown'] as const)('disconnect preserves typed completion ordering while fresh raw bypasses a prior %s ACK', async result => {
   const h = await fixture(), entered = barrier(), held = barrier()
   h.writes.mockImplementation(async (id, operation) => {
     if (operation.data === 'in-flight') {
@@ -235,8 +254,9 @@ it.each(['ack', 'unknown'] as const)('disconnect preserves the shared raw/typed 
     return h.native(id, operation)
   })
   const original = outcome(h.write('in-flight')); await entered.pending
-  const stale = outcome(h.write('old-queued'))
-  await checkpoint()
+  const authorEntered = barrier(), authorHeld = barrier()
+  const stale = outcome(h.write('old-queued', { assertCurrent: async () => { authorEntered.resolve(); await authorHeld.pending } }))
+  await authorEntered.pending
   h.client.disconnect(); await h.client.connectRuntime()
   const fresh = h.write('fresh')
   const typed = await h.typed('typed-after-reconnect')
@@ -244,7 +264,7 @@ it.each(['ack', 'unknown'] as const)('disconnect preserves the shared raw/typed 
   const before = h.bytes()
   held.resolve(); const originalResult = await original, staleResult = await stale
   await fresh; await h.settled(typed)
-  expect(before).toEqual(['in-flight'])
+  expect(before).toEqual(['in-flight', 'fresh'])
   expect(h.bytes()).toEqual(['in-flight', 'fresh', pasted('typed-after-reconnect'), '\r'])
   expect(staleResult.error).toMatchObject({ code: 'CTXMUX_DISCONNECTED' })
   if (result === 'ack') expect(originalResult.value).toMatchObject({ appliedByteRange: { startByte: 0, endByte: 9 } })
@@ -254,7 +274,7 @@ it.each(['ack', 'unknown'] as const)('disconnect preserves the shared raw/typed 
 
 it('disconnect abandons the old typed pre-dispatch Run read and preserves new local input', async () => {
   const h = await fixture(), entered = barrier(), held = barrier()
-  const lanes = Reflect.get(h.client, 'agentInputTails') as Map<string, { renderObservations: Set<unknown> }>
+  const lanes = Reflect.get(h.client, 'agentInputLanes') as Map<string, { renderObservations: Set<unknown> }>
   const status = h.inner.kernel.status as (id: string) => Promise<ReturnType<typeof h.currentRun>>
   let armed = true
   h.inner.kernel.status = async (id: string) => {
@@ -279,10 +299,7 @@ it('disconnect abandons the old typed pre-dispatch Run read and preserves new lo
 it.each(['original', 'another-operation', 'another-request'] as const)('a final authorization refusal preserves the %s native-input identity', async identity => {
   const h = await fixture(), entered = barrier(), held = barrier()
   const stored = (await h.store.readMetadata('recipient'))!
-  const request = { kind: 'permission' as const, id: 'original-permission', agentSessionId: 'recipient', title: 'Original request',
-    nativeToolCallId: 'original-call', toolName: 'tool', toolInput: '{}',
-    options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' as const }],
-    evidence: { source: 'native-hook' as const, observedAt: 1, run: h.run, hookReceiptId: 'original-receipt' } }
+  const request = nativeRequest(h.run)
   await h.store.compareAndSwapMetadata(stored, { ...stored, pendingInteraction: { request } })
   await h.inner.registry.load('local')
   const save = h.store.compareAndSwapMetadata.bind(h.store)
@@ -308,6 +325,38 @@ it.each(['original', 'another-operation', 'another-request'] as const)('a final 
   expect((await h.store.readMetadata('recipient'))?.pendingInteraction).toEqual(retained)
   await h.write('local-after-refusal')
   expect(h.bytes()).toEqual(['local-after-refusal'])
+})
+
+it('a queued native-hook write owns fresh uncertainty after its prior input was not applied', async () => {
+  const h = await fixture(), entered = barrier(), held = barrier()
+  const stored = (await h.store.readMetadata('recipient'))!, request = nativeRequest(h.run)
+  await h.store.compareAndSwapMetadata(stored, { ...stored, pendingInteraction: { request } })
+  await h.inner.registry.load('local')
+  let secondMarker: { operationId: string; delivery: string } | undefined
+  h.writes.mockImplementation(async (id, operation) => {
+    if (operation.data === 'first') {
+      entered.resolve(); await held.pending
+      throw new AgentMuxError('Original input was not applied.', 'CTXMUX_INPUT_REJECTED', 'not_applied')
+    }
+    secondMarker = (await h.store.readMetadata('recipient'))?.pendingInteraction?.nativeInput
+    return h.native(id, operation)
+  })
+  const first = outcome(h.write('first')); await entered.pending
+  const originalMarker = (await h.store.readMetadata('recipient'))!.pendingInteraction!.nativeInput!
+  expect(originalMarker.delivery).toBe('unknown')
+  const second = h.write('second')
+  for (let n = 0; n < 8; n++) await checkpoint()
+  const before = { bytes: h.bytes(), marker: (await h.store.readMetadata('recipient'))!.pendingInteraction!.nativeInput }
+  held.resolve(); const firstResult = await first; await second
+  expect(before).toEqual({ bytes: ['first'], marker: originalMarker })
+  expect(firstResult.error).toMatchObject({ code: 'CTXMUX_INPUT_REJECTED', detail: 'not_applied' })
+  expect(secondMarker).toMatchObject({ delivery: 'unknown' })
+  expect(secondMarker!.operationId).not.toBe(originalMarker.operationId)
+  expect((await h.store.readMetadata('recipient'))!.pendingInteraction).toMatchObject({ request,
+    nativeInput: { operationId: secondMarker!.operationId, delivery: 'accepted' } })
+  expect(h.bytes()).toEqual(['first', 'second'])
+  expect(h.rawInput).not.toHaveBeenCalled()
+  expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 it('the exact Session Run is rechecked after the final original authority read', async () => {
