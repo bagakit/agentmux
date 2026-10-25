@@ -33,7 +33,7 @@ const native = String.raw`
     process.stdout.write('  '+JSON.stringify({jsonrpc:'2.0',id:request.id,result:{pid:process.pid,count}})+' \n');
   }})();`
 
-async function fixture(executable = process.execPath) {
+async function fixture(executable = process.execPath, contribution: Pick<AgentExecutionProtocol, 'concurrentConnections' | 'projectResponse'> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'amux-executor-test-'))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   const journal = await AgentExecutionJournal.open(join(root, 'journal'))
@@ -46,6 +46,7 @@ async function fixture(executable = process.execPath) {
   lines.on('line', line => { const frame = JSON.parse(line) as Frame; frames.push(frame); events.emit('frame', frame) })
   const log = join(root, 'native.log'), effects = join(root, 'effects'), release = join(root, 'release')
   const protocol: AgentExecutionProtocol = {
+    ...contribution,
     executor: { command: executable, args: ['-e', native, log, effects, release], cwd: root },
     parseServer(payload) {
       const p = payload as Record<string, unknown>
@@ -92,6 +93,42 @@ async function fixture(executable = process.execPath) {
 }
 
 describe('resource executor original native stream', () => {
+  it('keeps independent concurrent Provider connections and identical request IDs on their original generations', async () => {
+    const h = await fixture(process.execPath, { concurrentConnections: true })
+    const first = Number((await h.initialize('main')).payload!.result!.pid)
+    const initialized = await h.initialize('subagent')
+    expect(initialized.payload!.result).toBeDefined()
+    const second = Number(initialized.payload!.result!.pid)
+    expect(second).not.toBe(first)
+    h.send(1, 'save', 'main'); h.send(1, 'echo', 'subagent')
+    expect((await h.wait(frame => frame.type === 'response' && frame.generation === 'main' && frame.payload?.id === 1)).payload!.result).toEqual({ pid: first, count: 1 })
+    expect((await h.wait(frame => frame.type === 'response' && frame.generation === 'subagent' && frame.payload?.id === 1)).payload!.result).toEqual({ pid: second, count: 0 })
+    h.closeGeneration('main')
+    await h.wait(frame => frame.type === 'generation' && frame.generation === 'main')
+    h.send(2, 'save', 'main'); h.send(2, 'echo', 'subagent')
+    expect((await h.wait(frame => frame.type === 'response' && frame.generation === 'main' && frame.payload?.id === 2)).payload!.error!.code).toBe(-32002)
+    expect((await h.wait(frame => frame.type === 'response' && frame.generation === 'subagent' && frame.payload?.id === 2)).payload!.result!.pid).toBe(second)
+    expect(await readFile(h.effects, 'utf8')).toBe('effect\n')
+    for (const streamGeneration of ['main', 'subagent']) expect(await h.journal.inspect({ bindingId: 'fixed-binding', streamGeneration, nativeRequestId: 1 })).toMatchObject({ phase: 'completed' })
+  })
+
+  it('projects the exact request response after raw native journal completion, including completed replay', async () => {
+    const projected = vi.fn((request, response) => request.method === 'save' ? { ...response, result: { public: true } } : response)
+    const h = await fixture(process.execPath, { projectResponse: projected }); await h.initialize()
+    h.send(1, 'save')
+    expect((await h.reply(1)).payload!.result).toEqual({ public: true })
+    const key = { bindingId: 'fixed-binding', streamGeneration: 'original', nativeRequestId: 1 }
+    const operation = (await h.journal.inspect(key))!
+    const original = Buffer.from((await h.journal.readResult(key, operation.payloadDigest))!).toString()
+    expect(original.startsWith('  {')).toBe(true)
+    expect(JSON.parse(original).result.count).toBe(1)
+    const cursor = h.frames.length
+    h.send(1, 'save')
+    expect((await h.reply(1, cursor)).payload!.result).toEqual({ public: true })
+    expect(projected.mock.calls.filter(([request]) => request.method === 'save')).toHaveLength(2)
+    expect(await readFile(h.effects, 'utf8')).toBe('effect\n')
+  })
+
   it('executes a pending request once, returns its original completed response and retains exact private bytes', async () => {
     const h = await fixture(), initialized = await h.initialize(), pid = initialized.payload!.result!.pid
     h.send(1, 'save'); h.send(1, 'save'); h.send(2, 'echo')
