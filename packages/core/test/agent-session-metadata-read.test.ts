@@ -228,3 +228,55 @@ it.each(['recipient-run', 'author-capability', 'author-reservation'] as const)('
     expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   } finally { await h.close() }
 })
+
+// Session-scoped reads join only writes that can change their rows: the same Session's,
+// and whole-document lifecycle reconciliation. Another Session's write never delays them.
+const scopedReads = {
+  'history source': (store: AgentMuxFileAgentSessionStore, id: string) => store.readHistorySource(id),
+  'future intent': (store: AgentMuxFileAgentSessionStore, id: string) => store.readFuturePromptIntent(id, 'missing-intent'),
+  'future intent page': (store: AgentMuxFileAgentSessionStore, id: string) => store.listFuturePromptIntents(id),
+  'continuity receipt': (store: AgentMuxFileAgentSessionStore, id: string) => store.readContinuityControlReceipt(id, 'missing-operation'),
+  'lifecycle reservation': (store: AgentMuxFileAgentSessionStore, id: string) => store.readLifecycleReservation(id),
+  'resume correlation': (store: AgentMuxFileAgentSessionStore, id: string) => store.loadResumeCorrelation(id, 'missing-operation')
+} as const
+const scopedReadNames = Object.keys(scopedReads) as (keyof typeof scopedReads)[]
+
+it.each(scopedReadNames)('a Session-scoped %s read finishes before an unrelated Session writer commits', async name => {
+  const h = await fixture(), writer = (await h.store.readMetadata('writer'))!, [pause] = pauseCommits(h.store), pending: Promise<unknown>[] = []
+  try {
+    pending.push(h.store.compareAndSwapMetadata(writer, { ...writer, updatedAt: writer.updatedAt + 1 })); await pause!.entered
+    let done = false
+    pending.push(scopedReads[name](h.store, h.session.agentSessionId).then(() => { done = true }))
+    await vi.waitFor(() => expect(done, 'an unrelated write must not delay this read').toBe(true), { timeout: 1000, interval: 10 })
+  } finally { pause!.release(); await Promise.allSettled(pending); await h.close() }
+})
+
+it.each(scopedReadNames)('a Session-scoped %s read still waits for its own Session writer', async name => {
+  const h = await fixture(), [pause] = pauseCommits(h.store), pending: Promise<unknown>[] = []
+  try {
+    pending.push(h.store.compareAndSwapMetadata(h.session, { ...h.session, updatedAt: h.session.updatedAt + 1 })); await pause!.entered
+    let done = false
+    pending.push(scopedReads[name](h.store, h.session.agentSessionId).then(() => { done = true }))
+    await delay(30)
+    expect(done).toBe(false)
+    pause!.release(); await vi.waitFor(() => expect(done).toBe(true), { timeout: 1000, interval: 10 })
+  } finally { pause!.release(); await Promise.allSettled(pending); await h.close() }
+})
+
+it('a Session-scoped read waits for a cross-Session lifecycle write and sees its result', async () => {
+  const h = await fixture(), reservation = restartReservation(h.session), pending: Promise<unknown>[] = []
+  const { restart: _restart, ...resumeFacts } = reservation
+  const resume: AgentMuxLifecycleReservation = { ...resumeFacts, operationId: 'original-resume', ownerId: 'released-owner' }
+  await h.store.reserveLifecycle(resume)
+  await h.store.releaseReopenOwner('released-owner')
+  const [pause] = pauseCommits(h.store)
+  try {
+    const releasing = h.store.releaseLifecycle(resume); pending.push(releasing); await pause!.entered
+    let done = false
+    const read = h.store.readLifecycleReservation(h.session.agentSessionId).then(value => { done = true; return value }); pending.push(read)
+    await delay(30)
+    expect(done, 'a write that may change any Session row is joined by exact reads').toBe(false)
+    pause!.release(); await releasing
+    expect(await read).toBeNull()
+  } finally { pause!.release(); await Promise.allSettled(pending); await h.close() }
+})
