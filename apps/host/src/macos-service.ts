@@ -70,11 +70,17 @@ export function macosHostService(input: {
 const xml = (value: string) => value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]!)
 const string = (value: string) => `<string>${xml(value)}</string>`
 export function macosHostServicePlist(service: MacosHostService): string {
+  // The Host relays every keystroke and output byte between the window and its terminals,
+  // and ctxmux plus the Agents it launches inherit its scheduling class. Without a
+  // ProcessType launchd applies light resource limits (throttled CPU and I/O), so under
+  // load the terminals fall behind a CLI opened directly in a terminal app. Interactive is
+  // the documented class for a job the app's responsiveness depends on.
   return `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>
 <key>Label</key>${string(service.label)}
 <key>ProgramArguments</key><array>${[service.executable, service.entrypoint, '--store', service.storePath].map(string).join('')}</array>
 <key>EnvironmentVariables</key><dict>${Object.entries(service.environment).map(([key, value]) => `<key>${xml(key)}</key>${string(value)}`).join('')}</dict>
 <key>KeepAlive</key><true/>
+<key>ProcessType</key><string>Interactive</string>
 <key>StandardOutPath</key>${string(service.logPath)}
 <key>StandardErrorPath</key>${string(service.logPath)}
 </dict></plist>\n`
