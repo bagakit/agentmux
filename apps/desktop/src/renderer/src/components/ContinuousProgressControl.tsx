@@ -46,6 +46,8 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
   const [loops, setLoops] = useState<ContinuousProgressLoop[]>([])
   const [observedTarget, setObservedTarget] = useState<typeof target>()
   const [error, setError] = useState<string>()
+  const [observationError, setObservationError] = useState<string>()
+  const [actionNotice, setActionNotice] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [calendarStatus, setCalendarStatus] = useState<ContinuousProgressStatus>('unconfirmed')
   const [interval, setInterval] = useState(() => String(initialDefaults.progressIntervalMs / 60_000))
@@ -62,7 +64,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     updates.current++
     const held = useLauncherState.getState().drafts[draftKey], retained = held?.progressUpdate, draft = held?.progressDraft
     hadLoop.current = false; edited.current = !!(retained || draft); editBasis.current = draft?.expectedLoop ?? retained?.expectedLoop; editVersion.current++
-    setLoops([]); setError(undefined); setBusy(false); setSaveNotice(undefined); setConflict(false)
+    setLoops([]); setError(undefined); setObservationError(undefined); setActionNotice(undefined); setBusy(false); setSaveNotice(undefined); setConflict(false)
     setPrompt(draft?.prompt ?? retained?.prompt ?? form.current.defaults.progressPrompt); setInterval(draft?.interval ?? String((retained?.intervalMs ?? form.current.defaults.progressIntervalMs) / 60_000)); setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
   }, [target])
   useEffect(() => {
@@ -82,10 +84,10 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
         try {
           const result = await request
           if (alive && !document.hidden && current.current === target && updates.current === before) {
-            setLoops(result.filter(loop => !isAgentSchedule(loop))); setObservedTarget(target); setError(undefined)
+            setLoops(result.filter(loop => !isAgentSchedule(loop))); setObservedTarget(target); setObservationError(undefined)
           }
         } finally { if (reads.current.get(targetKey) === request) reads.current.delete(targetKey) }
-      } catch (failure) { if (alive && !document.hidden && updates.current === readCut) setError(failure instanceof Error ? failure.message : String(failure)) }
+      } catch (failure) { if (alive && !document.hidden && updates.current === readCut) setObservationError(failure instanceof Error ? failure.message : String(failure)) }
       finally { reading = false; if (reread) { reread = false; void refresh() } }
     }
     void refresh()
@@ -97,7 +99,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
   async function run(action: () => Promise<ContinuousProgressLoop>, onFailure?: (error: unknown) => void) {
     if (busy) return
     const captured = target, before = ++updates.current
-    setBusy(true)
+    setBusy(true); setError(undefined)
     try {
       const result = await action()
       if (current.current === captured && updates.current === before) {
@@ -130,11 +132,23 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
     editBasis.current = undefined
   }, [target, loop?.loopId, observedTarget])
-  const status: ContinuousProgressStatus = error || displayed?.lastOutcome === 'unknown' || observedTarget !== target
+  const status: ContinuousProgressStatus = error || observationError || displayed?.lastOutcome === 'unknown' || observedTarget !== target
     ? 'unconfirmed' : loop?.status === 'active' ? 'active' : loop?.status === 'paused' ? 'paused' : 'inactive'
   const combinedStatus = [status, calendarStatus].includes('unconfirmed') ? 'unconfirmed' : [status, calendarStatus].includes('active') ? 'active' : [status, calendarStatus].includes('paused') ? 'paused' : 'inactive'
   useEffect(() => { onStatusChange?.(combinedStatus) }, [onStatusChange, combinedStatus])
-  const action = (kind: 'pause' | 'resume' | 'stop' | 'check') => loop && void run(() => api.continuousProgress.action(target, loop.loopId, kind, loop, mintObjectId()))
+  async function action(kind: 'pause' | 'resume' | 'stop' | 'check') {
+    if (!loop || busy) return
+    const captured = target
+    setActionNotice(kind === 'resume' ? 'Resuming and checking this Agent…' : kind === 'check' ? 'Checking this Agent…' : kind === 'pause' ? 'Pausing automatic progress…' : 'Stopping automatic progress…')
+    const result = await run(() => api.continuousProgress.action(target, loop.loopId, kind, loop, mintObjectId()))
+    if (current.current !== captured) return
+    setActionNotice(!result ? undefined : kind === 'pause' ? 'Automatic progress paused.' : kind === 'stop' ? 'Automatic progress stopped.'
+      : result.lastOutcome === 'unknown' ? 'The check result is unconfirmed. Review the latest decision.'
+      : result.status !== 'active' ? 'Automatic progress is paused or stopped. Review the latest decision.'
+      : result.lastOutcome === 'sent' ? 'Host accepted the request; a new Agent turn is not yet confirmed.'
+      : result.lastOutcome === 'skipped' ? 'Check complete. No continuation prompt was sent.'
+      : 'No check outcome was confirmed. Review the current loop status.')
+  }
   function editConfiguration(patch: { interval?: string; prompt?: string }) {
     edited.current = true; editVersion.current++
     if (patch.interval !== undefined) setInterval(patch.interval)
@@ -195,7 +209,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     } catch (failure) { if (current.current === captured) setSaveNotice(presentError(failure)) }
   }
   const progress = displayed || status === 'unconfirmed' ? <>
-    {status === 'unconfirmed' ? <p className="continuous-progress-control__notice" role="status">Automatic progress is unconfirmed. {observedTarget !== target && !error ? 'Waiting for loop status. ' : ''}Manual input follows terminal readiness.{error ? ` ${error}` : ''}</p> : null}
+    {status === 'unconfirmed' ? <p className="continuous-progress-control__notice" role="status">Automatic progress is unconfirmed. {observedTarget !== target && !observationError ? 'Waiting for loop status. ' : ''}Manual input follows terminal readiness.{observationError ? ` ${observationError}` : ''}</p> : null}
     <details className="continuous-progress-control__details" data-progress-details="interval" onToggle={event => event.stopPropagation()}>
       <summary><span className="automation-progress__title">Continuous progress</span> <span className="automation-state" data-state={status}>{status === 'unconfirmed' ? 'Unconfirmed' : displayed?.status === 'stopped' ? 'Stopped' : status === 'inactive' ? 'Not enabled' : status === 'active' ? 'Active' : 'Paused'}</span>{displayed ? <><small className="automation-progress__summary">{displayed.prompt.split('\n')[0]}</small><small className="automation-progress__cadence">Every {displayed.intervalMs / 60000} min</small></> : null}</summary>
       <div className="continuous-progress-control__detail-body">
@@ -205,6 +219,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
       ...(displayed.lastTickAt !== undefined ? { lastTickAt: displayed.lastTickAt } : {}),
       ...(displayed.lastDecision ? { lastDecision: displayed.lastDecision } : displayed.lastOutcome === 'sent' ? { lastDecision: 'Host accepted the request; a new Agent turn is not yet confirmed.' } : {}) }}
       unconfirmed={status === 'unconfirmed'}
+      notice={error ?? actionNotice}
       disabled={busy} onPause={() => action('pause')} onResume={() => action('resume')} onStop={() => action('stop')} onCheck={() => action('check')} />
       : null}
     {displayed ? <details className="continuous-progress-control__details" data-progress-details="configuration" onToggle={event => event.stopPropagation()}>
@@ -237,7 +252,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
         </div> : <p className="continuous-progress-control__help">Periodic continuation only. This loop is not bound to a business task source.</p>}
       </details>
         {loop ? <p className="continuous-progress-control__help">Applies to future checks. {loop.status === 'paused' ? 'Stays paused.' : 'Stays active.'}</p> : null}
-        {[...new Set([saveNotice, persistenceIssue, error].filter(Boolean))].map(notice => <p key={notice} className="continuous-progress-control__notice" role="status">{notice}</p>)}
+        {[...new Set([saveNotice, persistenceIssue, error, observationError].filter(Boolean))].map(notice => <p key={notice} className="continuous-progress-control__notice" role="status">{notice}</p>)}
         {pendingUpdate && !busy ? <p className="continuous-progress-control__help">Previous save is unconfirmed. Retry saves its original values; your newer draft is kept.</p> : null}
         {pendingUpdate ? <button type="button" className="small-button" disabled={busy} onClick={() => void reviewLatest()}>Review latest settings</button> : null}
         {previousUpdates?.length ? <details className="continuous-progress-control__details" onToggle={event => event.stopPropagation()}><summary>Previous unconfirmed saves</summary>

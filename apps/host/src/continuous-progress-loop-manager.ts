@@ -224,7 +224,7 @@ export class ContinuousProgressLoopManager {
       // Pure state changes and the operation are one durable write. A retry repeats that same state;
       // a check persists its operation before the original scheduler can cross the input boundary.
       await this.persist(loopId)
-      if (action === 'check') await this.checkNow(loopId)
+      if (action === 'check') await this.checkNow(loopId, assertActivation)
       return this.require(loopId)
     }))
   }
@@ -422,7 +422,10 @@ export class ContinuousProgressLoopManager {
         context.signal?.throwIfAborted(); await context.assertCurrent?.()
         assertCurrent()
         if (!isDeepStrictEqual(actionBasis(this.require(loop.loopId)), actionBasis(p.expectedLoop))) throw new AgentMuxError('The original loop changed during action preparation. Read its current record before another explicit action.', 'CONTROL_REQUEST_CONFLICT')
-        return p.action === 'pause' ? this.pause(loop.loopId) : p.action === 'stop' ? this.stopLoop(loop.loopId) : p.action === 'resume' ? this.resume(loop.loopId, context) : this.checkNow(loop.loopId)
+        if (p.action === 'pause') return this.pause(loop.loopId)
+        if (p.action === 'stop') return this.stopLoop(loop.loopId)
+        if (p.action === 'resume') await this.resume(loop.loopId, context)
+        return this.checkNow(loop.loopId, () => { context.signal?.throwIfAborted(); assertCurrent() })
       }
       const result = p.action === 'resume' || p.action === 'check' ? this.activation(loop.loopId, mutate) : mutate(() => {})
       this.progressActions.set(p.operationId, { input: structuredClone(p), result })
@@ -483,11 +486,14 @@ export class ContinuousProgressLoopManager {
     if (isAgentSchedule(this.require(loopId))) await this.saveFutureIntent(this.require(loopId), false, context)
     return this.require(loopId)
   }
-  async checkNow(loopId: string): Promise<ContinuousProgressLoop> {
+  async checkNow(loopId: string, assertCurrent?: () => void): Promise<ContinuousProgressLoop> {
     await this.start()
+    // A manual request must reach its own target, not join another target's tick.
+    // The existing tick owns its failure; it must not prevent this target's check.
+    while (this.checkPromise) await this.checkPromise.catch(() => {})
+    assertCurrent?.()
     if (this.require(loopId).status !== 'active') throw new Error('Resume this loop before checking it.')
     if (!isAgentSchedule(this.require(loopId))) this.scheduler.requestCheck(loopId)
-    await this.checkPromise
     await this.check(undefined, loopId)
     return this.require(loopId)
   }
