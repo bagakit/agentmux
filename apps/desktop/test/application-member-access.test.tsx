@@ -48,7 +48,17 @@ it('copies the observed original person name and full actor ID through Settings 
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await f.forward('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1,
     subject: { kind: 'actor', actor: actor() } }, f.hostingTarget)
+  const forward = f.forward
+  vi.mocked(api.connections.call).mockImplementation(async (method, input, owner) => {
+    const result = await forward(method, input, owner)
+    if (method === 'connection.metadata.get') {
+      const reading = result as import('@agentmux/core/connections').ChannelMetadataResult
+      return { ...reading, entry: { ...reading.entry, observation: { ...reading.entry.observation, freshness: 'stale' } } } as typeof result
+    }
+    return result
+  })
   await app()
+  await wait(() => expect(appRow().textContent).toContain('Profile update unconfirmed'))
   await wait(() => expect(appRow().querySelector('[data-entity-kind="person"] img')?.getAttribute('src')).toBe('https://cdn.example/ava-original.png'))
   const before = choices(appRow()).map(input => input.checked)
   await copyConnectorIdentity(appRow(), 'Copy person name', 'Ava')

@@ -36,3 +36,14 @@ Application/profile/access responses in this mode are explicitly synthetic publi
 Native pointer focus, Edit select-all, text insertion, view toggle and keyboard Escape operate the real Renderer. Edit select-all creates the nonempty selection through Electron's native editing command. A same-target refresh while editing must preserve the exact editor node, focus, selection, draft and pending operation. Hover disclosure closes by pointer leave; explicit keyboard menu navigation hands focus to the original trigger on Escape. Header geometry and adjacent controls stay fixed. Splitting can remount a pane, so editor identity is checked within each stable layout. Original pending feedback remains above the composer. An explicit connection-read allowlist and original public input guards assert zero writes.
 
 The four full images require independent aesthetic review. The fixture has synthetic typed public observations and a synthetic retained pending input; it does not qualify live accounts, IME, actual Host/SDK effects, an installed App or recovery. Source/transform/CSS/compiled/image pins and exited temporary bundle/profile cleanup use the existing runner, with no earlier screenshot matrix rerun.
+
+
+### Connector group details
+
+`node apps/desktop/scripts/capture-channel-entry.mjs --group-details` operates the real Agent channel menu and bound-group dialog in an isolated Renderer. The four candidate-bound scenes cover wide dark overview, narrow light mixed outcomes, narrow dark member draft and keyboard section return, and wide light stale metadata with precise automatic-sync recovery navigation. It also captures the current Settings → Mote Club at the same wide light viewport for a visual reference, without changing settings.
+
+The fixture controls typed metadata/diagnosis leaves and retains exact original Hosting/Binding inputs. Native clicks and keys verify hit targets, focus return, identity disclosure before Edit, preserved drafts and recovery destinations. Viewing and editing the local draft must make no grant, configure, rejoin, retry or message call. The capture receipt pins loaded production sources and theme CSS; a concurrent change to an owned source invalidates the capture. This is Renderer evidence, not a live platform, installed package or Agent lifecycle qualification.
+
+Owning constraints: `docs/design/presentation/conversation-mode.md` (connector identity, group details and bounded observation) and `docs/design/presentation/settings-and-observation.md` (settings reference controls). Independent complete-image review remains required.
+
+For a subsequent group-only correction, append `--skip-reference` and reuse the unchanged Mote Club reference from the prior candidate-bound capture. This avoids reoperating unaffected settings.

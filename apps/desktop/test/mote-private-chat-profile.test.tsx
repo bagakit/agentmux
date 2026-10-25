@@ -130,6 +130,13 @@ it('shows creator unlimited access and each guest used, total and remaining allo
     await f.connections.ingress!.dispatch(saved.ingress.ingressId).catch(() => undefined)
   }
   expect((await f.client.call('space.mote.chat.audience', { target: f.target() })).people).toHaveLength(2)
+  const originalCall = api.connections.call
+  vi.spyOn(api.connections, 'call').mockImplementation(async (method, input, owner) => {
+    if (method === 'connection.metadata.get' && 'subject' in input && input.subject.kind === 'actor') {
+      return { connectionId: input.connectionId, connectionRevision: 1, application, entry: { subject: input.subject, cacheRevision: 'stale-profile', observation: { actor: input.subject.actor, state: 'unavailable', freshness: 'stale', checkedAt: 1, profile: { name: 'Previously observed person', observedAt: 1 } } } } as any
+    }
+    return originalCall(method, input, owner)
+  })
   await f.renderMotePanel(); await ready(() => expect(chat()?.querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('on'))
   await act(async () => chat().querySelector<HTMLElement>('.mote-private-chat__people > summary')!.click())
   await ready(() => expect(chat().querySelector('[data-mote-chat-person="original-guest"]')).not.toBeNull())
@@ -138,7 +145,8 @@ it('shows creator unlimited access and each guest used, total and remaining allo
   const creatorRow = chat().querySelector<HTMLElement>('[data-mote-chat-person="original-creator"]')!
   expect(creatorRow.textContent).toContain('Creator · unlimited'); expect(creatorRow.textContent).not.toContain('Edit allowance')
   expect(row().querySelector('[data-entity-kind="person"]')).not.toBeNull()
-  expect(row().querySelector('[aria-label="Copy person name"]')).toBeNull()
+  await ready(() => expect(row().textContent).toContain('Profile update unavailable'))
+  await copyConnectorIdentity(row(), 'Copy person name', 'Previously observed person')
   await copyConnectorIdentity(row(), 'Copy open_id', guest.userId)
   await copyConnectorIdentity(creatorRow, 'Copy open_id', creator.userId)
   expect(f.chatRequests.mock.calls.filter(([method]) => method === 'space.mote.chat.allocate')).toHaveLength(0)

@@ -46,6 +46,7 @@ const composerNames = ['Research and Engineering - customer investigation and re
 const popoverClarity = new URLSearchParams(location.search).has('popover-clarity')
 const refusalClarity = new URLSearchParams(location.search).has('refusal-clarity')
 const questionValidation = new URLSearchParams(location.search).has('question-validation')
+const groupDetails = new URLSearchParams(location.search).has('group-details')
 const connectorDetails = new URLSearchParams(location.search).has('connector-details-modern')
 const entityOverview = new URLSearchParams(location.search).has('entity-overview')
 const inputRecovery = new URLSearchParams(location.search).has('input-recovery')
@@ -64,7 +65,7 @@ const hostingTarget: ConnectionHostingTarget = { hostId: 'preview-bot-host', run
 const target = { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
 const headerStatus = new URLSearchParams(location.search).has('header-status')
 type Scenario = 'unbound' | 'owner-failure' | 'attention' | 'mixed' | 'unsupported' | 'healthy'
-const proof = { ready: false, omitOriginal: false, accessUnavailable: false, status: 'normal' as 'normal' | 'attention' | 'unavailable', scenario: 'unbound' as Scenario,
+const proof = { profileStale: false, syncOff: false, ready: false, omitOriginal: false, accessUnavailable: false, status: 'normal' as 'normal' | 'attention' | 'unavailable', scenario: 'unbound' as Scenario,
   lastDiagnosis: null as ConnectionDiagnosis | null,
   calls: [] as string[], targets: [] as (ConnectionHostingTarget | undefined)[], errors: [] as string[],
   requests: [] as { method: string; input: unknown; owner: ConnectionHostingTarget | undefined }[],
@@ -139,14 +140,14 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   const subject = { kind: 'conversation', externalConversationId: input.subject?.externalConversationId ?? room.externalConversationId }
   const sourceConnection = sharedAudiences && input.connectionId === secondConnection.config.connectionId ? secondConnection : connection
   const meta = { connectionId: sourceConnection.config.connectionId, connectionRevision: 1, application: sourceConnection.config.application,
-    entry: { subject, cacheRevision: 'preview-cache', observation: { subject, state: 'observed', freshness: conversationSync ? 'stale' : 'current', profile: { name: conversationSync ? composerNames[sourceConnection === secondConnection ? 1 : 0] : room.name,
-      ...(entityOverview ? { avatarUrl: observedGroupAvatar } : {}), observedAt: conversationSync ? 1 : Date.now() }, checkedAt: conversationSync ? 1 : Date.now() } } }
+    entry: { subject, cacheRevision: 'preview-cache', observation: { subject, state: 'observed', freshness: conversationSync || proof.profileStale ? 'stale' : 'current', profile: { name: conversationSync ? composerNames[sourceConnection === secondConnection ? 1 : 0] : groupDetails && proof.scenario === 'mixed' ? 'Research and Engineering · Customer investigation and release planning' : room.name,
+      ...(entityOverview || groupDetails ? { avatarUrl: observedGroupAvatar } : {}), observedAt: conversationSync ? 1 : Date.now() }, checkedAt: conversationSync ? 1 : Date.now() } } }
   if (method === 'connection.ls') return { connections: proof.omitOriginal ? [] : sharedAudiences ? [connection, secondConnection] : [connection] }
   if (method === 'connection.inspect') return { connection: sourceConnection, operation: null }
   if (method === 'connection.service.get') {
     if (conversationSync) composerReads.push({ kind: 'service', scenario: composerScenario, adapterId: input.adapterId, state: !input.adapterId && composerScenario === 'unavailable' ? 'unavailable' : !input.adapterId && composerScenario === 'paused-off' ? 'off' : 'enabled' })
     if (conversationSync && composerScenario === 'unavailable' && !input.adapterId) throw Error('Controlled original global policy read unavailable')
-    return input.adapterId ? { adapterId: input.adapterId, enabled: true, revision: 0 } : { enabled: !conversationSync || composerScenario !== 'paused-off', revision: conversationSync && composerScenario === 'paused-off' ? 2 : 1 }
+    return input.adapterId ? { adapterId: input.adapterId, enabled: true, revision: 0 } : { enabled: !proof.syncOff && (!conversationSync || composerScenario !== 'paused-off'), revision: conversationSync && composerScenario === 'paused-off' ? 2 : 1 }
   }
   if (method === 'connection.binding.ls') return { bindings: structuredClone(bindings) }
   if (method === 'connection.diagnose') {
@@ -158,7 +159,7 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
     const attention = proof.status === 'attention', sourceGap = !inputRecovery && (attention || groupActivityActions && (!statusPriority || mixed)) && binding?.externalConversationId === room.externalConversationId
     const unknownEffect = mixed && !statusPriority || attention && !sourceGap
     const effective = binding && applicationAccess ? previewMemberAccess(binding).flatMap(member => member.effective?.state === 'active' ? [member.effective] : []) : null
-    const report = { target: input, service: { value: { enabled: true, revision: 1 }, issue: null }, groups: { issue: null, value: { nextBindingId: null, items: binding ? [{
+    const report = { target: input, service: { value: { enabled: !proof.syncOff, revision: 1 }, issue: null }, groups: { issue: null, value: { nextBindingId: null, items: binding ? [{
       target: groupTarget(binding), window: {}, limit: 5,
       adapterService: { value: { adapterId: connection.config.adapterId, enabled: true, revision: 0 }, issue: null },
       connection: { value: { revision: connection.revision, enabled: true, ...connection.observation }, issue: null },
@@ -252,7 +253,7 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   if (method === 'connection.room.link.inspect') return { operation: input.operationId === joinOperation.operationId ? structuredClone(joinOperation) : null }
   if (applicationAccess && method === 'connection.setup.ls') return { operations: [], next: null, support: { connectionRevision: 1, capabilities: [] } }
   if (applicationAccess && method === 'connection.profile.ls') return { operations: [], next: null }
-  const actorMetadata = members.map(member => { const actor = { application: connection.config.application, idType: member.idType, userId: member.userId }; return { subject: { kind: 'actor', actor }, cacheRevision: 'preview-actor-' + member.userId, observation: { actor, state: 'observed', freshness: 'current', profile: { name: member.name, observedAt: 1 }, checkedAt: 1 } } })
+  const actorMetadata = members.map(member => { const actor = { application: connection.config.application, idType: member.idType, userId: member.userId }; return { subject: { kind: 'actor', actor }, cacheRevision: 'preview-actor-' + member.userId, observation: { actor, state: 'observed', freshness: proof.profileStale ? 'stale' : 'current', profile: { name: member.name, observedAt: 1 }, checkedAt: 1 } } })
   if (conversationSync && method === 'connection.metadata.get') {
     composerReads.push({ kind: 'metadata', scenario: composerScenario, connectionId: sourceConnection.config.connectionId, state: composerScenario === 'unavailable' ? 'unavailable' : 'observed-stale' })
     if (composerScenario === 'unavailable') throw Error('Controlled original cached group name read unavailable')
