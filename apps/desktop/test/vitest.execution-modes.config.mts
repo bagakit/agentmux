@@ -9,6 +9,7 @@ const evidence = process.env.EXECUTION_MODES_EVIDENCE
 if (evidence) mkdirSync(evidence, { recursive: true })
 const mutant = process.env.EXECUTION_MODES_MUTANT
 const edits: Record<string, [string, string, string]> = {
+  'unknown-empty-configured': ['components/NewTabSurface.tsx', 'const emptyHostInventoryUnconfirmed = executors.length === 0 && usesHostInventory &&', 'const emptyHostInventoryUnconfirmed = false &&'],
   'wrong-endpoint-environment': ['components/LauncherExecutionModes.tsx', 'const host = hosts.find(item => item.id === target.hostId)', 'const host = hosts.find(item => item.id === workspace?.hostId)'],
   'ime-cancels-setup': ['components/LauncherExecutionModes.tsx', ' && !isImeOwnedKeyboardEvent(event)', ''],
   'wrong-remote-agent-resource': ['components/LauncherExecutionModes.tsx', 'commit(setup.resourceWorkspaceId, id, setup.intent)', 'commit(id, id, setup.intent)'],
