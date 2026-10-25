@@ -231,6 +231,39 @@ it('mounts the existing Composer leaf and real create/pause/resume/check/stop ro
   await click('Stop continuous progress'); expect(manager.list()[0]!.status).toBe('stopped')
   await vi.waitFor(() => expect(container.querySelector('[aria-label="Check continuous progress now"]')).toBeNull())
 })
+
+it('saves an existing paused configuration through Composer, preload, IPC and the original Host without recreating or resuming it', async () => {
+  const original = await create()
+  const paused = await api.continuousProgress.action(target(), original.loopId, 'pause', original, 'pause-before-configuration-edit')
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+  await showProgressForm()
+  await vi.waitFor(() => expect(container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe(original.prompt))
+  const form = container.querySelector<HTMLFormElement>('form[aria-label="Continuous progress setup"]')!
+  for (const [selector, value] of [['input[type="number"]', '60'], ['textarea', '检查最新成果并继续原任务']]) {
+    const field = form.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector!)!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(field.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(field, value)
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+  const save = form.querySelector<HTMLButtonElement>('button[type="submit"]')!
+  expect(save.disabled).toBe(false); expect(save.textContent).toBe('Save changes')
+  const update = vi.spyOn(api.continuousProgress, 'update'), createAgain = vi.spyOn(api.continuousProgress, 'create')
+  await act(async () => { save.click(); await vi.waitFor(() => expect(update).toHaveBeenCalledOnce()); await update.mock.results[0]!.value })
+  const request = update.mock.calls[0]![0]
+  expect(bridge.invoke).toHaveBeenCalledWith('continuousProgress:update', request)
+  expect(request).toMatchObject({ target: target(), loopId: original.loopId, intervalMs: 3_600_000, prompt: '检查最新成果并继续原任务' })
+  expect(manager.list()).toHaveLength(1)
+  expect(manager.list()[0]).toMatchObject({ ...target(), loopId: original.loopId, status: 'paused', nextCheckAt: paused.nextCheckAt,
+    intervalMs: 3_600_000, prompt: '检查最新成果并继续原任务', lastMutation: { operationId: request.operationId, action: 'update' } })
+  expect(await ContinuousProgressLoopStore.forUserData(directory).load()).toEqual(manager.list())
+  expect(client.agentSession(session.agentSessionId).run).toEqual(session.run)
+  expect(createAgain).not.toHaveBeenCalled(); expect(writes).toEqual([])
+  expect(form.textContent).toContain('Changes saved. Continuous progress remains paused.')
+  await expect(api.continuousProgress.update({ ...request, prompt: 'stale edit must not overwrite', operationId: 'stale-configuration-update' }))
+    .rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+  expect(manager.list()[0]!.prompt).toBe('检查最新成果并继续原任务')
+})
 it('saved defaults reach both original Composer creation routes and durable tasks without automatic input', async () => {
   await act(async () => root.unmount())
   await act(async () => {
