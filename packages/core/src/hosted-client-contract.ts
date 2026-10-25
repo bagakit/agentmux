@@ -235,6 +235,7 @@ export type AgentMuxHostedRuntimeParameterMap = {
   'runtime.owner.identity': { expectedRuntimeId?: string }
   'runtime.owner.shutdown': { fence: AgentMuxRuntimeFence }
   'runtime.network.inspect': { fence: AgentMuxRuntimeFence }
+  'runtime.profile.capture': import('./runtime-v8-profile.js').RuntimeV8ProfileInput
   'runtime.bootstrap': { consumerId: string; fence: AgentMuxRuntimeFence }
   'runtime.invoke': { consumerId: string; fence: AgentMuxRuntimeFence; invocation: AgentMuxHostedInvocation }
   'runtime.release-consumer': { consumerId: string; fence: AgentMuxRuntimeFence }
@@ -251,6 +252,7 @@ export type AgentMuxHostedRuntimeResultMap = {
   'runtime.owner.identity': { owner: AgentMuxRuntimeOwnerIdentity }
   'runtime.owner.shutdown': { owner: AgentMuxRuntimeOwnerIdentity; accepted: true }
   'runtime.network.inspect': import('./runtime-network.js').RuntimeNetworkSnapshot
+  'runtime.profile.capture': import('./runtime-v8-profile.js').RuntimeV8ProfileResult
   'runtime.bootstrap': AgentMuxHostedBootstrap
   'runtime.invoke': { value: unknown }
   'runtime.release-consumer': { released: boolean }
@@ -272,14 +274,14 @@ export type AgentMuxHostedStreamInitialMap = {
 export type AgentMuxHostedStreamInitial<M extends AgentMuxHostedStreamMethod> = AgentMuxHostedStreamInitialMap[M]
 export const AGENTMUX_HOSTED_RPC_METHODS = {
   'runtime.owner.identity': 'short', 'runtime.owner.shutdown': 'short',
-  'runtime.network.inspect': 'short',
+  'runtime.network.inspect': 'short', 'runtime.profile.capture': 'long',
   'runtime.bootstrap': 'short', 'runtime.invoke': 'long', 'runtime.release-consumer': 'long',
   'runtime.events': 'long', 'runtime.conversation-watch': 'long', 'runtime.history-watch': 'long', 'runtime.attachment-watch': 'long', 'runtime.replay-watch': 'long'
 } as const satisfies Record<AgentMuxHostedRuntimeMethod, 'short' | 'long'>
 
 export const AGENTMUX_HOSTED_RPC_FIELDS = {
   'runtime.owner.identity': ['expectedRuntimeId'], 'runtime.owner.shutdown': ['fence'],
-  'runtime.network.inspect': ['fence'],
+  'runtime.network.inspect': ['fence'], 'runtime.profile.capture': ['fence', 'processId', 'durationMs'],
   'runtime.bootstrap': ['consumerId', 'fence'], 'runtime.invoke': ['consumerId', 'fence', 'invocation'],
   'runtime.release-consumer': ['consumerId', 'fence'], 'runtime.events': ['consumerId', 'fence'],
   'runtime.conversation-watch': ['consumerId', 'fence', 'reference', 'options'],

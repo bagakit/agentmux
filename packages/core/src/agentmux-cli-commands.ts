@@ -11,6 +11,7 @@ import { parseRendererAllocationsInput } from './renderer-allocations.js'
 import { parseAgentDiscoveryFilters } from './agent-discovery.js'
 import { parseRendererSceneCaptureInput, parseRendererSceneInspectInput } from './renderer-performance-scene.js'
 import { parseAgentContinuityControlInput } from './agent-session-recovery/control-contract.js'
+import { parseRuntimeV8ProfileInput } from './runtime-v8-profile.js'
 import { parseRendererV8ProfileInput } from './renderer-v8-profile.js'
 import { parseRendererMemoryInput } from './renderer-memory.js'
 import { parseRendererHeapSnapshotInput, parseRendererHeapSnapshotInspectInput } from './renderer-heap-snapshot.js'
@@ -984,6 +985,11 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   { ...command('system.metrics.profile.analyze', '--input FILE', 'Analyse an explicit local cpuprofile without connecting or capturing.',
     { '--input': 'data' }, f => ({ input: value(f, '--input', true) }),
     'Pure local artifact processing. Input is a regular cpuprofile of at most 8 MiB. Preserves original byte hash and generated positions; reports weighted self/inclusive time, idle/GC/script/unattributed groups and unrepresented tail or overrun. Shares the Performance analysis owner. These weights are not process CPU or original source modules. Bare profiles have no verified capture identity. Top rows, caller paths and labels are bounded with explicit omissions. Original names/URLs may be sensitive; no endpoint, App, debugger, upload, sampling or file write is used.'), local: true },
+  command('system.metrics.host-profile.capture', '--host ID --runtime ID --owner ID --pid PID --duration-ms N [--output FILE]', 'Capture 1-5 seconds of the exact semantic Host main-thread V8 CPU profile.',
+    { '--host': 'data', '--runtime': 'data', '--owner': 'data', '--pid': 'value', '--duration-ms': 'value', '--output': 'data' }, f =>
+      parseRuntimeV8ProfileInput({ hostId: id(f, '--host', true), fence: { runtimeId: id(f, '--runtime', true), ownerInstanceId: id(f, '--owner', true) },
+        ...numbers(f, { '--pid': 'processId', '--duration-ms': 'durationMs' }) }, true) as unknown as Record<string, unknown>,
+    'Use the observed Host route, Runtime, owner instance and PID. One active capture per producer. Reader cancellation is not a stop ACK; an admitted bounded capture may finish at its original owner. No Native connect, Session discovery, debug port, GC or background sampler. Actual interval, original owner, stop/disable/disconnect and byte hash remain explicit. This covers that Node main-thread V8 isolate, not workers, native CPU or whole-process CPU. Profile names and URLs can be sensitive. --output creates a new local cpuprofile for the existing Performance import/analysis; never overwrites files, uploads or retries an unknown capture.'),
   command('system.metrics.profile.capture', '--window-id W --web-contents-id WC --generation G --pid PID --creation-time MS --duration-ms N [--output FILE]', 'Explicitly capture 1-5 seconds of this exact Renderer main-target V8 profile; no automatic sampling.',
     { '--window-id': 'value', '--web-contents-id': 'value', '--generation': 'value', '--pid': 'value', '--creation-time': 'value', '--duration-ms': 'value', '--output': 'data' }, f =>
       parseRendererV8ProfileInput({ target: numbers(f, { '--window-id': 'windowId', '--web-contents-id': 'webContentsId', '--generation': 'generation', '--pid': 'pid', '--creation-time': 'creationTime' }),
@@ -1053,7 +1059,7 @@ export async function parseAgentMuxCliInvocation(argv: readonly string[]): Promi
   if (!match) invalid('Unknown command. Run amux --help.')
   const command = match!.command.rpcMethod ? { ...match!.command, method: match!.command.rpcMethod } : match!.command
   let tail = match!.tail, output: string | undefined
-  if (['system.metrics.profile.capture', 'system.metrics.trace.capture', 'system.metrics.allocations.capture', 'system.metrics.scene.capture', 'system.metrics.scene.inspect'].includes(command.method)) {
+  if (['system.metrics.host-profile.capture', 'system.metrics.profile.capture', 'system.metrics.trace.capture', 'system.metrics.allocations.capture', 'system.metrics.scene.capture', 'system.metrics.scene.inspect'].includes(command.method)) {
     output = value(flags(tail, command.flags!), '--output')
     if (output !== undefined && (!output || output === '-')) invalid(command.method === 'system.metrics.profile.capture'
       ? '--output requires a named new local cpuprofile file.' : '--output requires a named new local diagnostic file.')
