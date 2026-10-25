@@ -1073,7 +1073,7 @@ export type ProviderCatalogObservation = {
 }
 
 /** Electron does not preserve custom Error fields; this carries Core's exact write facts. */
-export type SessionInputWriteResult = { ok: true; inputReceipt?: import('@agentmux/core').AgentInputSubmissionReceipt } | { ok: false; error: {
+export type SessionInputWriteResult = { ok: true; inputReceipt?: import('@agentmux/core').AgentInputSubmissionReceipt | import('@agentmux/core').MoteInputSubmissionReference } | { ok: false; error: {
   code: string; message: string; detail?: string; controlFailure?: AgentMuxControlFailure; logId?: string
 } }
 /** The same plain error owner carries read/control results through Electron. */

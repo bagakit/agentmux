@@ -108,7 +108,7 @@ export class CapsuleReplyAuthority implements CapsuleInputPort {
       agentSessionId: prepared.target.agentSessionId, run: prepared.expectedRun }, prepared.prompt, prepared.inputOperationId,
       { expectedRun: prepared.expectedRun, admissionIntent: { kind: 'manual-actor' } }, undefined,
       { execution: 'immediate' }, true, undefined, 'question-reply')
-    return { phase: 'submit', observation: receipt ? this.observation(prepared, receipt) : await this.inspect(prepared) ?? this.unknown(prepared) }
+    return { phase: 'submit', observation: receipt && 'key' in receipt ? this.observation(prepared, receipt) : await this.inspect(prepared) ?? this.unknown(prepared) }
   }
   private unknown(prepared: CapsulePreparedReply): CapsuleInputObservation {
     return { status: 'unknown', inputOperationId: prepared.inputOperationId, expectedRun: prepared.expectedRun,

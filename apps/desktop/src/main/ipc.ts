@@ -1805,6 +1805,7 @@ export async function registerIpc(args: {
     inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]
   ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
     let effectiveAuthorHuman = false
+    let submission: Awaited<ReturnType<RuntimeController['submitPrompt']>> = undefined
     if (inputContextCapture !== undefined || inputImages !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
     if ('admissionIntent' in condition) {
       assertManualPromptSenderTrusted(event.sender, contents)
@@ -1841,13 +1842,14 @@ export async function registerIpc(args: {
         ...(loop?.taskSource?.kind === 'goal' ? { continuation: { intervalMs: loop.intervalMs, alignmentRevision: loop.taskSource.alignmentRevision } } : {}) })
     } else {
       pauseUserProgress(session, 'Paused for your message.')
-      await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture, inputImages, effectiveAuthorHuman ? preparePublicUserProfile(config.profile) : undefined)
+      submission = await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture, inputImages, effectiveAuthorHuman ? preparePublicUserProfile(config.profile) : undefined)
     }
     if (goalPmo) {
       const original = await args.runtime.agentCreation(session.hostId, session.agentSessionId)
       if (original.agentSessionId !== session.agentSessionId) throw new AgentMuxError('The confirmed PMO recipient changed.', 'CONTROL_REQUEST_CONFLICT')
       await confirmPmoParticipation(goalPmo, session, operationId, 'prompt-input')
     }
+    return submission
   }))
   handleWithEvent('sessions:replyQuestion', async (event, session: AgentSessionControl,
     input: import('../shared/contracts.js').SessionQuestionReplyInput) => {
