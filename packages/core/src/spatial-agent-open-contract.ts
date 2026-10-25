@@ -12,7 +12,7 @@ export function isBackgroundLocalAgentOpen(request: { operation: string; content
       !request.destination || typeof request.destination !== 'object') return false
   const content = request.content as Record<string, unknown>, destination = request.destination as Record<string, unknown>
   return !graph?.zones.some(zone => zone.zoneId === destination.zoneId && zone.hostId && zone.hostId !== 'local') &&
-    content.kind === 'new-agent' && content.executionWorkspaceId === undefined && content.nativeResumeSource === undefined &&
+    content.kind === 'new-agent' && content.executionWorkspaceId === undefined && content.toolWorkspaceId === undefined && content.nativeResumeSource === undefined &&
     typeof destination.spaceId === 'string' && typeof destination.zoneId === 'string' && destination.newZone === undefined && destination.split === undefined &&
     destination.displayWorkspaceId === undefined && destination.groupId === undefined &&
     (destination.newTab === true && destination.tabId === undefined && destination.regionId === undefined ||
@@ -24,7 +24,7 @@ export type AgentMuxSpatialAgentOpenRecord = {
   execution: { hostId: string; workspacePath: string; workspaceId: string }
 }
 
-export function spatialAgentFact(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run' | 'providerId' | 'executorId' | 'workspacePath' | 'creation' | 'forkedFrom'>, hostId: string): AgentMuxSpaceAgentFact {
+export function spatialAgentFact(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run' | 'providerId' | 'executorId' | 'workspacePath' | 'creation' | 'forkedFrom' | 'toolExecution'>, hostId: string): AgentMuxSpaceAgentFact {
   return { agentSessionId: session.agentSessionId, runId: session.run.runId, providerId: session.providerId,
     executorId: session.executorId, hostId, cwd: session.workspacePath,
     createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
@@ -36,5 +36,6 @@ export function spatialAgentFact(session: Pick<AgentMuxAgentSession, 'agentSessi
     ...(session.creation?.agentMuxContext ? { agentMuxContext: session.creation.agentMuxContext } : {}),
     ...(session.creation?.persistence ? { creationPersistence: session.creation.persistence } : {}),
     ...(session.creation?.failure ? { creationFailure: session.creation.failure } : {}),
+    ...(session.toolExecution ? { toolExecution: structuredClone(session.toolExecution) } : {}),
     ...(session.forkedFrom ? { forkedFrom: session.forkedFrom } : {}) }
 }
