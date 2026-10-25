@@ -3,7 +3,7 @@ import { publicationInputImages } from './publication-input-images.js'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { publicationMarkdown } from './publication-markdown.js'
 import { AgentMuxError, parseAgentInputResourceResult, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
-import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationCheckpointPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationSourceRef, type ConversationCheckpointInput, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
+import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationCheckpointPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationSourceRef, type ConversationCheckpointInput, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
 import { readRoomPublicationBinding, roomPublicationReference, connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { credentialLookupFailure } from './credential-observation.js'
@@ -287,7 +287,9 @@ export class PublicationHost implements ConnectionDeliveryPort {
     let nativeFailure: { code?: string } | undefined
     for (let reads = 0; reads < 8; reads++) {
       if (signal.aborted || !this.authorized(binding)) return
-      const state = lane.read, input = { ...reference, checkpoint: state.after, limit: 100, ...(state.cursor ? { cursor: state.cursor } : {}), ...(lane.view ? { view: lane.view } : {}) }
+      // A valid coverage/route envelope can exceed the interactive default before
+      // any content fits. Use Core's existing wire bound for this background reader.
+      const state = lane.read, input = { ...reference, checkpoint: state.after, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES, ...(state.cursor ? { cursor: state.cursor } : {}), ...(lane.view ? { view: lane.view } : {}) }
       let page: ConversationChangesPage
       try { page = parseConversationChangesPage(await this.options.conversation.changes(input, signal), input) }
       catch (error) { lane.read = undefined; lane.view = undefined; lane.viewId = undefined; this.sourceUnavailable(lane, 'source-gap', error, connectionDiagnosisCheckpointKey(state.after)); return }
