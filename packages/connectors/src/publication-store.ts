@@ -10,7 +10,7 @@ import type { PublicationA2A, PublicationOriginalMessage } from './publication-a
 import type { PublicationSpeaker } from './publication-speaker.js'
 import type { PublicationCardAdapter, PublicationCardPreparation, PublicationPortrait, CardCreateReceipt, PortraitReceipt } from './publication-card.js'
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication, type PublicationPreparer } from './publication-wire.js'
-import type { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync, StatementSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
 import { sameRoomPublication, type RoomBindingReadPort, parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
 import { parseConversationChangesPageForWindow, parseConversationUnit, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
@@ -190,6 +190,8 @@ function representationFragments(value: RepresentationPayload | QuestionRepresen
 }
 /** Connector-owned publication facts, not another Agent history or lifecycle. Borrows the Host database. */
 export class PublicationStore {
+  private readonly decisionWrite: StatementSync
+
   constructor(readonly database: DatabaseSync, private readonly bindings?: Pick<RoomBindingReadPort, 'readExact'>) {
     database.exec(`
       CREATE TABLE IF NOT EXISTS connector_publication_frontier (
@@ -289,7 +291,7 @@ export class PublicationStore {
         json_extract(operation_json,'$.reference.source.nativeSessionId'),json_extract(operation_json,'$.mapping.messageId'))
       WHERE state='confirmed' AND json_extract(operation_json,'$.effect')='upsert';`) }
     catch { /* This optional observation must not prevent original input or Outbox ownership. Exact lookup reports it. */ }
-
+    this.decisionWrite = database.prepare('INSERT INTO connector_publication_decision (binding_id,binding_revision,source_key,record_id,source_revision,reason,decision_json) VALUES (?,?,?,?,?,?,?) ON CONFLICT(binding_id,binding_revision,source_key,record_id,source_revision) DO UPDATE SET reason=excluded.reason,decision_json=excluded.decision_json')
   }
   private transaction<T>(action: () => T): T {
     let begun = false
@@ -421,8 +423,7 @@ export class PublicationStore {
     this.saveDecision(boundary, gap.gapId, digest(gap), { kind: 'gap', gap, state: 'unresolved' })
   }
   private saveDecision(boundary: PublicationBoundary, id: string, revision: string, value: unknown): void {
-    this.database.prepare('INSERT INTO connector_publication_decision (binding_id,binding_revision,source_key,record_id,source_revision,reason,decision_json) VALUES (?,?,?,?,?,?,?) ON CONFLICT(binding_id,binding_revision,source_key,record_id,source_revision) DO UPDATE SET reason=excluded.reason,decision_json=excluded.decision_json')
-      .run(...scopeKey(boundary), 'unified', id, revision, 'content-accounted', encode(value))
+    this.decisionWrite.run(...scopeKey(boundary), 'unified', id, revision, 'content-accounted', encode(value))
   }
   /** Reuse only this accepted original part's exact derived image; no second resource cache. */
   retainedDiagram(boundary: PublicationBoundary, part: ConversationContentRef, text: string,
