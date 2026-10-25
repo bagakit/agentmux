@@ -85,7 +85,18 @@ export type RoomBindingOperation =
   | { operationId: string; action: RoomBindingAction; state: 'refused'; code: string }
   | { operationId: string; action: RoomBindingAction; state: 'applied'; binding: RoomBinding; grant?: ConnectionGrant; inherited?: { actor: ConnectionGrant['actor']; grants: Array<{ grantId: string; revision: number }> }; reused?: boolean; notices?: RoomBindingNotice[] }
 export type RoomBindingInspectInput = { bindingId: string; revision?: number; operationId?: never } | { operationId: string; bindingId?: never; revision?: never }
-export type RoomBindingInspection = { binding: RoomBinding | null; current: RoomBinding | null; operation: RoomBindingOperation | null; grants: ConnectionGrant[]; access?: ConnectionMemberAccess[] }
+export type RoomBindingMappingDifference = 'connection' | 'audience' | 'target' | 'scope' | 'source' | 'input-target'
+/** Current indexed observations, not a replacement for the immutable refusal or permission to retry. */
+export type RoomBindingMappingConflict = {
+  status: 'checked'
+  /** At most the original binding ID, Session mapping and application/audience mapping, deduplicated. */
+  current: Array<{
+    binding: Pick<RoomBinding, 'bindingId' | 'revision' | 'state' | 'connectionId' | 'application' | 'externalConversationId' | 'executionHostId' | 'agentSessionId'>
+    /** A different binding can occupy the exact requested relink mapping without field differences. */
+    differences: RoomBindingMappingDifference[]
+  }>
+}
+export type RoomBindingInspection = { binding: RoomBinding | null; current: RoomBinding | null; operation: RoomBindingOperation | null; grants: ConnectionGrant[]; access?: ConnectionMemberAccess[]; mappingConflict?: RoomBindingMappingConflict }
 export type RoomBindingListInput = { connectionId?: string; executionHostId?: string; agentSessionId?: string }
 export type RoomBindingCallContext = { actor: RoomBindingAuthority; assertCurrent?(): void | Promise<void> }
 export interface RoomBindingsPort {

@@ -980,8 +980,13 @@ export class AgentMuxRpcService {
           : method === 'connection.binding.relink' ? await bindings.relink(parseRoomBindingParams(method, params), administration)
           : method === 'connection.binding.member.inherit' ? await bindings.inherit(parseRoomBindingParams(method, params), { ...administration, assertCurrent: async () => { await administration.assertCurrent(); await this.assertRuntimeFence(context) } })
           : await bindings.grant(parseRoomBindingParams(method, params), administration)
-        // Application-wide member identities are administration data, not managed discovery.
-        if (caller && method === 'connection.binding.inspect') delete (result as import('./room-binding-contract.js').RoomBindingInspection).access
+        // Refused operations have no binding subject for managed discovery authorization.
+        // Keep their original receipts readable without exposing other current relationships.
+        if (caller && method === 'connection.binding.inspect') {
+          const inspection = result as import('./room-binding-contract.js').RoomBindingInspection
+          delete inspection.access
+          delete inspection.mappingConflict
+        }
         if (caller && method === 'connection.binding.ls') {
           const page = result as import('./room-binding-contract.js').RoomBindingResultMap['connection.binding.ls']
           const owned = await Promise.all(page.bindings.map(async binding => binding.authorizedBy.kind === 'agent' && binding.authorizedBy.id === caller.agentSessionId &&

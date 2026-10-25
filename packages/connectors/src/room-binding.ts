@@ -1,8 +1,8 @@
 import { effectiveRoomGrant } from './effective-grant.js'
-import type { ConnectionMemberAccess, ConnectionEffectiveGrant, ConnectionEffectiveGrants, RoomBindingInheritInput } from '@agentmux/core/connections'
+import type { ConnectionMemberAccess, ConnectionEffectiveGrant, ConnectionEffectiveGrants, RoomBindingInheritInput, RoomBindingInspection, RoomBindingMappingConflict, RoomBindingMappingDifference } from '@agentmux/core/connections'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConversationCheckpointPage, type ConversationCheckpointPage, type ConversationRef } from '@agentmux/core/conversation'
-import { readRoomPublicationBinding, sameRoomPublication, parseConnectionActor, parseConnectionGrant, parseRoomBinding, parseRoomBindingAuthority, parseRoomBindingOperation, parseRoomBindingParams, type ConnectionGrant, type RoomBinding, type RoomBindingAuthority, type RoomBindingBindInput, type RoomBindingCallContext, type RoomBindingGrantInput, type RoomBindingInspectInput, type RoomBindingListInput, type RoomBindingOperation, type RoomBindingPauseInput, type RoomBindingReadPort, type RoomBindingRelinkInput, type RoomBindingNoticeEvent, type RoomBindingNotice, type RoomBindingsPort, type RoomPublicationAuthority } from '@agentmux/core/connections'
+import { readRoomPublicationBinding, sameRoomPublication, parseConnectionActor, parseConnectionGrant, parseRoomBinding, parseRoomBindingAuthority, parseRoomBindingOperation, parseRoomBindingParams, parseRecordedRoomBindingInput, type ConnectionGrant, type RoomBinding, type RoomBindingAuthority, type RoomBindingBindInput, type RoomBindingCallContext, type RoomBindingGrantInput, type RoomBindingInspectInput, type RoomBindingListInput, type RoomBindingOperation, type RoomBindingPauseInput, type RoomBindingReadPort, type RoomBindingRelinkInput, type RoomBindingNoticeEvent, type RoomBindingNotice, type RoomBindingsPort, type RoomPublicationAuthority } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { readRoomTarget, type RoomTargetOwner } from './room-target.js'
 
@@ -68,7 +68,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
   findActiveAudience(input: { application: RoomBinding['application']; externalConversationId: string }): RoomBinding | null {
     return this.safe(() => { const binding = this.audience(input); return binding?.state === 'active' ? binding : null })
   }
-  private matching(column: 'audience' | 'session', input: RoomBindingBindInput): RoomBinding | null {
+  private matching(column: 'audience' | 'session', input: Pick<RoomBindingBindInput, 'connectionId' | 'externalConversationId' | 'executionHostId' | 'agentSessionId'>): RoomBinding | null {
     const connection = this.options.connections.readConfiguration(input.connectionId)
     if (!connection) return null
     if (column === 'audience') return this.audience({ application: connection.config.application, externalConversationId: input.externalConversationId })
@@ -170,12 +170,44 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     const row = this.database.prepare('SELECT intent_json, result_json FROM room_binding_operation WHERE operation_id=?').get(operationId)
     return row ? { intent: String(row.intent_json), operation: parseRoomBindingOperation(JSON.parse(String(row.result_json))) } : null
   }
-  async inspect(value: RoomBindingInspectInput) {
+  private mappingConflict(saved: Saved): RoomBindingMappingConflict | undefined {
+    const operation = saved.operation
+    if (operation.state !== 'refused' || operation.code !== 'ROOM_BINDING_MAPPING_CONFLICT' || operation.action !== 'bind' && operation.action !== 'relink') return undefined
+    // Historical inputs remain readable even when they no longer qualify for a new dispatch.
+    const intent = JSON.parse(saved.intent)
+    const input = parseRecordedRoomBindingInput(operation.action === 'bind' ? 'connection.bind' : 'connection.binding.relink', intent.input)
+    if (intent.action !== operation.action || input.operationId !== operation.operationId) return undefined
+    const connection = this.options.connections.readConfiguration(input.connectionId)
+    if (!connection) return undefined
+    const candidates = [this.readCurrent(input.bindingId), this.matching('session', input), this.matching('audience', input)]
+    const current: RoomBindingMappingConflict['current'] = []
+    const seen = new Set<string>()
+    for (const binding of candidates) {
+      if (!binding || binding.state === 'detached' || seen.has(binding.bindingId)) continue
+      seen.add(binding.bindingId)
+      if (operation.action === 'relink' && binding.bindingId === input.bindingId) continue
+      const differences: RoomBindingMappingDifference[] = []
+      if (binding.connectionId !== input.connectionId) differences.push('connection')
+      if (!equal(binding.application, connection.config.application) || binding.externalConversationId !== input.externalConversationId) differences.push('audience')
+      if (binding.executionHostId !== input.executionHostId || binding.agentSessionId !== input.agentSessionId) differences.push('target')
+      if (!equal(binding.scope, input.scope)) differences.push('scope')
+      if (binding.sourceCheckpoints.some(c => !equal(c.source, input.expectedSource))) differences.push('source')
+      if (!equal(binding.inputTarget, input.inputTarget)) differences.push('input-target')
+      if (operation.action === 'bind' && differences.length === 0) continue
+      const { bindingId, revision, state, connectionId, application, externalConversationId, executionHostId, agentSessionId } = binding
+      current.push({ binding: { bindingId, revision, state, connectionId, application, externalConversationId, executionHostId, agentSessionId }, differences })
+    }
+    return { status: 'checked', current }
+  }
+  async inspect(value: RoomBindingInspectInput): Promise<RoomBindingInspection> {
     const input = parseRoomBindingParams('connection.binding.inspect', value)
     return this.safe(() => {
-      const operation = input.operationId ? this.saved(input.operationId)?.operation ?? null : null
+      const saved = input.operationId ? this.saved(input.operationId) : null, operation = saved?.operation ?? null
       const binding = input.bindingId ? input.revision === undefined ? this.readCurrent(input.bindingId) : this.readExact(input.bindingId, input.revision) : operation?.state === 'applied' ? operation.binding : null
-      return { binding, current: binding ? this.readCurrent(binding.bindingId) : null, operation, grants: this.bindingGrants(binding), ...(binding && input.bindingId && input.revision === undefined ? { access: this.memberAccess(binding) } : {}) }
+      let mappingConflict: RoomBindingMappingConflict | undefined
+      try { mappingConflict = saved ? this.mappingConflict(saved) : undefined }
+      catch { /* Optional current observations cannot erase an already recorded refusal. Absence remains unknown. */ }
+      return { binding, current: binding ? this.readCurrent(binding.bindingId) : null, operation, grants: this.bindingGrants(binding), ...(binding && input.bindingId && input.revision === undefined ? { access: this.memberAccess(binding) } : {}), ...(mappingConflict ? { mappingConflict } : {}) }
     })
   }
   private writeBinding(binding: RoomBinding): void {

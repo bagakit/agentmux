@@ -5,7 +5,7 @@ import { parseConversationCheckpoint } from './conversation-changes.js'
 import { validateAgentDirectedPromptTarget } from './agent-prompt-condition.js'
 import { dequal } from 'dequal'
 import type { ConnectionActor, ConnectionApplication, ConnectionGrant } from './connections-contract.js'
-import type { RoomBinding, RoomBindingAuthority, RoomBindingMethod, RoomBindingOperation, RoomBindingParamsMap, RoomBindingResultMap, RoomBindingScope, RoomBindingRecordedBindInput, RoomBindingRecordedRelinkInput } from './room-binding-contract.js'
+import type { RoomBinding, RoomBindingAuthority, RoomBindingMethod, RoomBindingOperation, RoomBindingParamsMap, RoomBindingResultMap, RoomBindingScope, RoomBindingRecordedBindInput, RoomBindingRecordedRelinkInput, RoomBindingMappingConflict, RoomBindingMappingDifference } from './room-binding-contract.js'
 
 export const ROOM_BINDING_RPC_METHODS = { 'connection.binding.member.inherit': 'long', 'connection.bind': 'long', 'connection.binding.inspect': 'long', 'connection.binding.ls': 'long', 'connection.binding.pause': 'long', 'connection.binding.resume': 'long', 'connection.binding.detach': 'long', 'connection.binding.relink': 'long', 'connection.grant': 'long' } as const
 export const isRoomBindingMethod = (value: unknown): value is RoomBindingMethod => typeof value === 'string' && Object.hasOwn(ROOM_BINDING_RPC_METHODS, value)
@@ -128,6 +128,17 @@ export function parseRoomBindingParams<M extends RoomBindingMethod>(method: M, v
   if (input.scope.publication !== 'future-shared-conversation') fail()
   return input as RoomBindingParamsMap[M]
 }
+function parseMappingConflict(value: unknown): RoomBindingMappingConflict {
+  const p = object(value, ['status', 'current'])
+  if (p.status !== 'checked' || !Array.isArray(p.current) || p.current.length > 3) fail()
+  const current = (p.current as unknown[]).map(value => {
+    const item = object(value, ['binding', 'differences']), b = object(item.binding, ['bindingId', 'revision', 'state', 'connectionId', 'application', 'externalConversationId', 'executionHostId', 'agentSessionId'])
+    if (b.state !== 'active' && b.state !== 'paused' || !Array.isArray(item.differences) || new Set(item.differences).size !== item.differences.length || item.differences.some(d => !['connection', 'audience', 'target', 'scope', 'source', 'input-target'].includes(String(d)))) fail()
+    return { binding: { bindingId: id(b.bindingId), revision: revision(b.revision), state: b.state as 'active' | 'paused', connectionId: id(b.connectionId), application: parseConnectionApplication(b.application), externalConversationId: text(b.externalConversationId), executionHostId: id(b.executionHostId), agentSessionId: id(b.agentSessionId) }, differences: [...item.differences as RoomBindingMappingDifference[]] }
+  })
+  if (new Set(current.map(item => item.binding.bindingId)).size !== current.length) fail()
+  return { status: 'checked', current }
+}
 export function parseRoomBindingResult<M extends RoomBindingMethod>(method: M, value: unknown, input: RoomBindingParamsMap[M]): RoomBindingResultMap[M] {
   if (method === 'connection.binding.ls') {
     const p = object(value, ['bindings']); if (!Array.isArray(p.bindings)) fail()
@@ -136,14 +147,16 @@ export function parseRoomBindingResult<M extends RoomBindingMethod>(method: M, v
     return { bindings } as RoomBindingResultMap[M]
   }
   if (method === 'connection.binding.inspect') {
-    const p = object(value, ['binding', 'current', 'operation', 'grants', 'access']), expected = input as RoomBindingParamsMap['connection.binding.inspect']
+    const p = object(value, ['binding', 'current', 'operation', 'grants', 'access', 'mappingConflict']), expected = input as RoomBindingParamsMap['connection.binding.inspect']
     const binding = p.binding === null ? null : parseRoomBinding(p.binding), current = p.current === null ? null : parseRoomBinding(p.current), operation = p.operation === null ? null : parseRoomBindingOperation(p.operation)
     if (!Array.isArray(p.grants)) fail(); const grants = (p.grants as unknown[]).map(parseConnectionGrant)
     if (expected.operationId ? operation && operation.operationId !== expected.operationId || binding && (operation?.state !== 'applied' || JSON.stringify(binding) !== JSON.stringify(operation.binding)) : operation !== null || binding && (binding.bindingId !== expected.bindingId || expected.revision !== undefined && binding.revision !== expected.revision)) fail()
     if (current && current.bindingId !== (binding?.bindingId ?? expected.bindingId) || grants.some(g => !binding || g.bindingId !== binding.bindingId || (g.bindingRevision > binding.revision || g.bindingRevision < (binding.publicationBoundary?.revision ?? binding.revision)))) fail()
     const access = p.access === undefined ? undefined : Array.isArray(p.access) ? p.access.map(parseMemberAccess) : fail()
     if (access && (expected.operationId !== undefined || expected.revision !== undefined || !binding || access.some(a => !dequal(a.actor.application, binding.application) || a.local.kind !== 'none' && a.local.grant.bindingId !== binding.bindingId) || new Set(access.map(a => JSON.stringify(a.actor))).size !== access.length)) fail()
-    return { binding, current, operation, grants, ...(access ? { access } : {}) } as RoomBindingResultMap[M]
+    const mappingConflict = p.mappingConflict === undefined ? undefined : parseMappingConflict(p.mappingConflict)
+    if (mappingConflict && (!expected.operationId || operation?.state !== 'refused' || operation.code !== 'ROOM_BINDING_MAPPING_CONFLICT' || !['bind', 'relink'].includes(operation.action))) fail()
+    return { binding, current, operation, grants, ...(access ? { access } : {}), ...(mappingConflict ? { mappingConflict } : {}) } as RoomBindingResultMap[M]
   }
   const op = parseRoomBindingOperation(value), expected = input as RoomBindingParamsMap['connection.bind'] & RoomBindingParamsMap['connection.grant'] & RoomBindingParamsMap['connection.binding.relink']
   const action = method === 'connection.bind' ? 'bind' : method === 'connection.binding.member.inherit' ? 'inherit' : method === 'connection.grant' ? 'grant' : method === 'connection.binding.pause' ? 'pause' : method === 'connection.binding.resume' ? 'resume' : method === 'connection.binding.detach' ? 'detach' : 'relink'
