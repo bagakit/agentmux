@@ -347,4 +347,4 @@ Topic 自动发现只读取原收纳目录的直接 Topic 子目录，不扫描�
 - 左下角默认 Mote 仍打开已有协调对象的快捷面；入口的展开状态独立于 Working / Needs you 等真实 Session 状态，无障碍名称与描述可辨；树条目进入该对象的完整工作面。快捷面可打开完整 Space，完整面可编辑同一 SOUL.md。两条入口复用既有 Tab/Region/Session，不因面板开合新建对象；关闭快捷面沿[独立导航上下文](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)继续背景当前目标与原执行上下文，不能恢复打开时的旧选择；进入完整 Space 保留明确选择的新目标。同一 Mote 有多个会话时，快捷面与重启恢复保留已有目标 Tab 和 Mote 焦点，不能仅因它排在列表前面就换到另一个会话；浮层的目标选择不改写原主工作面的选中。
 - 从画像新建的 Mote 从没有运行 Session 的可用启动面开始，不凭打开或创建预制启动额外 Terminal；从 Topic 晋升则保留原已有成员与工作面。普通 Topic 的首次 Terminal 规则继续成立。
 - SOUL.md 的内容在新执行会话启动时作为该 Mote 的人格上下文实际传入 Core；恢复已有会话保留其原上下文和持久目录。正在运行的会话不因文件保存而声称已热更新；文件编辑入口明确说明新会话使用更新后的内容。读取失败应给出可见原因，原目录、工作面和健康 Session 保留。
-- Topic 晋升为 Mote 已是确认的产品目标，目标约束与尚待确认的功能方案分别见[《伙伴从哪里来》](companions-from-work.md)；复制仍未确认为产品要求。Mote 归档与恢复见[《Mote 归档与恢复》](motes-and-coordination.md#mote-归档与恢复)。
+- Topic 晋升为 Mote 已是确认的产品目标，首版行为与连续性合同见[《伙伴从哪里来》](companions-from-work.md)；复制仍未确认为产品要求。Mote 归档与恢复见[《Mote 归档与恢复》](motes-and-coordination.md#mote-归档与恢复)。
