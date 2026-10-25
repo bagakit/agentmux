@@ -1,6 +1,6 @@
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { useWorkbenchDocument } from '../lib/workbench-document'
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -8,7 +8,7 @@ import { autoUpdate, computePosition, offset, shift, size as floatingSize, type 
 import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
 import type { AgentAvatarAppearance, AppConfig } from '../../../shared/contracts'
 import { useShallow } from 'zustand/react/shallow'
-import { useAppStore } from '../store'
+import { useObservedAppStore } from '../lib/use-observed-app-store'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { observeAgentSession } from '../lib/agent-observation'
 import { attentionAccentFor } from '../lib/attention-event'
@@ -84,7 +84,8 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   const window = document.defaultView!
   const overlayHost = useWindowOverlayHost()
   const identity = useContext(ExecutorIdentityContext)
-  const session = useAppStore(useShallow((store) => {
+  const consumerScope = useMemo(() => ({ sessionIds: sessionId ? [sessionId] : [], navigation: false }), [sessionId])
+  const session = useObservedAppStore('avatar', visible, consumerScope, useShallow((store) => {
     const entry = sessionId ? sessionPresentationById(store.sessions).get(sessionId) : undefined
     return entry?.kind === 'agent' ? {
       executorId: entry.executorId, providerId: entry.providerId, label: entry.label,

@@ -6,7 +6,7 @@ import { sessionPresentationById } from './session-presentation'
 import { workbenchNavigationTabs } from './workbench-navigation-catalog'
 
 type MeasuredConsumerKind = 'composer' | 'sessionPane'
-type ConsumerKind = MeasuredConsumerKind | 'reactions' | 'workbenchTab'
+type ConsumerKind = MeasuredConsumerKind | 'reactions' | 'workbenchTab' | 'avatar'
 type State = ReturnType<typeof useAppStore.getState>
 // This is the read protocol for the retained Pane/Composer, not a second Store.
 // A new fact read must join its notification owner here; actions are imperative.
@@ -15,6 +15,7 @@ const sharedFacts = {
   sessionPane: ['config', 'workbenchSaveWarning', 'scratchTopicSnapshots', 'runtimeEndpointWarnings',
     'localHome', 'demands', 'layouts', 'spaceZoneBindings', 'spatialRequests', 'topicCategories', 'projectGroups'],
   reactions: ['config'],
+  avatar: [],
   workbenchTab: ['layouts', 'config', 'scratchTopicSnapshots']
 } as const satisfies Record<ConsumerKind, readonly (keyof State)[]>
 const navigationFacts = ['retainedSpatialFocus', 'workbenchNavigationInputPolicy', 'mainSurface', 'activeWorkspaceId', 'workbenchSpaceSelection'] as const
@@ -25,6 +26,7 @@ const sessionFacts = [
 const sessionFactsByKind = {
   composer: sessionFacts, sessionPane: sessionFacts,
   reactions: ['agentSteerQueues'],
+  avatar: [],
   workbenchTab: ['agentNames', 'pendingAgentLaunches', 'timelines', 'viewModes']
 } as const satisfies Record<ConsumerKind, readonly (typeof sessionFacts[number])[]>
 type ConsumerFacts<K extends ConsumerKind> = Pick<State, typeof sharedFacts[K][number] | typeof sessionFactsByKind[K][number] | 'sessions' | 'recoveryCandidates' | (K extends 'sessionPane' ? 'tabs' | 'sessionNameMetadata' | typeof navigationFacts[number] : K extends 'workbenchTab' ? 'sessionNameMetadata' : never)>
