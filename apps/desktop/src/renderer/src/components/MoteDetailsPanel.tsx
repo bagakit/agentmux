@@ -260,8 +260,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
       </div>
       <aside className="mote-profile__about" aria-label="Cooperation settings">
       {!sharedQuestion ? <section className="mote-profile__start" aria-label="Work together">
-        <h3>Start a new discussion</h3>
-        <MoteFirstCooperation scope={scope} reference={reference} />
+        <MoteFirstCooperation scope={scope} reference={reference} disclosure />
       </section> : null}
       <MotePrivateChat scope={scope} active={profileActive} reference={reference} onOpenPath={onOpenPath} />
       <details className="mote-profile__preferences" onToggle={event => setPreferencesOpen(event.currentTarget.open)}>

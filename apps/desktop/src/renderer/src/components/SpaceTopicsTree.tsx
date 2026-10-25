@@ -104,14 +104,14 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
   }
   const pendingOpen = useRef<AbortController | null>(null)
   useEffect(() => () => pendingOpen.current?.abort(), [])
-  async function openMote(id: string, action: 'profile' | 'persona' | 'materials' | 'discussion' = 'profile'): Promise<boolean> {
+  async function openMote(id: string, action: 'persona' | 'materials' | 'discussion' = 'discussion'): Promise<boolean> {
     pendingOpen.current?.abort()
     const controller = new AbortController(); pendingOpen.current = controller
     try {
       // Existing directory navigation does not create or repair files. The Topic
       // owner reveals its original selection before refreshing metadata.
       const opened = await openTopic(id, workspace.id, { signal: controller.signal,
-        onRevealed: () => action === 'profile' ? contentPresentation?.expand() : contentPresentation?.collapse() })
+        onRevealed: () => contentPresentation?.collapse() })
       if (!opened || controller.signal.aborted) return false
       if (action === 'persona') {
         const topic = scratchTopicsForWorkspace(useAppStore.getState().scratchTopicSnapshots, workspace)?.find(item => item.id === id)

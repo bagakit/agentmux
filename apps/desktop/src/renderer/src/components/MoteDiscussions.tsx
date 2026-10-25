@@ -50,7 +50,7 @@ export function MoteDiscussions({ scope, active, limit }: { scope: MoteWorkfaceS
       selected={object.choice?.tabId === tab.id && object.choice.groupId === groupId}
       detail={groups && groups.length > 1 ? `Pane ${groupIndex + 1}${visited ? ' · Visited' : ''}` : visited ? 'Recently visited' : 'Open discussion'}
       onOpen={() => open(tab, groupId)} />)}
-    {layout && !rows.length ? <p className="mote-details__hint">No discussions yet. Start with a question above.</p> : null}
+    {layout && !rows.length ? <p className="mote-details__hint">No discussions yet. Use New discussion to begin.</p> : null}
     {!layout && !object.issues.length ? <p className="mote-details__hint">The original discussion directory is not confirmed yet.</p> : null}
   </section>
 }

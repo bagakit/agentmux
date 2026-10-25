@@ -17,8 +17,8 @@ const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 
 
 /** Optional real-question entry. Original Launcher owns the input and original Files own its sources. */
-export function MoteFirstCooperation({ scope, reference }: {
-  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined
+export function MoteFirstCooperation({ scope, reference, disclosure = false }: {
+  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; disclosure?: boolean
 }) {
   const key = 'mote-cooperation:' + JSON.stringify([scope.workspace.hostId, scope.workspace.id,
     scope.workspace.path, scope.topic.id, scope.topic.directoryPath, scope.rootPath])
@@ -45,10 +45,10 @@ export function MoteFirstCooperation({ scope, reference }: {
     } catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
     finally { if (lifetime.current === epoch) { flight.current = false; setPending(false) } }
   }
-  return <section className="mote-cooperation-entry" aria-label="Start working together">
+  const content = <section className="mote-cooperation-entry" aria-label={disclosure ? "Start a new discussion" : "Start working together"}>
     <InputGroup variant="prompt" aria-invalid={Boolean(issue)}>
       <ComposerTextarea aria-label="A question for this Mote" rows={1} value={question}
-        placeholder="What’s on your mind?"
+        placeholder={disclosure ? "A separate discussion…" : "What’s on your mind?"}
         onValueChange={value => useLauncherState.getState().setDraft(key, 'prompt', value)}
         onKeyDown={event => {
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !isImeOwnedKeyboardEvent(event)) {
@@ -69,4 +69,8 @@ export function MoteFirstCooperation({ scope, reference }: {
       </p>)}
     </details> : null}
   </section>
+  return disclosure ? <details className="mote-new-discussion">
+    <summary>{pending ? 'Preparing discussion…' : issue || persistenceIssue ? 'Review draft' : question ? 'Continue draft' : 'New discussion'}<ThemeNavigationForwardIcon size={13} /></summary>
+    <div className="mote-new-discussion__body">{content}</div>
+  </details> : content
 }
