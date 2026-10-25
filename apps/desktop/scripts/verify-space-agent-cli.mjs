@@ -9,6 +9,7 @@ import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
+import { toolSceneOptions } from './fixtures/space-agent-cli/tool-remote.mjs'
 import { startToolCores, stopToolCores } from './fixtures/space-agent-cli/tool-cores.mjs'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 
@@ -16,9 +17,31 @@ const execFile = promisify(execFileCallback)
 const desktop = path.resolve(import.meta.dirname, '..')
 const root = path.resolve(desktop, '../..')
 const fixture = path.join(desktop, 'scripts/fixtures/space-agent-cli')
-const toolMode = process.argv.includes('--tool-workspace')
-assert(process.argv.slice(3).every(arg => arg === '--tool-workspace'), 'Only the explicit --tool-workspace scene flag is accepted.')
+const { toolMode, remoteReceipt, direction } = toolSceneOptions(process.argv.slice(3))
 const evidence = path.resolve(process.argv[2] ?? path.join(root, '.tmp/space-agent-cli/last'))
+if (direction === 'both') {
+  await fs.mkdir(evidence, { recursive: true })
+  const aggregate = { schema: 'agentmux.space-agent-cli.bidirectional.v1', passed: false, receipts: [], limitations: ['Each direction owns a separate original Session and workface; each child uses two real Electron processes. Independent visual approval is not inferred.'] }
+  try {
+    for (const selected of ['remote-agent', 'local-agent']) {
+      const output = path.join(evidence, selected), childReceipt = path.join(output, 'receipt.json')
+      const env = { ...process.env, ...(aggregate.receipts[0] ? { AGENTMUX_PROOF_RENDERER_RECEIPT: aggregate.receipts[0].receipt } : {}) }
+      const execution = execFile(process.execPath, [new URL(import.meta.url).pathname, output, '--tool-workspace', '--remote-target', remoteReceipt, '--direction', selected], { env, maxBuffer: 32 * 1024 * 1024 })
+      execution.child.stderr.on('data', bytes => process.stderr.write(bytes))
+      await execution // execFile resolves only after the actual child close.
+      const bytes = await fs.readFile(childReceipt), result = JSON.parse(bytes)
+      assert.equal(result.passed, true); assert.equal(result.direction, selected); assert.equal(result.actualMachines, 2)
+      assert.equal(result.toolRestart?.noCreateOrResume, true); assert.equal(result.toolRestart?.originalTerminalAttached, true)
+      assert.equal(result.transports[result.roles.agentHostId].transport, selected === 'remote-agent' ? 'ssh' : 'unix')
+      assert.equal(result.transports[result.roles.resourceHostId].transport, selected === 'remote-agent' ? 'unix' : 'ssh')
+      assert.deepEqual(result.cleanup.errors, []); assert.deepEqual(result.cleanup.remaining, [])
+      aggregate.receipts.push({ direction: selected, receipt: childReceipt, sha256: createHash('sha256').update(bytes).digest('hex') })
+    }
+    assert.equal(aggregate.receipts.length, 2); aggregate.passed = true
+  } catch (error) { aggregate.failure = { name: error.name, message: error.message }; throw error }
+  finally { await fs.writeFile(path.join(evidence, 'receipt.json'), JSON.stringify(aggregate, null, 2)) }
+  console.log(JSON.stringify(aggregate)); process.exit(0)
+}
 const require = createRequire(path.join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 // Resolve the existing Host public exports to this candidate source, as other private Desktop proofs do.
@@ -50,8 +73,8 @@ const files = async directory => (await Promise.all((await fs.readdir(directory,
 const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scripts/probe-process.mjs'),
   path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture),
   ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'apps/host/src')), ...await files(path.join(root, 'packages/core/src')),
-  ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/core/vendor/ctxmux')),
-  path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'), path.join(root, 'packages/core/scripts/fixtures/execution-proof-cleanup.mjs'),
+  ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/core/bin')), ...await files(path.join(root, 'packages/core/vendor/ctxmux')),
+  path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'), path.join(root, 'packages/core/scripts/fixtures/execution-proof-cleanup.mjs'), path.join(root, 'packages/core/scripts/fixtures/cross-host-execution-owner.mjs'),
   path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml')]
 const criticalConsumers = new Set(['apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/main/control-ipc-bridge.ts',
   'apps/desktop/src/renderer/src/lib/api.ts', 'apps/desktop/src/renderer/src/lib/control-api.ts',
@@ -90,8 +113,12 @@ try {
       name.startsWith('apps/desktop/scripts/fixtures/') && !name.endsWith('/main.ts') && !name.endsWith('/tool-cores.mjs')
     const exact = Object.entries(receipt.inputs).filter(([name]) => relevant(name))
     assert(exact.length > 100 && exact.every(([name, digest]) => previous.inputs?.[name] === digest), 'A retained renderer must belong to these exact current source/compiled inputs')
-    const retained = path.join(previous.privateRoot, 'renderer')
+    const retained = previous.rendererArtifact?.directory ?? path.join(previous.privateRoot, 'renderer')
     await fs.cp(retained, path.join(privateRoot, 'renderer'), { recursive: true, errorOnExist: true })
+    const actualRenderer = Object.fromEntries(await Promise.all((await files(path.join(privateRoot, 'renderer'))).map(async file => [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
+    const originalRenderer = Object.fromEntries(Object.entries(previous.builtInputs ?? {}).filter(([name]) => name.startsWith('renderer/')))
+    assert(Object.keys(originalRenderer).length > 0, 'Original renderer build hashes are required')
+    assert.deepEqual(actualRenderer, originalRenderer, 'Retained renderer artifacts changed after the original build receipt')
     receipt.rendererReuse = { receipt: path.resolve(process.env.AGENTMUX_PROOF_RENDERER_RECEIPT), originalDirectory: retained, qualifiedInputs: exact.length }
     reusedRenderer = true
   }
@@ -113,7 +140,17 @@ try {
     AGENTMUX_SPATIAL_STATE_STORE: path.join(privateRoot, 'runtime', 'state', 'spatial-state.json'),
     AGENTMUX_MESSAGE_QUEUE_PATH: path.join(privateRoot, 'messages.ndjson') })
   receipt.builtInputs = Object.fromEntries(await Promise.all((await files(path.join(privateRoot, 'renderer'))).concat(await files(path.join(privateRoot, 'main')), await files(path.join(privateRoot, 'preload'))).map(async file => [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
-  if (toolMode) await startToolCores(privateRoot, path.join(root, 'packages/core'), evidence, toolOwners, toolCleanup)
+  receipt.rendererArtifact = { directory: path.join(evidence, `renderer-artifact-${process.pid}`) }
+  await fs.cp(path.join(privateRoot, 'renderer'), receipt.rendererArtifact.directory, { recursive: true, force: false, errorOnExist: true })
+  if (toolMode) {
+    const targets = await startToolCores(privateRoot, path.join(root, 'packages/core'), evidence, toolOwners, toolCleanup, remoteReceipt, direction)
+    receipt.direction = direction; receipt.roles = { agentHostId: targets.agentHostId, resourceHostId: targets.resourceHostId }; receipt.transports = targets.endpoints; receipt.actualMachines = targets.actualMachines
+    if (remoteReceipt) {
+      receipt.remoteLease = JSON.parse(await fs.readFile(path.join(privateRoot, 'remote-owner-lease.json'), 'utf8'))
+      receipt.limitations[0] = `Two physical machines, ${direction}: actual SSH to an isolated Linux Core and Unix to a private Mac Core. Two Electron processes retain the same original native Session/Run/helper objects. No model turn is submitted.`
+      receipt.limitations.push('The remote installed candidate is qualified by its original build receipt and live Core-module hashes; the local compiled Core is recorded separately. Mixed candidate versions are not a claim that the remote installation contains unshipped local source changes.')
+    }
+  }
   for (const phase of toolMode ? ['tool-workspace', 'tool-workspace-restore'] : ['seed', 'restore', 'empty-restore', 'admission', 'after-admission']) {
     const phaseRoot = path.join(privateRoot, `phase-${phase}`)
     await fs.mkdir(phaseRoot)
@@ -181,6 +218,13 @@ finally {
   if (errors.length || receipt.cleanup.remaining.length) receipt.passed = false
   if (receipt.cleanup.remaining.length === 0 && (!toolMode || receipt.passed)) { await fs.rm(privateRoot, { recursive: true, force: true }); receipt.cleanup.temporaryRootRemoved = true }
   for (const [name, value] of previousEnvironment) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
+  if (toolMode) {
+    receipt.evidenceFiles = {}
+    for (const name of ['cleanup.json', ...(remoteReceipt ? ['remote-owner-lease.json', 'remote-owner-cleanup.json'] : [])]) {
+      try { const bytes = await fs.readFile(path.join(evidence, name)); receipt.evidenceFiles[name] = { path: path.join(evidence, name), sha256: hash(bytes) } }
+      catch (error) { receipt.passed = false; receipt.evidenceFiles[name] = { error: String(error) } }
+    }
+  }
   await fs.writeFile(path.join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2))
 }
 assert.deepEqual(receipt.cleanup.errors, [])

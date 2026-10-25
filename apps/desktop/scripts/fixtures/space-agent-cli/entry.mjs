@@ -132,8 +132,8 @@ createRoot(document.getElementById('root')).render(createElement(App))
 
 window.spaceExecution = { read: id => api.sessions.executionBinding(id), observe(id) { const values = []; const errors = []; const stop = api.sessions.observeExecutionBinding(id, value => values.push(value), error => errors.push(error)); window.spaceExecutionReader = { values, errors, stop }; } }
 
-window.spaceSeedToolDraft = async (address, executorId) => {
-  await useAppStore.getState().discoverHostExecutors('agent')
+window.spaceSeedToolDraft = async (address, executorId, agentHostId = 'agent') => {
+  await useAppStore.getState().discoverHostExecutors(agentHostId)
   const state = useAppStore.getState()
   const regionId = state.splitRegion(address.workspaceId, address.tabId, address.regionId, 'right', { prompt: 'Unsent original cross-host draft' })
   if (!regionId) throw new Error('The original Tab did not admit its adjacent draft Region')

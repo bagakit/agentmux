@@ -29,6 +29,8 @@ const toolMode = phase === 'tool-workspace' || toolRestore
 const toolOwners = toolMode ? JSON.parse(await fs.readFile(path.join(privateRoot, 'tool-owners.json'), 'utf8')) : null
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
+// The explicit proof finish owns process exit after exact client cleanup.
+app.on('window-all-closed', () => {})
 process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
 process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
 process.env.AGENTMUX_SPATIAL_STATE_STORE = path.join(privateRoot!, 'runtime', 'state', 'spatial-state.json')
@@ -42,8 +44,10 @@ const initialConfig: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'loc
     { id: SCRATCH_WORKSPACE_ID, hostId: 'local', name: 'Topics', path: path.join(privateRoot, 'topics'), kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 if (toolMode) {
-  initialConfig.hosts.push({ id: 'agent', kind: 'ssh', label: 'Second local Core (private Unix test route)', hostname: 'private-unix-route.invalid' })
-  initialConfig.workspaces.push({ id: 'agent-launch', hostId: 'agent', name: 'Agent launch', path: toolOwners.agentWorkspacePath, kind: 'folder' })
+  initialConfig.hosts.push(toolOwners.remoteHost ?? { id: 'agent', kind: 'ssh', label: 'Second local Core (private Unix test route)', hostname: 'private-unix-route.invalid' })
+  initialConfig.workspaces.find(workspace => workspace.id === 'repo')!.hostId = toolOwners.resourceHostId
+  initialConfig.workspaces.find(workspace => workspace.id === 'repo')!.path = toolOwners.resourceWorkspacePath
+  initialConfig.workspaces.push({ id: 'agent-launch', hostId: toolOwners.agentHostId, name: 'Agent launch', path: toolOwners.agentWorkspacePath, kind: 'folder' })
 }
 let config: AppConfig = phase === 'seed' || phase === 'tool-workspace' ? initialConfig : JSON.parse(await fs.readFile(path.join(privateRoot, 'config.json'), 'utf8'))
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
@@ -191,6 +195,9 @@ async function finish(passed: boolean) {
   result.persisted = (await store.load()).map(one => ({ agentSessionId: one.agentSessionId, run: one.run,
     nativeHandle: one.nativeHandle, workspacePath: one.workspacePath, creation: one.creation }))
   await fs.writeFile(path.join(evidence, `${phase}.json`), JSON.stringify(result, null, 2))
+  // End this actual Renderer before closing its RPC clients; late viewport work
+  // must not manufacture cancellation diagnostics during a healthy client exit.
+  if (win && !win.isDestroyed()) win.destroy()
   bridge.dispose()
   disposeSpatial()
   // Server.stop waits for this deliberately abandoned request; app exit owns its private socket.
@@ -200,7 +207,6 @@ async function finish(passed: boolean) {
   await runtime.dispose().catch(error => { result.cleanupFailure = String(error); result.passed = false })
   await fs.writeFile(path.join(evidence, `${phase}.json`), JSON.stringify(result, null, 2))
   for (const transport of privateTransports) await transport.dispose()
-  if (win && !win.isDestroyed()) win.destroy()
   app.exit(result.passed ? 0 : 1)
 }
 app.whenReady().then(async () => {
@@ -235,8 +241,8 @@ app.whenReady().then(async () => {
     emptySnapshot = false
     if (toolRestore) {
       const expected = JSON.parse(await fs.readFile(path.join(privateRoot, 'tool-restart.json'), 'utf8'))
-      const scopes = runtime.rpcClients(), agentClient = scopes.find(scope => scope.hostId === 'agent')!.client
-      const resourceClient = scopes.find(scope => scope.hostId === 'local')!.client
+      const scopes = runtime.rpcClients(), agentClient = scopes.find(scope => scope.hostId === toolOwners.agentHostId)!.client
+      const resourceClient = scopes.find(scope => scope.hostId === toolOwners.resourceHostId)!.client
       const original = await agentClient.readAgentSession(expected.original.agentSessionId)
       assert.ok(original)
       assert.deepEqual({ id: original!.agentSessionId, run: original!.run, creation: original!.creation, toolExecution: original!.toolExecution },
@@ -268,7 +274,7 @@ app.whenReady().then(async () => {
       result.bindingObservation = { rendererBinding, observedBinding, originalRunRetained: true }
       result.toolRestart = { passed: true, originalElectronPid: expected.pid, currentElectronPid: process.pid,
         originalSessionId: original!.agentSessionId, originalRunId: original!.run.runId, bindingId: expected.bindingId,
-        nativeRuns, durable: durable(restored), agentComposerDrafts: restored.agentComposerDrafts,
+        original, nativeRuns, graph: (await spatialState.read()).graph, durable: durable(restored), agentComposerDrafts: restored.agentComposerDrafts, launcherNameDrafts: restored.launcherNameDrafts,
         launcherSurface: restored.tabs[expected.launcher.tabId].regions[expected.launcher.regionId], noCreateOrResume: true, continuity: result.continuity ?? [], originalTerminalAttached: true }
       await finish(true); return
     }
@@ -281,13 +287,13 @@ app.whenReady().then(async () => {
       const opened = await cli(args)
       result.originalToolOpen = opened
       assert.equal(opened.outcome, 'opened', JSON.stringify(opened.issues))
-      assert.equal(opened.agent.hostId, 'agent')
+      assert.equal(opened.agent.hostId, toolOwners.agentHostId)
       assert.equal(opened.agent.cwd, toolOwners.agentWorkspacePath)
-      assert.deepEqual(opened.agent.toolExecution, { bindingId: opened.agent.toolExecution.bindingId, resourceHostId: 'local',
-        resourceRuntimeId: toolOwners.identities.local.runtimeId, workspacePath: path.join(privateRoot, 'repo') })
+      assert.deepEqual(opened.agent.toolExecution, { bindingId: opened.agent.toolExecution.bindingId, resourceHostId: toolOwners.resourceHostId,
+        resourceRuntimeId: toolOwners.identities[toolOwners.resourceHostId].runtimeId, workspacePath: toolOwners.resourceWorkspacePath })
       const scopes = runtime.rpcClients()
-      const agentClient = scopes.find(scope => scope.hostId === 'agent')!.client
-      const resourceClient = scopes.find(scope => scope.hostId === 'local')!.client
+      const agentClient = scopes.find(scope => scope.hostId === toolOwners.agentHostId)!.client
+      const resourceClient = scopes.find(scope => scope.hostId === toolOwners.resourceHostId)!.client
       const original = await agentClient.readAgentSession(opened.agent.agentSessionId)
       assert.ok(original)
       assert.equal(original!.run.runId, opened.agent.runId)
@@ -301,7 +307,7 @@ app.whenReady().then(async () => {
       try { const row = db.prepare('SELECT input,record FROM bindings JOIN binding_intents USING(id) WHERE id=?').get(bindingId)!;
         retained = { ...JSON.parse(String(row.record)), input: JSON.parse(String(row.input)) } } finally { db.close() }
       assert.equal(retained.input.agent.agentSessionId, original!.agentSessionId)
-      assert.equal(retained.input.agentHostId, 'agent'); assert.equal(retained.input.resourceHostId, 'local')
+      assert.equal(retained.input.agentHostId, toolOwners.agentHostId); assert.equal(retained.input.resourceHostId, toolOwners.resourceHostId)
       const frontend = await agentClient.readRunReplay({ runId: retained.bridge.frontend.runId }, 0, 'raw')
       const executor = await resourceClient.readRunReplay({ runId: retained.bridge.executor.runId }, 0, 'raw')
       assert.equal(frontend.run.state, 'running'); assert.equal(executor.run.state, 'running')
@@ -319,11 +325,11 @@ app.whenReady().then(async () => {
       const snapshot = await runtime.snapshot(config)
       assert(snapshot.sessions.some(one => one.control.kind === 'agent' && one.control.agentSessionId === original!.agentSessionId && one.toolExecution?.bindingId === bindingId))
       const launch = calls.find(call => call.operation === 'launch')!.args[0] as any
-      assert.deepEqual(launch.toolWorkspace, { id: 'repo', hostId: 'local', path: path.join(privateRoot, 'repo') })
+      assert.deepEqual(launch.toolWorkspace, { id: 'repo', hostId: toolOwners.resourceHostId, path: toolOwners.resourceWorkspacePath })
       assert.equal(launch.executionWorkspaceId, 'agent-launch')
       const rendererBinding = await win.webContents.executeJavaScript(`spaceExecution.read(${JSON.stringify(bindingId)})`)
       assert.equal(rendererBinding.bindingId, bindingId); assert.equal(rendererBinding.agentSessionId, original!.agentSessionId)
-      assert.equal(rendererBinding.notices.length, 4, 'Provider notices reach the actual preload reader')
+      assert.deepEqual(rendererBinding.notices.filter((notice: any) => notice.capability !== 'agent-control').map((notice: any) => notice.capability).sort(), ['hooks', 'mcp', 'skills'], 'Provider qualification facts reach the actual preload reader; configured Agent control may clear only its own notice')
       await win.webContents.executeJavaScript(`spaceExecution.observe(${JSON.stringify(bindingId)})`)
       for (let index = 0; index < 100; index++) {
         if (await win.webContents.executeJavaScript('spaceExecutionReader.values.length > 0')) break
@@ -332,7 +338,7 @@ app.whenReady().then(async () => {
       const observedBinding = await win.webContents.executeJavaScript('spaceExecutionReader.values[0]')
       assert.equal(observedBinding.bindingId, bindingId)
       assert.equal(observedBinding.agentSessionId, original!.agentSessionId)
-      assert.equal(observedBinding.notices.length, 4)
+      assert.deepEqual(observedBinding.notices.filter((notice: any) => notice.capability !== 'agent-control').map((notice: any) => notice.capability).sort(), ['hooks', 'mcp', 'skills'])
       await win.webContents.executeJavaScript('spaceExecutionReader.stop()')
       const stoppedReader = await win.webContents.executeJavaScript('({ count: spaceExecutionReader.values.length, errors: spaceExecutionReader.errors })')
       await executionBindings!.inspect(bindingId)
@@ -341,8 +347,8 @@ app.whenReady().then(async () => {
       assert.equal((await agentClient.readAgentSession(original!.agentSessionId))!.run.runId, original!.run.runId)
       result.bindingObservation = { rendererBinding, observedBinding, stoppedReader, originalRunRetained: true }
       result.toolBinding = { original, opened, repeated, inspection, coordinator: retained, frontend: frontend.run, executor: executor.run,
-        snapshot: snapshot.sessions, launch, actualMachines: 1, modelTurnSubmitted: false }
-      const launcher = await win.webContents.executeJavaScript(`spaceSeedToolDraft(${JSON.stringify(opened.to)}, ${JSON.stringify(toolOwners.executor.executorId)})`)
+        snapshot: snapshot.sessions, launch, direction: toolOwners.direction, roles: { agentHostId: toolOwners.agentHostId, resourceHostId: toolOwners.resourceHostId }, actualMachines: toolOwners.actualMachines, transports: toolOwners.endpoints, modelTurnSubmitted: false }
+      const launcher = await win.webContents.executeJavaScript(`spaceSeedToolDraft(${JSON.stringify(opened.to)}, ${JSON.stringify(toolOwners.executor.executorId)}, ${JSON.stringify(toolOwners.agentHostId)})`)
       await win.webContents.executeJavaScript('window.spaceFlush()')
       const rendererSessionId = snapshot.sessions.find(one => one.control.kind === 'agent' && one.control.agentSessionId === original!.agentSessionId)!.id
       await until(`window.spaceNativeReady(${JSON.stringify(opened.to.regionId)}, ${JSON.stringify(rendererSessionId)}, ${JSON.stringify(original!.run.runId)})`, 30000)
