@@ -4,6 +4,41 @@
 `ConnectionPort` through `AgentMuxRpcServiceOptions.connections`; Core has no
 reverse dependency on this package, an adapter SDK, Electron or React.
 
+## Conversation capability ownership
+
+Product requirements live in the [external conversation contract](../../docs/design/behavior/conversation-mode.md#共同来源与双向交付).
+This map locates the implementation and its consumer tests; it is not an installation
+receipt or a second capability registry. A test proves its actual source, protocol and
+consumer boundary, not every feature with a similar name.
+
+| Boundary | Original owner and consumer | Verification entry |
+| --- | --- | --- |
+| Native intake, author and input | [Durable ingress](src/durable-ingress.ts), Core input and original Binding/Grant | [Feishu post intake](test/feishu-post-intake-consumer.test.ts), [Discord channel](test/discord-channel.test.ts) |
+| Shared conversation, source eligibility and no echo | [Publication content](src/publication-content.ts) consumes the Core conversation; [PublicationHost](src/publication-host.ts) retains each original audience/effect | [Conversation completeness](test/group-conversation-completeness-consumer.test.ts) |
+| Display profiles in clients | [Channel metadata](#channel-display-metadata), shared [profile hook](../../apps/desktop/src/renderer/src/lib/use-connector-room-name.ts) and [avatar component](../client-ui/src/components/ChannelProfileAvatar.tsx); each client owns its image policy | [Profile refresh](../../apps/desktop/test/connector-profile-refresh.test.tsx) covers IPC/SDK observations; actual Renderer image decoding requires the production policy |
+| Public author presentation | [Speaker projection](src/publication-speaker.ts), original author resource and adapter rendering | [Human author](../../apps/host/test/author-profile-publication-consumer.test.ts), [A2A](test/a2a-publication-consumer.test.ts); body delivery and portrait rendering are separate assertions |
+| App image attachments | [Composer attachment producer](../../apps/desktop/src/renderer/src/lib/use-composer-attachments.ts), original Core input resource and [input image publication](src/publication-input-images.ts) | [Input image consumer](../../apps/host/test/input-image-publication-consumer.test.ts); prepared input references alone do not prove the App producer |
+| Native images, files and diagrams | Original recorded resource and [publication](#durable-publication); adapter upload/message receipts | [Recorded image](test/recorded-image-publication-consumer.test.ts), [recorded file](test/recorded-file-publication-consumer.test.ts) |
+| Questions, permissions and feedback | Original Core responders and independent grants; adapter actions and original Outbox | [Question actions](test/feishu-question-actions.test.ts), [permission actions](test/feishu-permission-actions.test.ts), [query feedback](test/feishu-query-feedback.test.ts) |
+| Reply metrics and durable effects | Original source/turn metrics, [reply metadata](src/publication-reply-metadata.ts), [frozen request and delivery owner](#durable-publication) | [Reply metadata](test/publication-reply-metadata-consumer.test.ts), [reply footer](test/feishu-reply-footer.test.ts), [worker](test/publication-worker-consumer.test.ts) |
+
+The implementations have distinct limits. [Discord rendering](src/adapters/discord/render.ts)
+currently consumes author name/role, not `speaker.avatar`, and does not declare automatic
+query feedback or reply metrics. [External speaker projection](src/publication-speaker.ts)
+currently preserves the external role without projecting the original external profile into
+cross-group copies. Feishu post image nodes and Discord attachment/embed intake are not
+complete inbound resource support. These gaps do not remove the corresponding product
+requirements or certify another platform/source combination.
+
+Keep regression coverage at the boundary being changed: an `<img src>` assertion does
+not prove browser decoding; a hand-built typed attachment does not prove paste/submit;
+a body received by both SDK fixtures does not prove both platforms render a portrait.
+Use the original consumer and a loaded counterexample for changed behavior, retaining
+its authority, unknown-effect and independent-content cases. Candidate results and live
+platform receipts remain in the owning task evidence; historical results are not current
+installation truth. This is the existing [test strategy](../../docs/testing/strategy.md#任务验收与假绿防护),
+not an additional full-suite or release gate.
+
 ## Connection ownership
 
 `ConnectionHost` owns connection configuration and its original configuration
@@ -468,7 +503,7 @@ expose the original image upload, delivery and any unresolved resource gap.
 
 Public `connection.delivery.inspect` and bounded `connection.delivery.ls` expose the original safe receipt and exact source reference, excluding body, prepared wire and credentials.
 
-Query reactions use an `ingress` source reference and `queryFeedback` with the original ingress/message identity and milestone. Their native `mapping.reactionId` is distinct from `mapping.messageId`, which remains the user's original query. Feishu uses its native received, started and completed reactions; the semantic contract is defined in [Conversation behavior](../../docs/design/behavior/conversation-mode.md#共同来源与双向交付). These observations reuse the existing SDK, RPC and CLI delivery reads rather than introducing a separate reaction command. New Feishu setup permission reviews include `im:message.reactions:write_only`; existing application grants are not changed automatically. Missing reaction permission leaves an inspectable local delivery failure while input and ordinary replies continue.
+Query reactions use an `ingress` source reference and `queryFeedback` with the original ingress/message identity and milestone. Their native `mapping.reactionId` is distinct from `mapping.messageId`, which remains the user's original query. Feishu automatically manages only the waiting and input-delivered markers. The Agent chooses processing or result reactions through the original bound native API; old frozen effects retain their inspection meaning. The semantic contract is defined in [Conversation behavior](../../docs/design/behavior/conversation-mode.md#接收反馈与自主-reaction). These observations reuse the existing SDK, RPC and CLI delivery reads rather than introducing a separate reaction command. New Feishu setup permission reviews include `im:message.reactions:write_only`; existing application grants are not changed automatically. Missing reaction permission leaves an inspectable local delivery failure while input and ordinary replies continue.
 
 The scoped list can report a source gap before any effect exists. Source replacement retains its old frontier for explicit relinking; storage or authority uncertainty retains the original work and reports the failed service step. Closing this publication owner releases only its readers and external-effect observation, preserving original Agents and durable operations.
 
@@ -757,14 +792,14 @@ model send tool, duplicate queue or adapter-local message cache. Receiver,
 parent reads and publication reuse the same official Client for the exact
 connection, application and credential.
 
-`feishu-post-group-v1` renders plain text nodes in a localized post. The original
-text, including quotes, Unicode and apparent mention markup, remains text with
-`un_escape: false`; the renderer creates no mention, card action or answer
-control. Typed question prompts and option labels are informational text until
-a separate authorized interaction owner supplies an exact action reference.
-The current publication intent has no exact reply target, so this version uses
-explicit group addressing and never infers which input caused a reply.
-[Message content schema](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/im-v1/message/create_json.md)
+New speech uses the current native card renderer in
+[Feishu publication](src/adapters/feishu/publication.ts), with shared author data,
+role-specific layout, complete body blocks and optional original reply metrics.
+Questions and permissions use their original authorized action references.
+Retained frozen post/card requests keep their original dispatch, inspection and
+authorized-retry semantics without migration or re-preparation; new messages use
+the current renderer. Rendering never creates an input-to-reply association from
+text or nearby messages.
 
 A create request uses `chat_id` addressing and a stable SHA-256 operation key
 encoded in 43 base64url characters. The official create contract permits a
@@ -776,19 +811,23 @@ retry. Rate limiting, missing targets and platform failure do not trigger a
 thread-to-group fallback.
 [Create message](https://open.feishu.cn/document/server-docs/im-v1/message/create.md)
 
-For recorded images the leaf uses the pinned official SDK `im.image.create` multipart API, then a post containing an image-only paragraph in its original fragment position. The effective byte budget is 10 MiB, bounded by the existing Core resource budget; GIF sides are limited to 2000 pixels and other accepted raster sides to 12000. Dimensions are verified by the original Core resource codec from the bytes. These header and size checks are not a full image decoder or a promise that the platform accepts every file. Missing upload keys never confirm success. Image message updates and withdrawals reuse the original message mapping, just as text does.
+For recorded images the leaf uses the pinned official SDK `im.image.create`
+multipart API, then a native image card in the original fragment position.
+Dimensions and byte identity come from the original Core resource codec; the
+adapter's native limits and final encoded-body budget remain in its source.
+Missing upload keys do not confirm success. The existing resource upload and
+message operations retain separate receipts.
 
-The Host fragments complete source text on Unicode boundaries with a conservative
-4 KiB UTF-8 fragment budget. The leaf also checks the final, double-encoded HTTP
-body against the platform's 30 KiB post limit, including target and envelope
-fields. An oversized request is rejected during preparation before any platform
-effect; the original pending operation and service diagnostic remain available.
-Source text is never silently clipped. Axios receives the exact frozen request
-body through `transformRequest`, preserving the durable bytes despite the SDK's
-object-merging request implementation.
+The Host and adapter preserve complete source blocks while checking the final
+encoded HTTP body, including its envelope. Oversized preparation leaves the
+original pending operation and service diagnostic; source text is not silently
+clipped. Axios sends the exact frozen body through `transformRequest`, preserving
+durable bytes despite the SDK's object-merging request implementation.
 
-An update uses the original durable message ID with PUT. A withdrawal uses DELETE
-for that same message. Both receive the original read-only mapping; an omitted
+A card update uses the original durable message mapping with PATCH, or the
+original card entity with its ordered sequence. Retained post requests keep their
+original PUT semantics. A withdrawal uses DELETE for the original message. Each
+operation receives the original read-only mapping; an omitted
 thread in a successful acknowledgement preserves its known original value.
 Explicitly contradictory message, chat, application or thread facts remain
 unknown rather than replacing the mapping. Read-only reconciliation fetches the
