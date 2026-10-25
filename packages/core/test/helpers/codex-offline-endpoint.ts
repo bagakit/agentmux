@@ -7,7 +7,8 @@ export async function offlineEndpoint(home: string, inputs: string[], workspace?
   const requests: Record<string, unknown>[] = []
   const endpoint = createServer(async (request, response) => {
     if (request.method === 'GET') { response.setHeader('content-type', 'application/json'); response.end('{"data":[]}'); return }
-    let body = ''; for await (const chunk of request) body += chunk
+    const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    const body = Buffer.concat(chunks).toString('utf8')
     const value = JSON.parse(body), text = value.input?.filter((item: any) => item.role === 'user').at(-1)?.content?.map((item: any) => item.text ?? '').join('') ?? ''
     if (!text.includes('PRIVATE_QUEUE') && !text.includes('<amux')) { response.setHeader('content-type', 'application/json'); response.end('{}'); return }
     requests.push(value)
