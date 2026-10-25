@@ -296,3 +296,33 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
   .launcher-execution__mode small { margin-top: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .launcher-execution__mode { transition: none; } }
+/* Short, narrow Regions keep the task and primary action ahead of secondary reading. */
+@container launcher (max-width: 560px) {
+  .launch-surface[data-density='compact'] .launcher-execution__modes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .launch-surface[data-density='compact'] .launcher-execution__mode { position: relative; justify-content: center; min-height: 36px; padding: var(--sp-2); gap: 0; }
+  .launch-surface[data-density='compact'] .launcher-execution__mode > svg:first-child { display: none; }
+  .launch-surface[data-density='compact'] .launcher-execution__mode > svg:last-child { position: absolute; top: 3px; right: 3px; width: 10px; height: 10px; }
+  .launch-surface[data-density='compact'] .launcher-execution__mode > span { padding-inline: var(--sp-1); text-align: center; }
+  .launch-surface[data-density='compact'] .launcher-execution { margin-bottom: var(--sp-1); }
+  .launch-surface[data-density='compact'] .launcher-execution__actions { padding-top: 0; }
+  .launch-surface[data-density='compact'] .launcher-environment[data-role='separate'] { padding-bottom: var(--sp-1); margin-bottom: var(--sp-2); gap: var(--sp-2); }
+  .launch-surface[data-density='compact'] .launcher-environment[data-role='separate'] .launcher-environment__project { gap: var(--sp-1) var(--sp-2); }
+  .launch-surface[data-density='compact'] .launcher-environment__title { gap: var(--sp-2); }
+  .launch-surface[data-density='compact'] .launcher-environment__path { line-height: 1.2; }
+  .launch-surface[data-density='compact'] .launcher-environment__host { min-height: 28px; padding: var(--sp-2); }
+  .launch-surface[data-density='compact'] .agent-catalog-wrapper { margin-bottom: var(--sp-1); }
+  .launch-surface[data-density='compact'] .launch-surface__footer { flex-wrap: nowrap; margin-top: 0; gap: var(--sp-2); }
+  .launch-surface[data-density='compact'] .launch-surface__footer > .launcher-mote { flex: 0 1 auto; min-width: 0; }
+  .launch-surface[data-density='compact'] .launcher-mote__actions { width: 100%; min-height: 32px; }
+  .launch-surface[data-density='compact'] .launcher-mote__create { flex: 1 1 auto; min-height: 30px; padding-inline: var(--sp-2); gap: var(--sp-1); }
+  .launch-surface[data-density='compact'] .launcher-mote__create > span { overflow: hidden; text-overflow: ellipsis; }
+  .launch-surface[data-density='compact'] .launcher-mote__target { flex: none; min-height: 30px; padding-inline: var(--sp-2); gap: var(--sp-1); }
+  .launch-surface[data-density='compact'] .launcher-mote__name { display: none; }
+  .launch-surface[data-density='compact'] .launcher-primary-actions { gap: var(--sp-2); }
+  .launch-surface[data-density='compact'] .launcher-resume-trigger { min-height: 32px; padding-inline: var(--sp-2); }
+  .launch-surface[data-density='compact'] .launcher-launch-button { min-height: 32px; min-width: 76px; padding-inline: var(--sp-3); }
+}
+
+@container launcher (min-width: 361px) and (max-width: 560px) {
+  .launch-surface[data-density='compact'] .launcher-mote__name { display: inline; }
+}
