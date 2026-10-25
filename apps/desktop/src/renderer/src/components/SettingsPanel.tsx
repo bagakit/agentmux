@@ -11,7 +11,7 @@ import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SettingsOverviewPane } from './settings/SettingsOverviewPane'
 import { SettingsSearchResults } from './settings/SettingsSearchResults'
 import { SettingsSidebarNavigation } from './settings/SettingsSidebarNavigation'
-import { SETTINGS_GROUPS } from './settings/settings-catalog'
+import { SETTINGS_GROUPS, type SettingsModule } from './settings/settings-catalog'
 import { settingsCatalog, settingsModules, visibleSettingsSections, settingsNavGroups, type SettingsPageId, type SettingsSectionId } from './settings/settings-modules'
 import '../styles/settings-search.css'
 
@@ -200,7 +200,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
                   {group.items.map((item) => {
                     const Icon = item.icon
                     return <DropdownMenu.RadioItem key={item.id} value={item.id} className="settings-section-menu__item" data-settings-target={item.id}>
-                      <span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span><Icon size={15} animation={!showResults && item.group === 'work' && active === item.id ? 'selection' : 'none'} aria-hidden="true" />{item.title}
+                      <span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span><Icon size={15} animation={!showResults && (item as SettingsModule).selectionAnimation && active === item.id ? 'selection' : 'none'} aria-hidden="true" />{item.title}
                     </DropdownMenu.RadioItem>
                   })}
                 </Fragment>)}

@@ -10,7 +10,8 @@ const SurveyIcon = semanticIconComponent('navigation.survey')
 
 
 export const surveySettingsModule = {
-  id: 'survey', group: 'work', title: 'Survey', icon: SurveyIcon,
+  id: 'survey', group: 'know', title: 'Survey', icon: SurveyIcon,
+  selectionAnimation: true,
   description: 'Personalize your browser start page and continue research.',
   keywords: 'work survey research browser default system http https browsing exploration start page title subtitle icon background history cards count motion interactive',
   searchTargets: [

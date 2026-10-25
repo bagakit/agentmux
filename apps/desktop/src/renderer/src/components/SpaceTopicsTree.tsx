@@ -15,11 +15,12 @@ import { formatSpaceAddress } from '@agentmux/core/sharing'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { TopicCategoryContextMenu, TopicCategoryActionsMenu } from './TopicCategoryMenu'
 import { isKnowledgeTopicInBindings } from '@agentmux/host/topic-categories'
-import { originalTopicAddress, directoryIdentity } from '../../../shared/space-addresses'
+import { originalTopicAddress } from '../../../shared/space-addresses'
 import { TopicCategoryDialog } from './TopicCategoryDialog'
 import { orderTopics, partitionPinned } from '../lib/topic-order'
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import { useAppStore } from '../store'
+import { openTopicDirectory } from '../lib/topic-directory-navigation'
 import { matchesSpaceQuery } from '../lib/space-tree-navigation'
 import { categorySpaceIconTarget, topicSpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
@@ -59,7 +60,6 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
   const collapsedGroups = useAppStore((state) => state.collapsedProjectGroups)
   const toggleGroup = useAppStore((state) => state.toggleProjectGroup)
   const togglePinned = useAppStore((state) => state.togglePinnedItem)
-  const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const openTopic = useAppStore((state) => state.openScratchTopic)
   const createTopic = useAppStore((state) => state.createScratchTopic)
   const reportError = useAppStore((state) => state.reportError)
@@ -100,7 +100,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
   const archivedMotes = motes.filter(topic => topic.moteArchive?.state === 'archived')
 
   async function openOverview(): Promise<void> {
-    try { const preparing = selectWorkspace(workspace.id); useAppStore.setState({ workbenchSpaceSelection: { spaceId: directoryIdentity(workspace.hostId, workspace.path), zoneId: null, workspaceId: workspace.id, topicId: null, tabId: null, groupId: null, regionId: null }, workspaceTool: 'files-branches', toolsOpen: true }); await preparing } catch (cause) { reportError(cause) }
+    try { await openTopicDirectory(workspace) } catch (cause) { reportError(cause) }
   }
   const pendingOpen = useRef<AbortController | null>(null)
   useEffect(() => () => pendingOpen.current?.abort(), [])

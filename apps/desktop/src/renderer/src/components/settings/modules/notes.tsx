@@ -16,7 +16,8 @@ async function saveNotes(value: Required<NotesPreferences>, expected: Required<N
 }
 
 export const notesSettingsModule = {
-  id: 'notes', group: 'work', title: 'Recall', icon: RecallIcon,
+  id: 'notes', group: 'know', title: 'Note', icon: RecallIcon,
+  selectionAnimation: true,
   description: 'A comfortable reading space for your notebooks and pages.',
   keywords: 'recall directory folder storage path work notes note notebook notebooks pages quick notes 随手记 knowledge reading font size width wide',
   searchTargets: [

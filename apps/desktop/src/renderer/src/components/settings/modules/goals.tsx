@@ -18,6 +18,7 @@ async function saveGoals(collapsed: boolean, expected: boolean, preferences: Req
 
 export const goalsSettingsModule = {
   id: 'goals', group: 'work', title: 'Goals', icon: GoalsIcon,
+  selectionAnimation: true,
   description: 'Choose a starting view and keep your goals in sight.',
   keywords: 'work goals default view list board finished history common actions collapsed expanded prompt library requester supervisor PMO continue',
   searchTargets: [

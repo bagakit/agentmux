@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react'
+import type { IconAnimation } from '@agentmux/client-ui/icons'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import type { SettingsPageId } from './settings-modules'
@@ -10,13 +11,14 @@ export type ChannelPresentation = { section: SettingsPageId; title: string; icon
 export const SETTINGS_GROUPS = [
   { id: 'preferences', title: 'Preferences', description: 'Your profile and everyday defaults.' },
   { id: 'agents', title: 'Agents', description: 'Agent CLIs and session recovery.' },
+  { id: 'mote', title: 'Mote', description: 'Your collaborators and how they grow.' },
+  { id: 'work', title: 'Work', description: 'Organize work, focus attention and pursue goals.' },
+  { id: 'know', title: 'Know', description: 'Develop topics, explore sources and keep notes.' },
   { id: 'browser-use', title: 'Browser use', description: 'Browsing and Agent interaction.' },
   { id: 'message-tool', title: 'Message Tool', description: 'Input, collaboration and reusable instructions.' },
   { id: 'remote', title: 'Remote', description: 'Hosts, remote execution, and device access.' },
   { id: 'conversation-channels', title: 'Conversation Channels', description: 'Conversations in the app and beyond.' },
-  { id: 'toolkit', title: 'Mods', description: 'Tools that extend your workspace.' },
-  { id: 'work', title: 'Work', description: 'Spaces for doing, exploring and keeping.' },
-  { id: 'mote', title: 'Mote', description: 'Your personal collaborators.' }
+  { id: 'toolkit', title: 'Mods', description: 'Tools that extend your workspace.' }
 ] as const
 
 export type SettingsPaneProps = {
@@ -45,9 +47,11 @@ export type SettingsModule = {
   description: string
   keywords: string
   searchTargets?: readonly SettingsSearchTarget[]
-  icon: ComponentType<{ size?: number | undefined }>
+  icon: ComponentType<{ size?: number | undefined; animation?: IconAnimation | undefined }>
   /** Presentation of this leaf's applications. Never implementation support or native authorization. */
   channel?: { adapterId: string; domains: readonly { domain: string; title: string }[]; icon: ComponentType<{ size?: number | undefined }> }
+  /** This module's authored icon supports a finite navigation-selection gesture. */
+  selectionAnimation?: boolean
   /** Optional ordered shortcut on Overview; the original editor remains the destination. */
   overviewShortcut?: number
   savedSummary(config: AppConfig): string

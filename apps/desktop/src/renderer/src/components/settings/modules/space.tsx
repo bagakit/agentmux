@@ -16,6 +16,7 @@ async function savePreferences(value: SpacePreferences, expected: SpacePreferenc
 
 export const spaceSettingsModule = {
   id: 'space', group: 'work', title: 'Space', icon: SpaceIcon,
+  selectionAnimation: true,
   description: 'Project rail density, Git History, topics and projects.',
   keywords: 'work topic topics project projects density rail compact dense git history commit time date',
   searchTargets: [

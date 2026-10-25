@@ -23,6 +23,7 @@ import { inappConversationSettingsModule } from './modules/inapp-conversation'
 import { toolkitSettingsModule } from './modules/toolkit'
 import { spaceSettingsModule } from './modules/space'
 import { goalsSettingsModule } from './modules/goals'
+import { topicSettingsModule, motePromotionSettingsModule } from './modules/topic'
 import { moteSettingsModule } from './modules/mote'
 import { surveySettingsModule } from './modules/survey'
 import { notesSettingsModule } from './modules/notes'
@@ -46,9 +47,11 @@ export const settingsModules = [
   promptsSettingsModule,
   amuxProtocolsSettingsModule,
   moteSettingsModule,
+  motePromotionSettingsModule,
   spaceSettingsModule,
   focusSettingsModule,
   goalsSettingsModule,
+  topicSettingsModule,
   surveySettingsModule,
   notesSettingsModule,
   toolkitSettingsModule,

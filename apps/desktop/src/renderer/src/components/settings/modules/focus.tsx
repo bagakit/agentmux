@@ -7,6 +7,7 @@ import type { SettingsModule } from '../settings-catalog'
 const FocusIcon = semanticIconComponent('navigation.focus')
 export const focusSettingsModule = {
   id: 'focus', group: 'work', title: 'Focus', icon: FocusIcon,
+  selectionAnimation: true,
   description: 'Project scanning, Agent previews, Map contours and zoom levels, and where links open.',
   keywords: 'focus work recent activity hours window project lanes timeline time ruler time zone reply excerpt density preview hover keyboard inputs links demo map motion animation reduced system polygon bezier contours LOD zoom levels information',
   searchTargets: [
