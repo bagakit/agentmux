@@ -1,8 +1,7 @@
 /* Focus owns the view choice; the canvas owns only its controls and reading surface. */
-.focus-view-switch { display: flex; align-items: center; flex: 0 0 auto; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-sm); -webkit-app-region: no-drag; }
-.focus-view-switch button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 26px; padding: 3px 9px; border: 0; border-radius: 4px; background: transparent; color: var(--text-2); font-size: var(--fs-meta); cursor: pointer; }
-.focus-view-switch button[aria-pressed=true] { color: var(--text); background: var(--surface-3); box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 7%, transparent); }
-.focus-view-switch button:focus-visible, .collaboration-map button:focus-visible, .collaboration-filter-menu [role=menuitemcheckbox]:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.focus-view-switch { margin: 0; align-items: center; -webkit-app-region: no-drag; }
+.focus-view-switch button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 26px; height: auto; padding: var(--sp-1) var(--sp-4); font-weight: 500; }
+.collaboration-map button:focus-visible, .collaboration-filter-menu [role=menuitemcheckbox]:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .focus-toolbar > .top-row-leading-chrome { flex: 0 0 auto; }
 .focus-toolbar > .focus-view-switch { margin-right: 8px; }
 .collaboration-map__header { display: flex; align-items: center; flex: 0 0 auto; gap: 10px; min-height: 44px; padding: 5px 12px 5px 0; border-bottom: 1px solid var(--line); background: var(--surface-1); -webkit-app-region: drag; }

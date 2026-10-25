@@ -1,5 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../store'
+import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 
 const ListIcon = semanticIconComponent('object.list')
 const MapIcon = semanticIconComponent('object.map')
@@ -8,8 +9,7 @@ const MapIcon = semanticIconComponent('object.map')
 export function FocusViewSwitch() {
   const view = useAppStore(state => state.focusView)
   const setView = useAppStore(state => state.setFocusView)
-  return <div className="focus-view-switch" role="group" aria-label="Focus view">
-    <button type="button" aria-label="List" aria-pressed={view === 'list'} onClick={() => setView('list')}><ListIcon size={14} /><span>List</span></button>
-    <button type="button" aria-label="Map" aria-pressed={view === 'map'} onClick={() => setView('map')}><MapIcon size={14} /><span>Map</span></button>
-  </div>
+  return <SurfaceModeSwitch value={view} onChange={setView} active semantics="pressed" className="focus-view-switch" ariaLabel="Focus view"
+    options={[{ value: 'list', ariaLabel: 'List', label: <><ListIcon size={14} /><span>List</span></> },
+      { value: 'map', ariaLabel: 'Map', label: <><MapIcon size={14} /><span>Map</span></> }]} />
 }
