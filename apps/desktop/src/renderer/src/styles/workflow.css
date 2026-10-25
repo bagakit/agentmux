@@ -116,6 +116,7 @@
 .observation-gallery__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }
 .observation-sample { min-width: 0; display: grid; align-content: start; gap: var(--sp-3); padding: var(--sp-5); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--hl); }
 .observation-sample__body { min-height: 116px; color: var(--text-2); font-size: var(--fs-prose); }
+.observation-sample--conversation { grid-column: 1 / -1; }
 .observation-sample__status { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
 .observation-sample__status .status { color: var(--green); }
 .observation-sample .service-window { margin: 0; padding: var(--sp-3); background: var(--surface-0); box-shadow: none; }

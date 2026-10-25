@@ -6,6 +6,7 @@ import { StaticConversationView as ConversationView, StaticActivityView as Activ
 import { NativeProcessObservation } from '../src/components/NativeProcessObservation.js'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
 import { metricsPage, responsePage } from './fixtures/conversation-metrics.js'
+import { projectConversationReading } from '../src/lib/conversation-records.js'
 import { projectConversationMetrics } from '../src/lib/conversation-metrics.js'
 
 let root: Root, host: HTMLDivElement
@@ -87,7 +88,7 @@ it('shows one exact cumulative turn report at its original process position, wit
 it('keeps response scope, a real zero and missing duration distinct, and continuously exposes a metric failure without hiding the original record', async () => {
   await show(responsePage())
   const summary = host.querySelector('.conversation-metrics > summary')!
-  expect(summary.textContent).toContain('本次响应记录')
+  expect(summary.textContent).toContain('本次响应用量')
   expect(summary.textContent).toContain('输出 0 tokens')
   expect(summary.textContent).toContain('耗时未记录')
   expect(host.querySelector('[role="status"]')?.textContent).toContain('原记录与 Agent 仍可使用')
@@ -136,15 +137,16 @@ it('retains read raw bodies, expansion and a real Range when metadata updates an
 
 it('preserves interrupted and failed observations, original Copy, and the common ConversationView consumer', async () => {
   const page = metricsPage(); page.items = page.items.filter(item => item.id === 'answer' || item.id === 'duration')
-  page.items[1] = { ...page.items[1]!, metrics: { scope: 'turn', status: 'interrupted', durationMs: 0 } }
+  page.items[1] = { ...page.items[1]!, turnOutcome: { status: 'interrupted' }, metrics: { scope: 'turn', durationMs: 0 } }
   await show(page, true)
-  expect(host.textContent).toContain('本轮已中断')
+  expect(host.querySelector('.wf-card')?.getAttribute('data-status')).toBe('interrupted')
   expect(host.textContent).toContain('用时 0ms')
   const action = record('answer').querySelector('[aria-label="Copy message"]')!; await click(action)
   expect(copy).toHaveBeenCalledWith('系统版本 26.5.1，架构为 arm64。', expect.any(Function))
-  page.items[1] = { ...page.items[1]!, metrics: { scope: 'turn', status: 'failed' } }
+  page.items[1] = { ...page.items[1]!, turnOutcome: { status: 'failed', failure: { code: 'MODEL_REQUEST_FAILED', message: 'Original provider failure', recovery: 'Review the recorded failure.', nativeTurnId: 'turn-original' } }, metrics: { scope: 'turn' } }
   await show({ ...page, items: [...page.items] }, true)
-  expect(host.textContent).toContain('本轮失败')
+  expect(host.textContent).toContain('请求失败')
+  expect(host.textContent).toContain('Original provider failure')
   expect(host.textContent).not.toContain('本轮已结束')
 })
 
@@ -170,7 +172,7 @@ it('retains the same response body and Range when clipping changes the metric su
   const page = responsePage()
   page.items = ['response-a', 'response-b'].map((id, index) => ({ id, kind: 'activity' as const,
     contentParts: [{ kind: 'text' as const, text: `Original response process ${index ? 'B' : 'A'}` }],
-    metrics: { scope: 'response' as const, usage: { outputTokens: index + 2 }, status: 'completed' as const } }))
+    turnOutcome: { status: 'completed' as const }, metrics: { scope: 'response' as const, usage: { outputTokens: index + 2 } } }))
   await show(page)
   await click(host.querySelector('.wf-head')!)
   const original = record('response-b'), step = original.querySelector('[data-observation-step-id]')!; await click(step)
@@ -184,8 +186,8 @@ it('retains the same response body and Range when clipping changes the metric su
   expect(original.querySelector('[data-observation-step-id]')?.getAttribute('aria-expanded')).toBe('true')
   expect(selection.toString()).toBe(selected)
   expect(range.startContainer.isConnected).toBe(true)
-  expect(host.textContent).toContain('原生响应已结束')
-  expect(host.textContent).not.toContain('原生回合已结束')
+  expect(host.textContent).toContain('原生单次响应报告')
+  expect(host.textContent).not.toContain('结束方式')
 })
 
 it('keeps a recorded operation failure visible when the native turn itself has ended', async () => {
@@ -200,4 +202,22 @@ it('keeps a recorded operation failure visible when the native turn itself has e
   expect(head.closest('.wf-card')?.getAttribute('data-status')).toBe('failed')
   await click(head)
   expect(record('failed-operation').textContent).toContain('Failed')
+})
+
+
+it('shows an explicit completed turn beside unreported steps only within the same native source and exact turn', async () => {
+  const page = { ...metricsPage(), sourceHostId: 'local' }; page.items = page.items.filter(item => item.id === 'read-call' || item.id === 'duration')
+  await show(page)
+  expect(host.querySelector('.wf-card')?.getAttribute('data-status')).toBe('complete')
+  const metrics = projectConversationMetrics(page.items).get('duration')!
+  for (const difference of ['unknown-turn', 'other-turn', 'other-source', 'unknown-host'] as const) {
+    const altered = { ...page, items: page.items.map((item, index) => index ? item : { ...item, turnId: difference === 'unknown-turn' ? undefined : difference === 'other-turn' ? 'foreign-turn' : item.turnId }) }
+    const records = projectConversationReading({ agentSessionId: page.agentSessionId, executionHostId: 'local', historyPage: altered }).records
+      .map((record, index) => difference === 'unknown-host' ? { ...record, sourceHostId: null }
+        : !index && difference === 'other-source' && record.source.kind === 'native'
+          ? { ...record, source: { ...record.source, nativeSessionId: 'foreign-source' } } : record)
+    await act(async () => root.render(<ClientUiProvider platform={platform}><NativeProcessObservation id="exact-turn-status" records={records}
+      entries={records.map(record => ({ kind: 'record', record }))} renderRecord={() => null} metrics={metrics} compact /></ClientUiProvider>))
+    expect(host.querySelector('.wf-card')?.getAttribute('data-status'), difference).toBeNull()
+  }
 })

@@ -8,6 +8,7 @@ import { pdfjsViewerAssets } from './scripts/pdfjs-viewer-assets'
 export default defineConfig({
   root: resolve(import.meta.dirname, 'src/renderer'),
   resolve: { alias: { ...radixOverlayAliases, ...noteParsingAliases }, dedupe: ['react', 'react-dom'] },
+  worker: { format: 'es' },
   plugins: [react(), pdfjsViewerAssets()],
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   base: '/agentmux-gallery/',

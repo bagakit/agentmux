@@ -3,6 +3,7 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const { app, BrowserWindow } = require('electron')
 const [url, privateRoot, evidence] = process.argv.slice(2)
+const conversationOnly = process.argv.includes('--conversation-only')
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { schema: 'agentmux.shared-conversation-electron-actual.v1', passed: false, frames: [], console: [], scope: 'Actual compiled Gallery and shared components; private Electron profile, no user Run or App lifecycle.' }
@@ -26,7 +27,8 @@ app.whenReady().then(async () => {
     for (const width of [1280, 390]) {
       win.setContentSize(width, 900)
       await settle()
-      for (const [name, selector] of [['conversation', '.observation-sample--conversation'], ['composer', '#composer-details']]) {
+      for (const [name, selector] of [['conversation', '.observation-sample--conversation'], ...conversationOnly ? [] : [['composer', '#composer-details']]]) {
+        if (name === 'conversation') await read(`document.querySelector('.conversation-turn-failure__details').open = false`)
         await read(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center' })`)
         await settle()
         const actual = await read(`(() => {
@@ -39,11 +41,42 @@ app.whenReady().then(async () => {
         })()`)
         assert.equal(actual.viewport, width)
         assert.ok(actual.section.width > 100 && actual.section.height > 50)
-        if (name === 'conversation') { assert.equal(actual.turns.length, 3); assert.ok(actual.turns.every(turn => turn.text && turn.width > 100)) }
+        if (name === 'conversation') {
+          assert.equal(actual.turns.length, 3); assert.ok(actual.turns.every(turn => turn.text && turn.width > 100))
+          const failure = await read(`(() => { const card = document.querySelector('.conversation-turn-failure'); return {
+            message: card.querySelector('.conversation-turn-failure__cause').textContent,
+            hidden: !!card.closest('[hidden],[inert],.conversation-record-process'),
+            agentLink: card.querySelector('[data-agent-link]')?.getAttribute('data-agent-link'),
+            unexpectedActions: [...card.querySelectorAll('button')].filter(button => !button.closest('[data-agent-link]')).length,
+            nextTurn: document.querySelector('[data-native-record-id="gallery-next-turn"]').textContent
+          } })()`)
+          assert.equal(failure.message, 'Selected model is at capacity. Please try a different model.')
+          assert.equal(failure.hidden, false); assert.equal(failure.unexpectedActions, 0)
+          assert.equal(failure.agentLink, 'amux://agent/gallery-conversation')
+          assert.ok(failure.nextTurn.includes('新一轮已开始'))
+          actual.failure = failure
+        }
         else { assert.equal(actual.editor.editable, true); assert.ok(actual.editor.width > 100); assert.ok(actual.buttons.length > 0) }
         const file = `${name}-${width}.png`
         await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG())
         result.frames.push({ file, name, width, actual })
+        if (name === 'conversation') {
+          await read(`document.querySelector('.conversation-turn-failure__details > summary').click()`)
+          await settle()
+          await read(`document.querySelector('.conversation-turn-failure').scrollIntoView({ block: 'center' })`)
+          await settle()
+          const detail = await read(`(() => { const card = document.querySelector('.conversation-turn-failure'); return {
+            open: card.querySelector('.conversation-turn-failure__details').open,
+            facts: card.querySelector('.conversation-turn-failure__details dl').textContent,
+            originalOpen: card.querySelector('.conversation-turn-failure__original').open
+          } })()`)
+          assert.equal(detail.open, true); assert.equal(detail.originalOpen, false)
+          assert.ok(detail.facts.includes('gallery-failed-turn')); assert.ok(detail.facts.includes('gallery-native'))
+          assert.ok(detail.facts.includes('server_overloaded'))
+          const file = `conversation-details-${width}.png`
+          await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG())
+          result.frames.push({ file, name: 'conversation-details', width, actual: detail })
+        }
       }
     }
     assert.deepEqual(result.console.filter(entry => entry.level === 'error'), [], 'Actual Renderer emitted an error')
