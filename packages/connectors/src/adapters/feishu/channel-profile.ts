@@ -18,6 +18,7 @@ function readActor(input: ChannelActorProfileRead): ChannelActorProfileObservati
   if (row.value.kind !== 'json') throw Error('Original actor profile is not metadata')
   const observed = parseChannelActorProfileObservation(row.value.value)
   if (channelActorKey(observed.actor) !== channelActorKey(input.actor)) throw Error('Original actor profile changed identity')
+  if (observed.profile && !observed.profile.name && !observed.profile.avatarUrl) return { ...observed, state: 'unavailable', profile: null, freshness: 'unknown', reason: 'not-visible' }
   return { ...observed, freshness: observed.profile ? observed.state === 'observed' && Date.now() - observed.profile.observedAt < PROFILE_FRESH_MS ? 'current' : 'stale' : 'unknown' }
 }
 
@@ -73,6 +74,7 @@ export function createFeishuChannelProfiles(withClient: WithClient): ChannelProf
         else {
           const user = response.data.user
           if (user[idType as 'open_id' | 'user_id' | 'union_id'] !== input.actor.userId) observation = failure('source-unconfirmed')
+          else if (!user.name && !user.avatar?.avatar_240) observation = failure('not-visible')
           else {
             const now = Date.now(), avatarUrl = user.avatar?.avatar_240
             const retained = !user.name && cached.profile?.name || !avatarUrl && cached.profile?.avatarUrl
