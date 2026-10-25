@@ -84,12 +84,12 @@ describe('original Mote quick preferences', () => {
     preferences(); await app.mount()
     const buttons = [...app.container.querySelectorAll<HTMLElement>('.pane-tabbar .workbench-tab')]
     expect(buttons.length).toBeGreaterThan(0)
-    const pin = app.container.querySelector<HTMLElement>('[aria-label="Default conversation"]')
+    const pin = app.container.querySelector<HTMLElement>('[aria-label="Main Agent"]')
     expect(pin).not.toBeNull()
     await moteClick(pin!.closest<HTMLElement>('[role="button"]')!)
     await settleMoteApp()
     expect(useAppStore.getState().tabs[neighborTab.id]).toBeDefined()
-    expect(useAppStore.getState().reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('default conversation stays open') }), expect.anything())
+    expect(useAppStore.getState().reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('main Agent conversation stays open') }), expect.anything())
     expect(app.stop).not.toHaveBeenCalled()
   })
 })
@@ -137,8 +137,14 @@ describe('quick-mode original consumer counterexamples', () => {
     await app.mount()
     const timing = app.container.querySelector('.mote-quick-mode [data-semantic-icon="action.configure-reconnect"]'); expect(timing).not.toBeNull(); expect(timing!.closest('button')?.textContent).toContain('Reconnect')
     await moteClick(app.container.querySelector<HTMLElement>('[aria-label="Edit quick mode"]')!)
-    const agent = document.querySelector<HTMLButtonElement>('[aria-label="Executor for new chat"]')!, selected = document.querySelector<HTMLButtonElement>('[aria-label="Default conversation"]')!
+    const agent = document.querySelector<HTMLButtonElement>('[aria-label="Executor for new chat"]')!, selected = document.querySelector<HTMLButtonElement>('.selection-field[aria-label="Main Agent"]')!
     expect(agent.dataset.value).toBe('fixture'); expect(JSON.parse(selected.dataset.value!)).toEqual(conversation)
+    await moteClick(selected)
+    const options = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+    const mainChoice = options.find(item => item.dataset.value === JSON.stringify(conversation))
+    expect(mainChoice).toBeDefined(); expect(mainChoice!.textContent).toContain(neighborTab.name!); expect(mainChoice!.textContent).toContain(conversation.sessionId)
+    expect(options.some(item => item.textContent?.includes(defaultTab.name!) && item.textContent?.includes(defaultAgent.id))).toBe(true)
+    await moteClick(mainChoice!)
     await chooseField(agent, 'fixture'); expect(read).toHaveBeenCalled()
     await moteClick(document.querySelector<HTMLElement>('[aria-label="Close quick mode"]')!)
     expect(write).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()

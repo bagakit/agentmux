@@ -25,6 +25,16 @@ async function open(topicId = PMO_TEAMS_TOPIC_ID) {
 }
 async function close() { await act(async () => requestPmoTeamsTopicFloatingClose()); await settleMoteApp() }
 const saved = () => JSON.parse(localStorage.getItem(savedMoteKey)!)
+function mainAgent() {
+  const state = useAppStore.getState(), conversation = { ...reference(defaultTab), hostId: 'local', sessionId: defaultAgent.id }
+  const topics = moteTopics.map(topic => topic.id === PMO_TEAMS_TOPIC_ID ? { ...topic,
+    quickMode: { status: 'saved' as const, version: 'main', defaults: { conversation } } } : topic)
+  useAppStore.setState({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
+    [SCRATCH_WORKSPACE_ID]: { ...state.scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!, topics } } })
+  app.listTopics.mockResolvedValue(topics)
+  vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => topics.find(topic => topic.id === id) ?? null)
+  return conversation
+}
 function assertSelected(tab = neighborTab, sessionId = neighborAgent.id, regionId = tab.layout.activeRegionId) {
   expect(app.panel().dataset.moteTargetTab).toBe(tab.id)
   expect(app.panel().dataset.moteTargetSession).toBe(sessionId)
@@ -36,7 +46,7 @@ function assertSelected(tab = neighborTab, sessionId = neighborAgent.id, regionI
 beforeEach(() => { app = createMoteApp() })
 afterEach(async () => { await app.dispose() })
 
-it('Space visits are remembered per Mote, override main-conversation preferences and preserve original Composer/drafts', async () => {
+it('Space visits remain available while ordinary entry returns to the saved main Agent and preserves drafts', async () => {
   const state = useAppStore.getState(), topics = moteTopics.map(topic => topic.id === PMO_TEAMS_TOPIC_ID ? { ...topic,
     quickMode: { status: 'saved' as const, version: 'fixture', defaults: { conversation: { ...reference(defaultTab), hostId: 'local', sessionId: defaultAgent.id } } } } : topic)
   useAppStore.setState({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
@@ -45,11 +55,11 @@ it('Space visits are remembered per Mote, override main-conversation preferences
   vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => topics.find(topic => topic.id === id) ?? null)
   visit(); visit(customTab)
   expect(useAppStore.getState().recentMoteAgents[PMO_TEAMS_TOPIC_ID]).toMatchObject({ ...reference(), hostId: 'local', sessionId: neighborAgent.id, presentationSessionId: neighborAgent.id })
-  await app.mount(); await open(); assertSelected()
+  await app.mount(); await open(); assertSelected(defaultTab, defaultAgent.id)
   await moteClick(app.panel().querySelector<HTMLButtonElement>(`[data-mote-topic-id="${customMoteId}"]`)!)
   assertSelected(customTab, 'custom-agent')
   await moteClick(app.panel().querySelector<HTMLButtonElement>(`[data-mote-topic-id="${PMO_TEAMS_TOPIC_ID}"]`)!)
-  assertSelected()
+  assertSelected(defaultTab, defaultAgent.id)
   expect(useAppStore.getState().agentComposerDrafts).toEqual(state.agentComposerDrafts)
   expect(useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.topics).toEqual(topics)
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
@@ -60,6 +70,45 @@ it('original floating Tab-strip selection records the actual Agent, and reopenin
   await moteClick(app.panel().querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${neighborTab.id}"]`)!)
   expect(useAppStore.getState().recentMoteAgents[PMO_TEAMS_TOPIC_ID]).toMatchObject(reference())
   await close(); await open(); assertSelected()
+})
+
+it('a member stays directly usable until the actual return-to-main action; ordinary reopening returns to main', async () => {
+  mainAgent(); await app.mount(); await open(); assertSelected(defaultTab, defaultAgent.id)
+  expect(app.panel().querySelector('[aria-label="Return to main Agent"]')).toBeNull()
+  await moteClick(app.panel().querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${neighborTab.id}"]`)!)
+  const before = useAppStore.getState()
+  useAppStore.getState().setAgentComposerDraft(neighborTab.layout.activeRegionId, 'Keep the revised scope here')
+  await open(); assertSelected()
+  await moteClick(app.panel().querySelector<HTMLButtonElement>('[aria-label="Return to main Agent"]')!)
+  assertSelected(defaultTab, defaultAgent.id)
+  expect(useAppStore.getState().agentComposerDrafts[neighborTab.layout.activeRegionId]).toBe('Keep the revised scope here')
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+it('restoring an already-open member keeps its exact position before a later daily entry returns to main', async () => {
+  mainAgent()
+  localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID,
+    targetTabId: neighborTab.id, reference: reference(), targetAgent: {
+      hostId: 'local', sessionId: neighborAgent.id, presentationSessionId: neighborAgent.id } }))
+  await app.mount(); assertSelected()
+  await close(); await open(); assertSelected(defaultTab, defaultAgent.id)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+it('an unavailable saved main Agent retains the original reference while a healthy member can still be opened', async () => {
+  const original = mainAgent(), state = useAppStore.getState()
+  visit()
+  const remaining = createWorkbenchTab(defaultTab.id, { kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID,
+    regionId: 'different-region', sessionId: neighborAgent.id })
+  useAppStore.setState({ tabs: { ...state.tabs, [defaultTab.id]: { ...remaining, topicId: PMO_TEAMS_TOPIC_ID } } })
+  await app.mount(); await open()
+  expect(saved().reference).toEqual(reference(defaultTab))
+  expect(saved().targetAgent).toMatchObject({ hostId: original.hostId, sessionId: original.sessionId })
+  expect(app.panel().querySelector('[aria-label="Message Agent"]')).toBeNull()
+  await moteClick(app.panel().querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${neighborTab.id}"]`)!)
+  assertSelected()
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
 })
 
 it('actual Footer click opens the recent Agent instead of passing its stale displayed Tab as an explicit target', async () => {
@@ -75,10 +124,10 @@ it('actual Footer initial entry does not invent a visit before the human selects
   expect(useAppStore.getState().recentMoteAgents).toEqual({})
 })
 
-it('retained Tab recovery records the exact Agent only after the original recovery Tab is clicked', async () => {
+it('an empty legacy choice keeps confirmed members available and records a visit only after an actual Tab click', async () => {
   localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: null }))
   await app.mount()
-  expect(app.panel().querySelector('[aria-label="Message Agent"]')).toBeNull()
+  expect(app.panel().querySelector('[aria-label="Message Agent"]')?.textContent).toContain('Default unsent')
   expect(useAppStore.getState().recentMoteAgents).toEqual({})
   await moteClick(app.panel().querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${neighborTab.id}"]`)!)
   expect(useAppStore.getState().recentMoteAgents[PMO_TEAMS_TOPIC_ID]).toMatchObject(reference())
