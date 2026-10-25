@@ -130,7 +130,9 @@ export function publicationContent(unit: ConversationUnit, binding: Pick<RoomBin
       }
       if (body.kind === 'markdown' && value && value.length > body.text.length) segments!.push({ text: value.slice(body.text.length) })
     } else if (original.kind === 'captured' && slot.selector.kind === 'captured-field') {
-      value = original.item[slot.selector.field]
+      const resolved = options.resolved.get(key)
+      if (resolved?.kind === 'markdown') { value = resolved.text; segments = [...resolved.segments]; if (!resolved.complete) gap('resource-unavailable') }
+      else value = original.item[slot.selector.field]
     }
     if (value !== undefined) {
       const author = original.kind === 'captured' && original.item.kind === 'user_message' && slot.selector.kind === 'captured-field' && slot.selector.field === 'content'

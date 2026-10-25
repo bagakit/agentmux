@@ -1,3 +1,4 @@
+import { publicationInputImages } from './publication-input-images.js'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { publicationMarkdown } from './publication-markdown.js'
 import { AgentMuxError, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
@@ -8,7 +9,7 @@ import { credentialLookupFailure } from './credential-observation.js'
 import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
 import { publicationEffectContext, publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
-import { isConversationPublicationPart, publicationPartKey } from './publication-content.js'
+import { isConversationPublicationPart, publicationContent, publicationPartKey } from './publication-content.js'
 import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation, type QuestionPublicationPayload } from './publication-store.js'
 import { readPublicationA2A, publicationMessageTargets, type PublicationA2A, type PublicationOriginalMessagePort } from './publication-a2a.js'
 import { publicationSpeaker, type PublicationSpeaker, type PublicationSpeakerDetails, type PublicationSpeakerReader } from './publication-speaker.js'
@@ -19,6 +20,7 @@ export interface PublicationConversationPort extends PublicationOriginalMessageP
   changes(input: ConversationChangesInput, signal: AbortSignal): Promise<ConversationChangesPage>
   inspect(input: ConversationTimelineReadInput, signal: AbortSignal): Promise<AgentConversationReadPage>
   observe(reference: ConversationWatchInput, listener: (value: ConversationObservation) => void, signal: AbortSignal): Promise<ConversationObservationHandle>
+  inputResource?(reference: ConversationRef, input: import('@agentmux/core').AgentInputResourceRead, signal: AbortSignal): Promise<import('@agentmux/core').AgentInputResourceResult>
   resource(reference: ConversationRef, input: AgentSessionHistoryResourceRequest, signal: AbortSignal): Promise<AgentSessionHistoryResourceReadResult>
 }
 export interface PublicationPermissionsPort {
@@ -346,70 +348,79 @@ export class PublicationHost implements ConnectionDeliveryPort {
   }
   private async resolve(reference: ConversationRef, units: readonly ConversationUnit[], signal: AbortSignal, binding: RoomBinding, adapter: PublicationAdapter): Promise<Map<string, ResolvedPublicationPart>> {
     const result = new Map<string, ResolvedPublicationPart>()
-    for (const unit of units) for (const slot of unit.event.content) {
-      const record = unit.records.find(record => record.id === slot.recordId)!
-      if (!isCompleteConversationRecord(record) || record.original.kind !== 'native' || record.reference!.source.kind !== 'native' || slot.selector.kind !== 'native-part') continue
-      const item = record.original.item, part = item.contentParts[slot.selector.partIndex]!
-      if (!isConversationPublicationPart(record, slot.selector, unit.event.author) || part.contentEligibility !== 'public') continue
-      const nativeSource = record.reference!.source, partIndex = slot.selector.partIndex
-      const markdown = async (text: string) => item.kind !== 'assistant-message' ? undefined : publicationMarkdown(text, {
-        source: { providerId: nativeSource.providerId, nativeSessionId: nativeSource.nativeSessionId },
-        recordId: item.id, ...(item.turnId ? { turnId: item.turnId } : {}), partIndex,
-        ...(part.kind === 'resource' ? { expectedReference: part.reference } : {})
-      }, async input => {
-        const response = await this.options.conversation.resource(reference, input, signal)
-        if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign Markdown resource Session')
-        return response
-      }, adapter.images, signal, (textSha256, start, end) => this.store.retainedDiagram(binding,
-        { record: record.reference!, recordRevision: record.revision, selector: slot.selector }, text, textSha256, start, end))
-      if (part.kind === 'text') {
-        const value = await markdown(part.text)
-        if (value) result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), value)
-        continue
+    for (const unit of units) {
+      const captured = binding.sourceFrontier && unit.records.every(isCompleteConversationRecord) && unit.records.some(record => record.original.kind === 'captured' && record.original.item.kind === 'user_message')
+        ? new Set(publicationContent(unit, binding, binding.sourceFrontier, { resolved: new Map(), origin: () => undefined }).pieces.map(piece => publicationPartKey(piece.part))) : new Set<string>()
+      for (const slot of unit.event.content) {
+        const record = unit.records.find(record => record.id === slot.recordId)!
+        if (captured.has(publicationPartKey({ record: record.reference!, selector: slot.selector })) && isCompleteConversationRecord(record) && record.original.kind === 'captured' && slot.selector.kind === 'captured-field' && slot.selector.field === 'content' && record.original.item.kind === 'user_message') {
+          const value = await publicationInputImages(record.original.item, reference, this.options.conversation.inputResource, adapter.images, signal)
+          if (value) result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), value)
+          continue
+        }
+        if (!isCompleteConversationRecord(record) || record.original.kind !== 'native' || record.reference!.source.kind !== 'native' || slot.selector.kind !== 'native-part') continue
+        const item = record.original.item, part = item.contentParts[slot.selector.partIndex]!
+        if (!isConversationPublicationPart(record, slot.selector, unit.event.author) || part.contentEligibility !== 'public') continue
+        const nativeSource = record.reference!.source, partIndex = slot.selector.partIndex
+        const markdown = async (text: string) => item.kind !== 'assistant-message' ? undefined : publicationMarkdown(text, {
+          source: { providerId: nativeSource.providerId, nativeSessionId: nativeSource.nativeSessionId },
+          recordId: item.id, ...(item.turnId ? { turnId: item.turnId } : {}), partIndex,
+          ...(part.kind === 'resource' ? { expectedReference: part.reference } : {})
+        }, async input => {
+          const response = await this.options.conversation.resource(reference, input, signal)
+          if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign Markdown resource Session')
+          return response
+        }, adapter.images, signal, (textSha256, start, end) => this.store.retainedDiagram(binding,
+          { record: record.reference!, recordRevision: record.revision, selector: slot.selector }, text, textSha256, start, end))
+        if (part.kind === 'text') {
+          const value = await markdown(part.text)
+          if (value) result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), value)
+          continue
+        }
+        if (part.kind !== 'resource') continue
+        const deferred = part.resourceType === 'text' && part.content?.kind === 'resource'
+        if (binding.scope.publication === 'future-shared-conversation' &&
+          ((part.resourceType === 'image' || deferred) && adapter.images || (part.resourceType === 'file' || deferred) && adapter.files)) {
+          const key = publicationPartKey({ record: record.reference!, selector: slot.selector })
+          result.set(key, { kind: part.resourceType === 'file' ? 'file-unavailable' : 'image-unavailable' })
+          const input = { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id,
+            ...(item.turnId ? { turnId: item.turnId } : {}), partIndex: slot.selector.partIndex, expectedReference: part.reference }
+          if ((part.resourceType === 'image' || deferred) && adapter.images) try {
+            const request = { ...input, maxBytes: adapter.images.maxBytes, representation: 'image' as const }
+            const response = await this.options.conversation.resource(reference, request, signal)
+            if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign image resource Session')
+            const { agentSessionId: _session, ...original } = response
+            const read = parseProviderSessionHistoryResourceReadResult(original, request).result
+            if (read.status === 'read') {
+              const image = publicationImage(read)
+              if (adapter.images.accepts(image)) { result.set(key, { kind: 'image', image }); continue }
+            }
+          } catch { signal.throwIfAborted() /* Keep this exact part as a recoverable gap. */ }
+          if ((part.resourceType === 'file' || deferred) && adapter.files) try {
+            const request = { ...input, maxBytes: adapter.files.maxBytes, representation: 'file' as const }
+            const response = await this.options.conversation.resource(reference, request, signal)
+            if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign file resource Session')
+            const { agentSessionId: _session, ...original } = response
+            const read = parseProviderSessionHistoryResourceReadResult(original, request).result
+            if (read.status === 'file') {
+              const file = publicationFile(read)
+              if (adapter.files.accepts(file)) result.set(key, { kind: 'file', file })
+            }
+          } catch { signal.throwIfAborted() /* Independent text is retained. */ }
+          continue
+        }
+        if (part.resourceType !== 'text' || !part.content || part.content.kind === 'resource' || binding.scope.publication === 'future-native-user-facing' && part.content.kind !== 'text') continue
+        try {
+          const value = await readSessionHistoryTextResource(part, slot.selector.partIndex,
+            { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id, ...(item.turnId ? { turnId: item.turnId } : {}) },
+            async input => {
+              const response = await this.options.conversation.resource(reference, input, signal)
+              if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign resource Session')
+              return response
+            }, signal)
+          result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), value.kind === 'text' ? await markdown(value.text) ?? value : value)
+        } catch { signal.throwIfAborted() /* Exact unresolved part is durably accounted; other contents keep flowing. */ }
       }
-      if (part.kind !== 'resource') continue
-      const deferred = part.resourceType === 'text' && part.content?.kind === 'resource'
-      if (binding.scope.publication === 'future-shared-conversation' &&
-        ((part.resourceType === 'image' || deferred) && adapter.images || (part.resourceType === 'file' || deferred) && adapter.files)) {
-        const key = publicationPartKey({ record: record.reference!, selector: slot.selector })
-        result.set(key, { kind: part.resourceType === 'file' ? 'file-unavailable' : 'image-unavailable' })
-        const input = { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id,
-          ...(item.turnId ? { turnId: item.turnId } : {}), partIndex: slot.selector.partIndex, expectedReference: part.reference }
-        if ((part.resourceType === 'image' || deferred) && adapter.images) try {
-          const request = { ...input, maxBytes: adapter.images.maxBytes, representation: 'image' as const }
-          const response = await this.options.conversation.resource(reference, request, signal)
-          if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign image resource Session')
-          const { agentSessionId: _session, ...original } = response
-          const read = parseProviderSessionHistoryResourceReadResult(original, request).result
-          if (read.status === 'read') {
-            const image = publicationImage(read)
-            if (adapter.images.accepts(image)) { result.set(key, { kind: 'image', image }); continue }
-          }
-        } catch { signal.throwIfAborted() /* Keep this exact part as a recoverable gap. */ }
-        if ((part.resourceType === 'file' || deferred) && adapter.files) try {
-          const request = { ...input, maxBytes: adapter.files.maxBytes, representation: 'file' as const }
-          const response = await this.options.conversation.resource(reference, request, signal)
-          if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign file resource Session')
-          const { agentSessionId: _session, ...original } = response
-          const read = parseProviderSessionHistoryResourceReadResult(original, request).result
-          if (read.status === 'file') {
-            const file = publicationFile(read)
-            if (adapter.files.accepts(file)) result.set(key, { kind: 'file', file })
-          }
-        } catch { signal.throwIfAborted() /* Independent text is retained. */ }
-        continue
-      }
-      if (part.resourceType !== 'text' || !part.content || part.content.kind === 'resource' || binding.scope.publication === 'future-native-user-facing' && part.content.kind !== 'text') continue
-      try {
-        const value = await readSessionHistoryTextResource(part, slot.selector.partIndex,
-          { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id, ...(item.turnId ? { turnId: item.turnId } : {}) },
-          async input => {
-            const response = await this.options.conversation.resource(reference, input, signal)
-            if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign resource Session')
-            return response
-          }, signal)
-        result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), value.kind === 'text' ? await markdown(value.text) ?? value : value)
-      } catch { signal.throwIfAborted() /* Exact unresolved part is durably accounted; other contents keep flowing. */ }
     }
     return result
   }
