@@ -2631,3 +2631,21 @@ describe('Browser recovery preview producer', () => {
     } finally { manager.dispose(); await store.dispose(); log.mockRestore() }
   })
 })
+
+describe('Profile candidate native destruction receipt', () => {
+  it('retains the original native handle when a failed candidate clears its view getter', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    await manager.create('candidate-receipt', 'https://example.invalid/original')
+    const original = fixture.children[0]!
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async contents => {
+      const candidate = fakeElectron.FakeWebContentsView.instances.find(view => view.webContents === contents)!
+      Object.defineProperty(candidate, 'webContents', { get: () => contents.isDestroyed() ? undefined : contents })
+      throw new Error('Native candidate certificate refused')
+    }
+    await expect(manager.switchProfile('candidate-receipt', 'work')).rejects.toThrow('Native candidate certificate refused')
+    expect((manager as any).entries.get('candidate-receipt').pendingSwitch).toBeNull()
+    expect(manager.target('candidate-receipt')).toMatchObject({ id: 'candidate-receipt', url: 'https://example.invalid/original' })
+    expect(fixture.children).toEqual([original])
+    expect(() => manager.dispose()).not.toThrow()
+  })
+})
