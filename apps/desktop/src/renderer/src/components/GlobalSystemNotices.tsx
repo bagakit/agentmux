@@ -153,6 +153,11 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     config?.hosts.find((host) => host.id === warning.hostId)?.label ?? warning.hostId,
     hostId => settings?.openHost(hostId)))
   const endpointInbox = useServiceNotices('global:runtime-endpoints', endpoints, endpointWarnings !== undefined)
+  // An unresolved connection remains visible even after its notification is read.
+  // The existing owner observation controls its lifetime, not a second UI timer.
+  const connectionWarnings = (endpointWarnings ?? []).filter(item => item.observationOrigin !== undefined)
+  const connectionLabels = connectionWarnings.map(item =>
+    `${config?.hosts.find(host => host.id === item.hostId)?.label ?? item.hostId}: ${item.step}`)
   const displacedKnown = !loading && displacedIds.every((sessionId) => sessions.some((session) => session.id === sessionId))
   const displacedInbox = useServiceNotices('global:displaced-agents', displaced, displacedKnown)
   const sessionOwners = new Map<string, (typeof sessions)[number]>()
@@ -387,6 +392,14 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     <span className="global-system-notices__announcement" role={liveVolume === 'assertive' ? 'alert' : 'status'} aria-live={liveVolume}>
       {latestUnreadEvent ? `${announcement}. Review system notifications for details.` : ''}
     </span>
+    {connectionWarnings.length ? <button type="button" className="global-system-notices__connection"
+      aria-label={`Unconfirmed connection observation: ${connectionLabels.join('; ')}. View details`}
+      title={connectionWarnings.map((item, index) => `${connectionLabels[index]}\n${item.message}`).join('\n\n')}
+      aria-expanded={open} aria-controls={id} popoverTarget={id} popoverTargetAction="show"
+      onClick={() => { setSection('current'); setCategory('connections') }}>
+      <span className="global-system-notices__connection-dot" aria-hidden="true" />
+      <span className="global-system-notices__connection-label">Unconfirmed · {connectionLabels[0]}{connectionWarnings.length > 1 ? ` +${connectionWarnings.length - 1}` : ''}</span>
+    </button> : null}
     <button ref={triggerRef} type="button" className="global-system-notices__trigger" data-unread={unread > 0}
       data-attention={events.some(event => unreadEventIds.has(event.id) && event.context?.kind === 'agent-broken') ? 'failure' : 'quiet'}
       aria-label={`System notifications: ${unread} unread, ${currentCount} current, ${projection.history.length} recent events`}

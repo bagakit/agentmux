@@ -1519,6 +1519,7 @@ export async function registerIpc(args: {
     if (typeof hostId !== 'string' || !hostId.length) throw new TypeError('An exact execution Host ID is required.')
     return await args.runtime.configureExecutor(hostId, input)
   })
+  handle('sessions:endpointWarnings', () => args.runtime.endpointWarningSnapshot())
   handle('sessions:snapshot', async () => {
     const snapshot = await args.runtime.snapshot(config)
     const preparation = { runtimeBindings: args.runtime.runtimeBindings() }
