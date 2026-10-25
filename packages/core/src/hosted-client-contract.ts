@@ -171,6 +171,7 @@ export type AgentMuxHostedClient = DelegatedMethods & {
   readonly providers: { catalog(): AgentCatalogEntry[]; get(id: string): { catalog: AgentCatalogEntry } }
   connect(): Promise<void>
   dispose(): Promise<void>
+  onRunEvent<Result>(runId: string, listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   runtimeOwnerIdentity(): AgentMuxRuntimeOwnerIdentity | null
   forwardRpc?: AgentMuxHostedForwardRpc
