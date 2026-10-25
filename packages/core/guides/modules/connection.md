@@ -349,6 +349,14 @@ The rule belongs to this hosting owner and exact adapter/application, including 
 and future bound groups; it is not shared with other bots or Hosts and does not change DM quotas.
 
 Current connection binding inspect returns access separately from the original room grants.
+Inspecting an original bind/relink mapping-conflict refusal may also return mappingConflict:
+status checked and up to three deduplicated current binding references with typed connection,
+audience, target, scope, source or input-target differences. These are current owner observations,
+not changes to the original refusal. An empty current list means that conflict was not observed
+now; it does not authorize retrying, relinking or detaching anything. An absent summary is not
+an absence-of-conflict claim. Managed callers retain the original refusal without this additional
+relationship-discovery data. Use the original operation ID with connection binding inspect;
+reading never replays it or changes member permissions.
 Each member has a local decision and a typed room/application effective source. An explicit
 group decision wins in full: missing capabilities are not filled from the application rule,
 and revoked group access denies all three. An original decision remains effective across an
