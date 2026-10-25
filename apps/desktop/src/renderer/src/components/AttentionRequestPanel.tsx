@@ -155,8 +155,12 @@ export function AttentionRequestPanel({
   // this panel while the Store is merely repainting a Session status.
   useEffect(() => {
     const panel = panelRef.current
-    if (!panel || (document.activeElement instanceof HTMLElement && panel.contains(document.activeElement))) return
-    const target = panel.querySelector<HTMLElement>('button:not([disabled])')
+    const active = panel?.ownerDocument.activeElement
+    if (!panel || (active && panel.contains(active))) return
+    // Cancel is the card's non-granting action, including when scoped grants precede it in the DOM.
+    // A native-only or unavailable card has no usable decision; keep its header navigation available.
+    const target = panel.querySelector<HTMLElement>('.agent-interaction__dismiss:not([disabled])') ??
+      panel.querySelector<HTMLElement>('.attention-request-panel__header button:not([disabled])')
     target?.focus()
   }, [activeSessionId, request?.id, caughtUp])
 
@@ -314,7 +318,9 @@ export function AttentionRequestPanel({
         useAppStore.getState().setViewMode(session.id, 'terminal')
         selectSession(session.id)
       }}
-      disabled={session.processState !== 'running' || session.status.state === 'disconnected' || submitting}
+      // Same terms as the Session's own card: a request from an earlier Run stays readable but cannot be answered.
+      disabled={session.processState !== 'running' || session.status.state === 'disconnected' || submitting ||
+        Boolean(request.evidence.run && request.evidence.run.runId !== runIdFor(session))}
       onInspect={operationId => useAppStore.getState().inspectInteraction(activeSessionId, operationId)}
       onRespond={respond}
     />
