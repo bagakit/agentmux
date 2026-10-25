@@ -208,6 +208,7 @@ export type AgentMuxRpcOutputInitial = {
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
 type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInputRequest } & CapsuleRuntimeParamsMap & CapsuleParamsMap & ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & ScheduleParamsMap & AgentProgressParams & NativeDesktopParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+  'system.metrics.host-profile.capture': import('./runtime-v8-profile.js').HostV8ProfileInput
   'goal.participation.confirm': import('./goal-participation.js').GoalParticipationConfirm
   'goal.watch': Record<string, never>
   'settings.appearance.watch': Record<string, never>
@@ -302,6 +303,7 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'system.subscription.cancel': { subscriptionId: string }
 }
 type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInputResult } & CapsuleRuntimeResultMap & CapsuleResultMap & ApplicationAccessResultMap & AgentLearningResultMap & MoteChatResultMap & MoteConnectionResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & AppWindowResultMap & ScheduleResultMap & AgentProgressResults & NativeDesktopResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+  'system.metrics.host-profile.capture': import('./runtime-v8-profile.js').RuntimeV8ProfileResult
   'goal.participation.confirm': import('./goal-participation.js').GoalParticipationReceipt
   'goal.watch': never
   'settings.appearance.watch': never
@@ -410,6 +412,7 @@ export type AgentMuxRpcSpacePresentation = {
 }
 
 export const AGENTMUX_RPC_NATIVE_METHODS = {
+  'system.metrics.host-profile.capture': 'long',
   ...AGENTMUX_RPC_DESKTOP_NATIVE_METHODS,
   ...AGENT_LEARNING_METHODS,
   ...CAPSULE_METHODS,

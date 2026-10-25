@@ -2,6 +2,7 @@
 import { analyseLocalV8Profile } from './v8-profile-analysis-cli.js'
 import { mintObjectId } from './object-id.js'
 import { writeRendererDiagnosticFile } from './renderer-scene-cli.js'
+import { writeRuntimeV8Profile } from './runtime-v8-profile-cli.js'
 import { writeRendererV8Profile } from './renderer-v8-profile-cli.js'
 import { writeRendererTrace } from './renderer-trace-cli.js'
 import { writeCliResourceDocument } from './cli-resource-document.js'
@@ -70,6 +71,7 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if ((method === 'file.upload' || method === 'file.upload.inspect') && body.status !== 'uploaded') return true
   if (['file.build', 'file.build.inspect', 'file.build.cancel'].includes(method) && !['running', 'succeeded', 'cancelled'].includes(String(body.status))) return true
   if (method === 'file.format' && body.status !== 'formatted' && body.status !== 'unchanged') return true
+  if (method === 'system.metrics.host-profile.capture' && body.status !== 'completed') return true
   if (method === 'system.metrics.profile.capture' && (body.capture as { status: string }).status !== 'completed') return true
   if (method === 'system.metrics.trace.capture' && (body.capture as { status: string }).status !== 'completed') return true
   if (method === 'system.metrics.allocations.capture' && (body.capture as {status:string}).status !== 'completed') return true
@@ -241,11 +243,12 @@ async function main(): Promise<number> {
     const result = await client.call(method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>, callOptions)
     let output: { path: string } | undefined
     try {
-      output = invocation.output === undefined ? undefined : method === 'system.metrics.profile.capture'
+      output = invocation.output === undefined ? undefined : method === 'system.metrics.host-profile.capture'
+        ? await writeRuntimeV8Profile(invocation.output, result, invocation.params) : method === 'system.metrics.profile.capture'
         ? await writeRendererV8Profile(invocation.output, result) : method === 'system.metrics.allocations.capture' ? await writeRendererDiagnosticFile(invocation.output,result,'allocations') : method === 'system.metrics.scene.capture' ? await writeRendererDiagnosticFile(invocation.output,result,'scene-capture') : method === 'system.metrics.scene.inspect' ? await writeRendererDiagnosticFile(invocation.output,result,'scene-inspect') : method === 'system.metrics.trace.capture'
           ? await writeRendererTrace(invocation.output, result) : await writeCliResourceDocument(invocation.output, result)
     } catch (error) {
-      if (!['system.metrics.profile.capture','system.metrics.trace.capture','system.metrics.allocations.capture','system.metrics.scene.capture','system.metrics.scene.inspect'].includes(method)) throw error
+      if (!['system.metrics.host-profile.capture','system.metrics.profile.capture','system.metrics.trace.capture','system.metrics.allocations.capture','system.metrics.scene.capture','system.metrics.scene.inspect'].includes(method)) throw error
       const source = error instanceof Error ? error as Error & { code?: string } : null
       write({ ok: false, operation: method, result, outputError: { code: source?.code ?? (method === 'system.metrics.trace.capture' ? 'TRACE_FILE_WRITE_FAILED' : 'PROFILE_FILE_WRITE_FAILED'),
         message: source?.message ?? String(error) } })

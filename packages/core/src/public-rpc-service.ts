@@ -34,6 +34,7 @@ import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicati
 import { isDeepStrictEqual } from 'node:util'
 import { isConnectionSetupMethod, parseConnectionSetupParams } from './connection-setup-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-recovery/control-contract.js'
+import { parseRuntimeV8ProfileInput, parseRuntimeV8ProfileResult, type HostV8ProfileInput } from './runtime-v8-profile.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererMemoryResult } from './renderer-memory.js'
 import { parseAppMemoryEvidence } from './app-memory-evidence.js'
@@ -300,6 +301,7 @@ export function boundedFileShareUndoResult(parsed: import('./public-rpc-file-sha
   return { ...parsed, destination: compact(parsed.destination), collections: parsed.collections.map(item => ({ ...item, source: compact(item.source) })) }
 }
 const NATIVE_FIELDS = {
+  'system.metrics.host-profile.capture': ['hostId', 'fence', 'processId', 'durationMs'],
   'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
   'goal.report': ['goalId', 'operationId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
   'goal.progress': ['goalId', 'progress'],
@@ -427,7 +429,7 @@ export class AgentMuxRpcService {
     const p = rpcRecord(params, AGENTMUX_HOSTED_RPC_FIELDS[method as AgentMuxHostedRuntimeMethod])
     if (!this.ports.hostedRuntime) throw new AgentMuxError('The borrowed Runtime Host business owner is unavailable. Existing Runs are retained.', 'CONTROL_UNAVAILABLE')
     const owner = await this.ports.hostedRuntime()
-    if (method === 'runtime.owner.identity' || method === 'runtime.owner.shutdown' || method === 'runtime.network.inspect') return { owner, params: p }
+    if (method === 'runtime.owner.identity' || method === 'runtime.owner.shutdown' || method === 'runtime.network.inspect' || method === 'runtime.profile.capture') return { owner, params: p }
     const consumer = rpcString(p.consumerId, 'Host consumer ID')
     const consumerId = createHash('sha256').update(context.principal.kind + '\0' + principalId + '\0' + consumer).digest('hex')
     return { owner, params: { ...p, consumerId } }
@@ -459,7 +461,7 @@ export class AgentMuxRpcService {
     // A remote Store keeps its local Host facts. The configured Host ID is only our route.
     return (await client.readAgentSessions()).filter(session => session.hostId === (client.forwardRpc ? 'local' : hostId))
   }
-  private async owner(id: string) {
+  private async owner(id: string, exactOnly = false) {
     const clients = await this.clients()
     const known = clients.filter(({ client }) => {
       if (this.endpointUnverified(client)) return false
@@ -487,6 +489,7 @@ export class AgentMuxRpcService {
     if (exactOwners.length === 1) return { ...exactOwners[0]!, unavailable: exactIssues }
     if (exactIssues.length) throw new AgentMuxError('Exact Session metadata is unconfirmed. Keep its original identity; no prefix owner was guessed.',
       exactIssues.some(issue => issue.code === 'RUNTIME_UNAVAILABLE') ? 'RUNTIME_UNAVAILABLE' : 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
+    if (exactOnly) throw new AgentMuxError('The exact caller Session is not present on the observed Hosts. No inventory was scanned.', 'UNKNOWN_AGENT_SESSION')
     // Only confirmed exact absence permits the original prefix inventory semantics.
     const observed = await Promise.allSettled(scopes.map(async scope => {
       const sessions = await this.ownedSessions(scope)
@@ -530,7 +533,7 @@ export class AgentMuxRpcService {
       'Input control requires the exact original Session.', 'INVALID_AGENT_INPUT_CONTROL')
     return scope
   }
-  private async authenticated(context: AgentMuxRpcCallContext) {
+  private async authenticated(context: AgentMuxRpcCallContext, exactOnly = false) {
     if (!context.caller) return undefined
     const caller = rpcRecord(context.caller, ['agentSessionId', 'capability'])
     const agentSessionId = rpcString(caller.agentSessionId, 'Caller Session ID')
@@ -548,10 +551,10 @@ export class AgentMuxRpcService {
       } catch (error) {
         // A prefix/undiscovered identity keeps the existing discovery semantics.
         // Invalid authority and unreadable durable facts never fall back to a cache.
-        if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION') throw error
+        if (exactOnly || !(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION') throw error
       }
     }
-    const owner = await this.owner(agentSessionId)
+    const owner = await this.owner(agentSessionId, exactOnly)
     // The claim must be exact. A capability cannot authenticate an ambiguous/prefix identity.
     if (owner.agentSessionId !== agentSessionId) throw new AgentMuxError('Caller Session ID must be exact.', 'AGENT_CAPABILITY_INVALID')
     const session = await owner.client.authorizeRetainedAgentCaller(capability, agentSessionId)
@@ -999,6 +1002,33 @@ export class AgentMuxRpcService {
         throw new AgentMuxError('The original application access owner is unavailable. Existing applications and Agents are retained.', 'CONTROL_UNAVAILABLE')
       }
       return parseApplicationAccessResult(method,await this.ports.applicationAccess.call(method,input,context.signal),input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'system.metrics.host-profile.capture') {
+      const input = parseRuntimeV8ProfileInput(params, true) as HostV8ProfileInput
+      if (!context.caller && (!context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id)) throw new AgentMuxError(
+        'Host profiling requires an authenticated original transport.', 'CONTROL_PERMISSION_DENIED')
+      if (!this.ports.coreClients && !this.local) throw new AgentMuxError(
+        'No existing Host Runtime client is available to profile. No Runtime was started.', 'CONTROL_UNAVAILABLE')
+      await this.authenticated(context, true)
+      context.signal?.throwIfAborted()
+      const targets = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+      if (!targets.length && this.ports.forwardControl) return parseRuntimeV8ProfileResult(
+        await this.ports.forwardControl('system.metrics.host-profile.capture', input, context), input) as AgentMuxRpcResult<M>
+      if (targets.length !== 1) throw new AgentMuxError('The exact route Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
+      const client = targets[0]!.client
+      const { hostId: _hostId, ...capture } = input
+      const originalContext = { ...(context.signal ? { signal: context.signal } : {}), runtimeFence: input.fence }
+      // This authenticated aggregate borrows only a fixed diagnostic operation.
+      // The original producer fences its process; no Native connect or Session bootstrap.
+      let result: unknown
+      if (client.forwardRpc) result = await client.forwardRpc('runtime.profile.capture', capture, originalContext)
+      else {
+        const owner = await this.ports.hostedRuntime?.()
+        if (owner?.client !== client) throw new AgentMuxError('The original profile owner is unavailable. No other Runtime was sampled.', 'RUNTIME_OWNER_UNCONFIRMED')
+        result = await owner.call('runtime.profile.capture', capture, originalContext)
+      }
+      // A later routing change does not erase an already acquired original capture.
+      return parseRuntimeV8ProfileResult(result, input) as AgentMuxRpcResult<M>
     }
     if (isHostSettingsMethod(method)) {
       const input = parseHostSettingsParams(method, params)

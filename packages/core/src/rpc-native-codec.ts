@@ -24,6 +24,7 @@ import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicati
 import { parseAgentInputChangesPage } from './agent-input-changes.js'
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseRuntimeDiagnostics } from './runtime-observation-codec.js'
+import { parseRuntimeV8ProfileInput, parseRuntimeV8ProfileResult } from './runtime-v8-profile.js'
 import { parseRuntimeNetworkSnapshot } from './runtime-network.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-recovery/control-contract.js'
 import { parseConversationLandmarkPage, parseConversationLandmarkQuery, parseConversationLandmarkWritePage, parseConversationLandmarkWrite } from './conversation-landmarks.js'
@@ -490,6 +491,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (p.runtimeDiagnostics !== null) parseRuntimeDiagnostics(p.runtimeDiagnostics)
         return { ...p, native: nativePage }
       }
+      case 'runtime.profile.capture': return parseRuntimeV8ProfileResult(value, parseRuntimeV8ProfileInput(input))
+      case 'system.metrics.host-profile.capture': return parseRuntimeV8ProfileResult(value, parseRuntimeV8ProfileInput(input, true))
       case 'runtime.network.inspect': return parseRuntimeNetworkSnapshot(value, input.fence as import('./hosted-client-contract.js').AgentMuxRuntimeFence)
       case 'runtime.bootstrap': parseRpcHostedBootstrap(p); break
       case 'runtime.invoke': record(p, ['value']); if (!Object.hasOwn(p, 'value')) fail(); break

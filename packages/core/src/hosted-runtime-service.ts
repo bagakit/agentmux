@@ -9,6 +9,8 @@ import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentMuxClientEvent, AgentMuxRunAttachment, AgentMuxRunRef } from './types.js'
 import { AgentMuxError } from './errors.js'
+import { captureRuntimeV8Profile } from './runtime-v8-profiler.js'
+import { parseRuntimeV8ProfileInput } from './runtime-v8-profile.js'
 import { readNetworkInterfaces } from './runtime-network.js'
 import { observeRead as observe } from './observation-read.js'
 import { parseAgentMuxCreationTrustInput } from './agent-creation-admission.js'
@@ -210,6 +212,8 @@ export class AgentMuxHostedRuntimeService {
     const p = record(params, AGENTMUX_HOSTED_RPC_FIELDS[method as AgentMuxHostedRuntimeMethod])
     if (method === 'runtime.owner.identity') return { owner: this.owner(p.expectedRuntimeId) }
     this.assertFence(p.fence)
+    if (method === 'runtime.profile.capture') return await captureRuntimeV8Profile(
+      parseRuntimeV8ProfileInput(p), () => this.owner(), context.signal)
     if (method === 'runtime.network.inspect') {
       context.signal?.throwIfAborted()
       return { owner: this.owner(), observedAt: Date.now(), interfaces: readNetworkInterfaces() }
