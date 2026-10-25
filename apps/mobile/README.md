@@ -2,6 +2,12 @@
 
 手机是 Mac Host 的 client：继续已有 Agent 的对话、终端观看与明确输入。Agent、Run 和权威历史仍由 Mac 上的 Core / ctxmux 持有。首个连接环境是同一 Wi-Fi，iPhone 优先。
 
+## 设计与验收
+
+改手机界面先读[手机客户端的呈现](../../docs/design/presentation/mobile-client.md)：手机尺度、控件、文案、状态与动效由该页持有；行为与恢复沿[手机版 Relay 连接](../../docs/design/behavior/public-control.md#手机版-relay-连接)。共享组件的 Desktop 默认与手机适配范围须分清，不能仅缩小桌面布局。
+
+真实 MobileApp 的操作、采图入口是 [capture-ui.mjs](scripts/fixtures/mobile-product-redesign/capture-ui.mjs)，参数和受控边界见[场景说明](scripts/fixtures/mobile-product-redesign/scenario.md)。完整截图须经独立看图评审，构建与采图成功不代表视觉或真机验收通过。
+
 ## 构建
 
 从仓库根目录安装锁定依赖，按依赖顺序构建：
