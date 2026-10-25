@@ -747,7 +747,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (p.record !== null) {
           const original = parsePromptSubmissionRecord(p.record), deliveryKey = observed ? agentInputDeliveryKey(observed.control) : key
           if (original.agentSessionId !== key.agentSessionId || original.run.runId !== deliveryKey.expectedRun.runId ||
-              (original.admission?.submissionId ?? original.terminalPromptSubmission?.submissionId ?? original.launch?.input.submissionId ?? original.admission?.operationId) !== agentPromptInputId(key) ||
+              (original.admission?.submissionId ?? original.terminalPromptSubmission?.submissionId ?? original.launch?.input.submissionId ?? original.admission?.operationId) !== agentPromptInputId(deliveryKey) ||
               original.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, deliveryKey)) fail()
         }
         break
@@ -760,7 +760,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       }
       case 'agent.input.rejoin': {
         const receipt = inputReceipt(p), original = validateAgentInputWaitRef(input.ref)
-        if (!isDeepStrictEqual(receipt.key, original.key) || ![original.waitGeneration, original.waitGeneration + 1].includes(receipt.ref.waitGeneration)) fail()
+        if (!isDeepStrictEqual(receipt.key, original.key) || receipt.ref.waitGeneration < original.waitGeneration) fail()
         break
       }
       case 'agent.send': {

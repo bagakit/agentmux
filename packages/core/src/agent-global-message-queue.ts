@@ -28,7 +28,7 @@ import { browserInputContextFields } from './browser-input-context.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { configureMessageJournal, initializeInputDeliveryIndex, initializeInputWaitingIndex, inputControlJournalSchema, messageRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, initializeMessageEventIndex, messageBroadcastJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
 import { assertAgentMessageRouteIntent, validateAgentMessageRoute, type AgentMessageRoute } from './agent-message-route.js'
-import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef,
+import { agentInputJournalKey, agentInputDeliveryKey, validateAgentInputRetry, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
   type AgentInputWaitJournalRecord, type AgentInputWaitReason, type AgentInputWaitRef,
   type AgentInputWaitStopReceipt, type AgentInputDispatchLink } from './agent-input-wait.js'
@@ -666,18 +666,23 @@ export class DurableAgentMuxMessageQueue {
       return
     }
     const next = record.control, prior = current.control
+    if (next.retry) validateAgentInputRetry(ref.key, next.retry)
     finiteTimestamp(next.at, 'Input control time')
     if (ref.waitGeneration === prior.ref.waitGeneration + 1) {
-      if (prior.state !== 'stopped-before-dispatch' || next.state !== 'enabled' || next.gateId !== undefined) throw new AgentMuxError(
+      const retry = prior.state === 'dispatch-authorized' && next.retry &&
+        next.retry.previousGateId === prior.gateId && next.retry.previousWaitGeneration === prior.ref.waitGeneration &&
+        isDeepStrictEqual(next.retry.previousKey, agentInputDeliveryKey(prior))
+      if ((!retry && (prior.state !== 'stopped-before-dispatch' || !isDeepStrictEqual(next.retry, prior.retry))) || next.state !== 'enabled' || next.gateId !== undefined || next.deliveryKey !== undefined) throw new AgentMuxError(
         'An unresolved original dispatch cannot enter another waiting generation.', 'AGENT_INPUT_WAIT_GENERATION_STALE')
     } else if (ref.waitGeneration !== prior.ref.waitGeneration || prior.state !== 'enabled' ||
-        !['enabled', 'stopped-before-dispatch', 'dispatch-authorized'].includes(next.state)) {
+        !isDeepStrictEqual(next.retry, prior.retry) || !['enabled', 'stopped-before-dispatch', 'dispatch-authorized'].includes(next.state)) {
       throw new AgentMuxError('Original input control generation or state changed.', 'AGENT_INPUT_WAIT_GENERATION_STALE')
     }
     if (next.state === 'dispatch-authorized') validateAgentInputControlId(next.gateId)
     else if (next.gateId !== undefined) throw new AgentMuxError('Unclaimed input cannot invent a dispatch gate.', 'INVALID_AGENT_INPUT_CONTROL')
     if (next.deliveryKey !== undefined) {
-      if (next.state !== 'dispatch-authorized' || !this.canBindResumedInput(current.intent)) throw new AgentMuxError(
+      if (next.state !== 'dispatch-authorized' || next.deliveryKey.attemptId !== next.retry?.attemptId ||
+          next.deliveryKey.expectedRun.runId !== ref.key.expectedRun.runId && !this.canBindResumedInput(current.intent)) throw new AgentMuxError(
         'Only an original human or external manual input can freeze delivery to its confirmed resumed Session.', 'INVALID_AGENT_INPUT_CONTROL')
       const key = validateAgentInputDeliveryKey(ref.key, next.deliveryKey)
       const deliveryId = agentInputJournalKey(key), ownerId = agentInputJournalKey(ref.key)
@@ -874,7 +879,7 @@ export class DurableAgentMuxMessageQueue {
       const current = this.input(ref.key)
       if (!current || !isDeepStrictEqual(current.control.ref, ref) || current.control.state !== 'enabled') return false
       if (isDeepStrictEqual(current.control.waiting, waiting)) return true
-      await this.appendRecord({ kind: 'input-control', sequence: this.nextSequence, control: { ref, state: 'enabled', at: Date.now(), waiting } })
+      await this.appendRecord({ kind: 'input-control', sequence: this.nextSequence, control: { ref, state: 'enabled', at: Date.now(), waiting, ...(current.control.retry ? { retry: current.control.retry } : {}) } })
       return true
     }, true)
   }
@@ -895,7 +900,8 @@ export class DurableAgentMuxMessageQueue {
       const current = this.input(ref.key)
       if (!current || !isDeepStrictEqual(current.control.ref, ref) || current.control.state !== 'enabled') return null
       const deliveryKey = delivery && !isDeepStrictEqual(delivery.key, ref.key) ? validateAgentInputDeliveryKey(ref.key, delivery.key) : undefined
-      if (deliveryKey && !this.canBindResumedInput(current.intent)) throw new AgentMuxError(
+      if (deliveryKey && (deliveryKey.attemptId !== current.control.retry?.attemptId ||
+          deliveryKey.expectedRun.runId !== ref.key.expectedRun.runId && !this.canBindResumedInput(current.intent))) throw new AgentMuxError(
         'Only the original human or external manual input may first deliver after its Session resumes.', 'INVALID_AGENT_INPUT_CONTROL')
       if (delivery) {
         await delivery.assertTarget()
@@ -909,7 +915,7 @@ export class DurableAgentMuxMessageQueue {
         'This resumed delivery already belongs to another original input.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       const gateId = mintObjectId()
       await this.appendRecord({ kind: 'input-control', sequence: this.nextSequence,
-        control: { ref, state: 'dispatch-authorized', gateId, ...(deliveryKey ? { deliveryKey } : {}), at: Date.now() } })
+        control: { ref, state: 'dispatch-authorized', gateId, ...(deliveryKey ? { deliveryKey } : {}), ...(current.control.retry ? { retry: current.control.retry } : {}), at: Date.now() } })
       return { ref, gateId, ...(deliveryKey ? { deliveryKey } : {}) }
     }, true)
   }
@@ -926,7 +932,7 @@ export class DurableAgentMuxMessageQueue {
       const outcome = !isDeepStrictEqual(current.control.ref, ref) ? 'stale-generation' : settled ? 'already-settled'
         : current.control.state === 'dispatch-authorized' || originalClaimExists ? 'observation-stopped' : 'stopped-before-dispatch'
       if (outcome === 'stopped-before-dispatch' && current.control.state === 'enabled') await this.appendRecord({ kind: 'input-control', sequence: this.nextSequence,
-        control: { ref, state: 'stopped-before-dispatch', at } })
+        control: { ref, state: 'stopped-before-dispatch', at, ...(current.control.retry ? { retry: current.control.retry } : {}) } })
       const receipt: AgentInputWaitStopReceipt = { ref, cancelOperationId: operationId, outcome, at }
       await this.appendRecord({ kind: 'input-stop', sequence: this.nextSequence, receipt })
       return structuredClone(receipt)
@@ -942,7 +948,24 @@ export class DurableAgentMuxMessageQueue {
       if (current.control.state === 'enabled') return current.control.ref
       if (mode === 'recipient-continue') throw new AgentMuxError('The original input was stopped. Recipient continuation cannot enable another waiting generation.', 'AGENT_INPUT_WAIT_STOPPED')
       const next = { key: ref.key, waitGeneration: ref.waitGeneration + 1 }
-      await this.appendRecord({ kind: 'input-control', sequence: this.nextSequence, control: { ref: next, state: 'enabled', at: Date.now() } })
+      await this.appendRecord({ kind: 'input-control', sequence: this.nextSequence, control: { ref: next, state: 'enabled', at: Date.now(), ...(current.control.retry ? { retry: current.control.retry } : {}) } })
+      return next
+    }, true)
+  }
+
+  /** The exact original admission owner must reconfirm whole-input refusal under this gate CAS. */
+  async retryInputWaiting(refValue: AgentInputWaitRef, confirmNotApplied: (key: AgentPromptInputKey, gateId: string) => Promise<boolean>): Promise<AgentInputWaitRef> {
+    const ref = validateAgentInputWaitRef(refValue)
+    return await this.withLock(async () => {
+      const current = this.input(ref.key)
+      if (!current) throw new AgentMuxError('The original input is unavailable.', 'AGENT_INPUT_NOT_FOUND')
+      if (!isDeepStrictEqual(current.control.ref, ref)) return current.control.ref
+      if (current.control.state !== 'dispatch-authorized' || !current.control.gateId) return current.control.ref
+      const previousKey = agentInputDeliveryKey(current.control), previousGateId = current.control.gateId
+      if (!await confirmNotApplied(previousKey, previousGateId)) throw new AgentMuxError('The exact original input is not confirmed wholly unapplied. Retain its receipt.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+      const next = { key: ref.key, waitGeneration: ref.waitGeneration + 1 }
+      await this.appendRecord({ kind: 'input-control', sequence: this.nextSequence, control: { ref: next, state: 'enabled', at: Date.now(),
+        retry: { attemptId: mintObjectId(), previousKey, previousGateId, previousWaitGeneration: ref.waitGeneration } } })
       return next
     }, true)
   }

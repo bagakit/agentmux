@@ -3,7 +3,7 @@ import { mintObjectId } from './object-id.js'
 import { parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseAgentContinuityControlReceipts, type AgentMuxContinuityControlReceipt } from './agent-session-recovery/control-contract.js'
 import { normalizeAgentContinuityOperation, normalizeAgentContinuityLaunchInput, normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation } from './agent-session-recovery/continuity-contract.js'
-import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { agentPromptInputId, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { MAX_STORED_TEXT_BYTES, parsePromptSubmissionRecord, normalizePromptCompletionAdmission, terminalPromptSubmission, terminalPromptReadinessSource } from './prompt-submission-record.js'
 export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from './prompt-submission-record.js'
 import { normalizeOperationDevice } from './operation-device.js'
@@ -1701,7 +1701,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
   if (initialKey && (initialKey.agentSessionId !== session.agentSessionId ||
     ![currentRun, ...priorRuns].some(run => run.runId === initialKey.expectedRun.runId))) throw new AgentMuxError('Creation input key names another original Session or Run.', 'INVALID_AGENT_SESSION_STORE')
   if (inputKey && (inputKey.agentSessionId !== session.agentSessionId ||
-      (inputKey.kind === 'prompt' ? inputKey.submissionId : inputKey.messageId) !== session.promptCompletionAdmission!.submissionId ||
+      agentPromptInputId(inputKey) !== session.promptCompletionAdmission!.submissionId ||
       inputKey.expectedRun.runId !== session.promptCompletionAdmission!.intent?.run.runId)) {
     throw new AgentMuxError('Stored input identity changed its original claim.', 'INVALID_AGENT_SESSION_STORE')
   }

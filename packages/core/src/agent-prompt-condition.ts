@@ -30,11 +30,15 @@ export type AgentPromptAdmissionIntent =
   | { kind: 'exact-condition'; condition: AgentPromptCondition }
   | (AgentDirectedPromptTarget & { expectedRun: AgentMuxRunRef })
 
-export type AgentPromptInputKey =
+export type AgentPromptInputKey = (
   | { kind: 'prompt'; agentSessionId: string; expectedRun: AgentMuxRunRef; submissionId: string }
   | { kind: 'message'; agentSessionId: string; expectedRun: AgentMuxRunRef; messageId: string }
+) & { /** A Core-owned delivery attempt; the original logical producer identity is unchanged. */ attemptId?: string }
 
 export function agentPromptInputId(key: AgentPromptInputKey): string {
+  return key.attemptId ?? agentPromptLogicalInputId(key)
+}
+export function agentPromptLogicalInputId(key: AgentPromptInputKey): string {
   return key.kind === 'prompt' ? key.submissionId : key.messageId
 }
 
@@ -49,8 +53,9 @@ function inputRun(value: unknown): value is AgentMuxRunRef {
 
 export function validateAgentPromptInputKey(value: unknown): AgentPromptInputKey {
   const v = value as AgentPromptInputKey | undefined
-  if (!v || !['prompt', 'message'].includes(v.kind) || !inputIdentity(v.agentSessionId) || !inputRun(v.expectedRun) || !inputIdentity(agentPromptInputId(v)) ||
-      Object.keys(v).some(k => !['kind', 'agentSessionId', 'expectedRun', v.kind === 'prompt' ? 'submissionId' : 'messageId'].includes(k))) {
+  if (!v || !['prompt', 'message'].includes(v.kind) || !inputIdentity(v.agentSessionId) || !inputRun(v.expectedRun) || !inputIdentity(agentPromptLogicalInputId(v)) ||
+      v.attemptId !== undefined && (!inputIdentity(v.attemptId) || v.attemptId === agentPromptLogicalInputId(v)) ||
+      Object.keys(v).some(k => !['kind', 'agentSessionId', 'expectedRun', 'attemptId', v.kind === 'prompt' ? 'submissionId' : 'messageId'].includes(k))) {
     throw new AgentMuxError('The original input identity is invalid.', 'INVALID_AGENT_PROMPT')
   }
   return structuredClone(v)

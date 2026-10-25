@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import { agentPromptNotApplied, agentPromptInputId, validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
+import { agentPromptNotApplied, agentPromptInputId, agentPromptLogicalInputId, validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import type { AgentNativeBinding, AgentNativeSessionHandle, AgentOperationDevice, AgentMessageChannel, AgentPromptSubmissionRecord } from './types.js'
 
 /** In-process Host context, never a wire argument or a persisted grant. */
@@ -61,6 +61,8 @@ export type AgentInputJournalIntent = {
         promptWire?: string }
 }
 export type AgentInputDispatchLink = { ref: AgentInputWaitRef; gateId: string; deliveryKey?: AgentPromptInputKey }
+/** A confirmed whole-input refusal remains at previousKey; this successor has its own transport identity. */
+export type AgentInputRetry = { attemptId: string; previousKey: AgentPromptInputKey; previousGateId: string; previousWaitGeneration: number }
 export type AgentInputJournalEntry = { sequence: number; recordedAt: number; intent: AgentInputJournalIntent; control: AgentInputWaitControl }
 export type AgentInputWaitControl = {
   ref: AgentInputWaitRef
@@ -70,20 +72,32 @@ export type AgentInputWaitControl = {
   gateId?: string
   /** Frozen only by the original dispatch gate after confirmed same-Session recovery. */
   deliveryKey?: AgentPromptInputKey
+  retry?: AgentInputRetry
 }
 
 /** The original journal identity survives an unclaimed input's first delivery to a resumed Run. */
-export function agentInputDeliveryKey(value: Pick<AgentInputWaitControl, 'ref' | 'deliveryKey'>): AgentPromptInputKey {
-  return value.deliveryKey ?? value.ref.key
+export function agentInputDeliveryKey(value: Pick<AgentInputWaitControl, 'ref' | 'deliveryKey' | 'retry'>): AgentPromptInputKey {
+  return value.deliveryKey ?? (value.retry ? { ...value.ref.key, attemptId: value.retry.attemptId } : value.ref.key)
 }
 
 /** A delivery binding changes only the executing Run, never the original producer or logical input. */
 export function validateAgentInputDeliveryKey(originalValue: AgentPromptInputKey, value: unknown): AgentPromptInputKey {
   const original = validateAgentPromptInputKey(originalValue), key = validateAgentPromptInputKey(value)
   if (original.kind !== key.kind || original.agentSessionId !== key.agentSessionId ||
-      agentPromptInputId(original) !== agentPromptInputId(key) || original.expectedRun.runId === key.expectedRun.runId) throw new AgentMuxError(
+      agentPromptLogicalInputId(original) !== agentPromptLogicalInputId(key) || original.attemptId !== undefined ||
+      original.expectedRun.runId === key.expectedRun.runId && key.attemptId === undefined) throw new AgentMuxError(
     'A resumed input delivery must retain its original Session, producer and logical identity.', 'INVALID_AGENT_INPUT_CONTROL')
   return key
+}
+export function validateAgentInputRetry(key: AgentPromptInputKey, value: unknown): AgentInputRetry {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).some(field => !['attemptId', 'previousKey', 'previousGateId', 'previousWaitGeneration'].includes(field))) throw new AgentMuxError('Original input retry is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
+  const retry = value as AgentInputRetry, previousKey = validateAgentPromptInputKey(retry.previousKey)
+  validateAgentInputDeliveryKey(key, { ...key, attemptId: validateAgentInputControlId(retry.attemptId) })
+  if (previousKey.kind !== key.kind || previousKey.agentSessionId !== key.agentSessionId ||
+      agentPromptLogicalInputId(previousKey) !== agentPromptLogicalInputId(key) || previousKey.attemptId === retry.attemptId ||
+      !Number.isSafeInteger(retry.previousWaitGeneration) || retry.previousWaitGeneration < 1) throw new AgentMuxError('Retry must retain its exact original input predecessor.', 'INVALID_AGENT_INPUT_CONTROL')
+  return { ...retry, previousKey, previousGateId: validateAgentInputControlId(retry.previousGateId) }
 }
 export type AgentInputWaitStopReceipt = {
   ref: AgentInputWaitRef

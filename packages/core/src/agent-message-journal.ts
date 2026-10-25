@@ -48,11 +48,16 @@ export const inputControlJournalSchema = `
 
 /** Delivery aliases are rebuildable positions over immutable original dispatch gates. */
 export function initializeInputDeliveryIndex(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='input_delivery_bindings'").get()) return
-  db.exec('CREATE TABLE input_delivery_bindings (delivery_id TEXT PRIMARY KEY, input_id TEXT NOT NULL UNIQUE)')
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='input_delivery_bindings'").get()) {
+    // The old derived index allowed only one actual delivery per logical input.
+    // Rebuild this position index from immutable gates; no source input or receipt is removed.
+    if (!db.prepare("PRAGMA index_list('input_delivery_bindings')").all().some(index => index.origin === 'u')) return
+    db.exec('DROP TABLE input_delivery_bindings')
+  }
+  db.exec('CREATE TABLE input_delivery_bindings (delivery_id TEXT PRIMARY KEY, input_id TEXT NOT NULL)')
   const insert = db.prepare('INSERT INTO input_delivery_bindings VALUES (?, ?)')
-  for (const row of db.prepare(`SELECT latest.json AS json FROM input_intents i JOIN records latest ON latest.sequence=i.control_sequence
-    WHERE json_extract(latest.json, '$.control.deliveryKey') IS NOT NULL`).all()) {
+  for (const row of db.prepare(`SELECT json FROM records WHERE json_extract(json, '$.kind')='input-control'
+    AND json_extract(json, '$.control.deliveryKey') IS NOT NULL ORDER BY sequence`).all()) {
     const control = (JSON.parse(String(row.json)) as Extract<AgentMuxMessageJournalRecord, { kind: 'input-control' }>).control
     const ref = validateAgentInputWaitRef(control.ref), key = validateAgentInputDeliveryKey(ref.key, control.deliveryKey)
     insert.run(agentInputJournalKey(key), agentInputJournalKey(ref.key))
