@@ -46,6 +46,54 @@ async function refreshVisible() {
 }
 
 describe('original calendar control', () => {
+  it('exposes the complete single-line prompt in compact arrangement details', async () => {
+    const prompt = 'Keep this original full message readable. '.repeat(18) + 'The final instruction remains available.'
+    vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved({ prompt })], executionScope: 'connected-host' })
+    await dom.render(<CalendarScheduleControl target={target} unified />)
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-schedule-id="saved-calendar"]')).not.toBeNull())
+    const row = dom.container.querySelector<HTMLElement>('[data-schedule-id="saved-calendar"]')!
+    const details = row.querySelector<HTMLDetailsElement>('.schedule-arrangement__details')!
+    await act(async () => { details.querySelector<HTMLElement>('summary')!.click() })
+    expect(details.open).toBe(true)
+    expect(details.querySelector('.calendar-schedules__context')!.textContent).toBe(prompt)
+    expect(row.querySelector('.schedule-arrangement__message')!.textContent).toBe(prompt)
+    expect(row.closest('[hidden]')).toBeNull()
+  })
+
+  it('keeps one schedule draft while the isolated editor exposes repeat, calendar and countdown timing', async () => {
+    const create = vi.spyOn(api.schedule, 'create')
+    await dom.render(<CalendarScheduleControl target={target} unified />)
+    const overview = dom.container.querySelector<HTMLElement>('[data-automation-view="overview"]')!
+    const editor = dom.container.querySelector<HTMLElement>('[data-automation-view="editor"]')!
+    const entry = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'New automation')!
+    expect(overview.hidden).toBe(false); expect(editor.hidden).toBe(true)
+    await act(async () => entry.click())
+    const message = editor.querySelector<HTMLTextAreaElement>('[aria-label="Arranged message"]')!
+    expect(message.closest('[hidden]')).toBeNull()
+    expect(overview.hidden).toBe(true); expect(editor.hidden).toBe(false)
+    await edit('[aria-label="Arranged message"]', 'Keep this same timing draft')
+    const choices = [...editor.querySelectorAll<HTMLInputElement>('[aria-label="Arrangement timing"] input[type="radio"]')]
+    expect(choices.map(choice => choice.value)).toEqual(['everyMs', 'calendar', 'afterMs'])
+    expect(choices.filter(choice => choice.checked).map(choice => choice.value)).toEqual(['everyMs'])
+    await dom.click('[aria-label="Arrangement timing"] input[value="calendar"]')
+    expect(editor.querySelector('[aria-label="Arrangement local time"]')!.closest('[hidden]')).toBeNull()
+    expect(editor.querySelector('[aria-label="Repeat interval in minutes"]')).toBeNull()
+    await dom.click('[aria-label="Arrangement timing"] input[value="afterMs"]')
+    expect(editor.querySelector('[aria-label="Countdown duration"]')!.closest('[hidden]')).toBeNull()
+    await dom.click('[aria-label="Arrangement timing"] input[value="everyMs"]')
+    expect(editor.querySelector('[aria-label="Repeat interval in minutes"]')!.closest('[hidden]')).toBeNull()
+    expect(editor.querySelector('[aria-label="Arranged message"]')).toBe(message)
+    expect(message.value).toBe('Keep this same timing draft')
+    await dom.click('[aria-label="Back to automations"]')
+    expect(overview.hidden).toBe(false); expect(editor.hidden).toBe(true)
+    await vi.waitFor(() => expect(document.activeElement).toBe(entry))
+    await act(async () => entry.click())
+    expect(editor.querySelector('[aria-label="Arranged message"]')).toBe(message)
+    expect(message.value).toBe('Keep this same timing draft')
+    expect(create).not.toHaveBeenCalled(); expect(api.schedule.list).toHaveBeenCalledTimes(1)
+    expect(dom.draft()).toBe('Keep my draft')
+  })
+
   it.each([1, 32])('keeps %i hidden forms without starting schedule readers or repeated timezone work', async count => {
     const timezone = vi.spyOn(automationPreferences, 'automationCalendarTimezone')
     const targets = Array.from({ length: count }, (_, index) => ({ ...target, agentSessionId: `retained-arrangement-${index}` }))

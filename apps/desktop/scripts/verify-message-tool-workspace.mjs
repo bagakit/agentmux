@@ -136,8 +136,8 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
   result.render = proof.render
   assert.ok(result.render.frames.length > 0)
   if (automation) {
-    assert.ok(result.render.scenes.every(scene => scene.originalSurfacePreserved && scene.retainedAutomation && scene.controlsReachable))
-    assert.equal(result.render.frames.length, 18, 'Each actual workface provides list, controls, progress edit/save and minute-form/save captures')
+    assert.ok(result.render.scenes.every(scene => scene.originalSurfacePreserved && scene.retainedAutomation && scene.controlsReachable && scene.isolatedEditor && scene.returnFocus && scene.reducedMotion && scene.motion.length > 0))
+    assert.equal(result.render.frames.length, 24, 'Each actual workface provides list, controls, progress edit/save, minute-form/save, calendar and countdown captures')
   } else if (manualNotify) {
     assert.equal(result.render.frames.length, recovery ? 15 : 9)
     if (recovery) assert.equal(result.render.scenes.find(scene => scene.width === 640)?.reloadedIdentity, true)
