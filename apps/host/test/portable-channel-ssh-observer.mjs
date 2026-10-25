@@ -13,6 +13,9 @@ assert.equal(endpoint.socketPath, checkpoint.socketPath)
 const { connectAgentMuxRpc } = await import(pathToFileURL(join(coreRoot, 'dist/index.js')).href)
 const rpc = await connectAgentMuxRpc({ endpoint })
 const report = { schema: 'agentmux.portable-channel-ssh-observer.v1', passed: false, checkpoint, endpoint }
+report.sdk = await Promise.all(['dist/index.js', 'dist/public-rpc-client.js'].map(async name => {
+  const path = join(coreRoot, name); return { path, sha256: createHash('sha256').update(await readFile(path)).digest('hex') }
+}))
 try {
   const owner = await rpc.call('runtime.owner.identity', {})
   assert.equal(owner.owner.runtimeId, checkpoint.owner.runtimeId)
@@ -33,8 +36,15 @@ try {
   const args = ['-T', '-o', 'BatchMode=yes', '-o', 'ClearAllForwardings=yes', '-o', 'StrictHostKeyChecking=yes']
   if (endpoint.port) args.push('-p', String(endpoint.port))
   if (endpoint.identityFile) args.push('-i', endpoint.identityFile)
+  const destination = endpoint.user ? endpoint.user + '@' + endpoint.host : endpoint.host
+  const { stdout: nativeHashes } = await promisify(execFile)('ssh', [...args, '--', destination,
+    ['sha256sum', '--', checkpoint.cli.path, endpoint.command].map(quote).join(' ')], { timeout: 30_000 })
+  const hashes = nativeHashes.trim().split('\n').map(line => line.slice(0, 64))
+  assert.equal(hashes[0], checkpoint.cli.sha256)
+  assert.match(hashes[1], /^[0-9a-f]{64}$/u)
+  report.remoteCli = { compiled: checkpoint.cli, launcher: { path: endpoint.command, sha256: hashes[1] } }
   const remote = [endpoint.command, '--endpoint', 'unix:' + endpoint.socketPath, 'agent', 'inspect', '--session', checkpoint.agentSessionId]
-  const { stdout } = await promisify(execFile)('ssh', [...args, '--', endpoint.user ? endpoint.user + '@' + endpoint.host : endpoint.host, remote.map(quote).join(' ')], { timeout: 30_000 })
+  const { stdout } = await promisify(execFile)('ssh', [...args, '--', destination, remote.map(quote).join(' ')], { timeout: 30_000 })
   const cli = JSON.parse(stdout)
   assert.equal(cli.result.session.run.runId, checkpoint.runId)
   assert.equal(cli.result.session.nativeHandle.sessionId, checkpoint.native.sessionId)
