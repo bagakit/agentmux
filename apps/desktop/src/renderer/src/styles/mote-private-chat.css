@@ -33,7 +33,7 @@
 .mote-chat-people, .mote-chat-requests { display: grid; gap: var(--sp-3); min-width: 0; }
 .mote-chat-people { padding-top: var(--sp-3); }
 .mote-chat-person { min-width: 0; display: grid; justify-items: start; gap: var(--sp-3); padding-block: var(--sp-3); border-bottom: 1px solid var(--line-soft); }
-.mote-chat-person__identity { min-width: 0; display: grid; gap: var(--sp-1); }
+.mote-chat-person > .connector-entity, .mote-chat-person > .agent-connector-disclosure { width: 100%; }
 .mote-chat-person strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
 .mote-chat-person code { color: var(--text-3); font: var(--fs-meta)/1.6 var(--font-mono); overflow-wrap: anywhere; }
 .mote-chat-person dl { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-5); margin: 0; }

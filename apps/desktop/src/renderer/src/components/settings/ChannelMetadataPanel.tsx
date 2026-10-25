@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { channelMetadataSubjectKey, type ChannelMetadataEntry, type ConnectionRecord } from '@agentmux/core/connections'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
+import { ConnectorEntityIdentity, ConnectorIdentityField } from '../ConnectorEntityIdentity'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
 import type { ConnectionSettingsPort } from '../../lib/connection-settings-port'
 import '../../styles/channel-metadata.css'
 
-const LoadingIcon = semanticIconComponent('status.loading'), RefreshIcon = semanticIconComponent('action.refresh'), PersonIcon = semanticIconComponent('object.user'), GroupIcon = semanticIconComponent('object.team')
+const LoadingIcon = semanticIconComponent('status.loading'), RefreshIcon = semanticIconComponent('action.refresh')
 
 /** The Channel owns its schemas and storage. This panel consumes bounded typed observations only. */
 export function ChannelMetadataPanel({ connection, active, connections = api.connections }: { connection: ConnectionRecord; active: boolean; connections?: ConnectionSettingsPort }) {
@@ -57,10 +57,11 @@ export function ChannelMetadataPanel({ connection, active, connections = api.con
       {issue ? <p className="channel-metadata__issue" role="status">{issue} Read saved profiles to check the current result.</p> : null}
       {entries.length ? <ul>{entries.map(entry => {
         const profile = entry.observation.profile, key = channelMetadataSubjectKey(entry.subject)
-        const subject = entry.subject.kind === 'actor' ? `${entry.subject.actor.idType} · ${entry.subject.actor.userId}` : entry.subject.externalConversationId
+        const subject = entry.subject.kind === 'actor' ? entry.subject.actor.userId : entry.subject.externalConversationId
         return <li key={key}><div className="channel-metadata__identity">
-          <ChannelProfileAvatar url={profile?.avatarUrl} size={28}><span className="channel-metadata__avatar" aria-hidden="true">{entry.subject.kind === 'actor' ? <PersonIcon size={15} /> : <GroupIcon size={15} />}</span></ChannelProfileAvatar>
-          <div><strong>{profile?.name ?? 'Profile not observed'}</strong><code>{subject}</code><small>{entry.observation.freshness === 'current' ? 'Saved platform profile' : entry.observation.freshness === 'stale' ? 'Saved profile · refresh unconfirmed' : 'No saved profile'}{entry.observation.reason ? ` · ${entry.observation.reason}` : ''}</small></div>
+          <ConnectorEntityIdentity identityKey={JSON.stringify([scope, key])} kind={entry.subject.kind === 'actor' ? 'person' : 'group'} name={profile?.name} missingName="Profile not observed" avatarUrl={profile?.avatarUrl}
+            status={<span>{entry.observation.freshness === 'current' ? 'Saved platform profile' : entry.observation.freshness === 'stale' ? 'Saved profile · refresh unconfirmed' : 'No saved profile'}{entry.observation.reason ? ` · ${entry.observation.reason}` : ''}</span>} />
+          <ConnectorIdentityField identityKey={JSON.stringify([scope, key])} label={entry.subject.kind === 'actor' ? entry.subject.actor.idType : 'Group ID'} value={subject} compact />
         </div><div className="channel-metadata__actions"><button className="small-button" disabled={!!busy} onClick={() => void change(entry, 'refresh')}>Refresh</button>
           <button className="small-button" disabled={!!busy || !entry.cacheRevision} onClick={() => void change(entry, 'clear')}>Clear saved profile</button></div></li>
       })}</ul> : !busy && !issue ? <p>No saved {kind === 'actor' ? 'people' : 'group'} profiles yet.</p> : null}

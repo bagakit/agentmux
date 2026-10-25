@@ -1,3 +1,4 @@
+import { ConnectorAccountSummary } from '../ConnectorEntityIdentity'
 import { useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ConnectionRecord } from '@agentmux/core/connections'
@@ -56,10 +57,8 @@ export function ConnectionManagementSetup({ record, model, platformLabel, onBack
     {view?.challenge && !reading?.issue && !revised ? <div className="connector-management__scan" data-management-code>
       <BotSignInPrompt url={view.challenge.qrPayload} title={`${platformLabel} account sign-in code`} platform={platformLabel} scanned={stage === 'scanned'} />
     </div> : null}
-    {account ? <dl className={`connector-management__account${configuration ? ' connector-management__account--confirmed' : ''}`} aria-label={configuration || observedView?.continuation?.stage === 'confirmed' ? 'Confirmed account and enterprise' : 'Account and enterprise to confirm'}>
-      <div><dt>{reading?.issue ? observedView?.continuation?.stage === 'confirmed' ? 'Last confirmed account' : 'Last observed account' : configuration ? 'Account confirmed' : 'Account'}</dt><dd>{account.userName ?? account.userId}</dd></div>
-      <div><dt>Enterprise</dt><dd>{account.tenantName ?? account.tenantId}</dd></div>
-    </dl> : null}
+    {account ? <ConnectorAccountSummary identityKey={JSON.stringify([model.originalTarget, model.selectedId])} account={account} label={configuration || observedView?.continuation?.stage === 'confirmed' ? 'Confirmed account and enterprise' : 'Account and enterprise to confirm'}
+      status={reading?.issue ? observedView?.continuation?.stage === 'confirmed' ? 'Last confirmed account' : 'Last observed account' : configuration ? 'Account confirmed' : 'Account to confirm'} /> : null}
     <div className="connector-enrollment__action" aria-busy={busy}>
       {showStart ? <button className="primary-button" data-management-start disabled={!model.supported || busy} onClick={model.start}>Show sign-in code</button> : null}
       {stage === 'account' && confirm && account ? <button className="primary-button" data-management-confirm disabled={busy} onClick={() => model.advance(confirm)}>{busy ? 'Confirming…' : 'Use this account'}</button> : null}

@@ -1,3 +1,4 @@
+import { ConnectorAccountSummary } from '../ConnectorEntityIdentity'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { BotSignInPrompt } from '../BotConfirmationCode'
@@ -507,10 +508,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
       <div className="connector-enrollment__alternative"><span>Already have a bot?</span><button data-enrollment-existing className="connector-enrollment__text-action" onClick={onExisting}>Connect an existing bot</button></div>
     </> : <>
       {view?.challenge ? <div className="connector-management__scan" data-enrollment-code><BotSignInPrompt url={view.challenge.qrPayload} title={`${platform} sign-in code`} platform={platform} scanned={stage === 'scanned'} /></div> : null}
-      {view?.account ? <dl className="connector-management__account" aria-label="Account and enterprise for this bot">
-        <div><dt>Account</dt><dd>{view.account.userName ?? view.account.userId}</dd></div>
-        <div><dt>Enterprise</dt><dd>{view.account.tenantName ?? view.account.tenantId}</dd></div>
-      </dl> : null}
+      {view?.account ? <ConnectorAccountSummary identityKey={JSON.stringify([enrollment.originalTarget, selectedId])} account={view.account} label="Account and enterprise for this bot" /> : null}
       {primary?.kind === 'create' ? <div className="connector-enrollment__creation">{identity}<p>Creates one bot, gets its credentials and saves it securely here. Message setup and publishing come next.</p></div> : null}
       {saved ? onContinue ? <details className="connector-optional"><summary>Connection status and checks</summary><ConnectionSetupResult record={saved} /></details> : <ConnectionSetupResult record={saved} /> : null}
       <div className="connector-enrollment__action" aria-busy={!!busy}>

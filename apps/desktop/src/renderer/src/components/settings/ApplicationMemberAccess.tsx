@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { parseConnectionParams, type ChannelMetadataEntry, type ConnectionActor, type ConnectionApplicationAccess, type ConnectionApplicationAccessOperation, type ConnectionApplicationGrant, type ConnectionGrant, type ConnectionRecord } from '@agentmux/core/connections'
+import { channelMetadataSubjectKey, parseConnectionParams, type ChannelMetadataEntry, type ConnectionActor, type ConnectionApplicationAccess, type ConnectionApplicationAccessOperation, type ConnectionApplicationGrant, type ConnectionGrant, type ConnectionRecord } from '@agentmux/core/connections'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
-import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
+import { ConnectorEntityIdentity, ConnectorIdentityField } from '../ConnectorEntityIdentity'
+import { useConnectorEntityProfiles } from '../../lib/use-connector-room-name'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import { connectionSettingsPort } from '../../lib/connection-settings-port'
@@ -149,8 +150,16 @@ function ApplicationMemberAccessEditor({ record, hostingTarget, intent, active }
   for (const result of Object.values(results)) if (result?.state === 'applied') include(result.grant.actor)
   for (const draft of Object.values(retained.drafts)) if (belongs(draft)) include(draft.actor)
   for (const request of requests) include(request.input.actor)
-  if (creatorReading.creator) include({ application, ...creatorReading.creator }, 'Bot creator')
+  if (creatorReading.creator) include({ application, ...creatorReading.creator })
   if (account.idType && account.userId) include({ application, ...account })
+  const visibleProfiles = useConnectorEntityProfiles(record.config, [...rows.values()].map(row => ({ kind: 'actor', actor: row.actor })), hostingTarget, active)
+  for (const [key, row] of rows) {
+    const observation = visibleProfiles.get(channelMetadataSubjectKey({ kind: 'actor', actor: row.actor }))?.observation
+    if (observation) {
+      const profile = observation.profile
+      rows.set(key, { actor: row.actor, name: profile?.name ?? 'Account · …' + row.actor.userId.slice(-4), named: !!profile?.name, ...(profile?.avatarUrl ? { avatar: profile.avatarUrl } : {}) })
+    }
+  }
   return <section className="agent-connector-section connector-member-access" aria-label="All groups member access" data-application-member-access>
     <div className="agent-connector-section-title"><h3>All groups · Member access</h3><button type="button" className="agent-connector-text-action" onClick={() => void read()}>Refresh access</button></div>
     <p className="agent-connector-note">Rules for this bot’s current and future groups. A group’s own member settings take precedence. Saved people are profile observations, not a group member list.</p>
@@ -170,9 +179,10 @@ function ApplicationMemberAccessEditor({ record, hostingTarget, intent, active }
       const activity = flights.get(key), creator = creatorReading.creator?.idType === row.actor.idType && creatorReading.creator.userId === row.actor.userId
       const change = (capability: ConnectionGrant['capabilities'][number], enabled: boolean) => edit(row.actor, grant, enabled ? [...desired, capability] : desired.filter(value => value !== capability))
       return <div className="connector-member-row" key={key} data-application-member-row={JSON.stringify([row.actor.idType, row.actor.userId])} data-member-state={pending ? 'pending' : dirty || needsReview ? 'dirty' : value ? 'saved' : 'unconfirmed'}>
-        <div className="connector-member-row__identity"><ChannelProfileAvatar url={row.avatar} size={24}><span aria-hidden="true">{row.name.slice(0, 1)}</span></ChannelProfileAvatar><strong>{row.name}</strong>{creator && row.name !== 'Bot creator' ? <small>Bot creator</small> : null}<span role="status">{activity ? activity === 'saving' ? 'Saving changes' : 'Checking original result' : pending ? pending.phase === 'not-dispatched' ? 'Original change not sent' : 'Original result unconfirmed' : dirty ? needsReview ? 'Unsaved · review current access' : 'Unsaved · all groups' : grant === undefined ? 'Access unconfirmed' : needsReview ? 'Saved access changed' : grant?.state === 'active' ? 'Saved · all groups' : 'No access'}</span></div>
+        <ConnectorEntityIdentity identityKey={key} kind="person" name={row.named ? row.name : undefined} label={row.name} missingName="Account" avatarUrl={row.avatar}
+          secondary={creator ? 'Bot creator' : row.actor.idType} status={<span role="status">{activity ? activity === 'saving' ? 'Saving changes' : 'Checking original result' : pending ? pending.phase === 'not-dispatched' ? 'Original change not sent' : 'Original result unconfirmed' : dirty ? needsReview ? 'Unsaved · review current access' : 'Unsaved · all groups' : grant === undefined ? 'Access unconfirmed' : needsReview ? 'Saved access changed' : grant?.state === 'active' ? 'Saved · all groups' : 'No access'}</span>} />
         <ConnectorMemberChoices name={row.name} value={desired} change={change} scope="application" />
-        <details className="agent-connector-disclosure"><summary>Account details</summary><small>{row.actor.idType} · {row.actor.userId}</small></details>
+        <details className="agent-connector-disclosure"><summary>Account details</summary><ConnectorIdentityField identityKey={key} label={row.actor.idType} value={row.actor.userId} /><ConnectorIdentityField identityKey={key} label="App ID" value={row.actor.application.appId} /></details>
         {dirty || needsReview ? <p className="agent-connector-note">Last confirmed access: {grant === undefined ? 'not checked' : grant?.state === 'active' ? grant.capabilities.join(', ') : 'No access'}</p> : null}
         {pending ? <p className="agent-connector-note">Original requested access: {pending.input.capabilities.join(', ') || 'No access'}. These controls remain your editable draft.</p> : null}
         <div className="connector-member-row__actions">

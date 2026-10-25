@@ -163,7 +163,6 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   const linkIntent = audienceHeads.length === 1 ? audienceHeads[0] : undefined
   const linkFact = linkIntent ? facts[linkIntent.input.operationId] : null
   const linkOperation = linkFact && 'input' in linkFact && 'externalConversationId' in linkFact.input ? linkFact as RoomLinkOperation : null
-  const roomFacts = useConnectorRoomFacts(connection, audience, hostingTarget)
   useEffect(() => {
     if (!initialFocus.current || !connection || mode !== 'existing') return
     initialFocus.current = false
@@ -201,6 +200,15 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   const frozenRoom = roomIntent?.method === 'connection.room.create' ? roomIntent.input : null
   const creatorInvitation = useConnectorCreatorInvitation(connection, !!connection, hostingTarget)
   const awaitingCreator = creatorInvitation.pending && creatorInvitation.included
+  const visibleActors: ConnectionActor[] = showingCurrentBinding && binding ? [
+    ...currentGrants.map(grant => grant.actor),
+    ...(actors?.bindingId === binding.bindingId && actors.revision === binding.revision ? actors.access ?? [] : []).map(item => item.actor),
+    ...Object.values(memberDrafts).filter(draft => draft.bindingId === binding.bindingId && draft.bindingRevision === binding.revision).map(draft => draft.actor),
+    ...currentMemberIntents.map(intent => intent.input.actor),
+    ...(creatorInvitation.creator ? [{ application: binding.application, ...creatorInvitation.creator }] : []),
+    ...(actorType && actorId ? [{ application: binding.application, idType: actorType, userId: actorId }] : [])
+  ] : []
+  const roomFacts = useConnectorRoomFacts(connection, audience, hostingTarget, visibleActors)
   function observeBinding(bindingId: string, current: RoomBinding | null) {
     setBindings(previous => {
       const known = previous.find(item => item.bindingId === bindingId)

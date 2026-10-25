@@ -1,3 +1,4 @@
+import { ConnectorAccountSummary } from './ConnectorEntityIdentity'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useRef, useState } from 'react'
 import { connectionProfileAvatarDigest, type ConnectionRecord, type ConnectionEnrollmentActionKind } from '@agentmux/core/connections'
@@ -381,7 +382,7 @@ export function MoteBotSetup({
           {completedCreation && operation ? <div className="mote-bot-profile bot-task-complete-profile">{originalImage ? <img width={48} height={48} src={originalImage} alt="Avatar chosen for this bot" /> : null}<div><strong>{operation.snapshot.name}</strong><span>Message delivery is checked when you connect a group.</span></div></div> : null}
           {publishedWithoutChoice ? <div className="mote-bot-next"><p>{operation.defaultLink.state === 'conflict' ? 'This Mote’s bot choice changed while setup was running.' : 'This bot is published, but its saved choice for this Mote is not confirmed.'} Choose the saved bot to use for new conversations.</p><button type="button" className="primary-button" onClick={onChoose}>Choose a saved bot</button></div> : null}
           {challenge ? <div className="mote-bot-confirmation" data-mote-bot-code><BotSignInPrompt url={challenge.qrPayload} title={enrollmentPlatform ? `Sign in to ${enrollmentPlatform}` : 'Sign in to the bot platform'} platform={enrollmentPlatform || 'the bot platform'} scanned={enrollment?.authentication?.stage === 'scanned'} /></div> : null}
-          {setup.enrollmentView?.account ? <dl className="connector-management__account" aria-label="Account and enterprise for this bot"><div><dt>Account</dt><dd>{setup.enrollmentView.account.userName ?? setup.enrollmentView.account.userId}</dd></div><div><dt>Enterprise</dt><dd>{setup.enrollmentView.account.tenantName ?? setup.enrollmentView.account.tenantId}</dd></div></dl> : null}
+          {setup.enrollmentView?.account ? <ConnectorAccountSummary identityKey={JSON.stringify([setup.hostingTarget, enrollment?.operationId])} account={setup.enrollmentView.account} label="Account and enterprise for this bot" /> : null}
           <div className="bot-task-activity" role="status" data-bot-task-reading={setup.checking || undefined} aria-busy={working}>
             {working ? <LoadingIcon size={14} animation="spin" /> : null}<span>{activity}</span>
           </div>
