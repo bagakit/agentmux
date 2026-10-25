@@ -64,10 +64,17 @@
 .connector-member-access, .connector-member-list, .connector-member-earlier { display: grid; gap: var(--sp-3); min-width: 0; }
 .connector-member-access h3, .connector-member-earlier h4 { margin: 0; }
 .connector-member-row { display: grid; gap: var(--sp-2); min-width: 0; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
+.connector-member-row__summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); align-items: center; }
+.connector-member-row__summary > .connector-member-row__identity { grid-column: 1; }
+.connector-member-row__saved { grid-column: 1; color: var(--text-2); font-size: var(--fs-micro); line-height: 1.5; overflow-wrap: anywhere; }
+.connector-member-row__saved > span { display: block; color: var(--text-3); }
+.connector-member-row__edit { grid-column: 2; grid-row: 1 / span 2; }
+.connector-member-row__editor { display: grid; gap: var(--sp-3); border-top: 1px solid var(--line-soft); padding-top: var(--sp-3); }
+.connector-member-row__editor > details > small { color: var(--text-3); overflow-wrap: anywhere; }
 .connector-member-row__identity { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
 .connector-member-row__identity strong { margin-right: auto; color: var(--text); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .connector-member-row__identity > span, .connector-member-row__identity > small { color: var(--text-3); font-size: var(--fs-micro); }
-.connector-member-row[data-member-state=dirty] .connector-member-row__identity > span { color: var(--green); }
+.connector-member-row:is([data-member-state=dirty], [data-member-state=pending]) .connector-member-row__identity > span { color: var(--amber-text); }
 .connector-member-row__choices, .connector-member-row__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
 .connector-member-row__choices label { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
 .connector-member-row__choices { border: 0; padding: 0; margin: 0; min-inline-size: 0; }

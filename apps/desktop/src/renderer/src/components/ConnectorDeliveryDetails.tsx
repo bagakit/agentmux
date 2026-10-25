@@ -132,6 +132,7 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget, onMembers }: 
       </section>
       <section ref={node => { originalSections.current.content = node }} className="connector-delivery-details__section" data-receipt-section="content" tabIndex={-1} aria-label="Conversation content details">
       <h4>Conversation content</h4>
+      <p className="agent-connector-note">Source reading: {outgoing?.sourceObservation?.state ?? 'not recorded'}{outgoing?.sourceObservation?.reason ? ' · ' + outgoing.sourceObservation.reason : ''}{outgoing?.sourceObservation?.code ? ' · ' + outgoing.sourceObservation.code : ''}</p>
       <p className="agent-connector-note">These source checks describe what could be shared. They do not change the delivery results of other messages.</p>
       <p className="agent-connector-note">Content coverage: {outgoing?.coverage?.state ?? 'not recorded'} · content has next: {String(!!outgoing?.coverage?.nextContent)}</p>
       {outgoing?.coverage?.gaps.map(gap => <p className="agent-connector-note" key={gap.gapKey}>{gap.reason} · <code>{gap.gapKey}</code></p>)}
