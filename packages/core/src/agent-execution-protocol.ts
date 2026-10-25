@@ -23,5 +23,13 @@ export type AgentExecutionMessage =
 export interface AgentExecutionProtocol {
   parse(input: unknown): AgentExecutionMessage
   parseServer(input: unknown): AgentExecutionMessage
+  /** Native clients with independent execution connections, such as MCP subagents. */
+  concurrentConnections?: true
+  /** Provider projection after the original native response is durably recorded. */
+  projectResponse?(request: Extract<AgentExecutionMessage, { kind: 'request' }>, response: Record<string, unknown>): Record<string, unknown>
+  /** Optional Provider effects under the same resource journal and original generation. */
+  execute?(request: Extract<AgentExecutionMessage, { kind: 'request' }>, generation: string, environment?: NodeJS.ProcessEnv): Promise<Record<string, unknown> | undefined>
+  /** Explicit whole-helper shutdown only; never called for an observer or socket detach. */
+  dispose?(): Promise<void>
   executor: { command: string; args: string[]; env?: Record<string, string | undefined>; cwd: string }
 }

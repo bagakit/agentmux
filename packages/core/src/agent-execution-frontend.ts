@@ -2,15 +2,15 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { Readable, Writable } from 'node:stream'
 import { WebSocket, WebSocketServer, createWebSocketStream } from 'ws'
-import { agentControlFailureCode, AgentExecutionRpcFrontend, type AgentExecutionRelayContext } from '../agent-execution-rpc-relay.js'
-import { createExecutionFrameChannel } from '../agent-execution-channel.js'
+import { agentControlFailureCode, AgentExecutionRpcFrontend, type AgentExecutionRelayContext } from './agent-execution-rpc-relay.js'
+import { createExecutionFrameChannel } from './agent-execution-channel.js'
 
 const DEFAULT_FRAME_BYTES = 32 * 1024 * 1024
 type NativeId = string | number
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 const nativeId = (value: unknown): value is NativeId => typeof value === 'string' || (typeof value === 'number' && Number.isSafeInteger(value))
 
-export interface CodexExecutionFrontendOptions {
+export interface AgentExecutionFrontendOptions {
   input: Readable
   output: Writable
   onError: (error: Error) => void
@@ -20,7 +20,7 @@ export interface CodexExecutionFrontendOptions {
   maxPendingRequests?: number
 }
 
-export interface CodexExecutionFrontend {
+export interface AgentExecutionFrontend {
   /** Capability URL. Send only on the private machine channel, never to logs. */
   url: string
   /** Explicit helper owner shutdown; reader detach must not call this. */
@@ -33,7 +33,7 @@ export interface CodexExecutionFrontend {
  * Every response names the exact original socket generation; a reconnect never
  * inherits pending IDs, even if the new native peer reuses the same request ID.
  */
-export async function runCodexExecutionFrontend(options: CodexExecutionFrontendOptions): Promise<CodexExecutionFrontend> {
+export async function runAgentExecutionFrontend(options: AgentExecutionFrontendOptions): Promise<AgentExecutionFrontend> {
   const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_FRAME_BYTES
   const maxPendingRequests = options.maxPendingRequests ?? 256
   if (!Number.isSafeInteger(maxFrameBytes) || maxFrameBytes < 256 || !Number.isSafeInteger(maxPendingRequests) || maxPendingRequests < 1) throw new TypeError('Invalid native frontend limits')
