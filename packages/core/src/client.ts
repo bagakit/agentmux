@@ -6034,21 +6034,45 @@ export class AgentMuxClient {
     return receipt
   }
 
+  /** Continue an original external request as its recipient, never as its author. */
+  private async inputRecipientContinuation(intent: AgentInputJournalIntent, caller?: { agentSessionId: string; capability: string }): Promise<(() => Promise<void>) | undefined> {
+    if (!caller || intent.source.kind !== 'message' || caller.agentSessionId !== intent.key.agentSessionId) return undefined
+    const original = await this.messageQueue.readByOperationId(intent.source.originalControlOperationId)
+    if (original?.envelope.sender.kind !== 'external') return undefined
+    const envelope = original.envelope
+    if (intent.key.kind !== 'message' || envelope.messageId !== intent.key.messageId || envelope.messageId !== intent.source.messageId ||
+        envelope.recipientSessionId !== intent.key.agentSessionId || envelope.recipientRunId !== intent.key.expectedRun.runId) {
+      throw new AgentMuxError('The original external request does not match this recipient input.', 'AGENT_INPUT_NOT_FOUND')
+    }
+    const assertCurrent = async () => {
+      const recipient = await this.authorizeAgentCaller(caller.capability, caller.agentSessionId)
+      if (!sameRun(recipient.run, intent.key.expectedRun)) throw new AgentMuxError(
+        'Recipient continuation requires the original Run. Retain and inspect the original input.', 'STALE_AGENT_SESSION')
+    }
+    await assertCurrent()
+    return assertCurrent
+  }
+
   async rejoinAgentInputWaiting(input: { ref: AgentInputWaitRef; caller?: { agentSessionId: string; capability: string } }, context?: AgentInputCallContext): Promise<AgentInputSubmissionReceipt> {
     context?.requestSignal?.throwIfAborted()
     const ref = validateAgentInputWaitRef(input.ref), saved = await this.messageQueue.inspectInput({ key: ref.key })
     if (!saved) throw new AgentMuxError('The original input has no controlled waiting contract.', 'AGENT_INPUT_NOT_FOUND')
-    await this.assertInputWaitingAuthor(saved.intent, input.caller)
+    const recipientContinuation = await this.inputRecipientContinuation(saved.intent, input.caller)
+    if (!recipientContinuation) await this.assertInputWaitingAuthor(saved.intent, input.caller)
     const prior = await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control))
     if (prior || saved.control.state === 'dispatch-authorized') return (await this.inspectAgentInput({ key: ref.key }))!
     const prompt = await this.inputWaitingPrompt(saved.intent, input.caller, context)
     const active = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
     if (active?.active && isDeepStrictEqual(active.ref, ref)) return (await this.inspectAgentInput({ key: ref.key }))!
-    const next = await this.messageQueue.reenableInputWaiting(ref)
+    const next = await this.messageQueue.reenableInputWaiting(ref, recipientContinuation ? 'recipient-continue' : 'author-reenable')
     const previous = this.inputWaitingContexts.get(agentInputJournalKey(ref.key))
-    if (previous) { previous.controller.abort(); this.inputWaitingContexts.delete(agentInputJournalKey(ref.key)) }
+    if (previous && isDeepStrictEqual(previous.ref, ref)) previous.controller.abort()
+    const authority = this.inputCallAuthority(prompt.authority, context)
     return await this.acceptInputWaiting(next, prompt.input, saved.intent.key.kind,
-      prompt.authorAgentSessionId, this.inputCallAuthority(prompt.authority, context), context?.requestSignal)
+      prompt.authorAgentSessionId, recipientContinuation ? { ...authority, assertCurrent: async () => {
+        await recipientContinuation()
+        await authority?.assertCurrent()
+      } } : authority, context?.requestSignal)
   }
 
   private async inputWaitingPrompt(intent: AgentInputJournalIntent, caller?: { agentSessionId: string; capability: string }, context?: AgentInputCallContext): Promise<{
@@ -6153,10 +6177,10 @@ export class AgentMuxClient {
     try {
       const saved = await this.messageQueue.inspectInput({ key: ref.key })
       if (!saved) throw new AgentMuxError('Original input persistence is unconfirmed.', 'AGENT_INPUT_NOT_FOUND')
-      if (saved.control.state === 'enabled' && !await this.inspectAgentPromptSubmission(ref.key) && !this.inputWaitingDisposed) {
+      if (isDeepStrictEqual(saved.control.ref, ref) && saved.control.state === 'enabled' && !await this.inspectAgentPromptSubmission(ref.key) && !this.inputWaitingDisposed) {
         const id = agentInputJournalKey(ref.key)
         if (!this.inputWaitingContexts.has(id)) {
-          const controller = new AbortController(), context = { ref: saved.control.ref, input, producer,
+          const controller = new AbortController(), context = { ref, input, producer,
             controller, runtimeWake: true, sessionWake: this.isRetainedHumanInput(saved.intent), requested: true, active: false, sequence: saved.sequence,
             ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(authority ? { authority } : {}) }
           this.inputWaitingContexts.set(id, context)

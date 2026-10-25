@@ -928,13 +928,14 @@ export class DurableAgentMuxMessageQueue {
     }, true)
   }
 
-  async reenableInputWaiting(refValue: AgentInputWaitRef): Promise<AgentInputWaitRef> {
+  async reenableInputWaiting(refValue: AgentInputWaitRef, mode: 'author-reenable' | 'recipient-continue' = 'author-reenable'): Promise<AgentInputWaitRef> {
     const ref = validateAgentInputWaitRef(refValue)
     return this.withLock(async () => {
       const current = this.input(ref.key)
       if (!current || !isDeepStrictEqual(current.control.ref, ref)) throw new AgentMuxError('The original waiting generation changed.', 'AGENT_INPUT_WAIT_GENERATION_STALE')
       if (current.control.state === 'dispatch-authorized') throw new AgentMuxError('The original dispatch is unresolved or settled; it cannot be enabled again.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
       if (current.control.state === 'enabled') return current.control.ref
+      if (mode === 'recipient-continue') throw new AgentMuxError('The original input was stopped. Recipient continuation cannot enable another waiting generation.', 'AGENT_INPUT_WAIT_STOPPED')
       const next = { key: ref.key, waitGeneration: ref.waitGeneration + 1 }
       await this.appendRecord({ kind: 'input-control', sequence: this.nextSequence, control: { ref: next, state: 'enabled', at: Date.now() } })
       return next
