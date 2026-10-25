@@ -203,7 +203,7 @@ it('shares one all-Workspace directory and preserves partial positions while ded
   expect(row('a').textContent).not.toContain('original-position-256'); expect(container.querySelector('[data-browser-resource="b"]')).toBeNull()
   metricSnapshot = { ...metricSnapshot, observation: null }
   await act(async () => { for (const id of metricIds) for (const listener of wire.listeners.get(TOOLKIT_CHANGED_CHANNEL) ?? []) listener({}, { id, snapshot: metricSnapshot }) }); await settle()
-  expect(resources().querySelector('[data-browser-process-total]')?.textContent).toContain('Process reading unconfirmed')
+  expect(resources().querySelector('[data-browser-process-total]')?.textContent).toContain('Reading not confirmed')
 })
 
 it('dispatches one finite release batch serially through preload and keeps each original mixed receipt without retry', async () => {
@@ -310,7 +310,7 @@ it('keeps a wrong-source release receipt unknown and leaves the original workben
 it('saves both Browser fields through the module and preload with original expected values while keeping a later edit', async () => {
   await render(true)
   const automation = container.querySelector<HTMLInputElement>('[data-settings-field="agent-automation"] input')!
-  const automatic = resources().querySelector<HTMLInputElement>('.browser-resources__policy input')!
+  const automatic = container.querySelector<HTMLInputElement>('[data-settings-field="automatic-memory-release"] input')!
   expect(automatic.checked).toBe(true)
   await act(async () => { automation.click(); automatic.click() }); await settle()
   const saving = deferred<AppConfig>(); saveConfig.mockReturnValueOnce(saving.promise)
