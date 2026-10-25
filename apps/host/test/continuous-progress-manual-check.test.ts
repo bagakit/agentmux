@@ -50,6 +50,43 @@ async function fixture(records: ContinuousProgressLoop[], options: { goals?: Goa
   }
 }
 
+it.each([1, 100, 1000])('public list copies only the exact target with %i unrelated saved prompts', async count => {
+  const original = record('selected'), target = { hostId: original.hostId, agentSessionId: original.agentSessionId,
+    providerId: original.providerId, workspacePath: original.workspacePath }
+  const sameTargetSchedule = record('same-target-schedule', { ...target, afterMs: 10 })
+  const sameTargetGoal = record('same-target-goal', { ...target, taskSource: { kind: 'goal', goalId: 'original-goal', alignmentRevision: 1 } })
+  const unrelated = Array.from({ length: count }, (_, index) => record(`unrelated-${index}`, {
+    status: index % 2 ? 'paused' : 'stopped', prompt: 'Unrelated saved prompt. '.repeat(512)
+  }))
+  const f = await fixture([original, sameTargetSchedule, sameTargetGoal,
+    record('other-host', { ...target, hostId: 'foreign' }),
+    record('other-provider', { ...target, providerId: 'another-provider' }),
+    record('other-workspace', { ...target, workspacePath: '/fixture/another-workspace' }), ...unrelated])
+  f.store.save.mockClear()
+  const copies = vi.spyOn(globalThis, 'structuredClone')
+  const result = await f.manager.callProgress('agent.progress.list', { target }, person)
+  expect(result.loops).toEqual([original])
+  expect(copies.mock.calls.map(([value]) => (value as ContinuousProgressLoop).loopId)).toEqual([
+    original.loopId, sameTargetSchedule.loopId, sameTargetGoal.loopId
+  ])
+  copies.mockClear()
+  expect((await f.manager.callProgress('agent.progress.list', { target: { ...target, agentSessionId: 'absent' } }, person)).loops).toEqual([])
+  expect(copies).not.toHaveBeenCalled()
+  expect(f.store.save).not.toHaveBeenCalled()
+  expect(f.observed).toEqual([]); expect(f.submitted).toEqual([])
+})
+
+it('exact cancellation discovery copies only its original Host and Session, including an already paused loop', async () => {
+  const local = record('local-loop', { agentSessionId: 'shared-session', status: 'paused' })
+  const f = await fixture([local, record('foreign-loop', { hostId: 'foreign', agentSessionId: 'shared-session' }), record('unrelated')])
+  f.store.save.mockClear()
+  const copies = vi.spyOn(globalThis, 'structuredClone')
+  f.manager.cancelTarget({ hostId: 'local', agentSessionId: 'shared-session' })
+  expect(copies.mock.calls.map(([value]) => (value as ContinuousProgressLoop).loopId)).toEqual([local.loopId])
+  expect(f.store.save).not.toHaveBeenCalled()
+  expect(f.observed).toEqual([]); expect(f.submitted).toEqual([])
+})
+
 it('public resume checks the exact original loop immediately and reuses its operation without double submission', async () => {
   const f = await fixture([record('original', { status: 'paused' })])
   const input = f.request('original', 'resume', 'explicit-resume')
