@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent, type AgentPromptSubmissionRecord } from '@agentmux/core'
-import type { Demand, DemandDispatch, DemandStore, GoalStartObservation } from '@agentmux/demand'
+import type { Demand, DemandDispatch, DemandStore, DemandStoreChanges, DemandStoreSnapshot, GoalStartObservation } from '@agentmux/demand'
 import type { GoalRuntimePort } from './goal-runtime.js'
 
 export type GoalStartRuntimePort = Pick<GoalRuntimePort, 'agentCreation' | 'observeCoreEvents' | 'observeOriginalRun' |
@@ -16,9 +16,9 @@ const closed = (goal: Demand) => goal.status === 'done' || goal.status === 'canc
 
 /** Finite Start keeps its original Core prompt provenance; it never becomes an A2A report. */
 export class GoalStartResponsibilityOwner {
-  private readonly workers = new Map<string, Reference[]>()
-  private readonly sessions = new Map<string, Reference[]>()
-  private readonly hosts = new Map<string, Reference[]>()
+  private readonly workers = new Map<string, Set<Reference>>()
+  private readonly sessions = new Map<string, Set<Reference>>()
+  private readonly hosts = new Map<string, Set<Reference>>()
   private readonly flights = new Map<string, Promise<void>>()
   private readonly dirty = new Map<string, Reference>()
   private readonly scopes = new Map<string, { controller: AbortController; supervisor: string; runId?: string }>()
@@ -27,11 +27,13 @@ export class GoalStartResponsibilityOwner {
   private readonly controller = new AbortController()
   private disposers: Array<() => void> = []
   private startupIssue: string | undefined
+  private revision = -1
+  private readonly indexed = new Map<string, { operations: string[]; remove(): void }>()
   constructor(private readonly demands: DemandStore, private readonly runtime: GoalStartRuntimePort,
     private readonly changed: (goalIds: string[]) => void) {}
 
   async start(): Promise<void> {
-    this.disposers.push(this.demands.subscribe(snapshot => { this.startupIssue = undefined; this.index(snapshot.demands) }))
+    this.disposers.push(this.demands.subscribe((snapshot, _ids, changes) => { this.startupIssue = undefined; this.index(snapshot, changes) }))
     this.disposers.push(this.runtime.observeCoreEvents(['process-state', 'agent-session', 'connection-state'], (host, event) => this.event(host, event)))
     this.disposers.push(this.runtime.observeInputOccupation(control => {
       for (const ref of this.sessions.get(key(control.hostId, control.agentSessionId)) ?? []) {
@@ -40,30 +42,45 @@ export class GoalStartResponsibilityOwner {
           scope.controller.abort(new Error('The original Supervisor input became occupied. Its draft and Agent are retained.'))
       }
     }))
-    try { this.index((await this.demands.snapshot()).demands) }
-    catch (error) { this.startupIssue = 'Observing original Goal Starts failed: ' + describe(error) }
+    try { this.index(await this.demands.snapshot()) }
+    catch (error) { if (this.revision < 0) this.startupIssue = 'Observing original Goal Starts failed: ' + describe(error) }
   }
   dispose(): void { this.controller.abort(); for (const dispose of this.disposers.splice(0)) dispose() }
-  private index(goals: Demand[]): void {
-    this.workers.clear(); this.sessions.clear(); this.hosts.clear()
-    const current = new Map(goals.flatMap(goal => (goal.dispatches ?? []).filter(start => start.execution === 'finite')
-      .map(start => [key(goal.id, start.operationId), { goal, start }] as const)))
-    for (const [id, scope] of this.scopes) {
-      const item = current.get(id)
-      if (!item || closed(item.goal) || item.goal.supervisorSessionId !== scope.supervisor)
-        scope.controller.abort(new Error('The original Goal Start responsibility changed before reminder admission.'))
-    }
-    const add = (map: Map<string, Reference[]>, id: string, ref: Reference) => map.set(id, [...map.get(id) ?? [], ref])
-    for (const [id, { goal, start }] of current) {
+  private index(snapshot: DemandStoreSnapshot, changes?: DemandStoreChanges): void {
+    if (snapshot.revision <= this.revision) return
+    const complete = this.revision < 0 || !changes || snapshot.revision !== this.revision + 1
+    const records = new Map<string, Demand | null>(complete ? snapshot.demands.map(goal => [goal.id, goal]) : changes)
+    if (complete) for (const id of this.indexed.keys()) if (!records.has(id)) records.set(id, null)
+    this.revision = snapshot.revision
+    for (const [goalId, goal] of records) {
+      const previous = this.indexed.get(goalId)
+      previous?.remove(); this.indexed.delete(goalId)
+      const current = new Map((goal?.dispatches ?? []).filter(start => start.execution === 'finite').map(start => [start.operationId, start]))
+      for (const operationId of previous?.operations ?? []) {
+        const id = key(goalId, operationId), scope = this.scopes.get(id)
+        if (scope && (!goal || !current.has(operationId) || closed(goal) || goal.supervisorSessionId !== scope.supervisor))
+          scope.controller.abort(new Error('The original Goal Start responsibility changed before reminder admission.'))
+        if (!goal || !current.has(operationId) || closed(goal)) this.epochs.delete(id)
+      }
+      if (!goal) continue
+      const removals: Array<() => void> = []
+      const add = (map: Map<string, Set<Reference>>, id: string, ref: Reference) => {
+        const refs = map.get(id) ?? new Set<Reference>(); refs.add(ref); map.set(id, refs)
+        removals.push(() => { const current = map.get(id)!; current.delete(ref); if (!current.size) map.delete(id) })
+      }
+      this.indexed.set(goalId, { operations: [...current.keys()], remove: () => { for (const remove of removals) remove() } })
       if (closed(goal)) continue
-      const ref = { goalId: goal.id, operationId: start.operationId }
-      add(this.workers, key(start.hostId, start.runId), ref)
-      add(this.sessions, key(start.hostId, start.agentSessionId), ref)
-      if (goal.supervisorSessionId && goal.supervisorSessionId !== start.agentSessionId) add(this.sessions, key(start.hostId, goal.supervisorSessionId), ref)
-      add(this.hosts, start.hostId, ref)
-      const epoch = JSON.stringify([goal.supervisorSessionId, goal.grounding?.submissionId, start])
-      if (this.epochs.get(id) !== epoch) queueMicrotask(() => { if (!this.controller.signal.aborted) void this.check(ref) })
-      this.epochs.set(id, epoch)
+      for (const [operationId, start] of current) {
+        const id = key(goalId, operationId)
+        const ref = { goalId: goal.id, operationId: start.operationId }
+        add(this.workers, key(start.hostId, start.runId), ref)
+        add(this.sessions, key(start.hostId, start.agentSessionId), ref)
+        if (goal.supervisorSessionId && goal.supervisorSessionId !== start.agentSessionId) add(this.sessions, key(start.hostId, goal.supervisorSessionId), ref)
+        add(this.hosts, start.hostId, ref)
+        const epoch = JSON.stringify([goal.supervisorSessionId, goal.grounding?.submissionId, start])
+        if (this.epochs.get(id) !== epoch) queueMicrotask(() => { if (!this.controller.signal.aborted) void this.check(ref) })
+        this.epochs.set(id, epoch)
+      }
     }
   }
   private event(host: string, event: AgentMuxClientEvent): void {

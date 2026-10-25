@@ -14,7 +14,7 @@ export type LoopTickHandler = (loop: ContinuousProgressLoop, operationId: string
 export type LoopObservationProvider = (loop: ContinuousProgressLoop, tickId: string, now: number, signal: AbortSignal) => Promise<ContinuousProgressObservation>
 export type GoalProgressOwner = {
   read: GoalProgressReader
-  subscribe?(listener: (goals: readonly GoalProgressRecord[]) => void): () => void
+  subscribe?(listener: (changes: ReadonlyMap<string, GoalProgressRecord | null>, revision: number, goals: readonly GoalProgressRecord[]) => void): () => void
   inspectInitial(loop: ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'>
 }
 export type GoalProgressStart = ContinuousProgressTarget & { goalId: string; alignmentRevision: number; intervalMs: number; operationId: string; prompt: string }
@@ -60,13 +60,20 @@ export class ContinuousProgressLoopManager {
   private disposeGoals: (() => void) | undefined
   private readonly mutations = new Map<string, Promise<unknown>>()
   private readonly progressActions = new Map<string, { input: import('@agentmux/core').AgentProgressParams['agent.progress.action']; result: Promise<ContinuousProgressLoop> }>()
+  private readonly goalLoops = new Map<string, Set<string>>()
+  private goalRevision = -1
   constructor(private readonly store: ContinuousProgressLoopStore, private readonly onTick: LoopTickHandler, private readonly now: (() => number) = Date.now, private readonly observe: LoopObservationProvider, private readonly futureInputs?: FutureProgressInputOwner, private readonly goals?: GoalProgressOwner) {
     this.scheduler = new ContinuousProgressScheduler({ now })
-    this.disposeGoals = goals?.subscribe?.(records => {
-      const current = new Map(records.map(goal => [goal.id, goal]))
-      for (const loop of this.list()) {
+    this.disposeGoals = goals?.subscribe?.((changes, revision, snapshot) => {
+      if (revision <= this.goalRevision) return
+      const complete = this.goalRevision < 0 || revision !== this.goalRevision + 1
+      const records = new Map<string, GoalProgressRecord | null>(complete ? snapshot.map(goal => [goal.id, goal]) : changes)
+      if (complete) for (const id of this.goalLoops.keys()) if (!records.has(id)) records.set(id, null)
+      this.goalRevision = revision
+      for (const [goalId, goal] of records) for (const loopId of this.goalLoops.get(goalId) ?? []) {
+        const loop = this.require(loopId)
         if (loop.status === 'stopped' || loop.taskSource?.kind !== 'goal') continue
-        const goal = current.get(loop.taskSource.goalId), source = decideGoalProgressSource(loop.taskSource, goal)
+        const source = decideGoalProgressSource(loop.taskSource, goal)
         if (source.action === 'continue' && goal?.sessionIds.includes(loop.agentSessionId)) continue
         // Confirmed original owner updates cancel any in-flight input synchronously.
         this.cancelDelivery(loop.loopId)
@@ -85,8 +92,11 @@ export class ContinuousProgressLoopManager {
     return starting
   }
   private async startOnce(): Promise<void> {
-    this.scheduler.restore((await this.store.load()).map((loop) => loop.pendingCompletion && loop.status === 'active'
-      ? { ...loop, status: 'paused', lastOutcome: 'unknown' } : loop))
+    const loops = (await this.store.load()).map((loop) => loop.pendingCompletion && loop.status === 'active'
+      ? { ...loop, status: 'paused' as const, lastOutcome: 'unknown' as const } : loop)
+    this.scheduler.restore(loops)
+    this.goalLoops.clear()
+    for (const loop of loops) this.indexGoalLoop(loop)
     await this.store.save(this.scheduler.list())
     this.running = true
     if (!this.timer) this.timer = setInterval(() => { void this.check().catch(() => {}) }, 1000)
@@ -136,13 +146,14 @@ export class ContinuousProgressLoopManager {
       const prompt = `Continue the original Goal ${goal.id} within its confirmed scope r${input.alignmentRevision}. Inspect it with amux goal inspect --goal ${JSON.stringify(goal.id)} before working. Report real progress, decisions and file evidence through the original Goal. Stop when done or cancelled; do not claim human acceptance.\n\n${goal.description.trim() || goal.title}\n\nConfirmed criteria:\n${goal.alignment!.criteria.map(c => '- ' + c.text).join('\n')}`
       assertCurrent()
       const loop = this.scheduler.create({ ...input, prompt, taskSource: source, operationId: input.operationId, initialDelivery })
+      this.indexGoalLoop(loop)
       await this.persist(loop.loopId)
       return this.require(loop.loopId)
     }))))
   }
   async listGoals(goalId: string): Promise<ContinuousProgressLoop[]> {
     await this.start()
-    return this.list().filter(loop => loop.taskSource?.kind === 'goal' && loop.taskSource.goalId === goalId)
+    return [...this.goalLoops.get(goalId) ?? []].map(id => this.require(id))
   }
   /** A queue retry joins original Core admission; a lost receipt never reconstructs another message. */
   async initialGoalInput(target: ContinuousProgressTarget, loopId: string, operationId: string, phase: 'begin' | 'confirm'): Promise<ContinuousProgressLoop> {
@@ -449,6 +460,7 @@ export class ContinuousProgressLoopManager {
     if (input.taskSource !== undefined) validateContinuousProgressTaskSource(input.taskSource)
     assertCurrent?.()
     const loop = this.scheduler.create(input)
+    this.indexGoalLoop(loop)
     await this.persist(loop.loopId)
     return loop
   }
@@ -543,6 +555,11 @@ export class ContinuousProgressLoopManager {
     const loop = this.scheduler.get(loopId)
     if (!loop) throw new Error('Continuous progress loop is unavailable.')
     return loop
+  }
+  private indexGoalLoop(loop: ContinuousProgressLoop): void {
+    if (loop.taskSource?.kind !== 'goal') return
+    const ids = this.goalLoops.get(loop.taskSource.goalId) ?? new Set<string>()
+    ids.add(loop.loopId); this.goalLoops.set(loop.taskSource.goalId, ids)
   }
   private async persist(loopId: string): Promise<void> {
     try { await this.saveLoops() }

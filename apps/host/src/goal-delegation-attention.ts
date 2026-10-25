@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent } from '@agentmux/core'
-import type { DemandStore } from '@agentmux/demand'
+import type { Demand, DemandStore, DemandStoreChanges, DemandStoreSnapshot } from '@agentmux/demand'
 import type { DemandDelegation, DemandDelegationAttention } from '@agentmux/demand/delegations'
 import type { GoalDelegationOwner } from './goal-delegation-owner.js'
 import type { GoalRuntimePort } from './goal-runtime.js'
@@ -14,10 +14,10 @@ const describe = (error: unknown) => error instanceof Error ? error.message : St
 
 /** Original business references + exact Runtime events, with no timer, queue or new Agent. */
 export class GoalDelegationAttentionOwner {
-  private readonly workers = new Map<string, Reference[]>()
-  private readonly supervisors = new Map<string, Reference[]>()
-  private readonly sources = new Map<string, Reference[]>()
-  private readonly hosts = new Map<string, Reference[]>()
+  private readonly workers = new Map<string, Set<Reference>>()
+  private readonly supervisors = new Map<string, Set<Reference>>()
+  private readonly sources = new Map<string, Set<Reference>>()
+  private readonly hosts = new Map<string, Set<Reference>>()
   private readonly flights = new Map<string, Promise<void>>()
   private readonly scopes = new Map<string, { controller: AbortController; supervisor: string; runId: string | undefined }>()
   private readonly dirty = new Map<string, Reference>()
@@ -26,11 +26,13 @@ export class GoalDelegationAttentionOwner {
   private disposers: Array<() => void> = []
   private startupIssue: string | undefined
   private epochs = new Map<string, string>()
+  private revision = -1
+  private readonly indexed = new Map<string, { operations: string[]; remove(): void }>()
   constructor(private readonly demands: DemandStore, private readonly runtime: Runtime,
     private readonly owner: GoalDelegationOwner, private readonly changed: (goalIds: string[]) => void) {}
 
   async start(): Promise<void> {
-    this.disposers.push(this.demands.subscribe(snapshot => { this.startupIssue = undefined; this.index(snapshot.demands) }))
+    this.disposers.push(this.demands.subscribe((snapshot, _ids, changes) => { this.startupIssue = undefined; this.index(snapshot, changes) }))
     this.disposers.push(this.runtime.observeCoreEvents(['process-state', 'agent-session', 'dispatch-changed', 'connection-state'],
       (hostId, event) => this.event(hostId, event)))
     this.disposers.push(this.runtime.observeInputOccupation(control => {
@@ -40,22 +42,35 @@ export class GoalDelegationAttentionOwner {
           scope.controller.abort(new Error('The original Supervisor input became occupied before reminder admission. Its draft and Agent are retained.'))
       }
     }))
-    try { this.index((await this.demands.snapshot()).demands) }
-    catch (error) { this.startupIssue = 'Observing original Goal responsibilities failed: ' + describe(error); return }
+    try { this.index(await this.demands.snapshot()) }
+    catch (error) { if (this.revision < 0) this.startupIssue = 'Observing original Goal responsibilities failed: ' + describe(error); return }
     for (const refs of this.hosts.values()) for (const ref of refs) void this.check(ref)
   }
   dispose(): void { this.controller.abort(); for (const dispose of this.disposers.splice(0)) dispose() }
-  private index(goals: Awaited<ReturnType<DemandStore['list']>>): void {
-    this.workers.clear(); this.supervisors.clear(); this.sources.clear(); this.hosts.clear()
-    const current = new Map(goals.flatMap(goal => (goal.delegations ?? []).map(delegation =>
-      [key(goal.id, delegation.operationId), { goal, delegation }] as const)))
-    for (const [id, scope] of this.scopes) {
-      const entry = current.get(id)
-      if (!entry || entry.delegation.collection || entry.goal.supervisorSessionId !== scope.supervisor)
-        scope.controller.abort(new Error('The original Goal responsibility was collected or handed off before reminder admission.'))
-    }
-    const add = (index: Map<string, Reference[]>, id: string, ref: Reference) => index.set(id, [...index.get(id) ?? [], ref])
-    for (const goal of goals) {
+  private index(snapshot: DemandStoreSnapshot, changes?: DemandStoreChanges): void {
+    if (snapshot.revision <= this.revision) return
+    // A revision gap includes writes from another Store. This event's complete
+    // snapshot is the original shared-file resync, without an extra read.
+    const complete = this.revision < 0 || !changes || snapshot.revision !== this.revision + 1
+    const records = new Map<string, Demand | null>(complete ? snapshot.demands.map(goal => [goal.id, goal]) : changes)
+    if (complete) for (const id of this.indexed.keys()) if (!records.has(id)) records.set(id, null)
+    this.revision = snapshot.revision
+    for (const [goalId, goal] of records) {
+      const previous = this.indexed.get(goalId)
+      previous?.remove(); this.indexed.delete(goalId)
+      const current = new Map((goal?.delegations ?? []).map(delegation => [delegation.operationId, delegation]))
+      for (const operationId of previous?.operations ?? []) {
+        const scope = this.scopes.get(key(goalId, operationId)), delegation = current.get(operationId)
+        if (scope && (!delegation || delegation.collection || goal?.supervisorSessionId !== scope.supervisor))
+          scope.controller.abort(new Error('The original Goal responsibility was collected or handed off before reminder admission.'))
+      }
+      if (!goal) { this.epochs.delete(goalId); continue }
+      const removals: Array<() => void> = []
+      const add = (index: Map<string, Set<Reference>>, id: string, ref: Reference) => {
+        const refs = index.get(id) ?? new Set<Reference>(); refs.add(ref); index.set(id, refs)
+        removals.push(() => { const current = index.get(id)!; current.delete(ref); if (!current.size) index.delete(id) })
+      }
+      this.indexed.set(goalId, { operations: [...current.keys()], remove: () => { for (const remove of removals) remove() } })
       const epoch = JSON.stringify([goal.supervisorSessionId, goal.delegations])
       const changed = this.epochs.get(goal.id) !== epoch; this.epochs.set(goal.id, epoch)
       for (const delegation of goal.delegations ?? []) {

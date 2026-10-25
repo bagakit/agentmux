@@ -81,7 +81,7 @@ export function createHostGoals(options: {
   const progress = new ContinuousProgressLoopManager(ContinuousProgressLoopStore.forUserData(root),
     (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal), undefined,
     (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal), runtime,
-    { read: id => demands.get(id), subscribe: listener => demands.subscribe(snapshot => listener(snapshot.demands)),
+    { read: id => demands.get(id), subscribe: listener => demands.subscribe((snapshot, _ids, changes) => listener(changes, snapshot.revision, snapshot.demands)),
       inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop) })
   const dispatch = new GoalDispatchInputOwner(demands, runtime)
   const automaticInput = createGoalAutomationPause({ ownerInstanceId: () => options.runtime().ownerIdentity().ownerInstanceId,

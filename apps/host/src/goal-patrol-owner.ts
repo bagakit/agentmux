@@ -2,7 +2,7 @@ import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { createHash } from 'node:crypto'
 import { AgentMuxError, agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { demandExecutionReferences, demandResponsibilityScope, type Demand, type DemandPatrol, type DemandPatrolAttempt,
-  type DemandPatrolReportInput, type DemandPatrolTarget, type DemandStore } from '@agentmux/demand'
+  type DemandPatrolReportInput, type DemandPatrolTarget, type DemandStore, type DemandStoreChanges, type DemandStoreSnapshot } from '@agentmux/demand'
 import type { GoalDelegationAuthority, GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import type { GoalPatrolObservation } from '@agentmux/core/goal-patrol'
 import type { DemandEvidence } from '@agentmux/demand/goals'
@@ -27,32 +27,50 @@ export class GoalPatrolOwner {
   private readonly issues = new Map<string, string>()
   private releases: Array<() => void> = []
   private readonly lifetime = new AbortController()
+  private revision = -1
+  private readonly indexed = new Map<string, { operations: string[]; remove(): void }>()
   constructor(private readonly demands: DemandStore, private readonly runtime: Runtime,
     private readonly read: (goalId: string, context: AgentMuxRpcCallContext) => Promise<GoalDelegationResult>,
     private readonly changed: (ids: string[]) => void) {}
   async start(): Promise<void> {
-    this.releases.push(this.demands.subscribe(snapshot => this.index(snapshot.demands)))
+    this.releases.push(this.demands.subscribe((snapshot, _ids, changes) => this.index(snapshot, changes)))
     this.releases.push(this.runtime.observeCoreEvents(['agent-session', 'agent-status', 'process-state', 'agent-input', 'connection-state'], (host, event) => this.event(host, event)))
     this.releases.push(this.runtime.observeInputOccupation(control => { for (const id of this.sessions.get(key(control.hostId, control.agentSessionId)) ?? [])
       this.scopes.get(id)?.abort(new Error('The original PMO input became occupied; its draft is retained.')) }))
-    try { this.index((await this.demands.snapshot()).demands) } catch (e) { this.issues.set('startup', describe(e)) }
+    try { this.index(await this.demands.snapshot()) } catch (e) { if (this.revision < 0) this.issues.set('startup', describe(e)) }
   }
   dispose(): void { this.lifetime.abort(); for (const release of this.releases.splice(0)) release() }
-  private index(goals: Demand[]): void {
-    this.sessions.clear(); this.runs.clear(); this.hosts.clear()
-    const active = new Set<string>()
-    const add = (map: Map<string, Set<string>>, name: string, id: string) => { const entries = map.get(name) ?? new Set<string>(); entries.add(id); map.set(name, entries) }
-    for (const goal of goals) for (const patrol of goal.patrols ?? []) {
-      const id = key(goal.id, patrol.operationId), attempt = patrol.attempts.at(-1)
-      if (patrol.report || !attempt || attempt.supersededAt || goal.status === 'done' || goal.status === 'cancelled' ||
-        goal.supervisorSessionId !== attempt.target.agentSessionId || demandResponsibilityScope(goal) !== patrol.expectedScope) {
-        this.scopes.get(id)?.abort(new Error('The frozen inspection scope changed; the request is retained.')); continue
+  private index(snapshot: DemandStoreSnapshot, changes?: DemandStoreChanges): void {
+    if (snapshot.revision <= this.revision) return
+    this.issues.delete('startup')
+    const complete = this.revision < 0 || !changes || snapshot.revision !== this.revision + 1
+    const records = new Map<string, Demand | null>(complete ? snapshot.demands.map(goal => [goal.id, goal]) : changes)
+    if (complete) for (const id of this.indexed.keys()) if (!records.has(id)) records.set(id, null)
+    this.revision = snapshot.revision
+    for (const [goalId, goal] of records) {
+      const previous = this.indexed.get(goalId)
+      previous?.remove(); this.indexed.delete(goalId)
+      const active = new Set<string>(), removals: Array<() => void> = []
+      const add = (map: Map<string, Set<string>>, name: string, id: string) => {
+        const entries = map.get(name) ?? new Set<string>(); entries.add(id); map.set(name, entries)
+        removals.push(() => { const current = map.get(name)!; current.delete(id); if (!current.size) map.delete(name) })
       }
-      active.add(id); add(this.sessions, key(attempt.target.hostId, attempt.target.agentSessionId), id); add(this.runs, key(attempt.target.hostId, attempt.target.runId), id); add(this.hosts, attempt.target.hostId, id)
-      const epoch = JSON.stringify([patrol.expectedScope, attempt])
-      if (this.goals.get(id) !== epoch) { this.goals.set(id, epoch); queueMicrotask(() => { void this.check(goal.id, patrol.operationId) }) }
+      if (goal) for (const patrol of goal.patrols ?? []) {
+        const id = key(goal.id, patrol.operationId), attempt = patrol.attempts.at(-1)
+        if (patrol.report || !attempt || attempt.supersededAt || goal.status === 'done' || goal.status === 'cancelled' ||
+          goal.supervisorSessionId !== attempt.target.agentSessionId || demandResponsibilityScope(goal) !== patrol.expectedScope) {
+          this.scopes.get(id)?.abort(new Error('The frozen inspection scope changed; the request is retained.')); continue
+        }
+        active.add(id); add(this.sessions, key(attempt.target.hostId, attempt.target.agentSessionId), id); add(this.runs, key(attempt.target.hostId, attempt.target.runId), id); add(this.hosts, attempt.target.hostId, id)
+        const epoch = JSON.stringify([patrol.expectedScope, attempt])
+        if (this.goals.get(id) !== epoch) { this.goals.set(id, epoch); queueMicrotask(() => { void this.check(goal.id, patrol.operationId) }) }
+      }
+      for (const id of previous?.operations ?? []) if (!active.has(id)) {
+        this.scopes.get(id)?.abort(new Error('The frozen inspection scope changed; the request is retained.'))
+        this.goals.delete(id)
+      }
+      if (goal) this.indexed.set(goalId, { operations: [...active], remove: () => { for (const remove of removals) remove() } })
     }
-    for (const id of this.goals.keys()) if (!active.has(id)) this.goals.delete(id)
   }
   private event(host: string, event: AgentMuxClientEvent): void {
     const sid = event.type === 'agent-session' ? event.session.agentSessionId : event.type === 'agent-input' ? event.receipt.ref.key.agentSessionId : 'agentSessionId' in event ? event.agentSessionId : null

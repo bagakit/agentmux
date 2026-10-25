@@ -1,6 +1,6 @@
 import { AgentMuxError, currentAgentSemanticStatus, type AgentMuxAgentRuntimeStatus, type AgentMuxClientEvent, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { demandExecutionReferences, demandHandoffDestinations, latestDemandProgress, demandResponsibilityScope, sameDemandExecution, type Demand, type DemandStore,
-  type DemandProgressInput } from '@agentmux/demand'
+  type DemandProgressInput, type DemandStoreChanges, type DemandStoreSnapshot } from '@agentmux/demand'
 import type { GoalDelegationAuthority, GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import { goalResponsibilityBasis, observeGoalExecution, type GoalExecutionFacts, type GoalResponsibilityObservation,
   type GoalSupervisorObservation } from '@agentmux/core/goal-responsibility'
@@ -30,27 +30,40 @@ export class GoalResponsibilityOwner {
   private timer: ReturnType<typeof setTimeout> | undefined
   private disposed = false
   private startupIssue: string | undefined
+  private revision = -1
+  private readonly indexed = new Map<string, () => void>()
   constructor(private readonly demands: DemandStore, private readonly runtime: GoalResponsibilityRuntime,
     private readonly read: (goalId: string, context: AgentMuxRpcCallContext) => Promise<GoalDelegationResult>,
     private readonly changed: (goalIds: string[]) => void) {}
 
   async start(): Promise<void> {
-    this.disposers.push(this.demands.subscribe(snapshot => { this.startupIssue = undefined; this.index(snapshot.demands) }))
+    this.disposers.push(this.demands.subscribe((snapshot, _ids, changes) => { this.startupIssue = undefined; this.index(snapshot, changes) }))
     this.disposers.push(this.runtime.observeCoreEvents(['agent-status', 'agent-session', 'agent-input', 'process-state', 'run-removed', 'dispatch-changed', 'connection-state'], (host, event) => this.event(host, event)))
-    try { this.index((await this.demands.snapshot()).demands) }
-    catch (error) { this.startupIssue = 'Reading original Goal responsibilities failed: ' + describe(error) }
+    try { this.index(await this.demands.snapshot()) }
+    catch (error) { if (this.revision < 0) this.startupIssue = 'Reading original Goal responsibilities failed: ' + describe(error) }
   }
   dispose(): void { this.disposed = true; if (this.timer) clearTimeout(this.timer); for (const release of this.disposers.splice(0)) release() }
-  private index(goals: Demand[]): void {
-    this.sessions.clear(); this.managers.clear(); this.runs.clear(); this.sources.clear(); this.hosts.clear()
-    const retained = new Set<string>()
-    const add = (index: Map<string, Set<string>>, id: string, goalId: string) => { const set = index.get(id) ?? new Set(); set.add(goalId); index.set(id, set) }
-    for (const goal of goals) {
-      retained.add(goal.id)
+  private index(snapshot: DemandStoreSnapshot, changes?: DemandStoreChanges): void {
+    if (snapshot.revision <= this.revision) return
+    const complete = this.revision < 0 || !changes || snapshot.revision !== this.revision + 1
+    const records = new Map<string, Demand | null>(complete ? snapshot.demands.map(goal => [goal.id, goal]) : changes)
+    if (complete) for (const id of this.indexed.keys()) if (!records.has(id)) records.set(id, null)
+    this.revision = snapshot.revision
+    let deadlinesChanged = false
+    for (const [goalId, goal] of records) {
+      this.indexed.get(goalId)?.(); this.indexed.delete(goalId)
+      if (!goal) { this.versions.delete(goalId); this.observations.delete(goalId); deadlinesChanged = this.deadlines.delete(goalId) || deadlinesChanged; continue }
+      const removals: Array<() => void> = []
+      const add = (index: Map<string, Set<string>>, id: string, goalId: string) => {
+        const set = index.get(id) ?? new Set<string>(); if (set.has(goalId)) return
+        set.add(goalId); index.set(id, set)
+        removals.push(() => { const current = index.get(id)!; current.delete(goalId); if (!current.size) index.delete(id) })
+      }
+      this.indexed.set(goalId, () => { for (const remove of removals) remove() })
       const refs = demandExecutionReferences(goal)
       const version = demandResponsibilityScope(goal), changed = this.versions.get(goal.id) !== version
       this.versions.set(goal.id, version)
-      if (goal.status === 'done' || goal.status === 'cancelled' || !refs.length) { this.observations.delete(goal.id); this.deadlines.delete(goal.id); continue }
+      if (goal.status === 'done' || goal.status === 'cancelled' || !refs.length) { this.observations.delete(goal.id); deadlinesChanged = this.deadlines.delete(goal.id) || deadlinesChanged; continue }
       for (const ref of refs) {
         add(this.sessions, key(ref.hostId, ref.agentSessionId), goal.id); add(this.runs, key(ref.hostId, ref.runId), goal.id); add(this.hosts, ref.hostId, goal.id)
       }
@@ -58,8 +71,7 @@ export class GoalResponsibilityOwner {
       if (goal.supervisorSessionId) add(this.managers, goal.supervisorSessionId, goal.id)
       if (changed) queueMicrotask(() => { void this.refresh(goal.id) })
     }
-    for (const id of this.versions.keys()) if (!retained.has(id)) { this.versions.delete(id); this.observations.delete(id); this.deadlines.delete(id) }
-    this.schedule()
+    if (deadlinesChanged) this.schedule()
   }
   private event(hostId: string, event: AgentMuxClientEvent): void {
     const ids = new Set<string>()
@@ -97,7 +109,7 @@ export class GoalResponsibilityOwner {
   }
   private remember(goalId: string, value: GoalResponsibilityObservation): void {
     const before = this.observations.get(goalId)
-    if (this.disposed || before && before.observedAt > value.observedAt || this.versions.has(goalId) && this.versions.get(goalId) !== value.scope) return
+    if (this.disposed || before && before.observedAt > value.observedAt || this.versions.get(goalId) !== value.scope) return
     const meaning = (observation: GoalResponsibilityObservation | undefined) => observation && JSON.stringify({
       ...observation, observedAt: undefined, executions: observation.executions.map(row => ({ ...row, observation: row.observation && { ...row.observation, observedAt: undefined } })) })
     this.observations.set(goalId, value)
