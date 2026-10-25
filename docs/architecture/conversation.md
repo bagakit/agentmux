@@ -50,7 +50,7 @@ Core 的 [`agent-outbound-message`](../../packages/core/src/agent-outbound-messa
 | --- | --- |
 | 来源适配 | [`conversation-timeline`](../../packages/core/src/conversation-timeline.ts) 将 SDK 的 native page／captured timeline 转为原记录，保原 Host、来源顺序与 writer 版本。Provider 继续解释各自原生协议。 |
 | 纯语义流 | [`conversation-stream`](../../packages/core/src/conversation-stream.ts) 的 `projectConversationStream` 消费已接受 `ConversationSourceRecord`，统一事件、作者、关系、版本、覆盖与部分顺序；无 IO、订阅或持久 Store，不决定输入资格。 |
-| 读取协调 | [`conversation-reader`](../../packages/core/src/conversation-reader.ts) 持有来源读取、cut、分页及临时阅读窗，直接将原版本化 records 交给语义流；不还原 page／timeline 再造记录或重算原版本。 |
+| 读取协调 | [`conversation-reader`](../../packages/core/src/conversation-reader.ts) 持有来源读取、cut、分页及临时阅读窗，直接将原版本化 records 交给语义流；不还原 page／timeline 再造记录或重算原版本。页预算在本次读取内累计已接受 entry 的 JSON 字节与分隔符，候选保留准确游标和 envelope 大小，避免逐项重编码整个已接受前缀；最终完整页仍执行原字节预算与严格解析。 |
 | 公共输送 | [`conversation-changes`](../../packages/core/src/conversation-changes.ts) 校验和组装完整版本化窗口；未收齐的 wire fragments 不表示语义节点处于半开状态。 |
 | 客户端消费 | Desktop、Mobile 和 Connectors 消费同一公共 Reader；`projectConversationWindow` 只适配已接受事件，不重判关联、作者或顺序。 |
 
