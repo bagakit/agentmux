@@ -19,7 +19,7 @@ import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, t
 import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_PREPARATION, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
   type AgentMuxHostedStreamEvent, type AgentMuxHostedTransferChunk,
   type AgentMuxRuntimeOwnerIdentity, type AgentMuxRuntimeFence, type AgentMuxHostedAttachmentTarget } from './hosted-client-contract.js'
-import { decodeHostedValue, encodeHostedValue, hostedTransfer, parseHostedAgentSessionRead, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
+import { decodeHostedValue, encodeHostedValue, hostedTransfer, parseHostedMessageQueuePath, parseHostedAgentSessionRead, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
 
 type Emit = (event: AgentMuxHostedStreamEvent) => void | Promise<void>
 type Context = { principal?: import('./public-rpc.js').AgentMuxRpcPrincipal; caller?: unknown; sourceDevice?: undefined | import('./types.js').AgentOperationDevice;
@@ -241,6 +241,8 @@ export class AgentMuxHostedRuntimeService {
         { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
+    if (invocation.method === 'readAgentMessageQueuePath' && invocation.args.length !== 0)
+      throw new AgentMuxError('Message namespace reading accepts no arguments.', 'INVALID_CONTROL_REQUEST')
     if (invocation.method === 'recoverTerminal') {
       if (invocation.args.length !== 1) throw new AgentMuxError('Terminal recovery accepts one exact original intent.', 'INVALID_CONTROL_REQUEST')
       parseTerminalRecoveryInput(invocation.args[0])
@@ -406,7 +408,7 @@ export class AgentMuxHostedRuntimeService {
       context.signal?.throwIfAborted(); this.assertFence(p.fence)
     }
     await recordActivity('confirmed')
-    return { value: encodeHostedValue(invocation.method === 'readAgentSession'
+    return { value: encodeHostedValue(invocation.method === 'readAgentMessageQueuePath' ? parseHostedMessageQueuePath(value) : invocation.method === 'readAgentSession'
       ? parseHostedAgentSessionRead(value, invocation.args[0]) : value) }
   }
   private async acquire(target: AgentMuxHostedAttachmentTarget, afterByte: number, view: 'raw' | 'terminal',

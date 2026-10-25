@@ -24,7 +24,7 @@ export type AgentDiscoveryPage = {
   errors: Array<{ agentSessionId: string | null; hostId: string; code: string; message: string }>
   nextCursor: string | null
 }
-type Owner = Pick<AgentMuxClient, 'readAgentSession' | 'readAgentSessions' | 'sessionHistorySources' | 'statusAgent' | 'agentMessageQueuePath'> & { forwardRpc?: unknown }
+type Owner = Pick<AgentMuxClient, 'readAgentSession' | 'readAgentSessions' | 'sessionHistorySources' | 'statusAgent' | 'readAgentMessageQueuePath'> & { forwardRpc?: unknown }
 type Scope = { hostId: string; client: Owner }
 type Candidate = { key: string; scope: Scope } & ({ session: AgentMuxAgentSession; retired?: never } | { retired: AgentSessionHistoryDescriptor; session?: never })
 
@@ -66,7 +66,13 @@ const invalidCursor = (): never => { throw new AgentMuxError('Discovery cursor b
 /** First narrow metadata; only this page's candidates incur a Runtime status read. */
 export async function readAgentDiscovery(scopes: readonly Scope[], filters: AgentDiscoveryFilters): Promise<AgentDiscoveryPage> {
   const { cursor, limit = 100, ...selection } = filters
-  const binding = hash({ selection, owners: scopes.map(scope => [scope.hostId, scope.client.agentMessageQueuePath()]).sort() })
+  const namespaces = await Promise.allSettled(scopes.map(async scope => await scope.client.readAgentMessageQueuePath()))
+  // Unknown namespaces stay explicit in the cursor. Recovery or owner replacement
+  // requires a fresh first page rather than silently omitting a newly available source.
+  const binding = hash({ selection, owners: scopes.map((scope, index) => {
+    const namespace = namespaces[index]!
+    return [scope.hostId, namespace.status === 'fulfilled' ? namespace.value : null]
+  }).sort() })
   let after = ''
   if (cursor !== undefined) {
     try {
@@ -77,7 +83,12 @@ export async function readAgentDiscovery(scopes: readonly Scope[], filters: Agen
   }
   const page: AgentDiscoveryPage = { sessions: [], unavailableSessions: [], retired: [], errors: [], nextCursor: null }
   const candidates: Candidate[] = []
-  await Promise.all(scopes.map(async scope => {
+  await Promise.all(scopes.map(async (scope, index) => {
+    const namespace = namespaces[index]!
+    if (namespace.status === 'rejected') {
+      page.errors.push({ hostId: scope.hostId, agentSessionId: filters.agentSessionId ?? null, ...issue(namespace.reason) })
+      return
+    }
     const sourceHost = scope.client.forwardRpc ? 'local' : scope.hostId
     const [active, history] = await Promise.allSettled([
       filters.agentSessionId ? scope.client.readAgentSession(filters.agentSessionId).then(value => value ? [value] : []) : scope.client.readAgentSessions(),

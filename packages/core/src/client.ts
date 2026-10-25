@@ -2348,6 +2348,11 @@ export class AgentMuxClient {
     return this.messageQueue.path
   }
 
+  /** Read the original message namespace without opening Runtime or Session observation. */
+  async readAgentMessageQueuePath(): Promise<string> {
+    return this.messageQueue.path
+  }
+
   agentSession(agentSessionId: string): AgentMuxAgentSession {
     return this.projectSession(this.registry.get(agentSessionId))
   }
