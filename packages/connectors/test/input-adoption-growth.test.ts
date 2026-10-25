@@ -1,13 +1,10 @@
-import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it, vi } from 'vitest'
-import { PublicationStore } from '../src/publication-store.js'
-import { projectQueryFeedback } from '../src/publication-query-feedback.js'
 import { ConversationReaderState, readConversationChanges, type ConversationReaderPort } from '../../core/src/conversation-reader.js'
 import { ConversationInputWitnessIndex } from '../../core/src/conversation-input-witness-index.js'
 import { consumeConversationWindowPage, type ConversationCheckpoint, type ConversationWindowAssembly, type ConversationWindowSnapshot } from '../../core/src/conversation-changes.js'
-import { conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts } from '../../core/src/conversation-stream.js'
+import { conversationInputAdoptionEdges, conversationInputIdentity, mergeConversationInputAdoptionContexts } from '../../core/src/conversation-stream.js'
 import type { AgentSessionHistoryItem } from '../../core/src/types.js'
-import type { RoomBinding, ConnectionIngressMessage } from '../../core/src/connections.js'
+import type { RoomBinding } from '../../core/src/connections.js'
 
 const closes: (() => void)[] = []
 afterEach(() => { for (const close of closes.splice(0).reverse()) close(); vi.restoreAllMocks() })
@@ -25,11 +22,10 @@ function nativeInput(index: number): AgentSessionHistoryItem {
     conversation: { nativeInput: { source, turnId: 'turn-' + index, semanticItemId: 'input-' + index, clientCorrelation: 'amux-input-v1.' + index }, adoptedInput: { key: inputKey(index) } } }
 }
 function fixture() {
-  const state = new ConversationReaderState(), database = new DatabaseSync(':memory:'), store = new PublicationStore(database)
-  closes.push(() => state.dispose(), () => database.close())
-  database.exec('CREATE TABLE connection_ingress_message(record_json TEXT)')
+  const state = new ConversationReaderState()
+  closes.push(() => state.dispose())
   const originals: AgentSessionHistoryItem[] = []
-  // Controlled native transport; Core reading, wire parsing and durable feedback consumers are real.
+  // Controlled native transport; production Core reading, wire parsing and adoption evidence are real.
   const port = { state, descriptor: {}, nativeChanges: async (cut: ReturnType<typeof nativeCut>, limit: number) => {
     const start = Number(cut.cursor.slice(4)), end = Math.min(originals.length, start + limit)
     return { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, source, items: originals.slice(start, end), checkpoint: nativeCut(end), more: end < originals.length }
@@ -48,20 +44,22 @@ function fixture() {
     }
     throw Error('The original wire window did not finish')
   }
-  function addQuery(index: number) {
-    const query = { ingressId: 'ingress-' + index, state: 'claimed', conversationKind: 'group', connectionId: binding.connectionId, application: binding.application,
-      externalConversationId: binding.externalConversationId, externalMessageId: 'external-' + index,
-      group: { target: { bindingId: binding.bindingId, bindingRevision: binding.revision, connectionId: binding.connectionId, hostId: binding.executionHostId, agentSessionId: binding.agentSessionId } },
-      input: { hostId: binding.executionHostId, ...inputKey(index) } } as ConnectionIngressMessage
-    database.prepare('INSERT INTO connection_ingress_message VALUES (?)').run(JSON.stringify(query))
-  }
-  const feedback = (index: number) => store.list(binding).filter(operation => operation.queryFeedback?.ingressId === 'ingress-' + index).map(operation => operation.queryFeedback!.stage)
-  const project = (snapshot: ConversationWindowSnapshot) => projectQueryFeedback(store, binding, snapshot.units, () => true)
-  return { originals, state, read, addQuery, project, feedback }
+  return { originals, state, read }
 }
 function edges(snapshot: ConversationWindowSnapshot) {
   return conversationInputAdoptionEdges(snapshot.units.flatMap(unit => unit.records),
     mergeConversationInputAdoptionContexts(snapshot.units.map(unit => ({ records: unit.records, context: unit.event.inputAdoption }))))
+}
+function key(index: number): string { return conversationInputIdentity(binding.executionHostId, inputKey(index)) }
+function exactAdoption(snapshot: ConversationWindowSnapshot, index: number, turnId = 'turn-' + index): void {
+  const relation = edges(snapshot), identity = key(index)
+  expect(relation.unconfirmed).toBe(false)
+  expect(relation.unconfirmedKeys.has(identity)).toBe(false)
+  expect(relation.ambiguous.has(identity)).toBe(false)
+  expect(relation.byKey.get(identity)).toHaveLength(1)
+  expect(relation.byKey.get(identity)![0]).toMatchObject({ key: inputKey(index), turnId,
+    record: { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId,
+      source: { kind: 'native', ...source } } })
 }
 
 it('normal growth preserves original query adoption and completion beyond the temporary body window', async () => {
@@ -74,15 +72,15 @@ it('normal growth preserves original query adoption and completion beyond the te
     costs.set(total, lookups.mock.calls.length - previousCalls)
     if (total < 1100) continue
     const index = total - 1
-    f.addQuery(index); f.project(snapshot)
     expect(edges(snapshot).unconfirmed).toBe(false)
     expect(snapshot.units.length).toBeLessThanOrEqual(1200)
-    expect(f.feedback(index), 'The exact new input must remain usable after normal growth').toEqual(['received', 'started'])
+    exactAdoption(snapshot, index)
   }
   expect(costs.get(2400), 'Unrelated accepted history must not expand current-window evidence work').toBe(costs.get(1400))
   f.originals.push({ id: 'original-completion', kind: 'assistant-message', turnId: 'turn-2399', contentParts: [], turnOutcome: { status: 'completed' } })
-  f.project(await f.read())
-  expect(f.feedback(2399)).toEqual(['received', 'started', 'completed'])
+  const completed = await f.read()
+  exactAdoption(completed, 2399)
+  expect(completed.units.flatMap(unit => unit.records).find(record => record.original.item.id === 'original-completion')?.original.item.turnOutcome).toEqual({ status: 'completed' })
 })
 
 it('evicted conflicting originals still refuse their own input while an independent input completes', async () => {
@@ -93,30 +91,32 @@ it('evicted conflicting originals still refuse their own input while an independ
     f.originals.push(...Array.from({ length: 100 }, (_, offset) => nativeInput(start + offset))); await f.read()
   }
   const late = structuredClone(first); late.id = 'late-qualified-original'; late.conversation!.nativeInput!.semanticItemId = late.id
-  f.originals.push(late, nativeInput(1401)); f.addQuery(0); f.addQuery(1401)
+  f.originals.push(late, nativeInput(1401))
   const snapshot = await f.read(65536)
   expect(snapshot.units.flatMap(unit => unit.records).some(record => ['input-0', 'conflicting-original'].includes(record.original.item.id))).toBe(false)
-  f.project(snapshot)
-  expect(f.feedback(0), 'Evicting bodies cannot erase already observed counterevidence').toEqual([])
-  expect(f.feedback(1401)).toEqual(['received', 'started'])
+  expect(edges(snapshot).ambiguous.has(key(0)), 'Evicting bodies cannot erase already observed counterevidence').toBe(true)
+  expect(edges(snapshot).byKey.get(key(0))).toHaveLength(2)
+  exactAdoption(snapshot, 1401)
   f.originals.push({ id: 'independent-completion', kind: 'assistant-message', turnId: 'turn-1401', contentParts: [], turnOutcome: { status: 'completed' } })
-  f.project(await f.read()); expect(f.feedback(1401)).toEqual(['received', 'started', 'completed'])
+  const completed = await f.read()
+  exactAdoption(completed, 1401)
+  expect(completed.units.flatMap(unit => unit.records).find(record => record.original.item.id === 'independent-completion')?.original.item.turnOutcome).toEqual({ status: 'completed' })
+  expect(edges(completed).ambiguous.has(key(0))).toBe(true)
 })
 
-it('one event with unknown adoption does not suppress other exact input feedback in its wire window', async () => {
+it('one event with unknown adoption does not suppress other exact input evidence in its wire window', async () => {
   const f = fixture(); f.originals.push(nativeInput(0)); await f.read()
   const changed = nativeInput(0)
   changed.turnId = 'changed-original-turn'; changed.conversation!.nativeInput!.turnId = changed.turnId
   f.originals.push(changed, nativeInput(1))
   const snapshot = await f.read()
   expect(snapshot.units.find(unit => unit.records.some(record => record.original.item.id === 'input-0'))!.event.inputAdoption?.unconfirmed).toBe(true)
-  f.addQuery(0); f.addQuery(1); f.project(snapshot)
-  expect(f.feedback(0)).toEqual([]); expect(f.feedback(1)).toEqual(['received', 'started'])
+  expect(edges(snapshot).unconfirmedKeys.has(key(0))).toBe(true)
+  exactAdoption(snapshot, 1)
 })
 
 it('a retained withdrawn witness cannot regain completion authority after its body leaves the window', async () => {
-  const f = fixture(); f.originals.push(nativeInput(0)); f.addQuery(0); f.project(await f.read())
-  expect(f.feedback(0)).toEqual(['received', 'started'])
+  const f = fixture(); f.originals.push(nativeInput(0)); exactAdoption(await f.read(), 0)
   const withdrawn = nativeInput(0); delete withdrawn.conversation!.adoptedInput
   f.originals.push(withdrawn); await f.read()
   for (let start = 1; start < 1301; start += 100) {
@@ -125,8 +125,8 @@ it('a retained withdrawn witness cannot regain completion authority after its bo
   f.originals.push({ id: 'late-completion', kind: 'assistant-message', turnId: 'turn-0', contentParts: [], turnOutcome: { status: 'completed' } })
   const snapshot = await f.read()
   expect(snapshot.units.flatMap(unit => unit.records).some(record => record.original.item.id === 'input-0')).toBe(false)
-  f.project(snapshot)
-  expect(f.feedback(0), 'A native turn result cannot erase retained uncertainty on its original adopted input').toEqual(['received', 'started'])
+  expect(edges(snapshot).unconfirmedKeys.has(key(0)), 'A native turn result cannot erase retained uncertainty on its original adopted input').toBe(true)
+  expect(snapshot.units.flatMap(unit => unit.records).find(record => record.original.item.id === 'late-completion')?.original.item.turnOutcome).toEqual({ status: 'completed' })
 })
 
 
@@ -144,13 +144,16 @@ it('a busy turn keeps conflicting inputs separate from its independent completio
     f.originals.push(first, conflict)
   }
   for (let page = 0; page < 5; page++) await f.read()
-  f.addQuery(0); f.addQuery(999); f.originals.push(inTurn(999))
-  f.project(await f.read())
-  expect(f.feedback(0)).toEqual([]); expect(f.feedback(999)).toEqual(['received', 'started'])
+  f.originals.push(inTurn(999))
+  const adopted = await f.read()
+  expect(edges(adopted).ambiguous.has(key(0))).toBe(true)
+  exactAdoption(adopted, 999, 'shared-turn')
   f.originals.push({ id: 'shared-turn-completion', kind: 'assistant-message', turnId: 'shared-turn', contentParts: [], turnOutcome: { status: 'completed' } })
   const snapshot = await f.read(65536)
   const completion = snapshot.units.find(unit => unit.records.some(record => record.original.item.id === 'shared-turn-completion'))!
   expect(completion.event.inputAdoption!.witnesses).toHaveLength(410)
-  f.project(snapshot)
-  expect(f.feedback(0)).toEqual([]); expect(f.feedback(999)).toEqual(['received', 'started', 'completed'])
+  expect(edges(snapshot).ambiguous.has(key(0))).toBe(true)
+  expect(edges(snapshot).byKey.get(key(0))).toHaveLength(2)
+  exactAdoption(snapshot, 999, 'shared-turn')
+  expect(completion.records.find(record => record.original.item.id === 'shared-turn-completion')?.original.item.turnOutcome).toEqual({ status: 'completed' })
 })
