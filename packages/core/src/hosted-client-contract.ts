@@ -15,7 +15,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'listRuns', 'runtimeProjection', 'runtimeSubject', 'statusAgent', 'refreshAgentSession', 'confirmAgentNativeSession',
   'recordExternalConversationMessage', 'readAgentMessageQueuePath', 'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'releaseConversationView', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'inspectAgentExecutionOperation', 'prepareAgentExecutionHelper', 'prepareTerminal', 'createPreparedTerminal', 'inspectPreparedTerminal', 'terminalCreationRuntimeIdentity', 'retirePreparedTerminalCreation', 'observePreparedTerminalCreationRetirement', 'prepareTerminalStop', 'stopPreparedTerminal', 'createTerminal', 'recoverTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
-  'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
+  'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'writeTerminalBytes', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
   'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'listAgentSpawns', 'reattachAgent', 'ensureAgentContinuity', 'controlAgentContinuity',
   'restartAgent', 'inspectAgentRestart', 'resumeAgent', 'reopenAgent', 'reconcileAgentReopen', 'respawnAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt', 'submitAgentMessage', 'notifyMessages', 'inspectMessageNotification', 'saveAgentFuturePromptIntent', 'replySessionQuestion',
   'respondAgentInteraction', 'inspectAgentInteractionOperation', 'setAgentPosture', 'resizeAgent', 'signalAgent', 'stopAgent',
@@ -102,6 +102,7 @@ export const AGENTMUX_HOSTED_PREPARATION = {
   removeTerminal: 'runtime',
   releaseRunAttachment: 'runtime',
   writeTerminal: 'runtime',
+  writeTerminalBytes: 'runtime',
   resizeTerminal: 'runtime',
   signalTerminal: 'runtime',
   stopTerminal: 'runtime',
@@ -156,7 +157,7 @@ export const AGENTMUX_HOSTED_PREPARATION = {
 
 type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'trustCreationSource'
   ? [input: Parameters<AgentMuxClient['trustCreationSource']>[0]]
-  : M extends 'writeTerminal' ? [ref: Parameters<AgentMuxClient[M]>[0], operation: Parameters<AgentMuxClient[M]>[1], observation?: Parameters<AgentMuxClient[M]>[2]]
+  : M extends 'writeTerminal' | 'writeTerminalBytes' ? [ref: Parameters<AgentMuxClient[M]>[0], input: Parameters<AgentMuxClient[M]>[1], observation?: Parameters<AgentMuxClient[M]>[2]]
   : M extends 'writeAgent' | 'pasteAgent' | 'recordExternalConversationMessage' | 'ensureAgentContinuity' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'broadcastMessages' | 'notifyMessages' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction' | 'replySessionQuestion'
     ? [input: Parameters<AgentMuxClient[M]>[0]] : Parameters<AgentMuxClient[M]>
 export type AgentMuxHostedInvocation = { [M in AgentMuxHostedMethod]: {

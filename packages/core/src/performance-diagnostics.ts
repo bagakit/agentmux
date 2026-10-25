@@ -5,7 +5,7 @@ export type PerformanceTiming = { count: number; totalMs: number; maxMs: number 
 export type InputObservationReference = { observerId: string; source: 'user' | 'protocol' | 'paste'; sequence: number }
 export type InputPerformanceSender = { webContentsId: number; window: { windowId: number; webContentsId: number; generation: number } | null }
 export type InputPerformanceKind = 'user' | 'mouse' | 'protocol' | 'paste' | 'semantic' | 'terminal'
-export const INPUT_PERFORMANCE_STAGES = ['queued', 'current-run', 'operation', 'native-input', 'input-capacity', 'input-completion-order', 'received', 'connected-client', 'host-call', 'reply-ready',
+export const INPUT_PERFORMANCE_STAGES = ['queued', 'current-run', 'operation', 'native-input', 'input-order', 'input-capacity', 'input-completion-order', 'received', 'connected-client', 'host-call', 'reply-ready',
   'submission-store', 'session-state', 'input-authority', 'input-claim', 'provider-prepare', 'provider-verify', 'provider-send', 'provider-cleanup',
   'input-receipt', 'render-observation', 'cancel-recovery-status', 'delivery-notice'] as const
 export type InputPerformanceStage = typeof INPUT_PERFORMANCE_STAGES[number]
@@ -61,7 +61,7 @@ export function sanitizeInputObservationArguments(method: string, args: unknown[
   return inputObservationArguments(method, args, false)
 }
 function inputObservationArguments(method: string, args: unknown[], encodedWire: boolean): unknown[] {
-  if (method === 'writeTerminal') return args.length > 2 ? [args[0], args[1], readInputObservation(args[2]) ?? undefined, ...args.slice(3)] : args
+  if (method === 'writeTerminal' || method === 'writeTerminalBytes') return args.length > 2 ? [args[0], args[1], readInputObservation(args[2]) ?? undefined, ...args.slice(3)] : args
   if (method !== 'writeAgent' && method !== 'pasteAgent') return args
   const input = args[0]
   if (!input || typeof input !== 'object' || Array.isArray(input)) return args

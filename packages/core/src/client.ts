@@ -861,6 +861,7 @@ export class AgentMuxClient {
   private readonly pendingLifecycleBindings = new Map<string, AgentHookBinding>()
   private reopensDisposed = false
   private readonly agentInputLanes = new Map<string, AgentInputLane>()
+  private readonly rawInputAdmissions = new Map<string, Promise<void>>()
   private readonly providerReads = new Set<AbortController>()
   private readonly conversationReadState = new ConversationReaderState()
   private readingDiagnosticSource: CoreReadingDiagnosticSource | undefined
@@ -4413,6 +4414,30 @@ export class AgentMuxClient {
   async releaseRunAttachment(ref: AgentMuxRunRef): Promise<void> {
     this.requireConnected()
     await this.kernel.detach(ref.runId)
+  }
+
+  /** Live terminal bytes use native ordering; durable operations use writeTerminal. */
+  async writeTerminalBytes(
+    ref: AgentMuxRunRef,
+    data: AgentMuxRunInputData,
+    observation?: InputObservationReference,
+    context?: AgentRawInputCallContext
+  ): Promise<AgentMuxRunInputAck> {
+    this.requireConnected()
+    const call = this.rawInputCall(context)
+    const diagnostic = this.inputPerformance.begin({ sessionId: null, runId: ref.runId, kind: 'terminal',
+      bytes: Buffer.byteLength(data), parent: readInputObservation(observation) })
+    diagnostic.dequeue()
+    try {
+      if (data.length === 0) {
+        await this.assertRawInputCurrent(call)
+        diagnostic.settle(true)
+        return { runId: ref.runId, appliedByteRange: null, acceptedThroughByte: null }
+      }
+      const accepted = await this.dispatchRawInput(ref.runId, data, call, diagnostic, () => {}, () => {})
+      diagnostic.settle(true)
+      return { runId: ref.runId, appliedByteRange: accepted.appliedByteRange, acceptedThroughByte: accepted.appliedByteRange.endByte }
+    } catch (error) { diagnostic.settle(false); throw error }
   }
 
   async writeTerminal(
@@ -9227,6 +9252,37 @@ export class AgentMuxClient {
     call.check()
   }
 
+  /** One physical Run channel has one capacity admission owner across raw APIs. */
+  private async dispatchRawInput(runId: string, data: AgentMuxRunInputData, call: RawInputCall,
+    diagnostic: InputPerformanceHandle, beforeDispatch: () => void, dispatched: () => void,
+    channel?: CtxmuxAdapterInputChannel): Promise<{ appliedByteRange: { startByte: number; endByte: number } }> {
+    const previous = this.rawInputAdmissions.get(runId) ?? Promise.resolve()
+    let release!: () => void
+    const ownAdmission = new Promise<void>(resolve => { release = resolve })
+    // Cancelling this waiter may release its node, never its predecessor.
+    const admitted = previous.then(() => ownAdmission)
+    this.rawInputAdmissions.set(runId, admitted)
+    void admitted.then(() => {
+      if (this.rawInputAdmissions.get(runId) === admitted) this.rawInputAdmissions.delete(runId)
+    })
+    const releaseAdmission = () => { release() }
+    try {
+      await diagnostic.measure('input-order', () => observePromptInput(call.signal, () => previous))
+      const owner = channel ?? await diagnostic.measure('current-run', () => observePromptInput(call.signal, () => this.kernel.openInput(runId)))
+      await diagnostic.measure('input-capacity', () => owner.waitWritable(Buffer.byteLength(data), call.signal))
+      await diagnostic.measure('input-authority', () => this.assertRawInputCurrent(call))
+      beforeDispatch()
+      diagnostic.executionOwner(this.kernel.identity().daemonInstanceId)
+      call.check()
+      const completion = owner.input(data)
+      dispatched()
+      // Never return the ACK through admission: Promise assimilation would
+      // recreate the full-receipt queue this boundary replaces.
+      releaseAdmission()
+      return await diagnostic.measure('native-input', () => completion)
+    } finally { releaseAdmission() }
+  }
+
   private async writeAgentInput(
     requestedSession: AgentMuxAgentSession,
     data: AgentMuxRunInputData,
@@ -9339,27 +9395,29 @@ export class AgentMuxClient {
       let result: { runId: string; pid: number | null; appliedByteRange: { startByte: number; endByte: number }; acceptedThroughByte: number | null }
       let dispatched = false
       try {
-        if (dispatch) await diagnostic.measure('input-capacity', () => dispatch.channel.waitWritable(Buffer.byteLength(data), call.signal))
-        await diagnostic.measure('input-authority', () => this.assertRawInputCurrent(call))
-        if (!sameRun(this.requireAgentSession(session.agentSessionId).run, session.run)) throw new AgentMuxError(
-          'Agent Session changed before native Input dispatch.', 'STALE_AGENT_SESSION')
-        this.assertAgentRun(session, run)
-        const ownerInstanceId = this.kernel.identity().daemonInstanceId
-        diagnostic.executionOwner(ownerInstanceId)
-        call.check()
-        result = await diagnostic.measure('native-input', async () => {
-          dispatched = true
-          if (dispatch) {
-            const completion = dispatch.channel.input(data)
-            dispatch.releaseAdmission()
-            const accepted = await completion
-            return { runId: run.runId, pid: run.pid, appliedByteRange: accepted.appliedByteRange,
-              acceptedThroughByte: accepted.appliedByteRange.endByte }
-          }
-          const accepted = await this.kernel.input(session.run.runId, { ownerInstanceId, operationId, expectedByte: expectedByte!, data })
-          return { runId: accepted.run.runId, pid: accepted.run.pid, appliedByteRange: accepted.appliedByteRange,
-            acceptedThroughByte: accepted.run.acceptedInputBytes }
-        })
+        if (dispatch) {
+          const accepted = await this.dispatchRawInput(run.runId, data, call, diagnostic, () => {
+            if (!sameRun(this.requireAgentSession(session.agentSessionId).run, session.run)) throw new AgentMuxError(
+              'Agent Session changed before native Input dispatch.', 'STALE_AGENT_SESSION')
+            this.assertAgentRun(session, run)
+          }, () => { dispatched = true; dispatch!.releaseAdmission() }, dispatch.channel)
+          result = { runId: run.runId, pid: run.pid, appliedByteRange: accepted.appliedByteRange,
+            acceptedThroughByte: accepted.appliedByteRange.endByte }
+        } else {
+          await diagnostic.measure('input-authority', () => this.assertRawInputCurrent(call))
+          if (!sameRun(this.requireAgentSession(session.agentSessionId).run, session.run)) throw new AgentMuxError(
+            'Agent Session changed before native Input dispatch.', 'STALE_AGENT_SESSION')
+          this.assertAgentRun(session, run)
+          const ownerInstanceId = this.kernel.identity().daemonInstanceId
+          diagnostic.executionOwner(ownerInstanceId)
+          call.check()
+          result = await diagnostic.measure('native-input', async () => {
+            dispatched = true
+            const accepted = await this.kernel.input(session.run.runId, { ownerInstanceId, operationId, expectedByte: expectedByte!, data })
+            return { runId: accepted.run.runId, pid: accepted.run.pid, appliedByteRange: accepted.appliedByteRange,
+              acceptedThroughByte: accepted.run.acceptedInputBytes }
+          })
+        }
       } catch (error) {
         for (const observation of protocolObservers) observation.protocolInput!.invalid = true
         if (!dispatched || error instanceof AgentMuxError && error.detail === 'not_applied') await observeNativeInput('not_applied')
