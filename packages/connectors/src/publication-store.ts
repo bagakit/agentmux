@@ -876,10 +876,13 @@ export class PublicationStore {
     }
     const revision = digest(represented), parts = representationFragments(represented, fragmentBytes, fragmentText ? payload => fragmentText(payload, speaker, originalMessage) : undefined)
     const withoutMetadata = (payload: PublicationPayload) => payload.kind === 'speech' ? (({ replyMetadata: _metadata, ...body }) => body)(payload) : payload
-    // A re-read containing the same body cannot turn late facts into a successor
-    // of an unknown/unsent request. Its original receipt will trigger safe enrichment.
-    if (latest.length === parts.length && latest.some(operation => operation.state !== 'confirmed') &&
-      latest.every((operation, index) => operation.effect === 'upsert' && same(withoutMetadata(operation.payload), withoutMetadata(parts[index]!)))) return
+    // Only a metadata-only change to a still-owned frozen request waits for its
+    // receipt. Ordinary pending work and cancelled body recovery keep their original path.
+    const metadataOnly = latest.length === parts.length && latest.every((operation, index) => operation.effect === 'upsert' &&
+      same(withoutMetadata(operation.payload), withoutMetadata(parts[index]!))) && latest.some((operation, index) => !same(operation.payload, parts[index]))
+    const frozenOriginal = latest.every(operation => !['cancelled', 'superseded'].includes(operation.state)) && latest.some(operation =>
+      ['unknown', 'dispatching'].includes(operation.state) || operation.state === 'pending' && (operation.prepared !== undefined || operation.attempt !== undefined))
+    if (metadataOnly && frozenOriginal) return
     if (parts.length && latest.length && latest.every(o => o.sourceRevision === revision && o.state !== 'cancelled')) return
     // A form status update has its own original receipt; unchanged media must not be sent again.
     if (question && payload.kind === 'sequence' && parts.length === latest.length && latest.every((operation, index) => operation.effect === 'upsert' && !['cancelled', 'superseded'].includes(operation.state) && same(operation.payload, parts[index]))) return
