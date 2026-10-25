@@ -264,6 +264,8 @@ export class PublicationStore {
       WHERE json_extract(decision_json,'$.kind')='origin' OR (json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved');
       CREATE INDEX IF NOT EXISTS connector_publication_content_gap ON connector_publication_decision(binding_id,binding_revision)
       WHERE json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved';
+      CREATE INDEX IF NOT EXISTS connector_publication_gap_part ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.gap.part'))
+        WHERE json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved';
       CREATE INDEX IF NOT EXISTS connector_publication_intent_projection ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.projectionId'))
       WHERE json_extract(decision_json,'$.kind') IN ('representation','legacy-representation');
       CREATE INDEX IF NOT EXISTS connector_publication_intent_record ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.part.record'))
@@ -430,6 +432,20 @@ export class PublicationStore {
       const derived = segment.image?.derivation
       return derived?.kind === 'mermaid' && derived.textSha256 === textSha256 && derived.start === start && derived.end === end
     })?.image
+  }
+  /** Reuse only a complete representation of this exact accepted part version. */
+  retainedResource(boundary: PublicationBoundary, part: ConversationContentRef, textResource = false): ResolvedPublicationPart | undefined {
+    const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision='current'")
+      .get(...scopeKey(boundary), 'part-' + digest(publicationPartKey(part)))
+    if (!row) return
+    const value = JSON.parse(String(row.decision_json)) as RepresentationIntent
+    if (value.kind !== 'representation' || !same(value.part, part)) return
+    if (!value.image && !value.file && !value.segments && !textResource) return
+    const gap = this.database.prepare("SELECT 1 FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.gap.part')=? LIMIT 1")
+      .get(...scopeKey(boundary), encode(part))
+    if (gap) return
+    return value.image ? { kind: 'image', image: value.image } : value.file ? { kind: 'file', file: value.file }
+      : value.segments ? { kind: 'markdown', text: value.text, segments: value.segments, complete: true } : textResource ? { kind: 'text', text: value.text } : undefined
   }
   private representationRows(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId: string, records: readonly ConversationItemRef[] = []): RepresentationRow[] {
     const rows: RepresentationRow[] = this.database.prepare("SELECT rowid,record_id,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND json_extract(decision_json,'$.kind') IN ('representation','legacy-representation') AND json_extract(decision_json,'$.projectionId')=? ORDER BY rowid")
@@ -659,12 +675,17 @@ export class PublicationStore {
         // Resolve only decisions superseded by these accepted original versions.
         for (const row of this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved'").all(...scopeKey(boundary))) {
           const d = JSON.parse(String(row.decision_json))
+          if (plan.gaps.some(gap => same(gap.part, d.gap.part) && same(gap.event, d.gap.event) && (gap.reason === d.gap.reason || gap.reason === 'resource-unavailable' && d.gap.reason === 'version-unavailable'))) continue
           if (d.kind === 'gap' && !d.inputAlias && d.gap.part && !ambiguous.has(conversationRecordId(d.gap.part.record)) && unit.records.some(r => r.id === conversationRecordId(d.gap.part.record))) this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...d, state: 'resolved' }), Number(row.rowid))
         }
         this.saveDecision(boundary, 'scope-' + digest(unit.event.id), unit.event.revision, { kind: 'scope', event: { id: unit.event.id, revision: unit.event.revision }, excluded: plan.excluded })
         for (const gap of plan.gaps) {
           const stored = { ...gap, gapId: 'gap-' + digest([...scopeKey(boundary), gap.event, gap.part, gap.reason]) }
           const inputAlias = publicationInputAlias(unit, gap)
+          // A replacement window does not change this missing part's original read cut.
+          const retained = this.database.prepare("SELECT 1 FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision=? AND json_extract(decision_json,'$.state')='unresolved'")
+            .get(...scopeKey(boundary), stored.gapId, gap.part?.recordRevision ?? unit.event.revision)
+          if (retained) continue
           this.saveDecision(boundary, stored.gapId, gap.part?.recordRevision ?? unit.event.revision, { kind: 'gap', gap: stored, state: 'unresolved', ...(inputAlias ? { inputAlias } : {}) })
         }
         for (const representation of plan.origins) this.saveDecision(boundary, 'origin-' + digest(representation.part), representation.part.recordRevision, { kind: 'origin', representation })
@@ -836,8 +857,7 @@ export class PublicationStore {
     const event = gap.event
     const unit = parseConversationUnit(original, { hostId: gap.anchor.frontier.sourceHostId, agentSessionId: boundary.agentSessionId }, gap.anchor.frontier.frontier.scope)
     if (!unit.records.some(r => r.id === conversationRecordId(gap.part!.record) && r.revision === gap.part!.recordRevision)) return false
-    const plan = publicationContent(unit, boundary, gap.anchor.frontier, { resolved: resolvedText, origin: id => this.origin(boundary, unit, id), selected: gap.part, ...(speaker ? { attributed: true } : {}) })
-    if (!plan.complete) return false
+    const plan = publicationContent(unit, boundary, gap.anchor.frontier, { resolved: resolvedText, origin: id => this.origin(boundary, unit, id), ...(speaker ? { attributed: true } : {}) })
     return this.transaction(() => {
       if (!authorized()) throw new AgentMuxError('Original audience no longer authorizes this content.', 'PUBLICATION_NOT_AUTHORIZED')
       const row = this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND json_extract(decision_json,'$.state')='unresolved'").get(...scopeKey(boundary), gap.gapId)
@@ -848,10 +868,25 @@ export class PublicationStore {
       // event/message or substitutes a newer original record.
       if (!represented) return false
       const { projectionId, records } = JSON.parse(String(represented.decision_json)) as { projectionId: string; records: ConversationItemRef[] }
-      this.queueRepresentation(boundary, projectionId, unit, this.materialize(boundary, projectionId, unit, plan, [], gap.part, records), fragmentBytes, event, records, undefined, fragmentText, speaker)
+      const before = this.latestProjection(projectionId)?.operationId
+      this.queueRepresentation(boundary, projectionId, unit, this.materialize(boundary, projectionId, unit, plan, [], undefined, records), fragmentBytes, event, records, undefined, fragmentText, speaker)
       for (const representation of plan.origins) this.saveDecision(boundary, 'origin-' + digest(representation.part), representation.part.recordRevision, { kind: 'origin', representation })
-      this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...JSON.parse(String(row.decision_json)), state: 'resolved' }), Number(row.rowid))
-      return true
+      let recovered = false
+      for (const piece of plan.pieces) {
+        if (plan.gaps.some(missing => missing.part && publicationPartKey(missing.part) === publicationPartKey(piece.part))) continue
+        const id = 'gap-' + digest([...scopeKey(boundary), event, piece.part, 'resource-unavailable'])
+        const pending = this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND json_extract(decision_json,'$.state')='unresolved'")
+          .get(...scopeKey(boundary), id)
+        if (pending) {
+          this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...JSON.parse(String(pending.decision_json)), state: 'resolved' }), Number(pending.rowid))
+          recovered = true
+        }
+      }
+      if (!plan.gaps.some(missing => missing.part && publicationPartKey(missing.part) === publicationPartKey(gap.part!))) {
+        this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...JSON.parse(String(row.decision_json)), state: 'resolved' }), Number(row.rowid))
+        recovered = true
+      }
+      return recovered || before !== this.latestProjection(projectionId)?.operationId
     })
   }
   versionUnavailable(boundary: PublicationBoundary, gap: ConnectionDeliveryGap, code: string): void {
