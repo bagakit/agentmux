@@ -5,6 +5,7 @@ export type FeishuRoleSpeaker = {
   kind: 'agent' | 'human' | 'external' | 'mixed' | 'unknown'
   name?: string
   imageKey?: string
+  elementId?: string
 }
 export type FeishuRoleCardOptions = {
   phase?: 'progress' | 'final'
@@ -24,7 +25,7 @@ const roleIcons: Record<FeishuRoleSpeaker['kind'], string> = {
 /** Shared display-only identity for speech and Question surfaces. */
 export function feishuSpeakerIdentity(speaker: Readonly<FeishuRoleSpeaker>, purpose?: string): Record<string, unknown> {
   const identity = [speaker.name, roles[speaker.kind], purpose].filter(Boolean).join(' · ')
-  return { tag: 'div', text_size: 'notation',
+  return { tag: 'div', ...(speaker.elementId ? { element_id: speaker.elementId } : {}), text_size: 'notation',
     text: { tag: 'plain_text', content: identity, text_size: 'notation', text_color: 'grey' },
     icon: speaker.imageKey ? { tag: 'custom_icon', img_key: speaker.imageKey, size: '16px 16px' }
       : { tag: 'standard_icon', token: roleIcons[speaker.kind], size: '16px 16px' } }
