@@ -10,11 +10,16 @@ const aliases = Object.entries(host).map(([key, value]) => ({
 })).sort((a, b) => b.find.length - a.find.length)
 const mutations = {
   'automatic-cleanup': ['apps/desktop/src/renderer/src/components/performance/PerformanceReclaim.tsx',
-    'const target = currentPerformanceCaptureTarget(snapshot?.observation)',
-    "useEffect(() => { if (active) void run('reclaim') }, [active]); const target = currentPerformanceCaptureTarget(snapshot?.observation)"],
+    "    void run('inspect')\n", "    void run('reclaim')\n"],
+  'entry-read': ['apps/desktop/src/renderer/src/components/performance/PerformanceReclaim.tsx',
+    "    void run('inspect')\n", "    /* entry read omitted */\n"],
+  'overwrite-cleanup': ['apps/desktop/src/renderer/src/components/performance/PerformanceReclaim.tsx',
+    "if (action === 'reclaim') setCleanup({ kind: 'receipt', result: receipt })", "setCleanup({ kind: 'receipt', result: receipt })"],
+  'delta-sign': ['apps/desktop/src/renderer/src/components/performance/PerformanceReclaim.tsx',
+    '? after - before : null', '? before - after : null'],
   'lossless-browser': ['apps/desktop/src/renderer/src/components/performance/PerformanceReclaim.tsx',
-    "working.current = true; setPending(action); setFailure(null)",
-    "working.current = true; setPending(action); setFailure(null); if (action === 'reclaim') for (const row of directory.rows) void api.browser.release(row.target.id, row.target.navigationId!)"],
+    'working.current = true; inspected.current = targetKey; setPending(action)',
+    "working.current = true; inspected.current = targetKey; setPending(action); if (action === 'reclaim') for (const row of directory.rows) void api.browser.release(row.target.id, row.target.navigationId!)"],
   'hidden-reader': ['apps/desktop/src/renderer/src/components/performance/PerformanceReclaim.tsx',
     'useBrowserDirectory(active)', 'useBrowserDirectory(true)'],
   'batch-receipt': ['apps/desktop/src/renderer/src/components/browser/BrowserResources.tsx',
@@ -29,7 +34,7 @@ export default { ...base, cacheDir: resolve(root, '.tmp/performance-reclaim/cach
   resolve: { ...base.resolve, alias: [...aliases, ...base.resolve!.alias as []] },
   plugins: [{ name: 'performance-reclaim-source', enforce: 'pre' as const, transform(code: string, id: string) {
     const path = relative(root, id.split('?')[0]!)
-    if (!/^(?:apps\/(?:desktop|host)\/(?:src|test)\/|packages\/[^/]+\/src\/)/u.test(path)) return
+    if (!/^(?:apps\/(?:desktop|host)\/(?:src|test)\/|packages\/[^/]+\/src\/)/u.test(path) || !/\.(?:ts|tsx|js|mjs|css)$/u.test(path)) return
     let served = code
     const mutation = process.env.AGENTMUX_RECLAIM_MUTATION as keyof typeof mutations | undefined
     if (mutation) {
