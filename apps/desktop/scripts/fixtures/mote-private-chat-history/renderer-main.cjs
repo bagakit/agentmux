@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu } = require('electron')
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict')
 const [html, privateRoot, evidence] = process.argv.slice(2)
+const peopleOnly = process.argv.includes('--people-only')
 app.setPath('userData', path.join(privateRoot, 'userData'))
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const result = { passed: false, images: [], operations: [] }
@@ -9,7 +10,7 @@ app.whenReady().then(async () => {
   try {
     Menu.setApplicationMenu(null)
     win = new BrowserWindow({ width: 1080, height: 850, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
-    await win.loadFile(html, { query: { workspacePath: path.join(privateRoot, 'workspace') } })
+    await win.loadFile(html, { query: { workspacePath: path.join(privateRoot, 'workspace'), ...(peopleOnly ? { 'people-only': '1' } : {}) } })
     const read = script => win.webContents.executeJavaScript(script)
     const until = async script => { for (let i = 0; i < 180; i++) { if (await read(script)) return; await pause(30) }; throw Error('Expected original UI state: ' + script) }
     const click = async selector => {
@@ -27,6 +28,16 @@ app.whenReady().then(async () => {
       result.images.push(name + '.png'); result.operations.push({ name, ...facts })
     }
     await until(`!!window.privateChatPreview && document.querySelector('[data-mote-chat-saved="on"]') && document.querySelector('.mote-chat-activity')?.textContent.includes('interrupted')`)
+    if (peopleOnly) {
+      await click('.mote-private-chat__people > summary'); await until('document.querySelectorAll("[data-mote-chat-person]").length===2')
+      await read('privateChatPreview.theme(false)'); await capture('people-wide-dark', '.mote-private-chat__people')
+      const guest = '[data-mote-chat-person="original-guest-research-and-engineering-collaboration"]'
+      await click(guest + ' .agent-connector-disclosure > summary')
+      win.setContentSize(390,850); await until('innerWidth===390'); await read('privateChatPreview.theme(true)')
+      await capture('people-identity-narrow-light', guest)
+      assert.equal(await read('privateChatPreview.facts().reads.some(row=>row.method==="space.mote.chat.allocate"||row.method==="space.mote.chat.history")'), false)
+      result.passed = true; return
+    }
     await capture('activity-interrupted-wide-dark', '[data-mote-private-chat]')
     await click('.mote-private-chat__people > summary'); await until(`!!document.querySelector('[data-mote-chat-person]')`)
     assert.equal(await read(`privateChatPreview.facts().reads.some(r=>r.method==='space.mote.chat.history')`), false)

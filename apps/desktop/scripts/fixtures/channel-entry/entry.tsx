@@ -17,6 +17,7 @@ import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-m
 import { invalidateConnectorTarget } from '../../../src/renderer/src/lib/connector-room-intent'
 import type { ConnectionHostingTarget } from '../../../src/shared/contracts'
 import { fixturePath } from '../../lib/fixture-values.mjs'
+import observedGroupAvatar from '../../../src/renderer/src/assets/pmo-teams-topic-avatar.png'
 import '../../../src/renderer/src/styles/index.css'
 
 const config = await api.config.get()
@@ -46,6 +47,7 @@ const popoverClarity = new URLSearchParams(location.search).has('popover-clarity
 const refusalClarity = new URLSearchParams(location.search).has('refusal-clarity')
 const questionValidation = new URLSearchParams(location.search).has('question-validation')
 const connectorDetails = new URLSearchParams(location.search).has('connector-details-modern')
+const entityOverview = new URLSearchParams(location.search).has('entity-overview')
 const inputRecovery = new URLSearchParams(location.search).has('input-recovery')
 const statusPriority = new URLSearchParams(location.search).has('status-priority')
 const groupActivityActions = connectorDetails || inputRecovery || statusPriority || new URLSearchParams(location.search).has('group-activity-actions')
@@ -137,7 +139,8 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   const subject = { kind: 'conversation', externalConversationId: input.subject?.externalConversationId ?? room.externalConversationId }
   const sourceConnection = sharedAudiences && input.connectionId === secondConnection.config.connectionId ? secondConnection : connection
   const meta = { connectionId: sourceConnection.config.connectionId, connectionRevision: 1, application: sourceConnection.config.application,
-    entry: { subject, cacheRevision: 'preview-cache', observation: { subject, state: 'observed', freshness: conversationSync ? 'stale' : 'current', profile: { name: conversationSync ? composerNames[sourceConnection === secondConnection ? 1 : 0] : room.name, observedAt: conversationSync ? 1 : Date.now() }, checkedAt: conversationSync ? 1 : Date.now() } } }
+    entry: { subject, cacheRevision: 'preview-cache', observation: { subject, state: 'observed', freshness: conversationSync ? 'stale' : 'current', profile: { name: conversationSync ? composerNames[sourceConnection === secondConnection ? 1 : 0] : room.name,
+      ...(entityOverview ? { avatarUrl: observedGroupAvatar } : {}), observedAt: conversationSync ? 1 : Date.now() }, checkedAt: conversationSync ? 1 : Date.now() } } }
   if (method === 'connection.ls') return { connections: proof.omitOriginal ? [] : sharedAudiences ? [connection, secondConnection] : [connection] }
   if (method === 'connection.inspect') return { connection: sourceConnection, operation: null }
   if (method === 'connection.service.get') {
@@ -254,7 +257,7 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
     composerReads.push({ kind: 'metadata', scenario: composerScenario, connectionId: sourceConnection.config.connectionId, state: composerScenario === 'unavailable' ? 'unavailable' : 'observed-stale' })
     if (composerScenario === 'unavailable') throw Error('Controlled original cached group name read unavailable')
   }
-  if (method === 'connection.metadata.get') return applicationAccess && input.subject.kind === 'actor' ? { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, entry: actorMetadata.find(entry => entry.subject.actor.userId === input.subject.actor.userId)! } : meta
+  if (method === 'connection.metadata.get') return input.subject.kind === 'actor' ? { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, entry: actorMetadata.find(entry => entry.subject.actor.userId === input.subject.actor.userId && entry.subject.actor.idType === input.subject.actor.idType)! } : meta
   if (method === 'connection.metadata.ls') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, entries: applicationAccess && input.kind === 'actor' ? actorMetadata : [], next: null }
   if (method === 'connection.bind') {
     bindings = [{ ...input, revision: 1, state: 'active', application: connection.config.application, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } }]

@@ -10,6 +10,8 @@ import { useAppStore } from '../../../src/renderer/src/store'
 const at = fixtureEpoch(1, 120), owner = { hostId: 'chat-host', runtimeId: 'chat-runtime' }
 const application = { domain: 'open.feishu.cn', appId: 'private-bot' }, actor = { application, idType: 'open_id', userId: 'original-person' }
 const connection = { connectionId: 'private-connection', application }, agentSessionId = 'original-private-agent'
+const peopleOnly = new URLSearchParams(location.search).has('people-only')
+const guest = { ...actor, userId: 'original-guest-research-and-engineering-collaboration' }
 const run = { runId: 'original-private-run' }, key = { kind: 'message' as const, agentSessionId, expectedRun: run, messageId: 'original-message' }, ref = { key, waitGeneration: 1 }
 const receipt: AgentInputSubmissionReceipt = { key, ref, originalControlOperationId: 'original-control', persistence: 'confirmed',
   control: { ref, state: 'enabled', at, waiting: { phase: 'runtime', reason: 'runtime-unavailable', wake: 'runtime-restored' } },
@@ -18,10 +20,18 @@ const reads: unknown[] = [], forbidden: string[] = []
 let historyState: 'ready' | 'unavailable' | 'loading' = 'ready', finishHistory: (() => void) | undefined
 let inputStatus: 'waiting' | 'admitted' = 'waiting'
 api.connections.hostingTarget = async () => owner
+api.connections.onMetadataChanged = (_listener, observation) => { observation?.('ready'); return () => {} }
 api.connections.call = async (method, input, target) => {
   reads.push({ method, input, target })
   if (method === 'connection.ls') return { connections: [{ revision: 1, config: { ...connection, adapterId: 'lark', label: 'Mote companion', enabled: true, credentialRef: 'preview-secret' }, initialSetup: { state: 'complete' } }] } as never
   if (method === 'connection.service.get') return { enabled: true, revision: 1 } as never
+  if (method === 'connection.metadata.get' && 'subject' in input) {
+    if (JSON.stringify(target) !== JSON.stringify(owner) || input.connectionId !== connection.connectionId || input.subject.kind !== 'actor') throw Error('Read one exact original person profile')
+    const original = input.subject.actor.userId === actor.userId
+    return { ...connection, connectionRevision: 1, entry: { subject: input.subject, cacheRevision: original ? 'original-profile' : null,
+      observation: { actor: input.subject.actor, state: original ? 'observed' : 'unknown', freshness: original ? 'current' : 'unknown',
+        profile: original ? { name: 'Ava Chen', observedAt: at } : null, checkedAt: at } } } as never
+  }
   throw Error('This private renderer does not perform ' + method)
 }
 api.moteChat.call = async (method, input, target) => {
@@ -38,7 +48,8 @@ api.moteChat.call = async (method, input, target) => {
       waiting: inputStatus === 'waiting' ? { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin' } : null,
       preparationReason: null, failureCode: inputStatus === 'waiting' ? 'STALE_AGENT_SESSION' : null,
       runtime: inputStatus === 'waiting' ? { target: 'original', state: 'interrupted', exitCode: null } : null } }] } } satisfies MoteChatDiagnosis as never
-  if (method === 'space.mote.chat.audience') return { people: [{ actor, name: 'Ava Chen', creator: true, revision: 1, total: null, used: 3, remaining: null }], next: null } as never
+  if (method === 'space.mote.chat.audience') return { people: [{ actor, name: 'Ava Chen', creator: true, revision: 1, total: null, used: 3, remaining: null },
+    ...(peopleOnly ? [{ actor: guest, name: null, creator: false, revision: 1, total: 8, used: 3, remaining: 5 }] : [])], next: null } as never
   if (method === 'space.mote.chat.history') {
     if (!('actor' in input) || JSON.stringify(input.actor) !== JSON.stringify(actor)) throw Error('Read one exact person')
     if (historyState === 'unavailable') throw Error('The original hosting connection is temporarily unavailable.')

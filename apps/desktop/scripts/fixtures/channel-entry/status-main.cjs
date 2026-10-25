@@ -9,6 +9,7 @@ const questionValidation = process.argv.includes('--question-validation')
 const refusalClarity = process.argv.includes('--refusal-clarity')
 const groupActivityActions = process.argv.includes('--group-activity-actions')
 const connectorDetails = process.argv.includes('--connector-details-modern')
+const entityOverview = process.argv.includes('--entity-overview')
 const inputRecovery = process.argv.includes('--input-recovery')
 const statusPriority = process.argv.includes('--status-priority')
 const statusPriorityDetails = process.argv.includes('--status-priority-details')
@@ -18,7 +19,7 @@ let win
 app.whenReady().then(async () => {
   try {
     win = new BrowserWindow({ width: 1380, height: 980, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
-    await win.loadFile(html, { query: { 'header-status': '1', ...(connectorDetails ? { 'connector-details-modern': '1' } : {}), ...(inputRecovery ? { 'input-recovery': '1' } : {}), ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(questionValidation ? { 'question-validation': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}), ...(statusPriority ? { 'status-priority': '1' } : {}) } })
+    await win.loadFile(html, { query: { 'header-status': '1', ...(connectorDetails ? { 'connector-details-modern': '1' } : {}), ...(entityOverview ? { 'entity-overview': '1' } : {}), ...(inputRecovery ? { 'input-recovery': '1' } : {}), ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(questionValidation ? { 'question-validation': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}), ...(statusPriority ? { 'status-priority': '1' } : {}) } })
     const { read, until, settle, click, press } = nativeRendererInput(win, result.interactions, '')
     const region = '[data-workbench-region-id="channel-preview-region"]'
     const entry = adapter => region + ' [data-channel-entry="' + adapter + '"]'
@@ -89,6 +90,22 @@ app.whenReady().then(async () => {
         await click('js:[...document.querySelectorAll(".connector-header-menu__item")].find(node=>node.getAttribute("aria-label")?.includes("345678901234567890"))')
         await until(exists(dialog))
         await until('document.querySelector(' + JSON.stringify(dialog + ' .connector-traffic-summary') + ')?.textContent.includes("Source reading unconfirmed")')
+      }
+      if (entityOverview) {
+        for (const narrow of [false, true]) {
+          win.setContentSize(1380,980);await until('innerWidth===1380');await layout(false)
+          await read('window.channelEntryProof.setTheme(' + JSON.stringify(narrow ? 'light' : 'dark') + ');window.channelEntryProof.setScenario("mixed")')
+          await openDetails()
+          if (narrow) { win.setContentSize(520,980);await until('innerWidth===520') }
+          await until(exists(dialog + ' [data-entity-kind="group"]'))
+          await until('(()=>{const image=document.querySelector(' + JSON.stringify(dialog + ' [data-entity-kind="group"] img') + ');return image?.complete&&image.naturalWidth>0})()')
+          result.avatarFixture = { asset: 'apps/desktop/src/renderer/src/assets/pmo-teams-topic-avatar.png', source: 'Repository brand artwork supplied as a synthetic observed group profile; no live platform or person identity claim', decoded: true }
+          await capture('entity-group-overview-' + (narrow ? 'narrow-light' : 'wide-dark'))
+          assert.equal(await read('document.querySelector(' + JSON.stringify(dialog + ' [data-direction="incoming"]') + ')!==null&&document.querySelector(' + JSON.stringify(dialog + ' [data-direction="outgoing"]') + ')!==null'),true)
+          await click('[aria-label="Close group setup"]');await until('!document.querySelector(' + JSON.stringify(dialog) + ')')
+        }
+        result.requests=await read('window.channelEntryProof.requests');assert.ok(!result.requests.some(row=>/rejoin|retry|configure|respond|\.grant$|\.create$/.test(row.method)))
+        assert.deepEqual(await read('window.channelEntryProof.errors'),[]);result.passed=true;return
       }
       for (const narrow of [false, true]) {
         win.setContentSize(1380, 980); await until('innerWidth===1380'); await layout(narrow)
