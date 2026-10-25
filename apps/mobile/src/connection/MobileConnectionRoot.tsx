@@ -26,6 +26,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
   const [client, setClient] = useState<AgentMuxHostedClient | null>(null)
   const [connection, setConnection] = useState<MobileConnection>({ state: 'connecting', message: '正在连接 Mac' })
   const [updatePending, setUpdatePending] = useState(() => !native && location.hash === mobileUpdateFragment)
+  const restoreWorkface = useRef(false)
   const [connectionRetry, retryConnection] = useState(0)
   const [returnIssue, setReturnIssue] = useState('')
   const binding = useRef<{ client: AgentMuxHostedClient; offer: string; hostId: string; key: KeyPair; connected: boolean } | null>(null)
@@ -87,6 +88,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
           await withDeviceStorageLock(() => {
             if (controller.signal.aborted) return
             if (!matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('原工作面在重新打开期间发生变化；请恢复原工作面后重试。')
+            restoreWorkface.current = true
             flushSync(() => setUpdatePending(false))
           })
           if (controller.signal.aborted) return
@@ -141,7 +143,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
     {returnIssue && <p role="status">{returnIssue}</p>}
   </main>
   return <MobileWebUpdateSafetyProvider verifyConnection={verifyConnection} prepareReload={prepareReload} native={native}><MobileWebCatalogObservation.Provider value={mobileWeb.observeCatalog}>
-    <MobileApp client={client} connection={connection} platform={platform} native={native} webObservation={mobileWeb.observation}
+    <MobileApp client={client} connection={connection} platform={platform} native={native} webObservation={mobileWeb.observation} restoreWorkface={restoreWorkface.current}
       {...(focusComposer ? { focusComposer } : {})} connectionPanel={<p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
   </MobileWebCatalogObservation.Provider></MobileWebUpdateSafetyProvider>
 }
