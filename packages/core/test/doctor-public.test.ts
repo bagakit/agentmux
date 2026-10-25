@@ -10,6 +10,7 @@ import type { AgentMuxRuntimeDiagnostics } from '../src/types.js'
 
 it('decodes actual Doctor through Unix RPC and compiled CLI from one original executable observation', async () => {
   const f = await rpcOwnerFixture()
+  f.inner.kernel.connect = vi.fn(async () => {})
   const prepare = vi.fn(async () => {})
   Object.assign(f.client, { prepareExecutionEnvironment: prepare })
   const catalog = new AgentProviderRegistry().get('codex').catalog
