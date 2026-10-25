@@ -7,7 +7,7 @@ import { runCodexExecutionFrontend } from '../src/providers/codex-execution-fron
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
 
-async function fixture(maxPendingRequests = 8, maxFrameBytes?: number) {
+async function fixture(maxPendingRequests = 8, maxFrameBytes?: number, agentSessionId?: string) {
   const input = new PassThrough(), output = new PassThrough()
   const errors: Error[] = [], frames: any[] = []
   let text = ''
@@ -20,10 +20,10 @@ async function fixture(maxPendingRequests = 8, maxFrameBytes?: number) {
       text = text.slice(newline + 1)
     }
   })
-  const frontend = await runCodexExecutionFrontend({ input, output, onError: error => errors.push(error), maxPendingRequests, ...(maxFrameBytes === undefined ? {} : { maxFrameBytes }) })
+  const frontend = await runCodexExecutionFrontend({ input, output, onError: error => errors.push(error), maxPendingRequests, ...(agentSessionId ? { agentSessionId } : {}), ...(maxFrameBytes === undefined ? {} : { maxFrameBytes }) })
   cleanups.push(async () => { await frontend.close(); input.destroy(); output.destroy() })
-  const connect = async () => {
-    const socket = new WebSocket(frontend.url)
+  const connect = async (url = frontend.url) => {
+    const socket = new WebSocket(url)
     const messages: any[] = []
     socket.on('message', data => messages.push(JSON.parse(String(data))))
     await once(socket, 'open')
@@ -174,4 +174,25 @@ it('rejects a native request whose machine envelope exceeds the limit without co
   peer.socket.send(JSON.stringify({ id: 2, method: 'environment/info' }))
   await vi.waitFor(() => expect(f.requests()).toHaveLength(1))
   expect(peer.socket.readyState).toBe(WebSocket.OPEN)
+})
+
+
+it('reports typed registration failure on its exact generation while native requests remain usable without an Agent caller', async () => {
+  const f = await fixture(8, undefined, 'original-agent')
+  const peer = await f.connect(f.frontend.url + '/unverified/RUNTIME_OWNER_MISMATCH')
+  peer.socket.send(JSON.stringify({ id: 6, method: 'initialize', params: { clientName: 'codex-environment', resumeSessionId: null } }))
+  await vi.waitFor(() => expect(f.requests()).toHaveLength(1))
+  f.reply(f.requests()[0].generation, { id: 6, result: { sessionId: 'native-original' } })
+  await vi.waitFor(() => expect(peer.messages).toHaveLength(1))
+  const payload = { id: 7, method: 'process/start', params: { command: ['/usr/bin/true'], cwd: 'file:///original/workspace' } }
+  peer.socket.send(JSON.stringify(payload))
+  await vi.waitFor(() => expect(f.requests()).toHaveLength(2))
+  const frame = f.requests()[1]
+  expect(f.frames).toContainEqual({ type: 'agent-control-state', generation: frame.generation, state: 'unverified', stage: 'invocation-registration', code: 'RUNTIME_OWNER_MISMATCH' })
+  expect(f.frames.some(value => value.type === 'agent-rpc-context')).toBe(false)
+  expect(frame.payload).toEqual(payload)
+  f.reply(frame.generation, { id: 7, result: { processId: 'native-original' } })
+  await vi.waitFor(() => expect(peer.messages.at(-1)).toEqual({ id: 7, result: { processId: 'native-original' } }))
+  expect(peer.socket.readyState).toBe(WebSocket.OPEN)
+  expect(f.errors).toEqual([])
 })
