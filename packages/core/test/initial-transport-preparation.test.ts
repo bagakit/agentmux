@@ -36,7 +36,7 @@ async function fixture(storePath?: string) {
   await store.compareAndSwap(null, stored('prepare'))
   await store.compareAndSwap(null, stored('healthy'))
   const template = new AgentProviderRegistry().get('codex')
-  const { providerFork: _fork, ...capabilities } = template.catalog.capabilities
+  const { providerFork: _fork, nativeConversationInput: _nativeInput, asyncQuestionReply: _questionReply, ...capabilities } = template.catalog.capabilities
   let source = 'source-1', pid = 123, cursor = 0, recheck = true, lostAck = false
   let verifyCount = 0, statusesAfterVerify = 0, finalStatusFault: string | undefined
   let finalVerify: ((count: number, context: AgentProviderPromptExecutionContext) => Promise<void>) | undefined
@@ -55,7 +55,7 @@ async function fixture(storePath?: string) {
     context.signal.throwIfAborted()
     return { nativeSourceId: 'source-1', verifyCurrentTransport: async context => { verifyCount++; statusesAfterVerify = 0; await finalVerify?.(verifyCount, context); return recheck } }
   })
-  const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', capabilities: { ...capabilities, promptExecution: { immediate: 'interrupt-before-input' } }, hookStrategy: { kind: 'native', installation: 'unmanaged' } },
+  const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', resumeStrategy: { kind: 'none' }, capabilities: { ...capabilities, providerResume: false, permission: 'none', promptExecution: { immediate: 'interrupt-before-input' } }, hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     buildArgs: (_, args) => [...args], hook: { rules: [] }, terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
     planPromptInput: (text, context) => ({ kind: 'render-then-submit', payload: text, renderedText: text, submit: '\r',
       ...(context?.execution === 'immediate' ? { prepare: { refresh: '\x1b[I', interrupt: '\x1b', endEvent: 'Interrupt' } } : {}) }),
@@ -271,6 +271,81 @@ describe('original immediate transport preparation', () => {
       expect(f.writes.some(write => ['ORIGINAL_BODY', '\x1b[I', '\r'].includes(write.data))).toBe(false)
       expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
     } finally { await f.close() }
+  })
+
+  it.each(['new', 'historical-unknown'] as const)('releases an initial Session read for human input and retains %s receipt facts', async kind => {
+    const f = await fixture()
+    const registry = (f.client as unknown as { registry: import('../src/agent-session-registry.js').AgentMuxAgentSessionRegistry }).registry
+    let release!: () => void, entered!: () => void, returned!: () => void
+    const held = new Promise<void>(done => { release = done }), reading = new Promise<void>(done => { entered = done })
+    const finished = new Promise<void>(done => { returned = done })
+    const read = f.store.readMetadata.bind(f.store)
+    let sent: Promise<unknown> | undefined, human: Promise<unknown> | undefined
+    try {
+      if (kind === 'historical-unknown') {
+        const original = (await read('prepare'))!
+        const plan = { kind: 'native-rpc' as const, protocolId: 'controlled-native-contract', operation: 'start-or-steer' as const,
+          sourceId: 'original-source', actorId: 'original-peer', threadId: 'original-thread' }
+        const claimed = { ...original, updatedAt: 2, promptCompletionAdmission: {
+          transport: 'native' as const, operationId: 'original-send', submissionId: 'original-send',
+          native: { plan, outcome: 'unknown' as const }, intent: { run: original.run, ownerInstanceId: 'prepare-daemon',
+            prompt: 'ORIGINAL_BODY', plan, execution: 'immediate' as const, message: { userContent: 'ORIGINAL_BODY' } } } }
+        await f.store.compareAndSwapMetadata(original, claimed)
+        await f.store.compareAndSwapMetadata(claimed, { ...original, updatedAt: 3 })
+        await registry.load('local')
+      }
+      const originalReceipt = await f.store.readPromptAdmission('prepare', { runId: 'prepare-run' }, 'original-send')
+      if (kind === 'historical-unknown') expect(originalReceipt?.admission).toMatchObject({ transport: 'native', native: { outcome: 'unknown' } })
+      sent = f.submit().then(() => null, error => error)
+      await f.entered
+      let once = true
+      f.store.readMetadata = async id => {
+        const value = await read(id)
+        if (id === 'prepare' && once) { once = false; entered(); await held; returned() }
+        return value
+      }
+      f.release(); await reading
+      human = f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: 'HUMAN_DURING_STATE_READ', source: 'user' })
+      await inputAckWithin(human)
+      expect(await sent).toMatchObject({ code: 'AGENT_INPUT_OBSERVATION_CANCELLED' })
+      expect((await sent as AgentMuxError).controlFailure).toBeUndefined()
+      expect(f.writes.map(write => write.data)).toEqual(['HUMAN_DURING_STATE_READ'])
+      // A later real registry write must finish while the abandoned read is still held.
+      await inputAckWithin(registry.update('prepare', { runId: 'prepare-run' }, current => ({ ...current, updatedAt: 7 })))
+      release(); await finished; await Promise.resolve()
+      expect(f.client.agentSession('prepare').updatedAt).toBe(7)
+      expect((await read('prepare'))?.updatedAt).toBe(7)
+      expect(await f.store.readPromptAdmission('prepare', { runId: 'prepare-run' }, 'original-send')).toEqual(originalReceipt)
+      expect(f.writes.map(write => write.data)).toEqual(['HUMAN_DURING_STATE_READ'])
+    } finally { release(); f.release(); await Promise.allSettled([sent, human]); await f.close() }
+  })
+
+  it('removes a cancelled initial Session read from the registry queue without cancelling its earlier writer', async () => {
+    const f = await fixture()
+    const registry = (f.client as unknown as { registry: import('../src/agent-session-registry.js').AgentMuxAgentSessionRegistry }).registry
+    let release!: () => void, entered!: () => void, queued!: () => void
+    const held = new Promise<void>(done => { release = done }), writing = new Promise<void>(done => { entered = done })
+    const reading = new Promise<void>(done => { queued = done })
+    const cas = f.store.compareAndSwapMetadata.bind(f.store), refresh = registry.refresh.bind(registry)
+    let sent: Promise<unknown> | undefined, writer: Promise<unknown> | undefined, human: Promise<unknown> | undefined
+    try {
+      sent = f.submit().then(() => null, error => error); await f.entered
+      f.store.compareAndSwapMetadata = async (expected, next, ...rest) => {
+        if (next?.updatedAt === 7) { entered(); await held }
+        return await cas(expected, next, ...rest)
+      }
+      writer = registry.update('prepare', { runId: 'prepare-run' }, current => ({ ...current, updatedAt: 7 }))
+      await writing
+      registry.refresh = (...args) => { const result = refresh(...args); queued(); return result }
+      f.release(); await reading
+      human = f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: 'HUMAN_DURING_STATE_QUEUE', source: 'user' })
+      await inputAckWithin(human)
+      expect(await sent).toMatchObject({ code: 'AGENT_INPUT_OBSERVATION_CANCELLED' })
+      expect(f.client.agentSession('prepare').updatedAt).toBe(1)
+      release(); await writer
+      expect(f.client.agentSession('prepare').updatedAt).toBe(7)
+      expect(f.writes.map(write => write.data)).toEqual(['HUMAN_DURING_STATE_QUEUE'])
+    } finally { release(); f.release(); await Promise.allSettled([sent, writer, human]); await f.close() }
   })
 
   it('human input cancels an uncooperative final preclaim verifier and obtains its ACK immediately', async () => {
