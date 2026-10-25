@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { AgentProviderRegistry, defineAgentProvider, type AgentProvider } from '../src/agent-provider.js'
 import { createCodexProvider } from '../src/providers/index.js'
 import { AgentMuxError } from '../src/errors.js'
+import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '../src/types.js'
 import { BUILT_IN_AGENT_LABELS } from '../src/agent-provider-id.js'
 
@@ -110,29 +111,17 @@ describe('built-in Provider conformance', () => {
       .toEqual(managed.map(provider => provider.id))
   })
 
-  // AgentCapabilities は "each field describes an axis Core actually branches on". Two booleans used to
-  // live here — `hookEvents` and `acp` — that nothing read: their real twins are `hookStrategy.kind` and
-  // `acpStrategy.kind`, which client.ts/doctor.ts/hook-normalizer.ts branch on. A per-provider boolean
-  // that only ever restates another declared field is drift surface: 12 hand-written copies that a new
-  // provider can silently get wrong. They are deleted.
-  //
-  // This guard bites the mutation "re-add a zero-consumer descriptor field": it freezes the capability
-  // key-set to a written literal (NOT derived from the object under test — that would drift along with
-  // the mutation). Re-introducing `hookEvents`/`acp`, or any other describe-only boolean, adds a key and
-  // turns this red, forcing the author to either wire a real consumer or keep it out.
-  it('AgentCapabilities exposes exactly the axes with a runtime consumer — no re-added mirror fields', () => {
-    // Anchored literal. `terminal` and `replyCorrelation` are intentionally kept even though today only
-    // structural consumers touch them; the point of the freeze is that ADDING a key is a deliberate act
-    // that updates this line, so a silently re-added `hookEvents`/`acp` mirror cannot slip back in.
-    const EXPECTED_CAPABILITY_KEYS = [
-      'permission', 'providerResume', 'replyCorrelation', 'terminal', 'timeline', 'usage'
-    ]
+  it('preserves registered capability contributions through the public catalog codec', () => {
+    expect(providers.length).toBeGreaterThan(0)
     for (const provider of providers) {
-      // `usage` is optional, so union it in before comparing: a provider that omits it still must not
-      // introduce any key outside the frozen set.
-      const keys = new Set(Object.keys(provider.catalog.capabilities))
-      keys.add('usage')
-      expect([...keys].sort()).toEqual(EXPECTED_CAPABILITY_KEYS)
+      const params = { hostId: 'local', executorId: provider.id }
+      const catalog = { ...params, providerId: provider.id, availability: 'available',
+        capabilities: provider.catalog.capabilities, sessions: [], issues: [] }
+      expect(parseRpcNativeResult('agent.native.ls', catalog, params)).toMatchObject({ capabilities: provider.catalog.capabilities })
+      for (const mirror of ['hookEvents', 'acp']) {
+        expect(() => parseRpcNativeResult('agent.native.ls', { ...catalog,
+          capabilities: { ...catalog.capabilities, [mirror]: true } }, params)).toThrow()
+      }
     }
   })
 
