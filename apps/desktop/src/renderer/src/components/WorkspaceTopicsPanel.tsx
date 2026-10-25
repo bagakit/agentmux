@@ -35,6 +35,8 @@ import { activeTopicIdFromLayout, openTopicWorkSurfaces } from '../lib/scratch-t
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { TopicActionsMenu, TopicContextMenu } from './TopicContextMenu'
+import { TopicPromotionDialog, type TopicPromotionTarget } from './TopicPromotionDialog'
+import { MoteIcon } from './MoteIcon'
 import { TopicMoveDialog } from './TopicMoveDialog'
 import { TopicRowPresence } from './TopicRowPresence'
 import { useTopicSessionPaths } from '../lib/topic-session-subscriptions'
@@ -78,6 +80,7 @@ export function WorkspaceTopicsPanel({
 }) {
   const displayPath = usePathDisplay()
   const bindings = useAppStore(state => state.spaceZoneBindings)
+  const categories = useAppStore(state => state.topicCategories)
   const category = useAppStore(state => state.topicCategories.find(category => category.spaceId === categorySpaceId))
   const layout = useAppStore((state) => state.layouts[workspace.id])
   const tabs = useAppStore(useShallow(state => workbenchDisplayTabs(state.tabs, workspace.id, layout)))
@@ -97,6 +100,8 @@ export function WorkspaceTopicsPanel({
   const categoryRefreshState = categoryRefresh?.spaceId === categorySpaceId ? categoryRefresh : null
   const [iconTarget, setIconTarget] = useState<SpaceIconTarget | null>(null)
   const [moveTarget, setMoveTarget] = useState<{ topicId: string; title: string } | null>(null)
+  const [promotionTarget, setPromotionTarget] = useState<TopicPromotionTarget | null>(null)
+  const [promoted, setPromoted] = useState<{ topicId: string; title: string } | null>(null)
   const manualIcons = useAppStore(state => state.spaceObjectIcons)
   const panel = useRef<HTMLElement>(null)
   const iconReturnKey = useRef<string | null>(null)
@@ -119,10 +124,16 @@ export function WorkspaceTopicsPanel({
   // 文件系统仍是 Topic 存在与否的真相；用户顺序只决定怎么排。
   // 先 orderTopics 定拖拽序，再 partitionPinned 把 pin 的提到前面——是一次**分区**不是排序：
   // pin 段按 pin 的先后、未 pin 段保留拖拽序原样。两者组合而不是取代（见 topic-order.ts）。
-  const userTopics = useMemo(() => topics?.filter(topic => isKnowledgeTopicInBindings(topic, bindings) &&
-    (!categorySpaceId || (() => { const address = originalTopicAddress(workspace, topic, bindings)
-      return address && bindings[address.zoneId]?.relations?.[categorySpaceId] === true })())) ?? null,
-    [topics, bindings, categorySpaceId, workspace])
+  const userTopics = useMemo(() => topics?.filter(topic => {
+    const address = originalTopicAddress(workspace, topic, bindings)
+    const original = address ? bindings[address.zoneId] : undefined
+    // The original Category keeps its same-object entry. A partial personality write
+    // cannot make a still-confirmed Topic vanish while its operation is recoverable.
+    const inCategory = categories.some(item => original?.relations?.[item.spaceId] === true)
+    const visibleKind = isKnowledgeTopicInBindings(topic, bindings) || original?.contentKind === 'topic' ||
+      original?.contentKind === 'mote' && inCategory && !topic.moteArchive
+    return visibleKind && (!categorySpaceId || original?.relations?.[categorySpaceId] === true)
+  }) ?? null, [topics, bindings, categories, categorySpaceId, workspace])
   const projected = useMemo(() => {
     if (!userTopics) return null
     const byId = new Map(userTopics.map(topic => [topic.id, topic]))
@@ -329,6 +340,8 @@ export function WorkspaceTopicsPanel({
             const editing = editingTopicId === topic.id
             const pinned = pinnedTopics.includes(topic.id)
             const target = topicSpaceIconTarget(workspace, topic, bindings)
+            const address = originalTopicAddress(workspace, topic, bindings)
+            const isPromoted = address ? bindings[address.zoneId]?.contentKind === 'mote' : false
             const logicalPath = scratchTopicLogicalPath(workspace, topic)
             const physicalPath = scratchTopicPhysicalPath(workspace, topic)
             function withLogicalPath(action: (path: string) => void): void {
@@ -358,7 +371,9 @@ export function WorkspaceTopicsPanel({
               onToggleWiki: topic.wiki ? () => void setTopicWikiEnabled(topic, !topic.wiki!.enabled) : undefined,
               onResetWiki: topic.wiki ? () => void resetTopicWiki(topic) : undefined,
               onChangeIcon: () => { if (!target) { reportError(new Error('The original object identity is unconfirmed. Repair its directory record before changing its icon.')); return } iconReturnKey.current = target.key; iconInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setIconTarget(target) },
-              onMove: () => setMoveTarget({ topicId: topic.id, title: topic.title }),
+              onMove: isPromoted ? undefined : () => setMoveTarget({ topicId: topic.id, title: topic.title }),
+              onPromote: () => setPromotionTarget({ topicId: topic.id, title: topic.title }),
+              promoted: isPromoted,
               wikiEnabled: topic.wiki?.enabled
             }
             return (
@@ -410,7 +425,7 @@ export function WorkspaceTopicsPanel({
                     <SelectorRow
                       leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><ThemeStatusLoadingIcon animation="spin" size={14} /></span>
                         : <SpaceObjectIcon kind={target?.kind ?? 'topic'} name={target?.name ?? topic.title} manualIcon={target ? manualIcons[target.key] ?? null : null} imageTarget={target?.imageTarget} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />}
-                      title={<><span title={topic.title}>{topic.title}</span>{pinned ? <ThemeActionPinIcon className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
+                      title={<><span title={topic.title}>{topic.title}</span>{isPromoted ? <span className="workspace-topic-entry__promoted">Mote</span> : null}{pinned ? <ThemeActionPinIcon className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
                       subtitle={<><span>{topic.summary || displayPath(physicalPath, workspace.hostId)}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
                       presence={
@@ -434,6 +449,8 @@ export function WorkspaceTopicsPanel({
       ) : null}
       {readError ? <div className="surface-inline-error" role="alert">Topics could not be refreshed: {readError}. Existing work surfaces remain available.</div> : null}
       {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
+      {promoted ? <div className="topic-promotion-notice" role="status"><MoteIcon size={26} /><div><strong>{promoted.title} · 已晋升为 Mote</strong><p>熟悉的 Agent，继续一起做事。</p></div><button type="button" className="icon-button" aria-label="关闭晋升提示" onClick={() => setPromoted(null)}>×</button></div> : null}
+      <TopicPromotionDialog target={promotionTarget} onClose={() => setPromotionTarget(null)} onPromoted={receipt => setPromoted({ topicId: receipt.topicId, title: receipt.topic?.title ?? promotionTarget?.title ?? 'Mote' })} />
       <TopicMoveDialog target={moveTarget} onClose={() => setMoveTarget(null)} />
       <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} returnFocus={() =>
         iconInvoker.current?.isConnected ? iconInvoker.current : [...(panel.current?.querySelectorAll<HTMLElement>('[data-space-icon-target]') ?? [])]
@@ -463,6 +480,8 @@ function SortableTopicItem({
   onResetWiki,
   onChangeIcon,
   onMove,
+  onPromote,
+  promoted,
   wikiEnabled
 }: {
   topicId: string
@@ -478,7 +497,9 @@ function SortableTopicItem({
   onToggleWiki?: (() => void) | undefined
   onResetWiki?: (() => void) | undefined
   onChangeIcon(): void
-  onMove(): void
+  onMove?: (() => void) | undefined
+  onPromote?: (() => void) | undefined
+  promoted?: boolean | undefined
   wikiEnabled?: boolean | undefined
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -497,6 +518,8 @@ function SortableTopicItem({
       onResetWiki={onResetWiki}
       onChangeIcon={onChangeIcon}
       onMove={onMove}
+      onPromote={onPromote}
+      promoted={promoted}
       {...(wikiEnabled === undefined ? {} : { wikiEnabled })}
     >
       <div

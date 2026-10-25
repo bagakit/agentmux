@@ -12,7 +12,14 @@ export type TopicCategory = {
 export type KnowledgeTopic = {
   topicId: string; hostId: string; zoneId: string; directoryPath: string;
   title: string; summary: string; categorySpaceIds: string[]; chatIds: string[];
-  spatialRevision: number; readError?: string
+  spatialRevision: number; contentKind?: 'topic' | 'mote'; readError?: string
+}
+/** One original promotion; partial receipts retain its explicit continuation identity. */
+export type TopicPromotionReceipt = {
+  operationId: string; topicId: string; state: 'complete' | 'partial';
+  stage: 'personality' | 'directory' | 'spatial' | 'complete';
+  topic: KnowledgeTopic | null; moteSpaceId: string | null;
+  unavailable: TopicUnavailable[]; diskDurability: 'confirmed' | 'unconfirmed'
 }
 export type TopicUnavailable = { code: string; message: string; recovery: string; source?: string }
 export type TopicMigrationPreview = {
@@ -63,6 +70,8 @@ export type TopicParameterMap = {
   'topic.ls': { categoryId?: string; topicId?: string }
   'topic.inspect': { topicId: string }
   'topic.create': { topicId: string; title: string; categoryId?: string }
+  'topic.promote.apply': { topicId: string; operationId: string }
+  'topic.promote.inspect': { topicId: string; operationId?: string }
   'topic.move': { topicId: string; categoryId: string; expectedRevision: number }
   'topic.migrate.preview': Record<string, never>
   'topic.migrate.apply': { expectedRevision: number }
@@ -79,6 +88,8 @@ export type TopicResultMap = {
   'topic.ls': { topics: KnowledgeTopic[]; unavailable: TopicUnavailable[] }
   'topic.inspect': { topic: KnowledgeTopic | null; unavailable: TopicUnavailable[] }
   'topic.create': { topic: KnowledgeTopic; diskDurability: 'confirmed' }
+  'topic.promote.apply': { promotion: TopicPromotionReceipt }
+  'topic.promote.inspect': { promotion: TopicPromotionReceipt | null }
   'topic.move': { topic: KnowledgeTopic; previousCategorySpaceIds: string[]; spatialRevision: number; diskDurability: 'confirmed' }
   'topic.migrate.preview': TopicMigrationPreview
   'topic.migrate.apply': TopicMigrationReceipt
@@ -97,6 +108,7 @@ export interface AgentMuxRpcTopicsOwner {
 export const AGENTMUX_RPC_TOPIC_METHODS = {
   'topic.category.ls': 'short', 'topic.category.create': 'long', 'topic.category.rename': 'long',
   'topic.ls': 'long', 'topic.inspect': 'short', 'topic.create': 'long', 'topic.move': 'long',
+  'topic.promote.apply': 'long', 'topic.promote.inspect': 'short',
   'topic.migrate.preview': 'long', 'topic.migrate.apply': 'long',
   'topic.knowledge.ls': 'long', 'topic.knowledge.search': 'long', 'topic.knowledge.history': 'short', 'topic.knowledge.read': 'short', 'topic.knowledge.write': 'long'
 } as const satisfies Record<TopicMethod, 'short' | 'long'>
@@ -136,11 +148,12 @@ export function parseTopicCategory(value: unknown): TopicCategory {
   return p as TopicCategory
 }
 function parseTopic(value: unknown): KnowledgeTopic {
-  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['topicId','hostId','zoneId','directoryPath','title','summary','categorySpaceIds','chatIds','spatialRevision','readError'], code)
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['topicId','hostId','zoneId','directoryPath','title','summary','categorySpaceIds','chatIds','spatialRevision','contentKind','readError'], code)
   topicId(p.topicId, code); string(p.hostId, code); string(p.zoneId, code); string(p.directoryPath, code); string(p.title, code)
   if (typeof p.summary !== 'string') invalid('Topic summary is invalid.', code)
   stringArray(p.categorySpaceIds, code); stringArray(p.chatIds, code); count(p.spatialRevision, code)
   if (p.readError !== undefined) string(p.readError, code)
+  if (p.contentKind !== undefined && p.contentKind !== 'topic' && p.contentKind !== 'mote') invalid('The original content kind is invalid.', code)
   return p as KnowledgeTopic
 }
 function unavailable(value: unknown): void {
@@ -236,6 +249,7 @@ const PARAM_FIELDS: Record<TopicMethod, readonly string[]> = {
   'topic.category.ls': [], 'topic.category.create': ['categoryId','title'],
   'topic.category.rename': ['categoryId','title','expectedRevision'], 'topic.ls': ['categoryId','topicId'],
   'topic.inspect': ['topicId'], 'topic.create': ['topicId','title','categoryId'],
+  'topic.promote.apply': ['topicId','operationId'], 'topic.promote.inspect': ['topicId','operationId'],
   'topic.move': ['topicId','categoryId','expectedRevision'], 'topic.migrate.preview': [], 'topic.migrate.apply': ['expectedRevision'],
   'topic.knowledge.ls': ['topicId','limit'], 'topic.knowledge.search': ['topicId','query','limit'],
   'topic.knowledge.history': ['topicId','query','searchId','limit'],
@@ -256,6 +270,7 @@ export function parseTopicParams<M extends TopicMethod>(method: M, value: unknow
     if (p.query !== undefined) { string(p.query, code); if (!(p.query as string).trim()) invalid('Choose a nonempty query filter.', code) }
     if (p.searchId !== undefined) categoryId(p.searchId, code)
   }
+  if (method === 'topic.promote.apply' || method === 'topic.promote.inspect' && p.operationId !== undefined) categoryId(p.operationId, code)
   if (p.limit !== undefined && (!Number.isSafeInteger(p.limit) || (p.limit as number) < 1 || (p.limit as number) > 100)) invalid('Knowledge limit must be between 1 and 100.', code)
   return p as TopicParams<M>
 }
@@ -264,6 +279,7 @@ export function parseTopicResult<M extends TopicMethod>(method: M, value: unknow
   const fields = method === 'topic.category.ls' ? ['categories','unavailable']
     : method === 'topic.category.create' || method === 'topic.category.rename' ? ['category','diskDurability']
     : method === 'topic.ls' ? ['topics','unavailable'] : method === 'topic.inspect' ? ['topic','unavailable']
+    : method === 'topic.promote.apply' || method === 'topic.promote.inspect' ? ['promotion']
     : method === 'topic.create' ? ['topic','diskDurability']
     : method === 'topic.move' ? ['topic','previousCategorySpaceIds','spatialRevision','diskDurability']
     : method === 'topic.migrate.preview' ? ['spatialRevision','topics','category','required','unavailable']
@@ -281,6 +297,16 @@ export function parseTopicResult<M extends TopicMethod>(method: M, value: unknow
     p.categories.forEach(parseTopicCategory)
   } else if (method === 'topic.category.create' || method === 'topic.category.rename') {
     if (parseTopicCategory(p.category).categoryId !== input.categoryId) invalid('Another Topic Category was returned.', code)
+  } else if (method === 'topic.promote.apply' || method === 'topic.promote.inspect') {
+    if (p.promotion === null && method === 'topic.promote.inspect') return p as TopicResult<M>
+    const receipt = rpcRecord(p.promotion, ['operationId','topicId','state','stage','topic','moteSpaceId','unavailable','diskDurability'], code)
+    categoryId(receipt.operationId, code); topicId(receipt.topicId, code); unavailable(receipt.unavailable)
+    if (receipt.topicId !== input.topicId || input.operationId !== undefined && receipt.operationId !== input.operationId) invalid('Another promotion operation was returned.', code)
+    if (receipt.state !== 'complete' && receipt.state !== 'partial' || !['personality','directory','spatial','complete'].includes(String(receipt.stage))) invalid('The promotion state is unconfirmed.', code)
+    if (receipt.diskDurability !== 'confirmed' && receipt.diskDurability !== 'unconfirmed') invalid('Promotion persistence is unconfirmed.', code)
+    if (receipt.topic !== null && parseTopic(receipt.topic).topicId !== input.topicId) invalid('Another promoted Topic was returned.', code)
+    if (receipt.moteSpaceId !== null) string(receipt.moteSpaceId, code)
+    if (receipt.state === 'complete' && (receipt.stage !== 'complete' || receipt.diskDurability !== 'confirmed' || receipt.topic === null || !receipt.moteSpaceId || (receipt.unavailable as unknown[]).length)) invalid('Promotion completion lacks confirmed original facts.', code)
   } else if (method === 'topic.ls') {
     if (!Array.isArray(p.topics)) invalid('Topics must be an array.', code)
     p.topics.forEach(item => { if (input.topicId !== undefined && parseTopic(item).topicId !== input.topicId) invalid('Another Topic was returned.', code); parseTopic(item) })

@@ -46,7 +46,7 @@ export function selectedKnowledgeSources(workspaceId: string): { title: string; 
   }
   if (surface.kind === 'browser') return { title: surface.title || surface.url, sources: [{ kind: 'url', url: surface.url }] }
   const origin = state.spaceZoneBindings[tab.space?.zoneId ?? '']
-  if (origin?.contentKind === 'topic' && origin.topicId)
+  if ((origin?.contentKind === 'topic' || origin?.contentKind === 'mote') && origin.topicId)
     return { title: tab.name ?? 'Discussion', sources: [{ kind: 'topic', topicId: origin.topicId, chatId: tab.id, threadId: surface.regionId }] }
   return tab.space?.zoneId ? { title: tab.name ?? 'Current work', sources: [{ kind: 'space', zoneId: tab.space.zoneId, tabId: tab.id, regionId: surface.regionId }] } : null
 }
@@ -89,7 +89,7 @@ export async function openKnowledgeSource(source: TopicKnowledgeSource): Promise
     if (!source.chatId) { await state.openScratchTopic(source.topicId); return }
     const tab = state.tabs[source.chatId], groups = Object.entries(state.layouts).flatMap(([workspaceId, layout]) => layout.groups.filter(group => group.tabOrder.includes(source.chatId!)).map(group => ({ workspaceId, groupId: group.id })))
     const origin = tab?.space?.zoneId ? state.spaceZoneBindings[tab.space.zoneId] : undefined
-    if (!tab || origin?.topicId !== source.topicId || origin.contentKind !== 'topic' || groups.length !== 1 || source.threadId && !Object.hasOwn(tab.regions, source.threadId)) throw new Error('The original discussion source and position are not uniquely confirmed. Its reference is kept.')
+    if (!tab || origin?.topicId !== source.topicId || (origin.contentKind !== 'topic' && origin.contentKind !== 'mote') || groups.length !== 1 || source.threadId && !Object.hasOwn(tab.regions, source.threadId)) throw new Error('The original discussion source and position are not uniquely confirmed. Its reference is kept.')
     const location = groups[0]!
     const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `knowledge-source:${mintObjectId()}`, operation: 'focus', target: {
       kind: 'space', zoneId: tab.space!.zoneId, tabId: tab.id, displayWorkspaceId: location.workspaceId, groupId: location.groupId,

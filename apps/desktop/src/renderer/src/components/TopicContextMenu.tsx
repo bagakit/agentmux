@@ -2,6 +2,7 @@ import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
+import { MoteIcon } from './MoteIcon'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useSpaceObjectActionsMenu, useSpaceObjectMenu } from './SpaceObjectContextMenu'
 
@@ -28,6 +29,8 @@ type TopicMenuActions = {
   onReveal(): void
   onTogglePin(): void
   onEditWiki(): void
+  onPromote?: (() => void) | undefined
+  promoted?: boolean | undefined
   onMove?: (() => void) | undefined
   onToggleWiki?: (() => void) | undefined
   onResetWiki?: (() => void) | undefined
@@ -38,6 +41,7 @@ type TopicMenuActions = {
 /** The visible action menu and right-click menu offer the same original Topic actions. */
 function topicMenuItems(Item: typeof ContextMenu.Item, Separator: typeof ContextMenu.Separator, actions: TopicMenuActions, openDialog: (callback: () => void) => void) {
   return <>
+    {actions.onPromote ? <><Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onPromote!)}><MoteIcon size={14} /><span>{actions.promoted ? '查看晋升结果' : '晋升为 Mote'}</span></Item><Separator className="tab-context-menu__separator" /></> : null}
     {actions.onMove ? <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onMove!)}><ThemeActionExchangeIcon size={14} /><span>Move to category…</span></Item> : null}
     {actions.onChangeIcon ? <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onChangeIcon!)}><ThemeObjectShapesIcon size={14} /><span>Change avatar…</span></Item> : null}
     <Item className="tab-context-menu__item" onSelect={actions.onTogglePin}>

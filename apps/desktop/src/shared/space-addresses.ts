@@ -30,7 +30,7 @@ export function topicSpatialAddress(config: AppConfig | null, topic: ScratchTopi
   if (!source) return null
   const { spaceId: contentId, zoneId } = source
   const original = bindings[zoneId]
-  if (!isKnowledgeTopic(topic) || original?.contentKind === 'mote' || !categories.length) return { spaceId: contentId, zoneId }
+  if (original?.contentKind === 'mote' || original?.contentKind !== 'topic' && !isKnowledgeTopic(topic) || !categories.length) return { spaceId: contentId, zoneId }
   const relationships = bindings[zoneId]?.relations
   if (original?.topicId !== topic.id && !categories.some(category => relationships?.[category.spaceId] === true)) return { spaceId: contentId, zoneId }
   const selected = categories.find(category => relationships?.[category.spaceId] === true) ??

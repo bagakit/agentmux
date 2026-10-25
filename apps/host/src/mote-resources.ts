@@ -1,3 +1,4 @@
+import { migrateTopicDirectories } from './mote-directory-maintenance.mjs'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { topicPublicCopy } from './mote-topic-model.js'
 import { MOTE_QUICK_MODE_PATH, parseMoteQuickMode, type MoteQuickMode } from './mote-quick-mode.js'
@@ -508,7 +509,7 @@ export class ScratchTopics {
     if (mote && existing) {
       const context = await scratchIdentityContext(workspace.path, topicId)
       const saved = await inspectDirectoryIdentity(absolutePath, context)
-      if (saved) await normalizeDirectoryIdentity(absolutePath, context)
+      if (saved) await normalizeDirectoryIdentity(absolutePath, context, { ...(this.options.directoryIdentityHelper ? { helperPath: this.options.directoryIdentityHelper } : {}) })
       else await retainDirectoryIdentity(absolutePath, { ...context, original: await scratchDirectoryIdentity(workspace.path, topicId, absolutePath) }, { ...(this.options.directoryIdentityHelper ? { helperPath: this.options.directoryIdentityHelper } : {}) })
     }
     await Promise.all([
@@ -544,6 +545,31 @@ export class ScratchTopics {
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_STATE_PATH), '{"enabled":true}\n')
     const snapshot = (await this.read(workspace, topicId))!
     return contextIssues.length ? { ...snapshot, readError: [snapshot.readError, ...contextIssues].filter(Boolean).join('\n') } : snapshot
+  }
+
+  /** Explicit promotion resumes missing base files without overwriting later persona edits. */
+  async prepareMotePromotion(workspace: WorkspaceRecord, topicId: string): Promise<void> {
+    const original = await resolveScratchTopicDirectory(workspace.path, topicId)
+    if (!original) throw new AgentMuxError('The exact original Topic is unavailable.', 'TOPIC_NOT_FOUND')
+    await this.ensure(workspace, topicId, undefined, true)
+    for (const [name, content] of [[MOTE_SOUL_PATH, DEFAULT_MOTE_SOUL], [MOTE_BEHAVIOR_PATH, DEFAULT_MOTE_BEHAVIOR], [MOTE_MEMORY_PATH, DEFAULT_MOTE_MEMORY]] as const) {
+      await ensureRegularFile(join(original, name), content)
+      const handle = await open(join(original, name), constants.O_RDONLY | constants.O_NOFOLLOW)
+      try { if (!(await handle.stat()).isFile()) throw new Error('The personality file is not regular.'); await handle.sync() } finally { await handle.close() }
+    }
+    const directory = await open(original, 'r')
+    try { await directory.sync() } finally { await directory.close() }
+  }
+
+  async promoteMoteDirectory(workspace: WorkspaceRecord, topicId: string): Promise<void> {
+    requireScratchWorkspace(workspace)
+    const report = await migrateTopicDirectories({ scratchRoot: workspace.path, execute: true, motesOnly: true, topicId,
+      ...(this.options.directoryIdentityHelper ? { helperPath: this.options.directoryIdentityHelper } : {}) })
+    const target = report.objects.find(item => item.id === topicId)
+    if (!report.success || !target || target.kind !== 'mote') {
+      const problem = target?.issue ?? report.issues[0]
+      throw new AgentMuxError(problem?.message ?? 'The exact Mote directory is unconfirmed; keep and inspect this promotion operation.', problem?.code ?? 'DIRECTORY_MIGRATION_RESULT_UNKNOWN')
+    }
   }
 
   async ensureMote(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot> {
@@ -754,3 +780,5 @@ export function createMoteChatResources(options: {
     return prepared
   } }
 }
+
+export * from './mote-directory-maintenance.mjs'

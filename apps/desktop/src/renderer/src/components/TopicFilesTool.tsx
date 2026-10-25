@@ -23,7 +23,7 @@ export function TopicFilesTool({ workspace, visible, isScratch, topicId, onOpenP
   const { topics } = useScratchTopics(scratch?.id ?? null, visible)
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const selectedTopicId = topicId ?? choice?.topicId
-  const topic = selectedTopicId ? topics?.find(item => item.id === selectedTopicId && isKnowledgeTopicInBindings(item, bindings)) : undefined
+  const topic = selectedTopicId ? topics?.find(item => item.id === selectedTopicId && (isKnowledgeTopicInBindings(item, bindings) || Object.values(bindings).some(binding => binding.topicId === item.id && (binding.contentKind === 'topic' || binding.contentKind === 'mote')))) : undefined
   const categorySpaceId = choice?.spaceId && choice.spaceId !== directoryIdentity(workspace.hostId, workspace.path) ? choice.spaceId : undefined
   const [reveal, setReveal] = useState<{ selection: string | null; categorySpaceId: string | undefined; request: FileExplorerRevealRequest }>()
   useEffect(() => setReveal(undefined), [selectedTopicId, workspace.id, categorySpaceId])

@@ -123,7 +123,7 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
   }
   return <section className="topic-knowledge-panel" aria-label={`Knowledge in ${title}`}>
     <header className="topic-knowledge-panel__header"><span className="topic-knowledge-scope" title={topic ? [title, current.map(category => category.title).join(' · ') || 'Category not confirmed'].join(' · ') : 'Search across all Topics'}><TopicIcon size={13} aria-hidden="true" /><strong>{title}</strong></span>
-      {topic ? <button type="button" className="icon-button" aria-label="Move to category…" title="Move to category…" onClick={() => setMoveTarget({ topicId: topic.id, title: topic.title })}><ThemeActionExchangeIcon size={14} /></button> : null}
+      {topic && fact?.contentKind !== 'mote' && !topic.soul ? <button type="button" className="icon-button" aria-label="Move to category…" title="Move to category…" onClick={() => setMoveTarget({ topicId: topic.id, title: topic.title })}><ThemeActionExchangeIcon size={14} /></button> : null}
       <button type="button" className="icon-button" aria-label="Refresh knowledge" onClick={() => setAttempt(value => value + 1)}><ThemeActionRefreshIcon size={13} /></button>
       {topic ? <button type="button" className="icon-button" aria-label="New knowledge" onClick={() => setEdit({ topicId: topic.id })}><ThemeActionCreateKnowledgeIcon size={14} /></button> : null}</header>
     <form className="topic-knowledge-search" role="search" onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setAttempt(value => value + 1) }}>
