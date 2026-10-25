@@ -3816,7 +3816,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   private savePromptAdmission(db: DatabaseSync, value: AgentPromptSubmissionRecord, receipt = false): void {
     const row = db.prepare('SELECT json FROM prompt_admissions WHERE session_id=? AND run_id=? AND record_id=?')
       .get(value.agentSessionId, value.run.runId, promptRecordId(value))
-    assertPromptRecordWrite(row ? JSON.parse(String(row.json)) as AgentPromptSubmissionRecord : undefined, value, receipt)
+    const original = row ? JSON.parse(String(row.json)) as AgentPromptSubmissionRecord : undefined
+    if (isDeepStrictEqual(original, value)) return
+    assertPromptRecordWrite(original, value, receipt)
     db.prepare('INSERT INTO prompt_admissions VALUES (?, ?, ?, ?) ON CONFLICT(session_id,run_id,record_id) DO UPDATE SET json=excluded.json')
       .run(value.agentSessionId, value.run.runId, promptRecordId(value), JSON.stringify(value))
   }
