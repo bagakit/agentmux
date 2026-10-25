@@ -10174,9 +10174,6 @@ export class AgentMuxClient {
       completion.evidence.run?.runId !== session.run.runId ||
       completion.evidence.hookReceiptId !== receipt.id
     )) throw new AgentMuxError('Provider interaction completion does not match its native Hook receipt.', 'INVALID_AGENT_INTERACTION')
-    const completedRequestId = completion && session.pendingInteraction?.request.kind === completion.kind &&
-      session.pendingInteraction.request.nativeToolCallId === completion.nativeToolCallId
-      ? session.pendingInteraction.request.id : undefined
     // Native source and main-subject qualification belong to normalization and the
     // exact native-handle CAS below. Within that source, a call can have several Hook receipts.
     const sameNativeCall = (left: AgentMuxInteractionRequest, right: AgentMuxInteractionRequest) =>
@@ -10340,10 +10337,7 @@ export class AgentMuxClient {
         next.nativeInteractionEnds = { run: { ...next.run }, providerId: next.providerId,
           nativeHandle: structuredClone(next.nativeHandle), calls: { ...calls, [key]: end } }
       }
-      if (completion && completedRequestId && pending?.request.kind === completion.kind &&
-        pending.request.id === completedRequestId && pending.request.agentSessionId === current.agentSessionId &&
-        pending.request.evidence.source === 'native-hook' && pending.request.evidence.run?.runId === current.run.runId &&
-        pending.request.nativeToolCallId === completion.nativeToolCallId) {
+      if (completion && pending && matchesCompletion(pending.request)) {
         for (const operation of Object.values(current.interactionOperations ?? {})) {
           if (sameRun(operation.run, current.run) && isDeepStrictEqual(agentInteractionRequestTarget(operation.expectedRequest), agentInteractionRequestTarget(pending.request))) {
             next.interactionOperations = interactionReceiptPatch(next, operation.operationId, { nativeCompleted: structuredClone(completion.evidence) }).interactionOperations!
