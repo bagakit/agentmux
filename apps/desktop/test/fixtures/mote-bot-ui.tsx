@@ -25,7 +25,7 @@ import { installNativePopover, moteConfig } from './mote-workface'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../../packages/core/test/helpers/object-cli-rpc'
 
 const { defaultHttpInstance } = createRequire(resolve('packages/connectors/package.json'))('@larksuiteoapi/node-sdk')
-export async function moteBotUi(options: NonNullable<Parameters<typeof moteConnectionOwner>[1]> & { native?: ReturnType<typeof moteEnrollmentWeb> } = {}) {
+export async function moteBotUi(options: NonNullable<Parameters<typeof moteConnectionOwner>[1]> & { native?: ReturnType<typeof moteEnrollmentWeb>; hostId?: string } = {}) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const root = await mkdtemp(join(tmpdir(), 'amx-mote-ui-')), original = useAppStore.getState()
   const restore = installNativePopover(), calls: Array<{ method?: string; url?: string; data?: any }> = []
@@ -57,7 +57,7 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   const handlers = new Map<string, (...args: any[]) => Promise<any>>(), sender = {}
   const handleWithEvent = (name: string, handler: (...args: any[]) => Promise<any>) => { handlers.set(name, handler) }
   const assertTrusted = (_channel: string, event: { sender: object }) => { if (event.sender !== sender) throw new Error('Untrusted renderer') }
-  const hostingTarget = { hostId: 'original-host', runtimeId: 'original-host-runtime' }
+  const hostingTarget = { hostId: options.hostId ?? 'original-host', runtimeId: 'original-host-runtime' }
   const runtime: import('../../src/main/connection-host-ipc').ConnectionHostIpc = {
     connectionHostingTarget: async () => structuredClone(hostingTarget),
     callConnectionHost: async (target, method, params) => {

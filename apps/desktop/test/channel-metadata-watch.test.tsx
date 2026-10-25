@@ -12,6 +12,7 @@ import { ConnectionSecrets } from '../../../packages/connectors/src/connection-s
 import { ConnectionHost } from '../../../packages/connectors/src/connection-host.js'
 import { startAgentMuxHost } from '../../host/src/host.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
+import type { ConnectionHostIpc } from '../src/main/connection-host-ipc.js'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts.js'
 import { CONNECTION_METADATA_CHANGED_CHANNEL, CONNECTION_METADATA_OBSERVATION_CHANNEL } from '../src/shared/contracts.js'
 import type { AgentSessionUserMessage } from '@agentmux/core'
@@ -79,11 +80,20 @@ async function fixture() {
   return { original, host, rpc, socket, fence, refresh, rename: () => { groupName = 'Renamed native group'; personName = 'Renamed native person' } }
 }
 
-function main(socket: string, connect?: typeof core.connectAgentMuxRpc) {
+async function main(socket: string, connect: typeof core.connectAgentMuxRpc = core.connectAgentMuxRpc) {
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), states: string[] = []
-  const release = registerConnectorIpc({ socketPath: socket, connect, assertTrusted: () => {}, handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },
-    secrets: { store: async () => { throw Error('Not a credential test') }, inspect: async () => null },
-    metadata: { publish: change => bridge.events.emit(CONNECTION_METADATA_CHANGED_CHANNEL, {}, change), observation: state => { states.push(state); bridge.events.emit(CONNECTION_METADATA_OBSERVATION_CHANNEL, {}, state) } } })
+  const rpc = await connect({ endpoint: { transport: 'unix', path: socket } }); close.push(() => rpc.dispose())
+  const { owner } = await rpc.call('runtime.owner.identity', {})
+  const target = { hostId: 'local', runtimeId: owner.runtimeId }, runtimeFence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+  const runtime: ConnectionHostIpc = {
+    connectionHostingTarget: async (hostId = 'local') => { expect(hostId).toBe(target.hostId); return target },
+    callConnectionHost: (original, method, params) => { expect(original).toEqual(target); return rpc.call(method, params, { runtimeFence }) },
+    watchConnectionMetadata: (original, handlers) => { expect(original).toEqual(target); return rpc.subscribe('connection.metadata.watch', {}, { ...handlers, runtimeFence }) }
+  }
+  const ipc = registerConnectorIpc({ runtime, assertTrusted: () => {}, handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },
+    metadata: { publish: (watchId, change) => bridge.events.emit(CONNECTION_METADATA_CHANGED_CHANNEL, {}, { watchId, change }),
+      observation: (watchId, state) => { states.push(state); bridge.events.emit(CONNECTION_METADATA_OBSERVATION_CHANNEL, {}, { watchId, state }) } } })
+  const release = () => ipc.dispose()
   close.push(release)
   bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => {
     const handler = handlers.get(channel); if (!handler) throw Error('Unexpected IPC channel'); return handler({}, ...args)
@@ -98,12 +108,13 @@ it('refreshes mounted names and actors from the original Host callback through p
     return () => { active.delete(token); release() }
   })
   const f = await fixture(); await f.refresh('conversation'); await f.refresh('actor')
-  const baseline = active.size, ipc = main(f.socket), container = document.createElement('div'), root = createRoot(container)
+  const baseline = active.size, ipc = await main(f.socket), container = document.createElement('div'), root = createRoot(container)
   document.body.append(container); close.push(async () => { await act(async () => root.unmount()); container.remove() })
   expect(api.connections).toBe(bridge.api!.connections)
   await act(async () => root.render(<Profiles />))
   await vi.waitFor(() => { expect(ipc.states).toContain('ready'); expect(container.querySelector('[data-room]')?.textContent).toBe('Original native group | '); expect(container.querySelector('[data-person]')?.textContent).toBe('Original native person | ') })
-  expect(active.size).toBe(baseline + 1)
+  // The room and actor readers each own their explicit preload subscription.
+  expect(active.size).toBe(baseline + 2)
   f.rename(); await act(async () => { await f.refresh('conversation'); await f.refresh('actor') })
   await vi.waitFor(() => { expect(container.querySelector('[data-room]')?.textContent).toBe('Renamed native group | '); expect(container.querySelector('[data-person]')?.textContent).toBe('Renamed native person | ') })
   ipc.release(); await vi.waitFor(() => expect(active.size).toBe(baseline))
@@ -120,7 +131,9 @@ it('does not make a slow metadata opening a prerequisite for an exact saved-prof
     rpc.subscribe = async (...args: Parameters<typeof rpc.subscribe>) => { entered = true; await held; return await subscribe(...args) }
     return rpc
   }
-  const ipc = main(f.socket, connect)
+  const ipc = await main(f.socket, connect)
+  const stopObserver = api.connections.onMetadataChanged(() => {})
+  close.push(stopObserver)
   try {
     let result: unknown
     const read = api.connections.call('connection.metadata.get', { connectionId: binding.connectionId, subject: { kind: 'conversation', externalConversationId: binding.externalConversationId } }).then(value => { result = value })
@@ -151,7 +164,7 @@ it('rereads the visible original profiles after watch opening closes the initial
     rpc.subscribe = async (...args: Parameters<typeof rpc.subscribe>) => { await held; return await subscribe(...args) }
     return rpc
   }
-  const ipc = main(f.socket, connect), container = document.createElement('div'), root = createRoot(container)
+  const ipc = await main(f.socket, connect), container = document.createElement('div'), root = createRoot(container)
   document.body.append(container); close.push(async () => { await act(async () => root.unmount()); container.remove() })
   try {
     await act(async () => root.render(<Profiles />))
@@ -164,7 +177,7 @@ it('rereads the visible original profiles after watch opening closes the initial
   } finally { release() }
 })
 
-it('retains saved profiles on an unavailable watch and rearms only on a later original operation', async () => {
+it('retains saved profiles on an unavailable watch and reopens only on an explicit observation', async () => {
   const f = await fixture(); await f.refresh('conversation'); await f.refresh('actor')
   let release!: () => void, attempts = 0
   const held = new Promise<void>(yes => { release = yes })
@@ -172,22 +185,24 @@ it('retains saved profiles on an unavailable watch and rearms only on a later or
     const rpc = await core.connectAgentMuxRpc(options), subscribe = rpc.subscribe.bind(rpc)
     rpc.subscribe = async (...args: Parameters<typeof rpc.subscribe>) => {
       attempts++
-      if (attempts === 1) { await held; throw new core.AgentMuxError('Controlled observation transport failure', 'CONTROL_UNAVAILABLE') }
+      if (attempts <= 2) { await held; throw new core.AgentMuxError('Controlled observation transport failure', 'CONTROL_UNAVAILABLE') }
       return await subscribe(...args)
     }
     return rpc
   }
-  const ipc = main(f.socket, connect), container = document.createElement('div'), root = createRoot(container)
+  const ipc = await main(f.socket, connect), container = document.createElement('div'), root = createRoot(container)
   document.body.append(container); close.push(async () => { await act(async () => root.unmount()); container.remove() })
   try {
     await act(async () => root.render(<Profiles />))
     await vi.waitFor(() => expect(container.querySelector('[data-room]')?.textContent).toBe('Original native group | '))
     await act(async () => release())
     await vi.waitFor(() => { expect(ipc.states).toContain('unavailable'); expect(container.querySelector('[data-room]')?.textContent).toBe('Original native group | Group name updates unconfirmed'); expect(container.querySelector('[data-person]')?.textContent).toBe('Original native person | Live profile updates unavailable') })
-    expect(attempts).toBe(1)
-    await act(async () => { await api.connections.call('connection.metadata.get', { connectionId: binding.connectionId, subject: { kind: 'conversation', externalConversationId: binding.externalConversationId } }) })
-    await vi.waitFor(() => { expect(ipc.states).toContain('ready'); expect(container.querySelector('[data-room]')?.textContent).toBe('Original native group | ') })
     expect(attempts).toBe(2)
+    await act(async () => { await api.connections.call('connection.metadata.get', { connectionId: binding.connectionId, subject: { kind: 'conversation', externalConversationId: binding.externalConversationId } }) })
+    expect(attempts).toBe(2)
+    await act(async () => root.render(<Profiles key="explicit-observation-reopen" />))
+    await vi.waitFor(() => { expect(ipc.states).toContain('ready'); expect(container.querySelector('[data-room]')?.textContent).toBe('Original native group | '); expect(container.querySelector('[data-person]')?.textContent).toBe('Original native person | ') })
+    expect(attempts).toBe(4)
   } finally { release() }
 })
 

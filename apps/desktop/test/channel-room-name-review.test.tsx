@@ -55,7 +55,7 @@ it('native rename changes only the exact original group; a failed read preserves
 it('a changed application cannot turn the original group cache miss into a native refresh on a different issuer', async () => {
   const f = await fixture(async () => result(undefined, { ...original, application: { ...application, appId: 'changed-application' } }))
   await f.render(); await f.settled('original-room | Group name unconfirmed')
-  expect(f.call).toHaveBeenCalledExactlyOnceWith('connection.metadata.get', { connectionId: original.connectionId, subject: { kind: 'conversation', externalConversationId: original.externalConversationId } })
+  expect(f.call).toHaveBeenCalledExactlyOnceWith('connection.metadata.get', { connectionId: original.connectionId, subject: { kind: 'conversation', externalConversationId: original.externalConversationId } }, undefined)
 })
 
 it('a late original group read cannot replace the currently displayed group', async () => {

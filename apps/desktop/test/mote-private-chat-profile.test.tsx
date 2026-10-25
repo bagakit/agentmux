@@ -6,6 +6,7 @@ import { AgentMuxError } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { moteBotUi } from './fixtures/mote-bot-ui'
+import { copyConnectorIdentity } from './helpers/connector-identity-copy'
 
 let f: Awaited<ReturnType<typeof moteBotUi>>
 let missingExecutor = false
@@ -118,6 +119,7 @@ it('keeps a refused enable draft and opens the original Executor preference with
 })
 
 it('shows creator unlimited access and each guest used, total and remaining allowance, then preserves used through a real allocation', async () => {
+  vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await seed()
   const service = await f.client.call('connection.service.get', {})
   await f.client.call('connection.service.configure', { operationId: 'allow-native-intake', expectedRevision: service.revision, service: { enabled: true } })
@@ -135,7 +137,12 @@ it('shows creator unlimited access and each guest used, total and remaining allo
   expect(row().querySelectorAll('dd')[0]!.textContent).toBe('1'); expect(row().querySelectorAll('dd')[1]!.textContent).toBe('2'); expect(row().querySelectorAll('dd')[2]!.textContent).toBe('1')
   const creatorRow = chat().querySelector<HTMLElement>('[data-mote-chat-person="original-creator"]')!
   expect(creatorRow.textContent).toContain('Creator · unlimited'); expect(creatorRow.textContent).not.toContain('Edit allowance')
-  await act(async () => row().querySelector<HTMLButtonElement>('button')!.click())
+  expect(row().querySelector('[data-entity-kind="person"]')).not.toBeNull()
+  expect(row().querySelector('[aria-label="Copy person name"]')).toBeNull()
+  await copyConnectorIdentity(row(), 'Copy open_id', guest.userId)
+  await copyConnectorIdentity(creatorRow, 'Copy open_id', creator.userId)
+  expect(f.chatRequests.mock.calls.filter(([method]) => method === 'space.mote.chat.allocate')).toHaveLength(0)
+  await act(async () => [...row().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Edit allowance')!.click())
   await fill('Total allowance for original-guest', '5')
   await act(async () => row().querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
   await ready(() => expect(row().querySelectorAll('dd')[1]!.textContent, chat().textContent ?? '').toBe('5'))

@@ -26,6 +26,7 @@ import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { activityReadingProps } from './helpers/activity-reading-props'
 import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 import { projectMailboxInputs } from '../src/renderer/src/lib/mailbox-input-projection'
+import { copyConnectorIdentity } from './helpers/connector-identity-copy'
 
 const bridge = vi.hoisted(() => ({ api: null as any, handlers: new Map<string, (...args: any[]) => Promise<any>>(), listeners: new Map<string, Set<(...args: any[]) => void>>() }))
 // This reader/metadata test retains the real Terminal slot. Chromium/xterm paint
@@ -553,11 +554,19 @@ it('released profile watch callbacks cannot start hidden reads or overwrite the 
 })
 
 it('mounted cache management refreshes and clears exact metadata through IPC while preserving original records and bindings', async () => {
+  vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   const connection = (await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection!
   await dom.render(<ChannelMetadataPanel connection={connection} active />)
   const details = dom.container.querySelector('details')!
   await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Original native person'))
+  await copyConnectorIdentity(dom.container, 'Copy person name', 'Original native person')
+  await copyConnectorIdentity(dom.container, 'Copy open_id', 'original-external-user')
+  const avatar = dom.container.querySelector<HTMLImageElement>('[data-entity-kind="person"] img')!
+  expect(avatar?.getAttribute('src')).toBe('https://cdn.example/person.png')
+  await act(async () => avatar.dispatchEvent(new Event('error')))
+  expect(dom.container.querySelector('[data-entity-kind="person"] img')).toBeNull()
+  expect(dom.container.querySelector('.connector-entity__name')?.textContent).toBe('Original native person')
   f.source('Updated via real UI', 'Original native group')
   await click('Refresh')
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Updated via real UI'))
@@ -565,12 +574,44 @@ it('mounted cache management refreshes and clears exact metadata through IPC whi
   await vi.waitFor(async () => { before = await f.client.sessionTimeline('original-agent'); expect(before.items.some(item => !!item.authorExternal)).toBe(true) })
   await click('Clear saved profile')
   await vi.waitFor(() => expect(dom.container.textContent).toContain('No saved profile'))
+  expect(dom.container.querySelector('[aria-label="Copy person name"]')).toBeNull()
+  await copyConnectorIdentity(dom.container, 'Copy open_id', 'original-external-user')
   expect((await f.get()).entry.observation.profile).toBeNull()
   const originalInputs = (timeline: typeof before) => timeline.items.filter(item => item.authorExternal).map(({ id, content, authorExternal }) => ({ id, content, authorExternal }))
   expect(originalInputs(await f.client.sessionTimeline('original-agent'))).toEqual(originalInputs(before))
   expect((await f.sdk.call('connection.binding.ls', { executionHostId: 'local', agentSessionId: 'original-agent' })).bindings).toHaveLength(1)
   const clear = calls.find(call => call.method === 'connection.metadata.clear')!
   expect(clear.input).toMatchObject({ subject: actorSubject, expectedConnectionRevision: 1, expectedCacheRevision: expect.any(String) })
+})
+
+it('the actual saved-profile panel cannot show a late person card after switching the original connection subject', async () => {
+  const original = (await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection!
+  await f.sdk.call('connection.configure', { operationId: 'separate-profile-subject', expectedRevision: null,
+    connection: { ...f.config, connectionId: 'different-profile-subject', application: { ...f.config.application, appId: 'different-profile-application' }, enabled: false } })
+  const other = (await f.sdk.call('connection.inspect', { connectionId: 'different-profile-subject' })).connection!
+  const call = vi.mocked(api.connections.call).getMockImplementation()!
+  let release!: () => void, held = false
+  const barrier = new Promise<void>(resolve => { release = resolve })
+  vi.mocked(api.connections.call).mockImplementation(async (...args) => {
+    const result = await call(...args)
+    if (args[0] === 'connection.metadata.ls' && args[1].connectionId === original.config.connectionId) { held = true; await barrier }
+    return result
+  })
+  try {
+    await dom.render(<ChannelMetadataPanel connection={original} active />)
+    await act(async () => dom.container.querySelector<HTMLElement>('summary')!.click())
+    await vi.waitFor(() => expect(held).toBe(true))
+    await dom.render(<ChannelMetadataPanel connection={other} active />)
+    await vi.waitFor(() => expect(dom.container.textContent).toContain('No saved people profiles yet.'))
+    await act(async () => release())
+    await vi.waitFor(() => expect(metadataInFlight).toBe(0))
+    expect(dom.container.querySelector('[data-entity-kind="person"]')).toBeNull()
+    expect(dom.container.textContent).not.toContain('original-external-user')
+    expect(dom.container.textContent).not.toContain('Original native person')
+    expect(calls.filter(item => item.method === 'connection.metadata.ls').at(-1)!.input.connectionId).toBe(other.config.connectionId)
+    expect((await f.get()).entry.observation.profile?.name).toBe('Original native person')
+    expect((await f.sdk.call('connection.binding.ls', { executionHostId: 'local', agentSessionId: 'original-agent' })).bindings).toHaveLength(1)
+  } finally { release() }
 })
 
 it('unavailable display notifications preserve the actual recorded sender and readable cached profile', async () => {

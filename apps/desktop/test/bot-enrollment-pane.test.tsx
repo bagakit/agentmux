@@ -14,6 +14,7 @@ import type { ConnectionHostingTarget } from '../src/shared/contracts'
 import { useAppStore } from '../src/renderer/src/store'
 import { connectionSettingsPort } from '../src/renderer/src/lib/connection-settings-port'
 import { composerDOM } from './helpers/composer-dom-fixture'
+import { copyConnectorIdentity } from './helpers/connector-identity-copy'
 
 const dom = composerDOM(), hostingTarget: ConnectionHostingTarget = { hostId: 'local', runtimeId: 'original-enrollment-runtime' }, connections = connectionSettingsPort(hostingTarget)
 let fixture: Awaited<ReturnType<typeof enrollmentFixture>>
@@ -84,6 +85,12 @@ async function finishCreation(intent: 'initial-publication-unsupported' | 'confi
     await click('[data-enrollment-action="continue-authentication"]')
   await ready('[data-enrollment-action="confirm-account"]')
   expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('account')
+  vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  const account = dom.container.querySelector<HTMLElement>('.connector-account-summary')!
+  expect(account).not.toBeNull()
+  expect(account.querySelector('img')).toBeNull()
+  await copyConnectorIdentity(account, 'Copy Account ID', 'original-user')
+  await copyConnectorIdentity(account, 'Copy Tenant ID', 'original-tenant')
   await click('[data-enrollment-action="confirm-account"]')
   await ready('[data-enrollment-action="create"]')
   expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('create')

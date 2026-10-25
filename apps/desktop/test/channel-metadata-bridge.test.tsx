@@ -21,6 +21,8 @@ const bridge = await vi.hoisted(async () => {
   window.document.write('<!doctype html><html><body></body></html>')
   vi.stubGlobal('window', window); vi.stubGlobal('document', window.document); vi.stubGlobal('navigator', window.navigator)
   const directory = await mkdtemp(join(tmpdir(), 'amux-metadata-bridge-'))
+  // Desktop publishes beside the Runtime endpoint, independently of its state/profile paths.
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', directory)
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'state'))
   vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(directory, 'state', 'spatial-state.json'))
   vi.stubEnv('AGENTMUX_DESKTOP_USER_DATA', join(directory, 'profile'))
@@ -35,7 +37,7 @@ const bridge = await vi.hoisted(async () => {
 vi.mock('node:os', async load => ({ ...await load<typeof import('node:os')>(), homedir: () => join(bridge.directory, 'home') }))
 vi.mock('electron', () => ({
   nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
-  app: { getPath: () => bridge.profile, getAppPath: () => bridge.profile },
+  app: { getPath: () => bridge.profile, getAppPath: () => bridge.profile, isPackaged: false, once: vi.fn() },
   safeStorage: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async (value: string) => Buffer.from(value),
     decryptStringAsync: async (value: Buffer) => ({ result: value.toString(), shouldReEncrypt: false }) },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...args: any[]) => Promise<unknown>) => bridge.handlers.set(channel, handler),
@@ -45,16 +47,8 @@ vi.mock('electron', () => ({
   } },
   ipcRenderer: { invoke: bridge.invoke, on: (channel: string, listener: (...args: any[]) => void) => bridge.events.on(channel, listener),
     removeListener: (channel: string, listener: (...args: any[]) => void) => bridge.events.removeListener(channel, listener) },
-  webFrame: { getZoomFactor: () => 1 }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}
+  webFrame: { getZoomFactor: () => 1 }, globalShortcut: { register: () => true, unregister: vi.fn() }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}
 }))
-// Keep the actual RPC service/wire and Main bootstrap, confined to this fixture's endpoint.
-vi.mock('@agentmux/core', async load => {
-  const actual = await load<typeof import('@agentmux/core')>()
-  return { ...actual, AgentMuxControlServer: class extends actual.AgentMuxControlServer {
-    constructor(options: ConstructorParameters<typeof actual.AgentMuxControlServer>[0]) { super(options, bridge.socket) }
-  }, connectAgentMuxRpc: (options: Parameters<typeof actual.connectAgentMuxRpc>[0]) =>
-    actual.connectAgentMuxRpc({ ...options, endpoint: { transport: 'unix', path: bridge.socket } }) }
-})
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [], snapshot: async () => ({ demands: [] }), subscribe: () => () => {} }) }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 vi.mock('../../../packages/connectors/src/connection-services.js', async load => {
@@ -69,17 +63,20 @@ vi.mock('../../../packages/connectors/src/connection-services.js', async load =>
   } }
 })
 
-import { AgentMuxMemoryAgentSessionStore, connectAgentMuxRpc, LocalExecutionHost } from '@agentmux/core'
+import { AgentMuxControlServer, AgentMuxMemoryAgentSessionStore, connectAgentMuxRpc, LocalExecutionHost } from '@agentmux/core'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerIpc } from '../src/main/ipc.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
+import { desktopBusinessSocketPath } from '../src/main/desktop-host.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
 import { CONNECTION_METADATA_CHANGED_CHANNEL } from '../src/shared/contracts'
 import '../src/preload/index'
 import { api } from '../src/renderer/src/lib/api'
 import { useConnectorRoomName } from '../src/renderer/src/lib/use-connector-room-name'
 
-afterAll(async () => { bridge.events.removeAllListeners(); await bridge.window.happyDOM.abort(); vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); await rm(bridge.directory, { recursive: true, force: true }) })
+const cleanup: Array<() => void | Promise<void>> = []
+afterAll(async () => { for (const close of cleanup.reverse()) await close(); bridge.events.removeAllListeners(); await bridge.window.happyDOM.abort(); vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); await rm(bridge.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) })
 const connection: ConnectionConfig = { connectionId: 'original-connection', adapterId: 'feishu',
   application: { domain: 'open.feishu.cn', appId: 'cli_0123456789abcdef' }, label: 'Original', enabled: false, credentialRef: '' }
 const binding = { connectionId: connection.connectionId, application: connection.application, externalConversationId: 'original-room' } as RoomBinding
@@ -87,6 +84,8 @@ function RoomName() { const read = useConnectorRoomName(binding); return <output
 
 it('delivers original Host metadata through Main, preload and the mounted reader, then releases both ends', async () => {
   expect(api.connections).toBe(bridge.api!.connections)
+  expect(desktopBusinessSocketPath()).toBe(join(bridge.directory, 'control.sock.desktop'))
+  expect(desktopBusinessSocketPath()).not.toBe(bridge.socket)
   let groupName = 'Original native group', windowDestroyed = false, contentsDestroyed = false
   // The native SDK is declared by Connectors, rather than a new Desktop dependency.
   const { defaultHttpInstance } = createRequire(resolve(import.meta.dirname, '../../../packages/connectors/package.json'))('@larksuiteoapi/node-sdk') as {
@@ -113,13 +112,20 @@ it('delivers original Host metadata through Main, preload and the mounted reader
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
+  // Main borrows the exact Host owner; the real metadata service and wire live at a separate endpoint.
+  const services = await createConnectionServices({ directory: join(bridge.directory, 'connections') }); cleanup.push(() => services.close())
+  const server = new AgentMuxControlServer({ socketPath: bridge.socket, connections: services.connections }); await server.start(); cleanup.push(() => server.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
+  const hostingTarget = { hostId: 'local', runtimeId: 'original-metadata-runtime' }
+  vi.spyOn(runtime, 'connectionHostingTarget').mockImplementation(async (hostId = 'local') => { expect(hostId).toBe(hostingTarget.hostId); return hostingTarget })
+  vi.spyOn(runtime, 'callConnectionHost').mockImplementation((target, method, params) => { expect(target).toEqual(hostingTarget); return rpc.call(method, params) })
+  vi.spyOn(runtime, 'watchConnectionMetadata').mockImplementation((target, handlers) => { expect(target).toEqual(hostingTarget); return rpc.subscribe('connection.metadata.watch', {}, handlers) })
   const dispose = await registerIpc({ initialConfig: config,
     window: { setBackgroundColor: vi.fn(), isDestroyed: () => windowDestroyed, webContents: sender } as unknown as BrowserWindow, runtime,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: (value: typeof config) => value, save: async (value: typeof config) => { config = value; return value } } as never,
     progressLoops: { subscribe: () => () => {} } as never, scratchTopics: { setNameAudit: vi.fn() } as never,
     workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) })
-  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: bridge.socket } })
   const container = document.createElement('div'); document.body.append(container); const root = createRoot(container)
   const subject = { kind: 'conversation' as const, externalConversationId: binding.externalConversationId }
   const change: ChannelMetadataChange = { connectionId: connection.connectionId, application: connection.application, subject }
@@ -128,12 +134,14 @@ it('delivers original Host metadata through Main, preload and the mounted reader
   const gets = () => bridge.invoke.mock.calls.filter(([channel, method]) => channel === 'connections:call' && method === 'connection.metadata.get').length
   let released = false, unmounted = false
   try {
-    const credential = await api.connections.storeCredential({ operationId: 'original-credential', secret: 'owned-transport-secret' })
+    const credential = await services.secrets.store({ operationId: 'original-credential', secret: 'owned-transport-secret' })
     await api.connections.call('connection.configure', { operationId: 'original-configure', expectedRevision: null, connection: { ...connection, credentialRef: credential.credentialRef } })
     await refresh()
     holdSnapshot = true
     await act(async () => root.render(<RoomName />))
     await vi.waitFor(() => expect(snapshotHeld).toBe(true))
+    const originalWatchId = bridge.invoke.mock.calls.find(([channel]) => channel === 'connections:metadataStart')?.[1]
+    expect(originalWatchId).toBeTypeOf('string')
     expect(bridge.events.listenerCount(CONNECTION_METADATA_CHANGED_CHANNEL)).toBe(1)
     groupName = 'Latest native group while the initial snapshot is pending'
     await act(async () => { await refresh() }); await settled(groupName)
@@ -143,26 +151,26 @@ it('delivers original Host metadata through Main, preload and the mounted reader
     expect(gets()).toBe(initialGets)
     groupName = 'Renamed original group'
     await act(async () => { await refresh() }); await settled(groupName)
-    expect(send.mock.calls.filter(([channel]) => channel === CONNECTION_METADATA_CHANGED_CHANNEL).at(-1)).toEqual([CONNECTION_METADATA_CHANGED_CHANNEL, change])
+    expect(send.mock.calls.filter(([channel]) => channel === CONNECTION_METADATA_CHANGED_CHANNEL).at(-1)).toEqual([CONNECTION_METADATA_CHANGED_CHANNEL, { watchId: originalWatchId, change }])
     expect(gets()).toBe(initialGets + 1)
     const surviving = vi.fn(), releaseSurviving = api.connections.onMetadataChanged(surviving)
     await act(async () => root.unmount()); unmounted = true
     expect(bridge.events.listenerCount(CONNECTION_METADATA_CHANGED_CHANNEL)).toBe(1)
     const before = gets()
     await refresh(); await vi.waitFor(() => expect(surviving).toHaveBeenCalledExactlyOnceWith(change)); expect(gets()).toBe(before)
-    releaseSurviving(); expect(bridge.events.listenerCount(CONNECTION_METADATA_CHANGED_CHANNEL)).toBe(0)
     const delivered = send.mock.calls.length
     windowDestroyed = true; await refresh(); expect(send).toHaveBeenCalledTimes(delivered)
     windowDestroyed = false; contentsDestroyed = true; await refresh(); expect(send).toHaveBeenCalledTimes(delivered)
     contentsDestroyed = false
+    releaseSurviving(); expect(bridge.events.listenerCount(CONNECTION_METADATA_CHANGED_CHANNEL)).toBe(0)
+    await vi.waitFor(() => expect(bridge.releaseMetadata).toHaveBeenCalledTimes(2))
     await bridge.invoke('notesStorage:inspect')
-    await rpc.dispose(); await dispose(); released = true
-    await vi.waitFor(() => expect(bridge.releaseMetadata).toHaveBeenCalledOnce())
+    await dispose(); released = true
     expect(bridge.handlers.size).toBe(0)
   } finally {
     releaseSnapshot()
     if (!unmounted) await act(async () => root.unmount())
     container.remove()
-    if (!released) { await rpc.dispose(); await dispose() }
+    if (!released) await dispose()
   }
 })
