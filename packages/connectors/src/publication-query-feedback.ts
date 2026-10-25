@@ -13,7 +13,7 @@ export function queryFeedbackOperationId(boundary: Pick<PublicationBoundary, 'bi
   return 'publication-query-feedback-' + createHash('sha256').update(JSON.stringify([boundary.bindingId, boundary.revision, ingressId, stage])).digest('base64url')
 }
 
-/** Terminal outcomes share one phase, without inventing an order between their original facts. */
+/** Retained phases stay readable; new feedback only advances from waiting to delivery. */
 export function reconcileQueryFeedback(store: PublicationStore, original: PublicationOperation): void {
   if (!original.queryFeedback) return
   const boundary = { bindingId: original.bindingId, revision: original.bindingRevision }
@@ -31,8 +31,19 @@ export function reconcileQueryFeedback(store: PublicationStore, original: Public
     if (rank >= confirmed || operation.state !== 'confirmed' || !operation.mapping?.reactionId) continue
     const digest = createHash('sha256').update(JSON.stringify([operation.operationId, 'withdraw'])).digest('base64url')
     const operationId = 'publication-query-feedback-' + digest
-    if (store.inspect(operationId)) continue
-    const withdrawal: PublicationOperation = {
+    const withdrawal = store.inspect(operationId)
+    // A retained received Get and a new delivered Get can be the same native effect.
+    if (stages.some(value => value.rank === confirmed && value.operation?.state === 'confirmed' &&
+        isDeepStrictEqual(value.operation.mapping, operation.mapping))) {
+      // An unsent or definitively unapplied old cleanup no longer describes an
+      // obsolete marker. Keep its frozen request and receipts; never replay an unknown effect.
+      if (withdrawal?.state === 'pending' && (withdrawal.attempt === undefined || withdrawal.receipt?.state === 'not-applied'))
+        store.database.prepare('UPDATE connector_publication_operation SET operation_json=?,state=? WHERE operation_id=?')
+          .run(JSON.stringify({ ...withdrawal, state: 'superseded' }), 'superseded', withdrawal.operationId)
+      continue
+    }
+    if (withdrawal) continue
+    const cleanup: PublicationOperation = {
       operationId, projectionId: operation.projectionId, sourceRevision: digest,
       bindingId: operation.bindingId, bindingRevision: operation.bindingRevision,
       reference: operation.reference, target: operation.target, ...(operation.publicationScope ? { publicationScope: operation.publicationScope } : {}),
@@ -40,12 +51,12 @@ export function reconcileQueryFeedback(store: PublicationStore, original: Public
       effect: 'withdraw', predecessorOperationId: operation.operationId, fragment: { ordinal: 0, count: 1 }, state: 'pending'
     }
     store.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
-      .run(operationId, withdrawal.projectionId, digest, 0, withdrawal.bindingId, withdrawal.bindingRevision, JSON.stringify(withdrawal), 'pending')
+      .run(operationId, cleanup.projectionId, digest, 0, cleanup.bindingId, cleanup.bindingRevision, JSON.stringify(cleanup), 'pending')
   }
 }
 
 /** These effects use the existing Outbox. No separate input state, retry queue or Runtime. */
-export function queueQueryFeedback(store: PublicationStore, boundary: PublicationBoundary, query: ConnectionIngressMessage, stage: QueryFeedbackPayload['stage'], witness?: ConversationInputWitness, completion?: PublicationOperation['queryCompletion'], directBinding?: import('@agentmux/core/connections').RoomBinding): void {
+export function queueQueryFeedback(store: PublicationStore, boundary: PublicationBoundary, query: ConnectionIngressMessage, stage: 'received' | 'dispatched', directBinding?: import('@agentmux/core/connections').RoomBinding): void {
   // Later direct milestones can only borrow this exact query's original received target.
   const anchor = query.conversationKind === 'direct' && stage !== 'received' ? store.queryReceived(boundary, query.ingressId) : null
   const direct = query.conversationKind === 'direct' ? stage === 'received' ? directBinding : anchor ? {
@@ -66,12 +77,12 @@ export function queueQueryFeedback(store: PublicationStore, boundary: Publicatio
   if (store.inspect(operationId)) return
   const payload: QueryFeedbackPayload = { kind: 'query-feedback', stage, messageId: query.externalMessageId }
   const operation: PublicationOperation = {
-    operationId, projectionId, sourceRevision: createHash('sha256').update(JSON.stringify([payload, witness, completion])).digest('hex'),
+    operationId, projectionId, sourceRevision: createHash('sha256').update(JSON.stringify(payload)).digest('hex'),
     bindingId: boundary.bindingId, bindingRevision: boundary.revision, reference: { hostId: target.hostId, agentSessionId: target.agentSessionId, source: { kind: 'ingress', ingressId: query.ingressId } },
     target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
     publicationScope: boundary.scope.publication, payload, queryFeedback: { stage, ingressId: query.ingressId, messageId: query.externalMessageId },
     ...(stage === 'received' ? { queryPending: true as const } : {}),
-    ...(witness ? { queryTurn: witness } : {}), ...(completion ? { queryCompletion: completion } : {}), effect: 'upsert', fragment: { ordinal: 0, count: 1 }, state: 'pending'
+    effect: 'upsert', fragment: { ordinal: 0, count: 1 }, state: 'pending'
   }
   store.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
     .run(operationId, projectionId, operation.sourceRevision, 0, boundary.bindingId, boundary.revision, JSON.stringify(operation), 'pending')
@@ -106,29 +117,5 @@ export function projectQueryFeedback(store: PublicationStore, boundary: Publicat
     const witness = witnesses[0]!, query = queryFor(witness)
     if (!query) continue
     queueQueryFeedback(store, boundary, query, 'received')
-    queueQueryFeedback(store, boundary, query, 'started', witness)
-  }
-  // Only the exact original native turn completion can advance a previously qualified query.
-  // The partial index keeps this lookup proportional to this turn, not historical Sessions.
-  const started = store.database.prepare(`SELECT operation_json FROM connector_publication_operation
-    WHERE binding_id=? AND binding_revision=? AND json_extract(operation_json,'$.payload.kind')='query-feedback'
-      AND json_extract(operation_json,'$.payload.stage')='started'
-      AND json_extract(operation_json,'$.queryTurn.record.source.providerId')=?
-      AND json_extract(operation_json,'$.queryTurn.record.source.nativeSessionId')=?
-      AND json_extract(operation_json,'$.queryTurn.turnId')=?`)
-  for (const record of records) {
-    const ref = record.reference
-    if (record.original.kind !== 'native' || ref?.source.kind !== 'native' || ref.hostId !== boundary.executionHostId || ref.agentSessionId !== boundary.agentSessionId) continue
-    const item = record.original.item
-    if (!item.turnId || !item.turnOutcome) continue
-    for (const row of started.all(boundary.bindingId, boundary.revision, ref.source.providerId, ref.source.nativeSessionId, item.turnId)) {
-      const original = JSON.parse(String(row.operation_json)) as PublicationOperation, witness = original.queryTurn
-      if (!witness?.key) continue
-      const accepted = conversationInputAdoptionEdges(records, { ...context, witnesses: [...context.witnesses, witness] })
-      const key = conversationInputIdentity(witness.record.hostId, witness.key)
-      if (accepted.unconfirmed || accepted.unconfirmedKeys.has(key) || accepted.ambiguous.has(key) || accepted.byKey.get(key)?.length !== 1) continue
-      const query = queryFor(witness)
-      if (query) queueQueryFeedback(store, boundary, query, item.turnOutcome.status, witness, { record: ref, revision: record.revision })
-    }
   }
 }
