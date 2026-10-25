@@ -1,5 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import { join } from 'node:path'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { connectHostedAgentMux } from '../src/hosted-client.js'
 import type { AgentTerminalFrontend } from '../src/agent-terminal-frontend.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { DEFAULT_AGENT_CONTINUITY_POLICY, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityResult } from '../src/agent-session-recovery.js'
@@ -203,6 +208,39 @@ it('connection recovery commits the retained successor before any manual continu
   await f.inner.recoverStaleLifecycles()
   expect(f.inner.kernel.inspectCreation).toHaveBeenCalledWith(reservation!.operationId)
   await expectReplacementCanClose(f, f.client.agentSession('recipient'))
+})
+
+it.each([
+  { origin: 'initialization' as const, loseStartReply: true },
+  { origin: 'frontend' as const, loseStartReply: false }
+])('Hosted recovery retains the accepted receipt after $origin post-commit observation failure', async ({ origin, loseStartReply }) => {
+  const f = await replacementAfterInitialization(origin, loseStartReply)
+  await f.inner.registry.update('recipient', f.original.expectedRun, (value: AgentMuxStoredAgentSession) => {
+    const original = value.continuityOperations![f.original.operationId]!
+    const operation = { ...original, supervision: { phase: 'observing' as const, activeAttemptOperationId: original.operationId,
+      attemptCount: 1, attemptLimit: 3, observedAt: Date.now(), reason: 'start-pending' } }
+    return { ...value, continuity: operation, continuityOperations: { ...value.continuityOperations, [operation.operationId]: operation } }
+  })
+  const hosted = new AgentMuxHostedRuntimeService(f.client, f.store.path, () => ({ runtimeId: 'initialization-runtime',
+    ownerInstanceId: 'initialization-owner', protocolVersion: 2, processId: process.pid, ctxmux: f.client.runtimeIdentity(), availability: 'connected' }))
+  cleanup.push(() => hosted.dispose())
+  const socketPath = join(f.root, 'control.sock')
+  const server = new AgentMuxControlServer({ socketPath, coreClients: f.coreClients, hostedRuntime: () => hosted })
+  await server.start(); cleanup.push(() => server.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }); cleanup.push(() => rpc.dispose())
+  const consumer = await connectHostedAgentMux({ rpc }); cleanup.push(() => consumer.dispose())
+  if (loseStartReply) {
+    expect((await consumer.ensureAgentContinuity(f.original)).kind).toBe('pending')
+    expect((await f.store.readLifecycleReservation('recipient'))?.preparedSession).toBeDefined()
+    f.observeStart()
+  }
+  const failure = new AgentMuxError('Original post-commit observation failed', 'TEST_OBSERVATION_UNAVAILABLE')
+  if (loseStartReply) f.inner.ensureTerminalHandshakeOrDegrade.mockRejectedValueOnce(failure)
+  else vi.spyOn(f.inner.recovery.reconciler, 'observeResumedInterruption').mockRejectedValueOnce(failure)
+  const result = await consumer.ensureAgentContinuity(f.original)
+  expect(result.kind).toBe('resumed')
+  expect(result.continuity).toMatchObject({ errorCode: 'TEST_OBSERVATION_UNAVAILABLE', error: 'Original post-commit observation failed' })
+  await expectReplacementCanClose(f, result)
 })
 
 it('skips initial-input history enumeration for a legacy actor while its original supervisor still observes', async () => {
