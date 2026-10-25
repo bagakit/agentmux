@@ -1,4 +1,5 @@
-import { MAX_FRAME_BYTES, type ClientFrame } from '@ctxmux/sdk'
+import type { ClientFrame } from '@ctxmux/sdk'
+import { CTXMUX_MAX_FRAME_BYTES as MAX_FRAME_BYTES } from './ctxmux-run-adapter.js'
 import type { AgentMuxRunInputOperation } from './types.js'
 import { AgentMuxError } from './errors.js'
 
