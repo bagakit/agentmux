@@ -254,13 +254,13 @@ export class AgentMuxHostedRuntimeService {
       if (invocation.args.length !== 1) throw new AgentMuxError('Input resource reading accepts one original request; the Host supplies caller authority.', 'INVALID_CONTROL_REQUEST')
       invocation.args[0] = parseAgentInputResourceRead(invocation.args[0])
     }
-    if (invocation.method === 'readAgentInputMailbox') {
-      if (invocation.args.length !== 1) throw new AgentMuxError('Mailbox reading accepts one exact read; author authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
-      invocation.args[0] = parseAgentInputMailboxRead(invocation.args[0])
-    }
     if (invocation.method === 'readAgentInputChanges') {
       if (invocation.args.length !== 1) throw new AgentMuxError('Input changes accepts one exact read; the original Host supplies authority.', 'INVALID_CONTROL_REQUEST')
       invocation.args[0] = parseAgentInputChangesRead(invocation.args[0])
+    }
+    if (invocation.method === 'readAgentInputMailbox') {
+      if (invocation.args.length !== 1) throw new AgentMuxError('Mailbox reading accepts one exact read; author authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
+      invocation.args[0] = parseAgentInputMailboxRead(invocation.args[0])
     }
     if (invocation.method === 'recordExternalConversationMessage' && invocation.args.length !== 1) throw new AgentMuxError('The record owner is supplied by the semantic Host, never wire arguments.', 'INVALID_CONTROL_REQUEST')
     const continuityControl = invocation.method === 'controlAgentContinuity'
@@ -289,7 +289,7 @@ export class AgentMuxHostedRuntimeService {
       case 'runtime': await observe(this.client.connectRuntime(), context.signal); break
       case 'session-observation': await observe(this.client.connect(), context.signal); break
       case 'input-admission':
-        if (!messageIntake && !['manual-actor', 'native-conversation'].includes(
+        if (!messageIntake && !['manual-actor', 'session-conversation', 'native-conversation'].includes(
           (invocation.args[0] as { admissionIntent?: { kind?: string } } | undefined)?.admissionIntent?.kind ?? '')) {
           await observe(this.client.connect(), context.signal)
         }

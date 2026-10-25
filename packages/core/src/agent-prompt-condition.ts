@@ -12,7 +12,7 @@ export type AgentPromptInputBinding = AgentPromptCondition |
   { expectedRun: AgentMuxRunRef; admissionIntent: AgentDirectedPromptTarget; afterSubmissionId?: never }
 
 /** An explicit selected native source is independent of the TUI's current editor/selection. */
-export type AgentDirectedPromptTarget = { kind: 'manual-actor' } |
+export type AgentDirectedPromptTarget = { kind: 'manual-actor' } | { kind: 'session-conversation' } |
   { kind: 'native-conversation'; source: { providerId: string; nativeSessionId: string }; expectedTurnId?: string }
 
 export function validateAgentPromptInputBinding(value: unknown): AgentPromptInputBinding {
@@ -61,7 +61,7 @@ export function validateAgentPromptAdmissionIntent(value: unknown): AgentPromptA
   if (v?.kind === 'exact-condition' && Object.keys(v).every(k => k === 'kind' || k === 'condition')) {
     return { kind: v.kind, condition: validateAgentPromptCondition(v.condition) }
   }
-  if ((v?.kind === 'manual-actor' || v?.kind === 'native-conversation') && inputRun(v.expectedRun)) {
+  if ((v?.kind === 'manual-actor' || v?.kind === 'session-conversation' || v?.kind === 'native-conversation') && inputRun(v.expectedRun)) {
     const { expectedRun, ...target } = v
     return { ...validateAgentDirectedPromptTarget(target), expectedRun: { ...expectedRun } }
   }
@@ -71,7 +71,7 @@ export function validateAgentPromptAdmissionIntent(value: unknown): AgentPromptA
 /** Shared strict target decoding. A caller's source is an intent, never an actor credential. */
 export function validateAgentDirectedPromptTarget(value: unknown): AgentDirectedPromptTarget {
   const v = value as AgentDirectedPromptTarget | undefined
-  if (v?.kind === 'manual-actor' && Object.keys(v).every(k => k === 'kind')) return { kind: v.kind }
+  if ((v?.kind === 'manual-actor' || v?.kind === 'session-conversation') && Object.keys(v).every(k => k === 'kind')) return { kind: v.kind }
   if (v?.kind === 'native-conversation' && Object.keys(v).every(k => ['kind', 'source', 'expectedTurnId'].includes(k)) &&
       v.source && typeof v.source === 'object' && !Array.isArray(v.source) &&
       Object.keys(v.source).every(k => k === 'providerId' || k === 'nativeSessionId') && inputIdentity(v.source.providerId) &&

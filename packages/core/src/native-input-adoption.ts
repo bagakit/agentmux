@@ -34,6 +34,8 @@ export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, 
     const defaultInput = (key.kind === 'message' || questionReply && isDeepStrictEqual(questionReply.source, source)) &&
       target?.kind === 'exact-condition' && isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) &&
       (intent.execution ?? 'default') === 'default' && plan.operation === 'start-or-steer' && plan.expectedTurnId === undefined
+    const sessionInput = target?.kind === 'session-conversation' && isDeepStrictEqual(target.expectedRun, key.expectedRun) &&
+      intent.execution === 'immediate' && plan.operation === 'start-or-steer' && plan.expectedTurnId === undefined
     // Native queue entries can be edited by their original user. Correlation alone
     // cannot turn that edited content back into the frozen platform notification.
     const notification = key.kind === 'prompt' && intent.message?.a2aNotificationId === key.submissionId &&
@@ -42,7 +44,7 @@ export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, 
       target?.kind === 'exact-condition' && isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) &&
       (intent.execution ?? 'default') === 'default' && plan.operation === 'queue-idle' && plan.expectedTurnId === undefined &&
       item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt
-    if (!addressed && !defaultInput && !notification) return unconfirmed()
+    if (!addressed && !defaultInput && !sessionInput && !notification) return unconfirmed()
     return { ...original, conversation: { ...conversation, adoptedInput: { key, ...(notification ? { purpose: 'a2a-notification' as const } : {}) } } }
   } catch {
     signal?.throwIfAborted()

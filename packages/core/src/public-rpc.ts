@@ -255,8 +255,8 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'agent.role.ls': { workspacePath?: string }
   'agent.role.register': { role: string; providerId?: string }
   'agent.role.resolve': { role: string; workspacePath?: string }
-  'agent.input.ls': import('./agent-input-mailbox.js').AgentInputMailboxRead & { hostId: string }
   'agent.input.changes': import('./agent-input-changes.js').AgentInputChangesRead & { hostId: string }
+  'agent.input.ls': import('./agent-input-mailbox.js').AgentInputMailboxRead & { hostId: string }
   'agent.input.submit': import('./agent-input-submit.js').AgentInputSubmit
   'agent.automation.pause': import('./agent-automation.js').AgentAutomationPause
   'agent.automation.inspect': import('./agent-automation.js').AgentAutomationTarget
@@ -266,7 +266,7 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'agent.input.stop': { ref: import('./agent-input-wait.js').AgentInputWaitRef; cancelOperationId: string }
   'agent.input.rejoin': { ref: import('./agent-input-wait.js').AgentInputWaitRef }
   'agent.send': { target: AgentMuxMessageTarget; text: string; operationId: string;
-    admissionIntent?: Extract<import('./agent-prompt-condition.js').AgentPromptAdmissionIntent, { kind: 'native-conversation' }>;
+    admissionIntent?: Extract<import('./agent-prompt-condition.js').AgentPromptAdmissionIntent, { kind: 'session-conversation' | 'native-conversation' }>;
     execution?: AgentPromptExecution; expectedRun?: import('./types.js').AgentMuxRunRef; sourceChannel?: import('./types.js').AgentMessageChannel;
     messageId?: string; threadId?: string; correlationId?: string; replyTo?: string }
   'agent.broadcast': import('./agent-message-broadcast.js').AgentMuxMessageBroadcastInput
@@ -351,9 +351,9 @@ type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'agent.role.ls': { bindings: AgentRoleBinding[] }
   'agent.role.register': { binding: AgentRoleBinding }
   'agent.role.resolve': { binding: AgentRoleBinding }
+  'agent.input.changes': import('./agent-input-changes.js').AgentInputChangesPage & { hostId: string }
   'agent.input.ls': import('./agent-input-mailbox.js').AgentInputMailboxPage & { hostId: string }
   'agent.input.submit': import('./agent-input-submit.js').AgentInputSubmitResult
-  'agent.input.changes': import('./agent-input-changes.js').AgentInputChangesPage & { hostId: string }
   'agent.automation.pause': import('./agent-automation.js').AgentAutomationPauseInspection
   'agent.automation.inspect': import('./agent-automation.js').AgentAutomationPauseInspection
   'browser.input.inspect': import('./agent-input-context-capture.js').AgentInputContextCaptureRead
