@@ -52,7 +52,7 @@ it.each([
   ['preflight', 'A required setup check did not complete.'],
   ['native-session', 'The conversation could not finish opening.'],
   ['frontend', 'The terminal could not connect to the conversation.']
-] as const)('explains typed %s before the original action and keeps exact diagnostic in reachable details', async (step, reason) => {
+] as const)('explains typed %s before the original action and keeps the exact diagnostic visible before identity details', async (step, reason) => {
   const session = startup('failed', step), tab = await mount(session)
   const surface = dom.container.querySelector('.full-page-loading')!, heading = surface.querySelector('.surface-state__heading')!
   expect(heading.textContent).toContain(reason)
@@ -63,7 +63,8 @@ it.each([
   expect(surface.textContent).toContain('Checks and continues the original setup')
   const diagnostic = surface.querySelector('.session-frontend-diagnostic')!
   expect(diagnostic, 'Original diagnostic remains reachable').not.toBeNull()
-  const details = diagnostic.closest('details')!
+  expect(diagnostic.closest('details')).toBeNull()
+  const details = surface.querySelector('details')!
   expect(details).not.toBeNull(); expect(details.open).toBe(false)
   expect(diagnostic.textContent).toContain(session.terminalFrontend.initialization.failure!.message)
   await act(async () => details.querySelector('summary')!.click())
