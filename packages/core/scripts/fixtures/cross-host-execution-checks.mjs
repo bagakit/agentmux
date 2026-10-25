@@ -1,7 +1,7 @@
 // Public entry coverage. These are actual source consumers, never copied implementations.
 export const tests = [
   'agent-execution-journal', 'agent-execution-journal-retained', 'agent-execution-channel',
-  'agent-execution-executor', 'agent-execution-helper-store', 'agent-execution-bridge',
+  'agent-execution-executor', 'agent-execution-helper-store', 'agent-execution-bridge', 'agent-execution-bridge-native',
   'agent-execution-coordinator', 'agent-tool-execution-binding', 'agent-execution-tool-context-cli',
   'codex-execution-protocol', 'codex-execution-frontend', 'codex-execution-helper',
   'codex-tool-execution-launch', 'public-rpc-agent-execution', 'public-rpc-execution-bindings',
