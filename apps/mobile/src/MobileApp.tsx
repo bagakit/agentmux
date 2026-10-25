@@ -82,11 +82,13 @@ type MobileAppProps = {
   native?: boolean; focusComposer?: () => boolean
   connectionPanel?: ReactNode
   webObservation?: MobileWebPageObservation | null
+  /** First presentation only, after the connection owner verifies the original reload handoff. */
+  restoreWorkface?: boolean
 }
 export function MobileApp(props: MobileAppProps) {
   return <MobileNoticeProvider><MobileAppContent {...props} /></MobileNoticeProvider>
 }
-function MobileAppContent({ client, connection, platform, native = false, focusComposer = () => false, connectionPanel, webObservation }: MobileAppProps) {
+function MobileAppContent({ client, connection, platform, native = false, focusComposer = () => false, connectionPanel, webObservation, restoreWorkface = false }: MobileAppProps) {
   const composeAfterClose = useRef<{ client: MobileAppProps['client']; sessionId: string } | null>(null)
   const composeScope = useRef({ client, sessionId: null as string | null, visible: false, focusComposer })
   const connected = connection.state === 'connected'
@@ -98,7 +100,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const [hasConnected, setHasConnected] = useState(connection.state === 'connected' || initial.current.workface.selectedSessionId !== null || initial.current.presentation !== undefined)
   const hostAppearance = useHostAppearance(client, connection.state)
   useEffect(() => { if (connection.state === 'connected') setHasConnected(true) }, [connection.state])
-  const [workface, setWorkface] = useState<Workface>(() => ({ ...initial.current!.workface, panel: 'conversation' }))
+  const [workface, setWorkface] = useState<Workface>(() => restoreWorkface ? initial.current!.workface : { ...initial.current!.workface, panel: 'conversation' })
   const [canPersist, setCanPersist] = useState(initial.current.issue === null)
   const initialHome = useRef(readMobileHome())
   const initialPrimary = initial.current.presentation?.primary ?? initialHome.current.home
@@ -145,11 +147,11 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     if (!client?.forwardRpc) return Promise.reject(new Error('连接暂不可用，原工作面保留。'))
     return client.forwardRpc(method, params)
   }, [client])
-  const [showSession, setShowSession] = useState(true)
-  const [showGoalWork, setShowGoalWork] = useState(false)
+  const [showSession, setShowSession] = useState(restoreWorkface ? initial.current.presentation?.showSession ?? true : true)
+  const [showGoalWork, setShowGoalWork] = useState(restoreWorkface && (initial.current.presentation?.showGoalWork ?? false))
   const [conversationToolsTarget, setConversationToolsTarget] = useState<HTMLDivElement | null>(null)
   const [recentMoteSpaceId, setRecentMoteSpaceId] = useState(initial.current.presentation?.recentMoteSpaceId ?? initial.current.presentation?.identity?.mote?.spaceId ?? null)
-  const startupProfile = useRef(initial.current.presentation?.profile ?? null)
+  const startupProfile = useRef(restoreWorkface ? null : initial.current.presentation?.profile ?? null)
   const goalReturn = useRef<{ trigger: HTMLButtonElement; sessionId: string | null } | null>(null)
   useEffect(() => {
     if (showGoalWork || !goalReturn.current) return
@@ -214,7 +216,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     }).catch(error => setNotice(error instanceof Error ? error.message : String(error)))
   }
   const sessionTitle = objectIdentity?.name ?? null
-  const [sheet, updateSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | null>(null)
+  const [sheet, updateSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | null>(restoreWorkface && initial.current.presentation?.profile ? 'identity' : null)
   const setSheet = useCallback((value: typeof sheet) => {
     if (value !== null) navigationRevision.current += 1
     updateSheet(value)
@@ -279,9 +281,9 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const backRef = useRef(requestBack)
   backRef.current = requestBack
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
-  const [chatStartIssue, setChatStartIssue] = useState<string | null>(null)
+  const [chatStartIssue, setChatStartIssue] = useState<string | null>(restoreWorkface && !initial.current.workface.selectedSessionId ? '原工作面已接回，可选择 Mote 或已有对话。' : null)
   const [chatStartRevision, retryChatStart] = useState(0)
-  const chatStartDone = useRef(initial.current.workface.selectedSessionId !== null)
+  const chatStartDone = useRef(restoreWorkface || initial.current.workface.selectedSessionId !== null)
   const chatStartExpectedRevision = useRef(0)
   useEffect(() => {
     if (chatStartDone.current || !client?.forwardRpc || !connected || !canPersist || navigationRevision.current !== chatStartExpectedRevision.current) return
@@ -443,7 +445,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           <div><button type="button" className="mobile-text-button" onClick={() => openPrimaryWorkface('mote')}>选择 Mote</button>
             <button type="button" className="mobile-text-button" onClick={() => openPrimaryWorkface('focus')}>已有对话</button>
             {objectIdentity?.mote && <button type="button" className="mobile-text-button" onClick={() => openProfile(objectIdentity)}>查看 Profile</button>}
-            {chatStartIssue && <button type="button" className="mobile-text-button" onClick={() => { chatStartExpectedRevision.current = navigationRevision.current; retryChatStart(value => value + 1) }}>重新核对</button>}</div>
+            {chatStartIssue && <button type="button" className="mobile-text-button" onClick={() => { chatStartDone.current = false; chatStartExpectedRevision.current = navigationRevision.current; retryChatStart(value => value + 1) }}>重新核对</button>}</div>
         </div>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
           <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} toolbarTarget={conversationToolsTarget} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))}
