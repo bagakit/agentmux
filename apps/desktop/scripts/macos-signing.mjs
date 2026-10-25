@@ -51,10 +51,9 @@ export async function preflightMacosSigning({ argv = process.argv.slice(2), env 
   return Object.freeze({ kind: 'certificate', identity: fingerprint, teamId: team[1] })
 }
 
-/** Verification uses the real signed output. It neither replaces nor weakens requirements. */
-export async function verifyMacosSigning(appPath, plan, { run = runNative, bundleId = 'dev.agentmux.desktop' } = {}) {
+async function verifyMacosSigningScope(appPath, plan, { run = runNative, bundleId = 'dev.agentmux.desktop' } = {}, deep = true) {
   requireSigningPlan(plan)
-  const verification = ['--verify', '--deep', '--strict', '--verbose=2']
+  const verification = ['--verify', ...(deep ? ['--deep'] : []), '--strict', '--verbose=2']
   if (plan.kind === 'certificate') verification.push('--test-requirement',
     plan.profile === 'local' ? `=identifier "${bundleId}" and certificate leaf = H"${plan.identity}" and certificate leaf trusted` :
       `=identifier "${bundleId}" and anchor apple generic and certificate leaf[subject.OU] = "${plan.teamId}" and certificate leaf = H"${plan.identity}"`)
@@ -85,6 +84,11 @@ export async function verifyMacosSigning(appPath, plan, { run = runNative, bundl
   return Object.freeze({ kind: 'certificate', ...(plan.profile === 'local' ? { profile: 'local', identity: plan.identity } : { teamId: plan.teamId }), designatedRequirement: requirement, authorizationContinuity: 'unverified', notarized: false })
 }
 
+/** Independent verification of a copied or otherwise unqualified App remains deep. */
+export async function verifyMacosSigning(appPath, plan, options = {}) {
+  return verifyMacosSigningScope(appPath, plan, options)
+}
+
 /** Electron's maintained signer owns inside-out traversal; local runtime mode stays unchanged. */
 export async function signMacosApplication(appPath, plan, { signer = sign } = {}) {
   requireSigningPlan(plan)
@@ -102,4 +106,11 @@ export async function signMacosApplication(appPath, plan, { signer = sign } = {}
       preEmbedProvisioningProfile: false, optionsForFile: () => ({ hardenedRuntime: false, entitlements,
         ...(plan.kind === 'ad-hoc' || plan.profile === 'local' ? { timestamp: 'none' } : {}) }) })
   } finally { await rm(temporary, { recursive: true, force: true }) }
+}
+
+/** Sign the candidate and qualify its certificate-backed identity. */
+export async function signAndVerifyMacosApplication(appPath, plan, options = {}) {
+  await signMacosApplication(appPath, plan, options)
+  // osx-sign has already strictly verified the same nested bundle before returning.
+  return verifyMacosSigningScope(appPath, plan, options, false)
 }

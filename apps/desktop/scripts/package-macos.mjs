@@ -36,7 +36,7 @@ import {
   packageIdentityPath,
   readPackageIdentity
 } from './package-identity.mjs'
-import { preflightMacosSigning, signMacosApplication, verifyMacosSigning } from './macos-signing.mjs'
+import { preflightMacosSigning, signAndVerifyMacosApplication } from './macos-signing.mjs'
 import { verifyNativeDesktopCopy, verifyNativeDesktopSigning } from './native-desktop-package.mjs'
 
 const PRODUCT_NAME = 'AgentMux'
@@ -1169,9 +1169,8 @@ async function main() {
     await verifyWorkspaceMoveHelper(stagedWorkspaceMoveHelper,
       await sha256(join(desktopRoot, 'resources', 'bin', 'agentmux-workspace-move')))
     await verifyNativeDesktopCopy(stagedApp, repositoryRoot)
-    await signMacosApplication(stagedApp, signingPlan)
-    process.stdout.write('Verifying signed macOS candidate...\n')
-    const signature = await verifyMacosSigning(stagedApp, signingPlan)
+    process.stdout.write('Signing and verifying macOS candidate...\n')
+    const signature = await signAndVerifyMacosApplication(stagedApp, signingPlan)
     await verifyNativeDesktopSigning(stagedApp, signingPlan)
     const signedWorkspaceMoveHelperSha256 = await sha256(stagedWorkspaceMoveHelper)
 
