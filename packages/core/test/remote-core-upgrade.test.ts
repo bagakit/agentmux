@@ -1,9 +1,11 @@
+import { PROTOCOL_VERSION } from '@ctxmux/sdk'
 import { fixturePath } from './helpers/fixture-values.js'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
+import { ctxmuxOwnerReceiptPath } from '../src/runtime-paths.js'
 import { RemoteCoreUpgradeManager, remoteCoreUpgradeTargetDigest, type RemoteCoreUpgradeHost } from '../src/remote-core-upgrade.js'
 import { INSPECT_CORE_OWNER, READ_CORE_MAINTENANCE, OWNER_GONE, STAGE_CORE, START_CORE, NATIVE_RUN_INVENTORY } from '../src/remote-core-upgrade-programs.js'
 import type { AgentMuxAgentSession } from '../src/types.js'
@@ -16,7 +18,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'core-upgrade-')); directories.push(root)
   const archivePath = join(root, 'archive.tar.gz'); await writeFile(archivePath, 'offline-candidate')
   const effects: string[] = []
-  const native = { instanceId: 'native-original', processId: 202, buildIdentity: 'ctxmuxd/0.1.0', protocolVersion: 22 }
+  const native = { instanceId: 'native-original', processId: 202, buildIdentity: 'ctxmuxd/0.1.0', protocolVersion: PROTOCOL_VERSION }
   let owner = { runtimeId: 'runtime', ownerInstanceId: 'original', protocolVersion: 2 as const, processId: 101, ctxmux: native, availability: 'connected' as const }
   let launch = { node: fixturePath("original/bin/node"), cli: fixturePath("original/core/dist/headless-runtime-cli.js"), cwd: fixturePath("original/work"), processId: 101, startTicks: '1234',
     env: { HOME: fixturePath("scope/home"), PATH: fixturePath("original/bin:/usr/bin"), AGENTMUX_STATE_DIRECTORY: fixturePath("scope/state"), AGENTMUX_RUNTIME_DIRECTORY: fixturePath("scope/runtime"), AGENTMUX_AGENT_SESSION_STORE: fixturePath("scope/state/sessions.json") },
@@ -24,10 +26,12 @@ async function fixture() {
     nativeArtifactDirectory: fixturePath('original/core/vendor/ctxmux/linux-x64'), nativeManifestSha256: 'e'.repeat(64), nativeInstanceId: native.instanceId,
     nativeRuntimeId: 'native-runtime', nativeBuildId: native.buildIdentity, platform: 'linux-x64', deploymentDigest: 'd'.repeat(64) }
   const sessions = [{ agentSessionId: 'original-session', run: { runId: 'original-run' } }] as AgentMuxAgentSession[]
+  let receiptStatus = 'matching', physicalDrift = false
+  const physical = () => { const { nativeInstanceId, nativeRuntimeId, nativeBuildId, ...value } = launch; return value }
   let shutdownUnknown = false, startUnknown = false, changedWhileStaging = false, changedTerminal = false, naturalExit = false, savedRunMissing = false
   let stageCommand = fixturePath("scope/state/core-releases/") + digest + '/launcher/amux'
   let stagePause: Promise<void> | undefined, resumeStage: (() => void) | undefined
-  const compatibility = { daemonInstanceId: native.instanceId, runtimeId: launch.nativeRuntimeId, protocolGeneration: 22,
+  const compatibility = { daemonInstanceId: native.instanceId, runtimeId: launch.nativeRuntimeId, protocolGeneration: PROTOCOL_VERSION,
     runtimeIdPersistence: 'state_dir', buildId: native.buildIdentity, platform: 'linux', arch: 'x86_64',
     capabilities: { 'native.start': 1, 'native.recoverable_input': 1, 'native.recoverable_stop': 1, 'services.persistent_state': 1, 'services.planned_exec_upgrade_continuity': 1 } }
   const maintenance = vi.fn(async params => {
@@ -46,8 +50,16 @@ async function fixture() {
   const run = vi.fn(async (_command, args, options) => {
     const p = JSON.parse(options.input)
     let output: unknown
-    if (args[1] === INSPECT_CORE_OWNER) { expect(p.socket).toBe(host.remoteSocketPath); expect(p.runtimeId).toBe('runtime'); if (p.pid) expect(p.pid).toBe(owner.processId); output = launch }
-    else if (args[1] === READ_CORE_MAINTENANCE) { expect(_command).toBe(launch.node); expect(p.launch).toEqual(launch); output = await maintenance(p) }
+    if (args[1] === INSPECT_CORE_OWNER) {
+      expect(p.socket).toBe(host.remoteSocketPath); expect(p.runtimeId).toBe('runtime'); if (p.pid) expect(p.pid).toBe(owner.processId)
+      if (p.receipt) {
+        expect(maintenance).toHaveBeenCalled()
+        expect(p.receipt.identity).toEqual({ ...compatibility, protocolGeneration: native.protocolVersion })
+        expect(p.receipt.path).toBe(ctxmuxOwnerReceiptPath(join(launch.runtimeDirectory, 'ctxmux.sock'), compatibility, launch.nativeManifestSha256))
+      }
+      output = { ...physical(), ...(p.receipt ? { nativeStartTicks: physicalDrift ? 'changed' : launch.nativeStartTicks, ownerReceipt: { status: receiptStatus, path: p.receipt.path } } : {}) }
+    }
+    else if (args[1] === READ_CORE_MAINTENANCE) { expect(_command).toBe(launch.node); expect(p.launch).toEqual(p.shutdown ? launch : physical()); output = await maintenance(p) }
     else if (args[1] === OWNER_GONE) output = { gone: true }
     else if (args[1] === NATIVE_RUN_INVENTORY) output = { instanceId: native.instanceId, protocolVersion: native.protocolVersion,
       runs: [...(savedRunMissing ? [] : [{ runId: 'original-run', pid: 404, state: 'running', outputBytes: owner.processId === 101 ? 100 : 120, inputBytes: 3 }]),
@@ -67,11 +79,12 @@ async function fixture() {
     } else throw new Error('Unexpected program')
     return { stdout: JSON.stringify(output), stderr: '', exitCode: 0 }
   })
-  const options = { stateDirectory: root, artifact: async () => ({ digest, sourceCommit: 'source', protocolVersion: 22, nativeBuild: 'native-source', nativeDigest, archivePath,
+  const options = { stateDirectory: root, artifact: async () => ({ digest, sourceCommit: 'source', protocolVersion: PROTOCOL_VERSION, nativeBuild: 'native-source', nativeDigest, archivePath,
     archiveDigest: createHash('sha256').update(await readFile(archivePath)).digest('hex'), files: [] }),
     executionHost: () => ({ id: 'original', kind: 'ssh' as const, label: 'Original', run, dispose: async () => {} }) }
   const manager = new RemoteCoreUpgradeManager(options)
   return { root, manager, options, effects, native, run, maintenance, sessions, compatibility,
+    setReceiptStatus: (status: string) => { receiptStatus = status }, setPhysicalDrift: () => { physicalDrift = true },
     setStageCommand: (command: string) => { stageCommand = command },
     setShutdownUnknown: () => { shutdownUnknown = true }, setStartUnknown: () => { startUnknown = true }, setChangedWhileStaging: () => { changedWhileStaging = true },
     setChangedTerminal: () => { changedTerminal = true }, setNaturalExit: () => { naturalExit = true },
@@ -159,7 +172,7 @@ it('refuses Native mismatch and stale owner without stopping any Core or Run', a
   const f = await fixture(); f.native.protocolVersion = 21
   const unavailable = await f.manager.check(host)
   expect(unavailable.eligible).toBe(false); expect(unavailable.expected).toBeUndefined(); expect(unavailable.reason).toBe('runtime-update-required'); expect(f.effects).toEqual([])
-  f.native.protocolVersion = 22
+  f.native.protocolVersion = PROTOCOL_VERSION
   const differentNative = new RemoteCoreUpgradeManager({ ...f.options, artifact: async () => ({ ...await f.options.artifact(), nativeDigest: 'c'.repeat(64) }) })
   expect(await differentNative.check(host)).toMatchObject({ eligible: true, reason: 'ready' })
   expect(f.effects).toEqual([])
@@ -271,4 +284,18 @@ it('a route alias cannot bypass an unconfirmed operation on the same physical Co
   expect((await other.check(alias)).detail).toContain('original-route')
   await expect(other.upgrade(alias, { ...check.expected!, targetDigest: remoteCoreUpgradeTargetDigest(alias) }, 'alias-admission')).rejects.toThrow('original-route')
   expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core'])
+})
+
+it.each(['missing', 'mismatch', 'unreadable'])('keeps qualified remote maintenance usable with %s product provenance', async status => {
+  const f = await fixture(); f.setReceiptStatus(status)
+  const check = await f.manager.check(host)
+  expect(check.eligible).toBe(true); expect(check.detail).toContain('产品来源回执'); expect(f.effects).toEqual([])
+  const receipt = await f.manager.upgrade(host, check.expected!, 'provenance-' + status)
+  expect(receipt.status).toBe('completed')
+  expect(f.effects).toEqual(['stage-offline-candidate', 'stop-original-core', 'start-new-core'])
+})
+it('refuses the exact remote maintenance when current process changes after public identity without touching Runs', async () => {
+  const f = await fixture(); f.setPhysicalDrift()
+  const check = await f.manager.check(host)
+  expect(check.eligible).toBe(false); expect(check.detail).toContain('process or software changed'); expect(f.effects).toEqual([])
 })

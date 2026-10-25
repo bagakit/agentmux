@@ -2,6 +2,7 @@ import { tmpdir as fixtureTmpdir } from 'node:os'
 import { join as fixtureJoin, sep as fixtureSep } from 'node:path'
 const fixtureRootPath = relative => { const temporary = relative.replace(/^(?:private\/)?tmp\//u, ''); return (temporary === relative ? fixtureJoin(fixtureTmpdir(), 'agentmux-fixtures') : fixtureTmpdir()) + fixtureSep + temporary.replaceAll('/', fixtureSep) }
 import assert from 'node:assert/strict'
+import { ctxmuxOwnerReceiptPath, CTXMUX_MANIFEST_SHA256 } from '../src/runtime-paths.ts'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, writeFile, symlink, rm } from 'node:fs/promises'
@@ -160,7 +161,7 @@ try {
   assert.notEqual(first.run.runId, second.run.runId)
   await stopPrivateDaemon()
   const live = await run('live-first')
-  const receiptPath = join(endpoints, 'owner.json'), originalReceipt = await readFile(receiptPath)
+  const receiptPath = ctxmuxOwnerReceiptPath(join(endpoints, 'ctxmux.sock'), live.identity, CTXMUX_MANIFEST_SHA256), originalReceipt = await readFile(receiptPath)
   const secondLive = await run('live-second', { ...environment, AGENTMUX_STATE_DIRECTORY: join(root, 'future-state') })
   assert.equal(secondLive.childPid, live.childPid); assert.deepEqual(secondLive.run, live.run)
   assert.ok(secondLive.input > live.input && secondLive.output > live.output)

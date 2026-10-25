@@ -8,6 +8,7 @@ import { homedir } from 'node:os'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { canonicalInstallPath } from './package-identity.mjs'
+import { ctxmuxOwnerReceiptPath } from '../../../packages/core/src/runtime-paths.ts'
 import { prepareRuntimeUpgrade, finishRuntimeUpgrade, closeRuntimeUpgrade } from './package-runtime-upgrade.mjs'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 
@@ -16,7 +17,8 @@ const out = process.argv.find(value => value.startsWith('--output='))?.slice('--
   join(base, ".tmp/runtime-upgrade-live-owner-proof-fixture")
 const oldRoot = process.argv.find(value => value.startsWith('--previous-artifacts='))?.slice('--previous-artifacts='.length) ??
   join(canonicalInstallPath(homedir()), 'Contents/Resources/app/node_modules/@agentmux/core/vendor/ctxmux', `${process.platform}-${process.arch}`)
-const candidateRoot = join(base, 'packages/core/vendor/ctxmux', `${process.platform}-${process.arch}`)
+const candidateRoot = process.argv.find(value => value.startsWith('--candidate-artifacts='))?.slice('--candidate-artifacts='.length) ??
+  join(base, 'packages/core/vendor/ctxmux', `${process.platform}-${process.arch}`)
 const relative = 'Contents/Resources/app/node_modules/@agentmux/core', sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const digest = async path => sha(await readFile(path))
 const oldManifest = JSON.parse(await readFile(join(oldRoot, 'manifest.json')))
@@ -37,7 +39,7 @@ const root = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-live-own
 const uiNext = join(root, 'Applications/.ui-next.app'), fullNext = join(root, 'Applications/.full-next.app')
 const uiBackup = join(root, 'Trash/BeforeUi.app'), fullBackup = join(root, 'Trash/BeforeFull.app')
 const runtimeDir = join(root, 'runtime'), socket = join(runtimeDir, 'ctxmux.sock'), state = join(root, 'original-state')
-const configuredBase = join(root, 'configured-durable'), receiptPath = join(runtimeDir, 'owner.json')
+const configuredBase = join(root, 'configured-durable'), legacyReceiptPath = join(runtimeDir, 'owner.json')
 const previousEnv = { runtime: process.env.AGENTMUX_RUNTIME_DIRECTORY, state: process.env.AGENTMUX_STATE_DIRECTORY }
 process.env.AGENTMUX_RUNTIME_DIRECTORY = runtimeDir; process.env.AGENTMUX_STATE_DIRECTORY = configuredBase
 const daemons = [], cleanupErrors = [], records = []
@@ -84,7 +86,7 @@ try {
   // Create a truthful receipt from a previous private incarnation, then allow
   // it to become stale through an ordinary daemon exit. No production ledger.
   const initial = await daemon(old.executable), initialIdentity = await client.runtimeInfo()
-  await writeFile(receiptPath, JSON.stringify({ schema: 'agentmux.ctxmux-owner.v1', sourceCommit: oldManifest.source.commit,
+  await writeFile(legacyReceiptPath, JSON.stringify({ schema: 'agentmux.ctxmux-owner.v1', sourceCommit: oldManifest.source.commit,
     sourceTree: oldManifest.source.tree, manifestSha256: await digest(join(old.vendor, 'manifest.json')),
     daemonSha256: await digest(old.executable), daemonPath: old.executable, socketPath: socket, stateDirectory: state,
     daemonInstanceId: initialIdentity.daemonInstanceId, runtimeId: initialIdentity.runtimeId, runtimeBuildId: initialIdentity.buildId }), { mode: 0o600 })
@@ -111,7 +113,7 @@ try {
   plan = await prepareRuntimeUpgrade(current, fullNext)
   assert.equal(plan.owner.pid, serving.pid); assert.equal(plan.owner.executable, join(uiBackup, relative, 'vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'))
   assert.equal(plan.owner.state.directory, state); assert.notEqual(plan.old.stateDirectory, state)
-  assert.equal(plan.old.stateDirectory, plan.candidate.stateDirectory); assert.equal(plan.ownerReceipt.status, 'mismatch')
+  assert.equal(plan.old.stateDirectory, plan.candidate.stateDirectory); assert.equal(plan.ownerReceipt.status, 'missing')
   assert.equal(plan.before.running.length, 2)
   assert.deepEqual(plan.before.running.map(run => run.id).sort(), originalRuns.map(run => run.runId).sort())
   const lockBefore = { device: plan.owner.state.device, inode: plan.owner.state.inode }
@@ -121,7 +123,8 @@ try {
   assert.equal(outcome.status, 'upgraded'); assert.equal(outcome.daemonPid, serving.pid)
   assert.equal(outcome.runtimeId, identity.runtimeId); assert.equal(outcome.daemonInstanceId, identity.daemonInstanceId)
   assert.equal(outcome.stateDirectory, state); assert.equal(outcome.daemonPath, join(current, relative, 'vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'))
-  const saved = JSON.parse(await readFile(receiptPath, 'utf8'))
+  const saved = JSON.parse(await readFile(ctxmuxOwnerReceiptPath(socket, identity, plan.candidate.manifestSha256), 'utf8'))
+  assert.equal(JSON.parse(await readFile(legacyReceiptPath, 'utf8')).daemonInstanceId, initialIdentity.daemonInstanceId)
   assert.equal(saved.daemonPath, outcome.daemonPath); assert.equal(saved.stateDirectory, state)
   assert.equal(saved.daemonSha256, await digest(join(candidateRoot, 'bin/ctxmuxd')))
   const newSdk = await import(pathToFileURL(plan.newSdk).href); client = new newSdk.CtxmuxClient({ socketPath: socket })
