@@ -6,11 +6,6 @@
 .channel-metadata button[aria-pressed="true"] { color: var(--green); background: var(--surface-2); }
 .channel-metadata__body > ul { list-style: none; margin: 8px 0; padding: 0; }
 .channel-metadata li { padding: 12px 0; border-bottom: 1px solid var(--line-soft); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.channel-metadata__identity { display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1 1 190px; }
-.channel-metadata__identity > div { display: grid; gap: 4px; min-width: 0; }
-.channel-metadata__identity img { border-radius: 50%; object-fit: cover; flex: 0 0 auto; }
-.channel-metadata__avatar { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; flex: 0 0 auto; border-radius: 50%; color: var(--text-3); background: var(--surface-2); }
-.channel-metadata__identity strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
-.channel-metadata__identity code, .channel-metadata__identity small { color: var(--text-3); overflow-wrap: anywhere; font-size: 11px; }
+.channel-metadata__identity { display: grid; gap: var(--sp-2); min-width: 0; flex: 1 1 190px; }
 .channel-metadata__status { display: flex; align-items: center; gap: 6px; padding-top: 10px; }
 .channel-metadata__issue { color: var(--amber) !important; padding-top: 10px; }

@@ -1,3 +1,4 @@
+import { ConnectorAccountSummary } from './ConnectorEntityIdentity'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useRef, useState } from 'react'
 import { connectionSetupDecisionForAction, type ConnectionSetupAdvance, type ConnectionSetupAuthenticationAction, type ConnectionSetupConfigurationAction, type ConnectionSetupView } from '@agentmux/core/connections'
@@ -181,7 +182,7 @@ export function MoteProfileSetup({ operation, hostingTarget, automatic, onOperat
         <span className="mote-profile-activity__icon" aria-hidden="true">{working ? <LoadingIcon size={14} animation="spin" /> : checked && !retained ? <CompletedIcon size={14} /> : <RefreshIcon size={14} />}</span><span>{activity}</span>
       </div>
       {view?.challenge ? <div className="mote-bot-confirmation" data-mote-profile-code><BotSignInPrompt url={view.challenge.qrPayload} title="Sign in to manage this bot" platform={operation.connection?.application.domain === 'open.larksuite.com' ? 'Lark' : 'Feishu'} scanned={authentication?.stage === 'scanned'} /></div> : null}
-      {account ? <dl className="connector-management__account" aria-label="Account and enterprise to confirm"><div><dt>Account</dt><dd>{account.userName ?? account.userId}</dd></div><div><dt>Enterprise</dt><dd>{account.tenantName ?? account.tenantId}</dd></div></dl> : null}
+      {account ? <ConnectorAccountSummary identityKey={JSON.stringify([hostingTarget, id])} account={account} label="Account and enterprise to confirm" /> : null}
       {publication?.review && (publication.review.changes.length || publication.review.issues.length) ? <section className="mote-profile-checks" aria-label="Publication checks"><div><strong>{publication.review.changes.length ? 'Review the other pending changes' : 'Publication checks'}</strong>{publication.review.changes.length ? <p>Publishing includes these application changes along with this profile update. Confirm the complete version before continuing.</p> : null}
         {publication.review.changes.map(change => <div key={change.category}><strong>{change.category}</strong><ul>{change.details.map(detail => <li key={detail}>{detail}</li>)}</ul></div>)}
         <p>{publication.review.audience ? 'The complete current audience is kept.' : 'The current audience is not confirmed yet.'} Candidate version: {publication.draft?.kind === 'create-version' ? publication.draft.version : 'Not confirmed'}.</p>

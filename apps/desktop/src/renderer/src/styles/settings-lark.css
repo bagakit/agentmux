@@ -23,9 +23,6 @@
 .lark-settings .connector-management .bot-task-heading { gap: var(--sp-2); }
 .lark-settings .connector-management .bot-task-heading .connector-editor-title { font-size: var(--fs-title); letter-spacing: -.015em; line-height: 1.4; }
 .lark-settings .connector-management .bot-task-heading > p { font-size: var(--fs-meta); line-height: 1.6; }
-.lark-settings .connector-management__account--confirmed { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-6); padding: 0; border: 0; }
-.lark-settings .connector-management__account--confirmed > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2); }
-.lark-settings .connector-management__account--confirmed dd { margin: 0; font-size: var(--fs-meta); }
 .lark-settings .connector-management > .connector-enrollment__action:empty { display: none; }
 .lark-settings .connector-guided-task { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-4); padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
 .lark-settings .connector-guided-task > div > strong { font-size: var(--fs-body); line-height: 1.5; }

@@ -3,11 +3,12 @@ import { useEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import type { ConnectionRecord, RoomGetResult, RoomListResult, RoomMembersResult, RoomSummary } from '@agentmux/core/connections'
+import { channelMetadataSubjectKey, type ChannelMetadataSubject, type ConnectionActor, type ConnectionRecord, type RoomGetResult, type RoomListResult, type RoomMembersResult, type RoomSummary } from '@agentmux/core/connections'
 import { api } from '../lib/api'
 import { SelectionField } from './SelectionField'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { ConnectorEntityIdentity, ConnectorIdentityField } from './ConnectorEntityIdentity'
+import { useConnectorEntityProfiles } from '../lib/use-connector-room-name'
 
 const LoadingIcon = semanticIconComponent('status.loading')
 const RefreshIcon = semanticIconComponent('action.refresh')
@@ -58,7 +59,7 @@ export function ConnectorRoomSelection({ connection, value, onChange, disabled, 
 }
 
 /** Exact visible room only. Changing the application, revision or room releases this read window. */
-export function useConnectorRoomFacts(connection: Connection | undefined, externalConversationId: string, hostingTarget?: ConnectionHostingTarget | null) {
+export function useConnectorRoomFacts(connection: Connection | undefined, externalConversationId: string, hostingTarget?: ConnectionHostingTarget | null, visibleActors: readonly ConnectionActor[] = []) {
   const identity = JSON.stringify([connection?.config.connectionId, connection?.revision, externalConversationId, hostingTarget])
   const [read, setRead] = useState<{ identity: string; room: RoomGetResult | null; people: RoomMembersResult | null; issue: string } | null>(null)
   const current = useRef(identity), flight = useRef<object | null>(null), [pending, setPending] = useState(false)
@@ -78,7 +79,14 @@ export function useConnectorRoomFacts(connection: Connection | undefined, extern
     } finally { if (flight.current === request) flight.current = null; if (current.current === original && occurrence.current === originalOccurrence) setPending(false) }
   }
   useEffect(() => { current.current = identity; occurrence.current = {}; void refresh(); return () => { current.current = ''; occurrence.current = {}; flight.current = null } }, [identity])
-  return { ...(read?.identity === identity ? read : { room: null, people: null, issue: '' }), pending, refresh }
+  const facts = read?.identity === identity ? read : { room: null, people: null, issue: '' }
+  const subjects: ChannelMetadataSubject[] = connection && externalConversationId ? [
+    { kind: 'conversation', externalConversationId },
+    ...visibleActors.filter(actor => actor.application.domain === connection.config.application.domain && actor.application.appId === connection.config.application.appId).map(actor => ({ kind: 'actor' as const, actor })),
+    ...(facts.people?.members ?? []).map(member => ({ kind: 'actor' as const, actor: { application: connection.config.application, idType: member.idType, userId: member.userId } }))
+  ] : []
+  const profiles = useConnectorEntityProfiles(connection?.config ?? null, subjects, hostingTarget)
+  return { ...facts, identity, profiles, pending, refresh }
 }
 
 /** Current native metadata stays separate from the name frozen in a creation request. */
@@ -86,15 +94,11 @@ export function ConnectorRoomOverview({ facts, groupId, requestedName }: {
   facts: ReturnType<typeof useConnectorRoomFacts>; groupId: string; requestedName?: string | undefined
 }) {
   const room = facts.room?.room, observation = facts.room?.observation
-  const [feedback, setFeedback] = useState('')
-  useEffect(() => setFeedback(''), [groupId])
+  const profile = facts.profiles.get(channelMetadataSubjectKey({ kind: 'conversation', externalConversationId: groupId }))?.observation?.profile
   return <div className="agent-connector-room-overview" aria-busy={facts.pending}>
-    <div className="agent-connector-section-title"><div className="agent-connector-group-identity">
-      <strong className="agent-connector-group">{room?.name ?? 'Group name not confirmed'}</strong>
-
-    </div><button type="button" className="agent-connector-text-action agent-connector-room-refresh" aria-label="Refresh group details" title="Refresh group details" disabled={facts.pending} onClick={() => void facts.refresh()}>
+    <ConnectorEntityIdentity identityKey={facts.identity} kind="group" name={room?.name ?? profile?.name} avatarUrl={profile?.avatarUrl} missingName="Group name not confirmed" actions={<button type="button" className="agent-connector-text-action agent-connector-room-refresh" aria-label="Refresh group details" title="Refresh group details" disabled={facts.pending} onClick={() => void facts.refresh()}>
       {facts.pending ? <LoadingIcon size={13} animation="spin" /> : <RefreshIcon size={14} />}
-    </button></div>
+    </button>} />
     {facts.pending ? <p className="agent-connector-note" role="status">Reading group details…</p> : null}
     {observation && observation.state !== 'ready' ? <p className="agent-connector-note" role="status">
       {observation.reason === 'permission-denied' ? 'This bot cannot read the group details. Review its application permissions.' : observation.reason === 'room-unavailable' ? 'The platform could not find an accessible group for this bot.' : 'Current group details could not be confirmed. Check this original group again.'}
@@ -106,8 +110,7 @@ export function ConnectorRoomOverview({ facts, groupId, requestedName }: {
       <span>{room.membershipApproval === 'required' ? 'Approval required to join' : room.membershipApproval === 'not-required' ? 'No approval required to join' : 'Join approval policy not confirmed'}</span>
     </div> : null}
     {facts.issue ? <p className="agent-connector-note" role="status">The group and member refresh could not complete. Earlier observed details are kept. {facts.issue}</p> : null}
-    <details className="agent-connector-disclosure"><summary>Group identity</summary><div className="agent-connector-fields"><code>{groupId}</code><button type="button" className="agent-connector-text-action" onClick={() => void copyTextToClipboard(groupId, error => setFeedback(presentError(error))).then(copied => { if (copied) setFeedback('Group ID copied.') })}>Copy group ID</button></div></details>
-    {feedback ? <p className="agent-connector-note" role="status">{feedback}</p> : null}
+    <details className="agent-connector-disclosure"><summary>Group identity</summary><ConnectorIdentityField identityKey={facts.identity} label="Group ID" value={groupId} /></details>
   </div>
 }
 
@@ -116,10 +119,14 @@ export function ConnectorRoomPeople({ facts, onSelect, prominent = false }: { fa
   const body = <div className="agent-connector-fields">
     <p className="agent-connector-note">{onSelect ? 'Choose a member to set their access to this Agent.' : 'Your own membership is not verified here. Joining the group and permission to use this Agent are separate.'}</p>
     {facts.pending ? <p className="agent-connector-note" role="status"><LoadingIcon size={14} animation="spin" /> Reading this group…</p> : null}
-    {people?.observation.state === 'ready' ? people.members.length ? people.members.map(member => <div className="agent-connector-person" key={JSON.stringify([member.idType, member.userId])}>
-      <span><strong>{member.name ?? member.userId}</strong><small>{member.idType} · {member.userId}</small></span>
+    {people?.observation.state === 'ready' ? people.members.length ? people.members.map(member => {
+      const subject: ChannelMetadataSubject | undefined = people.application ? { kind: 'actor', actor: { application: people.application, idType: member.idType, userId: member.userId } } : undefined
+      const profile = subject ? facts.profiles.get(channelMetadataSubjectKey(subject))?.observation?.profile : undefined
+      const identityKey = JSON.stringify([facts.identity, member.idType, member.userId])
+      return <div className="agent-connector-person" key={JSON.stringify([member.idType, member.userId])}>
+      <div><ConnectorEntityIdentity identityKey={identityKey} kind="person" name={profile?.name ?? member.name} avatarUrl={profile?.avatarUrl} missingName="Group member" compact /><ConnectorIdentityField identityKey={identityKey} label={member.idType} value={member.userId} compact /></div>
       {onSelect ? <button className="small-button" onClick={() => onSelect(member.idType, member.userId)}>Choose</button> : null}
-    </div>) : <p className="agent-connector-note">No people were returned by the application.</p> : <p role="status" className="agent-connector-note">Group members are not confirmed.</p>}
+    </div>}) : <p className="agent-connector-note">No people were returned by the application.</p> : <p role="status" className="agent-connector-note">Group members are not confirmed.</p>}
     {facts.issue ? <p role="status" className="surface-inline-error">{facts.issue}</p> : null}
     {people?.next ? <button className="agent-connector-text-action" disabled={facts.pending} onClick={() => void facts.refresh(people.next!)}>More people</button> : null}
     <button className="agent-connector-text-action" disabled={facts.pending} onClick={() => void facts.refresh()}>Check group and members</button>
