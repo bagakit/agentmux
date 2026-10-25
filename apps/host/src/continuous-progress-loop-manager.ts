@@ -57,7 +57,7 @@ export class ContinuousProgressLoopManager {
   private readonly initialDeliveries = new Map<string, AbortController>()
   private readonly activations = new Map<string, Set<AbortController>>()
   private activeDelivery: { loopId: string; controller: AbortController } | undefined
-  private readonly disposeGoals: (() => void) | undefined
+  private disposeGoals: (() => void) | undefined
   private readonly mutations = new Map<string, Promise<unknown>>()
   private readonly progressActions = new Map<string, { input: import('@agentmux/core').AgentProgressParams['agent.progress.action']; result: Promise<ContinuousProgressLoop> }>()
   constructor(private readonly store: ContinuousProgressLoopStore, private readonly onTick: LoopTickHandler, private readonly now: (() => number) = Date.now, private readonly observe: LoopObservationProvider, private readonly futureInputs?: FutureProgressInputOwner, private readonly goals?: GoalProgressOwner) {
@@ -75,7 +75,15 @@ export class ContinuousProgressLoopManager {
       }
     })
   }
-  start(): Promise<void> { return this.started ??= this.startOnce() }
+  start(): Promise<void> {
+    if (this.started) return this.started
+    const starting = this.startOnce().catch(error => {
+      if (this.started === starting) this.started = undefined
+      throw error
+    })
+    this.started = starting
+    return starting
+  }
   private async startOnce(): Promise<void> {
     this.scheduler.restore((await this.store.load()).map((loop) => loop.pendingCompletion && loop.status === 'active'
       ? { ...loop, status: 'paused', lastOutcome: 'unknown' } : loop))
@@ -84,10 +92,12 @@ export class ContinuousProgressLoopManager {
     if (!this.timer) this.timer = setInterval(() => { void this.check().catch(() => {}) }, 1000)
   }
   async stop(): Promise<void> {
-    if (!this.started) return
-    try { await this.started } catch { return }
-    this.running = false
     this.disposeGoals?.()
+    this.disposeGoals = undefined
+    const starting = this.started
+    if (!starting) return
+    try { await starting } catch { return }
+    this.running = false
     this.activeDelivery?.controller.abort()
     for (const controller of this.initialDeliveries.values()) controller.abort()
     if (this.timer) clearInterval(this.timer)
@@ -395,7 +405,8 @@ export class ContinuousProgressLoopManager {
         const original = this.list().find(loop => loop.creationOperationId === p.operationId)
         if (original) {
           if (!matches(original) || original.intervalMs !== p.intervalMs || original.prompt !== p.prompt || JSON.stringify(original.taskSource) !== JSON.stringify(p.taskSource)) throw new AgentMuxError('The original progress creation belongs to another exact intent.', 'CONTROL_REQUEST_CONFLICT')
-          return { loop: original, diskDurability: 'confirmed' as const }
+          await this.persist(original.loopId)
+          return { loop: this.require(original.loopId), diskDurability: 'confirmed' as const }
         }
         const observed = await this.observe({ ...target, loopId: p.operationId, intervalMs: p.intervalMs, prompt: p.prompt, nextCheckAt: this.now(), status: 'paused' }, p.operationId, this.now(), context.signal ?? new AbortController().signal)
         if (observed.inputOccupied) throw new AgentMuxError('Your original explicit input intent pauses automatic progress. Manual input remains available.', 'CONTROL_REQUEST_CONFLICT')
