@@ -1,3 +1,4 @@
+import { createExecutionBindingApi } from '../../../src/preload/execution-binding'
 const { contextBridge, ipcRenderer } = require('electron')
 const subscribe = channel => listener => {
   const relay = (_event, value) => listener(value)
@@ -5,6 +6,7 @@ const subscribe = channel => listener => {
   return () => ipcRenderer.removeListener(channel, relay)
 }
 contextBridge.exposeInMainWorld('spaceBoundary', {
+  execution: createExecutionBindingApi(ipcRenderer),
   request: (operation, ...args) => ipcRenderer.invoke('space-proof:request', operation, ...args),
   onEvent: subscribe('agentmux:session-event'),
   onSpatialChange: subscribe('space-proof:spatial-changed'),
