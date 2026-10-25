@@ -45,7 +45,7 @@ function controller(hosts: ReturnType<typeof host>[]) {
   const value = new ActualController()
   value.hosts = new Map(hosts.map(host => [host.config.id, host]))
   value.connectEndpointInBackground = vi.fn()
-  value.trackHostLifecycleOperation = (_: string, action: () => unknown) => action()
+  value.trackHostOperation = (_: string, action: () => unknown) => action()
   value.connectedClient = async (id: string) => value.hosts.get(id).client
   value.sessionByTarget = async () => { throw new Error('Projection unavailable') }
   return value

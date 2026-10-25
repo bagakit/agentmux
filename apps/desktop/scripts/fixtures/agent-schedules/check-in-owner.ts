@@ -33,7 +33,7 @@ catch (error) {
 // Only the original configured Executor fields are consumed by this read.
 const config = { executors: { [provider.id]: { providerId: provider.id, label: provider.label, command: process.execPath, args: [], env: {} } } } as unknown as AppConfig
 const runtime = Object.assign(Object.create(RuntimeController.prototype), { hosts: new Map([['local', { client }]]), progressInputObserver: async () => false,
-  connectedClient: async () => client, trackHostLifecycleOperation: async (_host: string, work: () => Promise<unknown>) => work() }) as RuntimeController
+  connectedClient: async () => client, trackHostOperation: async (_host: string, work: () => Promise<unknown>) => work() }) as RuntimeController
 let now = Number(process.env.SCHEDULE_PROBE_NOW)
 const loops = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(state, 'loops.json')), async (...args) => {
   const outcome = await deliverContinuousProgress(runtime, ...args)

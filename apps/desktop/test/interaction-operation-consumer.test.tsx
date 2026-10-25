@@ -22,7 +22,7 @@ async function fixture() {
   useAppStore.setState({ sessions: [session], agentSteerQueues: {}, agentComposerDrafts: { [AGENT_SESSION_ID]: 'Retain this draft' } })
   // The configured host is the test seam; actual lifecycle tracking and response forwarding stay real.
   const runtime = Object.create(RuntimeController.prototype) as RuntimeController
-  Object.assign(runtime, { hostReconfigurationReservations: new Map(), hostLifecycleOperations: new Map(), configuredClient: () => h.client })
+  Object.assign(runtime, { hostReconfigurationReservations: new Map(), hostOperations: new Map(), configuredClient: () => h.client })
   const inspect = vi.spyOn(api.sessions, 'inspectInteraction').mockImplementation((control, operationId) => runtime.inspectInteraction(control, operationId))
   const respond = vi.spyOn(api.sessions, 'respondInteraction').mockImplementation((control, response, intent) => runtime.respondInteraction(control, response, intent))
   const submit = vi.spyOn(useAppStore.getState(), 'respondInteraction')

@@ -7,7 +7,7 @@ import type { Terminal as BrowserTerminal } from '@xterm/xterm'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { RuntimeEvent, SessionAttachResult, SessionSnapshot } from '../src/shared/contracts'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
-import { AgentMuxClient } from '@agentmux/core'
+import { AgentMuxClient, AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { recoverTerminalRetainedOutput, terminalHistoryBoundary } from '@agentmux/client-ui/terminal/replay'
 import type { SessionReplayResult } from '../src/shared/contracts'
@@ -117,11 +117,13 @@ vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
 vi.mock('../src/renderer/src/store', () => {
   const state = {
     config: null, regionCaretFocus: null,
+    sessions: [], tabs: {}, layouts: {}, demands: {}, localHome: '',
+    spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {},
     noticeReadReceipts: {},
     clearRegionCaretFocus: vi.fn(), recoverSession: vi.fn(),
     openHttpLink: vi.fn(), openFile: vi.fn(), reportError: vi.fn()
   }
-  return { useAppStore: Object.assign((select: (value: typeof state) => unknown) => select(state), {
+  return { currentCoreSpatialGraph: () => null, useAppStore: Object.assign((select: (value: typeof state) => unknown) => select(state), {
     getState: () => state,
     setState: (update: Partial<typeof state> | ((value: typeof state) => Partial<typeof state>)) => {
       Object.assign(state, typeof update === 'function' ? update(state) : update)
@@ -144,6 +146,8 @@ const session: SessionSnapshot = {
 }
 const linkOrigin = { workspaceId: 'workspace', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }
 let root: Root | null = null
+const controllers: RuntimeController[] = []
+const cores: AgentMuxClient[] = []
 
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -169,6 +173,8 @@ beforeEach(() => {
   root = createRoot(container)
 })
 afterEach(async () => {
+  for (const controller of controllers.splice(0)) controller.resourceSampler.dispose()
+  for (const core of cores.splice(0)) await core.dispose()
   await act(async () => root?.unmount())
   root = null
   document.body.replaceChildren()
@@ -184,22 +190,26 @@ vi.mock('@agentmux/client-ui/terminal/live-output', async (original) => {
 const control = session.control
 function controllerFixture(readRunReplay: ReturnType<typeof vi.fn>) {
   const key = JSON.stringify([control.hostId, control.run.runId])
-  const client: AgentMuxClient = Object.assign(Object.create(AgentMuxClient.prototype), {
-    connected:true, runPids:new Map(), endedRuns:new Map(),
-    registry:{isRetiredRun:()=>false,findByRun:()=>undefined},
-    kernel:{isConnected:()=>true,replay:async (runId:string,afterByte:number) => {
+  const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
+  cores.push(client)
+  Object.assign((client as any).kernel, {
+    isConnected:()=>true,replay:async (runId:string,afterByte:number) => {
       const result=await readRunReplay({runId},afterByte)
       return {...result,run:{...result.run,pid:42,state:{type:'running'},cols:80,rows:24,latestOutputBytes:result.replay.at(-1)?.endByte ?? afterByte}}
-    }},
+    }
+  })
+  Object.assign(client, { connected:true,
     resizeTerminal:vi.fn(async (_run,cols,rows)=>({cols,rows})),
-    writeTerminal:vi.fn(async()=>({acceptedThroughByte:5})), runtimeIdentity:()=>({instanceId:'owner'}),
+    writeTerminalBytes:vi.fn(async()=>({acceptedThroughByte:5})), runtimeIdentity:()=>({instanceId:'owner'}),
     releaseRunAttachment:vi.fn(async()=>{})
   })
   // The actual production method executes; fixture only supplies its established lease and Core.
-  const controller: RuntimeController = Object.assign(Object.create(RuntimeController.prototype), {
+  const controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), async () => { throw Error('The original fixture client is already configured') })
+  controllers.push(controller)
+  Object.assign(controller, {
     sessionAttachmentOwners: new Map([[key, { control, controlIdentity: '', attachmentIds: new Set(['attachment-retained']) }]]),
     sessionAttachmentLeases: new Map([['attachment-retained', { key, webContentsId: 7 }]]),
-    sessionAttachmentTails: new Map(), sessionReplayReads: new Map(), terminalInputTails:new Map(), terminalInputCursors:new Map([[key,0]]), connectedClient: vi.fn(async () => client)
+    sessionAttachmentTails: new Map(), sessionReplayReads: new Map(), connectedClient: vi.fn(async () => client)
   })
   return { controller,client,key }
 }
@@ -419,7 +429,7 @@ it('binds replay to the current lease, refuses a different renderer/Run and keep
   expect(await busy).toMatchObject({message:expect.stringContaining('still pending')})
   expect(await controller.resizeSessionAttachment(7,'attachment-retained',90,30)).toEqual({cols:90,rows:30})
   await controller.write(control,'input','user')
-  expect(client.writeTerminal).toHaveBeenCalledWith(control.run,expect.objectContaining({data:'input',expectedByte:0}))
+  expect(client.writeTerminalBytes).toHaveBeenCalledWith(control.run,'input',undefined)
   expect(client.resizeTerminal).toHaveBeenCalledWith(control.run,90,30)
   expect(readRunReplay).toHaveBeenCalledOnce()
   settle(replay(full,0)); await pending
