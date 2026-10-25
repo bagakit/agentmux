@@ -155,3 +155,14 @@ it('preserves typed Provider notices through actual RPC service and strict resul
   }
   expect(() => parseAgentExecutionInspection({ ...value, notices: [...value.notices!, ...value.notices!] }, key)).toThrow()
 })
+
+
+it('roundtrips connected bindings with exact scoped local diagnostics without private payloads', () => {
+  const operation = { bindingId: input.bindingId, streamGeneration: 'original', nativeRequestId: '1' }
+  const diagnostic = { scope: 'operation', side: 'executor', runId: 'original-helper', generation: 'original', operation, code: 'RESPONSE_STORAGE_UNCONFIRMED', message: 'Original response not committed' }
+  const value = { ...inspection, diagnostics: [diagnostic, { scope: 'unclassified', code: 'OLD', message: 'Original unscoped issue' }] }
+  expect(parseAgentExecutionInspection(value, key)).toEqual(value)
+  for (const wrong of [{ ...diagnostic, side: 'frontend' }, { ...diagnostic, operation: undefined }, { ...diagnostic, runId: '' }, { ...diagnostic, scope: 'guessed' }, { ...diagnostic, operation: { ...operation, bindingId: 'wrong' } }, { ...diagnostic, result: 'private' }]) {
+    expect(() => parseAgentExecutionInspection({ ...inspection, diagnostics: [wrong] }, key)).toThrow()
+  }
+})

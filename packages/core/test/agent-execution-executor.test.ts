@@ -15,7 +15,7 @@ vi.mock('node:child_process', async importOriginal => {
   return { ...actual, spawn: vi.fn(actual.spawn) }
 })
 
-type Frame = { type: string; generation: string; code?: string; payload?: { id?: number; method?: string; result?: Record<string, unknown>; error?: { code: number } } }
+type Frame = { type: string; state?: string; generation: string; scope?: string; operation?: import('../src/agent-execution-journal.js').AgentExecutionOperationKey; code?: string; payload?: { id?: number; method?: string; result?: Record<string, unknown>; error?: { code: number } } }
 const cleanup: (() => Promise<void>)[] = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
@@ -170,10 +170,12 @@ describe('resource executor original native stream', () => {
     const h = await fixture(); await h.initialize()
     const complete = vi.spyOn(h.journal, 'complete').mockRejectedValueOnce(new Error('storage unavailable'))
     h.send(1, 'save')
-    await h.wait(frame => frame.code === 'RESPONSE_STORAGE_UNCONFIRMED')
+    expect(await h.wait(frame => frame.code === 'RESPONSE_STORAGE_UNCONFIRMED')).toMatchObject({ scope: 'operation', operation: { bindingId: 'fixed-binding', streamGeneration: 'original', nativeRequestId: 1 } })
+    expect(h.frames.some(frame => frame.type === 'operation-completed' && frame.operation?.nativeRequestId === 1)).toBe(false)
     expect(h.frames.some(frame => frame.type === 'response' && frame.payload?.id === 1)).toBe(false)
     h.send(1, 'save'); expect((await h.reply(1)).payload!.result!.count).toBe(1)
     expect(complete).toHaveBeenCalledTimes(2)
+    expect(h.frames.filter(frame => frame.type === 'operation-completed' && frame.operation?.nativeRequestId === 1)).toEqual([{ type: 'operation-completed', generation: 'original', operation: { bindingId: 'fixed-binding', streamGeneration: 'original', nativeRequestId: 1 } }])
     expect(await readFile(h.effects, 'utf8')).toBe('effect\n')
   })
   it('allows a new generation only after original socket close while old child and late response stay original', async () => {

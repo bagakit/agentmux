@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { AgentExecutionBridge, type AgentExecutionBridgePort, type AgentExecutionBridgeState } from '../src/agent-execution-bridge.js'
+import { AgentExecutionBridge, type AgentExecutionBridgePort, type AgentExecutionBridgeState, type AgentExecutionBridgeConnection } from '../src/agent-execution-bridge.js'
 import type { AgentMuxRunInputOperation } from '../src/types.js'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
 
@@ -27,6 +27,7 @@ it('delivers one large original JSON frame through real Core/SDK Input chunks af
       snapshots => snapshots.every(snapshot => snapshot.replay.some(chunk => chunk.data.includes('ready'))), 'both original raw helper PTYs')
     const ownerInstanceId = client.runtimeIdentity().instanceId
     let saved: AgentExecutionBridgeState = { bindingId: randomUUID(), frontend: { runId: source.runId, ownerInstanceId, inputByte: 0, outputByte: 0 }, executor: { runId: sink.runId, ownerInstanceId, inputByte: 0, outputByte: 0 } }
+    const connections: { side: string; value: AgentExecutionBridgeConnection }[] = []
     const attempts: AgentMuxRunInputOperation[] = [], replayRanges: { start: number; end: number; bytes: number }[] = [], errors: Error[] = []
     let loseAck = true
     const port = (): AgentExecutionBridgePort => new Proxy(client, { get(target, property) {
@@ -46,6 +47,7 @@ it('delivers one large original JSON frame through real Core/SDK Input chunks af
     } }) as unknown as AgentExecutionBridgePort
     const make = () => new AgentExecutionBridge({ state: saved, ports: { frontend: port(), executor: port() },
       persist: async next => { await writeFile(savedPath, JSON.stringify(next)); saved = structuredClone(next) },
+      onConnection: (side, value) => { connections.push({ side, value }) },
       onFrame: async (_side, frame) => { frames.push(frame) }, onError: error => { errors.push(error) } })
     bridge = make(); await bridge.start()
     const start = saved.frontend.outputByte
@@ -78,6 +80,20 @@ it('delivers one large original JSON frame through real Core/SDK Input chunks af
     expect(saved.frontend.outputByte).toBe(start + transported.byteLength)
     expect(saved.executor.inputByte).toBe(transported.byteLength)
     expect(errors).toHaveLength(1)
+    expect(connections.filter(value => value.side === 'frontend').at(-1)?.value).toMatchObject({ runId: source.runId, process: 'running', reader: 'attached' })
+    expect(connections.filter(value => value.side === 'executor').at(-1)?.value).toMatchObject({ runId: sink.runId, process: 'running', reader: 'attached' })
+    const unrelated = await client.createTerminal({ workspacePath: scope.root, command: process.execPath, createOperationId: randomUUID(), args: ['-e', 'setInterval(()=>{},1000)'] })
+    runs.push({ runId: unrelated.runId })
+    const count = connections.length
+    await client.stopTerminal({ runId: unrelated.runId })
+    expect((await client.runtimeSubject({ runId: unrelated.runId })).run.state).toBe('exited')
+    runs.splice(runs.findIndex(run => run.runId === unrelated.runId), 1)
+    expect(connections).toHaveLength(count)
+    await client.stopTerminal({ runId: sink.runId })
+    await until(() => connections.filter(value => value.side === 'executor').at(-1)?.value, value => value?.process === 'exited' || value?.process === 'removed', 'exact original helper exit without new protocol output')
+    expect((await client.runtimeSubject({ runId: sink.runId })).run.state).toBe('exited')
+    runs.splice(runs.findIndex(run => run.runId === sink.runId), 1)
+    expect(connections.filter(value => value.side === 'frontend').at(-1)?.value.process).toBe('running')
   } finally {
     await bridge?.close()
     const failures: unknown[] = []
