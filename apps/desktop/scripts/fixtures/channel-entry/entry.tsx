@@ -46,6 +46,7 @@ const composerNames = ['Research and Engineering - customer investigation and re
 const popoverClarity = new URLSearchParams(location.search).has('popover-clarity')
 const refusalClarity = new URLSearchParams(location.search).has('refusal-clarity')
 const questionValidation = new URLSearchParams(location.search).has('question-validation')
+const groupClarity = new URLSearchParams(location.search).has('group-clarity')
 const groupDetails = new URLSearchParams(location.search).has('group-details')
 const connectorDetails = new URLSearchParams(location.search).has('connector-details-modern')
 const entityOverview = new URLSearchParams(location.search).has('entity-overview')
@@ -65,7 +66,7 @@ const hostingTarget: ConnectionHostingTarget = { hostId: 'preview-bot-host', run
 const target = { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
 const headerStatus = new URLSearchParams(location.search).has('header-status')
 type Scenario = 'unbound' | 'owner-failure' | 'attention' | 'mixed' | 'unsupported' | 'healthy'
-const proof = { profileStale: false, syncOff: false, ready: false, omitOriginal: false, accessUnavailable: false, status: 'normal' as 'normal' | 'attention' | 'unavailable', scenario: 'unbound' as Scenario,
+const proof = { clarityPaused: false, clarityRepliesOnly: false, clarityMulti: false, clarityNoAvatar: false, clarityJoinUnknown: false, profileStale: false, syncOff: false, ready: false, omitOriginal: false, accessUnavailable: false, status: 'normal' as 'normal' | 'attention' | 'unavailable', scenario: 'unbound' as Scenario,
   lastDiagnosis: null as ConnectionDiagnosis | null,
   calls: [] as string[], targets: [] as (ConnectionHostingTarget | undefined)[], errors: [] as string[],
   requests: [] as { method: string; input: unknown; owner: ConnectionHostingTarget | undefined }[],
@@ -73,11 +74,11 @@ const proof = { profileStale: false, syncOff: false, ready: false, omitOriginal:
   setTheme(appAppearance: 'light' | 'dark') { updateThemeSelection({ ...config.appearance, appAppearance }) },
   setScenario(value: Scenario) {
     proof.scenario = value; proof.status = value === 'attention' ? 'attention' : 'normal'
-    bindings = value === 'attention' || value === 'mixed' || value === 'unsupported' || value === 'healthy' ? (value === 'mixed' || value === 'unsupported' || value === 'healthy' ? [0] : [0, 1]).map((index): RoomBinding => ({ ...target, regionAnchor: { regionId: 'channel-preview-region' }, bindingId: 'preview-original-binding-' + index,
-      revision: 1, state: 'active', connectionId: connection.config.connectionId, application: connection.config.application,
+    bindings = value === 'attention' || value === 'mixed' || value === 'unsupported' || value === 'healthy' ? (proof.clarityMulti ? [0, 1] : value === 'mixed' || value === 'unsupported' || value === 'healthy' ? [0] : [0, 1]).map((index): RoomBinding => ({ ...target, regionAnchor: { regionId: 'channel-preview-region' }, bindingId: 'preview-original-binding-' + index,
+      revision: 1, state: proof.clarityPaused ? 'paused' : 'active', connectionId: connection.config.connectionId, application: connection.config.application,
       externalConversationId: index ? '456789012345678901' : room.externalConversationId,
-      scope: { input: 'mentions-and-replies', publication: refusalClarity ? 'future-native-user-facing' : 'future-shared-conversation' }, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } })) : []
-    useAppStore.setState({ connectorRoomIntents: value === 'attention' ? { [joinOperation.operationId]: {
+      scope: { input: 'mentions-and-replies', publication: refusalClarity || proof.clarityRepliesOnly ? 'future-native-user-facing' : 'future-shared-conversation' }, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } })) : []
+    useAppStore.setState({ connectorRoomIntents: value === 'attention' || groupClarity ? { [joinOperation.operationId]: {
       target, hostingTarget, method: 'connection.room.link.create', input: joinOperation.input, phase: 'may-have-dispatched'
     } } : {} })
     invalidateConnectorTarget(target)
@@ -141,7 +142,7 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   const sourceConnection = sharedAudiences && input.connectionId === secondConnection.config.connectionId ? secondConnection : connection
   const meta = { connectionId: sourceConnection.config.connectionId, connectionRevision: 1, application: sourceConnection.config.application,
     entry: { subject, cacheRevision: 'preview-cache', observation: { subject, state: 'observed', freshness: conversationSync || proof.profileStale ? 'stale' : 'current', profile: { name: conversationSync ? composerNames[sourceConnection === secondConnection ? 1 : 0] : groupDetails && proof.scenario === 'mixed' ? 'Research and Engineering · Customer investigation and release planning' : room.name,
-      ...(entityOverview || groupDetails ? { avatarUrl: observedGroupAvatar } : {}), observedAt: conversationSync ? 1 : Date.now() }, checkedAt: conversationSync ? 1 : Date.now() } } }
+      ...((entityOverview || groupDetails) && !proof.clarityNoAvatar ? { avatarUrl: observedGroupAvatar } : {}), observedAt: conversationSync ? 1 : Date.now() }, checkedAt: conversationSync ? 1 : Date.now() } } }
   if (method === 'connection.ls') return { connections: proof.omitOriginal ? [] : sharedAudiences ? [connection, secondConnection] : [connection] }
   if (method === 'connection.inspect') return { connection: sourceConnection, operation: null }
   if (method === 'connection.service.get') {
@@ -250,7 +251,7 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   if (method === 'connection.room.ls' || method === 'connection.room.search') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, observation: { state: 'ready' }, rooms: [room], next: null }
   if (method === 'connection.room.get') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, observation: { state: 'ready' }, room: { ...room, externalConversationId: input.externalConversationId } }
   if (method === 'connection.room.members') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, externalConversationId: input.externalConversationId, observation: { state: 'ready' }, members, next: null } satisfies RoomMembersResult
-  if (method === 'connection.room.link.inspect') return { operation: input.operationId === joinOperation.operationId ? structuredClone(joinOperation) : null }
+  if (method === 'connection.room.link.inspect') return { operation: input.operationId === joinOperation.operationId && !proof.clarityJoinUnknown ? structuredClone(joinOperation) : null }
   if (applicationAccess && method === 'connection.setup.ls') return { operations: [], next: null, support: { connectionRevision: 1, capabilities: [] } }
   if (applicationAccess && method === 'connection.profile.ls') return { operations: [], next: null }
   const actorMetadata = members.map(member => { const actor = { application: connection.config.application, idType: member.idType, userId: member.userId }; return { subject: { kind: 'actor', actor }, cacheRevision: 'preview-actor-' + member.userId, observation: { actor, state: 'observed', freshness: proof.profileStale ? 'stale' : 'current', profile: { name: member.name, observedAt: 1 }, checkedAt: 1 } } })
