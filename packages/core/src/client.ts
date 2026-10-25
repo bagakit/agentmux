@@ -83,7 +83,7 @@ import {
   type AgentProviderPromptExecutionContext
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
-import { normalizeNativeHook, releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation } from './hook-normalizer.js'
+import { normalizeNativeHook, releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation, nativeHookHasSubagentSubject } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn, resolveHookEventName } from './agent-hook-event.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
 import {
@@ -3384,6 +3384,9 @@ export class AgentMuxClient {
           try {
             const next = await this.registry.update(agentSessionId, expected.run, value => {
               if (!sameNativeHandle(value.nativeHandle, retained)) throw new AgentMuxError('The original failed source observation is stale.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+              // Failure to observe again cannot resolve an already confirmed conflict.
+              if (code !== 'AGENT_NATIVE_IDENTITY_AMBIGUOUS' && value.nativeSourceObservation &&
+                  sameRun(value.nativeSourceObservation.run, value.run) && value.nativeSourceObservation.state !== 'unknown') return value
               const observedAt = Math.max(Date.now(), value.updatedAt + 1), result = { ...value, updatedAt: observedAt,
                 nativeSourceObservation: { state: code === 'AGENT_NATIVE_IDENTITY_AMBIGUOUS' ? 'ambiguous' as const : 'unknown' as const,
                   run: { ...value.run }, observedAt, reason: 'current-main-unconfirmed' } }
@@ -7650,10 +7653,12 @@ export class AgentMuxClient {
         (activity.fact.state !== 'idle' || activity.invalidated || childrenUnconfirmed || !agentHasActiveSubagents(session.run.runId))) {
       const fact = structuredClone(activity.fact)
       if (activity.invalidated || childrenUnconfirmed || activity.admissionId !== session.promptCompletionAdmission?.submissionId ||
-          nativeTargetSourceUnconfirmed(session)) {
+          nativeTargetSourceUnconfirmed(session) && session.nativeSourceObservation?.state !== 'unknown') {
         delete fact.interruption
         return { ...fact, state: 'unknown' }
       }
+      // A failed history/source observation cannot withdraw an independently accepted live fact.
+      // Actual Hook source failures invalidate that exact live record at ingress instead.
       return fact
     }
     return undefined
@@ -9699,7 +9704,8 @@ export class AgentMuxClient {
     const provider = this.providers.get(session.providerId)
     const payload = envelope.payload ?? {}
     const eventName = resolveHookEventName(envelope.eventName, payload, provider.hook.eventNameSource) ?? 'unknown'
-    const transition = provider.hook.nativeSessionTransition?.(eventName, payload) === true
+    const transition = provider.hook.nativeSessionTransition?.(eventName, payload) === true &&
+      !nativeHookHasSubagentSubject(provider.hook, eventName, payload)
     if (!provider.hook.processNativeIdentity && !transition) return {}
     if (transition) this.hookNativeWitnesses.delete(session.run.runId)
     const nested = payload.extra && typeof payload.extra === 'object' ? payload.extra as Record<string, unknown> : {}
@@ -9831,6 +9837,8 @@ export class AgentMuxClient {
       try {
         next = await this.registry.update(session.agentSessionId, session.run, current => {
           if (!sameNativeHandle(current.nativeHandle, session.nativeHandle)) throw new AgentMuxError('Native binding changed while observing its Hook.', 'AGENT_NATIVE_CONFIRMATION_STALE')
+          if (state === 'unknown' && current.nativeSourceObservation && sameRun(current.nativeSourceObservation.run, current.run) &&
+              current.nativeSourceObservation.state !== 'unknown') return current
           if (current.nativeSourceObservation?.state === state && sameNativeHandle(current.observedNativeHandle, witnessTargetMismatch ? witness.handle : undefined) &&
             isDeepStrictEqual(current.nativeSourceObservation.candidates, witness.candidates)) return current
           const observedAt = Math.max(Date.now(), current.updatedAt + 1), next = { ...current,
@@ -9849,7 +9857,11 @@ export class AgentMuxClient {
         throw error
       }
       // Persisted source facts precede their diagnostic so clients can present the exact owner.
-      if (nativeTargetSourceUnconfirmed(next)) await this.invalidateRecoveryActivity(next, envelope.receiptId, next.nativeSourceObservation!.observedAt)
+      if (nativeTargetSourceUnconfirmed(next)) {
+        const live = this.nativeCurrentActivities.get(session.agentSessionId)
+        if (live?.runId === session.run.runId) live.invalidated = true
+        await this.invalidateRecoveryActivity(next, envelope.receiptId, next.nativeSourceObservation!.observedAt)
+      }
       this.publishSession(next)
       if (witness.reason === 'native-witness-unavailable' || witness.reason === 'native-main-ambiguous') this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
         code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: 'Native Hook identity could not be confirmed from this Run. The Run and input remain available; Refresh the native Session observation to retry.',
