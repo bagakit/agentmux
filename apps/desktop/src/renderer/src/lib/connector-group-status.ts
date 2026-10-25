@@ -37,7 +37,8 @@ function incomingStatus(report: GroupDiagnosis): string {
   const row = report.incoming.value?.rows[0]
   if (!report.incoming.value) return 'Reading unavailable'
   if (!row) return 'No events in this window'
-  const recorded = row.recording?.state === 'recorded' ? 'Conversation recorded' : row.recording?.state === 'refused' ? 'Message not recorded' : 'Recording unconfirmed'
+  if (row.scope === 'other-binding') return 'Earlier connection receipt · does not confirm this connection'
+  const recorded = row.kind === 'action' ? 'Group event' : row.recording?.state === 'recorded' ? 'Conversation recorded' : row.recording?.state === 'refused' ? 'Message not recorded' : 'Recording unconfirmed'
   if (!row.inputOperationId) return recorded + (row.state === 'refused' ? ' · ' + incomingRefusal(row.code).title : ' · no Agent submission recorded')
   if (row.coreObservation === 'unavailable') return recorded + ' · Agent submission observation unavailable'
   const status = row.coreStatus
@@ -50,7 +51,7 @@ export type ConnectorProblemKind = 'configuration-unconfirmed' | 'sync-off' | 'p
   'outgoing-unconfirmed' | 'outgoing-not-applied' | 'outgoing-read-unavailable' | 'incoming-read-unavailable' | 'member-access' | 'request-refused' | 'agent-waiting' | 'agent-stopped' | 'agent-not-applied' | 'agent-unconfirmed' | 'recording-unconfirmed'
 export type ConnectorProblemAction = { kind: 'members' | 'content' | 'receipts' | 'incoming'; label: string }
 export type ConnectorProblem = { kind: ConnectorProblemKind; title: string; detail: string; tone: 'warning' | 'muted'; action?: ConnectorProblemAction }
-export type ConnectorDirectionSummary = { direction: 'outgoing' | 'incoming'; title: string; value: string; detail: string; tone: 'neutral' | 'warning' | 'muted'; problem?: ConnectorProblemKind }
+export type ConnectorDirectionSummary = { direction: 'outgoing' | 'incoming'; title: string; value: string; detail: string; secondary?: string; tone: 'neutral' | 'warning' | 'muted'; problem?: ConnectorProblemKind }
 export type ConnectorGroupSummary = { problems: ConnectorProblem[]; outgoing: ConnectorDirectionSummary; incoming: ConnectorDirectionSummary; retained: boolean; note: string | null }
 export type ConnectorGroupAction = 'resume' | 'members' | 'sharing' | 'sync' | 'activity' | 'channel-settings'
 
@@ -81,7 +82,7 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
   if (report?.binding.value?.state === 'paused') add('sharing-paused', 'Group sharing is paused', 'The saved group and its original requests are kept.', 'muted')
   if (report?.connection.value?.enabled === false) add('bot-off', 'Bot is disabled', 'Enable this original bot in its settings to resume its automatic work.', 'muted')
   const out = report?.outgoing.value
-  const { contentGap, sourceUnconfirmed, accessUnconfirmed, counts } = outgoingFacts(out)
+  const { contentGap, sourceUnconfirmed, accessUnconfirmed, counts, confirmedText } = outgoingFacts(out)
   if (accessUnconfirmed) add('access-unconfirmed', 'Member access check unavailable', 'Application permissions could not be checked. Saved decisions are kept; review member access and check again.', 'muted', { kind: 'members', label: 'Member access' })
   if (contentGap) add('content-gap',
     'Some conversation content is not shared yet', 'Some original content is not confirmed for sharing. Other messages can still be delivered.', 'muted', { kind: 'content', label: 'View content details' })
@@ -90,13 +91,15 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
     counts.unconfirmed ? `${counts.unconfirmed} delivery result${counts.unconfirmed === 1 ? '' : 's'} not confirmed` : 'Earlier delivery results not confirmed', 'The platform has not confirmed these earlier requests. Recent confirmed deliveries are unaffected.', 'muted', { kind: 'receipts', label: 'View delivery details' })
   if (counts.notApplied) add('outgoing-not-applied', `${counts.notApplied} request${counts.notApplied === 1 ? '' : 's'} not delivered`, 'The original platform receipts report not applied. Check those exact requests.', 'warning', { kind: 'receipts', label: 'View delivery details' })
   const outgoing: ConnectorDirectionSummary = { direction: 'outgoing', title: 'Conversation → group',
-    value: !out ? report ? 'Could not check recent sends' : 'Not checked' : counts.notApplied ? `${counts.notApplied} request${counts.notApplied === 1 ? '' : 's'} not delivered` :
-      counts.unconfirmed ? 'Recent send results not confirmed' : counts.pending ? 'Sending recent requests' : counts.confirmed ? `${counts.confirmed} recent update${counts.confirmed === 1 ? '' : 's'} delivered` : out.deliveries.length ? 'Recent send results not recorded' : 'No recent requests',
-    detail: out ? `Original platform requests in this window${out.next ? '; more receipts available' : ''}.` : 'Check the original group to read its receipts.',
-    tone: !out ? 'muted' : counts.notApplied ? 'warning' : 'neutral', ...(counts.notApplied ? { problem: 'outgoing-not-applied' as const } : counts.unconfirmed ? { problem: 'outgoing-unconfirmed' as const } : {}) }
+    value: !out ? report ? 'Could not check recent sends' : 'Not checked' : contentGap ? 'Some conversation content is not shared yet' : counts.notApplied ? `${counts.notApplied} request${counts.notApplied === 1 ? '' : 's'} not delivered` :
+      counts.unconfirmed ? 'Recent send results not confirmed' : sourceUnconfirmed ? 'Source reading unconfirmed' : counts.pending ? 'Sending recent requests' : confirmedText || (out.deliveries.length ? 'Recent send results not recorded' : 'No recent requests'),
+    detail: out ? `Recent receipt window${out.next ? '; more receipts available' : ''}.` : 'Check the original group to read its receipts.',
+    ...(confirmedText && (contentGap || counts.notApplied || counts.unconfirmed || sourceUnconfirmed || counts.pending) ? { secondary: confirmedText } : {}),
+    tone: !out || contentGap || sourceUnconfirmed ? 'muted' : counts.notApplied ? 'warning' : 'neutral',
+    ...(contentGap ? { problem: 'content-gap' as const } : counts.notApplied ? { problem: 'outgoing-not-applied' as const } : counts.unconfirmed ? { problem: 'outgoing-unconfirmed' as const } : sourceUnconfirmed ? { problem: 'source-unconfirmed' as const } : {}) }
   const incoming = report?.incoming.value, row = incoming?.rows[0]
   let value = !incoming ? report ? 'Input check unavailable' : 'Not checked' : !row ? 'No events in this window' : 'Agent submission unconfirmed'
-  let detail = row ? row.recording?.state === 'recorded' ? 'Conversation recorded.' : 'Conversation recording unconfirmed.' : incoming ? 'This bounded window does not describe all group history.' : 'Check the original group to read its input receipts.'
+  let detail = row ? row.kind === 'action' ? row.inputOperationId ? 'Group action with an original Agent input receipt.' : 'Latest group event; no Agent input recorded.' : row.recording?.state === 'recorded' ? 'Conversation recorded.' : 'Conversation recording unconfirmed.' : incoming ? 'This bounded window does not describe all group history.' : 'Check the original group to read its input receipts.'
   let tone: ConnectorDirectionSummary['tone'] = !incoming ? 'muted' : 'neutral'
   let incomingProblem: ConnectorProblemKind | undefined
   if (report?.binding.value?.activeInputGrants === 0 && !report.binding.issue) add('member-access', 'No member has request access', 'Group recording and permission to ask the Agent are separate. Review member access explicitly.', 'warning', { kind: 'members', label: 'Member access' })
@@ -106,7 +109,7 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
     if (!row.inputOperationId) {
       const refusal = row.state === 'refused' ? incomingRefusal(row.code) : undefined
       value = refusal?.title ?? 'No Agent submission recorded'
-      if (refusal) { detail = refusal.detail; incomingProblem = 'request-refused'; add('request-refused', refusal.title, refusal.detail, 'warning', refusal.action) }
+      if (refusal) { detail = (row.scope === 'group-event' ? 'Latest group event. ' : '') + refusal.detail; incomingProblem = 'request-refused'; add('request-refused', refusal.title, detail, 'warning', refusal.action) }
       tone = row.state === 'refused' ? 'warning' : 'neutral'
     } else if (row.coreObservation === 'unavailable') { value = 'Agent receipt could not be checked'; incomingProblem = 'agent-unconfirmed'; add('agent-unconfirmed', value, 'The original input remains recorded; its current Agent receipt could not be read.') }
     else if (row.coreStatus === 'admitted') value = 'Accepted by Agent'
@@ -115,10 +118,8 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
     else if (row.coreStatus === 'not-applied') { value = 'Not delivered to Agent'; tone = 'warning'; incomingProblem = 'agent-not-applied'; add('agent-not-applied', value, 'Check the original input receipt.', 'warning') }
     else { value = row.coreStatus === 'terminal-confirmed' || row.coreStatus === 'bytes-accepted' ? 'Sent to Agent · awaiting confirmation' : 'Agent acceptance not confirmed'; incomingProblem = 'agent-unconfirmed'; add('agent-unconfirmed', value, 'Input transport or recording is separate from Agent acceptance.') }
   }
-  const otherResults = !counts.unconfirmed && out?.effectObservation?.state === 'unknown'
-  const unsettled = contentGap && otherResults ? 'Some conversation content and other request results still need checking.' :
-    contentGap ? 'Some conversation content is not confirmed for sharing.' : otherResults ? 'Other updates: delivery not confirmed.' : accessUnconfirmed ? 'Member access could not be checked; saved choices are kept.' : sourceUnconfirmed ? 'The conversation source could not be fully checked.' : null
-  const note = [unsettled, retained ? 'Earlier observations are kept; the latest check is incomplete.' : null].filter(Boolean).join(' ') || null
+  const remaining = problems.filter(problem => problem.kind !== outgoing.problem && problem.kind !== incomingProblem).map(problem => problem.title).join(' · ')
+  const note = [remaining, retained ? 'Earlier observations are kept; the latest check is incomplete.' : null].filter(Boolean).join(' ') || null
   return { problems, outgoing, incoming: { direction: 'incoming', title: 'Group → Agent', value, detail, tone, ...(incomingProblem ? { problem: incomingProblem } : {}) }, retained, note }
 }
 
@@ -128,13 +129,16 @@ function outgoingFacts(out: GroupDiagnosis['outgoing']['value'] | undefined) {
   const accessUnconfirmed = out?.observation?.reason === 'access-unconfirmed'
   const sourceUnconfirmed = !!out && (out.sourceObservation?.state !== 'ready' || out.observation?.state === 'unavailable' && out.observation.reason !== 'effect-unconfirmed' && !accessUnconfirmed)
   const counts = { confirmed: 0, unconfirmed: 0, pending: 0, notApplied: 0 }
+  const confirmed = { conversation: 0, permission: 0, 'binding-notice': 0 }
   for (const delivery of out?.deliveries ?? []) {
-    if (delivery.receipt === 'confirmed') counts.confirmed++
+    if (delivery.receipt === 'confirmed') { counts.confirmed++; confirmed[delivery.kind]++ }
     else if (delivery.receipt === 'unknown' || delivery.state === 'unknown') counts.unconfirmed++
     else if (delivery.receipt === 'not-applied' || delivery.state === 'not-applied') counts.notApplied++
     else if (delivery.state === 'pending' || delivery.state === 'dispatching') counts.pending++
   }
   const effects = [[counts.confirmed, 'confirmed'], [counts.unconfirmed, 'unconfirmed'], [counts.pending, 'pending'], [counts.notApplied, 'not applied']]
     .filter(([count]) => count).map(([count, label]) => `${count} ${label}`).join(' · ')
-  return { gapCount, contentGap, sourceUnconfirmed, accessUnconfirmed, counts, effects }
+  const confirmedText = [[confirmed.conversation, 'conversation update'], [confirmed.permission, 'permission request'], [confirmed['binding-notice'], 'connection notice']]
+    .filter(([count]) => count).map(([count, label]) => `${count} ${label}${count === 1 ? '' : 's'} delivered`).join(' · ')
+  return { gapCount, contentGap, sourceUnconfirmed, accessUnconfirmed, counts, effects, confirmedText }
 }
