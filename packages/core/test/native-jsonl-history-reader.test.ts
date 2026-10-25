@@ -29,6 +29,57 @@ async function openWithBudget(context: AgentProviderSessionHistoryContext, budge
 }
 const lines = (...ids: string[]) => ids.map((id) => JSON.stringify({ id, text: `exact 中 ${id}` })).join('\n') + '\n'
 
+it.each(['codex-index', 'claude-preamble'] as const)('reads successive %s metadata with IO proportional to the source and verified records', async (format) => {
+  const records = Array.from({ length: 1600 }, (_, index) => format === 'codex-index'
+    ? { id: `original-${index}`, thread_name: `Original conversation ${index} 中` }
+    : { type: 'progress', sessionId: 'original-main', uuid: `progress-${index}`, data: { type: 'hook_progress', elapsed: index } })
+  const bytes = records.map(record => JSON.stringify(record)).join('\n') + '\n'
+  const { context } = await fixture(bytes), budget = { bytesRead: 0, startedAt: Date.now() }
+  const reader = await openWithBudget(context, budget)
+  for (const record of records) expect((await reader.readNext())?.value).toEqual(record)
+  expect(await reader.readNext()).toBeNull()
+  await reader.verifyUnchanged()
+  // Delimiter discovery and JSON parsing each traverse the related source once;
+  // every original record still verifies the fresh 128-byte head and tail.
+  expect(budget.bytesRead).toBeLessThanOrEqual(Buffer.byteLength(bytes) * 2 + (records.length + 1) * 256)
+})
+
+it('shares forward delimiter blocks across header, large records and repeated exact reads without moving reverse paging', async () => {
+  const values = [{ id: 'header', source: 'cli' }, { id: 'large', text: '中🙂'.repeat(20_000) }, { id: 'tail', text: 'original tail' }]
+  const bytes = values.map(value => JSON.stringify(value)).join('\n') + '\n'
+  const { context } = await fixture(bytes), reader = await open(context)
+  expect(await reader.readFirst()).toEqual(values[0])
+  const header = (await reader.readNext())!
+  expect(header.value).toEqual(values[0])
+  expect((await reader.readNext())?.value).toEqual(values[1])
+  reader.repeatNext()
+  expect((await reader.readNext())?.value).toEqual(values[1])
+  expect((await reader.readAt(header.start))?.value).toEqual(values[0])
+  expect((await reader.readNext())?.value).toEqual(values[2])
+  expect(await reader.readNext()).toBeNull()
+  expect((await reader.readPrevious())?.value).toEqual(values[2])
+})
+
+it('keeps a cached forward snapshot fixed across append and gives a new reader the appended records', async () => {
+  const { context, path } = await fixture(lines('one', 'two')), reader = await open(context)
+  expect((await reader.readNext())?.value.id).toBe('one')
+  await appendFile(path, lines('three'))
+  expect((await reader.readNext())?.value.id).toBe('two')
+  expect(await reader.readNext()).toBeNull()
+  const newer = await open(context)
+  for (const id of ['one', 'two', 'three']) expect((await newer.readNext())?.value.id).toBe(id)
+  expect(await newer.readNext()).toBeNull()
+})
+
+it.each(['replace', 'truncate', 'boundary-rewrite'] as const)('does not let a forward delimiter cache conceal source %s', async (change) => {
+  const { path, context } = await fixture(lines('one', 'two', 'three')), reader = await open(context)
+  expect((await reader.readNext())?.value.id).toBe('one')
+  if (change === 'replace') { await rename(path, `${path}.old`); await writeFile(path, lines('one', 'two', 'three')) }
+  if (change === 'truncate') await truncate(path, 10)
+  if (change === 'boundary-rewrite') await writeFile(path, lines('NEW', 'two', 'three'))
+  await expect(reader.readNext()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+})
+
 it('retains exact small-string source slots without replacing ordinary parsed values', async () => {
   const original = '{"text":"same \\u4e2d","nested":{"text":"same 中"},"values":["same 中",7]}\n'
   const { context, path } = await fixture(original), reader = await open(context)

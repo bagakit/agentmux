@@ -58,6 +58,32 @@ async function fixture(providerId: 'codex' | 'claude' = 'codex') {
   return { root, home, workspace, provider, file, record, client, inner, store, kernel, runs, catalog, source, create, env, start, stop, input, close, bind }
 }
 
+it.each(['codex', 'claude'] as const)('keeps %s catalog identity and notices while bounding original metadata scan IO', async providerId => {
+  const f = await fixture(providerId), count = 400
+  const records = Array.from({ length: count }, (_, index) => providerId === 'codex'
+    ? { id: 'private-native', thread_name: `Recorded title ${index}` }
+    : { type: 'progress', sessionId: 'private-native', uuid: `progress-${index}`, data: { type: 'hook_progress', elapsed: index } })
+  const metadata = records.map(record => JSON.stringify(record)).join('\n') + '\n'
+  const scanned = providerId === 'codex' ? join(f.home, 'session_index.jsonl') : f.file
+  await writeFile(scanned, metadata + (providerId === 'claude' ? JSON.stringify(f.record) + '\n' : ''))
+  const invalid = join(dirname(f.file), providerId === 'codex' ? 'rollout-invalid.jsonl' : 'invalid.jsonl')
+  await writeFile(invalid, '{"type":"unknown"}\n')
+  const open = NativeJsonlHistoryReader.open.bind(NativeJsonlHistoryReader), budgets: Array<{ bytesRead: number; startedAt: number }> = []
+  vi.spyOn(NativeJsonlHistoryReader, 'open').mockImplementation(async (context, supplied) => {
+    const budget = supplied ?? { bytesRead: 0, startedAt: Date.now() }
+    if (context.transcriptPath === scanned) budgets.push(budget)
+    return await open(context, budget)
+  })
+  const catalog = await f.client.listNativeAgentSessions({ providerId, env: f.env, workspacePath: f.workspace })
+  expect(catalog.sessions.map(entry => entry.source)).toEqual([f.source])
+  expect(catalog.sessions[0]!.title).toBe(providerId === 'codex' ? `Recorded title ${count - 1}` : undefined)
+  expect(catalog.issues.map(issue => issue.code)).toEqual(['AGENT_NATIVE_SESSION_METADATA_INVALID'])
+  expect(budgets).toHaveLength(1)
+  const sourceBytes = Buffer.byteLength(metadata) + (providerId === 'claude' ? Buffer.byteLength(JSON.stringify(f.record) + '\n') : 0)
+  expect(budgets[0]!.bytesRead).toBeLessThanOrEqual(sourceBytes * 2 + (count + 2) * 256)
+  expect(f.start).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
+})
+
 it.each(['codex', 'claude'] as const)('shares only simultaneous %s native scans and returns independent catalogs', async providerId => {
   const f = await fixture(providerId), read = vi.spyOn(NativeJsonlHistoryReader, 'open')
   const scan = vi.spyOn(f.provider, 'listNativeSessions')
