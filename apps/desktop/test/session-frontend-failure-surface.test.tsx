@@ -136,12 +136,31 @@ it.each([
   await until(() => expect(surface()).not.toBeNull())
   const cause = surface()!.querySelector('.session-frontend-diagnostic pre')!
   expect(cause.textContent).toBe(diagnostic)
-  expect(cause.closest('details')).not.toBeNull()
+  expect(cause.closest('details')).toBeNull()
+  expect(cause.closest('[hidden]')).toBeNull()
+  expect(surface()!.querySelectorAll('.session-frontend-diagnostic')).toHaveLength(1)
   expect(surface()?.textContent).toContain('The backend is still running.')
   expect(surface()?.textContent).toContain('Check the CLI startup environment, then choose Resume or restart AgentMux.')
   expect(button('Resume').disabled).toBe(false)
   expect(button('Read original output').disabled).toBe(false)
   expect(recover).not.toHaveBeenCalled(); protectedState(original)
+})
+
+it('shows the original unknown startup diagnostic by default without treating the running backend as ready or failed', async () => {
+  const diagnostic = 'Original native request rejected while another writer owns this conversation.'
+  const original = seed({ ...failedFrontend(composerSession(sessionId).control.run), state: 'starting', exitCode: undefined,
+    initialization: { lifecycleOperationId: 'original-initialization', phase: 'unknown', native: { state: 'unknown' },
+      failure: { step: 'native-session', code: -32600, message: diagnostic } } })
+  const recover = vi.spyOn(api.sessions, 'recover')
+  await dom.render(<WorkspaceWorkbench workspaceId="workspace" />)
+  await until(() => expect(region().querySelector('.full-page-loading h2')?.textContent).toBe('Startup result unconfirmed'))
+  const startup = region().querySelector('.full-page-loading')!, cause = startup.querySelector('.session-frontend-diagnostic pre')!
+  expect(cause.textContent).toBe(diagnostic); expect(cause.closest('details')).toBeNull()
+  expect(cause.closest('[hidden]')).toBeNull(); expect(startup.querySelectorAll('.session-frontend-diagnostic')).toHaveLength(1)
+  expect(startup.getAttribute('data-loading-phase')).toBe('parked')
+  expect(startup.querySelector('details')?.open).toBe(false)
+  expect(button('Check startup').disabled).toBe(false); expect(button('Read original output').disabled).toBe(false)
+  expect(terminal()).toBeNull(); expect(recover).not.toHaveBeenCalled(); protectedState(original)
 })
 
 it('keeps the mounted original terminal reader through a live frontend failure, explicit output reading and a recovered exact frontend', async () => {
@@ -229,7 +248,8 @@ it.each(['normal-exit', 'unknown', 'wrong-run', 'attached'] as const)('keeps %s 
   const original = seed(frontend), recover = vi.spyOn(api.sessions, 'recover')
   await dom.render(<WorkspaceWorkbench workspaceId="workspace" />)
   await until(() => expect(terminal()).not.toBeNull())
-  expect(surface()).toBeNull(); expect(terminal()?.dataset.readOnly).toBe('false')
+  expect(surface()).toBeNull(); expect(region().querySelector('.session-frontend-diagnostic')).toBeNull()
+  expect(terminal()?.dataset.readOnly).toBe('false')
   expect(terminal()?.dataset.visible).toBe('true'); expect(button('Read original output')).toBeUndefined()
   if (kind === 'normal-exit') expect(region().querySelector('.terminal-recovery')?.textContent).toContain('Terminal disconnected')
   else expect(region().querySelector('.terminal-recovery')).toBeNull()

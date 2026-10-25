@@ -23,7 +23,7 @@ await verifyRendererSourceMutations({
     { label: 'original-action-disconnected', file: pane,
       before: 'await recoverSession(sessionId, frontendRecoveryIntent.current.operationId)', after: 'await recoverSession(sessionId)' },
     { label: 'original-diagnostic-lost', file: pane,
-      before: 'content: <>{frontendDiagnostic}<dl>', after: 'content: <><dl>' },
+      before: 'supplement={<>{frontendDiagnostic}{identityNotice}', after: 'supplement={<>{identityNotice}' },
     { label: 'hidden-pane-keeps-waiting', file: pane,
       before: 'visible={visible && !parked && !historyOpen}\n                title=', after: 'visible={true}\n                title=' },
     { label: 'hidden-primary-stops-visible-presentation', file: pane,
