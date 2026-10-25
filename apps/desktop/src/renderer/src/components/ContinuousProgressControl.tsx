@@ -13,6 +13,7 @@ import { resolveAutomationPreferences } from '../../../shared/automation-prefere
 import type { ProgressUpdateRequest } from '../../../shared/continuous-progress'
 import { useLauncherState } from '../lib/launcher-state'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import '../styles/automation.css'
 
 export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 
@@ -142,6 +143,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
   }
   async function saveConfiguration() {
     if (busy) return
+    setSaveNotice(undefined)
     const captured = target, version = editVersion.current
     const request: ProgressUpdateRequest | undefined = pendingUpdate ?? (loop ? {
       target, loopId: loop.loopId, expectedLoop: editBasis.current ?? loop,
@@ -161,7 +163,6 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
       setSaveNotice('The save request could not be retained on this device. Your draft is kept; retry when storage is available.')
       return
     }
-    setSaveNotice(undefined)
     const saved = await run(() => api.continuousProgress.update(request), failure => {
       const code = (failure as { code?: string })?.code
       // Only an explicit first-attempt rejection proves this request was not applied.
@@ -190,13 +191,13 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
       if (pendingUpdate) useLauncherState.getState().retainProgressUpdate(draftKey)
       const draft = useLauncherState.getState().drafts[draftKey]?.progressDraft
       useLauncherState.getState().setProgressDraft(draftKey, { interval: draft?.interval ?? interval, prompt: draft?.prompt ?? prompt, expectedLoop: editBasis.current })
-      setConflict(false); setSaveNotice('Latest saved settings are shown above. Your draft is kept; save again to apply it.' + (pendingUpdate ? ' The previous save remains unconfirmed below.' : ''))
+      setConflict(false); setSaveNotice('Latest saved settings are available in the automation details. Your draft is kept; save again to apply it.' + (pendingUpdate ? ' The previous save remains unconfirmed below.' : ''))
     } catch (failure) { if (current.current === captured) setSaveNotice(presentError(failure)) }
   }
   const progress = displayed || status === 'unconfirmed' ? <>
     {status === 'unconfirmed' ? <p className="continuous-progress-control__notice" role="status">Automatic progress is unconfirmed. {observedTarget !== target && !error ? 'Waiting for loop status. ' : ''}Manual input follows terminal readiness.{error ? ` ${error}` : ''}</p> : null}
     <details className="continuous-progress-control__details" data-progress-details="interval" onToggle={event => event.stopPropagation()}>
-      <summary><span className="automation-progress__title">Continuous progress</span> <span>{status === 'unconfirmed' ? 'Unconfirmed' : displayed?.status === 'stopped' ? 'Stopped' : status === 'inactive' ? 'Not enabled' : status === 'active' ? 'Active' : 'Paused'}</span>{displayed ? <small className="automation-progress__summary">{displayed.prompt.split('\n')[0]} · every {displayed.intervalMs / 60000} min</small> : null}</summary>
+      <summary><span className="automation-progress__title">Continuous progress</span> <span className="automation-state" data-state={status}>{status === 'unconfirmed' ? 'Unconfirmed' : displayed?.status === 'stopped' ? 'Stopped' : status === 'inactive' ? 'Not enabled' : status === 'active' ? 'Active' : 'Paused'}</span>{displayed ? <><small className="automation-progress__summary">{displayed.prompt.split('\n')[0]}</small><small className="automation-progress__cadence">Every {displayed.intervalMs / 60000} min</small></> : null}</summary>
       <div className="continuous-progress-control__detail-body">
     {displayed ? <ContinuousProgressPanel loop={{ loopId: displayed.loopId, providerLabel: agentProviderLabel(session.providerId),
       executionState: session.status.state, loopState: displayed.status,
@@ -223,38 +224,37 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
   </> : null
   const progressForm = <form ref={progressFormElement} aria-label="Continuous progress setup" onChange={() => { edited.current = true; editVersion.current++ }} onCompositionStart={() => { edited.current = true; editVersion.current++ }} onSubmit={event => { event.preventDefault(); if (!conflict) void saveConfiguration() }}>
       <section className="continuous-progress-control__group" aria-label="Continuation settings">
-        <h4>Continuation settings</h4>
         <label className="continuous-progress-control__interval">Check every (minutes)<TextInput type="number" min="1" value={interval} onChange={event => editConfiguration({ interval: event.target.value })} /></label>
         <label>Continuation prompt<ComposerTextarea value={prompt} onValueChange={value => editConfiguration({ prompt: value })} /></label>
       </section>
-      <section className="continuous-progress-control__group" aria-label="Optional task source" hidden={!!loop || !!pendingUpdate}>
-        <h4>Optional task source</h4>
+      <details className="continuous-progress-control__group continuous-progress-control__optional" aria-label="Optional task source" onToggle={event => event.stopPropagation()} hidden={!!loop || !!pendingUpdate}>
+        <summary>Task source <span>Optional</span></summary>
         <label><input type="checkbox" checked={bindSource} onChange={event => setBindSource(event.target.checked)} />Bind a read-only Feature Tracker source</label>
         {bindSource ? <div className="continuous-progress-control__source-fields">
           <label>Tracker root<TextInput aria-label="Tracker root" value={sourceRoot} onChange={event => setSourceRoot(event.target.value)} /></label>
           <label>Feature ID<TextInput aria-label="Feature ID" value={sourceId} onChange={event => setSourceId(event.target.value)} /></label>
           <label>Public Tracker script<TextInput aria-label="Public Tracker script" value={readerPath} onChange={event => setReaderPath(event.target.value)} /></label>
         </div> : <p className="continuous-progress-control__help">Periodic continuation only. This loop is not bound to a business task source.</p>}
-      </section>
-        {loop ? <p className="continuous-progress-control__help">Edits apply to future checks. The current check time, task source and {loop.status === 'paused' ? 'paused' : 'active'} state are kept.</p> : null}
-        {saveNotice || persistenceIssue ? <p className="continuous-progress-control__notice" role="status">{saveNotice || persistenceIssue}</p> : null}
+      </details>
+        {loop ? <p className="continuous-progress-control__help">Applies to future checks. {loop.status === 'paused' ? 'Stays paused.' : 'Stays active.'}</p> : null}
+        {[...new Set([saveNotice, persistenceIssue, error].filter(Boolean))].map(notice => <p key={notice} className="continuous-progress-control__notice" role="status">{notice}</p>)}
         {pendingUpdate && !busy ? <p className="continuous-progress-control__help">Previous save is unconfirmed. Retry saves its original values; your newer draft is kept.</p> : null}
         {pendingUpdate ? <button type="button" className="small-button" disabled={busy} onClick={() => void reviewLatest()}>Review latest settings</button> : null}
         {previousUpdates?.length ? <details className="continuous-progress-control__details" onToggle={event => event.stopPropagation()}><summary>Previous unconfirmed saves</summary>
           {previousUpdates.map(request => <div key={request.operationId} className="continuous-progress-control__detail-body"><code>{request.operationId}</code><p>{request.intervalMs / 60_000} minutes</p><p className="continuous-progress-control__prompt">{request.prompt}</p></div>)}
         </details> : null}
         {conflict ? <button type="button" className="small-button" onClick={() => void reviewLatest()}>Review latest settings</button>
-          : <button type="submit" className="small-button" disabled={busy || (!pendingUpdate && (!prompt.trim() || (!loop && bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))))}>{busy ? 'Saving…' : pendingUpdate ? 'Retry save' : loop ? 'Save changes' : 'Enable continuous progress'}</button>}
+          : <button type="submit" className="automation-button automation-button--primary automation-submit" disabled={busy || (!pendingUpdate && (!prompt.trim() || (!loop && bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))))}>{busy ? 'Saving…' : pendingUpdate ? 'Retry save' : loop ? 'Save changes' : 'Enable continuous progress'}</button>}
       </form>
   return <div className="continuous-progress-control" data-progress-state={status}>
-    <div className="automation-target"><span>Sending to</span><strong>{targetName || session.label}</strong><small>{target.agentSessionId}</small></div>
     <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={visible} unified
       progressConfigured={!!loop}
       progress={presented ? progress : null} progressForm={presented ? progressForm : null} />
     {presented ? <>
-    <details className="continuous-progress-control__details" data-progress-details="target" onToggle={event => event.stopPropagation()}>
-      <summary>Target details</summary>
+    <details className="continuous-progress-control__details automation-target" data-progress-details="target" onToggle={event => event.stopPropagation()}>
+      <summary>Agent details</summary>
       <dl className="continuous-progress-control__detail-body">
+        <dt>Sending to</dt><dd>{targetName || session.label}</dd>
         <dt>Provider</dt><dd>{agentProviderLabel(session.providerId)} ({target.providerId})</dd>
         <dt>Host</dt><dd>{target.hostId}</dd>
         <dt>Session</dt><dd>{target.agentSessionId}</dd>

@@ -48,17 +48,18 @@ export function ScheduleArrangementRow({ schedule, occurrence, timezone, now, on
       onReceipt(result.schedule); setInspection('Original arrangement checked. Input acceptance and completed work are separate.')
     } catch (error) { if (alive.current) setInspection(error instanceof Error ? error.message : String(error)) }
   }
-  return <li className="schedule-arrangement" data-schedule-id={schedule.loopId} data-occurrence-kind={occurrence?.kind ?? 'next-due'}>
-    <div className="schedule-arrangement__when"><time dateTime={new Date(at).toISOString()}>{date}</time><span>{phase}</span></div>
-    <p className="schedule-arrangement__message">{schedule.prompt.split('\n')[0]}</p>
-    <div className="schedule-arrangement__caption"><span>{schedule.calendar || schedule.everyMs !== undefined ? scheduleRuleLabel(schedule) : 'Countdown' + (schedule.status === 'active' && schedule.lastOutcome !== 'unknown' ? ' · ' + relative : '')}</span>
-      {discussion ? <span>{discussion}</span> : null}</div>
-    {quickActions && schedule.status !== 'stopped' ? <div className="calendar-schedules__actions">
-      <button type="button" className="small-button" disabled={operation.busy || !!operation.pending || schedule.revision === undefined} onClick={() => mutate(schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause' : 'Resume'}</button>
-    </div> : null}
+  return <li className="schedule-arrangement" data-compact={quickActions || undefined} data-schedule-id={schedule.loopId} data-occurrence-kind={occurrence?.kind ?? 'next-due'}>
+    <div className="schedule-arrangement__overview">
+      {quickActions ? <p className="schedule-arrangement__message">{schedule.prompt.split('\n')[0]}</p> : null}
+      <div className="schedule-arrangement__when"><time dateTime={new Date(at).toISOString()}>{date}</time><span className={quickActions ? 'automation-state' : undefined} data-state={schedule.lastOutcome === 'unknown' ? 'unconfirmed' : schedule.status}>{phase}</span></div>
+      {!quickActions ? <p className="schedule-arrangement__message">{schedule.prompt.split('\n')[0]}</p> : null}
+      <div className="schedule-arrangement__caption"><span>{schedule.calendar || schedule.everyMs !== undefined ? scheduleRuleLabel(schedule) : 'Countdown' + (schedule.status === 'active' && schedule.lastOutcome !== 'unknown' ? ' · ' + relative : '')}</span>
+        {discussion ? <span>{discussion}</span> : null}</div>
+      {quickActions && schedule.status !== 'stopped' ? <button type="button" className="automation-button schedule-arrangement__toggle" disabled={operation.busy || !!operation.pending || schedule.revision === undefined} onClick={() => mutate(schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause' : 'Resume'}</button> : null}
+    </div>
     <details className="schedule-arrangement__details">
       <summary>Details and controls</summary>
-      {schedule.prompt.includes('\n') ? <p className="calendar-schedules__context">{schedule.prompt}</p> : null}
+      {quickActions || schedule.prompt.includes('\n') ? <p className="calendar-schedules__context">{schedule.prompt}</p> : null}
       <p>{scheduleRuleLabel(schedule)}</p>
       <p>{schedule.status === 'active' ? 'Next due' : 'Original due'} · <time dateTime={new Date(schedule.nextCheckAt).toISOString()}>{formats.full.format(schedule.nextCheckAt)}</time></p>
       {occurrence?.kind === 'projected' ? <p>This is a planned occurrence. No input or work is confirmed for it.</p> : null}
