@@ -190,7 +190,11 @@ export async function connectHostedAgentMux(options: {
     }
     if (method === 'clientPerformanceDiagnostics') {
       if (!stream || !bootstrap) throw new AgentMuxError('Performance owner is not connected.', 'CONTROL_UNAVAILABLE')
-    } else await observeRead(connectControl(method === 'connectRuntime'), sourceSignal)
+    } else {
+      // Raw Agent input discovers the original Host here. Its service invocation
+      // prepares Native at the owner; callers need no separate Native preflight.
+      await observeRead(connectControl(method === 'connectRuntime' || method === 'writeAgent' || method === 'pasteAgent'), sourceSignal)
+    }
     if (method === 'runtimeProjection' && !bootstrap) {
       // Main needs the original Provider declarations to present these Subjects.
       // Their read-only bootstrap does not require the general event lease to open.
