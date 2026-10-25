@@ -28,6 +28,18 @@ export function ctxmuxManifestSha256(
 
 export const CTXMUX_MANIFEST_SHA256 = ctxmuxManifestSha256()
 
+/** Product proof for one exact Runtime instance and artifact, never a mutable current-owner pointer. */
+export function ctxmuxOwnerReceiptPath(
+  socketPath: string,
+  identity: { runtimeId: string; daemonInstanceId: string },
+  manifestSha256: string
+): string {
+  const key = createHash('sha256').update(JSON.stringify([
+    identity.runtimeId, identity.daemonInstanceId, manifestSha256
+  ])).digest('hex')
+  return join(dirname(socketPath), `owner-${key}.json`)
+}
+
 /** Each qualified platform retains the exact source of its own Native and SDK bundle. */
 export function ctxmuxArtifactSource(platform: string = process.platform, architecture: string = process.arch): { commit: string; tree: string } {
   const artifactPlatform = supportedCtxmuxArtifactPlatform(platform, architecture)
