@@ -1,3 +1,4 @@
+export * from './author-profile.js'
 export * from './agent-terminal-frontend.js'
 export type * from './startup-diagnostic.js'
 export { mintObjectId, mintCapabilityToken, deriveObjectId, isObjectId } from './object-id.js'

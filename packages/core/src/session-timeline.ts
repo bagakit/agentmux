@@ -1,3 +1,4 @@
+import { authorProfileFields } from './author-profile.js'
 import { parseAgentInputImages } from './agent-input-resource.js'
 import { parseExternalConversationAuthor, parseExternalConversationInputObservation } from './external-conversation.js'
 import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
@@ -228,6 +229,7 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     createdAt,
     updatedAt,
     title: text(source.title, 'Timeline item title'),
+    ...authorProfileFields(source.authorProfile),
     ...(source.inputImages === undefined ? {} : { inputImages: parseAgentInputImages(source.inputImages) }),
     ...browserInputContextFields(source), ...agentInputContextCaptureProofFields(source),
     ...optionalField(source, 'content'),

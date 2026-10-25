@@ -15,8 +15,9 @@ export type AgentInputImageReference = {
 export type AgentInputImage = AgentInputImageReference & {
   observation: 'confirmed' | 'unavailable'
 }
-export type AgentInputResourceRead = { key: AgentPromptInputKey; index: number; revision: string; maxBytes: number }
+export type AgentInputResourceRead = { purpose?: 'author-avatar'; key: AgentPromptInputKey; index: number; revision: string; maxBytes: number }
 export type AgentInputResourceResult = {
+  purpose?: 'author-avatar'
   key: AgentPromptInputKey
   index: number
   revision: string
@@ -49,12 +50,13 @@ export function parseAgentInputImages(value: unknown): AgentInputImage[] {
   })
 }
 export function parseAgentInputResourceRead(value: unknown): AgentInputResourceRead {
-  const p = rpcRecord(value, ['key', 'index', 'revision', 'maxBytes'], 'INVALID_AGENT_INPUT_RESOURCE')
+  const p = rpcRecord(value, ['key', 'index', 'revision', 'maxBytes', 'purpose'], 'INVALID_AGENT_INPUT_RESOURCE')
   const key = validateAgentPromptInputKey(p.key)
+  if (p.purpose !== undefined && p.purpose !== 'author-avatar') invalid()
   if (key.kind !== 'prompt' || !Number.isSafeInteger(p.index) || Number(p.index) < 0 ||
     typeof p.revision !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(p.revision) ||
     !Number.isSafeInteger(p.maxBytes) || Number(p.maxBytes) < 1 || Number(p.maxBytes) > FILE_UPLOAD_MAX_BYTES) invalid()
-  return { key, index: p.index as number, revision: p.revision as string, maxBytes: p.maxBytes as number }
+  return { ...(p.purpose === 'author-avatar' ? { purpose: 'author-avatar' as const } : {}), key, index: p.index as number, revision: p.revision as string, maxBytes: p.maxBytes as number }
 }
 /** Original membership is checked before the Host is asked to inspect any bytes. */
 export function inputImageMatches(image: AgentInputImageReference, key: AgentPromptInputKey, body: string, bodyRevision = fileUploadRevision(new TextEncoder().encode(body))): boolean {
@@ -82,8 +84,8 @@ export async function resolveAgentInputImages(value: readonly AgentInputImageRef
 }
 
 export function parseAgentInputResourceResult(value: unknown, input: AgentInputResourceRead): AgentInputResourceResult {
-  const p = rpcRecord(value, ['key', 'index', 'revision', 'status', 'mimeType', 'name', 'dataBase64', 'byteLength', 'width', 'height', 'code', 'message'], 'CONTROL_PROTOCOL_ERROR')
-  if (JSON.stringify(validateAgentPromptInputKey(p.key)) !== JSON.stringify(input.key) || p.index !== input.index || p.revision !== input.revision) invalid('The image response belongs to another original input resource.')
+  const p = rpcRecord(value, ['key', 'index', 'revision', 'status', 'mimeType', 'name', 'dataBase64', 'byteLength', 'width', 'height', 'code', 'message', 'purpose'], 'CONTROL_PROTOCOL_ERROR')
+  if (JSON.stringify(validateAgentPromptInputKey(p.key)) !== JSON.stringify(input.key) || p.index !== input.index || p.revision !== input.revision || p.purpose !== input.purpose) invalid('The image response belongs to another original input resource.')
   if (p.status === 'unavailable' && typeof p.code === 'string' && typeof p.message === 'string' && p.dataBase64 === undefined && p.byteLength === undefined) return p as AgentInputResourceResult
   if (p.status !== 'available' || typeof p.mimeType !== 'string' || !p.mimeType.startsWith('image/') || typeof p.name !== 'string' || /[\\/]/u.test(p.name) || typeof p.dataBase64 !== 'string' || !Number.isSafeInteger(p.byteLength) || Number(p.byteLength) < 1 || Number(p.byteLength) > input.maxBytes) invalid('The image response is not a bounded original image.')
   // Decode in the public codec as well; a successful transport is not a byte identity receipt.

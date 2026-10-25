@@ -1,3 +1,4 @@
+import { parsePreparedAuthorProfile, publicAuthorProfile } from './author-profile.js'
 import { parseAgentInputChangesRead, type AgentInputChangesRead, type AgentInputChangesPage } from './agent-input-changes.js'
 import { imageBytes } from './session-history-resource.js'
 import { resolveAgentInputImages, parseAgentInputResourceRead, inputImageMatches, type AgentInputImageReference, type AgentInputResourceOwner, type AgentInputResourceRead, type AgentInputResourceResult } from './agent-input-resource.js'
@@ -332,6 +333,7 @@ export type AgentMuxTerminalCreateInput = {
 }
 
 type AgentMuxAgentPromptContent = {
+  authorProfile?: import('./author-profile.js').AgentPreparedAuthorProfile
   inputImages?: readonly AgentInputImageReference[]
   /** Resolves only through a trusted non-wire Host reader; mutually exclusive with inputContext. */
   inputContextCapture?: import('./agent-input-context-capture.js').AgentInputContextCaptureReference
@@ -5649,8 +5651,15 @@ export class AgentMuxClient {
       authority = { ...authority, inputContextSource: 'host-capture', inputContextCaptureProof: captured.inputContextCaptureProof,
         assertCurrent: authority?.assertCurrent ?? (async () => {}) }
     }
+    const originalProducer = input.authorHuman === true ? await this.readCapturedPromptProducer(input.agentSessionId, input.expectedRun, input.operationId) : undefined
+    let authorProfile: import('./author-profile.js').AgentPreparedAuthorProfile | undefined
+    if (input.authorHuman === true && !context?.externalAuthor) {
+      if (originalProducer !== undefined) authorProfile = originalProducer.authorProfile
+      else if (input.authorProfile !== undefined) try { authorProfile = parsePreparedAuthorProfile(input.authorProfile) }
+      catch { /* Optional prepared display data never gates the original human input. */ }
+    }
     const imageKey = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
-    const originalImages = input.inputImages === undefined ? undefined : (await this.readCapturedPromptProducer(input.agentSessionId, input.expectedRun, input.operationId))?.inputImages
+    const originalImages = input.inputImages === undefined ? undefined : (input.authorHuman === true ? originalProducer : await this.readCapturedPromptProducer(input.agentSessionId, input.expectedRun, input.operationId))?.inputImages
     const inputImages = input.inputImages === undefined ? undefined : originalImages ?? await resolveAgentInputImages(input.inputImages, imageKey, input.prompt, this.inputResources)
     if (originalImages && !isDeepStrictEqual(originalImages.map(({ observation: _observation, ...reference }) => reference), input.inputImages)) throw new AgentMuxError(
       'The selected images differ from the original input. Its existing input and resources were retained.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -5665,6 +5674,7 @@ export class AgentMuxClient {
       if (saved || !await this.inspectAgentPromptSubmission(key)) {
         const intent: AgentInputJournalIntent = { key, admissionIntent: validateAgentPromptAdmissionIntent({ ...input.admissionIntent, expectedRun: input.expectedRun }) as AgentInputJournalIntent['admissionIntent'], execution: 'immediate',
           environment: this.inputSavedEnvironment(session), source: { kind: 'prompt', prompt: input.prompt,
+            ...(authorProfile === undefined ? {} : { authorProfile }),
             ...(inputImages === undefined ? {} : { inputImages }),
             ...(input.inputContext === undefined ? {} : { inputContext: input.inputContext,
               inputContextSource: authority?.inputContextSource ?? 'caller-declared',
@@ -5686,7 +5696,7 @@ export class AgentMuxClient {
       'The original controlled input has another admission intent. An exact caller condition cannot replace it.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     await this.submitPromptInternal(input, undefined, undefined, () => {
       if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use submitAgentMessage.', 'MESSAGE_ENVELOPE_REQUIRED')
-    }, inputImages === undefined ? authority : { ...authority, inputImages, assertCurrent: authority?.assertCurrent ?? (async () => {}) }, 'prompt', context?.nativeIdleOnly ? { nativeIdleOnly: true } : undefined)
+    }, inputImages === undefined && authorProfile === undefined ? authority : { ...authority, ...(inputImages === undefined ? {} : { inputImages }), ...(authorProfile === undefined ? {} : { authorProfile }), assertCurrent: authority?.assertCurrent ?? (async () => {}) }, 'prompt', context?.nativeIdleOnly ? { nativeIdleOnly: true } : undefined)
   }
 
   async readAgentInputResource(value: AgentInputResourceRead, caller?: { agentSessionId: string; capability: string }): Promise<AgentInputResourceResult> {
@@ -5701,8 +5711,18 @@ export class AgentMuxClient {
     const message = claim?.admission?.intent?.message ?? claim?.launch?.message
     const body = source?.prompt ?? message?.userContent
     const image = (source?.inputImages ?? message?.inputImages)?.[input.index]
-    const unavailable = (code: string): AgentInputResourceResult => ({ key, index: input.index, revision: input.revision, status: 'unavailable', code,
+    const unavailable = (code: string): AgentInputResourceResult => ({ ...(input.purpose ? { purpose: input.purpose } : {}), key, index: input.index, revision: input.revision, status: 'unavailable', code,
       message: 'The original selected image is unavailable. The original message and Agent remain available.' })
+    if (input.purpose === 'author-avatar') {
+      const profile = source?.authorHuman === true ? source.authorProfile : message?.authorHuman === true ? message.authorProfile : undefined
+      const avatar = profile?.avatar
+      if (!avatar || input.index !== 0 || avatar.revision !== input.revision || avatar.byteLength > input.maxBytes) return unavailable('INPUT_AUTHOR_AVATAR_UNAVAILABLE')
+      try {
+        const original = parsePreparedAuthorProfile(profile).avatar!
+        return { purpose: 'author-avatar', key, index: input.index, revision: input.revision, status: 'available', name: 'avatar',
+          mimeType: original.mimeType, byteLength: original.byteLength, width: original.width, height: original.height, dataBase64: original.dataBase64 }
+      } catch { return unavailable('INPUT_AUTHOR_AVATAR_UNAVAILABLE') }
+    }
     if (!image || body === undefined || image.upload.revision !== input.revision || !inputImageMatches(image, key, body)) return unavailable('INPUT_IMAGE_MEMBERSHIP_UNCONFIRMED')
     if (!this.inputResources || image.upload.byteLength > input.maxBytes) return unavailable('INPUT_IMAGE_RESOURCE_UNAVAILABLE')
     try {
@@ -5721,7 +5741,7 @@ export class AgentMuxClient {
     const waiting = await this.messageQueue.inspectInput({ key })
     if (!waiting) return undefined
     const source = waiting.intent.source
-    return source.kind === 'prompt' ? { ...(source.inputImages === undefined ? {} : { inputImages: source.inputImages }), ...(source.inputContext ? { inputContext: source.inputContext } : {}),
+    return source.kind === 'prompt' ? { ...(source.authorProfile === undefined ? {} : { authorProfile: source.authorProfile }), ...(source.inputImages === undefined ? {} : { inputImages: source.inputImages }), ...(source.inputContext ? { inputContext: source.inputContext } : {}),
       ...(source.inputContextSource ? { inputContextSource: source.inputContextSource } : {}),
       ...(source.inputContextCaptureProof ? { inputContextCaptureProof: source.inputContextCaptureProof } : {}) } : {}
   }
@@ -5927,6 +5947,7 @@ export class AgentMuxClient {
         createdAt: original?.createdAt ?? recordedAt, updatedAt: at, title: original?.title ?? (author.authorExternal ? 'External message' : 'User input'), content: body,
         publicContent: 'confirmed', ...author, inputRef: key, inputOrigin,
         inputSubmission: { status: receipt.status, observation: receipt.observation },
+        ...(source.kind === 'prompt' && source.authorProfile ? { authorProfile: publicAuthorProfile(source.authorProfile) } : {}),
         ...(source.kind === 'prompt' && source.inputImages !== undefined ? { inputImages: source.inputImages } : {}),
         ...(source.kind === 'prompt' && source.inputContext ? { inputContext: source.inputContext, inputContextSource: source.inputContextSource,
           ...(source.inputContextCaptureProof ? { inputContextCaptureProof: source.inputContextCaptureProof } : {}) } : {}) }
@@ -6033,10 +6054,10 @@ export class AgentMuxClient {
   }> {
     const source = intent.source
     if (source.kind === 'prompt') {
-      const { kind: _producer, promptWire: _wire, recoveryAuthorization: _recovery, inputContextSource, inputContextCaptureProof, inputImages, ...content } = source
+      const { kind: _producer, promptWire: _wire, recoveryAuthorization: _recovery, inputContextSource, inputContextCaptureProof, inputImages, authorProfile, ...content } = source
       return { input: { ...content, agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun,
         operationId: agentPromptInputId(intent.key), admissionIntent: (() => { const { expectedRun: _run, ...target } = intent.admissionIntent; return target })(), execution: 'immediate' },
-        ...((inputContextSource || inputImages !== undefined) ? { authority: { ...(inputContextSource ? { inputContextSource } : {}), ...(inputContextCaptureProof ? { inputContextCaptureProof } : {}), ...(inputImages === undefined ? {} : { inputImages }), assertCurrent: async () => {} } } : {}) }
+        ...((inputContextSource || inputImages !== undefined || authorProfile !== undefined) ? { authority: { ...(inputContextSource ? { inputContextSource } : {}), ...(inputContextCaptureProof ? { inputContextCaptureProof } : {}), ...(inputImages === undefined ? {} : { inputImages }), ...(authorProfile === undefined ? {} : { authorProfile }), assertCurrent: async () => {} } } : {}) }
     }
     const original = await this.messageQueue.readByOperationId(source.originalControlOperationId)
     if (!original) throw new AgentMuxError('Original message input is unknown.', 'AGENT_INPUT_NOT_FOUND')
@@ -6518,7 +6539,9 @@ export class AgentMuxClient {
     const waitingSource = waiting?.intent.source.kind === 'prompt' ? waiting.intent.source : undefined
     const captureProof = waitingSource?.inputContextCaptureProof ?? authority?.inputContextCaptureProof
     const capturedImages = waitingSource?.inputImages ?? authority?.inputImages
+    const capturedProfile = waitingSource?.authorProfile ?? authority?.authorProfile
     const authored: AgentPromptMessageContent = platformNotification ? { systemContext: platformNotification.wire, a2aNotificationId: platformNotification.notificationId } : {
+      ...(!authorAgentSessionId && !authority?.externalAuthor && input.authorHuman === true && capturedProfile ? { authorProfile: capturedProfile } : {}),
       ...(capturedImages === undefined ? {} : { inputImages: capturedImages }),
       ...(inputContext ? { inputContext, inputContextSource: waitingSource?.inputContextSource ?? authority?.inputContextSource ?? 'caller-declared',
         ...(captureProof ? { inputContextCaptureProof: captureProof } : {}) } : {}),
@@ -8291,6 +8314,7 @@ export class AgentMuxClient {
     }
     if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
       title, message.userContent, now, 'user', { status, publicContent: 'confirmed', ...(inputRef ? { inputRef } : {}),
+        ...(message.authorProfile ? { authorProfile: publicAuthorProfile(message.authorProfile) } : {}),
         ...(message.inputImages === undefined ? {} : { inputImages: message.inputImages }),
         ...(message.inputContext ? { inputContext: message.inputContext, inputContextSource: message.inputContextSource, ...(message.inputContextCaptureProof ? { inputContextCaptureProof: message.inputContextCaptureProof } : {}) } : {}),
         ...(message.authorAgentSessionId ? { authorAgentSessionId: message.authorAgentSessionId } : {}),
@@ -8353,7 +8377,7 @@ export class AgentMuxClient {
     observedAt: number,
     source: 'user' | 'agentmux',
     delivery: { a2aNotificationId?: string; sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed'; publicContent?: 'confirmed'; inputRef?: AgentPromptInputKey;
-      inputImages?: import('./agent-input-resource.js').AgentInputImage[]; inputContext?: import('./browser-input-context.js').BrowserInputContext; inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource; inputContextCaptureProof?: AgentInputContextCaptureProof } = {}
+      authorProfile?: import('./author-profile.js').AgentAuthorProfile; inputImages?: import('./agent-input-resource.js').AgentInputImage[]; inputContext?: import('./browser-input-context.js').BrowserInputContext; inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource; inputContextCaptureProof?: AgentInputContextCaptureProof } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
       type: 'append',
@@ -8369,6 +8393,7 @@ export class AgentMuxClient {
         title,
         content,
         ...(source === 'agentmux' && delivery.a2aNotificationId ? { a2aNotificationId: delivery.a2aNotificationId } : {}),
+        ...(source === 'user' && delivery.authorProfile ? { authorProfile: delivery.authorProfile } : {}),
         ...(source === 'user' && delivery.inputImages !== undefined ? { inputImages: delivery.inputImages } : {}),
         ...(source === 'user' && delivery.inputContext ? { inputContext: delivery.inputContext, ...(delivery.inputContextSource ? { inputContextSource: delivery.inputContextSource } : {}), ...(delivery.inputContextCaptureProof ? { inputContextCaptureProof: delivery.inputContextCaptureProof } : {}) } : {}),
         ...(source === 'user' && delivery.publicContent ? { publicContent: delivery.publicContent } : {}),
