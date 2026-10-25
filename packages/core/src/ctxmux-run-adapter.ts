@@ -21,6 +21,7 @@ import {
   CtxmuxRuntimeIdentityMismatchError,
   CtxmuxUnsupportedCapabilityError,
   PROTOCOL_VERSION,
+  MAX_FRAME_BYTES,
   RUNTIME_CAPABILITY_NATIVE_RECOVERABLE_INPUT,
   RUNTIME_CAPABILITY_NATIVE_RECOVERABLE_STOP,
   RUNTIME_CAPABILITY_NATIVE_START,
@@ -70,6 +71,8 @@ const unobservedTimestamp = 0
 export const CTXMUX_COMMIT = ctxmuxArtifactSource().commit
 const CTXMUX_TREE = ctxmuxArtifactSource().tree
 export const CTXMUX_VERSION = ctxmuxArtifacts.version
+// Runtime SDK values reach published consumers through this bundled adapter.
+export const CTXMUX_MAX_FRAME_BYTES = MAX_FRAME_BYTES
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
   [RUNTIME_CAPABILITY_NATIVE_START]: 1,
