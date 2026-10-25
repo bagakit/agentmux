@@ -185,6 +185,47 @@ async function emptyStates(width, theme, original, before, geometry) {
   await originalSurfacePreserved(original, before)
   result.scenes.push({ width, theme, geometry, notices, collaboration, automation, automationReturn: true, keyboardClose: true, originalSurfacePreserved: true })
 }
+async function progressActionsScene(width, theme, short, original, before) {
+  const suffix = short ? '-short' : ''
+  const automation = `${panel}.querySelector('[aria-label="Automation settings"]')`
+  const progress = `${automation}.querySelector('.continuous-progress-panel')`
+  const resume = `${progress}.querySelector('[aria-label="Resume and check continuous progress"]')`
+  const check = `${progress}.querySelector('[aria-label="Check continuous progress now"]')`
+  await click(buttons('Automation'))
+  await waitFor(`${automation}.querySelector('[data-progress-details="interval"]')`)
+  await click(`${automation}.querySelector('[data-progress-details="interval"] > summary')`)
+  await waitFor(visible(resume))
+  assert.equal(await evaluate(`${resume}.textContent.trim()`), 'Resume and check')
+  assert.equal(await evaluate(`${check}===null`), true, 'A paused loop offers resume-and-check instead of a disabled check')
+  await frame(width, theme, 'progress-paused' + suffix)
+  await click(resume)
+  await waitFor(`${progress}.getAttribute('aria-busy')==='true'&&${progress}.textContent.includes('Resuming and checking this Agent')`)
+  assert.equal(await evaluate(`[...${progress}.querySelectorAll('button')].length===2&&[...${progress}.querySelectorAll('button')].every(button=>button.disabled)`), true)
+  const calls = await evaluate(`messageWorkspace.facts().calls.filter(call=>call.action==='fixture-progress-action')`)
+  assert.equal(calls.length, 1); assert.equal(calls[0].query.action, 'resume'); assert.equal(calls[0].reference.agentSessionId, original.agentSessionId)
+  assert.equal(calls[0].query.loopId, 'visual-progress')
+  await frame(width, theme, 'progress-checking' + suffix)
+  await evaluate(`messageWorkspace.settleProgressAction('skipped')`)
+  await waitFor(`${progress}.getAttribute('aria-busy')==='false'&&${progress}.textContent.includes('Check complete. No continuation prompt was sent.')`)
+  await waitFor(visible(check))
+  assert.equal(await evaluate(`${progress}.textContent.includes('The Agent is still working.')&&!${check}.disabled`), true)
+  await frame(width, theme, 'progress-skipped' + suffix)
+  await click(check)
+  await waitFor(`${progress}.textContent.includes('Checking this Agent')`)
+  await evaluate(`messageWorkspace.settleProgressAction('failure')`)
+  await waitFor(`${progress}.querySelector('[role="status"]')?.textContent.includes('The original check could not be confirmed.')`)
+  await evaluate(`document.dispatchEvent(new Event('visibilitychange'))`); await painted()
+  assert.equal(await evaluate(`${progress}.querySelector('[role="status"]').textContent.includes('The original check could not be confirmed.')`), true, 'A successful list observation does not erase this original action error')
+  const finalCalls = await evaluate(`messageWorkspace.facts().calls.filter(call=>call.action==='fixture-progress-action')`)
+  assert.equal(finalCalls.length, 2); assert.equal(finalCalls[1].query.action, 'check'); assert.notEqual(finalCalls[0].query.operationId, finalCalls[1].query.operationId)
+  await frame(width, theme, 'progress-error' + suffix)
+  const bounds = await evaluate(`(()=>{const r=${panel}.getBoundingClientRect();return{top:r.top,bottom:r.bottom,width:${panel}.clientWidth,scroll:${panel}.scrollWidth}})()`)
+  assert.ok(bounds.top>=0&&bounds.bottom<=await evaluate('innerHeight')&&bounds.scroll<=bounds.width+1)
+  await key('Escape', 'Escape', 27)
+  await originalSurfacePreserved(original, before)
+  result.scenes.push({ width, theme, short, originalSurfacePreserved: true, pausedAction: true, pendingFeedback: true, skippedFeedback: true, retainedActionError: true, exactOriginalActions: finalCalls })
+}
+
 async function automationScene(width, theme, short, original, before) {
   const suffix = short ? '-short' : ''
   const automation = `${panel}.querySelector('[aria-label="Automation settings"]')`
@@ -194,7 +235,7 @@ async function automationScene(width, theme, short, original, before) {
   assert.ok(bounds.top >= 0 && bounds.bottom <= await evaluate('innerHeight') && bounds.scroll <= bounds.width + 1, 'The real Automation popover remains within its workface')
   await frame(width, theme, 'automation-list' + suffix)
   await click(`${automation}.querySelector('[data-progress-details="interval"] > summary')`)
-  const resume = `${automation}.querySelector('[aria-label="Resume continuous progress"]')`
+  const resume = `${automation}.querySelector('[aria-label="Resume and check continuous progress"]')`
   await waitFor(visible(resume))
   await evaluate(`${resume}.scrollIntoView({block:'nearest'})`); await painted()
   const control = await evaluate(`(()=>{const n=${resume},p=${panel},r=n.getBoundingClientRect(),b=p.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {enabled:!n.disabled,inside:r.top>=b.top&&r.bottom<=b.bottom&&r.left>=b.left&&r.right<=b.right,hit:n===hit||n.contains(hit)}})()`)
@@ -484,6 +525,7 @@ async function scenario(width, theme, short = false) {
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: width * 2 + 1, height: short ? 540 : 800, deviceScaleFactor: 1, mobile: false })
   const original = await evaluate(`messageWorkspace.seed(${JSON.stringify(theme)},${JSON.stringify(theme + '-' + width + (short ? '-short' : ''))},${mode === 'empty-states' || mode === 'empty-mutation'})`)
   if (mode === 'automation') await evaluate('messageWorkspace.automation()')
+  if (mode === 'progress-actions') await evaluate('messageWorkspace.progressActions()')
   await waitFor(`${surface}?.querySelector('.xterm') && ${editor}?.textContent.includes('尚未发送')`)
   await painted()
   await evaluate(`window.workspaceEditor=${editor}`)
@@ -491,6 +533,7 @@ async function scenario(width, theme, short = false) {
   await click(`${surface}.querySelector('.composer__mailbox')`)
   await waitFor(`${panel}.matches(':popover-open')`)
   if (mode === 'automation') { await automationScene(width, theme, short, original, before); return }
+  if (mode === 'progress-actions') { await progressActionsScene(width, theme, short, original, before); return }
   if (mode === 'notification-resumed') { await resumedNotification(width, theme, original, before); return }
   if (mode === 'notification-recovery') { await notificationRecovery(width, theme, original, before); return }
   if (mode === 'manual-notify') { await manualNotification(width, theme, original, before); return }
@@ -628,7 +671,7 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor('Boolean(window.messageWorkspace)')
-    if (mode === 'automation') { await scenario(640, 'light'); await scenario(320, 'dark'); await scenario(320, 'dark', true) }
+    if (mode === 'automation' || mode === 'progress-actions') { await scenario(640, 'light'); await scenario(320, 'dark'); await scenario(320, 'dark', true) }
     else if (mode === 'manual-notify' || mode === 'notification-recovery' || mode === 'notification-resumed') { for (const [width, theme] of [[380,'dark'],[320,'dark'],[640,'light']]) await scenario(width, theme, mode === 'notification-recovery' && width === 320) }
     else if (mode === 'empty-mutation') await scenario(320, 'dark')
     else if (mode === 'empty-states') for (const theme of ['dark', 'light']) for (const width of [320, 380, 440]) await scenario(width, theme)

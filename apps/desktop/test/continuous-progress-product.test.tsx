@@ -225,15 +225,48 @@ it('mounts the existing Composer leaf and real create/pause/resume/check/stop ro
   expect(page.textContent).toContain('active')
   expect(manager.list()[0]).toMatchObject(target())
   await click('Pause continuous progress'); expect(manager.list()[0]!.status).toBe('paused')
-  await vi.waitFor(() => expect(container.querySelector('[aria-label="Resume continuous progress"]')).not.toBeNull())
-  await click('Resume continuous progress'); expect(manager.list()[0]!.status).toBe('active')
+  await vi.waitFor(() => expect(container.querySelector('[aria-label="Resume and check continuous progress"]')).not.toBeNull())
+  const resume = container.querySelector<HTMLButtonElement>('[aria-label="Resume and check continuous progress"]')!
+  expect(resume.textContent).toContain('Resume and check')
+  expect(container.querySelector('[aria-label="Check continuous progress now"]')).toBeNull()
+  await click('Resume and check continuous progress'); expect(manager.list()[0]!.status).toBe('active')
+  const firstInput = [`\u001b[200~${composeAgentPrompt('continue the assigned work', AGENTMUX_AGENT_MESSAGING_ENTRY).text}\u001b[201~`, '\r']
+  expect(writes).toEqual(firstInput)
+  expect(manager.list()[0]).toMatchObject({ lastOutcome: 'sent', agentSessionId: session.agentSessionId })
+  expect(client.agentSession(session.agentSessionId).run).toEqual(session.run)
+  await vi.waitFor(() => expect(container.querySelector('.continuous-progress-panel')!.textContent).toContain('Host accepted the request'))
   await vi.waitFor(() => expect(container.querySelector('[aria-label="Pause continuous progress"]')).not.toBeNull())
   await click('Check continuous progress now')
-  await vi.waitFor(() => expect(writes).toEqual([`\u001b[200~${composeAgentPrompt('continue the assigned work', AGENTMUX_AGENT_MESSAGING_ENTRY).text}\u001b[201~`, '\r']))
-  await vi.waitFor(() => expect(container.textContent).toContain('Host accepted the request'))
+  expect(writes).toEqual(firstInput)
+  expect(manager.list()[0]!.lastOutcome).toBe('skipped')
   expect(observations.length).toBeGreaterThan(0); expect(new Set(observations)).toEqual(new Set([session.agentSessionId]))
   await click('Stop continuous progress'); expect(manager.list()[0]!.status).toBe('stopped')
   await vi.waitFor(() => expect(container.querySelector('[aria-label="Check continuous progress now"]')).toBeNull())
+})
+
+it('resumes from the Composer and reports a busy check without sending or replacing the original Agent', async () => {
+  const original = await create()
+  await api.continuousProgress.action(target(), original.loopId, 'pause', original, 'pause-before-busy-resume')
+  const status = vi.mocked(client.statusAgent).getMockImplementation()!
+  // The private Native observation seam reports working; every owning decision and
+  // original public action still runs through the production Host/Core route.
+  vi.mocked(client.statusAgent).mockImplementation(async (...args) => {
+    const observed = await status(...args)
+    return { ...observed, session: { ...observed.session, semanticStatus: { ...session.semanticStatus!, state: 'working' as const } },
+      observation: { ...observed.observation, semantic: 'active' as const } }
+  })
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+  await vi.waitFor(() => expect(container.querySelector('[aria-label="Resume and check continuous progress"]')).not.toBeNull())
+  await click('Resume and check continuous progress')
+  expect(manager.list()).toHaveLength(1)
+  expect(manager.list()[0]).toMatchObject({ ...target(), loopId: original.loopId, status: 'active', lastOutcome: 'skipped', lastDecision: 'working', intervalMs: original.intervalMs })
+  const panel = container.querySelector<HTMLElement>('.continuous-progress-panel')!
+  expect(panel.closest('[hidden]')).toBeNull()
+  expect(panel.textContent).toMatch(/working|busy/i)
+  expect(writes).toEqual([])
+  expect(client.agentSession(session.agentSessionId).run).toEqual(session.run)
+  await click('Check continuous progress now')
+  expect(writes).toEqual([]); expect(manager.list()[0]!.lastDecision).toBe('working')
 })
 
 it('saves an existing paused configuration through Composer, preload, IPC and the original Host without recreating or resuming it', async () => {
@@ -368,11 +401,14 @@ it('the actual explicit-input signal pauses automatic work without moving its dr
   await act(async () => useAppStore.getState().setAgentComposerDraft(session.agentSessionId, 'my draft'))
   await vi.waitFor(() => expect(manager.list()[0]!.status).toBe('paused'))
   await api.continuousProgress.action(target(), loop.loopId, 'resume', manager.list()[0]!, 'explicit-resume-original-loop')
-  await manager.check(1_000_000)
-  expect(writes).toEqual([]); expect(useAppStore.getState().agentComposerDrafts[session.agentSessionId]).toBe('my draft')
+  const accepted = [`\u001b[200~${composeAgentPrompt(loop.prompt, AGENTMUX_AGENT_MESSAGING_ENTRY).text}\u001b[201~`, '\r']
+  expect(writes).toEqual(accepted)
+  expect(useAppStore.getState().agentComposerDrafts[session.agentSessionId]).toBe('my draft')
   expect(manager.list()[0]!.status).toBe('active')
   expect(useAppStore.getState().agentSteerQueues).toEqual({})
-  expect(writes).toEqual([])
+  await manager.checkNow(loop.loopId)
+  expect(writes).toEqual(accepted)
+  expect(client.agentSession(session.agentSessionId).run).toEqual(session.run)
 })
 it('rejects a new automatic claim when real public raw input follows its observation; manual input and its cursor remain intact', async () => {
   const loop = await create()
@@ -387,20 +423,40 @@ it('rejects a new automatic claim when real public raw input follows its observa
   expect(manager.list()[0]).toMatchObject({ lastOutcome: 'skipped' })
   expect(client.agentSession(session.agentSessionId).promptCompletionAdmission).toBeUndefined()
 })
-it('cancels a pending original Core observation without delaying healthy manual input', async () => {
+it('cancels a pending Composer resume check without delaying healthy manual input or erasing its action error on refresh', async () => {
   const loop = await create()
-  let release!: () => void
-  let entered = false
+  await api.continuousProgress.action(target(), loop.loopId, 'pause', loop, 'pause-before-cancelled-resume')
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+  await vi.waitFor(() => expect(container.querySelector('[aria-label="Resume and check continuous progress"]')).not.toBeNull())
+  const resume = container.querySelector<HTMLButtonElement>('[aria-label="Resume and check continuous progress"]')!
+  const details = resume.closest('details')!
+  await act(async () => { details.open = true })
+  let release!: () => void, entered = false
   const blocked = new Promise<void>(resolve => { release = resolve }), status = client.statusAgent.bind(client)
   vi.mocked(client.statusAgent).mockImplementationOnce(async (...args) => { entered = true; await blocked; return status(...args) })
-  const checking = manager.checkNow(loop.loopId)
+  const action = vi.spyOn(api.continuousProgress, 'action')
+  await act(async () => resume.click())
   try {
     await vi.waitFor(() => expect(entered).toBe(true))
+    expect(resume.disabled).toBe(true)
+    const request = action.mock.calls[0]!
+    expect(request.slice(0, 3)).toEqual([target(), loop.loopId, 'resume'])
     await api.sessions.write(snapshot.control, 'still healthy', 'user')
     expect(writes).toEqual(['still healthy'])
     await vi.waitFor(() => expect(manager.list()[0]!.status).toBe('paused'))
-  } finally { release(); await checking }
-  expect(writes).toEqual(['still healthy']); expect(manager.list()[0]!.lastOutcome).toBe('unknown')
+  } finally {
+    release()
+    await act(async () => { await expect(action.mock.results[0]!.value).rejects.toBeDefined() })
+  }
+  expect(writes).toEqual(['still healthy'])
+  expect(client.agentSession(session.agentSessionId).run).toEqual(session.run)
+  const notices = () => [...container.querySelectorAll<HTMLElement>('[aria-label="Automation settings"] .continuous-progress-panel [role="status"]')].filter(node => !node.closest('[hidden]'))
+  await vi.waitFor(() => expect(notices().length).toBeGreaterThan(0))
+  const originalError = notices().map(node => node.textContent).join(' ')
+  expect(originalError).toMatch(/cancel|changed|input/i)
+  await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+  expect(notices().map(node => node.textContent).join(' ')).toContain(originalError)
+  expect(action).toHaveBeenCalledTimes(1)
 })
 it('an unknown original Native cursor admits no automatic input or false zero and recovers on the same Session', async () => {
   const loop = await create(); cursor = null
@@ -486,7 +542,7 @@ it('binds an explicit real Tracker through the mounted leaf and IPC, keeping don
   expect(container.textContent).not.toContain('business complete')
   expect(requests).toEqual([])
   await tracker.run('closeout-feature', '--feature', binding.ownerId, '--mode', 'archive', '--execute', ...tracker.closeoutArgs)
-  await click('Resume continuous progress')
+  await click('Resume and check continuous progress')
   await click('Check continuous progress now')
   await vi.waitFor(() => expect(manager.list()[0]!.status).toBe('stopped'))
   await vi.waitFor(() => expect(container.textContent).toContain('business complete (archived)'))

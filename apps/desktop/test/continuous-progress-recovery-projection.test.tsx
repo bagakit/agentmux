@@ -7,7 +7,7 @@ describe('continuous progress recovery projection', () => {
     const html = renderToStaticMarkup(<ContinuousProgressPanel loop={{ loopId: 'l', providerLabel: 'Codex', executionState: 'unknown', loopState: 'paused', lastDecision: 'Needs inspection' }} />)
     expect(html).toContain('<dt>Loop</dt><dd>paused</dd>')
     expect(html).toContain('<dt>Agent execution</dt><dd>unknown</dd>')
-    expect(html).toContain('Resume continuous progress')
+    expect(html).toContain('Resume and check continuous progress')
     expect(html).not.toContain('Next check')
   })
 })
