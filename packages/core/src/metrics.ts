@@ -17,7 +17,7 @@ import type { RendererAnimationsInput, RendererAnimationsResult } from './render
 import type { RendererMemoryInput, RendererMemoryResult } from './renderer-memory.js'
 import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.js'
 import type { RendererV8ProfileInput, RendererV8ProfileResult } from './renderer-v8-profile.js'
-import { readInputObservation } from './performance-diagnostics.js'
+import { readInputObservation, INPUT_PERFORMANCE_STAGES, INPUT_PERFORMANCE_WORK } from './performance-diagnostics.js'
 import type { ClientPerformanceDiagnostics, InputPerformanceSnapshot } from './performance-diagnostics.js'
 import { RENDERER_SESSION_EVENT_TYPES, RENDERER_TIMING_KINDS, type RendererPerformanceSnapshot } from './renderer-performance.js'
 export * from './renderer-performance.js'
@@ -171,17 +171,22 @@ const terminalInteractionParser = record({ observedSinceAt: number,
     observedAt: number, delayMs: nullable(number), visible: boolean, liveReady: boolean, acceptsInput: boolean, readOnly: boolean,
     buffer: v => { if (!['normal', 'alternate'].includes(v as string)) invalid() }, mouseTrackingMode: identity })) })
 const inputParentParser: Parser = value => { if (!readInputObservation(value)) invalid() }
-const inputPhasesParser = record(Object.fromEntries(['queued','current-run','operation','native-input','received','connected-client','host-call','reply-ready'].map(key => [key, nullable(number)])))
+const inputPhasesParser = record(Object.fromEntries(INPUT_PERFORMANCE_STAGES.map(key => [key, nullable(number)])))
+const inputStageParser: Parser = v => { if (!(INPUT_PERFORMANCE_STAGES as readonly unknown[]).includes(v)) invalid() }
+const inputWorkParser = nullable((v: unknown) => { if (!(INPUT_PERFORMANCE_WORK as readonly unknown[]).includes(v)) invalid() })
+const inputKindParser: Parser = v => { if (!['user','mouse','protocol','paste','semantic','terminal'].includes(v as string)) invalid() }
+const inputBlockerParser = nullable(record({ id: count, sessionId: nullable(identity), runId: identity, kind: inputKindParser, work: inputWorkParser, stage: inputStageParser }))
 const inputEntryParser = record({ id: count, sessionId: nullable(identity), runId: identity,
+  work: inputWorkParser, blockedBy: inputBlockerParser, serviceMs: nullable(number),
   hostId: nullable(identity), ownerInstanceId: nullable(identity), sender: nullable(record({ webContentsId: count, window: nullable(windowParser) })),
   parent: nullable(inputParentParser), parentMatch: v => { if (!['absent','unique','ambiguous','unknown-omitted'].includes(v as string)) invalid() }, phases: inputPhasesParser,
-  kind: v => { if (!['user','mouse','protocol','paste','semantic','terminal'].includes(v as string)) invalid() }, bytes: nullable(count),
-  enqueuedAt: number, stage: v => { if (!['queued','current-run','operation','native-input','received','connected-client','host-call','reply-ready'].includes(v as string)) invalid() },
+  kind: inputKindParser, bytes: nullable(count),
+  enqueuedAt: number, stage: inputStageParser,
   stageMs: number, totalMs: number, result: v => { if (!['pending','completed','failed'].includes(v as string)) invalid() } })
 const inputPerformanceParser = record({ startedAt: number, started: count, completed: count, failed: count, pending: count,
   kinds: record({ user: count, mouse: count, protocol: count, paste: count, semantic: count, terminal: count }),
   queueWait: timingParser, currentRun: timingParser, operation: timingParser, nativeInput: timingParser,
-  active: boundedArray(64, inputEntryParser), omittedActive: count, recent: boundedArray(32, inputEntryParser), omittedRecent: count, oldestPendingMs: nullable(number) })
+  active: boundedArray(64, inputEntryParser), omittedActive: count, recent: boundedArray(32, inputEntryParser), omittedRecent: count, slowest: boundedArray(8, inputEntryParser), oldestPendingMs: nullable(number) })
 const clientPerformanceParser = record({ processId: count, observedAt: number, input: inputPerformanceParser,
   carrier: record({ encoded: timingParser, decodedFrames: timingParser, decodedValues: timingParser,
     encodedBytes: count, encodedFrames: count, decodedBytes: count, rejected: count }) })
