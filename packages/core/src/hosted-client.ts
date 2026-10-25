@@ -46,6 +46,7 @@ export async function connectHostedAgentMux(options: {
   const publicOpenings = new Set<AbortController>()
   let publicReaderEpoch = 0
   let controlOwner: AgentMuxRuntimeOwnerIdentity | undefined, controlConnecting: Promise<void> | undefined, controlEpoch = 0
+  let runtimePreparing: Promise<unknown> | undefined
   const acceptOwner = (owner: AgentMuxRuntimeOwnerIdentity): void => {
     if (controlOwner && (controlOwner.runtimeId !== owner.runtimeId || controlOwner.ownerInstanceId !== owner.ownerInstanceId)) controlEpoch++
     controlOwner = structuredClone(owner)
@@ -652,7 +653,7 @@ export async function connectHostedAgentMux(options: {
   const client: Record<string, unknown> = {
     connect,
     runtimeOwnerIdentity: () => controlOwner ? structuredClone(controlOwner) : null,
-    disconnect: () => { publicReaderEpoch++; for (const controller of publicOpenings) controller.abort(); publicOpenings.clear(); for (const reading of publicReaders) void reading.dispose().catch(() => {}); publicReaders.clear(); eventEpoch++; controlEpoch++; controlOwner = undefined; openingReaders.clear(); const previous = stream; stream = undefined; void previous?.dispose();
+    disconnect: () => { runtimePreparing = undefined; publicReaderEpoch++; for (const controller of publicOpenings) controller.abort(); publicOpenings.clear(); for (const reading of publicReaders) void reading.dispose().catch(() => {}); publicReaders.clear(); eventEpoch++; controlEpoch++; controlOwner = undefined; openingReaders.clear(); const previous = stream; stream = undefined; void previous?.dispose();
       for (const reading of attached.values()) void reading.stream.dispose(); attached.clear();
       for (const read of [...histories]) releaseHistory(read) },
     ...(options.forwardRpc ? { forwardRpc: async (method: Parameters<AgentMuxHostedForwardRpc>[0], params: Parameters<AgentMuxHostedForwardRpc>[1], context: Parameters<AgentMuxHostedForwardRpc>[2] = {}, expectedOwner?: AgentMuxRuntimeFence) => {
@@ -778,7 +779,7 @@ export async function connectHostedAgentMux(options: {
     },
     dispose: async () => {
       if (disposed) return
-      disposed = true; publicReaderEpoch++; for (const controller of publicOpenings) controller.abort(); publicOpenings.clear(); eventEpoch++; controlEpoch++; openingReaders.clear()
+      disposed = true; runtimePreparing = undefined; publicReaderEpoch++; for (const controller of publicOpenings) controller.abort(); publicOpenings.clear(); eventEpoch++; controlEpoch++; openingReaders.clear()
       observationLifetime.abort()
       if (retry) clearTimeout(retry)
       const resources = [...publicReaders, stream, ...[...attached.values()].map(value => value.stream)].filter((value): value is AgentMuxHostedSubscription => Boolean(value))
@@ -797,6 +798,13 @@ export async function connectHostedAgentMux(options: {
     }, options, () => endpointState ? structuredClone(endpointState) : undefined)
   }
   for (const method of AGENTMUX_HOSTED_METHODS) client[method] = async (...args: unknown[]) => {
+    if (method === 'connectRuntime') {
+      // Share unfinished preparation only. Later calls refresh the original owner;
+      // input operations and observation readers remain independent.
+      const preparing = runtimePreparing ??= invoke(method, args)
+      try { return await preparing }
+      finally { if (runtimePreparing === preparing) runtimePreparing = undefined }
+    }
     if (method === 'releaseRunAttachment') {
       const runId = (args[0] as AgentMuxRunRef).runId, reading = attached.get(runId)
       attached.delete(runId); openingReaders.delete(runId); await reading?.stream.dispose(); return
