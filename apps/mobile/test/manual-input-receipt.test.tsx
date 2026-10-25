@@ -25,6 +25,35 @@ async function settled(check: () => void) { await act(async () => { await vi.wai
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }; vi.restoreAllMocks() })
 
+it('keeps a Mote input reference unconfirmed for the original manual send and explicit retry', async () => {
+  const f = fixture()
+  f.submit.mockImplementation(async input => ({ moteObservationId: 'original-mote-observation', inputKey: {
+    kind: 'prompt', agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId
+  } }))
+  const v = await mount(<MobileConversationSurface {...props(f)} />)
+  await paste(v.element, body); await click(button(v.element, 'Send'))
+  await settled(() => expect(v.element.textContent).toContain('输入回执尚未确认'))
+  const original = structuredClone(attempt())
+  expect(original.phase).toBe('unknown')
+  expect(original.inputRequested).toBe(true)
+  expect(original.draft).toBe(body)
+  expect(editor(v.element).textContent).toBe(body)
+  expect(f.submit).toHaveBeenCalledOnce()
+
+  await click(button(v.element, '重试原请求'))
+  await settled(() => expect(f.submit).toHaveBeenCalledTimes(2))
+  await settled(() => expect(v.element.textContent).toContain('原操作尚未返回 Core 输入回执'))
+  expect(attempt().operationId).toBe(original.operationId)
+  expect(attempt().phase).toBe('unknown')
+  expect(attempt().draft).toBe(body)
+  expect(f.submit.mock.calls[1]![0].operationId).toBe(original.operationId)
+
+  const receipt = await receiptFor(f.submit.mock.calls[0]![0])
+  await act(async () => f.emit({ type: 'agent-input', receipt }))
+  await settled(() => expect(attempt().phase).toBe('confirmed'))
+  expect(f.submit).toHaveBeenCalledTimes(2)
+})
+
 it('sends a new manual input without catalog or predecessor gates and keeps first-save waiting distinct from terminal confirmation', async () => {
   const f = fixture()
   const catalog = f.client.catalog
