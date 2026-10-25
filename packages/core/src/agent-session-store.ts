@@ -3001,11 +3001,21 @@ export class AgentMuxSessionDurabilityError extends AgentMuxError {
   }
 }
 
+/** Scope marker for a write that may change rows of any Session. */
+const CROSS_SESSION_WRITE = Symbol('cross-session-write')
+
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
   private tail: Promise<void> = Promise.resolve()
   // Exact reads join preceding writes to their own Session, using the original
   // writer's settlement Promise. This index holds no metadata or receipt facts.
   private readonly sessionWriteTails = new Map<string, Promise<void>>()
+  // The latest write that may change any Session's rows (whole-document lifecycle
+  // reconciliation). An exact read joins it too, so it never misses such a write.
+  private crossSessionWriteTail: Promise<void> = Promise.resolve()
+  /** Preceding writes that can change this Session's rows: its own and any cross-Session one. */
+  private async sessionWrites(agentSessionId: string, signal?: AbortSignal): Promise<void> {
+    await observeRead(Promise.all([this.sessionWriteTails.get(agentSessionId), this.crossSessionWriteTail]), signal)
+  }
   private readonly timelineTails = new Map<string, Promise<void>>()
   private readonly capturedPreparations = new Map<string, Promise<AgentCapturedTimelinePage['stream']['gaps']>>()
   private pendingLockRelease: (() => Promise<void>) | null = null
@@ -3138,7 +3148,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async readHistorySource(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor | null> {
-    await observeRead(this.tail, signal)
+    await this.sessionWrites(agentSessionId, signal)
     return await this.withReadDatabase(db => {
       const activeRow = db.prepare(activeHistorySourceSql).get(agentSessionId)
       if (activeRow) return activeSessionHistorySource(JSON.parse(String(activeRow.json)), agentSessionId)
@@ -3155,13 +3165,13 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null> {
-    await this.tail
+    await this.sessionWrites(agentSessionId)
     return await this.withReadDatabase(db => this.futureIntent(db, agentSessionId, intentId),
       document => structuredClone(document.sessions.find(session => session.agentSessionId === agentSessionId)?.futurePromptIntents?.[intentId] ?? null))
   }
 
   async listFuturePromptIntents(agentSessionId: string, options: { afterIntentId?: string; limit?: number } = {}): Promise<AgentMuxFuturePromptPage> {
-    await this.tail
+    await this.sessionWrites(agentSessionId)
     const limit = futurePageLimit(options.limit)
     return await this.withReadDatabase(db => {
       const cursor = options.afterIntentId === undefined ? null : db.prepare(
@@ -3331,7 +3341,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null> {
-    await this.tail
+    await this.sessionWrites(agentSessionId)
     return await this.withReadDatabase(db => {
       const session = this.sessionMetadata(db, agentSessionId)
       const row = session ? undefined : db.prepare('SELECT json FROM retired_sessions WHERE id=?').get(agentSessionId)
@@ -3341,14 +3351,14 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async readLifecycleReservation(agentSessionId: string): Promise<AgentMuxLifecycleReservation | null> {
-    await this.tail
+    await this.sessionWrites(agentSessionId)
     return await this.withReadDatabase(db => {
       const row = db.prepare('SELECT json FROM reservations WHERE id=?').get(agentSessionId)
       return row ? lifecycleReservation(JSON.parse(String(row.json))) : null
     }, document => structuredClone(document.reservations.find(item => item.agentSessionId === agentSessionId) ?? null))
   }
   async loadResumeCorrelation(agentSessionId: string, operationId: string) {
-    await this.tail
+    await this.sessionWrites(agentSessionId)
     return await this.withReadDatabase(db => {
       const row = db.prepare('SELECT json FROM reservations WHERE id=?').get(agentSessionId)
       const reservation = row ? lifecycleReservation(JSON.parse(String(row.json))) : null
@@ -3364,7 +3374,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const document = await this.read()
       next = restartStartNotAppliedReservation(document.reservations.find(item => item.agentSessionId === reservation.agentSessionId), reservation, failure)
       await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === next.agentSessionId ? next : item) })
-    })
+    }, undefined, reservation.agentSessionId)
     return structuredClone(next)
   }
 
@@ -3376,7 +3386,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       assertReservationPrecondition(next, document.sessions, document.retiredAgentSessions)
       assertSupervisedResumeClaim(next, document.sessions)
       await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === next.agentSessionId ? next : item) })
-    })
+    }, undefined, reservation.agentSessionId)
     return structuredClone(next)
   }
 
@@ -3387,7 +3397,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       next = preparedReopenReservation(document.reservations.find(item => item.agentSessionId === reservation.agentSessionId), reservation, session)
       assertReservationPrecondition(next, document.sessions, document.retiredAgentSessions)
       await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === next!.agentSessionId ? next! : item) })
-    })
+    }, undefined, reservation.agentSessionId)
     return structuredClone(next!)
   }
 
@@ -3399,7 +3409,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       assertReservationPrecondition(next, document.sessions, document.retiredAgentSessions)
       assertNativeCreationOwner(next.preparedCreation!, document.sessions, document.retiredAgentSessions, document.reservations)
       await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === reservation.agentSessionId ? next! : item) })
-    })
+    }, undefined, reservation.agentSessionId)
     return structuredClone(next!)
   }
 
@@ -3409,7 +3419,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const document = await this.read()
       next = claimedCreateReservation(document.reservations.find(item => item.agentSessionId === agentSessionId), operationId, intentDigest, claim)
       if (next) await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === agentSessionId ? next! : item) })
-    })
+    }, undefined, agentSessionId)
     return next ? structuredClone(next) : null
   }
 
@@ -3419,7 +3429,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const retained = (item: AgentMuxLifecycleReservation) => (item.kind === 'reopen' || item.kind === 'create' && item.preparedCreation || item.kind === 'resume' && item.restart) && item.ownerId === ownerId
       if (!document.reservations.some(retained)) return
       await this.write({ ...document, reservations: document.reservations.map(item => retained(item) ? { ...item, ownerReleased: true } : item) })
-    })
+    }, undefined, CROSS_SESSION_WRITE)
   }
 
   async claimRestart(agentSessionId: string, operationId: string, claim: AgentMuxLifecycleClaim) {
@@ -3428,7 +3438,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const document = await this.read()
       next = claimedRestartReservation(document.reservations.find(item => item.agentSessionId === agentSessionId), operationId, claim)
       if (next) await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === agentSessionId ? next! : item) })
-    })
+    }, undefined, agentSessionId)
     return next ? structuredClone(next) : null
   }
 
@@ -3438,7 +3448,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const document = await this.read()
       next = claimedReopenReservation(document.reservations.find(item => item.agentSessionId === agentSessionId), operationId, expectedRetiredAt, claim)
       if (next) await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === agentSessionId ? next! : item) })
-    })
+    }, undefined, agentSessionId)
     return next ? structuredClone(next) : null
   }
 
@@ -3478,7 +3488,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
           (reservation) => claimedById.get(reservation.reservationId) ?? reservation
         )
       })
-    })
+    }, undefined, CROSS_SESSION_WRITE)
     return claimed.map((reservation) => structuredClone(reservation))
   }
 
@@ -3515,7 +3525,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
           (item) => item.reservationId !== reservation.reservationId
         )
       })
-    })
+    }, undefined, CROSS_SESSION_WRITE)
   }
 
   async retireRuns(runs: readonly AgentMuxRunRef[]): Promise<void> {
@@ -3537,7 +3547,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         retiredRuns,
         retiredAgentSessions
       })
-    })
+    }, undefined, CROSS_SESSION_WRITE)
   }
 
   async commitLifecycle(
@@ -4125,7 +4135,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return join(dirname(this.path), 'agent-timelines', `${filename}.jsonl`);
   }
 
-  private async enqueue(operation: () => Promise<void>, signal?: AbortSignal, sessionId?: string): Promise<void> {
+  private async enqueue(operation: () => Promise<void>, signal?: AbortSignal, sessionId?: string | typeof CROSS_SESSION_WRITE): Promise<void> {
     const current = this.tail.then(async () => {
       signal?.throwIfAborted()
       if (this.pendingLockRelease) {
@@ -4185,7 +4195,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     })
     const settled = current.then(() => {}, () => {})
     this.tail = settled
-    if (sessionId !== undefined) {
+    if (sessionId === CROSS_SESSION_WRITE) this.crossSessionWriteTail = settled
+    else if (sessionId !== undefined) {
       this.sessionWriteTails.set(sessionId, settled)
       void settled.then(() => {
         if (this.sessionWriteTails.get(sessionId) === settled) this.sessionWriteTails.delete(sessionId)
