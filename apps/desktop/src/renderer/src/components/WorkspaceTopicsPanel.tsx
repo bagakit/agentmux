@@ -4,7 +4,7 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 import { isKnowledgeTopicInBindings } from '@agentmux/host/topic-categories'
 import { originalTopicAddress } from '../../../shared/space-addresses'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type {
   ScratchTopicSnapshot,
@@ -100,8 +100,8 @@ export function WorkspaceTopicsPanel({
   const categoryRefreshState = categoryRefresh?.spaceId === categorySpaceId ? categoryRefresh : null
   const [iconTarget, setIconTarget] = useState<SpaceIconTarget | null>(null)
   const [moveTarget, setMoveTarget] = useState<{ topicId: string; title: string } | null>(null)
-  const [promotionTarget, setPromotionTarget] = useState<TopicPromotionTarget | null>(null)
-  const [promoted, setPromoted] = useState<{ topicId: string; title: string } | null>(null)
+  const [promotionTarget, setPromotionTarget] = useState<(TopicPromotionTarget & { categorySpaceId: string | undefined }) | null>(null)
+  const [promoted, setPromoted] = useState<{ topicId: string; categorySpaceId: string | undefined } | null>(null)
   const manualIcons = useAppStore(state => state.spaceObjectIcons)
   const panel = useRef<HTMLElement>(null)
   const iconReturnKey = useRef<string | null>(null)
@@ -334,7 +334,7 @@ export function WorkspaceTopicsPanel({
           items={projected.map((entry) => entry.id)}
           strategy={verticalListSortingStrategy}
         >
-        <div className="workspace-topic-list" aria-label="Topics list">
+        <div className="workspace-topic-list" aria-label="Topics list" data-category-space-id={categorySpaceId}>
           {projected.map((topic) => {
             const isCurrent = topic.id === currentTopic?.id
             const editing = editingTopicId === topic.id
@@ -372,15 +372,14 @@ export function WorkspaceTopicsPanel({
               onResetWiki: topic.wiki ? () => void resetTopicWiki(topic) : undefined,
               onChangeIcon: () => { if (!target) { reportError(new Error('The original object identity is unconfirmed. Repair its directory record before changing its icon.')); return } iconReturnKey.current = target.key; iconInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setIconTarget(target) },
               onMove: isPromoted ? undefined : () => setMoveTarget({ topicId: topic.id, title: topic.title }),
-              onPromote: () => setPromotionTarget({ topicId: topic.id, title: topic.title }),
+              onPromote: () => setPromotionTarget({ topicId: topic.id, title: topic.title, categorySpaceId }),
               promoted: isPromoted,
               wikiEnabled: topic.wiki?.enabled
             }
             return (
-              <SortableTopicItem
+              <Fragment key={topic.id}><SortableTopicItem
                 topicId={topic.id}
                 isCurrent={isCurrent}
-                key={topic.id}
                 {...menuActions}
               >
                 {editing ? (
@@ -441,6 +440,13 @@ export function WorkspaceTopicsPanel({
                 </span>
                 {topic.readError ? <div className="surface-inline-error" role="alert">{topic.title}: {topic.readError}. Its work surface is retained.</div> : null}
               </SortableTopicItem>
+              {promoted?.topicId === topic.id && promoted.categorySpaceId === categorySpaceId ?
+                <div className="topic-promotion-notice" role="status" data-topic-id={topic.id} data-category-space-id={categorySpaceId}>
+                  <span className="topic-promotion-notice__seal" aria-hidden="true"><MoteIcon size={22} /></span>
+                  <div><strong>已晋升为 Mote</strong><p>熟悉的 Agent，继续一起做事。</p></div>
+                  <button type="button" className="icon-button" aria-label="关闭晋升提示" onClick={() => setPromoted(null)}>×</button>
+                </div> : null}
+              </Fragment>
             )
           })}
         </div>
@@ -449,8 +455,7 @@ export function WorkspaceTopicsPanel({
       ) : null}
       {readError ? <div className="surface-inline-error" role="alert">Topics could not be refreshed: {readError}. Existing work surfaces remain available.</div> : null}
       {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
-      {promoted ? <div className="topic-promotion-notice" role="status"><MoteIcon size={26} /><div><strong>{promoted.title} · 已晋升为 Mote</strong><p>熟悉的 Agent，继续一起做事。</p></div><button type="button" className="icon-button" aria-label="关闭晋升提示" onClick={() => setPromoted(null)}>×</button></div> : null}
-      <TopicPromotionDialog target={promotionTarget} onClose={() => setPromotionTarget(null)} onPromoted={receipt => setPromoted({ topicId: receipt.topicId, title: receipt.topic?.title ?? promotionTarget?.title ?? 'Mote' })} />
+      <TopicPromotionDialog target={promotionTarget} onClose={() => setPromotionTarget(null)} onPromoted={receipt => setPromoted({ topicId: receipt.topicId, categorySpaceId: promotionTarget?.categorySpaceId })} />
       <TopicMoveDialog target={moveTarget} onClose={() => setMoveTarget(null)} />
       <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} returnFocus={() =>
         iconInvoker.current?.isConnected ? iconInvoker.current : [...(panel.current?.querySelectorAll<HTMLElement>('[data-space-icon-target]') ?? [])]
