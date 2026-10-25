@@ -232,7 +232,6 @@ it('a real pending interaction appearing after payload keeps that byte receipt a
     expect([...h.accepted.values()].map(value => value.data)).toEqual([plan.payload])
     const current = await h.stored()
     expect(current.terminalPromptSubmission?.payload.inputByteRange).toEqual({ startByte: 0, endByte: Buffer.byteLength(plan.payload) })
-    expect(Reflect.get(h.coordinator, 'deps').agentInputCursors.get(h.initial.agentSessionId)).toBe(Buffer.byteLength(plan.payload))
     expect(current.promptCompletionAdmission?.acknowledged).not.toBe(true)
     expect(current.promptCompletionAdmission?.notApplied).not.toBe(true)
     expect(current.terminalPromptSubmission?.submit.acknowledged).not.toBe(true)

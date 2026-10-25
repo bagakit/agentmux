@@ -76,7 +76,7 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: str
     return screen.throughByte
   }) }
   const coordinator = () => new AgentPromptSubmissionCoordinator({ store, registry, providers, publisher, kernel: kernel as never,
-    screenEvidence: screenEvidence as never, agentInputCursors: new Map(), requireAgentSession: id => registry.get(id), assertAgentRun: () => {},
+    screenEvidence: screenEvidence as never, requireAgentSession: id => registry.get(id), assertAgentRun: () => {},
     updateExactAgentSession: (id, expectedRun, update) => registry.update(id, expectedRun, update) })
   let owner = coordinator()
   const initialCondition = agentPromptCondition(stored)
