@@ -18,6 +18,8 @@
 
 原采样器以同一个消费时钟独立读取 App／Main，进程树扫描保持单笔在途。扫描完成只合入本来源结果和真实时间，随后由正常发布消费；不会重读 App 或额外制造一帧。公共首帧因而可含可用 App 和仍 pending 的进程树；任何一源的迟到、失败或换代都不刷新另一源的年龄。
 
+显式 Renderer 时间线请求 Chromium 的 `devtools.timeline.stack`，在平台实际提供时保留脚本触发样式或布局的调用位置；它不是完整 CPU 采样，也不保证每个事件都有栈。节点级 invalidation tracking 不属于默认录制。回执的 `requestedCategories` 保存原 producer 当时请求的类别与顺序，不与当前 reader 的录制列表强制相等；读取旧原件不能补造当时没有的栈。调用栈中的名称和 URL 只随原显式材料导出，不写入普通安全诊断投影。
+
 各层沿原公共 owner 接线。分析器是无 IO 的便携纯函数，不持有 Session、进程、debugger 或历史；本机 CLI 只转换用户明确指定的导出文件，不创建另一套服务事实。[Performance 本机导入](../../apps/desktop/src/renderer/src/components/performance/PerformanceProfileImport.tsx)通过用户选择的 `File` 读取有界原字节，复用同一解析、加权分析和技术摘要；[共享视图](../../apps/desktop/src/renderer/src/components/performance/PerformanceProfileView.tsx)同时服务原现场和导入结果。文件选择与下载归 client，Core 不引入文件系统或 UI 服务。
 
 ## 函数样本的解释
