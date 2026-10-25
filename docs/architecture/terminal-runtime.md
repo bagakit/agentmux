@@ -109,6 +109,27 @@ Main 新建 Agent 经 `launchAdmittedAgent` → Hosted `createAgentWithDelivery`
 
 Desktop `RuntimeController.resumeSession` 和 `performRecovery` 在这两条实际链路上选择 Runtime 连接。Main 的事件缓存缺项时，准确 Core continuity 回执可经既有 `sessionByTarget` 交付真实 Session 投影，并核对 Core 确认的 Run；缓存缺口不重新要求完整 `connect()`。全组 open 的辅助观察逐 Session 保留失败，物理状态读取不等待该 Session 的语义观察完成；当前上下文未知仍如实呈现。managed Hook 配置 helper 的既有无 Session 事件诊断仍有范围限制，不能把 listener／binding 的 `hookIngressObservation` 当成配置修复回执。
 
+### 1.2 输入顺序与等待成本
+
+行为要求归 [连续阅读与输入响应](../design/behavior/terminal-reading.md#terminal-连续向上阅读历史)。需要保证的是原字节、原目标、授权和写入顺序；Core 队列本身不是产品要求。不能用新增优先级、固定攒批延时或自动重试代替降低输入成本。
+
+**当前实现**：`AgentMuxClient.writeAgentInput` 经 `serializeAgentInput`，同一 Session 的下一次操作等待前次完整结束，再由 `requireCurrentAgentRun` 查询 ctxmux，取得 `acceptedInputBytes`，最后调用 `CtxmuxRunAdapter.input`。后者使用公开 `recoverableInput`，原生 writer 在写入前比较 expected cursor。它避免重复写入，但使连续 raw 输入逐条承担状态查询和回执往返。Hosted discovery、Host 事件循环繁忙与原生请求又是不同成本，不能全部归为 Core 队列，也不能拿入队时的 `blockedBy` 快照解释整段等待。
+
+| 等待或约束 | 归属与处理原则 |
+| --- | --- |
+| 原调用的授权准备、Session／Run／daemon 身份 | Core 保留；异步准备完成顺序不能打乱已接纳的同源输入 |
+| PTY 字节顺序、真实写入背压、本条 applied range | ctxmux 原 writer 唯一持有；接纳与完成回执分离，真实背压不能伪装成功 |
+| 语义输入的原操作身份、cursor 条件与未知恢复 | Core 与 ctxmux 原 recoverable 合同保留；不能因优化 raw 输入而取消防重复写入 |
+| 每条 raw 为获取 cursor 先查询一次 Run | 拟由原 writer 直接返回本条范围消除；不能用上次本地 ACK 代替跨客户端的当前 cursor |
+| 后条 raw 等前条完整 ACK 才派发 | 拟移除重复的上层完成依赖；只保授权顺序和真实语义事务边界 |
+| 历史投影、可选屏幕确认、无关 Session 工作 | 不应成为原始输入的必需前置；相关成本归原消费者缩小范围，不另造调度层 |
+
+**收敛方案，尚不代表已实现**：先在 ctxmux 既有普通 Input 回执中公开 writer 已生成的准确范围，使 raw 输入无需调用前的 cursor 查询；不能从回执旁较晚的 Run 快照倒推范围。迁移范围限 `writeAgent`／`pasteAgent` 的原始写入；共用 helper 的 posture、handshake、typed response 与 prompt 恢复不随之改道。原始输入的逻辑 operationId 仍关联取消诊断、native-hook 的 unknown／accepted 和协议恢复边界。普通输入结果丢失仍为 unknown，不自动重发；需要原操作恢复的语义输入继续使用 recoverableInput。这个独立切片减少一次原生往返，仍保留当前完整 ACK 尾链，不能签为排队问题已解决。
+
+解除该尾链还需要独立的有序命令连接 owner。现有 Core Attachment 属于输出观察，会在 detach、换 view 或观察失败时结束；不能借其寿命决定健康输入是否可用，也不能把它描述成已经存在的独立控制通道。后续通道应复用 ctxmux 的 FIFO 接纳、命令关联与结果返回机制，明确原 daemon／Run 绑定、容量背压、连接关闭、晚回执与 unknown；Core 只组合授权和语义边界，不复制 Runtime 状态。完成这段合同与真实消费者验证后，删除 raw 的旧逐 ACK 尾链，不保留兼容分支或第二套队列。
+
+验证按可推翻方案的边界展开：双 Client 交错写入仍取得各自准确范围；前条回执延迟时后条 raw 仍可接纳且实际字节有序；授权准备乱序、Run 替换、语义输入交错、观察 detach／失败、部分写与断连均不换目标、不丢字节、不自动重放未知输入。现场收益分别观察可信事件派发、Core 准备／排队、原生写入、输出解析与呈现；没有实际交互或尚未更新的实例不能代签流畅度改善。
+
 ## 2. 所有权矩阵
 
 ctxmux 在这个架构中仍是完整、独立的 Runtime 产品。它的 daemon、CLI、协议和 SDK 不依赖
