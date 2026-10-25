@@ -35,18 +35,23 @@ export function feishuQuestionCard(payload: QuestionPublicationPayload, agentSes
         label: text(question.options.length ? 'Or write your answer' : 'Your answer'), label_position: 'top', rows: 2, max_rows: 4, show_icon: false, width: 'fill' }] : [])
     ]))
     actions.push({ tag: 'button', name: 'submit_original_answer', text: text('Submit answers'), type: 'primary', size: 'small', width: 'fill',
-      icon: { tag: 'standard_icon', token: 'send_outlined' }, action_type: 'form_submit', form_name: 'original_question', form_action_type: 'submit',
-      value: { actionRef: payload.actionRef, questionFields: fields } })
+      icon: { tag: 'standard_icon', token: 'send_outlined' }, form_action_type: 'submit',
+      behaviors: [{ type: 'callback', value: { actionRef: payload.actionRef, questionFields: fields } }] })
   }
-  actions.push({ tag: 'button', text: text('Open in amux'), type: 'default', size: 'small', width: 'fill',
+  const navigation = { tag: 'button', text: text('Open in amux'), type: 'default', size: 'small', width: 'fill',
     icon: { tag: 'standard_icon', token: 'chat_outlined' },
-    behaviors: [{ type: 'open_url', default_url: `amux://agent/${encodeURIComponent(agentSessionId)}` }] })
+    behaviors: [{ type: 'open_url', default_url: `amux://agent/${encodeURIComponent(agentSessionId)}` }] }
+  const pending = payload.status === 'pending' && !!payload.actionRef
+  if (!pending) actions.push(navigation)
   elements.push({ tag: 'column_set', flex_mode: 'none', horizontal_spacing: '8px', margin: '0px',
     columns: actions.map(action => ({ tag: 'column', width: 'weighted', weight: 1, elements: [action] })) })
   const surface = { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '0px', margin: '0px', background_style: 'question-surface',
-    columns: [{ tag: 'column', width: 'weighted', weight: 1, padding: '10px 12px 10px 12px', vertical_spacing: '8px', elements }] }
+    columns: [{ tag: 'column', width: 'weighted', weight: 1, padding: pending ? '10px 12px 8px 12px' : '10px 12px 10px 12px', vertical_spacing: '8px', elements }] }
   return { schema: '2.0', config: { update_multi: true, style: { color: {
     'question-surface': { light_mode: 'rgba(30,130,130,0.06)', dark_mode: 'rgba(85,185,180,0.12)' }
-  } } }, body: { padding: '0px', vertical_spacing: '0px', elements: payload.status === 'pending' && payload.actionRef
-    ? [{ tag: 'form', name: 'original_question', padding: '0px', vertical_spacing: '0px', elements: [surface] }] : [surface] } }
+  } } }, body: { padding: '0px', vertical_spacing: '0px', elements: pending
+    ? [{ tag: 'form', name: 'original_question', padding: '0px', vertical_spacing: '0px', elements: [surface] },
+      // Navigation is not an answer field and must stay outside native form collection.
+      { ...surface, columns: [{ tag: 'column', width: 'weighted', weight: 1, padding: '0px 12px 10px 12px', elements: [navigation] }] }]
+    : [surface] } }
 }
