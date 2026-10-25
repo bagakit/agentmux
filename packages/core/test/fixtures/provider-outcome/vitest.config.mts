@@ -27,6 +27,6 @@ export default defineConfig({ root, cacheDir: resolve(root, '.local/cache/provid
       ...(before === code ? {} : { mutation }) }) + '\n')
     if (before !== code) return { code, map: null }
   }
-}], test: { include: ['packages/core/test/provider-turn-outcome.test.ts', 'packages/core/test/provider-session-failure.test.ts',
+}], test: { include: ['packages/core/test/provider-turn-outcome.test.ts', 'packages/core/test/provider-outcome-restart.integration.test.ts', 'packages/core/test/provider-session-failure.test.ts',
   'packages/core/test/codex-error-classification.test.ts'], passWithNoTests: false, fileParallelism: false, maxWorkers: 1,
   testTimeout: 30_000, hookTimeout: 20_000 } })
