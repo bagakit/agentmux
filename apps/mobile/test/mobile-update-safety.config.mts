@@ -1,12 +1,14 @@
 import { resolve, relative } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { defineConfig } from 'vitest/config'
 import base from './mobile-web.config.mts'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutant = process.env.MOBILE_UPDATE_MUTANT
-const variants: Record<string, { file: string; before: string; after: string }> = {
+const variants: Record<string, { file: string; before: string; after: string; matches?: number }> = {
   'ignore-live-owner': { file: 'apps/mobile/src/mobile-web/update-safety.ts', before: 'if (finalIssue) return blocked(finalIssue)', after: 'if (false && finalIssue) return blocked(finalIssue)' },
-  'ignore-workface-change': { file: 'apps/mobile/src/mobile-web/update-safety.ts', before: '!workfaceStillSaved()', after: 'false' },
+  'ignore-workface-change': { file: 'apps/mobile/src/mobile-web/update-safety.ts', before: '!workfaceStillSaved()', after: 'false', matches: 2 },
   'ignore-original-key': { file: 'apps/mobile/src/connection/MobileConnectionRoot.tsx', before: '!equal(key.secretKey, original.key.secretKey)', after: 'false' },
   'ignore-consumer-loss': { file: 'apps/mobile/src/connection/MobileConnectionRoot.tsx', before: 'binding.current === original && original.connected && !!saved', after: 'binding.current === original && !!saved' },
   'ignore-note-editor': { file: 'apps/mobile/src/navigation/MobileNoteFile.tsx', before: 'useMobileWebUpdateSafetyOwner(() => draft.reloadIssue())', after: 'void draft' },
@@ -36,6 +38,14 @@ if (mutant && !variants[mutant]) throw new Error('Unknown mobile update mutation
 export default defineConfig({ ...base, plugins: [...(base.plugins ?? []), { name: 'mobile-update-mutation', enforce: 'pre', transform(code, id) {
   const variant = mutant && variants[mutant]
   if (!variant || relative(root, id.split('?')[0]!) !== variant.file) return
-  if (code.split(variant.before).length !== 2) throw new Error('Mobile update mutation did not match exactly once')
-  return { code: code.replace(variant.before, variant.after), map: null }
+  const matches = code.split(variant.before).length - 1
+  if (matches !== (variant.matches ?? 1)) throw new Error('Mobile update mutation did not match its exact fence count')
+  let changed = code.replaceAll(variant.before, variant.after)
+  const report = process.env.MOBILE_APPLY_LOADED
+  if (report) {
+    const sha = (value: string) => createHash('sha256').update(value).digest('hex')
+    const entry = { file: variant.file, originalSHA256: sha(readFileSync(resolve(root, variant.file), 'utf8')), loadedSHA256: sha(changed), mutation: mutant, matchedFences: matches }
+    changed = `import { appendFileSync as __updateMutationLoaded } from 'node:fs'; __updateMutationLoaded(${JSON.stringify(report)}, ${JSON.stringify(JSON.stringify(entry) + '\n')});\n` + changed
+  }
+  return { code: changed, map: null }
 } }], test: { ...base.test, include: mutant === 'ignore-cancel-preparation' ? ['test/mobile-attachments.test.tsx'] : ['test/mobile-update-identity.test.ts', 'test/mobile-update-safety.test.tsx', 'test/mobile-update-connection.test.tsx', 'test/mobile-update-workface.test.tsx'] } })
