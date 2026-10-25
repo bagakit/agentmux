@@ -39,7 +39,7 @@ import { parseAgentMuxMessagePrefix, renderAgentMuxMessageReferences } from './a
 import { AGENTMUX_A2A_REFERENCE_REMINDER } from './agent-messaging-guidance.js'
 import { MAX_A2A_NOTIFICATION_BYTES, validateMessageNotification, type AgentMuxMessageNotification, type AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
 import { messageNotificationJournalSchema, initializeMessageNotificationReferenceIndex } from './agent-message-journal.js'
-import { parseMoteInputObservation, moteInputNeedsObservation, moteInputMember, moteInputNoticeWire, type MoteInputObservation, type MoteInputNoticePhase } from './mote-input.js'
+import { parseMoteInputObservation, moteInputNeedsObservation, moteInputMember, moteInputNoticeId, moteInputNoticeWire, moteInputNoticeWireMatches, type MoteInputObservation, type MoteInputNoticePhase } from './mote-input.js'
 
 const moteInputJournalSchema = `CREATE TABLE IF NOT EXISTS mote_input_observations
   (id TEXT PRIMARY KEY, member_id TEXT NOT NULL, primary_id TEXT, active INTEGER NOT NULL, state_sequence INTEGER NOT NULL);
@@ -224,6 +224,26 @@ export class DurableAgentMuxMessageQueue {
     this.queueId = queueIdFor(path)
   }
 
+  /** Rebuild only the derived Mote positions once, in the journal's writer transaction.
+   * Older owners left the initial null primary and retired refused notices out of discovery. */
+  private initializeMoteInputIndex(): void {
+    this.db.exec(moteInputJournalSchema)
+    if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='mote_input_current'").get()) return
+    const update = this.db.prepare('UPDATE mote_input_observations SET primary_id=?, active=? WHERE id=?')
+    const outcome = this.db.prepare(`SELECT json_extract(CASE WHEN json_valid(r.json) THEN r.json ELSE '{}' END, '$.state') AS state
+      FROM a2a_notifications n JOIN records r ON r.sequence=n.result_sequence WHERE n.notification_id=?`)
+    for (const row of this.db.prepare('SELECT m.id, m.primary_id, m.active, r.json FROM mote_input_observations m JOIN records r ON r.sequence=m.state_sequence').all()) {
+      // These are discovery positions over the already validated journal, not input authority.
+      // Domain errors remain visible to the exact Mote reader and must not block unrelated queue operations.
+      const record = (JSON.parse(String(row.json)) as Extract<JournalRecord, { kind: 'mote-input-observation' }>).observation
+      const primary = record?.binding?.primary?.agentSessionId
+      const notices = record?.notices && typeof record.notices === 'object' ? Object.values(record.notices) : []
+      const refused = notices.some(id => typeof id === 'string' && outcome.get(id)?.state === 'not-applied')
+      update.run(typeof primary === 'string' ? primary : row.primary_id!, refused ? 1 : row.active!, row.id!)
+    }
+    this.db.exec('CREATE UNIQUE INDEX mote_input_current ON mote_input_observations(state_sequence)')
+  }
+
   private withLock<T>(operation: () => Promise<T>, durableReceipt = false, transaction: JournalTransaction = {}): Promise<T> {
     const key = `${this.path}.mutex.sqlite`
     const processTail = processQueueTails.get(key) ?? Promise.resolve()
@@ -285,7 +305,7 @@ export class DurableAgentMuxMessageQueue {
         this.db.exec(messageBroadcastJournalSchema)
         this.db.exec(messageRouteJournalSchema)
         this.db.exec(messageNotificationJournalSchema)
-        this.db.exec(moteInputJournalSchema)
+        this.initializeMoteInputIndex()
         initializeMessageNotificationReferenceIndex(this.db)
       }
       transaction.signal?.throwIfAborted()
@@ -412,7 +432,7 @@ export class DurableAgentMuxMessageQueue {
       const observation = observationRow ? (JSON.parse(String(observationRow.json)) as Extract<JournalRecord, {kind:'mote-input-observation'}>).observation : null
       if (notice.moteObservation ? !observation?.binding || observation.binding.primary.hostId !== 'local' ||
           observation.binding.primary.agentSessionId !== notice.key.agentSessionId || notice.mode !== 'idle' ||
-          notice.wire !== moteInputNoticeWire(observation, notice.moteObservation.phase)
+          !moteInputNoticeWireMatches(notice.wire, observation, notice.moteObservation.phase)
         : reading?.kind !== 'references' || reading.declaredContexts?.length ||
           reading.references.length !== references.length ||
           reading.references.some((reference, index) => reference.declaredAgentSessionId !== references[index]!.senderSessionId ||
@@ -440,6 +460,8 @@ export class DurableAgentMuxMessageQueue {
       }
     }
     else if (record.state === 'not-applied') {
+      // A refused coordination attempt makes its observation outstanding again for its owner.
+      if (current.moteObservation) this.db.prepare('UPDATE mote_input_observations SET active=1 WHERE id=?').run(current.moteObservation.id)
       // A second explicit action may still own unknown input over these same references.
       // Follow only this exact MID's unfinished original references, never terminal history.
       const retain = this.db.prepare(`UPDATE a2a_message_notifications SET notification_id=(
@@ -490,13 +512,14 @@ export class DurableAgentMuxMessageQueue {
     return this.withLock(async () => this.notification(nonEmpty(notificationId, 'Notification ID')) ?? null)
   }
 
-  async prepareMoteInputNotification(id: string, phase: MoteInputNoticePhase, condition: AgentPromptCondition,
+  /** Each attempt has its own original key; an existing attempt is returned, never replaced. */
+  async prepareMoteInputNotification(id: string, phase: MoteInputNoticePhase, attempt: number, condition: AgentPromptCondition,
     idle: NonNullable<AgentMuxMessageNotification['idle']>): Promise<AgentMuxMessageNotification> {
     return this.withLock(async () => {
       const row = this.db.prepare('SELECT r.json FROM mote_input_observations m JOIN records r ON r.sequence=m.state_sequence WHERE m.id=?').get(id)
       if (!row) throw new AgentMuxError('The original Mote input observation is unavailable.', 'MOTE_INPUT_OBSERVATION_UNCONFIRMED')
       const observation = parseMoteInputObservation((JSON.parse(String(row.json)) as Extract<JournalRecord, {kind:'mote-input-observation'}>).observation)
-      const notificationId = `${id}-${phase}`
+      const notificationId = moteInputNoticeId(id, phase, attempt)
       const existing = this.notification(notificationId)
       if (existing) return existing
       if (!observation.binding || observation.binding.primary.hostId !== 'local') throw new AgentMuxError('The original primary input owner is unavailable here.', 'MOTE_INPUT_OBSERVATION_UNCONFIRMED')
@@ -1052,7 +1075,8 @@ export class DurableAgentMuxMessageQueue {
     if (record.kind === 'mote-input-observation') {
       const value = parseMoteInputObservation(record.observation)
       this.db.exec(moteInputJournalSchema)
-      this.db.prepare('INSERT INTO mote_input_observations VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET state_sequence=excluded.state_sequence, active=excluded.active')
+      // The primary is bound after the first, still-pending record; its index must follow each state.
+      this.db.prepare('INSERT INTO mote_input_observations VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET primary_id=excluded.primary_id, state_sequence=excluded.state_sequence, active=excluded.active')
         .run(value.id, moteInputMember(value.origin), value.binding?.primary.agentSessionId ?? null, moteInputNeedsObservation(value) ? 1 : 0, record.sequence)
       this.db.prepare('INSERT INTO records VALUES (?, ?)').run(record.sequence, JSON.stringify(record))
       return

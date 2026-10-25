@@ -31,6 +31,10 @@
       "types": "./dist/mote-chat.d.ts",
       "import": "./dist/mote-chat.js"
     },
+    "./mote-input-source": {
+      "types": "./dist/mote-input-source.d.ts",
+      "import": "./dist/mote-input-source.js"
+    },
     "./browser-page-capability": {
       "types": "./dist/browser-page-capability.d.ts",
       "import": "./dist/browser-page-capability.js"

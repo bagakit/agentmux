@@ -20,9 +20,12 @@ import {
 } from './conversation-changes.js'
 import type { AgentMuxAgentSession, AgentPromptExecutionEvidence } from './types.js'
 import type { AgentMuxMessageNotification } from './agent-message-notification.js'
+import type { ConversationWindowBoundary } from './conversation-changes.js'
 import {
   moteInputMember,
   moteInputNeedsObservation,
+  moteInputNoticeAttempt,
+  moteInputNoticeOwed,
   moteInputObservationId,
   parseAgentInputMoteSource,
   type AgentInputMoteResolver,
@@ -320,7 +323,10 @@ export class MoteInputOwner {
     record: MoteInputObservation,
     patch: Partial<MoteInputObservation>
   ): Promise<MoteInputObservation> {
-    const next = { ...record, ...patch }
+    return await this.save(record, { ...record, ...patch })
+  }
+  /** Saves a complete next state, so a field can also be removed. */
+  private async save(record: MoteInputObservation, next: MoteInputObservation): Promise<MoteInputObservation> {
     if (isDeepStrictEqual(next, record)) return record
     return await this.deps.queue.saveMoteInputObservation({ ...next, revision: record.revision + 1 }, record.revision)
   }
@@ -346,6 +352,9 @@ export class MoteInputOwner {
       })
   }
   private async reconcile(id: string): Promise<void> {
+    // Source/checkpoint capture owns this record until it releases the original input.
+    // A concurrent primary event must not race its CAS or consume an unfinished boundary.
+    if (this.preparations.has(id)) return
     let record = await this.deps.queue.readMoteInputObservation(id)
     if (!record) return
     const member = moteInputMember(record.origin),
@@ -457,6 +466,14 @@ export class MoteInputOwner {
                 value.reference.source.nativeSessionId === native.source.nativeSessionId &&
                 nativeItem(value)?.turnId === native.turnId
             )
+            // Replies and the turn outcome may arrive in different reads; the checkpoint below only
+            // advances after the replies already read are saved with this observation.
+            const replies = mergeReplies(
+              record.replies,
+              exact
+                .filter((value) => value.reference && nativeItem(value)?.kind === 'assistant-message')
+                .map((value) => ({ record: value.reference!, revision: value.revision }))
+            )
             const candidate = exact.find((value) => nativeItem(value)?.turnOutcome)
             // A deferred header selects one exact record; only its full original confirms the outcome.
             let outcome = candidate
@@ -505,19 +522,19 @@ export class MoteInputOwner {
               outcome.original.item.turnOutcome &&
               outcome.original.item.turnId === native.turnId
             ) {
-              record = await this.update(record, {
+              const { replies: _read, ...rest } = record
+              record = await this.save(record, {
+                ...rest,
                 result: {
                   kind: 'native-turn',
                   status: outcome.original.item.turnOutcome.status,
-                  records: exact
-                    .filter(
-                      (value) =>
-                        value.reference && (nativeItem(value)?.kind === 'assistant-message' || value === candidate)
-                    )
-                    .map((value) => ({ record: value.reference!, revision: value.revision }))
+                  records: [
+                    ...replies.filter((value) => !isDeepStrictEqual(value.record, candidate!.reference)),
+                    { record: candidate!.reference!, revision: candidate!.revision }
+                  ]
                 }
               })
-            }
+            } else if (replies.length) record = await this.update(record, { replies })
           }
           if (!page.more) record = await this.update(record, { checkpoint: page.checkpoint })
         }
@@ -535,12 +552,16 @@ export class MoteInputOwner {
   }
 
   private async notify(record: MoteInputObservation, phase: MoteInputNoticePhase): Promise<MoteInputObservation> {
-    if (record.notices[phase]) {
+    const currentId = record.notices[phase]
+    let refused: AgentMuxMessageNotification | null = null
+    if (currentId) {
       // The existing delivery owner may continue a never-submitted original after a crash.
       // Its claim check observes unknown writes without repeating or replacing them.
-      const notice = await this.deps.queue.readNotification(record.notices[phase]!)
-      if (notice) await this.deps.submit(notice)
-      return record
+      const notice = await this.deps.queue.readNotification(currentId)
+      if (notice && notice.state !== 'not-applied') await this.deps.submit(notice)
+      record = await this.recordRefusal(record, phase)
+      if (!moteInputNoticeOwed(record, phase)) return record
+      refused = notice
     }
     if (record.binding!.primary.hostId !== 'local') {
       this.issue(
@@ -566,15 +587,45 @@ export class MoteInputOwner {
           nativeEvidence: { sourceId: current.nativeIdle!.sourceId, id: current.nativeIdle!.id },
           inputByte: current.inputByte
         }
+    // The refused attempt's own opportunity is not a new chance; wait for the primary's next idle.
+    if (refused?.key.expectedRun.runId === current.session.run.runId &&
+      refused.idle && isDeepStrictEqual(refused.idle, idle)) return record
+    const attempt = currentId ? moteInputNoticeAttempt(record.id, phase, currentId)! + 1 : 1
     const notice = await this.deps.queue.prepareMoteInputNotification(
       record.id,
       phase,
+      attempt,
       agentPromptCondition(current.session),
       idle
     )
-    record = await this.update(record, { notices: { ...record.notices, [phase]: notice.notificationId } })
+    const { refused: phases, ...rest } = record,
+      remaining = phases?.filter((value) => value !== phase)
+    record = await this.save(record, {
+      ...rest,
+      notices: { ...record.notices, [phase]: notice.notificationId },
+      ...(remaining?.length ? { refused: remaining } : {})
+    })
     await this.deps.submit(notice)
-    return record
+    return await this.recordRefusal(record, phase)
+  }
+
+  /** Only the input owner's proof that a whole attempt was not applied frees its phase. */
+  private async recordRefusal(record: MoteInputObservation, phase: MoteInputNoticePhase): Promise<MoteInputObservation> {
+    const id = record.notices[phase]
+    if (!id || record.refused?.includes(phase)) return record
+    if ((await this.deps.queue.readNotification(id))?.state !== 'not-applied') return record
+    return await this.update(record, {
+      refused: [...(record.refused ?? []), phase]
+    })
+  }
+
+  /** Another delivery owner settled one of this observation's notices; reconcile only that observation. */
+  async revisit(id: string): Promise<void> {
+    if (this.disposed) return
+    const record = await this.deps.queue.readMoteInputObservation(id)
+    if (!record || !moteInputNeedsObservation(record) && !record.notices.input && !record.notices.result) return
+    this.track(record)
+    this.changed(moteInputMember(record.origin))
   }
 
   async inspect(id: string): Promise<MoteInputInspection | null> {
@@ -618,4 +669,18 @@ export class MoteInputOwner {
     this.watches.clear()
     await Promise.allSettled([...this.jobs.values()].map((job) => job.promise))
   }
+}
+
+/** Newest revision of every exact reply in read order; the notice carries only its owner reference. */
+function mergeReplies(
+  saved: readonly ConversationWindowBoundary[] | undefined,
+  read: readonly ConversationWindowBoundary[]
+): ConversationWindowBoundary[] {
+  const merged = new Map<string, ConversationWindowBoundary>()
+  for (const value of [...(saved ?? []), ...read]) {
+    const key = JSON.stringify(value.record)
+    merged.delete(key)
+    merged.set(key, value)
+  }
+  return [...merged.values()]
 }

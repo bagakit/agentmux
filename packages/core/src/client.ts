@@ -1149,7 +1149,10 @@ export class AgentMuxClient {
     this.messageNotifications = new AgentMuxMessageNotifications({ queue: this.messageQueue,
       connected: () => this.connected && this.kernel.isConnected(),
       read: id => this.readAutomaticInputOpportunity(id),
-      submit: notice => this.submitMessageNotification(notice),
+      submit: async notice => {
+        try { await this.submitMessageNotification(notice) }
+        finally { if (notice.moteObservation) await this.moteInputs.revisit(notice.moteObservation.id) }
+      },
       inputAbsent: async key => !await this.inspectAgentPromptSubmission(key),
       unavailable: (agentSessionId, error, run) => this.publisher.publish({ type: 'agent-error',
         ...(agentSessionId ? { agentSessionId } : {}), code: 'A2A_NOTIFICATION_UNCONFIRMED',

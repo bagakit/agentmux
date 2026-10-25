@@ -10,6 +10,8 @@ import { parseConversationLandmarkRef } from './conversation-landmarks.js'
 import { rpcRecord } from './rpc-data.js'
 import { isDeepStrictEqual } from 'node:util'
 import type { AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
+import { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote-input-source.js'
+export { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote-input-source.js'
 
 /** Host-owned snapshot. Later preference edits cannot redirect this original observation. */
 export type AgentInputMoteBinding = {
@@ -27,6 +29,21 @@ export type MoteInputOrigin =
   | { kind: 'prompt'; key: AgentPromptInputKey }
   | { kind: 'interaction'; agentSessionId: string; runId: string; operationId: string }
 export type MoteInputNoticePhase = 'input' | 'result'
+/** One original attempt per authoritative idle opportunity. Only an attempt the input owner proved
+ * wholly not applied makes room for the next; unknown attempts are never replaced. */
+export function moteInputNoticeId(id: string, phase: MoteInputNoticePhase, attempt: number): string {
+  if (!Number.isSafeInteger(attempt) || attempt < 1)
+    throw new AgentMuxError('The original Mote notice attempt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  return attempt === 1 ? `${id}-${phase}` : `${id}-${phase}-${attempt}`
+}
+/** The attempt an original notice ID names for this observation and phase, or null when it names another. */
+export function moteInputNoticeAttempt(id: string, phase: MoteInputNoticePhase, notificationId: string): number | null {
+  const first = `${id}-${phase}`
+  if (notificationId === first) return 1
+  if (!notificationId.startsWith(first + '-')) return null
+  const suffix = notificationId.slice(first.length + 1), attempt = Number(suffix)
+  return Number.isSafeInteger(attempt) && attempt >= 2 && String(attempt) === suffix ? attempt : null
+}
 /** References and receipts over original owners; never another transcript or task store. */
 export type MoteInputObservation = {
   id: string
@@ -50,6 +67,8 @@ export type MoteInputObservation = {
     turnId: string
     record: ConversationWindowBoundary
   }
+  /** Reply records of the exact native turn already read; a later completion read keeps them. */
+  replies?: ConversationWindowBoundary[]
   result?:
     | { kind: 'native-turn'; status: 'completed' | 'interrupted' | 'failed'; records: ConversationWindowBoundary[] }
     | {
@@ -62,6 +81,8 @@ export type MoteInputObservation = {
         decision?: string
       }
   notices: Partial<Record<MoteInputNoticePhase, string>>
+  /** Phases whose current notice attempt the input owner proved wholly not applied. */
+  refused?: MoteInputNoticePhase[]
 }
 export type MoteInputSubmissionReference = { moteObservationId: string; inputKey: AgentPromptInputKey }
 export type MoteInputInspection = {
@@ -80,7 +101,8 @@ export function moteInputNoticeWire(value: MoteInputObservation, phase: MoteInpu
     origin: value.origin,
     input: value.input,
     ...(value.confirmedQuestion ? { confirmedQuestion: value.confirmedQuestion } : {}),
-    ...(phase === 'result' ? { result: value.result } : {}),
+    ...(phase === 'result' && value.result ? { result: value.result.kind === 'native-turn'
+      ? { kind: value.result.kind, status: value.result.status } : value.result } : {}),
     read: {
       method: 'agent.input.observation',
       params: { agentSessionId: moteInputMember(value.origin), observationId: value.id }
@@ -89,6 +111,17 @@ export function moteInputNoticeWire(value: MoteInputObservation, phase: MoteInpu
     guidance:
       'This is a platform observation, not a new human request or permission. Read the original observation and exact result references before coordinating. Do not repeat the member input. Delivery, native turn outcome, task completion and human acceptance are distinct.'
   })
+}
+/** Retained notification bytes need not use today's presentation. Their immutable provenance
+ * still names this exact observation; full results and authority come from its original owner. */
+export function moteInputNoticeWireMatches(wire: string, value: MoteInputObservation, phase: MoteInputNoticePhase): boolean {
+  try {
+    const body = JSON.parse(wire) as Record<string, unknown>
+    const expected = JSON.parse(moteInputNoticeWire(value, phase)) as Record<string, unknown>
+    return body !== null && typeof body === 'object' && !Array.isArray(body) &&
+      ['schema', 'observationId', 'phase', 'source', 'memberAgentSessionId', 'origin', 'read']
+        .every(field => isDeepStrictEqual(body[field], expected[field]))
+  } catch { return false }
 }
 export function moteInputMember(origin: MoteInputOrigin): string {
   return origin.kind === 'prompt' ? origin.key.agentSessionId : origin.agentSessionId
@@ -125,8 +158,10 @@ export function parseMoteInputObservation(value: unknown): MoteInputObservation 
     'confirmedQuestion',
     'checkpoint',
     'nativeInput',
+    'replies',
     'result',
-    'notices'
+    'notices',
+    'refused'
   ])
   const rawOrigin = obj(p.origin, ['kind', 'key', 'agentSessionId', 'runId', 'operationId'])
   let origin: MoteInputOrigin
@@ -166,8 +201,12 @@ export function parseMoteInputObservation(value: unknown): MoteInputObservation 
   )
     fail()
   const notices = obj(p.notices, ['input', 'result'])
-  for (const phase of ['input', 'result'])
-    if (notices[phase] !== undefined && notices[phase] !== `${p.id}-${phase}`) fail()
+  for (const phase of ['input', 'result'] as const)
+    if (
+      notices[phase] !== undefined &&
+      (typeof notices[phase] !== 'string' || moteInputNoticeAttempt(String(p.id), phase, notices[phase]) === null)
+    )
+      fail()
   let binding: AgentInputMoteBinding | null = null
   if (p.binding !== null) {
     const b = obj(p.binding, ['source', 'primary', 'moteRevision', 'spatialRevision']),
@@ -203,6 +242,16 @@ export function parseMoteInputObservation(value: unknown): MoteInputObservation 
     input: p.input as MoteInputObservation['input'],
     notices: notices as MoteInputObservation['notices']
   }
+  if (p.refused !== undefined) {
+    if (
+      !Array.isArray(p.refused) ||
+      !p.refused.length ||
+      new Set(p.refused).size !== p.refused.length ||
+      p.refused.some((phase) => (phase !== 'input' && phase !== 'result') || !result.notices[phase as MoteInputNoticePhase])
+    )
+      fail()
+    result.refused = [...(p.refused as MoteInputNoticePhase[])]
+  }
   if (p.confirmedQuestion !== undefined) {
     const q = obj(p.confirmedQuestion, ['source', 'turnId', 'recordId', 'questionIds']),
       qs = obj(q.source, ['providerId', 'nativeSessionId'])
@@ -235,6 +284,26 @@ export function parseMoteInputObservation(value: unknown): MoteInputObservation 
       record
     }
   }
+  const sameNativeSource = (record: ConversationWindowBoundary) =>
+    record.record.source.kind === 'native' &&
+    record.record.source.providerId === result.nativeInput?.source.providerId &&
+    record.record.source.nativeSessionId === result.nativeInput?.source.nativeSessionId
+  if (p.replies !== undefined) {
+    if (
+      !result.nativeInput ||
+      p.result !== undefined ||
+      !Array.isArray(p.replies) ||
+      !p.replies.length
+    )
+      fail()
+    const replies = (p.replies as unknown[]).map(boundary)
+    if (
+      replies.some((record) => !sameNativeSource(record)) ||
+      new Set(replies.map((record) => JSON.stringify(record.record))).size !== replies.length
+    )
+      fail()
+    result.replies = replies
+  }
   if (p.result !== undefined) {
     const r = obj(p.result, [
       'kind',
@@ -258,15 +327,7 @@ export function parseMoteInputObservation(value: unknown): MoteInputObservation 
       )
         fail()
       const records = (r.records as unknown[]).map(boundary)
-      if (
-        records.some(
-          (record) =>
-            record.record.source.kind !== 'native' ||
-            record.record.source.providerId !== result.nativeInput!.source.providerId ||
-            record.record.source.nativeSessionId !== result.nativeInput!.source.nativeSessionId
-        )
-      )
-        fail()
+      if (records.some((record) => !sameNativeSource(record))) fail()
       result.result = { kind: 'native-turn', status: r.status as 'completed' | 'interrupted' | 'failed', records }
     } else if (r.kind === 'interaction') {
       if (
@@ -294,30 +355,13 @@ export function parseMoteInputObservation(value: unknown): MoteInputObservation 
   return structuredClone(result)
 }
 
-/** A client-selected original workface. This is a locator, never an observer or authority. */
-export type AgentInputMoteSource = {
-  spaceId: string
-  zoneId: string
-  tabId: string
-  regionId: string
-}
-
-export function parseAgentInputMoteSource(value: unknown): AgentInputMoteSource {
-  const fields = ['spaceId', 'zoneId', 'tabId', 'regionId'] as const
-  if (
-    !value ||
-    typeof value !== 'object' ||
-    Array.isArray(value) ||
-    Object.keys(value).some((key) => !fields.includes(key as (typeof fields)[number])) ||
-    fields.some(
-      (key) =>
-        typeof (value as Record<string, unknown>)[key] !== 'string' ||
-        !(value as Record<string, string>)[key]!.trim() ||
-        /[\0\r\n]/u.test((value as Record<string, string>)[key]!)
-    )
-  )
-    throw new AgentMuxError('The original Mote input source is invalid.', 'INVALID_CONTROL_REQUEST')
-  return Object.fromEntries(fields.map((key) => [key, (value as AgentInputMoteSource)[key]])) as AgentInputMoteSource
+/** A phase still owes the primary a notice: none was prepared, or its current attempt was proven
+ * wholly not applied. Unknown attempts belong to their delivery owner. */
+export function moteInputNoticeOwed(record: MoteInputObservation, phase: MoteInputNoticePhase): boolean {
+  const current = record.notices[phase]
+  if (!current) return true
+  if (!record.refused?.includes(phase)) return false
+  return true
 }
 
 /** Only outstanding coordination, not historical inputs, participates in invalidations.
@@ -326,10 +370,10 @@ export function moteInputNeedsObservation(record: MoteInputObservation): boolean
   if (!record.binding || record.binding.primary.hostId !== 'local')
     return ['unconfirmed', 'waiting'].includes(record.input)
   if (['stopped', 'not-applied'].includes(record.input)) return false
-  if (record.origin.kind === 'interaction') return !record.notices.result
+  if (record.origin.kind === 'interaction') return moteInputNoticeOwed(record, 'result')
   return (
-    !record.notices.input ||
+    moteInputNoticeOwed(record, 'input') ||
     Boolean(record.checkpoint && !record.result) ||
-    Boolean(record.result && !record.notices.result)
+    Boolean(record.result && moteInputNoticeOwed(record, 'result'))
   )
 }
