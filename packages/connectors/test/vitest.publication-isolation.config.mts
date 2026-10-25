@@ -17,6 +17,7 @@ export const mutations = {
   resource_cancel: ['packages/connectors/src/publication-host.ts', 'await this.until(this.resolve(reference, [unit], signal, binding, adapter, gap.part), signal)', 'await this.resolve(reference, [unit], signal, binding, adapter, gap.part)'],
   resource_part: ['packages/connectors/src/publication-host.ts', 'JSON.stringify([publicationPartKey(gap.part), gap.part.recordRevision])', 'JSON.stringify([conversationRecordId(gap.part.record), gap.part.recordRevision])'],
   resource_anchor: ['packages/connectors/src/publication-store.ts', " || gap.reason === 'resource-unavailable' && d.gap.reason === 'version-unavailable'", ''],
+  gap_scan: ['packages/connectors/src/publication-store.ts', "AND json_extract(decision_json,'$.gap.part.record')=?", 'AND (? IS NOT NULL)'],
   resource_cache: ['packages/connectors/src/publication-store.ts', 'if (gap) return', 'if (true) return']
 } as const
 if (mutation && !(mutation in mutations)) throw Error('Unknown publication isolation mutation')
