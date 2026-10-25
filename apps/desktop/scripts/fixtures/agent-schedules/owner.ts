@@ -4,8 +4,8 @@ import { AgentMuxFileAgentSessionStore, defineAgentProvider, startHeadlessAgentM
 import { AgentMuxControlServer } from '../../../../../packages/core/dist/public-rpc-server.js'
 import { ContinuousProgressLoopManager } from '../../../../host/src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../../../../host/src/continuous-progress-loop-store.js'
-import { RuntimeController } from '../../../src/main/runtime-controller.js'
 import { deliverContinuousProgress } from '../../../../host/src/continuous-progress-delivery.js'
+import { createGoalRuntime } from '../../../../host/src/goal-runtime.js'
 const state = process.env.AGENTMUX_STATE_DIRECTORY!, workspace = process.env.SCHEDULE_PROBE_WORKSPACE!
 // This private process owns a small authenticated begin/finish protocol, not Codex's vetoable Stop callback.
 const provider = defineAgentProvider({ catalog: { id: 'schedule-test', label: 'Schedule private test', executable: process.execPath,
@@ -44,9 +44,9 @@ catch (error) {
   target = { hostId: 'local', agentSessionId: session.agentSessionId, providerId: provider.id, workspacePath: workspace }
   await writeFile(join(state, 'target.json'), JSON.stringify(target))
 }
-// Inject only Host routing/input-observation dependencies. All Runtime business methods are the real prototype.
-const runtime = Object.assign(Object.create(RuntimeController.prototype), { hosts: new Map([['local', { client }]]), progressInputObserver: async () => false,
-  connectedClient: async () => client, trackHostLifecycleOperation: async (_host: string, work: () => Promise<unknown>) => work() }) as RuntimeController
+// Use the same Host-owned runtime adapter as the production scheduler.
+const runtime = createGoalRuntime({ clients: () => [{ hostId: 'local', client }], inputOccupied: async () => false,
+  checkIn: async () => ({ known: false, reason: 'Private schedule fixture does not exercise quiet follow-up.' }) })
 const loops = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(state, 'loops.json')), async (...args) => {
   const outcome = await deliverContinuousProgress(runtime, ...args)
   if (process.env.SCHEDULE_PROBE_DROP_RECEIPT === '1') return 'unknown'

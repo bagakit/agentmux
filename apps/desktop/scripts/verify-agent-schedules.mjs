@@ -34,7 +34,7 @@ async function tests(label, filter, mutationEnv = {}) {
   assert(report.numTotalTests > 0, 'Source proof cannot be empty')
   return { exitCode: result.exitCode, failed: report.numFailedTests, passed: report.numPassedTests, assertions: report.testResults.flatMap(file => file.assertionResults.filter(test => test.status === 'failed')) }
 }
-const sourceFiles = ['packages/core/src/types.ts','packages/core/src/client.ts','packages/core/src/prompt-submission.ts','packages/core/src/agent-session-store.ts','packages/core/src/hosted-client-contract.ts','packages/core/src/hosted-client.ts','packages/core/src/hosted-runtime-service.ts','packages/core/src/headless-runtime.ts','packages/core/src/public-rpc-client.ts','packages/core/src/public-rpc-server.ts','packages/core/src/continuous-progress.ts','packages/core/src/continuous-progress-scheduler.ts','packages/core/src/agent-schedule.ts','packages/core/src/public-rpc-schedules.ts','packages/core/src/schedule-cli.ts','packages/core/src/public-rpc.ts','packages/core/src/public-rpc-service.ts','packages/core/src/rpc-native-codec.ts','packages/core/src/agentmux-cli-commands.ts','packages/core/src/index.ts','packages/core/src/schedule-calendar.ts','apps/host/src/continuous-progress-loop-manager.ts','apps/host/src/continuous-progress-loop-store.ts','apps/host/src/continuous-progress-delivery.ts','apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/desktop-host.ts','apps/desktop/src/main/index.ts','apps/desktop/src/main/ipc.ts','apps/desktop/src/main/ipc-sender-trust.ts','apps/desktop/src/renderer/src/components/ContinuousProgressControl.tsx','apps/desktop/src/renderer/src/lib/api.ts','apps/desktop/src/preload/index.ts','apps/desktop/src/shared/contracts.ts']
+const sourceFiles = ['packages/core/src/types.ts','packages/core/src/client.ts','packages/core/src/prompt-submission.ts','packages/core/src/agent-session-store.ts','packages/core/src/hosted-client-contract.ts','packages/core/src/hosted-client.ts','packages/core/src/hosted-runtime-service.ts','packages/core/src/headless-runtime.ts','packages/core/src/public-rpc-client.ts','packages/core/src/public-rpc-server.ts','packages/core/src/continuous-progress.ts','packages/core/src/continuous-progress-scheduler.ts','packages/core/src/agent-schedule.ts','packages/core/src/public-rpc-schedules.ts','packages/core/src/schedule-cli.ts','packages/core/src/public-rpc.ts','packages/core/src/public-rpc-service.ts','packages/core/src/rpc-native-codec.ts','packages/core/src/agentmux-cli-commands.ts','packages/core/src/index.ts','packages/core/src/schedule-calendar.ts','apps/host/src/continuous-progress-loop-manager.ts','apps/host/src/continuous-progress-loop-store.ts','apps/host/src/continuous-progress-delivery.ts','apps/host/src/goal-runtime.ts','apps/host/src/goals.ts','apps/host/src/host.ts','apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/desktop-host.ts','apps/desktop/src/main/index.ts','apps/desktop/src/main/ipc.ts','apps/desktop/src/main/ipc-sender-trust.ts','apps/desktop/src/renderer/src/components/ContinuousProgressControl.tsx','apps/desktop/src/renderer/src/lib/api.ts','apps/desktop/src/preload/index.ts','apps/desktop/src/shared/contracts.ts']
 const sourceBindings = await Promise.all(sourceFiles.map(async path => ({ path, sha256: sha(await readFile(join(root,path))) })))
 const testFiles = ['apps/desktop/test/agent-schedules.test.ts','apps/desktop/test/continuous-progress-loop-manager.test.ts','apps/desktop/test/continuous-progress-loop-store.test.ts','packages/core/test/client-submit-prompt-run-binding.test.ts','packages/core/test/continuous-progress.test.ts','packages/core/test/continuous-progress-scheduler.test.ts','packages/core/test/schedule-cli-discovery.test.ts','packages/core/test/helpers/object-cli-rpc.ts','apps/desktop/scripts/fixtures/agent-schedules/vitest.config.mjs','apps/desktop/scripts/fixtures/agent-schedules/isolate-core.mjs','apps/desktop/scripts/fixtures/agent-schedules/owner.ts','apps/desktop/scripts/fixtures/agent-schedules/native-agent.mjs','apps/desktop/scripts/fixtures/agent-schedules/electron.ts','apps/desktop/scripts/fixtures/agent-schedules/cli.ts','tsconfig.base.json','apps/desktop/tsconfig.json','packages/core/package.json']
 const testBindings = await Promise.all(testFiles.map(async path => ({ path, sha256: sha(await readFile(join(root,path))) })))
@@ -48,10 +48,11 @@ if (!privateOnly) {
   await writeFile(path,configuration)
   const result=await run(process.execPath,[require.resolve('typescript/bin/tsc'),'--noEmit','-p',path],{cwd:root,timeout:60000,maxBuffer:4*1024*1024})
   await writeFile(join(evidence,'source-types.log'),result.stdout+result.stderr)
-  typecheck={passed:true,configurationSha256:sha(configuration),includes:3,scope:'Original Main RuntimeController/Manager + finite borrowed Host + owning Source tests'}
+  typecheck={passed:true,configurationSha256:sha(configuration),includes:3,scope:'Original Host GoalRuntime/Manager + finite borrowed Core + owning Source tests'}
 }
 const baseline = privateOnly ? null : await tests('source-green'); if (baseline) { assert.equal(baseline.exitCode, 0); assert(baseline.passed > 0) }
 const mutations = [
+  { file: 'apps/host/src/continuous-progress-loop-manager.ts', from: 'if (loop.everyMs !== undefined && !loop.pendingCompletion)', to: 'if (false && loop.everyMs !== undefined && !loop.pendingCompletion)', filter: 'collapses missed occurrences', name: 'minute-overdue-not-collapsed' },
   { file: 'packages/core/src/continuous-progress-scheduler.ts', from: 'isAgentSchedule(loop) ? loop.nextCheckAt : this.now() + loop.intervalMs', to: 'loop.calendar ? loop.nextCheckAt : this.now() + loop.intervalMs', filter: 'freezes the original.*deadline|keeps the absolute relative deadline', name: 'relative-resume-deadline-reset' },
   { file: 'apps/host/src/continuous-progress-loop-manager.ts', from: 'if (nextDue === null) settled.status = \'stopped\'', to: "if (nextDue === null && current.afterMs === undefined) settled.status = 'stopped'", filter: 'freezes the original.*deadline|retains the original relative occurrence', name: 'relative-single-send-keeps-running' },
   { file: 'packages/core/src/schedule-calendar.ts', from: "civil.hour !== hour || civil.minute !== minute", to: 'false', filter: 'skips DST gaps', name: 'gap-normalization' },
@@ -64,7 +65,7 @@ const mutations = [
   { file: 'apps/host/src/continuous-progress-loop-manager.ts', from: "futureIntent ? decideFutureProgress(observation, futureIntent)", to: 'false ? decideFutureProgress(observation, futureIntent)', filter: 'keeps the occurrence due', name: 'future-owner-disconnect' }
 ]
 const reds = []
-for (const mutation of privateOnly ? [] : timerTask ? mutations.filter(mutation => mutation.name.startsWith('relative-')) : mutations) {
+for (const mutation of privateOnly ? [] : timerTask ? mutations.filter(mutation => mutation.name.startsWith('relative-') || mutation.name.startsWith('minute-')) : mutations) {
   const path = join(root, mutation.file), source = await readFile(path, 'utf8')
   assert.equal(source.split(mutation.from).length, 2, 'Exact production mutation must be unique: ' + mutation.name)
   const copy = join(evidence, mutation.name + '.mutant.ts'), mutant = source.replace(mutation.from, mutation.to)
@@ -77,23 +78,23 @@ for (const mutation of privateOnly ? [] : timerTask ? mutations.filter(mutation 
 }
 const restored = privateOnly ? null : await tests('source-restored'); if (restored) assert.equal(restored.exitCode, 0)
 const callerPairs = [
-  ['saveAgentFuturePromptIntent(', 'packages/core/src/client.ts', 'apps/desktop/src/main/runtime-controller.ts'],
+  ['saveAgentFuturePromptIntent(', 'packages/core/src/client.ts', 'apps/host/src/goal-runtime.ts'],
   ['decideFutureProgress(', 'packages/core/src/continuous-progress.ts', 'apps/host/src/continuous-progress-loop-manager.ts'],
   ['createSchedule(', 'packages/core/src/continuous-progress-scheduler.ts', 'apps/host/src/continuous-progress-loop-manager.ts'],
-  ['deliverContinuousProgress(', 'apps/host/src/continuous-progress-delivery.ts', 'apps/desktop/src/main/index.ts'],
+  ['deliverContinuousProgress(', 'apps/host/src/continuous-progress-delivery.ts', 'apps/host/src/goals.ts'],
   ['validateScheduleRpcResult', 'packages/core/src/public-rpc-schedules.ts', 'packages/core/src/rpc-native-codec.ts'],
-  ['schedules: args.progressLoops', 'apps/host/src/continuous-progress-loop-manager.ts', 'apps/desktop/src/main/ipc.ts'],
-  ['authorizeFutureIntent(', 'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/main/index.ts']
+  ['schedules: progress', 'apps/host/src/continuous-progress-loop-manager.ts', 'apps/host/src/goals.ts'],
+  ['authorizeFutureIntent(', 'apps/host/src/goal-runtime.ts', 'apps/host/src/goals.ts']
 ]
 const callers = []
 for (const [symbol, definition, caller] of callerPairs) { const source = await readFile(join(root, caller), 'utf8'); assert(source.includes(symbol), 'Actual external production caller: ' + symbol); assert.notEqual(definition, caller); callers.push({ symbol, definition, caller, sha256: sha(source) }) }
-const ipcSource=await readFile(join(root,'apps/desktop/src/main/ipc.ts'),'utf8'), controlSource=await readFile(join(root,'apps/desktop/src/renderer/src/components/ContinuousProgressControl.tsx'),'utf8')
+const managerSource=await readFile(join(root,'apps/host/src/continuous-progress-loop-manager.ts'),'utf8'), controlSource=await readFile(join(root,'apps/desktop/src/renderer/src/components/ContinuousProgressControl.tsx'),'utf8')
 const intervalIsolation=[
-  {owner:'apps/desktop/src/main/ipc.ts',fact:'Original interval list excludes calendar',pattern:'list().filter(loop => !isAgentSchedule(loop) && progressTargetMatches(loop, target))'},
-  {owner:'apps/desktop/src/main/ipc.ts',fact:'Original interval action excludes calendar',pattern:'list().find(loop => !isAgentSchedule(loop) && loop.loopId === loopId && progressTargetMatches(loop, target))'},
-  {owner:'apps/desktop/src/main/ipc.ts',fact:'One original owner routes calendar and interval events to their typed consumers',pattern:'send(isAgentSchedule(loop) ? SCHEDULE_CHANGED : CONTINUOUS_PROGRESS_CHANGED, loop)'}
+  {owner:'apps/host/src/continuous-progress-loop-manager.ts',fact:'Schedule listing selects saved schedules',pattern:'this.scheduler.list(target ?? directory).filter(isAgentSchedule)'},
+  {owner:'apps/host/src/continuous-progress-loop-manager.ts',fact:'Progress list and action use the same exact-target filter',pattern:"const matches = (loop: ContinuousProgressLoop) => !isAgentSchedule(loop) && loop.taskSource?.kind !== 'goal'"},
+  {owner:'apps/host/src/continuous-progress-loop-manager.ts',fact:'Progress action rejects a different target',pattern:'if (!matches(loop)) throw new AgentMuxError'}
 ]
-for(const item of intervalIsolation)assert(ipcSource.includes(item.pattern),item.fact)
+for(const item of intervalIsolation)assert(managerSource.includes(item.pattern),item.fact)
 assert(controlSource.includes('isAgentSchedule(loop)') && controlSource.includes('!isAgentSchedule(loop)'),'Original interval UI excludes mixed-version calendar records')
 const coreManifest = JSON.parse(await readFile(join(root, 'packages/core/package.json'), 'utf8'))
 const coreOutputs = Object.fromEntries(Object.entries(coreManifest.exports).filter(([key, value]) => !key.includes('*') && value.import).map(([key, value]) => [key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2), join(root, 'packages/core', value.import)]))
@@ -135,7 +136,7 @@ const cli = async (env, action, data, fail = false) => {
   const body = JSON.parse((result.stdout || result.stderr).trim().split('\n').at(-1))
   cliJournal.push({ action, request: data, result: body, exitCode: result.code }); assert.equal(result.code === 0, !fail, 'Actual CLI result: ' + JSON.stringify(body)); return body
 }
-const check = async () => { const reply = once(owner, 'message'); owner.send('check'); return (await reply)[0] }
+const check = async checkAt => { const reply = once(owner, 'message'); owner.send(checkAt === undefined ? 'check' : { checkAt }); return (await reply)[0] }
 const managedCliJournal = []
 const managedCli = async (action, params) => {
   const prefix = join(state,'actions',String(managedCliJournal.length)), pending = prefix+'.pending.json', requestPath = prefix+'.request.json', responsePath = prefix+'.response.json'
@@ -169,11 +170,11 @@ try {
   assert.equal(savedSession.futurePromptIntents[agentSchedule.futureIntentId].active,false)
   await stop(owner)
   const overdue = { ...baseEnv, SCHEDULE_PROBE_NOW: String(schedule.nextCheckAt), SCHEDULE_PROBE_DROP_RECEIPT: '1' }
-  const b = await boot(overdue); assert.notEqual(a.pid, b.pid); assert.deepEqual(a.target, b.target)
+  const b = await boot({ ...overdue, SCHEDULE_PROBE_NOW: String(schedule.nextCheckAt - 1) }); assert.notEqual(a.pid, b.pid); assert.deepEqual(a.target, b.target)
   assert.equal(b.borrowed, true); assert.equal(a.hostedOwner.runtimeId, b.hostedOwner.runtimeId); assert.notEqual(a.hostedOwner.ownerInstanceId, b.hostedOwner.ownerInstanceId)
   const before = await cli(overdue, 'inspect', { scheduleId: schedule.loopId }); assert.equal(before.result.schedule.nextCheckAt, schedule.nextCheckAt)
   const duplicate = await cli(overdue, 'create', originalRequest); assert.equal(duplicate.result.schedule.nextCheckAt, schedule.nextCheckAt); assert.equal(duplicate.result.schedule.loopId, schedule.loopId)
-  await check()
+  await check(schedule.nextCheckAt)
   const unknown = await cli(overdue, 'inspect', { scheduleId: schedule.loopId }); assert.equal(unknown.result.schedule.lastOutcome, 'unknown')
   const originalOperation = unknown.result.schedule.pendingCompletion.operationId
   const nativeBefore = await readFile(join(state, 'native-input.ndjson'), 'utf8')
@@ -190,6 +191,44 @@ try {
     await check(); assert.equal(await readFile(join(state, 'native-input.ndjson'), 'utf8'), nativeBefore, 'A sent one-shot never starts another occurrence')
     await cli(overdue, 'cancel', { scheduleId: schedule.loopId, expectedRevision: 2, operationId: 'private-cancel' })
     await cli(overdue, 'resume', { scheduleId: schedule.loopId, expectedRevision: 3, operationId: 'private-rejected' }, true)
+    // Exercise a second original intent through the same public CLI, Host and native Run.
+    const repeatedRequest = { target: a.target, everyMs: 60_000, prompt: 'repeat the original task', operationId: 'private-repeat-create' }
+    const repeated = (await cli(overdue, 'create', repeatedRequest)).result.schedule
+    assert.equal(repeated.everyMs, 60_000)
+    assert.equal(repeated.nextCheckAt, Number(overdue.SCHEDULE_PROBE_NOW) + 60_000)
+    await stop(owner)
+    const repeatDue = { ...overdue, SCHEDULE_PROBE_NOW: String(repeated.nextCheckAt), SCHEDULE_PROBE_DROP_RECEIPT: '1' }
+    const d = await boot({ ...repeatDue, SCHEDULE_PROBE_NOW: String(repeated.nextCheckAt - 1) }); assert.deepEqual(d.target, a.target)
+    const recoveredRepeat = (await cli(repeatDue, 'inspect', { scheduleId: repeated.loopId })).result.schedule
+    assert.equal(recoveredRepeat.futureIntentId, repeated.futureIntentId)
+    await check(repeated.nextCheckAt)
+    const repeatUnknown = (await cli(repeatDue, 'inspect', { scheduleId: repeated.loopId })).result.schedule
+    assert.equal(repeatUnknown.lastOutcome, 'unknown')
+    const repeatOperation = repeatUnknown.pendingCompletion.operationId
+    const repeatInput = await readFile(join(state, 'native-input.ndjson'), 'utf8')
+    assert(repeatInput.includes('repeat the original task'), 'Original native Run received the repeating message')
+    await stop(owner)
+    const reconcile = { ...repeatDue, SCHEDULE_PROBE_DROP_RECEIPT: '' }
+    const e = await boot(reconcile); assert.deepEqual(e.target, a.target)
+    const repeatRecovered = (await cli(reconcile, 'inspect', { operationId: repeatOperation })).result.schedule
+    assert.equal(repeatRecovered.loopId, repeated.loopId); assert.equal(repeatRecovered.status, 'paused')
+    await check(); assert.equal(await readFile(join(state, 'native-input.ndjson'), 'utf8'), repeatInput, 'Unknown repeating input is not blindly resent')
+    await cli(reconcile, 'resume', { scheduleId: repeated.loopId, expectedRevision: 1, operationId: 'private-repeat-resume' })
+    await check()
+    assert.equal(await readFile(join(state, 'native-input.ndjson'), 'utf8'), repeatInput, 'Original repeating operation reconciles without duplicate input')
+    const delivered = (await cli(reconcile, 'inspect', { scheduleId: repeated.loopId })).result.schedule
+    assert.equal(delivered.lastOccurrenceAt, repeated.nextCheckAt)
+    assert.equal(delivered.nextCheckAt, repeated.nextCheckAt + 60_000)
+    await stop(owner)
+    const secondDue = { ...reconcile, SCHEDULE_PROBE_NOW: String(delivered.nextCheckAt) }
+    const f = await boot({ ...secondDue, SCHEDULE_PROBE_NOW: String(delivered.nextCheckAt - 1) }); assert.deepEqual(f.target, a.target)
+    await check(delivered.nextCheckAt)
+    const repeatedAgain = (await cli(secondDue, 'inspect', { scheduleId: repeated.loopId })).result.schedule
+    assert.equal(repeatedAgain.lastOccurrenceAt, delivered.nextCheckAt)
+    assert.equal(repeatedAgain.nextCheckAt, delivered.nextCheckAt + 60_000)
+    const twice = await readFile(join(state, 'native-input.ndjson'), 'utf8')
+    assert.equal(twice.split('repeat the original task').length - 1, 2, 'Exactly two original messages reach the same native Run')
+    await cli(secondDue, 'cancel', { scheduleId: repeated.loopId, expectedRevision: 2, operationId: 'private-repeat-cancel' })
   } else {
     await cli(overdue, 'pause', { scheduleId: schedule.loopId, expectedRevision: 2, operationId: 'private-pause' })
     await cli(overdue, 'cancel', { scheduleId: schedule.loopId, expectedRevision: 3, operationId: 'private-cancel' })
@@ -209,5 +248,5 @@ try {
 await writeFile(join(evidence,'actual-cli.ndjson'),cliJournal.map(item=>JSON.stringify(item)).join('\n')+'\n')
 await writeFile(join(evidence,'actual-managed-cli.ndjson'),managedCliJournal.map(item=>JSON.stringify(item)).join('\n')+'\n')
 for (const binding of [...sourceBindings,...testBindings,...compiledBindings,verificationBinding]) assert.equal(sha(await readFile(join(root,binding.path))),binding.sha256,'Qualified candidate remained unchanged: '+binding.path)
-await writeFile(join(evidence, privateOnly ? 'private-probe.json' : 'receipt.json'), JSON.stringify({ schema: 'agentmux.agent-schedules.v1', passed: !privateOnly, task, sourceBindings, testBindings, compiledBindings, verificationBinding, qualification: { host: 'private original semantic Host + Main/Runtime methods using finite borrowed SDK over real Unix RPC', provider: 'private native hook fixture with real ctxmux Input', electron: 'unrelated Electron surface APIs are unavailable', userAppOrModel: 'not operated', intervalIsolation:'Finite original IPC/UI Source wiring inspection; not a claim of operating the Electron app' }, typecheck, baseline, mutations: reds, restored, callers, intervalIsolation, restart }, null, 2) + '\n')
+await writeFile(join(evidence, privateOnly ? 'private-probe.json' : 'receipt.json'), JSON.stringify({ schema: 'agentmux.agent-schedules.v1', passed: !privateOnly, task, sourceBindings, testBindings, compiledBindings, verificationBinding, qualification: { host: 'private original semantic Host + production GoalRuntime using finite borrowed SDK over real Unix RPC', provider: 'private native hook fixture with real ctxmux Input', electron: 'unrelated Electron surface APIs are unavailable', userAppOrModel: 'not operated', intervalIsolation:'Finite original IPC/UI Source wiring inspection; not a claim of operating the Electron app' }, typecheck, baseline, mutations: reds, restored, callers, intervalIsolation, restart }, null, 2) + '\n')
 process.stdout.write(JSON.stringify({ passed: !privateOnly, task, tests: restored?.passed ?? 0, mutations: reds.length, restartPids: restart.pids, receipt: join(evidence, privateOnly ? 'private-probe.json' : 'receipt.json') }) + '\n')
