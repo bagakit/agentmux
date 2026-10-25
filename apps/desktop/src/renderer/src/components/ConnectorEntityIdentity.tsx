@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { ConnectorEntityProfileRead } from '../lib/use-connector-room-name'
 import type { ConnectionSetupAccount } from '@agentmux/core/connections'
 import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
 import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyButton'
@@ -23,10 +24,11 @@ type IdentityProps = {
   status?: ReactNode
   actions?: ReactNode
   compact?: boolean | undefined
+  profileRead?: ConnectorEntityProfileRead | undefined
 }
 
 /** Display observations only. The caller retains the exact object, authority and read lifecycle. */
-export function ConnectorEntityIdentity({ identityKey, kind, name, label, missingName, avatarUrl, secondary, status, actions, compact = false }: IdentityProps) {
+export function ConnectorEntityIdentity({ identityKey, kind, name, label, missingName, avatarUrl, secondary, status, actions, compact = false, profileRead }: IdentityProps) {
   const Icon = identityIcons[kind]
   const size = compact ? 28 : 32
   const nameCopy = name ? <ContentCopyButton text={name} identity={`${identityKey}:name`} label={`Copy ${kind} name`} className="connector-entity__copy" /> : null
@@ -41,8 +43,14 @@ export function ConnectorEntityIdentity({ identityKey, kind, name, label, missin
       </div>
       {status ? <div className="connector-entity__status">{status}</div> : null}
       {secondary ? <div className="connector-entity__secondary">{secondary}</div> : null}
+      {profileRead?.issue ? <small className="connector-entity__profile-note" role="status">{profileRead.issue}</small> : null}
     </div>
   </div>
+}
+
+/** A shared subscription gap is stated once for the represented list, separately from each profile. */
+export function ConnectorProfileUpdates({ reads }: { reads: ReadonlyMap<string, ConnectorEntityProfileRead> }) {
+  return [...reads.values()].some(read => read.updatesUnconfirmed) ? <p className="agent-connector-note" role="status" data-profile-updates>Profile updates unconfirmed. Earlier identities are kept.</p> : null
 }
 
 /** Full values remain selectable at every width; clipboard feedback is scoped to this exact field. */

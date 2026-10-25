@@ -50,11 +50,11 @@ function incomingStatus(report: GroupDiagnosis): string {
 
 export type ConnectorProblemKind = 'configuration-unconfirmed' | 'sync-off' | 'platform-off' | 'sharing-paused' | 'bot-off' | 'content-gap' | 'source-unconfirmed' | 'access-unconfirmed' |
   'outgoing-unconfirmed' | 'outgoing-not-applied' | 'outgoing-read-unavailable' | 'incoming-read-unavailable' | 'member-access' | 'request-refused' | 'agent-waiting' | 'agent-stopped' | 'agent-not-applied' | 'agent-unconfirmed' | 'recording-unconfirmed'
-export type ConnectorProblemAction = { kind: 'members' | 'content' | 'receipts' | 'incoming'; label: string }
+export type ConnectorProblemAction = { kind: 'members' | 'content' | 'receipts' | 'incoming' | 'sync' | 'channel-settings' | 'sharing'; label: string }
 export type ConnectorProblem = { kind: ConnectorProblemKind; title: string; detail: string; tone: 'warning' | 'muted'; action?: ConnectorProblemAction }
 export type ConnectorDirectionSummary = { direction: 'outgoing' | 'incoming'; title: string; value: string; detail: string; secondary?: string; tone: 'neutral' | 'warning' | 'muted'; problem?: ConnectorProblemKind }
 export type ConnectorGroupSummary = { problems: ConnectorProblem[]; outgoing: ConnectorDirectionSummary; incoming: ConnectorDirectionSummary; retained: boolean; note: string | null }
-export type ConnectorGroupAction = 'resume' | 'members' | 'sharing' | 'sync' | 'activity' | 'channel-settings'
+export type ConnectorGroupAction = 'overview' | 'resume' | 'members' | 'sharing' | 'sync' | 'activity' | 'channel-settings'
 
 /** Choose a destination from original facts, never from its displayed label. Execution stays with the original owner. */
 export function connectorGroupAction(summary: ConnectorGroupSummary, bindingState: RoomBinding['state']): { kind: ConnectorGroupAction; label: string } {
@@ -63,7 +63,7 @@ export function connectorGroupAction(summary: ConnectorGroupSummary, bindingStat
   if (has('member-access') || summary.problems.some(problem => problem.action?.kind === 'members')) return { kind: 'members', label: 'Manage member access' }
   if (has('platform-off') || has('bot-off')) return { kind: 'channel-settings', label: 'Open channel settings' }
   if (has('sync-off')) return { kind: 'sync', label: 'Review automatic sync' }
-  return { kind: 'activity', label: 'View group details' }
+  return { kind: 'overview', label: 'View group details' }
 }
 
 /** Read-only presentation of the original bounded facts. Labels are never parsed back into state. */
@@ -78,10 +78,10 @@ export function connectorGroupSummary(report: GroupDiagnosis | null): ConnectorG
   if (unread.length) add('configuration-unconfirmed', `${unread.join(', ')} unread`, 'These original settings could not be read. Earlier matching facts are kept.')
   if (report?.outgoing.issue) add('outgoing-read-unavailable', 'Recent sends could not be checked', 'Original delivery receipts remain available.', 'warning', { kind: 'receipts', label: 'View delivery details' })
   if (report?.incoming.issue) add('incoming-read-unavailable', 'Agent inputs could not be checked', 'Original input receipts remain available.', 'warning', { kind: 'incoming', label: 'View input details' })
-  if (report?.service.value?.enabled === false) add('sync-off', 'Automatic sync is off', 'This is the saved policy for all bots.', 'muted')
-  if (report?.adapterService.value?.enabled === false) add('platform-off', 'Platform is turned off', 'Enable this platform in channel settings to resume its automatic messages.', 'muted')
-  if (report?.binding.value?.state === 'paused') add('sharing-paused', 'Group sharing is paused', 'The saved group and its original requests are kept.', 'muted')
-  if (report?.connection.value?.enabled === false) add('bot-off', 'Bot is disabled', 'Enable this original bot in its settings to resume its automatic work.', 'muted')
+  if (report?.service.value?.enabled === false) add('sync-off', 'Automatic sync is off', 'This is the saved policy for all bots.', 'muted', { kind: 'sync', label: 'Review automatic sync' })
+  if (report?.adapterService.value?.enabled === false) add('platform-off', 'Platform is turned off', 'Enable this platform in channel settings to resume its automatic messages.', 'muted', { kind: 'channel-settings', label: 'Open channel settings' })
+  if (report?.binding.value?.state === 'paused') add('sharing-paused', 'Group sharing is paused', 'The saved group and its original requests are kept.', 'muted', { kind: 'sharing', label: 'Review group sync' })
+  if (report?.connection.value?.enabled === false) add('bot-off', 'Bot is disabled', 'Enable this original bot in its settings to resume its automatic work.', 'muted', { kind: 'channel-settings', label: 'Open bot settings' })
   const out = report?.outgoing.value
   const { contentGap, sourceUnconfirmed, accessUnconfirmed, counts, confirmedText } = outgoingFacts(out)
   if (accessUnconfirmed) add('access-unconfirmed', 'Member access check unavailable', 'Application permissions could not be checked. Saved decisions are kept; review member access and check again.', 'muted', { kind: 'members', label: 'Member access' })

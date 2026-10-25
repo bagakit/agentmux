@@ -1,8 +1,8 @@
-import { ConnectorEntityIdentity, ConnectorIdentityField } from './ConnectorEntityIdentity'
+import { ConnectorEntityIdentity, ConnectorIdentityField, ConnectorProfileUpdates } from './ConnectorEntityIdentity'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import type { MoteChatConfiguration, MoteChatPerson } from '@agentmux/core/mote-chat'
-import { channelMetadataSubjectKey, type ChannelActorProfile } from '@agentmux/core/connections'
+import { channelMetadataSubjectKey } from '@agentmux/core/connections'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { TextInput } from '@agentmux/client-ui/input'
 import { api } from '../lib/api'
@@ -11,7 +11,7 @@ import { useAppStore } from '../store'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { MoteChatHistory } from './MoteChatHistory'
-import { useConnectorEntityProfiles } from '../lib/use-connector-room-name'
+import { useConnectorEntityProfiles, type ConnectorEntityProfileRead } from '../lib/use-connector-room-name'
 
 const actorKey = (person: MoteChatPerson) => JSON.stringify(person.actor)
 
@@ -35,7 +35,8 @@ export function MoteChatPeople({ configuration, hostingTarget, active, refreshRe
   useEffect(() => { if (active) void read(); return () => { lifetime.current++ } }, [active, configuration.revision, refreshRevision])
   return <div className="mote-chat-people" aria-label="Private chat people" aria-busy={reading}>
     <p className="mote-details__hint">The confirmed bot creator has unlimited access. Other people have their own message allowance; changing a total keeps messages already used.</p>
-    {people.map(person => <MoteChatPersonRow key={JSON.stringify([hostingTarget, configuration.target, configuration.values.connection, actorKey(person)])} person={person} profile={profiles.get(channelMetadataSubjectKey({ kind: 'actor', actor: person.actor }))?.observation?.profile} configuration={configuration} hostingTarget={hostingTarget} active={active} onSaved={updated => {
+    <ConnectorProfileUpdates reads={profiles} />
+    {people.map(person => <MoteChatPersonRow key={JSON.stringify([hostingTarget, configuration.target, configuration.values.connection, actorKey(person)])} person={person} profileRead={profiles.get(channelMetadataSubjectKey({ kind: 'actor', actor: person.actor }))} configuration={configuration} hostingTarget={hostingTarget} active={active} onSaved={updated => {
       lifetime.current++; setReading(false); setPeople(current => current.map(old => actorKey(old) === actorKey(updated) ? updated : old)); onSaved()
     }} />)}
     {reading ? <p role="status" className="mote-details__hint">Reading people…</p> : !people.length && !issue ? <p className="mote-details__hint">People appear here when they first message this bot.</p> : null}
@@ -44,7 +45,8 @@ export function MoteChatPeople({ configuration, hostingTarget, active, refreshRe
   </div>
 }
 
-function MoteChatPersonRow({ person, profile, configuration, hostingTarget, active, onSaved }: { person: MoteChatPerson; profile?: ChannelActorProfile | null | undefined; configuration: MoteChatConfiguration; hostingTarget: ConnectionHostingTarget; active: boolean; onSaved(person: MoteChatPerson): void }) {
+function MoteChatPersonRow({ person, profileRead, configuration, hostingTarget, active, onSaved }: { person: MoteChatPerson; profileRead?: ConnectorEntityProfileRead | undefined; configuration: MoteChatConfiguration; hostingTarget: ConnectionHostingTarget; active: boolean; onSaved(person: MoteChatPerson): void }) {
+  const profile = profileRead?.observation?.profile
   const [editing, setEditing] = useState(false), [total, setTotal] = useState(String(person.total ?? 0)), [busy, setBusy] = useState(false), [issue, setIssue] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
   const pending = useAppStore(state => Object.values(state.moteChatIntents).some(intent => intent.method === 'space.mote.chat.allocate'
@@ -64,7 +66,7 @@ function MoteChatPersonRow({ person, profile, configuration, hostingTarget, acti
     finally { setBusy(false) }
   }
   return <article className="mote-chat-person" data-mote-chat-person={person.actor.userId}>
-    <ConnectorEntityIdentity identityKey={actorKey(person)} kind="person" name={profile?.name ?? person.name} avatarUrl={profile?.avatarUrl} missingName={person.creator ? 'Bot creator' : 'Chat participant'} secondary={person.actor.idType} />
+    <ConnectorEntityIdentity identityKey={actorKey(person)} kind="person" profileRead={profileRead} name={profile?.name ?? person.name} avatarUrl={profile?.avatarUrl} missingName={person.creator ? 'Bot creator' : 'Chat participant'} />
     <details className="agent-connector-disclosure"><summary>Account details</summary><ConnectorIdentityField identityKey={actorKey(person)} label={person.actor.idType} value={person.actor.userId} /><ConnectorIdentityField identityKey={actorKey(person)} label="App ID" value={person.actor.application.appId} /></details>
     <dl><div><dt>Used</dt><dd>{person.used}</dd></div><div><dt>Total</dt><dd>{person.creator ? 'Unlimited' : person.total}</dd></div><div><dt>Remaining</dt><dd>{person.creator ? 'Unlimited' : person.remaining}</dd></div></dl>
     {!person.creator ? editing ? <form className="mote-chat-person__allocation" onSubmit={event => { event.preventDefault(); void save() }}>

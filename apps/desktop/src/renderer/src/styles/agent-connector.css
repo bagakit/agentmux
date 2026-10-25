@@ -44,7 +44,6 @@
 .agent-connector-disclosure { min-width: 0; font-size: var(--fs-meta); color: var(--text-2); }
 .agent-connector-disclosure > summary { cursor: pointer; padding-block: var(--sp-2); }
 .agent-connector-disclosure > .agent-connector-fields, .agent-connector-disclosure > .agent-connector-receipt { margin-top: var(--sp-3); }
-.agent-connector-group { margin: 0; color: var(--text); overflow-wrap: anywhere; }
 
 .agent-connector-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); min-width: 0; padding-inline: var(--sp-3); }
 .agent-connector-status > div:not(.agent-connector-saved):not(.agent-connector-link-actions) { display: grid; gap: var(--sp-1); min-width: 0; margin-right: auto; }
@@ -113,7 +112,6 @@
 .agent-connector-dialog__body > .agent-connector-status { padding: 0; }
 .agent-connector-room-overview { display: grid; gap: var(--sp-3); min-width: 0; }
 .agent-connector-room-overview .agent-connector-section-title { align-items: flex-start; }
-.agent-connector-room-overview .agent-connector-group { font-size: var(--fs-title); font-weight: 600; line-height: 1.4; }
 .agent-connector-room-overview .agent-connector-section-title > button { display: inline-flex; align-items: center; flex: none; gap: var(--sp-2); }
 .agent-connector-room-metadata { display: flex; flex-wrap: wrap; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-micro); }
 .agent-connector-room-metadata > span { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
@@ -122,7 +120,6 @@
 .agent-connector-section > h3, .agent-connector-section .agent-connector-fields > h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: var(--fs-body); font-weight: 600; }
 
 .agent-connector-group-selection[data-bound] { gap: var(--sp-2); padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--surface-1); }
-.agent-connector-group-selection[data-bound] .agent-connector-group { font-size: 20px; letter-spacing: -.025em; }
 .agent-connector-group-selection[data-bound] .agent-connector-application { border-top: 1px solid var(--line-soft); padding-top: var(--sp-2); }
 .agent-connector-room-refresh { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--line-soft); }
 .agent-connector-room-refresh:hover { background: var(--surface-2); }
@@ -131,16 +128,6 @@
 .agent-connector-dialog [data-connection-section]:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; }
 .agent-connector-dialog [data-connection-section] { scroll-margin-block: var(--sp-3); }
 .agent-connector-section-stack { display: grid; align-content: start; gap: var(--sp-4); min-width: 0; }
-.agent-connector-configuration { display: grid; gap: var(--sp-2); min-width: 0; }
-.agent-connector-panel { border: 1px solid var(--line-soft); border-radius: var(--radius-md); }
-.agent-connector-panel > summary { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); color: var(--text-2); list-style: none; }
-.agent-connector-panel > summary::-webkit-details-marker { display: none; }
-.agent-connector-panel > summary::after { content: '›'; color: var(--text-3); font-size: var(--fs-body); }
-.agent-connector-panel[open] > summary::after { transform: rotate(90deg); }
-.agent-connector-panel > summary > small { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); text-align: right; }
-.agent-connector-panel > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
-.agent-connector-panel > .agent-connector-section { margin: 0; border: 0; border-top: 1px solid var(--line-soft); border-radius: 0; background: transparent; }
-.agent-connector-panel > .agent-connector-host-sync { margin: 0 var(--sp-4); }
 .agent-connector-section-grid > .agent-connector-section-stack:only-child { grid-column: 1 / -1; }
 .agent-connector-dialog .connector-service-control { margin: 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: transparent; }
 .agent-connector-dialog .connector-service-control__heading { gap: var(--sp-3); }

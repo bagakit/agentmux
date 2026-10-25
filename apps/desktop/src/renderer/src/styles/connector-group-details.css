@@ -1,0 +1,21 @@
+.connector-group-details { display: grid; gap: var(--sp-4); min-width: 0; }
+.connector-group-details__identity { display: grid; gap: var(--sp-3); min-width: 0; }
+.connector-group-details__identity .connector-entity__name { font-size: var(--fs-title); letter-spacing: -.015em; }
+.connector-group-details__bot { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.connector-group-details__bot strong { color: var(--text-2); font-weight: 500; }
+.connector-group-details__tabs { position: sticky; top: calc(-1 * var(--sp-5)); z-index: 1; display: flex; flex-wrap: wrap; gap: var(--sp-1); padding-block: var(--sp-2); background: var(--overlay-surface); border-bottom: 1px solid var(--line-soft); }
+.connector-group-details__tabs button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); min-height: 32px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: 500 var(--fs-meta)/1.4 var(--font-sans); cursor: pointer; }
+.connector-group-details__tabs button[aria-selected=true] { background: var(--surface-3); color: var(--text); }
+.connector-group-details__tabs button:hover { color: var(--text); }
+.connector-group-details__tabs button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.connector-group-details__panel:not([hidden]) { display: grid; gap: var(--sp-4); min-width: 0; }
+.connector-group-details__panel[hidden] { display: none; }
+.agent-connector-dialog .connector-group-details :is(summary, [data-connection-section], [data-receipt-section]) { scroll-margin-block-start: 72px; }
+.connector-group-details__panel > .agent-connector-section { border: 0; padding: 0; background: transparent; }
+.connector-group-details__panel > .agent-connector-status { padding: 0; }
+.connector-group-details__configuration { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
+.connector-group-details__configuration strong { font-weight: 500; color: var(--text-2); }
+@media (max-width: 420px) {
+  .connector-group-details__tabs button { flex: 1 1 calc(50% - var(--sp-1)); }
+  .agent-connector-dialog .connector-group-details :is(summary, [data-connection-section], [data-receipt-section]) { scroll-margin-block-start: 108px; }
+}

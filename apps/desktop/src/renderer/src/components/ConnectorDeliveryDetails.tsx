@@ -1,18 +1,21 @@
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { RoomBinding } from '@agentmux/core/connections'
 import type { AgentInputSubmissionReceipt } from '@agentmux/core'
 import { api } from '../lib/api'
 import { deliveryFacts, deliveryMatches, formatGroupDiagnosis, groupTarget, readGroupDiagnosis, retainGroupDiagnosis, type GroupDiagnosis, type GroupWindow } from '../lib/group-diagnosis'
 
-import { connectorGroupSummary } from '../lib/connector-group-status'
+import { connectorDiagnosisKey, useConnectorGroupDiagnosis } from '../lib/use-connector-group-diagnosis'
+import { connectorGroupSummary, type ConnectorProblemAction } from '../lib/connector-group-status'
 import { ConnectorTrafficSummary } from './ConnectorTrafficSummary'
 import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
 
 const LoadingIcon = semanticIconComponent('status.loading')
 /** Bounded original incoming/outgoing observations. Reading or copying never retries an effect. */
-export function ConnectorDeliveryDetails({ binding, hostingTarget, onMembers }: { binding: RoomBinding; hostingTarget?: ConnectionHostingTarget | null; onMembers?: () => void }) {
+export function ConnectorDeliveryDetails({ binding, hostingTarget, onMembers, actions, details, active = true }: { binding: RoomBinding; hostingTarget?: ConnectionHostingTarget | null; onMembers?: () => void; actions?: Partial<Record<ConnectorProblemAction['kind'], () => void>>; active?: boolean; details?: ReactNode }) {
+  const latest = useConnectorGroupDiagnosis([binding], 0, active, null, hostingTarget, [binding])
+  const checked = latest.entries[connectorDiagnosisKey(binding)]
   const target = groupTarget(binding), key = JSON.stringify([target, hostingTarget]), originalSource = api.connections.call
   const source: typeof api.connections.call = useMemo(() => (method, params) => {
     if (hostingTarget === null) return Promise.reject(new Error('The original bot hosting owner is unconfirmed.'))
@@ -26,7 +29,7 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget, onMembers }: 
   const [copying, setCopying] = useState(false), [feedback, setFeedback] = useState('')
   const originalSections = useRef<Record<'incoming' | 'receipts' | 'content', HTMLElement | null>>({ incoming: null, receipts: null, content: null })
   const reveal = useRef<'incoming' | 'receipts' | 'content' | null>(null)
-  const visible = read?.key === key ? read.value : null
+  const visible = read?.key === key ? read.value : checked?.report ?? null
   const original = detail?.key === key ? detail : null
   const accepts = () => live.current && current.current.key === key && current.current.source === source && api.connections.call === originalSource
   function focusOriginal(section: 'incoming' | 'receipts' | 'content') {
@@ -83,20 +86,24 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget, onMembers }: 
     finally { if (accepts() && request === exportRead.current) setCopying(false) }
   }
   useEffect(() => {
-    live.current = true; reveal.current = null; setFeedback(''); setCopying(false); setDetail(null); setInput(null); void inspect()
+    live.current = true; reveal.current = null; setFeedback(''); setCopying(false); setDetail(null); setInput(null)
     return () => { live.current = false; epoch.current++; exportRead.current++ }
   }, [key, source])
+  const configuration = checked?.report?.binding.value
   const outgoing = visible?.outgoing.value, incoming = visible?.incoming.value
   const sectionIssue = (name: string, section: { issue: string | null; retained?: true } | undefined) => section?.issue ? <p className="agent-connector-note" role="status">{name} observation unconfirmed{section.retained ? '; earlier observed facts are kept.' : '.'}</p> : null
   const readFailed = !!visible && [visible.service, visible.adapterService, visible.connection, visible.binding, visible.outgoing, visible.incoming].some(section => section.issue)
-  return <section className="agent-connector-fields connector-delivery-details" aria-busy={pending} aria-label="Group delivery" data-connection-section="activity" tabIndex={-1}>
-    <div className="agent-connector-section-title"><div><h3>Group activity</h3>{visible && read ? <small className="agent-connector-checked">Checked <time dateTime={new Date(read.checkedAt).toISOString()}>{new Date(read.checkedAt).toLocaleTimeString()}</time> · recent receipt window</small> : null}</div><button className="agent-connector-text-action" aria-busy={pending} disabled={pending} onClick={() => void inspect()}>{pending ? <LoadingIcon size={13} animation="spin" /> : null}Check group activity</button></div>
-    <ConnectorTrafficSummary summary={connectorGroupSummary(visible)} actions={{ ...(onMembers ? { members: onMembers } : {}),
+  return <section className="agent-connector-fields connector-delivery-details" aria-busy={pending || checked?.checking} aria-label="Group delivery" data-connection-section="activity" tabIndex={-1}>
+    {configuration ? <div className="connector-group-details__configuration"><span>{checked?.report?.binding.issue ? 'Last observed sync' : 'Group sync'} · <strong>{configuration.state === 'paused' ? 'Paused' : configuration.state === 'detached' ? 'Disconnected' : 'Enabled'}</strong></span><span>Sharing · <strong>{configuration.scope.publication === 'future-shared-conversation' ? 'Complete conversation' : 'Agent replies only'}</strong></span></div> : null}
+    <div className="agent-connector-section-title"><div><h3>Message activity</h3>{checked?.checkedAt ? <small className="agent-connector-checked">Checked <time dateTime={new Date(checked.checkedAt).toISOString()}>{new Date(checked.checkedAt).toLocaleTimeString()}</time> · recent receipt window</small> : null}</div><button className="agent-connector-text-action" aria-busy={checked?.checking} disabled={checked?.checking} onClick={latest.check}>{checked?.checking ? <LoadingIcon size={13} animation="spin" /> : null}Check group activity</button></div>
+    <ConnectorTrafficSummary summary={connectorGroupSummary(checked?.report ?? null)} actions={{ ...actions, ...(onMembers ? { members: onMembers } : {}),
       incoming: () => showOriginal('incoming'), receipts: () => showOriginal('receipts'), content: () => showOriginal('content') }} />
 
-    <details className="agent-connector-disclosure connector-delivery-details__originals" open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}><summary>Original records and details</summary><div className="agent-connector-fields">
+    <details className="agent-connector-disclosure connector-delivery-details__originals" open={expanded} onToggle={event => { setExpanded(event.currentTarget.open); if (event.currentTarget.open && read?.key !== key && checked?.report) setRead({ key, value: checked.report, checkedAt: checked.checkedAt ?? Date.now() }) }}><summary>Connection details</summary><div className="agent-connector-fields">
       <section className="connector-delivery-details__section" aria-label="Connection observation">
       <h4>Connection observation</h4>
+      <p className="agent-connector-note">This reading stays in place while the activity summary updates.</p>
+      <button className="agent-connector-text-action" disabled={pending} onClick={() => void inspect()}>Read latest records</button>
       {readFailed ? <p className="agent-connector-note" role="status">The latest check is incomplete. Earlier matching observations are kept.</p> : null}
       {visible?.service.value ? <p className="agent-connector-note">Automatic service: {visible.service.value.enabled ? 'on' : 'off'} · revision {visible.service.value.revision}</p> : null}
       {visible?.adapterService.value ? <p className="agent-connector-note">Platform: {visible.adapterService.value.enabled ? 'on' : 'off'} · revision {visible.adapterService.value.revision}</p> : null}
@@ -139,6 +146,7 @@ export function ConnectorDeliveryDetails({ binding, hostingTarget, onMembers }: 
       {outgoing?.coverage?.omittedGapCount ? <p className="agent-connector-note">{outgoing.coverage.omittedGapCount} additional gaps in this owner page.</p> : null}
       {outgoing?.coverage?.nextContent ? <button className="small-button" disabled={pending} onClick={() => void inspect({ afterContent: outgoing.coverage!.nextContent! })}>Next content window</button> : null}
       </section>
+    {details ? <details className="agent-connector-disclosure"><summary>Bot and connection settings</summary><div className="agent-connector-fields">{details}</div></details> : null}
     <div className="agent-connector-row"><button className="small-button" aria-busy={copying} disabled={copying} onClick={() => void copyDiagnosis()}>{copying ? <LoadingIcon size={13} animation="spin" /> : null}Copy group diagnosis</button>{copying ? <button className="small-button" onClick={() => { exportRead.current++; setCopying(false); setFeedback('Group diagnosis copy canceled.') }}>Cancel copy</button> : null}</div>
     {feedback ? <p className="agent-connector-note" role="status">{feedback}</p> : null}
     </div></details>

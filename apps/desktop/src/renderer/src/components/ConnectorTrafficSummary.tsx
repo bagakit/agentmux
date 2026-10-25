@@ -20,6 +20,11 @@ export function ConnectorTrafficSummary({ summary, compact = false, onInspect, a
   }
   const primary = new Set([summary.outgoing.problem, summary.incoming.problem].filter(Boolean))
   const problems = summary.problems.filter(problem => !primary.has(problem.kind))
+  const immediate = problems.filter(problem => ['configuration-unconfirmed', 'sync-off', 'platform-off', 'bot-off', 'sharing-paused', 'member-access', 'access-unconfirmed'].includes(problem.kind))
+  const additional = problems.filter(problem => !immediate.includes(problem))
+  const observations = (items: ConnectorProblem[]) => <ul className="connector-traffic-summary__problems" aria-label="Connection observations">{items.map(problem => <li key={problem.kind} data-problem-kind={problem.kind} data-tone={problem.tone}>
+    <span className="connector-traffic-summary__problem-icon"><ConnectorProblemIcon kind={problem.kind} /></span><div><strong>{problem.title}</strong><small>{problem.detail}</small></div>{action(problem)}
+  </li>)}</ul>
   return <div className={'connector-traffic-summary' + (compact ? ' connector-traffic-summary--compact' : '')}>
     <div className="connector-traffic-summary__directions">
       {[summary.outgoing, summary.incoming].map(direction => {
@@ -31,9 +36,8 @@ export function ConnectorTrafficSummary({ summary, compact = false, onInspect, a
         </section>
       })}
     </div>
-    {!compact && problems.length ? <ul className="connector-traffic-summary__problems" aria-label="Connection observations">{problems.map(problem => <li key={problem.kind} data-problem-kind={problem.kind} data-tone={problem.tone}>
-      <span className="connector-traffic-summary__problem-icon"><ConnectorProblemIcon kind={problem.kind} /></span><div><strong>{problem.title}</strong><small>{problem.detail}</small></div>{action(problem)}
-    </li>)}</ul> : null}
+    {!compact && immediate.length ? observations(immediate) : null}
+    {!compact && additional.length ? <details className="agent-connector-disclosure connector-traffic-summary__additional"><summary>{additional.length === 1 ? additional[0]!.title : `${additional.length} other observations`}</summary>{observations(additional)}</details> : null}
     {compact && summary.note ? <p className="connector-traffic-summary__retained">{summary.note}</p> : !compact && summary.retained && !primary.has('outgoing-read-unavailable') && !primary.has('incoming-read-unavailable') ? <p className="connector-traffic-summary__retained">Earlier matching observations are kept; the latest check is incomplete.</p> : null}
     {onInspect ? <button type="button" className="agent-connector-text-action connector-traffic-summary__inspect" onClick={onInspect}>View original receipts</button> : null}
   </div>
