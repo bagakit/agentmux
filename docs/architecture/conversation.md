@@ -118,6 +118,8 @@ Renderer 桥使用 Core [`conversation-changes`](../../packages/core/src/convers
 
 [`PublicationStore.commitPage`](../../packages/connectors/src/publication-store.ts) 在核对当前页请求后，复用同一 Core owner 的 `parseConversationUnitsForPage`：只有该不可变页内的原 item 对象免去重复正文校验；复制、其他页或跨页组装的单位仍严格解析。成员身份只在本次调用内比较，不建立另一份长期缓存；Binding 授权、原 frontier 与发布事务不变。
 
+内容恢复的 `recoverableGaps` 查询与派生索引共享原完整资格条件，按准确 Binding 修订和原 rowid 分页，只扫描可恢复候选。原 Store 初始化时退役被替代的宽 gap 索引；诊断 gap 仍由原覆盖读取及其现有索引保留。增加无可读原对象的历史不扩大每页恢复工作，不改变 gap 状态或原恢复顺序。
+
 [`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 保持阅读锚点和返回位置，沿同一 view 的 `navigation.older`／`navigation.newer` 补充相邻范围。时间范围读取、Current／Previous source 仍是明确阅读意图。退休 Session、History 和当前对话复用共同读取与呈现；来源失败保原内容及恢复入口。窗口提交调用共同呈现端口，待提交数据仍由原 Reader 持有；Focus pin 保留完整 accepted frame，不裁出 records 再重投影。
 
 [`RecentFocusTimeline`](../../apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx) 仅为已选择的 Context 挂载共同 view；已读 Context 的完整 frame 在原呈现预算内保留，未选中的观察停放且不读。淘汰以完整 frame 为单位，当前和 pin 的原内容保留；Core 暂存已过期时明确显示错误，不能把旧 frame 当可继续的 cursor。Context 目录、已记录工作区间与时间尺仍由原 Focus owner 提供，不成为对话关联来源。
