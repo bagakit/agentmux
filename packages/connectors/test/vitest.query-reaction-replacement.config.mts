@@ -5,7 +5,9 @@ import { relative, resolve } from 'node:path'
 
 const root = native.root!
 const mutations = {
-  'skip-retirement': { path: 'packages/connectors/src/publication-query-feedback.ts', before: "if (index >= confirmed || operation.state !== 'confirmed' || !operation.mapping?.reactionId) continue", after: 'continue /* Loaded business mutation: retain every historical marker. */' },
+  'old-metrics-outcome': { path: 'packages/connectors/src/publication-query-feedback.ts', before: 'if (!item.turnId || !item.turnOutcome) continue', after: "if (!item.turnId || item.metrics?.scope !== 'turn' || item.metrics.status !== 'completed') continue" },
+  'omit-failure-retirement': { path: 'packages/connectors/src/publication-query-feedback.ts', before: "['completed', 'failed', 'interrupted']", after: "['completed']" },
+  'skip-retirement': { path: 'packages/connectors/src/publication-query-feedback.ts', before: "if (rank >= confirmed || operation.state !== 'confirmed' || !operation.mapping?.reactionId) continue", after: 'continue /* Loaded business mutation: retain every historical marker. */' },
   'foreign-app': { path: 'packages/connectors/src/adapters/feishu/reaction.ts', before: 'operator.operator_id !== application.appId ||', after: '' }
 } as const
 const name = process.env.AGENTMUX_TEST_REACTION_MUTANT as keyof typeof mutations | undefined

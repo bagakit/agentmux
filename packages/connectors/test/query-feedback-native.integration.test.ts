@@ -95,7 +95,7 @@ async function fixture(options: { providerId?: 'codex' | 'claude'; narrow?: bool
   const operations = () => services.publication!.store.list(binding, 100).filter(value => value.queryFeedback && value.effect === 'upsert')
   const stages = () => operations().map(value => value.queryFeedback!.stage)
   const restore = () => { f.inner.connected = true; f.inner.kernel.isConnected = () => true; Reflect.get(f.client, 'publisher').publish({ type: 'connection-state', state: 'restored', evidence: { source: 'run-process', observedAt: Date.now() } }) }
-  return { ...f, transcript, ref, capturedBefore, get services() { return services }, wire, http, sends, reactions, get binding() { return binding }, member, stages, operations, restore,
+  return { ...f, transcript, ref, capturedBefore, get services() { return services }, wire, http, sends, reactions, remote, get binding() { return binding }, member, stages, operations, restore,
     async relink() { missingCapturedCut = false; const linked = await services.bindings!.relink({ ...bindInput, operationId: 'explicit-fresh-relink', expectedRevision: binding.revision }, context); expect(linked.state).toBe('applied'); if (linked.state === 'applied') binding = linked.binding; services.publication!.refresh(); return linked },
     async hook(receiptId: string, sequence: number, turnId: string) {
       const accept = Reflect.get(f.client, 'acceptHookEvent') as (envelope: core.NativeHookEnvelope, signal: AbortSignal) => Promise<void>
@@ -121,11 +121,55 @@ it('default group feeds the real native RPC Provider and publishes five distinct
   await f.native('valid'); await expect.poll(f.stages, { timeout: 5000 }).toContain('started')
   await f.complete('other-turn'); await new Promise<void>(resolve => setImmediate(resolve)); expect(f.stages()).not.toContain('completed')
   await f.complete(); await expect.poll(f.stages, { timeout: 5000 }).toContain('completed')
+  const completed = (await f.client.sessionHistoryPage(f.ref.agentSessionId)).items.find(item => item.turnId === turn && item.turnOutcome?.status === 'completed')
+  expect(completed).toBeDefined(); expect(completed!.metrics).toBeUndefined()
   await expect.poll(() => f.operations().every(value => ['confirmed', 'superseded'].includes(value.state))).toBe(true)
   expect(f.stages()).toEqual(['received', 'queued', 'dispatched', 'started', 'completed'])
   await expect.poll(() => f.reactions.map(value => value.reaction_type.emoji_type)).toEqual(['DONE'])
   expect(f.reactions.every(value => value.path.endsWith('/original-query/reactions'))).toBe(true)
 }, 30000)
+
+it.each([['completed', 'DONE'], ['failed', 'CrossMark'], ['interrupted', 'MinusOne']] as const)('replaces earlier markers with the same terminal phase for an original %s outcome', async (outcome, emoji) => {
+  const f = await fixture(); await f.send(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
+  await f.native('valid'); await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === 'started')?.state).toBe('confirmed')
+  const started = f.operations().find(value => value.queryFeedback?.stage === 'started')!
+  const path = '/open-apis/im/v1/messages/original-query/reactions'
+  const unrelated = [f.remote.seed(path, 'OnIt', { operator_type: 'user', operator_id: 'another-person' }), f.remote.seed(path, 'SMILE')]
+  await f.complete(turn, outcome === 'failed' ? { message: 'Original native turn failed' } : undefined, outcome === 'interrupted')
+  await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === outcome)?.state, { timeout: 5000 }).toBe('confirmed')
+  const active = () => f.reactions.filter(value => !unrelated.includes(value)).map(value => value.reaction_type.emoji_type)
+  try { await expect.poll(active, { timeout: 5000 }).toEqual([emoji]) }
+  catch (error) { expect(active(), 'A confirmed terminal outcome must retire earlier managed markers').toEqual([emoji]); throw error }
+  const withdrawal = f.services.publication!.store.list(f.binding, 100).find(value => value.predecessorOperationId === started.operationId)!
+  expect(withdrawal).toMatchObject({ effect: 'withdraw', state: 'confirmed', mapping: started.mapping })
+  expect(f.reactions.filter(value => unrelated.includes(value))).toEqual(unrelated)
+  const created = f.remote.calls.findIndex(call => call.method === 'POST' && JSON.parse(call.body).reaction_type.emoji_type === emoji)
+  const deleted = f.remote.calls.findIndex(call => call.method === 'DELETE' && call.path.endsWith('/' + started.mapping!.reactionId))
+  expect(created).toBeGreaterThanOrEqual(0); expect(deleted).toBeGreaterThan(created)
+  expect(f.sends).toHaveLength(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 30000)
+
+it('a late started acknowledgement cannot retain or downgrade a confirmed failed outcome', async () => {
+  const f = await fixture(); await f.send(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve }), request = f.http.http.request.bind(f.http.http)
+  f.http.http.request = async (...args: Parameters<typeof request>) => {
+    const result: any = await request(...args)
+    if (String(args[0].method).toUpperCase() === 'POST' && result?.data?.reaction_type?.emoji_type === 'OnIt') await held
+    return result
+  }
+  try {
+    await f.native('valid'); await expect.poll(() => f.remote.created.some(value => value.reaction_type.emoji_type === 'OnIt')).toBe(true)
+    await f.complete(turn, { message: 'Original native turn failed' })
+    await expect.poll(() => f.operations().find(value => value.queryFeedback?.stage === 'failed')?.state, { timeout: 35000 }).toBe('confirmed')
+    const failed = f.operations().find(value => value.queryFeedback?.stage === 'failed')!
+    release()
+    await expect.poll(() => f.reactions.map(value => value.reaction_type.emoji_type), { timeout: 5000 }).toEqual(['CrossMark'])
+    expect(f.operations().find(value => value.queryFeedback?.stage === 'failed')).toEqual(failed)
+    expect(f.remote.created.filter(value => value.reaction_type.emoji_type === 'OnIt')).toHaveLength(1)
+    expect(f.sends).toHaveLength(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  } finally { release() }
+}, 45000)
 
 it.each(['wrong-source', 'ambiguous', 'revoked'] as const)('retains input availability but cannot invent native processing for %s evidence', async kind => {
   const f = await fixture(); await f.send(); await expect.poll(f.stages, { timeout: 10000 }).toContain('dispatched')
