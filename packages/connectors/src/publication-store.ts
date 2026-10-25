@@ -697,7 +697,7 @@ export class PublicationStore {
         const presentationTime = originalMessage?.createdAt ?? (sourceTime !== undefined && Number.isFinite(sourceTime) && Math.abs(sourceTime) <= 8.64e15
           ? sourceTime : prior?.presentationTime ?? Date.now())
         const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision, presentationTime, ...(event ? { event } : {}), sourceRecords: [...references],
-          ...(speaker && payload.kind === 'speech' ? { speaker } : {}),
+          ...(speaker && (payload.kind === 'speech' || payload.kind === 'question') ? { speaker } : {}),
           ...(originalMessage ? { originalMessage: { messageId: originalMessage.messageId, senderSessionId: originalMessage.senderSessionId, ...(originalMessage.notificationId ? { notificationId: originalMessage.notificationId } : {}) } } : {}),
           bindingId: boundary.bindingId, bindingRevision: boundary.revision, publicationScope: boundary.scope.publication,
           reference: unit.event.reference!, target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },

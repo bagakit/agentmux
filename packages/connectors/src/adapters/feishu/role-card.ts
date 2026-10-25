@@ -21,6 +21,15 @@ const roleIcons: Record<FeishuRoleSpeaker['kind'], string> = {
   agent: 'robot_outlined', human: 'member_outlined', external: 'chat_outlined', mixed: 'group_outlined', unknown: 'info_outlined'
 }
 
+/** Shared display-only identity for speech and Question surfaces. */
+export function feishuSpeakerIdentity(speaker: Readonly<FeishuRoleSpeaker>, purpose?: string): Record<string, unknown> {
+  const identity = [speaker.name, roles[speaker.kind], purpose].filter(Boolean).join(' · ')
+  return { tag: 'div', text_size: 'notation',
+    text: { tag: 'plain_text', content: identity, text_size: 'notation', text_color: 'grey' },
+    icon: speaker.imageKey ? { tag: 'custom_icon', img_key: speaker.imageKey, size: '16px 16px' }
+      : { tag: 'standard_icon', token: roleIcons[speaker.kind], size: '16px 16px' } }
+}
+
 /** Pure native layout; no identity lookup, upload, effect or source-text rewriting. */
 export function feishuRoleCard(text: string, speaker: Readonly<FeishuRoleSpeaker>, options: FeishuRoleCardOptions = {}): Record<string, unknown> {
   const card = feishuReplyCard(text, undefined, options.literal)
@@ -32,11 +41,7 @@ export function feishuRoleCard(text: string, speaker: Readonly<FeishuRoleSpeaker
     if (element.tag === 'markdown' || element.tag === 'div') element.text_size = 'notation'
   }
   const purpose = options.incoming ? '→ this conversation' : options.phase === 'final' ? 'Reply' : options.phase === 'progress' ? 'Progress' : undefined
-  const identity = [speaker.name, roles[speaker.kind], purpose].filter(Boolean).join(' · ')
-  body.elements.unshift({ tag: 'div', text_size: 'notation',
-    text: { tag: 'plain_text', content: identity, text_size: 'notation', text_color: 'grey' },
-    icon: speaker.imageKey ? { tag: 'custom_icon', img_key: speaker.imageKey, size: '16px 16px' }
-      : { tag: 'standard_icon', token: roleIcons[speaker.kind], size: '16px 16px' } })
+  body.elements.unshift(feishuSpeakerIdentity(speaker, purpose))
   if (options.status) body.elements.push({ tag: 'div', text_size: 'notation',
     text: { tag: 'plain_text', content: options.status, text_size: 'notation', text_color: 'grey' } })
   if (options.fragment && options.fragment.count > 1) body.elements.push({ tag: 'div', text_size: 'notation',
