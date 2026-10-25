@@ -38,6 +38,7 @@ export const inputControlJournalSchema = `
     intent_sequence INTEGER NOT NULL UNIQUE, control_sequence INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS input_recipient_order ON input_intents(recipient_id, intent_sequence);
+  CREATE INDEX IF NOT EXISTS input_recipient_control ON input_intents(recipient_id, control_sequence);
   CREATE TABLE IF NOT EXISTS input_stops (
     input_id TEXT NOT NULL, generation INTEGER NOT NULL,
     cancel_operation_id TEXT NOT NULL, sequence INTEGER NOT NULL UNIQUE,

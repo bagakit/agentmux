@@ -21,6 +21,7 @@ import { parseTerminalFrontend } from './agent-terminal-frontend.js'
 import { noteContentInCatalogScope } from './notebook-observation.js'
 import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult, parseFileShareUndoParams, parseFileShareUndoResult } from './public-rpc-file-share.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicationAccessResult } from './application-access.js'
+import { parseAgentInputChangesPage } from './agent-input-changes.js'
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseRuntimeDiagnostics } from './runtime-observation-codec.js'
 import { parseRuntimeNetworkSnapshot } from './runtime-network.js'
@@ -676,6 +677,14 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.input.ls': {
         record(p, ['hostId', 'agentSessionId', 'queueId', 'cut', 'budgetBytes', 'items', 'nextCursor', 'coverage'])
         if (p.hostId !== input.hostId) fail()
+      case 'agent.input.changes': {
+        record(p, ['hostId', 'agentSessionId', 'source', 'throughSequence', 'changes', 'nextCursor', 'checkpoint', 'coverage'])
+        if (p.hostId !== input.hostId) fail()
+        const { hostId: _route, ...page } = p
+        const { hostId: _target, ...read } = input
+        parseAgentInputChangesPage(page, read as import('./agent-input-changes.js').AgentInputChangesRead)
+        break
+      }
         const { hostId: _route, ...page } = p
         const { hostId: _target, ...read } = input
         parseAgentInputMailboxPage(page, read as import('./agent-input-mailbox.js').AgentInputMailboxRead)
