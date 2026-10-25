@@ -130,7 +130,7 @@ Core `connect()` 的**整组恢复观察**则包括 lifecycle 收口、Session �
 
 新建 Agent 同样只等待本次创建真正需要的 Runtime、Provider、Executor、权限与原创建操作事实，不把其它 Session 的恢复作为统一前置。读取原创建回执、确认原来源授权与执行新的创建分别证明：已有回执和无 prepared 关联的未知读取不要求 Native；prepared 操作仅连接原 Runtime 核对原操作，不另起 Run 或重放首句。新的 fork 沿准确原来源补足当前绑定并保留来源校验；原操作已经存在的回执不因来源后来变化而失去可读性。原终端附着成功、普通 shell 创建成功与 Agent 创建成功是不同消费者的证据，不能互相代签。
 
-Core 语义 owner 的原持久身份、Session／空间元数据读取与 Native 连接分别就绪。Native 启动尚未确认或完整恢复观察未完成时，仍活着的唯一语义 owner 保留原 namespace 与本次激活的 completion 观察，原持久工作面可先读取并显示；不能因此退出并换 Host、丢弃原启动观察或把未知当死亡。Native／Run 输入与控制仍取得准确原权威准入；当前步骤、最后确认与未知沿原服务窗表达。一次 reader 等待结束仅释放该 reader，不停止原 owner、child 或健康 Run。
+Core 语义 owner 的原持久身份、Session／空间元数据读取与 Native 连接分别就绪。Native 启动尚未确认或完整恢复观察未完成时，仍活着的唯一语义 owner 保留原 namespace 与本次激活的 completion 观察，原持久工作面可先读取并显示；不能因此退出并换 Host、丢弃原启动观察或把未知当死亡。Native／Run 输入与控制仍取得准确原权威准入；当前步骤、最后确认与未知沿原服务窗表达。一次 reader 等待结束仅释放该 reader，不停止原 owner、child 或健康 Run。 产品归属证明绑定准确 durable Runtime、daemon 实例和 artifact；不同进程、旧实例或旧 artifact 的迟到发布不能覆盖当前来源。归属未知不撤销已确认兼容能力，显式重试须能到达原证明观察，不要求关闭健康 Runtime。
 
 原 Native 已确认且准确 Session 元数据可读时，无关 lifecycle 或全量恢复观察未完成不能撤销原 Agent 的 raw 输入输出。内存缺少绑定时，只沿原元数据 owner 读取准确 SID／Host，再以原 Run 与当前 Native 事实准入；已确认绑定的热路径不重读无关目录或历史。真正目标冲突或授权缺失只拒绝该次操作；lease 与观察未知继续沿原服务窗表达。晚到的全量读取不得覆盖期间已受理的绑定、未确认持久回执或能力事实，也不能复活已准确退场的 Session。
 
