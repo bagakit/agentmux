@@ -56,7 +56,7 @@ import { isRoomBindingMethod, parseRoomBindingParams } from './room-binding-code
 import { isRoomProvisioningMethod, parseRoomProvisioningParams } from './room-provisioning-codec.js'
 import { isRoomDiscoveryMethod, parseRoomDiscoveryParams } from './room-discovery-codec.js'
 import { forwardConversationInput, readRoutedConversation } from './conversation-reader.js'
-import { parseConversationViewReleaseInput, parseConversationViewReleaseResult, parseConversationWatchInput, parseConversationRef, parseConversationCheckpointInput, parseConversationCheckpointPage, parseConversationChangesInput, parseConversationChangesPage, parseConversationTimelineReadInput, parseConversationReadPage } from './conversation-changes.js'
+import { parseConversationViewReleaseInput, parseConversationViewReleaseResult, parseConversationWatchInput, parseConversationRef, parseConversationCheckpointInput, parseConversationCheckpointPage, parseConversationChangesInput, parseConversationChangesPageForWindow, parseConversationTimelineReadInput, parseConversationReadPageForWindow } from './conversation-changes.js'
 import { createAgentMuxSearchReader, type AgentMuxSearchReadContext } from './search-reader.js'
 import { createAgentMuxSearchObservationOwner } from './search-observation.js'
 import { parseAgentMuxSearchInput } from './search-codec.js'
@@ -1548,11 +1548,11 @@ export class AgentMuxRpcService {
       if (method === 'agent.conversation.inspect') {
         const request = input as import('./conversation-changes.js').ConversationTimelineReadInput, forwarded = forwardConversationInput(request)
         const page = await readRoutedConversation(request, (maxBytes, replay) => client.readAgentConversation({ ...forwarded.input, maxBytes, ...(replay ? { cursor: replay } : {}) }, options), forwarded.sourceHostId)
-        return parseConversationReadPage(page, request) as AgentMuxRpcResult<M>
+        return parseConversationReadPageForWindow(page, request) as AgentMuxRpcResult<M>
       }
       const request = input as import('./conversation-changes.js').ConversationChangesInput, forwarded = forwardConversationInput(request)
       const page = await readRoutedConversation(request, (maxBytes, replay) => client.readConversationChanges({ ...forwarded.input, maxBytes, ...(replay ? { cursor: replay } : {}) }, options), forwarded.sourceHostId)
-      return parseConversationChangesPage(page, request) as AgentMuxRpcResult<M>
+      return parseConversationChangesPageForWindow(page, request) as AgentMuxRpcResult<M>
     }
     if (method === 'app.search') {
       const input = parseAgentMuxSearchInput(params)
