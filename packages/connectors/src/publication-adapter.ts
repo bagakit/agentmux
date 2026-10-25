@@ -15,6 +15,7 @@ export interface PublicationAdapter extends PublicationPreparer {
   readonly permissionActions?: true
   readonly questionActions?: true
   readonly queryFeedback?: true
+  readonly cards?: import('./publication-card.js').PublicationCardAdapter
   readonly images?: {
     readonly maxBytes: number
     accepts(image: PublicationImage): boolean
