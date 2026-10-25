@@ -75,7 +75,7 @@ afterEach(async () => {
 
 async function settle() { while (inFlight.size) await act(async () => { await Promise.allSettled([...inFlight]) }) }
 function button(text: string): HTMLButtonElement {
-  const found = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)
+  const found = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => (node.getAttribute('aria-label') ?? node.textContent) === text)
   expect(found, `Connected action: ${text}`).toBeDefined(); return found!
 }
 async function click(text: string, wait = true) { await act(async () => button(text).click()); if (wait) await settle() }
@@ -97,7 +97,9 @@ it('reads original requests through public RPC, retains draft bytes, and confirm
   await mount(false)
   expect(toolbarHost.textContent).toContain('Original review'); expect(container.textContent).toContain(question)
   expect(container.textContent).toContain('Browsing another site'); expect(container.textContent).toContain('original-recipient-session')
-  expect(container.textContent).toContain('Host local'); expect(container.querySelector('section section')).toBeNull()
+  const recipient = container.querySelector<HTMLDetailsElement>('.capsule-question__recipient')!
+  expect(recipient.open).toBe(false); expect(recipient.querySelector('dd')?.textContent).toBe('local')
+  expect(container.querySelector('section section')).toBeNull()
   expect(mutations('capsule.interaction.ls').length).toBeGreaterThan(0)
   await change('Use the original build.'); await click('Save draft')
   expect((await owner.call('capsule.interaction.inspect', { capsuleId, interactionId: interaction.interactionId })).interaction.draft).toBe('Use the original build.')
