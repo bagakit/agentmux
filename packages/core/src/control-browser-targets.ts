@@ -1,6 +1,22 @@
 import type { AgentMuxBrowserControl, AgentMuxBrowserSource, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserResource, AgentMuxBrowserReleaseReceipt, AgentMuxBrowserRetention } from './browser-targets.js'
 import { BROWSER_PAGE_CAPABILITY_NAMES } from './browser-page-capability.js'
 import { AgentMuxError } from './errors.js'
+import type { AgentMuxBrowserCertificateRequest } from './browser-targets.js'
+
+function parseBrowserCertificateRequest(value: unknown): AgentMuxBrowserCertificateRequest {
+  const row = record(value)
+  const keys = ['requestId', 'navigationId', 'url', 'error', 'fingerprint', 'subject', 'issuer', 'validFrom', 'validTo', 'scope']
+  if (Object.keys(row).some(key => !keys.includes(key)) || row.scope !== 'profile-connections' ||
+    typeof row.fingerprint !== 'string' || !/^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/.test(row.fingerprint)) {
+    throw new AgentMuxError('Browser certificate request is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  const url = text(row.url, 8192)
+  try { if (new URL(url).protocol !== 'https:') throw new Error() }
+  catch { throw new AgentMuxError('Browser certificate URL is invalid.', 'CONTROL_PROTOCOL_ERROR') }
+  return { requestId: text(row.requestId, 200), navigationId: text(row.navigationId, 200), url,
+    error: text(row.error, 2000), fingerprint: row.fingerprint, subject: text(row.subject, 65536, true),
+    issuer: text(row.issuer, 65536, true), validFrom: text(row.validFrom, 200), validTo: text(row.validTo, 200), scope: 'profile-connections' }
+}
 
 const sources = new Set(['embedded', 'external'])
 const statuses = new Set(['ready', 'disconnected', 'revoked', 'closed', 'unavailable'])
@@ -70,6 +86,8 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
   if (row.mode !== undefined && row.mode !== 'normal' && row.mode !== 'private') throw new AgentMuxError('Browser target mode is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (row.navigationId === undefined && (row.source !== 'embedded' || row.status !== 'unavailable' || row.capabilities.length !== 0 || row.cdpMethods !== undefined)) throw new AgentMuxError('A live Browser target requires its actual navigation identity.', 'CONTROL_PROTOCOL_ERROR')
   if (row.resource !== undefined && row.source !== 'embedded') throw new AgentMuxError('External Browser resource management is unavailable.', 'CONTROL_PROTOCOL_ERROR')
+  const certificateRequest = row.certificateRequest === undefined ? undefined : row.certificateRequest === null ? null : parseBrowserCertificateRequest(row.certificateRequest)
+  if (certificateRequest && (row.source !== 'embedded' || certificateRequest.navigationId !== row.navigationId)) throw new AgentMuxError('Browser certificate request belongs to another document.', 'CONTROL_PROTOCOL_ERROR')
   return { id, workspaceId, source: row.source as AgentMuxBrowserTarget['source'],
     ...(row.mode === undefined ? {} : { mode: row.mode as 'normal' | 'private' }),
     status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, 512, true),
@@ -77,6 +95,7 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
     ...(row.openedFrom === undefined ? {} : { openedFrom: parseBrowserSource(row.openedFrom) }),
     ...(row.cdpMethods === undefined ? {} : { cdpMethods: [...row.cdpMethods as string[]] }),
     ...(row.control === undefined ? {} : { control: parseBrowserControl(row.control) }),
+    ...(certificateRequest === undefined ? {} : { certificateRequest }),
     ...(row.resource === undefined ? {} : { resource: parseBrowserResource(row.resource) }),
     ...(row.warning === undefined ? {} : { warning: text(row.warning, 2000) }) }
 }
