@@ -1,10 +1,11 @@
+import { ConversationInputWitnessIndex } from './conversation-input-witness-index.js'
 import { deferConversationProcessRecord } from './conversation-process-detail.js'
 import { mintObjectId } from './object-id.js'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { projectConversationStream, conversationRecordRole, conversationRecordId, conversationRevision, conversationValuesEqual as same, conversationSourceKey, conversationInputAdoptionEdges,
-  type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationInputAdoptionContext } from './conversation-stream.js'
+  type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationInputAdoptionEvidence } from './conversation-stream.js'
 import { parseConversationTimelineReadInput, parseConversationChangesInput, parseConversationFrontier, parseConversationReadPage, parseConversationChangesPage,
   CONVERSATION_DEFAULT_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, CONVERSATION_MAX_WINDOW_RECORDS, type ConversationTimelineReadInput, type ConversationChangesInput, type ConversationFrontier,
   type ConversationCheckpointPage, type AgentConversationReadPage, type ConversationChangesPage, type ConversationUnit, type ConversationUnitEntry, type ConversationVersionedAnchor, type ConversationReadWindow } from './conversation-changes.js'
@@ -37,9 +38,9 @@ type HistoryPosition = { position: Position; after: Position; checkpoint: Conver
   head?: { page: AgentSessionHistoryPage; rows: ConversationSourceRecord[] } }
 type CompleteUnit = ReturnType<typeof projection>['units'][number]
 type Snapshot = { rows: ConversationSourceRecord[]; batch: Batch; units: CompleteUnit[]; deferredUnits?: ConversationUnit[]; coverage: ConversationSourceCoverage[];
-  order: ReturnType<typeof projection>['order']; revision: number; checkpoint: ConversationFrontier; committed: boolean; requestKey: string; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext; navigation?: ReturnType<typeof historyNavigation> }
+  order: ReturnType<typeof projection>['order']; revision: number; checkpoint: ConversationFrontier; committed: boolean; requestKey: string; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionEvidence; inputRecords: ConversationSourceRecord[]; navigation?: ReturnType<typeof historyNavigation> }
 type ReadingView = ConversationRef & { processDetails?: 'deferred'; id: string; scope: ConversationFrontier['scope']; revision: number; rows: ConversationSourceRecord[];
-  checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; observers: number; readers: number; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext }
+  checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; observers: number; readers: number; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputWitnesses: ConversationInputWitnessIndex }
 const MAX_UNOBSERVED_VIEWS = 16
 /** Temporary state of this original Reader. Durable originals remain in their original owners. */
 export class ConversationReaderState {
@@ -50,7 +51,7 @@ export class ConversationReaderState {
   }
   create(ref: ConversationRef, checkpoint: ConversationFrontier, processDetails?: 'deferred'): ReadingView {
     this.trimParked(MAX_UNOBSERVED_VIEWS - 1)
-    const view: ReadingView = { ...ref, ...(processDetails ? { processDetails } : {}), id: mintObjectId(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), observers: 0, readers: 0, outside: { older: null, newer: null }, inputAdoption: { witnesses: [] } }
+    const view: ReadingView = { ...ref, ...(processDetails ? { processDetails } : {}), id: mintObjectId(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), observers: 0, readers: 0, outside: { older: null, newer: null }, inputWitnesses: new ConversationInputWitnessIndex() }
     this.views.set(view.id, view); return view
   }
   get(id: string, ref: ConversationRef, scope: ConversationFrontier['scope']): ReadingView {
@@ -161,7 +162,7 @@ export async function conversationCheckpoint(ref: ConversationRef, port: Convers
   const target = { ...ref, hostId: port.readHostId ?? ref.hostId }
   return { ...target, sourceHostId: ref.hostId, scope: found.scope, checkpoint: { ...target, sourceHostId: ref.hostId, frontier: checkpoint }, coverage: found.coverage }
 }
-function projection(ref: ConversationRef, accepted: ConversationFrontier['scope'], rows: ConversationSourceRecord[], coverage: ConversationSourceCoverage[], inputAdoption: ConversationInputAdoptionContext, preserveCurrent = false) {
+function projection(ref: ConversationRef, accepted: ConversationFrontier['scope'], rows: ConversationSourceRecord[], coverage: ConversationSourceCoverage[], inputAdoption: ConversationInputAdoptionEvidence, preserveCurrent = false) {
   const source = accepted.sources.find((value): value is Extract<ConversationSourceRef, { kind: 'native' }> => value.kind === 'native')
   const timeline = projectConversationStream({ agentSessionId: ref.agentSessionId, reference: ref, records: rows,
     scope: accepted, coverage, inputAdoption, ...(source ? { nativeSource: source } : {}) })
@@ -478,12 +479,8 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       const captured = [...records.values()].filter(record => record.original.kind === 'captured').sort((a, b) =>
         a.order.kind === 'captured-stream' && b.order.kind === 'captured-stream' ? a.order.firstSequence - b.order.firstSequence : 0)
       let rows = [...nativeIds.map(id => records.get(id)!), ...captured]
-      const knownInputs = conversationInputAdoptionEdges(rows, view.inputAdoption)
-      const witnesses = knownInputs.witnesses
-      // Retain only bounded identity witnesses in this original temporary view. An
-      // overflow preserves known counterevidence and makes adoption unknown, never first-wins.
-      const inputAdoption: ConversationInputAdoptionContext = knownInputs.unconfirmed || witnesses.length > CONVERSATION_MAX_WINDOW_RECORDS || Buffer.byteLength(JSON.stringify(witnesses)) > CONVERSATION_MAX_UNIT_BYTES
-        ? { ...view.inputAdoption, unconfirmed: true } : { witnesses }
+      const inputWitnesses = view.inputWitnesses.preview(accepted)
+      const knownInputs = conversationInputAdoptionEdges(rows, inputWitnesses.context(rows))
       // Bound the temporary accepted window before duplicating bodies into a projection.
       // Whole existing event groups leave the window; their original owners and exact
       // versioned anchors remain available. Incoming originals never disappear here.
@@ -521,6 +518,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       }
       rows = rows.filter(record => !removed.has(record.id))
       if (retainedCount > CONVERSATION_MAX_WINDOW_RECORDS || retainedBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event contribution exceeds the temporary window assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
+      let inputAdoption = inputWitnesses.context(rows)
       let projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption, preserveCurrent)
       let unitBytes = projected.units.reduce((sum, unit) => sum + Buffer.byteLength(JSON.stringify(unit)), 0)
       if (preserveCurrent && unitBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This older expansion cannot retain the accepted canonical contributions within its assembly budget. The original live view and continuation remain available.', 'AGENT_CONVERSATION_WINDOW_FULL')
@@ -530,10 +528,10 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
         unitBytes -= Buffer.byteLength(JSON.stringify(unit)); evict(unit)
       }
       if (unitBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event exceeds its wire assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
-      if (removed.size) { rows = rows.filter(record => !removed.has(record.id)); projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption) }
+      if (removed.size) { rows = rows.filter(record => !removed.has(record.id)); inputAdoption = inputWitnesses.context(rows); projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption) }
       const batch: Batch = { ...loaded.batch, index: 0, offset: 0, digests: [] }
       snapshot = { rows, batch, units: projected.units.reverse(), coverage: projected.coverage, order: projected.order,
-        ...(state.anchor ? { anchor: state.anchor } : {}), revision: view.revision + 1, checkpoint: loaded.batch.end ?? state.checkpoint!, committed: false, requestKey, outside, history, inputAdoption }
+        ...(state.anchor ? { anchor: state.anchor } : {}), revision: view.revision + 1, checkpoint: loaded.batch.end ?? state.checkpoint!, committed: false, requestKey, outside, history, inputAdoption, inputRecords: accepted }
       state.viewRevision = view.revision; state.snapshotId = mintObjectId(); state.batch = { index: 0, offset: 0 }
       view.snapshots.set(state.snapshotId, snapshot)
       while (view.snapshots.size > 3) view.snapshots.delete(view.snapshots.keys().next().value!)
@@ -589,7 +587,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     port.signal?.throwIfAborted()
     if (page.window.complete && !snapshot.committed) {
       if (view.revision !== state.viewRevision) return fail('Another read already advanced this accepted window. Retain this response as uncommitted and read the current view.')
-      view.rows = snapshot.rows; view.revision = snapshot.revision; view.checkpoint = snapshot.checkpoint; view.outside = snapshot.outside; view.history = snapshot.history; if (snapshot.anchor) view.anchor = snapshot.anchor; view.inputAdoption = snapshot.inputAdoption; snapshot.committed = true
+      view.rows = snapshot.rows; view.revision = snapshot.revision; view.checkpoint = snapshot.checkpoint; view.outside = snapshot.outside; view.history = snapshot.history; if (snapshot.anchor) view.anchor = snapshot.anchor; view.inputWitnesses.accept(snapshot.inputRecords); snapshot.committed = true
     }
     return parsed
   } finally { releaseRead() }

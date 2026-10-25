@@ -13,7 +13,7 @@ import { parsePreparedPublication, publicationSpeechText, type PreparedPublicati
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
 import { sameRoomPublication, type RoomBindingReadPort, parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
-import { parseConversationChangesPageForWindow, parseConversationUnit, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
+import { parseConversationChangesPageForWindow, parseConversationUnit, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationInputIdentity, conversationNativeInputWitness, type ConversationInputWitness, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
 export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'sourceFrontier' | 'publicationOrigin' | 'scope' | 'executionRuntimeId' | 'inputTarget' | 'publicationBoundary'>
@@ -711,7 +711,8 @@ export class PublicationStore {
     }
     if (!aliases.size) return
     witnesses.push(...[...aliases.values()].map(value => value.inputAlias))
-    const accepted = conversationInputAdoptionEdges(records, { witnesses, ...(units.some(unit => unit.event.inputAdoption?.unconfirmed) ? { unconfirmed: true as const } : {}) })
+    const context = mergeConversationInputAdoptionContexts(units.map(unit => ({ records: unit.records.filter(isCompleteConversationRecord), context: unit.event.inputAdoption })))
+    const accepted = conversationInputAdoptionEdges(records, { ...context, witnesses })
     if (accepted.unconfirmed) return
     const byKey = new Map<string, Array<[number, InputAliasDecision]>>()
     for (const entry of aliases) if (entry[1].state === 'unresolved' && entry[1].inputAlias.key) {
@@ -727,7 +728,7 @@ export class PublicationStore {
       if (publicParts.length !== 1) continue
       for (const [ordinal, value] of related) {
         const identity = conversationInputIdentity(value.inputAlias.record.hostId, key), association = accepted.byKey.get(identity)
-        if (accepted.ambiguous.has(identity) || association?.length !== 1 || !association[0]!.key || conversationRecordId(association[0]!.record) !== conversationRecordId(value.inputAlias.record)) continue
+        if (accepted.unconfirmedKeys.has(identity) || accepted.ambiguous.has(identity) || association?.length !== 1 || !association[0]!.key || conversationRecordId(association[0]!.record) !== conversationRecordId(value.inputAlias.record)) continue
         if (publicParts[0]!.part.record.hostId !== value.inputAlias.record.hostId || publicParts[0]!.part.record.agentSessionId !== key.agentSessionId) continue
         this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...value, state: 'resolved' }), ordinal)
       }
