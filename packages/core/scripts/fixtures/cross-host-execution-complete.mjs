@@ -93,6 +93,15 @@ export function validateRemote(summary, mode, commit) {
       assert(result.file?.bytes === 1024 * 1024 && /^[a-f0-9]{64}$/.test(result.file.sha256) && result.file.roundtripMs > 0)
       assert(result.bindings.some(value => [['output-1mib', 1], ['slow-output', 4]].every(([label, size]) =>
         value.outputs?.some(output => output.label === label && output.bytes === size * 1024 * 1024 && output.roundtripMs > 0 && /^[a-f0-9]{64}$/.test(output.sha256)))), 'Both exact original output workloads must be measured')
+      const window = result.concurrencyWindow, samples = result.bindings.flatMap(value => value.samples), producer = samples.find(value => value.label === 'slow-output')
+      assert(window && producer && window.producer.emittedAt === producer.emittedAt && window.producer.completedAt === producer.completedAt && producer.completedAt > producer.emittedAt)
+      const all = samples.filter(value => value.label === 'under-load')
+      assert(all.length === 6 && new Set(all.map(value => value.callId)).size === 6 && window.totalCount === 6)
+      const overlap = all.filter(value => value.emittedAt >= producer.emittedAt && value.completedAt <= producer.completedAt)
+      assert(overlap.length > 0 && window.overlapCount === overlap.length && result.healthyWithStoppedIndependentReader?.count === overlap.length)
+      assert.deepEqual([...window.overlappingCallIds].sort(), overlap.map(value => value.callId).sort(), 'Only actual overlapping calls may contribute to concurrent latency')
+      const excluded = all.filter(value => !overlap.includes(value)).map(({ callId, emittedAt, completedAt, roundtripMs }) => ({ callId, emittedAt, completedAt, roundtripMs }))
+      assert.deepEqual(window.excludedSamples, excluded)
       assert(result.idle?.durationMs >= 10_000 && result.idle.samples?.length === 2 && result.idle.samples.every(value => value.intervalMs > 0 && Number.isFinite(value.cpuSeconds) && value.rssKiB > 0))
       assert(Number.isFinite(result.medianLatencyRatio) && result.medianLatencyRatio > 0 && result.network?.syntheticLatency === false)
     }
