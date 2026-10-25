@@ -14,7 +14,7 @@ import { createExecutionProofCleanup } from './fixtures/execution-proof-cleanup.
 assert.equal(process.argv.length, 2, 'This proof accepts no user profile or Session target')
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const root = await realpath(await mkdtemp('/tmp/amx-claude-'))
-const sourcePaths = ['src/agent-execution-frontend.ts', 'src/agent-execution-helper-run.ts', 'src/agent-execution-bridge.ts',
+const sourcePaths = ['src/agent-execution-frontend.ts', 'src/agent-execution-helper-run.ts', 'src/agent-execution-bridge.ts', 'src/recoverable-input-frame.ts',
   'src/agent-execution-executor.ts', 'src/agent-execution-coordinator.ts', 'src/agent-execution-protocol.ts',
   'src/providers/claude.ts', 'src/providers/claude-tool-execution-launch.ts', 'src/providers/claude-execution-helper.ts',
   'src/providers/claude-execution-run.ts', 'src/providers/claude-execution-protocol.ts', 'src/providers/claude-execution-policy.ts', 'src/providers/claude-execution-shell.ts', 'src/providers/claude-execution-operations.ts']
