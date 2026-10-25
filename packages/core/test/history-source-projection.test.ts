@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
@@ -53,10 +54,18 @@ function observe() {
 
 it('original public history consumes a nonempty durable source without normalizing recovery bodies', async () => {
   const f = await fixture(), read = f.store.readHistorySource.bind(f.store)
+  const sourceReads = new AsyncLocalStorage<boolean>()
+  const bodyParses: number[] = [], otherBodyParses: number[] = [], parse = JSON.parse
+  vi.spyOn(JSON, 'parse').mockImplementation((text, reviver) => {
+    if (text.includes('Original recovery body ') || text.includes('Original executor body ')) {
+      (sourceReads.getStore() ? bodyParses : otherBodyParses).push(Buffer.byteLength(text))
+    }
+    return parse(text, reviver)
+  })
   const costs: ReturnType<typeof observe>[] = []
   const exact = vi.spyOn(f.store, 'readHistorySource').mockImplementation(async (...args) => {
     const cost = observe(); costs.push(cost)
-    try { return await read(...args) } finally { Reflect.deleteProperty(globalThis, '__amuxHistorySourceCost') }
+    try { return await sourceReads.run(true, () => read(...args)) } finally { Reflect.deleteProperty(globalThis, '__amuxHistorySourceCost') }
   })
   const descriptor = await f.store.readHistorySource(f.session.agentSessionId)
   expect(descriptor).toEqual({ agentSessionId: f.session.agentSessionId, hostId: 'local', state: 'active', history: sessionHistoryMetadata(f.session) })
@@ -69,14 +78,19 @@ it('original public history consumes a nonempty durable source without normalizi
   expect(await readFile(f.path)).toEqual(f.before.native)
   expect(f.raw()).toBe(f.original)
   f.assertNoControls()
+  expect(bodyParses, 'The exact source reader must not copy unrelated persisted bodies into JS JSON.parse').toEqual([])
   const control = observe()
+  const fullReadStart = otherBodyParses.length
   expect(await f.store.readMetadata(f.session.agentSessionId)).toMatchObject({ continuityOperations: f.session.continuityOperations,
     continuityExecutors: f.session.continuityExecutors })
   Reflect.deleteProperty(globalThis, '__amuxHistorySourceCost')
   expect(control.fullRecords).toBeGreaterThan(0)
   expect(control.continuityOperations).toBeGreaterThan(0)
   expect(control.executorBodies).toBeGreaterThan(0)
-  samples.push({ historyReads: costs.length, costs, fullMetadataControl: control, originalRowBytes: Buffer.byteLength(f.original) })
+  expect(otherBodyParses.length, 'Full metadata still consumes and validates its original bodies').toBeGreaterThan(fullReadStart)
+  samples.push({ historyReads: costs.length, costs, fullMetadataControl: control, originalRowBytes: Buffer.byteLength(f.original),
+    exactSourceBodyParseBytes: bodyParses, otherConsumerBodyParseBytes: otherBodyParses.slice(0, fullReadStart),
+    fullMetadataBodyParseBytes: otherBodyParses.slice(fullReadStart) })
   for (const cost of costs) expect(cost, 'Exact history source must not normalize unrelated recovery bodies').toEqual({ fullRecords: 0, continuityOperations: 0, executorBodies: 0 })
 })
 
@@ -100,6 +114,24 @@ it('only original current, observed and confirmed previous sources enter the rea
   f.assertNoControls()
 })
 
+it('preserves original string escapes and last-value authority for duplicate source keys', async () => {
+  const f = await fixture()
+  const source = { ...f.session, executorId: 'original-\ud800', workspacePath: f.root + '/原🙂\udfff' }
+  try {
+    f.replace(source)
+    expect((await f.store.readHistorySource(source.agentSessionId))!.history).toEqual(sessionHistoryMetadata(source))
+    const db = new DatabaseSync(f.storePath)
+    try {
+      const replace = (raw: string) => db.prepare('UPDATE sessions SET json=? WHERE id=?').run(raw, source.agentSessionId)
+      replace('{"agentSessionId":"foreign-session",' + f.original.slice(1))
+      expect(await f.store.readHistorySource(source.agentSessionId)).toMatchObject({ agentSessionId: source.agentSessionId })
+      replace(f.original.slice(0, -1) + ',"agentSessionId":"foreign-session"}')
+      await expect(f.store.readHistorySource(source.agentSessionId)).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
+    } finally { db.close() }
+  } finally { f.replace(JSON.parse(f.original)) }
+  f.assertNoControls()
+})
+
 it('rejects malformed source authority while full metadata and writes still validate recovery bodies', async () => {
   const f = await fixture(), handle = f.session.nativeHandle!
   for (const invalid of [
@@ -116,6 +148,16 @@ it('rejects malformed source authority while full metadata and writes still vali
     f.replace({ ...f.session, ...invalid })
     await expect(f.store.readHistorySource(f.session.agentSessionId)).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
   }
+  try {
+    for (const invalid of [
+      { createdAt: true }, { createdAt: false }, { createdAt: null },
+      { nativeHandle: null }, { nativeHandle: false }, { nativeConfirmation: null },
+      { creation: null }, { forkedFrom: null }, { toolExecution: null }
+    ]) {
+      f.replace({ ...f.session, ...invalid })
+      await expect(f.store.readHistorySource(f.session.agentSessionId)).rejects.toThrow()
+    }
+  } finally { f.replace(JSON.parse(f.original)) }
   const invalidRecovery = { ...f.session, continuityOperations: { broken: {} } }
   f.replace(invalidRecovery)
   expect(await f.store.readHistorySource(f.session.agentSessionId)).toMatchObject({ history: { nativeHandle: handle } })

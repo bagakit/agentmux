@@ -12,10 +12,12 @@ export default defineConfig({ ...original, root, cacheDir: '.cache/history-sourc
     let code = source
     const mutation = process.env.AGENTMUX_HISTORY_SOURCE_MUTATION
     if (mutation) {
-      if (mutation !== 'full-session') throw Error('Unknown history source mutation')
-      const active = "const activeRow = db.prepare('SELECT json FROM sessions WHERE id=?').get(agentSessionId)\n      if (activeRow) return activeSessionHistorySource(JSON.parse(String(activeRow.json)), agentSessionId)"
+      if (!['full-session', 'full-json'].includes(mutation)) throw Error('Unknown history source mutation')
+      const active = 'const activeRow = db.prepare(activeHistorySourceSql).get(agentSessionId)\n      if (activeRow) return activeSessionHistorySource(JSON.parse(String(activeRow.json)), agentSessionId)'
       if (code.split(active).length !== 2) throw Error('Missing unique active history source owner')
-      code = code.replace(active, 'const active = this.sessionMetadata(db, agentSessionId)\n      if (active) return sessionHistorySources([active], [], [])[0]!')
+      code = code.replace(active, mutation === 'full-json'
+        ? "const activeRow = db.prepare('SELECT json FROM sessions WHERE id=?').get(agentSessionId)\n      if (activeRow) return activeSessionHistorySource(JSON.parse(String(activeRow.json)), agentSessionId)"
+        : 'const active = this.sessionMetadata(db, agentSessionId)\n      if (active) return sessionHistorySources([active], [], [])[0]!')
     }
     const entry = 'export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgentSession {'
     if (code.split(entry).length !== 2) throw Error('Missing unique full-record normalization owner')
