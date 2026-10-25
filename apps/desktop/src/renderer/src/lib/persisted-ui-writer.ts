@@ -1,104 +1,68 @@
 import { createJSONStorage, type PersistStorage, type StorageValue } from 'zustand/middleware'
 
-// A layout drag (dock resize, split-ratio, tab reorder) fires many state changes per second, and the
-// old storage wrote localStorage synchronously on every one. Coalesce them: the newest value per key
-// lands once, this long after durable activity settles. Equal values do not extend that deadline.
-// Unload flush closes the remaining in-memory window on an ordinary quit; abrupt exit cannot flush.
-const DEFAULT_DEBOUNCE_MS = 400
+// Bound both encoding and browser storage work to one batch. Continuous input
+// replaces the immutable pending projection without postponing its save deadline.
+const DEFAULT_BATCH_MS = 400
 
 type SynchronousStateStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
 type FlushablePersistentStorage<State> = {
   storage: PersistStorage<State>
-  /** Write any debounced value to the base storage now. A no-op when nothing is pending. */
   flush: () => void
 }
 
-/**
- * Own the JSON boundary and the pending writes for synchronous browser storage. Unchanged projected
- * state is rejected before JSON encoding; newly projected equal content keeps the existing deadline.
- * The startup fence must wrap this storage, so a rejected startup write cannot enter this queue.
+/** Own the original JSON boundary and latest immutable Zustand projection per key.
+ * The startup fence wraps this owner so rejected defaults never enter a batch.
+ * Ordinary unload flushes the latest input; abrupt exit cannot run that handler.
  */
-export function createDebouncedPersistentStorage<State>(
+export function createBatchedPersistentStorage<State>(
   base: SynchronousStateStorage,
-  delayMs: number = DEFAULT_DEBOUNCE_MS
+  delayMs: number = DEFAULT_BATCH_MS
 ): FlushablePersistentStorage<State> {
-  // Keyed by storage name: a later setItem for a key overwrites its pending value rather than queuing
-  // a second write, and a removeItem drops any pending value so it cannot resurrect after deletion.
-  const pending = new Map<string, string>()
-  // This is an input identity cache, not a claim that the input has reached durable storage.
+  const pending = new Map<string, StorageValue<State>>()
+  // Input identity does not imply that its pending write has reached storage.
   const inputs = new Map<string, StorageValue<State>>()
+  const jsonStorage = createJSONStorage<State>(() => base)!
   let timer: ReturnType<typeof setTimeout> | null = null
 
   const writePending = (): void => {
     timer = null
     for (const [name, value] of pending) {
-      base.setItem(name, value)
-      // A synchronous storage failure leaves this value pending for a later flush / same-value retry.
+      const encoded = JSON.stringify(value)
+      if (base.getItem(name) !== encoded) base.setItem(name, encoded)
+      // Encoding, read or write failure leaves the original input available to retry.
       pending.delete(name)
     }
   }
-
   const flush = (): void => {
-    if (timer !== null) {
-      clearTimeout(timer)
-      timer = null
-    }
+    if (timer !== null) { clearTimeout(timer); timer = null }
     writePending()
   }
-
   const schedule = (): void => {
-    if (timer !== null) clearTimeout(timer)
-    timer = setTimeout(writePending, delayMs)
+    if (timer === null) timer = setTimeout(writePending, delayMs)
   }
-
-  const jsonStorage = createJSONStorage<State>(() => ({
-    getItem: (name) => base.getItem(name),
-    setItem: (name, value) => {
-      if (pending.get(name) === value) {
-        if (timer === null) schedule()
-        return
-      }
-      if (base.getItem(name) === value) {
-        pending.delete(name)
-        if (pending.size === 0 && timer !== null) {
-          clearTimeout(timer)
-          timer = null
-        }
-        return
-      }
-      pending.set(name, value)
-      schedule()
-    },
-    removeItem: (name) => {
-      pending.delete(name)
-      inputs.delete(name)
-      if (pending.size === 0 && timer !== null) {
-        clearTimeout(timer)
-        timer = null
-      }
-      base.removeItem(name)
-    }
-  }))!
-
   const storage: PersistStorage<State> = {
-    getItem: (name) => {
-      // An explicit rehydrate rereads the authority; the next input must be compared with that value.
+    getItem: name => {
       inputs.delete(name)
       return jsonStorage.getItem(name)
     },
     setItem: (name, value) => {
       const previous = inputs.get(name)
       if (previous?.state === value.state && previous.version === value.version) {
-        if (pending.has(name) && timer === null) schedule()
+        if (pending.has(name)) schedule()
         return
       }
-      jsonStorage.setItem(name, value)
+      pending.set(name, value)
       inputs.set(name, value)
+      schedule()
     },
-    removeItem: (name) => jsonStorage.removeItem(name)
+    removeItem: name => {
+      pending.delete(name)
+      inputs.delete(name)
+      if (pending.size === 0 && timer !== null) { clearTimeout(timer); timer = null }
+      base.removeItem(name)
+    }
   }
-
   return { storage, flush }
 }
 
