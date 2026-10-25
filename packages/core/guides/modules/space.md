@@ -16,6 +16,14 @@ reports its original Session/Run and retirement fact, not a missing creation or 
 Inspection never creates or reopens. A newly authorized takeover after retirement needs a new
 operation ID; keep the previous receipt. Unknown results always keep their original operation.
 
+For a new Agent, `amux agent open --executor ID --execution-workspace AGENT_WORKSPACE
+--tool-workspace RESOURCE_WORKSPACE --zone ZONE --new-tab` keeps the Agent Run location
+separate from the project/tool resource and display destination. Both Workspace references must
+be explicit; this mode requires a transport-authenticated user/device without a managed Agent
+caller. It cannot be combined with native resume, fork or new Zone resources. Spatial receipts
+retain the original Session toolExecution binding alongside its Agent Host/cwd; moving its
+presentation or inspecting it never changes either execution identity.
+
 Read the client-owned Agent list order with amux space agent-order --display-workspace WORKSPACE.
 With --input FILE|- provide {order:[{hostId,agentSessionId}],expectedOrder?:[...]} to change that
 exact Workspace preference. An empty order restores creation order; new Sessions append.
