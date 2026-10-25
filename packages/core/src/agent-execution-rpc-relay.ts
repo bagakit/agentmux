@@ -60,7 +60,7 @@ export function gateExecutionAgentRpc(value: unknown, expected: Caller, replacem
     const params = request.params
     if (!object(params) || !object(params.caller) || Object.keys(params.caller).length !== 2 ||
         params.caller.agentSessionId !== expected.agentSessionId || !sameSecret(params.caller.capability, expected.capability) ||
-        Object.hasOwn(params, 'runtimeFence') || isAgentMuxRpcDeviceMethod(request.method) || request.method.startsWith('runtime.')) throw denied()
+        Object.hasOwn(params, 'runtimeFence') || (isAgentMuxRpcDeviceMethod(request.method) && request.method !== 'device.link') || request.method.startsWith('runtime.')) throw denied()
     return { ...request, params: { ...params, caller: { ...(replacement ?? expected) }, ...(fence ? { runtimeFence: { ...fence } } : {}) } }
   })
   return Array.isArray(value) ? qualified : qualified[0]

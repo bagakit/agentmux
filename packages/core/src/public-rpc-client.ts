@@ -345,7 +345,9 @@ class RpcClient implements AgentMuxRpcClient {
     const abort = () => end(new AgentMuxError('RPC reader was cancelled; an admitted operation may still complete at its original owner.', 'CONTROL_CANCELLED'))
     signal?.addEventListener('abort', abort, { once: true })
     let deadline: ReturnType<typeof setTimeout> | undefined
-    const deviceRecovery = () => method === 'device.hello'
+    const deviceRecovery = () => method === 'device.link'
+      ? 'Explicitly read amux device link again on the same original Host after the connection is available. This read does not change device state.'
+      : method === 'device.hello'
       ? "Check this device's connection state and ask a local user to inspect the original device facts before another explicit mutation. Never automatically replay a write."
       : 'Read amux device ls and inspect the original device facts before another explicit mutation. Never automatically replay a write.'
     const armDeadline = () => {

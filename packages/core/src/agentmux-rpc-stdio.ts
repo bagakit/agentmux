@@ -47,7 +47,10 @@ export async function forwardAgentMuxRpcStdio(options: { endpoint: AgentMuxRpcEn
   const gate = createAgentMuxRpcFrameStream(async (value, raw) => {
     if (Array.isArray(value) && !value.length) throw new AgentMuxError('An RPC batch cannot be empty.', 'CONTROL_PROTOCOL_ERROR')
     const requests = (Array.isArray(value) ? value : [value]).map(parseRpcRequest)
-    if (!requests.some(request => isAgentMuxRpcDeviceMethod(request.method))) return raw
+    // Preserve the managed caller for the original Host to authenticate. A
+    // callerless remote request must never acquire the Unix user's authority.
+    if (!requests.some(request => isAgentMuxRpcDeviceMethod(request.method) &&
+      (request.method !== 'device.link' || !Object.hasOwn(request.params ?? {}, 'caller')))) return raw
     const error = new AgentMuxError('Device management cannot be forwarded through stdio. Use the local Unix client and original Host confirmation.', 'CONTROL_PERMISSION_DENIED')
     const responses = requests.filter(request => Object.hasOwn(request, 'id')).map(request => rpcFailure(request.id!, error))
     if (responses.length) {
