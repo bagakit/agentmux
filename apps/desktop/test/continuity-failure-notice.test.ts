@@ -292,6 +292,18 @@ describe('the store actually carries Core’s reason to the surface', () => {
       expect(classifyContinuityFailure('unavailable', session.status.continuityReason)).not.toBeNull()
     }
   })
+  it('uses the current recovery receipt while retaining older candidate operations', () => {
+    const receipt = { operationId: 'current-recovery', error: 'Exact executable was missing.', errorCode: 'AGENT_NOT_FOUND' } as never
+    const historical = { operationId: 'historical-recovery', error: 'Older observation.' } as never
+    const projected = recoveryCandidateSession({ ...candidate(), continuity: historical,
+      continuityOperations: { 'historical-recovery': historical } }, { kind: 'unavailable', agentSessionId: 'agent-1',
+      previousRun: { runId: 'run-1' }, reason: 'provider-unavailable', continuity: receipt,
+      evidence: { kind: 'run-missing', observedAt: 1 } })
+    expect(projected.continuity).toEqual(receipt)
+    expect(projected.continuityOperations).toEqual({ 'historical-recovery': historical, 'current-recovery': receipt })
+    expect(projected.status.detail).toBe('AGENT_NOT_FOUND: Exact executable was missing.')
+    expect(projected.control.run).toEqual({ runId: 'run-1' })
+  })
 
   it('carries which kind of conflict it was, because the two ask for opposite things', () => {
     // 这条守的是**投影这一段**，不是判定层：Core 的 conflict variant 一直带着 reason，丢失发生在

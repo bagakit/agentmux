@@ -10,6 +10,7 @@ import { DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-recovery/c
 import { decideAgentSessionContinuity, agentContinuityAdmission } from '../src/agent-session-recovery/continuity-policy.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
+import { classifyExecutable } from '../src/executable-probe.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import type {
   CtxmuxAdapterObservationEvent,
@@ -398,7 +399,7 @@ async function continuityHarness(options: {
     kernel: Record<string, unknown>
     hookServer: Record<string, unknown>
     connected: boolean
-    probeAgent: unknown
+    probePreparedAgent: unknown
     ensureTerminalHandshakeOrDegrade: unknown
   }
   await internals.registry.load('local')
@@ -446,7 +447,7 @@ async function continuityHarness(options: {
     })
   }
 
-  internals.probeAgent = async () => structuredClone(CODEX_RESUME_CAPABILITY)
+  internals.probePreparedAgent = async () => structuredClone(CODEX_RESUME_CAPABILITY)
   // 握手在 kernel.start（spawn 观测点）之后，且不改变 Run 计数：passthrough 让恢复干净收束成 resumed。
   internals.ensureTerminalHandshakeOrDegrade = async (session: unknown) => session
 
@@ -490,9 +491,61 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
     })
   }
   const original = { agentSessionId: 'agent-1', expectedRun: { runId: 'run-1' }, operationId: 'continuity-original', trigger: 'startup' as const }
+  it('retains the exact missing executable cause and clears only the recovered operation failure', async () => {
+    const harness = await continuityHarness()
+    const missingCommand = join((await harness.store.readMetadata('agent-1'))!.workspacePath, 'missing wrapper')
+    const observation = await classifyExecutable(missingCommand)
+    const probe = vi.spyOn(harness.client as unknown as { probePreparedAgent: AgentMuxClient['probeAgent'] }, 'probePreparedAgent').mockResolvedValue({ ...CODEX_RESUME_CAPABILITY,
+      executable: missingCommand, installed: false, executableObservation: observation })
+    const request = { ...original, trigger: 'manual' as const, commandOverride: missingCommand, policy: { recheckMaxAttempts: 0 } }
+    try {
+      const historical = await harness.client.ensureAgentContinuity({ ...request, operationId: 'historical-failure' })
+      const failed = await harness.client.ensureAgentContinuity(request)
+      expect(failed).toMatchObject({ kind: 'unavailable', reason: 'provider-unavailable', continuity: {
+        operationId: request.operationId, errorCode: 'AGENT_NOT_FOUND', error: expect.stringContaining(missingCommand) } })
+      expect(failed.continuity?.error).toContain(observation.availability === 'missing' ? observation.cause!.message : 'not missing')
+      expect(harness.spawnCount()).toBe(0)
+      probe.mockRejectedValueOnce(new Error('Current executable observation is unconfirmed.'))
+      const unconfirmed = await harness.client.ensureAgentContinuity(request)
+      expect(unconfirmed).toMatchObject({ kind: 'pending', reason: 'provider-unverified', continuity: {
+        error: 'Current executable observation is unconfirmed.' } })
+      expect(unconfirmed.continuity?.errorCode).toBeUndefined()
+      probe.mockResolvedValue({ ...CODEX_RESUME_CAPABILITY, executable: missingCommand })
+      const recovered = await harness.client.ensureAgentContinuity(request)
+      expect(recovered).toMatchObject({ kind: 'resumed', session: { agentSessionId: 'agent-1', nativeHandle: { sessionId: 'native-1' } } })
+      expect(recovered.continuity?.error).toBeUndefined(); expect(recovered.continuity?.errorCode).toBeUndefined()
+      const stored = (await harness.store.readMetadata('agent-1'))!
+      expect(stored.continuity?.error).toBeUndefined()
+      expect(stored.continuityOperations?.['historical-failure']).toEqual(historical.continuity)
+      expect(harness.spawnCount()).toBe(1)
+    } finally { await harness.client.dispose() }
+  })
+  it('keeps an explicitly requested native resume available when the same executable check is unconfirmed', async () => {
+    const harness = await continuityHarness()
+    vi.spyOn(harness.client as unknown as { probePreparedAgent: AgentMuxClient['probeAgent'] }, 'probePreparedAgent').mockResolvedValue({
+      ...CODEX_RESUME_CAPABILITY, installed: false,
+      executableObservation: { executable: 'codex', availability: 'check-failed', cause: { code: 'EIO', message: 'private lookup unavailable' } } })
+    try {
+      const result = await harness.client.ensureAgentContinuity({ ...original, trigger: 'manual' })
+      expect(result.kind).toBe('resumed'); expect(harness.spawnCount()).toBe(1)
+      expect(result.continuity?.errorCode).not.toBe('AGENT_NOT_FOUND')
+    } finally { await harness.client.dispose() }
+  })
+  it('does not label an available executable as missing when its Provider cannot resume', async () => {
+    const harness = await continuityHarness()
+    vi.spyOn(harness.client as unknown as { probePreparedAgent: AgentMuxClient['probeAgent'] }, 'probePreparedAgent').mockResolvedValue({
+      ...CODEX_RESUME_CAPABILITY, capabilities: { ...CODEX_RESUME_CAPABILITY.capabilities, providerResume: false },
+      executableObservation: { executable: 'codex', availability: 'available' } })
+    try {
+      const result = await harness.client.ensureAgentContinuity({ ...original, trigger: 'manual' })
+      expect(result).toMatchObject({ kind: 'unavailable', reason: 'provider-unavailable' })
+      expect(result.continuity?.error).toBeUndefined(); expect(result.continuity?.errorCode).toBeUndefined()
+      expect(harness.spawnCount()).toBe(0)
+    } finally { await harness.client.dispose() }
+  })
   it('automatically restores recent working without inventing native interruption', async () => {
     const harness = await continuityHarness(); await working(harness)
-    const probe = vi.spyOn(harness.client, 'probeAgent')
+    const probe = vi.spyOn(harness.client as unknown as { probePreparedAgent: AgentMuxClient['probeAgent'] }, 'probePreparedAgent')
     const result = await harness.client.ensureAgentContinuity(original)
     expect(result).toMatchObject({ kind: 'resumed', session: { agentSessionId: 'agent-1', nativeHandle: { sessionId: 'native-1' } },
       continuity: { reason: 'recent-activity', policy: DEFAULT_AGENT_CONTINUITY_POLICY, previousRun: { runId: 'run-1' }, newRun: { runId: 'spawned-run-1' } } })
@@ -509,7 +562,7 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
   })
   it('keeps a healthy Run attach-only before policy or Provider probes', async () => {
     const harness = await continuityHarness({ runId1State: { type: 'running' } }); await working(harness)
-    const probe = vi.spyOn(harness.client, 'probeAgent')
+    const probe = vi.spyOn(harness.client as unknown as { probePreparedAgent: AgentMuxClient['probeAgent'] }, 'probePreparedAgent')
     const result = await harness.client.ensureAgentContinuity({ ...original, policy: { activeRecovery: 'manual', resumeAfterExit: false } })
     expect(result).toMatchObject({ kind: 'reattachable', run: { runId: 'run-1' } })
     expect(result.continuity?.recoveryInputs).toBeUndefined()
@@ -520,7 +573,7 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
     const harness = await continuityHarness(); await working(harness)
     const originalPath = process.env.PATH ?? ''
     let observedProbes = 0
-    const probe = vi.spyOn(harness.client, 'probeAgent').mockImplementation(async () => {
+    const probe = vi.spyOn(harness.client as unknown as { probePreparedAgent: AgentMuxClient['probeAgent'] }, 'probePreparedAgent').mockImplementation(async () => {
       if (++observedProbes === 1) vi.stubEnv('PATH', `${originalPath}:/amx-probe-context-changed`)
       return structuredClone(CODEX_RESUME_CAPABILITY)
     })
@@ -532,7 +585,7 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
   })
   it('delays interrupted work without taking a lifecycle lease and keeps explicit recovery usable', async () => {
     const harness = await continuityHarness(); await working(harness)
-    const probe = vi.spyOn(harness.client, 'probeAgent'), reserve = vi.spyOn(harness.store, 'reserveLifecycle')
+    const probe = vi.spyOn(harness.client as unknown as { probePreparedAgent: AgentMuxClient['probeAgent'] }, 'probePreparedAgent'), reserve = vi.spyOn(harness.store, 'reserveLifecycle')
     const result = await harness.client.ensureAgentContinuity({ ...original, policy: { activeRecoveryDelayMs: 60000 } })
     expect(result).toMatchObject({ kind: 'pending', reason: 'active-delay' })
     expect(result.continuity?.nextActionAt).toBe(result.continuity!.admittedAt + 60000)
@@ -544,7 +597,7 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
     const harness = await continuityHarness(); await working(harness)
     const kernel = (harness.client as any).kernel
     kernel.status = async () => { throw new Error('observation unavailable') }
-    const probe = vi.spyOn(harness.client, 'probeAgent')
+    const probe = vi.spyOn(harness.client as unknown as { probePreparedAgent: AgentMuxClient['probeAgent'] }, 'probePreparedAgent')
     const result = await harness.client.ensureAgentContinuity({ ...original, policy: { recheckMaxAttempts: 0 } })
     expect(result).toMatchObject({ kind: 'pending', reason: 'runtime-unverified', evidence: { kind: 'run-unknown' } })
     expect(probe).not.toHaveBeenCalled(); expect(harness.spawnCount()).toBe(0)
@@ -553,7 +606,7 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
   })
   it('fences the exact expected Run before a Provider probe or new start', async () => {
     const harness = await continuityHarness(); await working(harness)
-    const probe = vi.spyOn(harness.client, 'probeAgent')
+    const probe = vi.spyOn(harness.client as unknown as { probePreparedAgent: AgentMuxClient['probeAgent'] }, 'probePreparedAgent')
     expect(await harness.client.ensureAgentContinuity({ ...original, expectedRun: { runId: 'wrong-original' } })).toMatchObject({ kind: 'conflict', reason: 'session-run-changed' })
     expect(probe).not.toHaveBeenCalled(); expect(harness.spawnCount()).toBe(0)
     await harness.client.dispose()
@@ -566,7 +619,7 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
       started = { ...await start(input), program: input.program, args: input.args, lifecycleOperationId: input.operationKey }
       throw new Error('start ACK lost')
     }
-    kernel.list = async () => started ? [started] : []
+    kernel.inspectCreation = async (operationId: string) => started?.lifecycleOperationId === operationId ? started : null
     const first = await harness.client.ensureAgentContinuity({ ...original, policy: { recheckMaxAttempts: 0 } })
     expect(first).toMatchObject({ kind: 'pending', reason: 'operation-unconfirmed' })
     const second = await harness.client.ensureAgentContinuity(original)
