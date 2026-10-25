@@ -2845,9 +2845,7 @@ export class RuntimeController {
     data: string
   ): Promise<void> {
     try {
-      await (await this.connectedClient(hostId, 'runtime')).writeAgent({
-        agentSessionId, expectedRun: { runId }, data, source: 'terminal-protocol'
-      })
+      await this.write({ kind: 'agent', hostId, agentSessionId, run: { runId } }, data, 'terminal-protocol')
     } catch (error) {
       console.error(`Failed to answer Terminal color query for Run ${runId}`, error)
     }
