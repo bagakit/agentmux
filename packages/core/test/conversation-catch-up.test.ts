@@ -139,7 +139,8 @@ it('compiled CLI watch follows the original source and Ctrl-C releases only its 
   const f = await historyReaderFixture(true, true); close.push(f.close)
   const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: () => [{ hostId: 'local', client: f.client }] })
   await server.start(); close.push(() => server.stop())
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../bin/amux', import.meta.url)), 'agent', 'conversation', 'watch', '--host', 'local', '--session', f.reference.agentSessionId],
+  const entry = process.env.AGENTMUX_TEST_OBJECT_CLI ?? fileURLToPath(new URL('../bin/amux', import.meta.url))
+  const child = spawn(process.execPath, [entry, 'agent', 'conversation', 'watch', '--host', 'local', '--session', f.reference.agentSessionId],
     { env: objectCliEnvironment(f.root), stdio: ['pipe', 'pipe', 'pipe'] })
   close.push(async () => { child.kill('SIGKILL') })
   let output = '', error = ''
@@ -199,8 +200,11 @@ it('actual CLI help and skill expose scoped changes and reader-only follow cance
   expect(help.code, help.stderr).toBe(0)
   expect(help.stdout).toContain('--view VIEW')
   expect(help.stdout).toContain('never the original Session or Run')
-  const skill = await runCompiledObjectCli(['agent', '--help'], env)
+  const commands = await runCompiledObjectCli(['agent', 'conversation', '--help'], env)
+  expect(commands.code, commands.stderr).toBe(0)
+  for (const action of ['checkpoint', 'changes', 'watch']) expect(commands.stdout).toContain(`amux agent conversation ${action}`)
+  const skill = await runCompiledObjectCli(['agent', '--skill'], env)
   expect(skill.code, skill.stderr).toBe(0)
-  for (const action of ['checkpoint', 'changes', 'watch']) expect(skill.stdout).toContain(`amux agent conversation ${action}`)
+  expect(skill.stdout).toContain('agent conversation checkpoint cuts current native and captured positions')
   await f.unchanged()
 })
