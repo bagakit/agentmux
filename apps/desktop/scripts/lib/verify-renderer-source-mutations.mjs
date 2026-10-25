@@ -74,7 +74,7 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
     for (const file of ['package.json', 'tsconfig.base.json', 'vitest.setup.ts']) await cp(join(root, file), join(copy, file), { mode: fsConstants.COPYFILE_FICLONE })
     await symlink(join(root, 'node_modules'), join(copy, 'node_modules'))
     const packageDirectories = ['packages/core', 'packages/layout', 'packages/demand', 'packages/client-ui', 'packages/git',
-      'packages/identity', 'packages/relay', 'packages/diagnostic-evidence', 'apps/host', 'apps/mobile']
+      'packages/identity', 'packages/relay', 'packages/diagnostic-evidence', 'packages/capsule', 'apps/host', 'apps/mobile']
     for (const directory of packageDirectories) {
       const destination = join(copy, directory)
       await mkdir(destination, { recursive: true })
