@@ -40,9 +40,9 @@ TerminalView (Renderer, xterm)          apps/desktop/src/renderer/src/components
 
 反向的输入路径：[TerminalView](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) 的 xterm `onData` → `api.sessions.write`
 → [RuntimeController](../../apps/desktop/src/main/runtime-controller.ts) 的 `write`
-→ [AgentMuxClient](../../packages/core/src/client.ts) 的 `writeTerminal` /
-`writeAgent` → [CtxmuxRunAdapter](../../packages/core/src/ctxmux-run-adapter.ts) 的 `input` →
-CtxMux 的累计 Input cursor → PTY。
+→ [AgentMuxClient](../../packages/core/src/client.ts) 的 `writeTerminalBytes` /
+`writeAgent` → [CtxmuxRunAdapter](../../packages/core/src/ctxmux-run-adapter.ts) 的 input-only 通道 →
+ctxmux 原 writer 的有序字节与本条回执 → PTY。
 
 关键性质：**Desktop 持有主题；物理终端通路只传输字节、尺寸与生命周期，不承载 Desktop theme**。
 Core 另持有 Provider、AgentSession 等 Agent 语义。此处的公共物理终端类型没有主题字段（`client.ts` 的
@@ -84,9 +84,9 @@ Desktop Main 组合跨进程控制，通过公开 Core API 执行 Agent lifecycl
 
 同一 Hosted consumer 中，重叠的显式 `connectRuntime()` 共享尚未完成的原准备，包括前后 owner discovery 和 Host 准备。成功或失败后立即释放共享 Promise，后续调用重新准备；disconnect／dispose 清除该 consumer 的共享引用，旧调用收尾不能清掉新的准备。此处不缓存 readiness，不合并输入，不让独立 metadata reader 等待 Native 准备；每次输入仍保留自己的顺序、目标、byte cursor 与回执。
 
-Hosted Agent 的原始输入由 `writeAgent`／`pasteAgent` 自身先发现原 semantic Host，再交给同一次 Host invocation 准备 Native。Main 不在这条路径额外调用显式 `connectRuntime()`；每个串行输入只有一次 Host discovery 和一次业务 invocation，重叠 discovery 复用原在途请求。Host 保留准备前后的 owner fence，Core 保留准确 Session／Run、授权、FIFO、字节游标与回执；发现失败后的新输入重新观察，不重发未知输入。普通 Terminal 仍需 Main 的 Native fence／游标准备，直接 Core client 也保留原连接前提。
+Hosted 原始输入由 `writeAgent`／`pasteAgent`／`writeTerminalBytes` 自身先发现原 semantic Host，再交给同一次 Host invocation 准备 Native。Main 不额外调用显式 `connectRuntime()`；每个串行输入只有一次 Host discovery 和一次业务 invocation，重叠 discovery 复用原在途请求。Host 保留准备前后的 owner fence，Core 保留准确 Session／Run、授权、FIFO 和真实回执；发现失败后的新输入重新观察，不重发未知输入。普通 Terminal 不再由 Main 持有输入游标；直接 Core client 仍保留原连接前提。Main 从输入入口、任何异步准备之前沿既有 Host 操作集合保留在途事实，配置切换等待原操作结算；它不再维护第二份 raw 完成队列。
 
-这条路径的发现等待计入原 Main `host-call` 与总输入耗时，原 parent 关联不变。Main 不用旧 Native 投影标记 Hosted Agent 的执行 owner，实际 owner 由 Host 诊断提供；观察缺项保持未知。原输入错误保留在 Renderer 的通知与历史中。SDK 的原 Host 发现失败使其观察变为未确认时，Main 将该原错误保留在已有连接服务窗；下一次成功输入只清除此步骤的提醒。已确认 Host 上的业务拒绝不推断为连接失败，也不为分类错误增加探测。
+这条路径的发现等待计入原 Main `host-call` 与总输入耗时，原 parent 关联不变。Main 不用旧 Native 投影标记 Hosted 输入的执行 owner，实际 owner 由 Host 诊断提供；观察缺项保持未知。原输入错误保留在 Renderer 的通知与历史中。SDK 的原 Host 发现失败使其观察变为未确认时，Main 将该原错误保留在已有连接服务窗；下一次成功输入只清除此步骤的提醒。已确认 Host 上的业务拒绝不推断为连接失败，也不为分类错误增加探测。
 
 本机 Host 的启动探测属于物理连接建立。[Desktop connector](../../apps/desktop/src/main/desktop-host.ts) 将原服务准备注入 [RPC client](../../packages/core/src/public-rpc-client.ts) 的 `prepareUnixConnection`；同一 Unix 通道的原 `ready` 覆盖准备与连接，后续请求、订阅和显式 owner discovery 复用该通道，不重复探测 socket。通道关闭后，新通道重新准备；没有健康状态缓存或定时探测。这个本地 SDK 注入点不进入 wire，也不替代上表的 Native 准入和每次操作的身份检查。
 
@@ -113,7 +113,7 @@ Desktop `RuntimeController.resumeSession` 和 `performRecovery` 在这两条实�
 
 行为要求归 [连续阅读与输入响应](../design/behavior/terminal-reading.md#terminal-连续向上阅读历史)。需要保证的是原字节、原目标、授权和写入顺序；Core 队列本身不是产品要求。不能用新增优先级、固定攒批延时或自动重试代替降低输入成本。
 
-**输入通道**：`writeAgent`／`pasteAgent` 的非空原始写入，经 `AgentMuxClient.writeAgentInput` 消费 `CtxmuxRunAdapter.openInput`，沿 ctxmux 公开的 input-only connection 顺序发送。每个实际使用的 Run 懒开一个物理连接；同一 opening 的 RunInfo 与 daemon 身份供 Core 在首次副作用前核对 Session／Run／cwd，每次派发仍重核当前绑定与原授权。原 writer 决定可写状态和准确 applied range；Core 不维护第二份 cursor，也不逐笔查询状态。
+**输入通道**：Agent 的 `writeAgent`／`pasteAgent` 与普通 Terminal 的 `writeTerminalBytes` 消费 `CtxmuxRunAdapter.openInput`，沿 ctxmux 公开的 input-only connection 顺序发送。每个实际使用的 Run 懒开一个物理连接；同一 opening 的 RunInfo 与 daemon 身份供 Core 在首次副作用前核对 Session／Run／cwd，每次派发仍重核当前绑定与原授权。原 writer 决定可写状态和准确 applied range；Core 不维护第二份 cursor，也不逐笔查询状态。 同一 Core 的两个 raw 入口共享准确 Run 的短接纳边界：容量等待、最终授权／目标核对、同步入 wire 是一个连续责任，入线后立即释放，各原调用独立等待 ACK。SDK 的可写通知不预留容量，不能在两个方法中分别排队、再争用同一物理窗口。
 
 | 等待或约束 | 归属与处理原则 |
 | --- | --- |
@@ -125,11 +125,11 @@ Desktop `RuntimeController.resumeSession` 和 `performRecovery` 在这两条实�
 | SDK 真实在途窗口已满 | 仅队首等待容量通知，之后重核授权再发送；不定时攒批、不丢弃未发送输入、不自动重试已派发输入 |
 | 历史投影、可选屏幕确认、无关 Session 工作 | 不应成为原始输入的必需前置；相关成本归原消费者缩小范围，不另造调度层 |
 
-**必要事务边界**：Core 区分接纳顺序与尚未完成的交易。普通 raw 接纳只随原调用增长；完成集合只保留真实在途项，必要的协议后处理也算本次完成，不能在回执缺失时积累已完成历史的 Promise 尾链。语义输入等待入队时已有交易完整结束，保留原 recoverableInput 的 cursor／operationId 合同。posture、handshake、typed response、prompt 恢复与空载荷不随 raw 改道。用户原始输入遇到当前 native-hook 请求时，先等原前驱交易，再重读准确 Session／Run 和 pending request，沿原 CAS 事务保存本次 unknown；晚回执只更新这次捕获的请求与操作，不能误改后来请求。
+**必要事务边界**：程序化 `writeTerminal` 仍服务原 execution bridge 等可恢复操作，保留 `operationId`、原 daemon 和 `expectedByte`；它不是实时按键接口的兼容分支。`writeTerminalBytes` 是 SDK／客户端组合方法，由现有 `runtime.invoke` 与 GUI `sessions:write`／`sessions:paste` 消费，无需另造 CLI 按键命令。空原始字节不发送，无法确认的字节范围保持空值。Core 区分接纳顺序与尚未完成的交易。普通 raw 接纳只随原调用增长；完成集合只保留真实在途项，必要的协议后处理也算本次完成，不能在回执缺失时积累已完成历史的 Promise 尾链。同一 Agent 语义 lane 的输入等待入队时已有交易完整结束，保留原 recoverableInput 的 cursor／operationId 合同。该 lane 不是跨 Client 或全部 Run 写入的全局屏障；通用 Run bytes、其他 Core 与 Native Client 的交错仍由原生 CAS 核对原范围，不能据局部排队推定没有外部输入。posture、handshake、typed response、prompt 恢复与空载荷不随 raw 改道。用户原始输入遇到当前 native-hook 请求时，先等原前驱交易，再重读准确 Session／Run 和 pending request，沿原 CAS 事务保存本次 unknown；晚回执只更新这次捕获的请求与操作，不能误改后来请求。
 
 **寿命与失败**：输入通道复用 ctxmux 的 FIFO 接纳、命令关联、预算与结果机制，独立于输出 Attachment；detach、换 view 或观察失败不关闭健康输入。原 Run 终局、真实连接关闭或 adapter 连接替换释放对应 handle 与 opening；晚 opening 不得覆盖新 owner。Native 复用原 Run 终局通知收束没有输出 reader 的通道，不新增轮询。SDK 只保未完成命令，Core 只保未完成交易。未发送取消为 not_applied；已发送结果丢失保持 unknown，不自动回放，不关闭健康 Run。下次独立输入可打开新连接，但不是重试旧 unknown。
 
-验证按可推翻方案的边界展开：双 Client 交错写入仍取得各自准确范围；前条回执延迟时后条 raw 已实际接纳且字节有序；突发输入经过真实窗口后完整到达；授权准备乱序、Run 替换、语义输入交错、观察 detach／失败、部分写与断连均不换目标、不丢字节、不自动重放未知输入。诊断区分准备／接纳等待、`input-capacity`、原生写入和 `input-completion-order`；Hosted discovery、Host 事件循环与呈现仍分别归属原消费者，不能拿入队时的 `blockedBy` 快照解释整段等待。没有实际交互或尚未更新的实例不能代签流畅度改善。
+验证按可推翻方案的边界展开：双 Client 交错写入仍取得各自准确范围；前条回执延迟时后条 raw 已实际接纳且字节有序；突发输入经过真实窗口后完整到达；授权准备乱序、Run 替换、语义输入交错、观察 detach／失败、部分写与断连均不换目标、不丢字节、不自动重放未知输入。诊断区分准备、`input-order`、`input-capacity`、原生写入和 `input-completion-order`；Hosted discovery、Host 事件循环与呈现仍分别归属原消费者，不能拿入队时的 `blockedBy` 快照解释整段等待。没有实际交互或尚未更新的实例不能代签流畅度改善。
 
 ## 2. 所有权矩阵
 
