@@ -165,3 +165,20 @@ it('retains reference reading, removal and a healthy input when its original Wor
   expect(dom.draft()).toBe(draft); expect(useAppStore.getState().sessions[0]).toBe(sessionBefore)
   expect(useAppStore.getState().error).toBeNull(); expect(read).not.toHaveBeenCalled()
 })
+
+it.each(['component', 'file'] as const)('a split Session opens a selected %s through its original native or project owner', async kind => {
+  const path = 'src/selected.ts', { draft, sessionBefore } = prepareReference(path, kind)
+  const project = { ...composerConfig.workspaces[0]!, id: 'project-resource', name: 'Project resources', path: _hygiene_fixturePath('other-project') }
+  const boundSession = { ...sessionBefore!, toolExecution: { bindingId: 'original-reference-binding', resourceHostId: project.hostId, resourceRuntimeId: 'project-runtime', workspacePath: project.path } }
+  useAppStore.setState(state => ({ sessions: [boundSession as typeof state.sessions[number]],
+    config: { ...state.config!, workspaces: [...state.config!.workspaces, project] }, layouts: { ...state.layouts, [project.id]: createWorkspaceLayout('resource-group') } }))
+  const read = vi.spyOn(api.files, 'read').mockImplementation(async (_workspaceId, path) => ({ status: 'read', document: { path, content: 'ORIGINAL OWNER BYTES', revision: 'original-reference' } }))
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  if (kind === 'component') await dom.click('button[data-tool-reference="component"]')
+  else { await dom.click('.composer-file__name'); await dom.click('.composer-file__reference button') }
+  const targetId = kind === 'file' ? project.id : 'workspace'
+  await vi.waitFor(() => expect(read).toHaveBeenCalledExactlyOnceWith(targetId, path))
+  expect(useAppStore.getState().documents[documentKey(targetId, path)]?.content).toBe('ORIGINAL OWNER BYTES')
+  expect(useAppStore.getState().sessions[0]).toBe(boundSession)
+  expect(dom.draft()).toBe(draft)
+})
