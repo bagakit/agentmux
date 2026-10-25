@@ -57,6 +57,16 @@ Hosts keep surface-specific geometry and supply the original theme tokens.
 
 ## Inputs
 
+`FormRow` from `@agentmux/client-ui/components/FormRow` renders one native label
+with a separate title and description. Its child callback supplies `id`,
+`aria-labelledby` and `aria-describedby`; spread those onto the original native
+control. The whole row remains its label, while only the title supplies the
+accessible name. `controlId` preserves an explicit field ID when needed.
+The caller keeps the input's ref, name, value, checked, handlers and disabled
+state. FormRow has no field state or validation model, clones no control, and
+adds no styles; pass the existing surface row class. Whole-save errors stay with
+the caller's save feedback.
+
 `src/input/` is the shared native field module: import `TextInput`, `Textarea` and `InputGroup` from `@agentmux/client-ui/input`, and `@agentmux/client-ui/input/styles.css` when not using the full shared stylesheet. Each component forwards native props and React 19 refs; callers retain labels, values, validation and actions. `InputGroup` is the existing field container with one focus boundary, not an extra wrapper or form state provider. Surface classes retain their own geometry.
 
 `Textarea` is the native presentation layer. Desktop controlled drafts use `ComposerTextarea`, which delegates to it while preserving the composition mirror and final-value writeback. Rich messages use the existing `AgentComposer` with `InlineComposer` (Tiptap): controlled value/change, references, commands, attachments, submit/queue/interrupt and feedback are explicit props. Desktop's `AgentSessionComposer` adapts draft persistence, native file IO and delivery; Core retains Session/Run authority. These responsibilities do not move into the native input module.
