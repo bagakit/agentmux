@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { type Socket } from 'node:net'
 import { createServer as createHttpServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
-import { Readable } from 'node:stream'
+import { Readable, type Writable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createJSONRPCErrorResponse } from 'json-rpc-2.0'
 import { AgentMuxError } from './errors.js'
@@ -15,6 +15,56 @@ import { AgentMuxRpcDispatcher, AgentMuxRpcLines, rpcEncode, AGENTMUX_RPC_MAX_ME
   parseRpcRequest, rpcRecord, rpcFailure, type AgentMuxRpcFrame, type AgentMuxRpcConnection } from './public-rpc-wire.js'
 import type { AgentMuxRpcStreamMethod, AgentMuxRpcPrincipal } from './public-rpc.js'
 import { RPC_FORWARD, RpcForwardingAuthority, receiveForwardedCall, type RpcForwardingPeer } from './rpc-forwarding.js'
+
+/** One physical writer. Pending producers retain their original frames, not encoded copies. */
+function rpcWritableSender(output: Writable, encode: (frame: AgentMuxRpcFrame) => string, failed: () => void) {
+  type Write = { frame: AgentMuxRpcFrame; resolve(): void; final: boolean }
+  const pending = new Set<Write>()
+  let current: Write | undefined, flushing = false, closed = false, ending = false
+  const dispose = () => {
+    if (closed) return
+    closed = true
+    output.off('drain', drained); output.off('close', dispose); output.off('error', fail)
+    current?.resolve(); current = undefined
+    for (const entry of pending) entry.resolve()
+    pending.clear()
+  }
+  const fail = () => { dispose(); failed() }
+  const complete = () => {
+    const entry = current; current = undefined
+    entry?.resolve()
+    if (entry?.final) { dispose(); output.end() }
+  }
+  function drained() { complete(); flush() }
+  function flush() {
+    if (closed || current || flushing) return
+    flushing = true
+    try {
+      for (const entry of pending) {
+        pending.delete(entry)
+        current = entry
+        // Encode only at this producer's turn. The frame limit belongs to rpcEncode;
+        // another legal frame's buffered bytes cannot make this frame invalid.
+        const encoded = encode(entry.frame)
+        const ready = output.write(encoded)
+        if (closed) return
+        if (!ready && current) return
+        complete()
+        if (closed) return
+      }
+    } catch { fail() }
+    finally { flushing = false }
+  }
+  output.on('drain', drained); output.once('close', dispose); output.once('error', fail)
+  return {
+    dispose,
+    send(frame: AgentMuxRpcFrame, final = false): Promise<void> {
+      if (closed || ending || output.destroyed || output.writableEnded) return Promise.resolve()
+      ending = final
+      return new Promise(resolve => { pending.add({ frame, resolve, final }); flush() })
+    }
+  }
+}
 
 export type AgentMuxRpcHttpAuthorization = {
   principal: AgentMuxRpcPrincipal;
@@ -180,18 +230,8 @@ export class AgentMuxControlServer {
   private accept(socket: Socket): void {
     this.sockets.add(socket)
     const lines = new AgentMuxRpcLines()
-    const channel = this.connection(async frame => {
-      if (socket.destroyed || socket.writableEnded) return
-      let encoded: string
-      try { encoded = rpcEncode(frame) } catch { channel.dispose(); return }
-      if (socket.writableLength + Buffer.byteLength(encoded) > AGENTMUX_RPC_MAX_MESSAGE_BYTES) {
-        channel.dispose(); return
-      }
-      if (!socket.write(encoded)) await new Promise<void>(resolve => {
-        const done = () => { socket.off('drain', done); socket.off('close', done); resolve() }
-        socket.once('drain', done); socket.once('close', done)
-      })
-    }, () => socket.destroy(), 'unix')
+    const writer = rpcWritableSender(socket, rpcEncode, () => channel.dispose())
+    const channel = this.connection(frame => writer.send(frame), () => { writer.dispose(); socket.destroy() }, 'unix')
     socket.setTimeout(AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS, () => channel.dispose())
     socket.on('error', () => channel.dispose())
     socket.once('end', () => { try { lines.end() } catch { /* An incomplete reader cannot own a business rollback. */ } channel.dispose() })
@@ -266,7 +306,7 @@ export class AgentMuxControlServer {
           }
         })
       }) } catch {
-        if (!socket.destroyed) socket.end(rpcEncode(createJSONRPCErrorResponse(null, -32700, 'Invalid JSON RPC frame.')))
+        if (!socket.destroyed) void writer.send(createJSONRPCErrorResponse(null, -32700, 'Invalid JSON RPC frame.'), true)
       }
     })
   }
@@ -320,16 +360,10 @@ export class AgentMuxControlServer {
         response.end(); return
       }
       if (!authorization) { response.writeHead(401); response.end(); return }
-      channel = this.connection(async frame => {
-        if (response.destroyed || response.writableEnded) return
-        let encoded: string
-        try { encoded = `data: ${rpcEncode(frame).trimEnd()}\n\n` } catch { channel!.dispose(); return }
-        if (response.writableLength + Buffer.byteLength(encoded) > AGENTMUX_RPC_MAX_MESSAGE_BYTES) { channel!.dispose(); return }
-        if (!response.write(encoded)) await new Promise<void>(resolve => {
-          const done = () => { response.off('drain', done); response.off('close', done); resolve() }
-          response.once('drain', done); response.once('close', done)
-        })
-      }, () => { if (!response.writableEnded) response.destroy() }, 'http', authorization.principal, authorization)
+      const writer = rpcWritableSender(response, frame => `data: ${rpcEncode(frame).trimEnd()}\n\n`, () => channel!.dispose())
+      channel = this.connection(frame => writer.send(frame), () => {
+        writer.dispose(); if (!response.writableEnded) response.destroy()
+      }, 'http', authorization.principal, authorization)
       response.once('close', () => channel!.dispose()); request.once('aborted', () => channel!.dispose())
       if (web.method !== 'POST' || new URL(web.url).pathname !== '/' || new URL(web.url).search) { response.writeHead(405, { Allow: 'POST' }); response.end(); return }
       if (web.headers.get('content-type')?.split(';')[0]?.trim() !== 'application/json') { response.writeHead(415); response.end(); return }
