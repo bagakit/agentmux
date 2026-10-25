@@ -70,6 +70,8 @@ describe('the macOS Host has one platform service per original endpoint', () => 
       connectorDirectory: fixturePath('config/connectors') }, workspaceMoveHelper: fixturePath('bin/workspace-move') })
     const plist = macosHostServicePlist(service)
     expect(plist).toContain('<key>KeepAlive</key><true/>')
+    // Terminal input and output relay through this job; it must not run in launchd's throttled default class.
+    expect(plist).toContain('<key>ProcessType</key><string>Interactive</string>')
     expect(plist).toContain('<key>ProgramArguments</key><array>')
     expect(plist).toContain('<string>--store</string>')
     expect(plist).toContain(input.entrypoint)
