@@ -13,7 +13,6 @@ import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
 import { THEME_BOOTSTRAP_CHANNEL, type ThemeBootstrap } from '../shared/theme-bootstrap'
 import { projectInitialTheme } from './theme-bootstrap'
-import { installNativeOverlayBlurGuard } from './native-overlay-focus'
 import { NATIVE_OVERLAY_FOCUS_CHANNEL, sameNativeOverlayDocument } from '../shared/native-overlay'
 import { unwrapSessionReopenResult } from '../shared/session-reopen-result'
 import { unwrapSessionAgentLaunchResult, unconfirmedSessionAgentLaunch } from '../shared/session-agent-launch-result'
@@ -86,8 +85,6 @@ import type {
   GitPushOptions,
   GitRemoteOptions
 } from '../shared/git-contracts.js'
-
-if (process.isMainFrame) installNativeOverlayBlurGuard(window)
 
 const initialTheme: ThemeBootstrap | null = process.isMainFrame ? (() => {
   try {

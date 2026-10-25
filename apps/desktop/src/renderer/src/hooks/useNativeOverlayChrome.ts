@@ -16,6 +16,11 @@ export function useNativeOverlayChrome(doc: Document = document, scope?: Workben
     let disposed = false
     let draining = false
     let pending: { regions: NativeOverlayRegion[]; warning?: string } | undefined
+    // Publication demand only; Main still owns the actual native focus decision.
+    // Keep it until removal is confirmed, including failed or in-flight publication.
+    let mayHaveProjection = false
+    const releaseBlurGuard = doc.defaultView ? guardNativeOverlayBlur(doc.defaultView, () => mayHaveProjection &&
+      (scope ? api.ui.nativeOverlayFocus(scope) : api.ui.nativeOverlayFocus())) : () => {}
     const failModal = (modalId: string, message: string): void => {
       if (disposed || !doc.defaultView) return
       const node = doc.getElementById(modalId)
@@ -31,6 +36,7 @@ export function useNativeOverlayChrome(doc: Document = document, scope?: Workben
           try {
             const receipt = await (scope ? api.ui.publishNativeOverlays(next.regions, scope) : api.ui.publishNativeOverlays(next.regions))
             if (!disposed) {
+              if (next.regions.length === 0 && receipt.projected === 0 && !pending) mayHaveProjection = false
               setWarning(next.warning ?? receipt.warning)
               for (const failure of receipt.failures ?? []) if (next.regions.some(region => region.modal?.id === failure.modalId)) failModal(failure.modalId, failure.message)
             }
@@ -50,6 +56,7 @@ export function useNativeOverlayChrome(doc: Document = document, scope?: Workben
     }, scope)
     let zoomFactor = scope ? Number.NaN : api.ui.getZoomFactor()
     const overlays = observeNativeOverlayRegions(doc.body, () => zoomFactor, (regions, notice) => {
+      if (regions.length) mayHaveProjection = true
       pending = { regions, ...(notice ? { warning: notice } : {}) }
       void drain()
     }, reading => rendererPerformance.observeOverlay(reading), scope ? { revision: -1, bounds: [], document: scope } : undefined)
@@ -75,7 +82,6 @@ export function useNativeOverlayChrome(doc: Document = document, scope?: Workben
     const unsubscribeInput = api.ui.onNativeBrowserInput(input => {
       if (sameNativeOverlayDocument(input.document, scope)) overlays.handleNativeInput(input)
     }, scope)
-    const releaseBlurGuard = scope && doc.defaultView ? guardNativeOverlayBlur(doc.defaultView, () => api.ui.nativeOverlayFocus(scope)) : () => {}
     return () => {
       disposed = true
       pending = undefined
