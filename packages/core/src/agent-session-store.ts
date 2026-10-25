@@ -700,6 +700,23 @@ export function sessionHistoryMetadata(session: AgentMuxStoredAgentSession): Age
     ...(session.nativeConfirmation ? { previousNativeHandle: session.nativeConfirmation.previousNativeHandle } : {}) })
 }
 
+/** Exact read identity does not consume the Session's cumulative recovery bodies. */
+function activeSessionHistorySource(value: unknown, id: string): AgentSessionHistoryDescriptor {
+  const source = record(value, 'Agent Session')
+  if (source.kind !== 'agent') throw new AgentMuxError('Only Agent Sessions may be persisted.', 'INVALID_AGENT_SESSION_STORE')
+  const agentSessionId = string(source.agentSessionId, 'agentSessionId')
+  if (agentSessionId !== id) throw new AgentMuxError('History source belongs to another Session.', 'INVALID_AGENT_SESSION_STORE')
+  const confirmation = source.nativeConfirmation === undefined ? undefined : nativeConfirmation(source.nativeConfirmation)
+  if (confirmation && !nativeConfirmationMatchesSession(confirmation, { agentSessionId,
+    providerId: string(source.providerId, 'providerId'), updatedAt: timestamp(source.updatedAt, 'updatedAt') })) {
+    throw new AgentMuxError('Native/activity facts do not match this Session.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return { agentSessionId, hostId: string(source.hostId, 'hostId'), state: 'active',
+    history: normalizeHistoryMetadata({ ...source,
+      // The preceding source comes only from its original confirmation receipt.
+      previousNativeHandle: confirmation?.previousNativeHandle }) }
+}
+
 function retiredAgentSessions(value: unknown): AgentMuxRetiredAgentSession[] {
   if (!Array.isArray(value)) {
     throw new AgentMuxError('Retired Agent Sessions are invalid.', 'INVALID_AGENT_SESSION_STORE')
@@ -1445,6 +1462,14 @@ function nativeConfirmation(value: unknown): AgentNativeSessionConfirmationRecei
     ...(p.previousPromptSubmissionId === undefined ? {} : { previousPromptSubmissionId: string(p.previousPromptSubmissionId, 'nativeConfirmation.previousPromptSubmissionId') }) }
 }
 
+function nativeConfirmationMatchesSession(confirmation: AgentNativeSessionConfirmationReceipt,
+  session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'providerId' | 'updatedAt'>): boolean {
+  return confirmation.nativeHandle.providerId === session.providerId && confirmation.observedAt <= session.updatedAt &&
+    confirmation.candidateObservedAt <= confirmation.observedAt && (!confirmation.previousInteraction ||
+      confirmation.previousInteraction.request.agentSessionId === session.agentSessionId &&
+      confirmation.previousInteraction.request.evidence.run?.runId === confirmation.run.runId)
+}
+
 export function parseAgentCreationSpatialIntent(value: unknown): import('./types.js').AgentMuxAgentCreationSpatialIntent {
   const intent = record(value, 'creation.spatialIntent')
   if (Object.keys(intent).some(key => !['tabId', 'regionId', 'executionWorkspaceId'].includes(key)))
@@ -1691,10 +1716,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
   if ((session.nativeBinding && (!session.nativeHandle || session.nativeBinding.run.runId !== session.run.runId || session.nativeBinding.observedAt > session.updatedAt)) ||
     (session.nativeSourceObservation && (session.nativeSourceObservation.run.runId !== session.run.runId ||
       session.nativeSourceObservation.observedAt > session.updatedAt || session.nativeSourceObservation.state === 'changed' && !session.observedNativeHandle)) ||
-    (session.nativeConfirmation && (session.nativeConfirmation.nativeHandle.providerId !== session.providerId ||
-      session.nativeConfirmation.observedAt > session.updatedAt || session.nativeConfirmation.candidateObservedAt > session.nativeConfirmation.observedAt ||
-      session.nativeConfirmation.previousInteraction && (session.nativeConfirmation.previousInteraction.request.agentSessionId !== session.agentSessionId ||
-        session.nativeConfirmation.previousInteraction.request.evidence.run?.runId !== session.nativeConfirmation.run.runId))) ||
+    (session.nativeConfirmation && !nativeConfirmationMatchesSession(session.nativeConfirmation, session)) ||
     (session.observedNativeHandle?.kind === 'provider' && session.observedNativeHandle.providerId !== session.providerId) ||
     (session.semanticStatus?.aggregateActivityAt !== undefined && session.semanticStatus.aggregateActivityAt > session.updatedAt)) {
     throw new AgentMuxError('Native/activity facts do not match this Session.', 'INVALID_AGENT_SESSION_STORE')
@@ -1703,10 +1725,8 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     throw new AgentMuxError('Native session handle provider does not match the Agent.', 'INVALID_AGENT_SESSION_STORE')
   }
   const confirmations = [...(session.nativeConfirmationHistory ?? []), ...(session.nativeConfirmation ? [session.nativeConfirmation] : [])]
-  if (new Set(confirmations.map(value => value.operationId)).size !== confirmations.length || confirmations.some(value =>
-    value.nativeHandle.providerId !== session.providerId || value.observedAt > session.updatedAt || value.candidateObservedAt > value.observedAt ||
-    value.previousInteraction && (value.previousInteraction.request.agentSessionId !== session.agentSessionId ||
-      value.previousInteraction.request.evidence.run?.runId !== value.run.runId))) {
+  if (new Set(confirmations.map(value => value.operationId)).size !== confirmations.length ||
+    confirmations.some(value => !nativeConfirmationMatchesSession(value, session))) {
     throw new AgentMuxError('Native confirmation history does not match this Session.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (
@@ -3084,8 +3104,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async readHistorySource(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor | null> {
     await observeRead(this.tail, signal)
     return await this.withReadDatabase(db => {
-      const active = this.sessionMetadata(db, agentSessionId)
-      if (active) return sessionHistorySources([active], [], [])[0]!
+      const activeRow = db.prepare('SELECT json FROM sessions WHERE id=?').get(agentSessionId)
+      if (activeRow) return activeSessionHistorySource(JSON.parse(String(activeRow.json)), agentSessionId)
       const row = db.prepare('SELECT json FROM retired_sessions WHERE id=?').get(agentSessionId)
       if (!row) return null
       const retired = retiredAgentSession(JSON.parse(String(row.json)))
