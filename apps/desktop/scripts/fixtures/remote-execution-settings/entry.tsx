@@ -5,6 +5,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import type { AgentExecutionInspection } from '@agentmux/core'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
+import { SettingsNavigation, type SettingsNavigationRequest } from '../../../src/renderer/src/components/SettingsNavigation'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { WorkspaceWorkbench } from '../../../src/renderer/src/components/WorkspaceWorkbench'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -87,11 +88,17 @@ for (const type of ['click', 'keydown']) document.addEventListener(type, event =
 }, true)
 let select: (page: SettingsPageId | null) => void
 function Scene() {
-  const [section, setSection] = useState<SettingsPageId | null>('remote-execution')
-  select = setSection
+  const [request, setRequest] = useState<SettingsNavigationRequest | null>({ section: 'remote-execution' })
+  select = section => setRequest(section ? { section } : null)
   const workspaceId = useAppStore(state => state.activeWorkspaceId)
-  return section ? <SettingsPanel initialSection={section} navigationRequest={{ section }} onClose={() => setSection(null)} />
-    : <div id="remote-settings-workbench"><WorkspaceWorkbench workspaceId={workspaceId ?? project.id} visible /></div>
+  const unavailable = () => { throw new Error('This scene does not supply that navigation destination') }
+  return <SettingsNavigation.Provider value={{
+    open: (section, executorId, field) => setRequest({ section, ...(executorId ? { executorId } : {}), ...(field ? { field } : {}) }),
+    openHost: hostId => setRequest({ section: 'hosts', hostId }), openToolkit: unavailable, openChannel: unavailable,
+    channelEntries: [], channelPresentation: () => null, openMoteLark: unavailable, chooseAgent: unavailable,
+  }}>{request ? <SettingsPanel initialSection={request.section} navigationRequest={request} onClose={() => setRequest(null)} />
+    : <div id="remote-settings-workbench"><WorkspaceWorkbench workspaceId={workspaceId ?? project.id} visible /></div>}
+  </SettingsNavigation.Provider>
 }
 const root = createRoot(document.getElementById('root')!)
 flushSync(() => root.render(<DesktopClientUiProvider><Scene /></DesktopClientUiProvider>))

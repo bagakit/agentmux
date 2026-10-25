@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, type ContextType } from 'react'
 import { expect, it, vi } from 'vitest'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-warm-run /> }))
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
+import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { useAppStore, warmTerminalKey } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
@@ -14,7 +15,7 @@ const dom = composerDOM()
 const remote = { id: 'B', kind: 'ssh' as const, label: 'Agent server', hostname: 'fixture.invalid' }
 const remoteProject = { id: 'agent-project', hostId: 'B', name: 'Agent home', path: '/agent-home', kind: 'folder' as const }
 const target = { tabId: 'launch', regionId: 'input' }
-async function mount(reverse = false) {
+async function mount(reverse = false, settings: ContextType<typeof SettingsNavigation> = null) {
   const project = reverse ? remoteProject : composerConfig.workspaces[0]!
   const warm = { ...composerSession('warm-original'), kind: 'terminal' as const, providerId: null,
     hostId: project.hostId, workspacePath: project.path, control: { kind: 'terminal' as const, hostId: project.hostId, runId: 'warm-run', run: { runId: 'warm-run' } } }
@@ -33,16 +34,23 @@ async function mount(reverse = false) {
       warmTerminals: { [warmTerminalKey(project.hostId, project.path)]: [{ key: warmTerminalKey(project.hostId, project.path), ownerLauncherId: 'region:input', session: warm, ready: Promise.resolve(warm) }] },
       prewarmTerminal: vi.fn() })
   })
-  await dom.render(<NewTabSurface tabGroupId="group" tabId="launch" regionId="input" />)
+  await dom.render(<SettingsNavigation.Provider value={settings}><NewTabSurface tabGroupId="group" tabId="launch" regionId="input" /></SettingsNavigation.Provider>)
   return { project, warm, before: useAppStore.getState() }
 }
 async function applySplit(workspaceId: string) {
-  await dom.click('[aria-label="Runtime environment"]')
-  await act(async () => document.querySelector<HTMLInputElement>('.launcher-execution-mode input')!.click())
-  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  // The project Launcher itself must expose this choice before any Host dialog opens.
+  const checkbox = dom.container.querySelector<HTMLInputElement>('.launcher-execution-mode input[type="checkbox"]')
+  expect(checkbox).not.toBeNull()
+  expect(checkbox!.closest('[role="dialog"], [hidden], [inert]')).toBeNull()
+  expect(document.querySelector('[aria-label="Machine for new session"]')).toBeNull()
+  expect(checkbox!.checked).toBe(false)
+  await act(async () => checkbox!.click())
+  expect(checkbox!.checked).toBe(true)
   await dom.click('[aria-label="Agent runtime environment"]')
   const hostId = useAppStore.getState().config!.workspaces.find(item => item.id === workspaceId)!.hostId
+  const before = useAppStore.getState().tabs.launch!.regions.input
   await act(async () => { const select = document.querySelector<HTMLSelectElement>('[aria-label="Machine for new session"]')!; select.value = hostId; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(useAppStore.getState().tabs.launch!.regions.input).toBe(before)
   await act(async () => document.querySelector<HTMLButtonElement>(`[data-workspace-id="${workspaceId}"]`)!.click())
 }
 async function splitAt(workspaceId: string) { await expect(applySplit(workspaceId)).resolves.toBeUndefined() }
@@ -93,8 +101,7 @@ it('never aliases a retained Core choice to App templates or a new Host revision
   expect(dom.container.querySelector('[aria-label="Agent prompt"]')?.getAttribute('contenteditable')).toBe('true')
   await dom.click('[data-executor-id="codex"]')
   expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ agentExecutor: { executorRevision: 'changed-revision' } })
-  await dom.click('[aria-label="Runtime environment"]')
-  await act(async () => document.querySelector<HTMLInputElement>('.launcher-execution-mode input')!.click())
+  await act(async () => dom.container.querySelector<HTMLInputElement>('.launcher-execution-mode input')!.click())
   expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ workspaceId: 'workspace' })
   expect(useAppStore.getState().tabs.launch!.regions.input).not.toHaveProperty('agentWorkspaceId')
 })
@@ -116,6 +123,26 @@ it('restores the exact dual selection only on an authoritative not-applied reply
   await dom.click('.launcher-launch-button')
   expect(useAppStore.getState().tabs.launch!.regions.input).toEqual(surface)
   expect(useAppStore.getState().agentComposerDrafts.input).toBe('Keep complete request')
+})
+
+it('opens the exact Remote execution guide from the project Launcher without preparing or launching work', async () => {
+  const open = vi.fn()
+  const settings = { open, openToolkit: vi.fn(), openHost: vi.fn(), openChannel: vi.fn(), channelEntries: [],
+    channelPresentation: vi.fn(), openMoteLark: vi.fn(), chooseAgent: vi.fn() }
+  await mount(false, settings)
+  const before = useAppStore.getState()
+  const launch = vi.spyOn(api.sessions, 'launchAgent'), resume = vi.spyOn(api.sessions, 'resume'), stop = vi.spyOn(api.sessions, 'stop')
+  const prepare = vi.spyOn(useAppStore.getState(), 'setLauncherAgentWorkspace')
+  const help = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent?.trim() === 'How it works')
+  expect(help).toHaveLength(1)
+  expect(help[0]!.closest('[role="dialog"], [hidden], [inert]')).toBeNull()
+  await act(async () => help[0]!.click())
+  expect(open).toHaveBeenCalledExactlyOnceWith('remote-execution', undefined, 'guide')
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(prepare).not.toHaveBeenCalled()
+  expect(launch).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
 })
 it('explains unsupported Mote dual execution while retaining normal launch, all inputs and original selection', async () => {
   await mount(); await splitAt(remoteProject.id)

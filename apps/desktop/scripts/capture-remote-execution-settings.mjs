@@ -14,7 +14,7 @@ const repository = resolve(import.meta.dirname, '../../..')
 const require = createRequire(join(repository, 'apps/desktop/package.json'))
 const fixture = join(import.meta.dirname, 'fixtures/remote-execution-settings')
 const args = process.argv.slice(2)
-assert(args.length === 1 && args[0] === '--prepare' || (args.length === 2 || args.length === 3 && args[2] === '--first') && args[0] === '--run', 'Use --prepare, then --run the exact prepared directory')
+assert(args.length === 1 && args[0] === '--prepare' || (args.length === 2 || args.length === 3 && ['--first', '--guidance'].includes(args[2])) && args[0] === '--run', 'Use --prepare, then --run the exact prepared directory')
 assert(!process.env.TOOL_EXECUTION_UI_MUTANT, 'A visual candidate cannot inherit a test mutation')
 const outputRoot = join(repository, '.tmp/remote-execution-settings')
 const directory = args[0] === '--run' ? resolve(args[1]) : join(outputRoot, 'capture-' + randomUUID())
@@ -57,6 +57,7 @@ async function captureDriverHashes() {
   return Object.fromEntries(await Promise.all(driverFiles.map(async file => [relative(repository, file), hash(await readFile(file))])))
 }
 const first = args[2] === '--first'
+const mode = first ? 'first' : args[2] === '--guidance' ? 'guidance' : 'complete'
 const sourcePath = join(directory, 'source.json')
 const boundary = 'Production SettingsPanel, Remote execution and Mote Settings, WorkspaceWorkbench, Launcher, Store and CSS in private Electron. External Session/binding/API facts are controlled typed preview inputs. No Main, SSH, model, native execution, user App or physical input claim.'
 
@@ -140,13 +141,13 @@ if (args[0] === '--prepare') {
     qualificationScope: 'compiled-snapshot-with-current-owning-inputs', currentWorkingTreeQualified: false,
     owningInputs: [...presentationOwners].filter(file => original.sources[file]), captureDrivers }
   try {
-    receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(directory, 'compiled/index.html'), privateRoot, directory, first ? 'first' : 'complete'],
+    receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(directory, 'compiled/index.html'), privateRoot, directory, mode],
       { cwd: repository, env, temporaryRoot: privateRoot, timeoutMs: 120000, onLine: line => { logs.push(line); if (line.startsWith('{\"frame\":')) console.log(line) } })
     receipt.capture = JSON.parse(await readFile(join(directory, first ? 'first-capture.json' : 'capture.json'), 'utf8'))
     assert.equal(receipt.process.exitCode, 0, receipt.capture.failure?.message)
     assert.equal(receipt.process.timedOut, false)
     assert.equal(receipt.capture.passed, true)
-    assert.equal(receipt.capture.frames.length, first ? 1 : 17, 'Fifteen task views and two actual Mote Settings comparisons')
+    assert.equal(receipt.capture.frames.length, first ? 1 : mode === 'guidance' ? 9 : 17, 'The selected scenario must produce its complete frame set')
     for (const [file, digest] of Object.entries(compiled)) assert.equal(hash(await readFile(join(directory, file))), digest, 'Captured assets changed')
     await checkInputs()
     assert.deepEqual(await captureDriverHashes(), captureDrivers, 'Actual capture drivers stay fixed through execution')
