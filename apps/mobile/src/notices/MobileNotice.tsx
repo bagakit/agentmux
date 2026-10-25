@@ -1,5 +1,4 @@
-import { createContext, useContext, useId, useMemo, useState, type HTMLAttributes, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 
 export const DELIVERY_DISMISSAL_STORAGE = 'agentmux-mobile-dismissed-delivery-v1'
@@ -14,7 +13,11 @@ type Presentation = {
 }
 const Notices = createContext<Presentation | null>(null)
 const Scope = createContext('')
-const AvatarNoticeTarget = createContext<{ target: HTMLElement | null; setTarget(target: HTMLDivElement | null): void } | null>(null)
+type AvatarNoticeEntry = { key: string; name: string; issue: string; retry?: (() => void) | undefined }
+const AvatarNotices = createContext<{
+  entries: ReadonlyMap<string, AvatarNoticeEntry>
+  register(id: string, entry: AvatarNoticeEntry): () => void
+} | null>(null)
 const objectIds = new WeakMap<object, number>()
 let nextObjectId = 0
 // Object identity is local to this presentation tree; no business object is serialized or inferred.
@@ -29,8 +32,12 @@ function identityKey(identity: Identity): string {
 }
 
 export function MobileNoticeProvider({ children }: { children: ReactNode }) {
-  const [avatarTarget, setAvatarTarget] = useState<HTMLDivElement | null>(null)
-  const avatarOutlet = useMemo(() => ({ target: avatarTarget, setTarget: setAvatarTarget }), [avatarTarget])
+  const [avatarEntries, setAvatarEntries] = useState<Map<string, AvatarNoticeEntry>>(new Map())
+  const registerAvatar = useCallback((id: string, entry: AvatarNoticeEntry) => {
+    setAvatarEntries(previous => new Map(previous).set(id, entry))
+    return () => setAvatarEntries(previous => { const next = new Map(previous); next.delete(id); return next })
+  }, [])
+  const avatars = useMemo(() => ({ entries: avatarEntries, register: registerAvatar }), [avatarEntries, registerAvatar])
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [deliveryDismissed, setDeliveryDismissed] = useState(() => {
     try { const value: unknown = JSON.parse(localStorage.getItem(DELIVERY_DISMISSAL_STORAGE) ?? 'null'); return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(-64) : []) }
@@ -51,33 +58,41 @@ export function MobileNoticeProvider({ children }: { children: ReactNode }) {
       })
     }
   }), [dismissed, deliveryDismissed])
-  return <AvatarNoticeTarget.Provider value={avatarOutlet}><Notices.Provider value={value}>{children}</Notices.Provider></AvatarNoticeTarget.Provider>
+  return <AvatarNotices.Provider value={avatars}><Notices.Provider value={value}>{children}</Notices.Provider></AvatarNotices.Provider>
 }
 
 /** Presentation only: each original avatar owner keeps its own observation and retry. */
 export function MobileAvatarNoticeOutlet() {
-  const outlet = useContext(AvatarNoticeTarget)
-  return <div ref={outlet?.setTarget} className="mobile-avatar-notice-outlet" />
+  const avatars = useContext(AvatarNotices), presentation = useMobileNotices()
+  const entries = [...(avatars?.entries.values() ?? [])].filter(entry => !presentation?.dismissed.has(entry.key))
+  return <div className="mobile-avatar-notice-outlet">{entries.length > 0 && <MobileNotice
+    identity={entries.map(entry => entry.key)} className="mobile-avatar-notice"
+    onDismiss={() => entries.forEach(entry => presentation?.dismiss(entry.key))}>
+    <details><summary><SemanticIcon name="status.warning" size={13} /><span>{entries.length === 1
+      ? `头像外观未确认 · ${entries[0]!.name}` : `${entries.length} 个图标外观未确认`}</span></summary>
+      <div className="mobile-avatar-notice__list">{entries.map(entry => <section key={entry.key} className="mobile-avatar-notice__item" data-avatar-notice-key={entry.key}>
+        {entries.length > 1 && <strong>{entry.name}</strong>}
+        <p>图标暂未显示，仍可继续使用。</p>
+        {entry.retry ? <button type="button" onClick={entry.retry}>重新读取头像</button> : <p>连接可用后可重新读取。</p>}
+        <details><summary>技术信息</summary><p>{entry.issue}</p></details>
+      </section>)}</div>
+    </details>
+  </MobileNotice>}</div>
 }
 
 export function MobileAvatarNotice({ owner, identity, name, issue, visible, retry }: {
   owner: object | null; identity: Identity; name: string; issue: string; visible: boolean; retry?: (() => void) | undefined
 }) {
-  const target = useContext(AvatarNoticeTarget)?.target
-  if (!target || !issue) return null
-  // Portals retain their React ancestry, which can include an Agent row button.
-  // Isolate the notice's own gestures without cancelling their native defaults.
-  return createPortal(<div onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
-    onPointerMove={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
-    onPointerCancel={event => event.stopPropagation()} onContextMenu={event => event.stopPropagation()}
-    onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') event.stopPropagation() }}
-    onKeyUp={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') event.stopPropagation() }}>
-    <MobileNotice owner={owner} identity={identity} hidden={!visible} className="mobile-avatar-notice">
-      <details><summary>{`头像外观未确认 · ${name}`}</summary><p>{issue}</p>
-        {retry ? <button type="button" onClick={retry}>重新读取头像</button> : <p>原对象连接可用后可重新核对。</p>}
-      </details>
-    </MobileNotice>
-  </div>, target)
+  const register = useContext(AvatarNotices)?.register, scope = useContext(Scope), id = useId()
+  const key = JSON.stringify([scope, id, ownerKey(owner), identityKey(identity)])
+  const retryRef = useRef(retry)
+  retryRef.current = retry
+  const canRetry = Boolean(retry)
+  useLayoutEffect(() => {
+    if (!register || !visible || !issue) return
+    return register(id, { key, name, issue, ...(canRetry ? { retry: () => retryRef.current?.() } : {}) })
+  }, [register, id, key, name, issue, visible, canRetry])
+  return null
 }
 
 export function MobileNoticeScope({ identity = [], owner, children }: { identity?: Identity; owner?: object | null | undefined; children: ReactNode }) {
@@ -87,8 +102,8 @@ export function MobileNoticeScope({ identity = [], owner, children }: { identity
 export const useMobileNotices = () => useContext(Notices)
 
 /** Hide only this original notice view. Owners, drafts and recovery operations stay mounted outside it. */
-export function MobileNotice({ identity = [], owner, children, className, dismissible = true, kind = 'warning', ...attributes }: HTMLAttributes<HTMLDivElement> & {
-  identity?: Identity; owner?: object | null | undefined; dismissible?: boolean; kind?: 'warning' | 'feedback'
+export function MobileNotice({ identity = [], owner, children, className, dismissible = true, kind = 'warning', onDismiss, ...attributes }: HTMLAttributes<HTMLDivElement> & {
+  identity?: Identity; owner?: object | null | undefined; dismissible?: boolean; kind?: 'warning' | 'feedback'; onDismiss?(): void
 }) {
   const presentation = useMobileNotices(), scope = useContext(Scope), id = useId()
   const key = JSON.stringify([scope, id, ownerKey(owner), identityKey(identity)])
@@ -101,7 +116,8 @@ export function MobileNotice({ identity = [], owner, children, className, dismis
         const button = event.currentTarget
         const focusTarget = button.closest<HTMLElement>('[role="dialog"]') ?? button.closest('.mobile-app')?.querySelector<HTMLElement>('.mobile-main')
         focusTarget?.focus({ preventScroll: true })
-        presentation ? presentation.dismiss(key) : setLocalDismissed(key)
+        if (onDismiss) onDismiss()
+        else presentation ? presentation.dismiss(key) : setLocalDismissed(key)
       }}><SemanticIcon name="action.close" size={14} /></button>}
   </div>
 }

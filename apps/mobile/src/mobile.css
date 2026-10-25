@@ -256,6 +256,12 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-avatar-notice summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
 .mobile-avatar-notice p { margin: 0; overflow-wrap: anywhere; }
 .mobile-avatar-notice .mobile-notice__body button { min-height: 44px; padding: 0 4px; background: transparent; color: var(--mobile-accent); }
+.mobile-avatar-notice > .mobile-notice__body > details > summary { gap: var(--sp-3); font-size: var(--fs-meta); }
+.mobile-avatar-notice__list { display: grid; gap: var(--sp-4); padding-bottom: var(--sp-4); }
+.mobile-avatar-notice__item { min-width: 0; font-size: var(--fs-meta); }
+.mobile-avatar-notice__item + .mobile-avatar-notice__item { border-top: 1px solid var(--line-soft); padding-top: var(--sp-4); }
+.mobile-avatar-notice__item strong { display: block; color: var(--text); }
+.mobile-avatar-notice__item > details { color: var(--text-3); }
 .mobile-web-update-notice { align-items: center; padding: 0 max(8px, env(safe-area-inset-left)); background: var(--surface-1); border-top: 1px solid var(--line-soft); color: var(--text-2); font-size: 12px; }
 .mobile-web-update-notice[hidden] { display: none; }
 .mobile-web-update-notice .mobile-notice__body { display: flex; align-items: center; gap: 12px; }

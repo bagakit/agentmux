@@ -3,6 +3,7 @@ import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxSpaceAppearance } from '@agentmux/core/control'
 import { SpaceAppearanceIcon } from '@agentmux/client-ui/components/SpaceAppearanceIcon'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { SPACE_ICON_CATALOG } from '@agentmux/client-ui/space-icon-catalog'
 import { MobileAvatarNotice } from '../notices/MobileNotice'
 
 /** Only a visible original object asks its existing appearance owner for image bytes. */
@@ -47,8 +48,11 @@ export function MobileSpaceIcon({ spaceId, name, appearance, client, connected, 
   const inputMatches = observed?.input?.glyph === appearance?.glyph && observed?.input?.preset === appearance?.preset &&
     observed?.input?.image?.revision === appearance?.image?.revision && observed?.input?.image?.dataUrl === appearance?.image?.dataUrl && observed?.input?.issue === appearance?.issue
   const selected = observed && observed.owner === observationOwner && observed.id === spaceId && inputMatches ? observed.value : appearance
+  const hasVisual = Boolean(selected?.image?.dataUrl || selected?.glyph && Object.hasOwn(SPACE_ICON_CATALOG, selected.glyph)
+    || selected?.preset === 'repository' || selected?.preset === 'directory')
   return <><span ref={node} className="mobile-space-icon" title={issue || selected?.issue || name} data-space-icon-source={selected?.glyph ? 'manual' : selected?.image?.dataUrl ? 'image' : 'automatic'}>
-    <SpaceAppearanceIcon name={name} glyph={selected?.glyph} image={selected?.image?.dataUrl} preset={selected?.preset} size={size} />
+    {hasVisual ? <SpaceAppearanceIcon name={name} glyph={selected?.glyph} image={selected?.image?.dataUrl} preset={selected?.preset} size={size} />
+      : <SemanticIcon name="object.spaces" size={size} data-space-icon-fallback />}
     {(issue || selected?.issue) && <span className="mobile-avatar-issue" aria-label={issue || selected?.issue}><SemanticIcon name="status.warning" size={10} /></span>}
   </span><MobileAvatarNotice owner={client} identity={[spaceId, issue || selected?.issue]} name={name} issue={issue || selected?.issue || ''} visible={visible}
     {...(spaceId && connected && client?.forwardRpc ? { retry: () => setRetryRequest(value => ({ owner: observationOwner, revision: value?.owner === observationOwner ? value.revision + 1 : 1 })) } : {})} /></>
