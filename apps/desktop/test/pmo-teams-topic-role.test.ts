@@ -20,19 +20,20 @@ async function workspace(): Promise<WorkspaceRecord> {
 }
 
 describe('PMO teams topic role contract', () => {
-  it('injects the shared coordination role and confirmation boundary for the leader', async () => {
+  it('injects exact main-Agent discovery and the human confirmation boundary for the main Mote', async () => {
     const topics = new ScratchTopics()
     const prepared = await topics.prepareAgent(await workspace(), 'launcher:leader', { providerId: 'codex', sessionId: 'leader-1' })
 
     expect(prepared.snapshot.wiki?.content).toBe(DEFAULT_PMO_TEAMS_TOPIC_WIKI)
     expect(prepared.prompt).toContain(MOTE_COORDINATION_ROLE)
-    expect(prepared.prompt).toContain('Implement personally only when the user explicitly asks')
+    expect(prepared.prompt).toContain('original MOTE.md main conversation binding')
+    expect(prepared.prompt).toContain('Members carry out their authorized assignments')
     expect(prepared.prompt).toContain('mote --skill')
     expect(prepared.prompt).toContain('mote playbook pmo')
     expect(prepared.prompt).toContain('never supply human goal confirmation or result acceptance')
   })
 
-  it('injects the same coordination role for a fresh non-leader Mote', async () => {
+  it('injects the same role discovery for a fresh custom Mote without appointing every member', async () => {
     const topics = new ScratchTopics()
     const project = await workspace()
     await topics.ensureMote(project, 'launcher:fresh-ideas')
@@ -43,7 +44,8 @@ describe('PMO teams topic role contract', () => {
     expect(prepared.prompt).toContain(MOTE_COORDINATION_ROLE)
     expect(prepared.prompt).toContain('mote playbook pmo')
     expect(prepared.prompt).toContain('goal --skill')
-    expect(prepared.prompt).toContain('Follow authorized work through evidence, report collection and delivery')
+    expect(prepared.prompt).toContain('An unknown binding does not appoint a main Agent')
+    expect(prepared.prompt).toContain('Follow authorized work through delivery')
     expect(prepared.prompt).toContain('never blindly create or resend')
     // The methods live in the local playbook, rather than every fresh discussion.
     expect(prepared.prompt).not.toContain('agent rename --derived')
