@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
+import { createHash } from 'node:crypto'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, mintObjectId, type ContinuousProgressLoop, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
 import { parseScheduleRpcParams, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
@@ -36,7 +37,14 @@ export type LoopMutationFence = { prepare(): Promise<void>; assertCurrent(): voi
 // later tick observations do not confer or revoke control authority.
 const actionBasis = (loop: ContinuousProgressLoop) => ({ loopId: loop.loopId, hostId: loop.hostId, agentSessionId: loop.agentSessionId,
   providerId: loop.providerId, workspacePath: loop.workspacePath, intervalMs: loop.intervalMs, prompt: loop.prompt,
-  taskSource: loop.taskSource, creationOperationId: loop.creationOperationId, status: loop.status })
+  taskSource: loop.taskSource, creationOperationId: loop.creationOperationId, status: loop.status, revision: loop.revision ?? 0 })
+
+// Canonicalize the complete original RPC request, including its expected loop.
+const updateDigest = (input: unknown): string => {
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
+    ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, v]) => [key, canonical(v)])) : value
+  return createHash('sha256').update(JSON.stringify(canonical(input))).digest('hex')
+}
 
 /** Host owner: scheduler and durable store stay together; renderer only observes results. */
 export class ContinuousProgressLoopManager {
@@ -356,15 +364,34 @@ export class ContinuousProgressLoopManager {
       if (context.caller || !context.principal || !['user','device'].includes(context.principal.kind))
         throw new AgentMuxError('Continuous progress activation requires the original person or device arrangement. Agent message authority does not authorize Host automatic input or task-source scripts; reading, cancellation and normal Agent messages remain available.', 'CONTROL_PERMISSION_DENIED')
     }
-    if (method === 'agent.progress.create' || method === 'agent.progress.action' && 'action' in input && (input.action === 'resume' || input.action === 'check')) activationAuthority()
+    if (method === 'agent.progress.create' || method === 'agent.progress.update' || method === 'agent.progress.action' && 'action' in input && (input.action === 'resume' || input.action === 'check')) activationAuthority()
     const matches = (loop: ContinuousProgressLoop) => !isAgentSchedule(loop) && loop.taskSource?.kind !== 'goal' &&
       ['hostId','agentSessionId','providerId','workspacePath'].every(key => loop[key as keyof ContinuousProgressTarget] === target[key as keyof ContinuousProgressTarget])
     const value = await this.serialize('progress:' + target.hostId + ':' + target.agentSessionId, async () => {
       await this.start(); await this.authorizeCaller(target, context)
       if (method === 'agent.progress.list') return { loops: this.list().filter(matches) }
-      const p = input as import('@agentmux/core').AgentProgressParams['agent.progress.create'] | import('@agentmux/core').AgentProgressParams['agent.progress.action']
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
-      if ('intervalMs' in p) return this.activation(this.targetKey(target), async assertCurrent => {
+      if (method === 'agent.progress.update') {
+        const update = input as import('@agentmux/core').AgentProgressParams['agent.progress.update']
+        const loop = this.require(update.loopId)
+        if (!matches(loop)) throw new AgentMuxError('This progress update belongs to another exact loop target.', 'CONTROL_REQUEST_CONFLICT')
+        if (loop.creationOperationId === update.operationId || this.progressActions.has(update.operationId)) throw new AgentMuxError('This operation identity belongs to another progress request.', 'CONTROL_REQUEST_CONFLICT')
+        const digest = updateDigest(update), expectedRevision = update.expectedLoop.revision ?? 0
+        if (loop.lastMutation?.operationId === update.operationId) {
+          if (loop.lastMutation.action !== 'update' || loop.lastMutation.requestDigest !== digest || loop.lastMutation.expectedRevision !== expectedRevision || loop.revision !== expectedRevision + 1) throw new AgentMuxError('The original progress update changed content.', 'CONTROL_REQUEST_CONFLICT')
+        } else {
+          if (loop.status === 'stopped' || !Number.isSafeInteger(expectedRevision + 1) || !isDeepStrictEqual(actionBasis(loop), actionBasis(update.expectedLoop))) throw new AgentMuxError('The original loop changed. Read its current record before another explicit update.', 'CONTROL_REQUEST_CONFLICT')
+          this.patch(loop.loopId, { intervalMs: update.intervalMs, prompt: update.prompt, revision: expectedRevision + 1,
+            lastMutation: { operationId: update.operationId, action: 'update', expectedRevision, requestDigest: digest } })
+        }
+        // Preserve the original loop and any in-flight tick on an unconfirmed save.
+        // A matching explicit retry only persists the same current record.
+        try { await this.store.save(this.scheduler.list()) }
+        finally { for (const listener of this.listeners) listener(this.require(loop.loopId)) }
+        return { loop: this.require(loop.loopId), diskDurability: 'confirmed' as const }
+      }
+      if (method === 'agent.progress.create') return this.activation(this.targetKey(target), async assertCurrent => {
+        const p = input as import('@agentmux/core').AgentProgressParams['agent.progress.create']
         const original = this.list().find(loop => loop.creationOperationId === p.operationId)
         if (original) {
           if (!matches(original) || original.intervalMs !== p.intervalMs || original.prompt !== p.prompt || JSON.stringify(original.taskSource) !== JSON.stringify(p.taskSource)) throw new AgentMuxError('The original progress creation belongs to another exact intent.', 'CONTROL_REQUEST_CONFLICT')
@@ -376,8 +403,11 @@ export class ContinuousProgressLoopManager {
         assertCurrent()
         return { loop: await this.create({ ...target, intervalMs: p.intervalMs, prompt: p.prompt, operationId: p.operationId, ...(p.taskSource ? { taskSource: p.taskSource } : {}) }, assertCurrent), diskDurability: 'confirmed' as const }
       })
-      const loop = this.require(p.loopId)
+      const pAction = input as import('@agentmux/core').AgentProgressParams['agent.progress.action']
+      const loop = this.require(pAction.loopId)
       if (!matches(loop)) throw new AgentMuxError('This progress action belongs to another exact loop target.', 'CONTROL_REQUEST_CONFLICT')
+      const p = pAction
+      if (loop.lastMutation?.action === 'update' && loop.lastMutation.operationId === p.operationId) throw new AgentMuxError('This operation identity belongs to another progress request.', 'CONTROL_REQUEST_CONFLICT')
       const prior = this.progressActions.get(p.operationId)
       if (prior) {
         if (!isDeepStrictEqual(prior.input, p)) throw new AgentMuxError('The original progress action changed target or content.', 'CONTROL_REQUEST_CONFLICT')
