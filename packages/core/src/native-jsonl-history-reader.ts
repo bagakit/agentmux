@@ -402,8 +402,10 @@ export class NativeJsonlHistoryReader {
       let saved: { version: number; providerId: string; nativeSessionId: string; dev: number; ino: number; birth: number; offset: number; head: string; tail: string }
       try { saved = JSON.parse(Buffer.from(after, 'base64url').toString('utf8')) as typeof saved }
       catch { return failure('INVALID_CURSOR', 'Conversation checkpoint is malformed.') }
+      // Device numbers belong to one mount lifetime. Durable cuts retain the
+      // original file and boundary; verifyUnchanged still checks this open's device.
       if (!saved || typeof saved !== 'object' || saved.version !== 1 || saved.providerId !== this.context.source.providerId || saved.nativeSessionId !== this.context.source.nativeSessionId ||
-          saved.dev !== this.identity.dev || saved.ino !== this.identity.ino || saved.birth !== this.birth ||
+          saved.ino !== this.identity.ino || saved.birth !== this.birth ||
           !Number.isSafeInteger(saved.offset) || saved.offset < 0 || saved.offset > this.cut) {
         return failure('SOURCE_CHANGED', 'The original conversation source was replaced, truncated or changed.')
       }
