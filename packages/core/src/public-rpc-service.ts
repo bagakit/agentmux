@@ -846,6 +846,14 @@ export class AgentMuxRpcService {
         await administration.assertCurrent(); await this.assertRuntimeFence(context)
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
+      if (caller && method === 'connection.delivery.retry') {
+        const request = parseConnectionDeliveryParams(method, input)
+        const original = parseConnectionResult('connection.delivery.inspect', await readAgentConnectionDelivery(owner, 'connection.delivery.inspect', request, { hostId: caller.hostId, agentSessionId: caller.agentSessionId }), request)
+        if (!original.delivery) throw new AgentMuxError('The original publication operation is unknown.', 'UNKNOWN_PUBLICATION_OPERATION')
+        const result = await owner.delivery!.retry(request, { ...administration,
+          assertCurrent: async () => { await administration.assertCurrent(); await this.assertRuntimeFence(context) } })
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
       if (caller) await assertAgentConnectionAccess(owner, method, input, caller.agentSessionId)
       if (isConnectionDeletionMethod(method)) {
         if (caller) throw new AgentMuxError('Deleting saved identities requires the original person or device.', 'CONTROL_PERMISSION_DENIED')
