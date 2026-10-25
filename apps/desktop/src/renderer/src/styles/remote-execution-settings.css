@@ -1,0 +1,65 @@
+.remote-execution-settings { min-width: 0; container-type: inline-size; }
+.remote-execution-intro { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: var(--sp-5); padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.remote-execution-eyebrow { font-size: var(--fs-meta); letter-spacing: .09em; color: var(--text-3); }
+.remote-execution-intro h3 { margin: var(--sp-3) 0; font-size: var(--fs-display); font-weight: 600; line-height: 1.35; text-wrap: balance; }
+.remote-execution-intro p { margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.7; max-width: 42ch; }
+.remote-execution-diagram { margin: 0; min-width: 0; background: #f4f2e9; border-radius: var(--radius-sm); overflow: hidden; color: #425d53; }
+.remote-execution-diagram img { display: block; width: 100%; height: auto; max-height: 200px; object-fit: contain; }
+.remote-execution-diagram figcaption { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); padding: 0 var(--sp-3); text-align: center; }
+.remote-execution-diagram figcaption span { display: flex; flex-direction: column; gap: var(--sp-1); }
+.remote-execution-diagram strong { font-size: var(--fs-body); font-weight: 600; }
+.remote-execution-diagram small { font-size: var(--fs-meta); line-height: 1.5; }
+.remote-execution-diagram > p { max-width: none; margin: var(--sp-2) 0 0; padding: 0 var(--sp-2) var(--sp-3); color: inherit; font-size: var(--fs-meta); text-align: center; line-height: 1.5; }
+.remote-execution-prepare__controls { display: flex; align-items: flex-end; gap: var(--sp-3); }
+.remote-execution-prepare__controls label { display: flex; flex-direction: column; flex: 1; gap: var(--sp-2); min-width: 0; font-size: var(--fs-meta); color: var(--text-2); }
+.remote-execution-prepare__controls select { width: 100%; min-width: 0; height: 34px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0 var(--sp-2); background: var(--surface-2); color: var(--text); font: inherit; font-size: var(--fs-body); }
+.remote-execution-prepare__controls > button { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 34px; flex: 0 0 auto; }
+.remote-execution-caption { margin: var(--sp-3) 0 0; font-size: var(--fs-meta); color: var(--text-3); line-height: 1.6; }
+.remote-execution-feedback { padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: var(--fs-body); color: var(--text-2); overflow-wrap: anywhere; }
+.remote-execution-bindings__body { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(0, 1.4fr); gap: var(--sp-4); align-items: start; }
+.remote-execution-bindings .settings-resource-library { min-width: 0; }
+.remote-execution-bindings .settings-resource-library__list { max-height: none; }
+.remote-execution-bindings .settings-resource-row { align-items: flex-start; }
+.remote-execution-bindings .settings-resource-row__text small { white-space: pre-line; overflow-wrap: anywhere; line-height: 1.5; }
+.remote-execution-detail { min-width: 0; border-left: 1px solid var(--line-soft); padding-left: var(--sp-4); }
+.remote-execution-detail > header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); }
+.remote-execution-detail h3 { margin: 0 0 var(--sp-1); font-size: var(--fs-title); font-weight: 600; overflow-wrap: anywhere; }
+.remote-execution-detail > header span { color: var(--text-3); font-size: var(--fs-meta); }
+.remote-execution-endpoints { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); padding: var(--sp-4) 0; margin: 0; }
+.remote-execution-endpoints dt { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); margin-bottom: var(--sp-2); }
+.remote-execution-endpoints dd { margin: 0; display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+.remote-execution-endpoints dd button { display: inline-flex; align-items: center; align-self: flex-start; gap: var(--sp-1); padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-body); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.remote-execution-endpoints dd button:hover { text-decoration: underline; }
+.remote-execution-endpoints dd code, .remote-execution-endpoints dd span { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.remote-execution-identities { border-top: 1px solid var(--line-soft); margin-top: var(--sp-3); padding-top: var(--sp-3); font-size: var(--fs-meta); color: var(--text-3); }
+.remote-execution-identities summary { cursor: pointer; }
+.remote-execution-identities dl { margin-bottom: 0; }
+.remote-execution-identities dd { margin: var(--sp-1) 0 var(--sp-2); font-family: var(--font-mono); overflow-wrap: anywhere; user-select: text; }
+.remote-execution-empty { padding: var(--sp-5) var(--sp-3); color: var(--text-3); text-align: center; }
+.remote-execution-empty h3 { font-size: var(--fs-body); font-weight: 500; color: var(--text-2); }
+.remote-execution-empty p { max-width: 40ch; margin: 0 auto; font-size: var(--fs-meta); line-height: 1.7; }
+.tool-execution-observation { border-top: 1px solid var(--line-soft); padding-top: var(--sp-3); }
+.tool-execution-observation > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-body); }
+.tool-execution-observation > header strong { font-weight: 500; }
+.tool-execution-observation > p { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.tool-execution-observation .service-window { margin-top: var(--sp-2); }
+.remote-execution-settings :is(button, select, summary):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+@container (max-width: 720px) {
+  .remote-execution-intro { grid-template-columns: 1fr; gap: var(--sp-4); }
+  .remote-execution-intro__copy p { max-width: none; }
+  .remote-execution-bindings__body { grid-template-columns: 1fr; }
+  .remote-execution-detail { padding: var(--sp-4) 0 0; border-left: 0; border-top: 1px solid var(--line-soft); }
+}
+@container (max-width: 430px) {
+  .remote-execution-intro { padding: var(--sp-4); }
+  .remote-execution-prepare__controls { align-items: stretch; flex-direction: column; }
+  .remote-execution-endpoints { grid-template-columns: 1fr; gap: var(--sp-3); }
+}
+
+@media (max-height: 600px) {
+  .remote-execution-intro { display: block; padding: var(--sp-3) var(--sp-4); }
+  .remote-execution-intro h3 { font-size: var(--fs-title); margin: var(--sp-2) 0; }
+  .remote-execution-intro h3 br { display: none; }
+  .remote-execution-intro__copy p { max-width: none; line-height: 1.5; }
+  .remote-execution-diagram, .remote-execution-eyebrow { display: none; }
+}

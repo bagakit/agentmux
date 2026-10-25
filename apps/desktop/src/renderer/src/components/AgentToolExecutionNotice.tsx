@@ -11,7 +11,7 @@ type Agent = Extract<SessionSnapshot, { kind: 'agent' }>
 const capabilityNames = { hooks: 'Hooks', skills: 'Skills', mcp: 'MCP calls', 'agent-control': 'Agent control' }
 
 /** A reader of the original Core binding; never a health, retry or lifecycle owner. */
-export function AgentToolExecutionNotice({ session, visible }: { session: Agent; visible: boolean }) {
+export function AgentToolExecutionNotice({ session, visible, presentation = 'disclosure' }: { session: Agent; visible: boolean; presentation?: 'disclosure' | 'inline' }) {
   const [observationAttempt, setObservationAttempt] = useState(0)
   const binding = session.toolExecution
   const identity = JSON.stringify([session.control.hostId, session.control.agentSessionId, binding?.bindingId])
@@ -22,6 +22,10 @@ export function AgentToolExecutionNotice({ session, visible }: { session: Agent;
   function accept(value: AgentExecutionInspection | null) {
     if (latest.current.identity !== identity) return
     latest.current.revision++
+    if (value === null) {
+      setRead(prior => ({ ...(prior.identity === identity ? prior : {}), identity, error: 'The original execution binding was not present in this observation.' }))
+      return
+    }
     if (value && (value.bindingId !== binding?.bindingId || value.agentHostId !== session.control.hostId || value.agentSessionId !== session.control.agentSessionId ||
       value.resourceHostId !== binding.resourceHostId || value.resourceWorkspacePath !== binding.workspacePath)) {
       setRead(prior => ({ ...(prior.identity === identity ? prior : {}), identity, error: 'The observation did not identify this original execution binding.' }))
@@ -55,6 +59,13 @@ export function AgentToolExecutionNotice({ session, visible }: { session: Agent;
     try { const value = await api.sessions.executionBinding(binding!.bindingId); if (latest.current === original && original.revision === revision) accept(value) }
     catch (error) { if (latest.current === original && original.revision === revision) setRead(prior => ({ ...prior, identity, error: error instanceof Error ? error.message : String(error) })) }
   }
+  if (presentation === 'inline') return <section className="tool-execution-observation" aria-label="Tool execution observation">
+    <header><strong>Tool connection · {current.error || !inspection ? 'Unconfirmed' : inspection.state === 'connected' ? 'Connected' : 'Unavailable'}</strong>
+      <button type="button" className="small-button" onClick={() => void refresh()}>Refresh observation</button></header>
+    {current.error && inspection ? <p>Last confirmed tool connection: {inspection.state}.</p> : null}
+    {items.map(item => <ServiceWindowNotice key={item.id} notice={item.notice} />)}
+    {!items.length ? <p>No capability notices in this observation. Tool connection does not establish support for every Provider feature.</p> : null}
+  </section>
   return <ServiceNoticeDisclosure scope={`local:tool-execution:${identity}`} notices={items} visible={visible}
     available={inspection !== undefined && !current.error} persistentTitle title="Tool execution" detailsTitle={`Tools · ${resourceHost ?? binding.resourceHostId}`}
     actions={<button type="button" className="small-button" onClick={() => void refresh()}>Refresh observation</button>}>
