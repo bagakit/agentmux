@@ -15,7 +15,7 @@ type NameChangeAudit = ScratchNameAudit
 import { MOTE_BEHAVIOR_PATH, DEFAULT_MOTE_BEHAVIOR, parseMoteBehaviorDocument, moteBehaviorIntroduction } from './mote-behavior.js'
 import { moteSoulForBehaviorContext } from './mote-behavior-legacy.js'
 import type { AgentMuxOptionalContext } from '@agentmux/core/agent-outbound-message'
-import { MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
+import { AGENT_LAUNCH_CONTEXT_BUDGET_BYTES } from '@agentmux/core/agent-prompt-budget'
 import { TOPIC_AGENT_INSTRUCTIONS_PATH, DEFAULT_TOPIC_AGENT_INSTRUCTIONS, DEFAULT_MOTE_AGENT_INSTRUCTIONS, MOTE_MEMORY_PATH, DEFAULT_MOTE_MEMORY } from './mote-agent-instructions.js'
 import {
   SCRATCH_WORKSPACE_ID,
@@ -131,7 +131,7 @@ function optionalFileContext(directory: string, fileName: string, text: string):
 }
 
 async function initialFileContext(directory: string, fileName: string): Promise<AgentMuxOptionalContext> {
-  const maxBytes = MAX_AGENT_PROMPT_BYTES
+  const maxBytes = AGENT_LAUNCH_CONTEXT_BUDGET_BYTES
   try {
     const handle = await open(join(directory, fileName), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     let content: string

@@ -1,6 +1,5 @@
 import type { AgentSessionRunLifecycle } from './lifecycle.js'
 import type { AgentSessionRecoveryReconciler } from './reconciliation.js'
-import { assertAgentPromptSize } from '../agent-runtime-helpers.js'
 import { parseTerminalFrontendObservation } from '../agent-terminal-frontend.js'
 import type { AgentSessionContinuitySupervisor } from './supervisor.js'
 import { inspectAgentSessionInterruption } from './interruption.js'
@@ -164,7 +163,6 @@ export async function performAgentContinuity(
     if (input.trigger !== 'input' || typeof input.input.prompt !== 'string' ||
         !composeAgentPrompt(input.input.prompt, input.input.agentMuxNote, prior?.launchInput?.message.inputContext ?? captured?.inputContext ?? input.input.inputContext).text.trim()) throw new AgentMuxError('A new continuity input needs its original input trigger and nonempty content.', 'INVALID_AGENT_PROMPT')
     safeId(input.input.submissionId, 'Original continuity input id')
-    assertAgentPromptSize(composeAgentPrompt(input.input.prompt, input.input.agentMuxNote, prior?.launchInput?.message.inputContext ?? captured?.inputContext ?? input.input.inputContext).text)
     if (prior && (!prior.launchInput || !isDeepStrictEqual(prior.launchInput.input, input.input))) throw new AgentMuxError(
       'This original recovery operation has another frozen input. Its original body and Run are kept.', 'AGENT_PROMPT_OPERATION_CONFLICT')
   }

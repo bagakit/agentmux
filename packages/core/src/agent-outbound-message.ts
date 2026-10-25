@@ -6,7 +6,7 @@ import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY } from './agent-messaging-guidance.js'
 import { browserInputContextJson, type BrowserInputContext } from './browser-input-context.js'
-import { agentPromptExceedsBudget } from './agent-prompt-budget.js'
+import { agentLaunchContextExceedsBudget } from './agent-prompt-budget.js'
 
 /** Ordered optional platform context. Omission must retain its source/recovery instructions. */
 export type AgentMuxOptionalContext = { text: string; omittedText: string }
@@ -131,7 +131,7 @@ export function composeAgentLaunchPrompt(
   }
   for (const [index, part] of optionalContext.entries()) {
     selected[index] = part.text
-    if (agentPromptExceedsBudget(compose().text)) selected[index] = part.omittedText
+    if (agentLaunchContextExceedsBudget(compose().text)) selected[index] = part.omittedText
   }
   // Retain the generated system segment before wire formatting. Clients consume this fact;
   // an amux-looking string in the user's text never becomes a system message.

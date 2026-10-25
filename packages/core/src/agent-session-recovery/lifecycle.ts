@@ -1,7 +1,6 @@
 import { hasSelectedNativeTarget } from '../agent-native-source.js'
 import { lifecycleObserved } from '../lifecycle-diagnostic.js'
 import type { AgentSessionRecoveryReconciler } from './reconciliation.js'
-import { assertAgentPromptSize } from '../agent-runtime-helpers.js'
 import { parseAgentRestartInput, type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './restart-contract.js'
 import type { AgentSessionContinuitySupervisor } from './supervisor.js'
 import { createContinuityInputDelivery, prepareContinuityLaunchInput, bindContinuityLaunchInput } from './input.js'
@@ -361,7 +360,6 @@ export class AgentSessionRunLifecycle {
     const frozenInput = continuity?.launchInput
     const composed = frozenInput ? { text: frozenInput.prompt, systemContext: frozenInput.message.systemContext }
       : composeAgentResumePrompt(input.prompt, input.agentMuxNote)
-    assertAgentPromptSize(composed.text)
     const prompt = composed.text || undefined
     const message: AgentPromptMessageContent = frozenInput?.message ?? {
       ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
