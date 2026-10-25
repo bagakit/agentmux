@@ -1,6 +1,9 @@
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import type { ServiceNoticeItem } from '../lib/use-service-notices'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+
+const LoadingIcon = semanticIconComponent('status.loading')
 
 /** Source read failures do not change Context or Agent capability. */
 export function FocusSourceStatus({ sourceError, loading, laneErrors, onRetrySources, onRetryLanes, visible }: {
@@ -23,7 +26,9 @@ export function FocusSourceStatus({ sourceError, loading, laneErrors, onRetrySou
     mode: 'Contexts and previously known lane details remain available.',
     restore: 'Retry lane details to read the unavailable workspace sources.'
   } } })
-  return <ServiceNoticeDisclosure scope="focus:sources" notices={notices} available={!loading} visible={visible}
+  return <>
+    {loading && visible ? <span className="focus-source-loading" role="status"><LoadingIcon size={12} aria-hidden="true" /><span>Loading sources…</span></span> : null}
+    <ServiceNoticeDisclosure scope="focus:sources" notices={notices} available={!loading} visible={visible}
     title="Sources unavailable" className="focus-source-status" actions={<>
       {sourceError ? <button type="button" className="small-button" aria-busy={loading} onClick={onRetrySources}>Retry project sources</button> : null}
       {laneErrors.length ? <button type="button" className="small-button" onClick={onRetryLanes}>Retry lane details</button> : null}
@@ -34,5 +39,5 @@ export function FocusSourceStatus({ sourceError, loading, laneErrors, onRetrySou
         {item.id === 'project-sources' ? sourceError : laneErrors.join('\n')}
       </p>
     </section>)}
-  </ServiceNoticeDisclosure>
+  </ServiceNoticeDisclosure></>
 }
