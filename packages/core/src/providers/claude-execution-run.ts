@@ -2,7 +2,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { createClaudeExecutionOperations } from './claude-execution-operations.js'
 import { pathToFileURL } from 'node:url'
 import type { AgentExecutionHelperContext } from '../agent-execution-helper.js'
-import { runAgentExecutionHelper, type AgentExecutionHelperIo } from '../agent-execution-helper-run.js'
+import { runAgentExecutionHelper, runAgentExecutionHelperCli, type AgentExecutionHelperIo } from '../agent-execution-helper-run.js'
 import { parseClaudeExecutionMessage, parseClaudeExecutionServerMessage, projectClaudeExecutionResponse, buildClaudeNativeExecutorLaunchSpec } from './claude-execution-protocol.js'
 
 export function parseClaudeExecutionRunArguments(args: readonly string[]): AgentExecutionHelperContext {
@@ -29,6 +29,8 @@ export function runClaudeExecutionHelper(context: AgentExecutionHelperContext, i
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  void runClaudeExecutionHelper(parseClaudeExecutionRunArguments(process.argv.slice(2)), { input: process.stdin, output: process.stdout })
-    .catch(() => { process.stdout.write(JSON.stringify({ type: 'diagnostic', scope: 'helper', code: 'CLAUDE_EXECUTION_HELPER_START_FAILED' }) + '\n'); process.exitCode = 1 })
+  void runAgentExecutionHelperCli(() => runClaudeExecutionHelper(parseClaudeExecutionRunArguments(process.argv.slice(2)), { input: process.stdin, output: process.stdout }))
+    .then(() => process.exit(0), () => {
+      process.stdout.write(JSON.stringify({ type: 'diagnostic', scope: 'helper', code: 'NATIVE_EXECUTION_HELPER_LIFECYCLE_FAILED' }) + '\n', () => process.exit(1))
+    })
 }

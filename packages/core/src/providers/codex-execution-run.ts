@@ -2,7 +2,7 @@ import { isAbsolute, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { AgentToolContextState } from '../agent-tool-context.js'
 import type { AgentExecutionHelperContext } from '../agent-execution-helper.js'
-import { runAgentExecutionHelper, type AgentExecutionHelperIo } from '../agent-execution-helper-run.js'
+import { runAgentExecutionHelper, runAgentExecutionHelperCli, type AgentExecutionHelperIo } from '../agent-execution-helper-run.js'
 import { buildCodexNativeExecutorLaunchSpec, parseCodexExecutionMessage, parseCodexExecutionServerMessage } from './codex-execution-protocol.js'
 
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !value.includes('\0')
@@ -36,11 +36,10 @@ export async function runCodexExecutionHelper(context: AgentExecutionHelperConte
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   // Only the explicit packaged runner owns startup. EOF merely detaches machine
   // observation; it is not permission to kill an executor or its native child.
-  void (async () => {
+  void runAgentExecutionHelperCli(async () => {
     const context = parseCodexExecutionRunArguments(process.argv.slice(2))
-    await runCodexExecutionHelper(context, { input: process.stdin, output: process.stdout })
-  })().catch(() => {
-    process.stdout.write(JSON.stringify({ type: 'diagnostic', scope: 'helper', code: 'NATIVE_EXECUTION_HELPER_START_FAILED' }) + '\n')
-    process.exitCode = 1
+    return await runCodexExecutionHelper(context, { input: process.stdin, output: process.stdout })
+  }).then(() => process.exit(0), () => {
+    process.stdout.write(JSON.stringify({ type: 'diagnostic', scope: 'helper', code: 'NATIVE_EXECUTION_HELPER_LIFECYCLE_FAILED' }) + '\n', () => process.exit(1))
   })
 }

@@ -9,6 +9,22 @@ import { AgentExecutionJournal } from './agent-execution-journal.js'
 import { runAgentExecutionFrontend } from './agent-execution-frontend.js'
 export type AgentExecutionHelperIo = { input: Readable & { isTTY?: boolean; setRawMode?: (raw: boolean) => unknown }; output: Writable }
 
+/** The packaged CLI owns explicit shutdown; EOF and reader detach do not. */
+export async function runAgentExecutionHelperCli(start: () => Promise<{ close(): Promise<void> }>): Promise<void> {
+  const signals = ['SIGTERM', 'SIGHUP', 'SIGINT'] as const
+  let requestShutdown!: () => void
+  const shutdown = new Promise<void>(resolve => { requestShutdown = resolve })
+  for (const signal of signals) process.on(signal, requestShutdown)
+  try {
+    // A signal during startup is retained until its original handle is ready.
+    const helper = await start()
+    await shutdown
+    await helper.close()
+  } finally {
+    for (const signal of signals) process.removeListener(signal, requestShutdown)
+  }
+}
+
 export async function runAgentExecutionHelper(
   context: AgentExecutionHelperContext,
   io: AgentExecutionHelperIo,
