@@ -43,8 +43,9 @@ export class AgentMuxClientEventPublisher {
   private readonly listeners = new Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>()
   private readonly statusListeners = new Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>()
   private readonly conversationSourceListeners = new Map<string, Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>>()
+  private readonly runListeners = new Map<string, Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>>()
   private publishingDiagnostic = false
-  get hasEventListeners(): boolean { return this.listeners.size > 0 }
+  get hasEventListeners(): boolean { return this.listeners.size > 0 || this.runListeners.size > 0 }
 
   /** Low-frequency owner facts; these listeners never join ordered-byte dispatch. */
   onStatusEvent<Result>(listener: AgentMuxClientEventListener<Result>, options: AgentMuxClientEventListenerOptions = {}): () => void {
@@ -63,6 +64,13 @@ export class AgentMuxClientEventPublisher {
     return () => { this.listeners.delete(listener) }
   }
 
+  /** Index exact Run consumers before dispatch; unrelated bytes never visit them. */
+  onRunEvent<Result>(runId: string, listener: AgentMuxClientEventListener<Result>, options: AgentMuxClientEventListenerOptions = {}): () => void {
+    const listeners = this.runListeners.get(runId) ?? new Map()
+    listeners.set(listener, options); this.runListeners.set(runId, listeners)
+    return () => { listeners.delete(listener); if (!listeners.size) this.runListeners.delete(runId) }
+  }
+
   /** Original Conversation source notifications, indexed before dispatch to unrelated Consumers. */
   onConversationSourceEvent<Result>(agentSessionId: string, listener: AgentMuxClientEventListener<Result>): () => void {
     const listeners = this.conversationSourceListeners.get(agentSessionId) ?? new Map()
@@ -74,12 +82,15 @@ export class AgentMuxClientEventPublisher {
     this.listeners.clear()
     this.statusListeners.clear()
     this.conversationSourceListeners.clear()
+    this.runListeners.clear()
   }
 
   publish(event: AgentMuxClientEvent): void {
     const listeners = event.type === 'agent-error' || event.type === 'connection-state' || event.type === 'agent-session'
       ? [...this.listeners, ...this.statusListeners] : [...this.listeners]
     this.deliver(event, listeners)
+    const runId = 'run' in event && event.run ? event.run.runId : undefined
+    if (runId) this.deliver(event, [...(this.runListeners.get(runId) ?? [])])
     const sourceSession = conversationSourceSession(event)
     if (sourceSession) this.deliver(event, [...(this.conversationSourceListeners.get(sourceSession) ?? [])])
   }
@@ -108,6 +119,8 @@ export class AgentMuxClientEventPublisher {
       if (!failure) continue
       this.listeners.delete(listener)
       this.statusListeners.delete(listener)
+      const runId = 'run' in event && event.run ? event.run.runId : undefined
+      if (runId) { const scoped = this.runListeners.get(runId); scoped?.delete(listener); if (!scoped?.size) this.runListeners.delete(runId) }
       const sourceSession = conversationSourceSession(event)
       if (sourceSession) { const scoped = this.conversationSourceListeners.get(sourceSession); scoped?.delete(listener); if (!scoped?.size) this.conversationSourceListeners.delete(sourceSession) }
       failures.push(failure)

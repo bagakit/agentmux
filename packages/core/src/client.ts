@@ -2092,6 +2092,11 @@ export class AgentMuxClient {
    * required. Promise-returning callbacks are detached with a diagnostic; fix and explicitly
    * subscribe again. Other Consumers and Run capabilities remain available.
    */
+  /** Observe only existing events for this original Run; use attachTerminal for its byte lease. */
+  onRunEvent<Result>(runId: string, listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void {
+    return this.publisher.onRunEvent(runId, listener, options)
+  }
+
   onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void {
     // Each selected registration takes its own current journal cut. A late reader
     // cannot mistake an older shared observer's catch-up for a newly arrived message.

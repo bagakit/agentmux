@@ -796,6 +796,7 @@ export async function connectHostedAgentMux(options: {
       // A second sweep would make GUI exit wait on unrelated Native cleanup receipts.
       attached.clear()
     },
+    onRunEvent: <Result>(runId: string, listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions) => publisher.onRunEvent(runId, listener, options),
     onEvent: <Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions) => publisher.onEvent(event => {
       if (options?.observeMessages === false && (event.type === 'agent-message-changed' || event.type === 'agent-message-observation')) return
       return listener(event)
