@@ -46,7 +46,7 @@ async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; lo
     if (options.lostStart) throw new AgentMuxError('Start applied; original ACK lost', 'CTXMUX_START_UNKNOWN', undefined, { disposition: 'unknown', confirmedInputBytes: null })
     return currentRun()
   })
-  core.probeAgent = vi.fn(async () => ({ providerId, executable: provider.executable, installed: true, capabilities: provider.catalog.capabilities }))
+  core.probePreparedAgent = vi.fn(async () => ({ providerId, executable: provider.executable, installed: true, capabilities: provider.catalog.capabilities }))
   core.ensureTerminalHandshakeOrDegrade = async (session: any) => session
   core.hookServer.isRunning = () => true
   core.hookServer.createBinding = () => ({ bindingId: 'binding'.padEnd(43, 'B'), endpoint: { url: 'http://127.0.0.1:0', token: 'token'.padEnd(43, 'T') }, bindRun: async () => {}, close: async () => {} })
@@ -139,7 +139,7 @@ it.each(['runtime', 'provider'] as const)('retains the same frozen fresh input a
   const h = await fixture()
   try {
     if (observation === 'runtime') h.core.kernel.status.mockRejectedValueOnce(new Error('Original Runtime observation failed'))
-    else h.core.probeAgent.mockRejectedValueOnce(new Error('Original Provider observation failed'))
+    else h.core.probePreparedAgent.mockRejectedValueOnce(new Error('Original Provider observation failed'))
     expect((await h.client.ensureAgentContinuity(h.request)).kind).toBe('pending')
     expect(h.op()!.launchInput).toMatchObject({ state: 'prepared', input: fresh })
     expect(h.started).toHaveLength(0)
@@ -287,7 +287,7 @@ it.each(['fresh', 'plain-startup'] as const)('preserves both original decisions 
     const core = other as any; await core.registry.load('local'); core.connected = true
     core.kernel.isConnected = () => true
     for (const key of ['status', 'list', 'input', 'identity']) core.kernel[key] = h.core.kernel[key]
-    core.probeAgent = h.core.probeAgent; core.ensureTerminalHandshakeOrDegrade = h.core.ensureTerminalHandshakeOrDegrade
+    core.probePreparedAgent = h.core.probePreparedAgent; core.ensureTerminalHandshakeOrDegrade = h.core.ensureTerminalHandshakeOrDegrade
     core.hookServer.isRunning = h.core.hookServer.isRunning; core.hookServer.createBinding = h.core.hookServer.createBinding
     const start = h.core.kernel.start, entered = Promise.withResolvers<void>(), blocked = new Promise<void>(resolve => { release = resolve })
     h.core.kernel.start = vi.fn(async (spec: any) => { const result = await start(spec); entered.resolve(); await blocked; return result })

@@ -80,7 +80,7 @@ async function fixture(ordinaryName?: string, extraSessions: string[] = []) {
     inner.hookServer.isRunning = () => true
     inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
     inner.ensureManagedHooks = async () => {}; inner.ensureTerminalHandshakeOrDegrade = async (session: core.AgentMuxAgentSession) => session
-    vi.spyOn(host.client, 'probeAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true, capabilities: new core.AgentProviderRegistry().get(id).catalog.capabilities }))
+    vi.spyOn(host.client as unknown as { probePreparedAgent: typeof host.client.probeAgent }, 'probePreparedAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true, capabilities: new core.AgentProviderRegistry().get(id).catalog.capabilities }))
     const provider = inner.providers.get('claude') as unknown as { discoverNativeSession(context: { processId: number }): Promise<unknown> }
     vi.spyOn(provider, 'discoverNativeSession').mockImplementation(async ({ processId }) => {
       const source = sources.get(processId)

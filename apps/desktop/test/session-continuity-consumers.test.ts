@@ -152,7 +152,7 @@ describe('actual Store cold start', () => {
     core.kernel.isConnected = () => true
     core.kernel.status = async (runId: string) => nativeRun(runId, runId === 'new-run')
     const start = vi.fn(async (_spec: { args: string[] }) => nativeRun('new-run', true)); core.kernel.start = start
-    core.probeAgent = async () => ({ providerId: 'codex', executable: 'codex', installed: true,
+    core.probePreparedAgent = async () => ({ providerId: 'codex', executable: 'codex', installed: true,
       capabilities: new AgentProviderRegistry().get('codex').catalog.capabilities })
     core.ensureTerminalHandshakeOrDegrade = async (session: unknown) => session
     core.hookServer.isRunning = () => true

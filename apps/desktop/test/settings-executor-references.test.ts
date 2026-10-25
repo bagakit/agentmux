@@ -133,7 +133,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
     runs = new Map([[retained.run.runId, run(retained.run.runId)]])
     writes = []
     connect = vi.spyOn(core, 'connect').mockResolvedValue(undefined)
-    vi.spyOn(core, 'probeAgent').mockResolvedValue({ providerId: primary.id, installed: true,
+    vi.spyOn(core as unknown as { probePreparedAgent: typeof core.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: primary.id, installed: true,
       executable: primary.executable, capabilities: primary.catalog.capabilities })
     vi.spyOn(kernel, 'isConnected').mockReturnValue(true)
     vi.spyOn(kernel, 'identity').mockReturnValue({ daemonInstanceId: 'private-reference', buildIdentity: 'fixture', protocolVersion: 18 })

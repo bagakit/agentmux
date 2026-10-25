@@ -70,7 +70,7 @@ async function fixture(selected = false) {
         threadId: target.nativeSessionId, actorId: 'private-writer', operation: target.idleOnly ? 'queue-idle' : 'start-or-steer' },
         assertCurrent: async () => {}, send: native, dispose: async () => {} }
     } })
-  vi.spyOn(h.client, 'probeAgent').mockResolvedValue({ providerId: 'codex', executable: 'codex', installed: true, capabilities: builtin.catalog.capabilities })
+  vi.spyOn(h.client as unknown as { probePreparedAgent: typeof h.client.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: 'codex', executable: 'codex', installed: true, capabilities: builtin.catalog.capabilities })
   const append = async (id: string, recipient = 'recipient') => queue.append({ messageId: id, operationId: 'send-' + id, createdAt: Date.now(),
     sender: { kind: 'agent-session', agentSessionId: 'sender' }, recipient: { kind: 'agent-session', agentSessionId: recipient },
     senderSessionId: 'sender', senderRunId: 'run-sender', recipientSessionId: recipient, recipientRunId: recipient === 'recipient' ? currentRun : 'run-other',

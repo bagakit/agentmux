@@ -123,7 +123,7 @@ async function targetFixture(options: { providerId?: 'claude' | 'codex'; targetO
   Object.assign(inner.kernel, { isConnected: () => true, status: async () => ({ runId: stored.run.runId, workspacePath: stored.workspacePath,
     program: '/bin/sh', args: [], pid: 99, state: { type: 'exited', code: 0 }, latestOutputBytes: 0, firstAvailableByte: 0,
     acceptedInputBytes: 0, nativeService: null, cols: 80, rows: 24 }), start, stop })
-  vi.spyOn(core, 'probeAgent').mockResolvedValue({ providerId: 'claude', installed: true, executable: '/bin/sh', capabilities: provider.catalog.capabilities })
+  vi.spyOn(core as unknown as { probePreparedAgent: typeof core.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: 'claude', installed: true, executable: '/bin/sh', capabilities: provider.catalog.capabilities })
   return { ...f, stored, core, inner, executors, resolve, resolveExecutor, page, observe, record, resume, start, stop }
 }
 function targetInvocation(value: unknown) {
@@ -268,6 +268,6 @@ it('a healthy original Run remains reattachable without resolving or probing its
     acceptedInputBytes: 0, nativeService: null, cols: 80, rows: 24 }) })
   await expect(f.core.ensureAgentContinuity({ agentSessionId: f.stored.agentSessionId, expectedRun: f.stored.run,
     operationId: 'original-continuity' })).resolves.toMatchObject({ kind: 'reattachable' })
-  expect(f.core.probeAgent).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+  expect(Reflect.get(f.core, 'probePreparedAgent')).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
   expect((await f.store.readMetadata(f.stored.agentSessionId))?.run).toEqual(f.stored.run)
 })

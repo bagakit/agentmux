@@ -184,7 +184,7 @@ it.each(['interrupted', 'completed', 'unknown'] as const)('public Core lifecycle
   core.kernel.status = vi.fn(async (id: string) => id === 'run-recipient' ? { ...h.run(id), state: { type: 'exited', code: 143, signal: null } } : currentRun())
   core.kernel.list = vi.fn(async () => started.length ? [currentRun()] : [])
   core.kernel.start = vi.fn(async (spec: any) => { started.push(spec); return currentRun() })
-  core.probeAgent = async () => ({ providerId: 'gemini', executable: 'gemini', installed: true, capabilities: provider.catalog.capabilities })
+  core.probePreparedAgent = async () => ({ providerId: 'gemini', executable: 'gemini', installed: true, capabilities: provider.catalog.capabilities })
   core.ensureTerminalHandshakeOrDegrade = async (session: any) => session
   core.hookServer.isRunning = () => true
   core.hookServer.createBinding = () => ({ bindingId: 'binding'.padEnd(43, 'B'), endpoint: { url: 'http://127.0.0.1:0', token: 'token'.padEnd(43, 'T') }, bindRun: async () => {}, close: async () => {} })

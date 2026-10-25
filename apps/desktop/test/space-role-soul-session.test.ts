@@ -69,7 +69,7 @@ async function fixture() {
   inner.connected = true
   await inner.registry.load('local')
   vi.spyOn(core, 'connect').mockResolvedValue()
-  vi.spyOn(core, 'probeAgent').mockImplementation(async id => ({
+  vi.spyOn(core as unknown as { probePreparedAgent: typeof core.probeAgent }, 'probePreparedAgent').mockImplementation(async id => ({
     providerId: id, installed: true, executable: id, capabilities: core.providers.get(id).catalog.capabilities
   }))
   const starts: StartInput[] = []

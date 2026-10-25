@@ -67,7 +67,7 @@ async function owner() {
     hookServer: Record<string, unknown>; ensureManagedHooks: unknown; ensureTerminalHandshakeOrDegrade: unknown }
   inner.connected = true; await inner.registry.load('local')
   vi.spyOn(core, 'connect').mockResolvedValue(undefined)
-  vi.spyOn(core, 'probeAgent').mockResolvedValue({ providerId: 'claude', executable: '/bin/sh', installed: true,
+  vi.spyOn(core as unknown as { probePreparedAgent: typeof core.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: 'claude', executable: '/bin/sh', installed: true,
     capabilities: core.providers.get('claude').catalog.capabilities })
   const entered = deferred(), release = deferred(), runs: CtxmuxAdapterRun[] = []
   // Only native process/Hook I/O is synthetic. The actual preload, registered IPC handler,

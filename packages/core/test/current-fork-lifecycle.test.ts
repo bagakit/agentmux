@@ -72,7 +72,7 @@ async function fixture(providerId: 'codex' | 'claude' = 'claude', cold = false) 
   inner.hookServer.isRunning = () => true
   const close = vi.fn(async () => {}), bind = vi.fn(async () => {})
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: bind, close })
-  vi.spyOn(client, 'probeAgent').mockResolvedValue({ providerId, executable: provider.executable, installed: true, capabilities: provider.catalog.capabilities })
+  vi.spyOn(client as unknown as { probePreparedAgent: typeof client.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId, executable: provider.executable, installed: true, capabilities: provider.catalog.capabilities })
   inner.ensureManagedHooks = async () => {}
   const handshake = vi.fn(async (session: AgentMuxStoredAgentSession) => session); inner.ensureTerminalHandshakeOrDegrade = handshake
   cleanups.push(async () => { await client.dispose(); expect(stop).not.toHaveBeenCalled() })

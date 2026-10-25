@@ -70,7 +70,7 @@ export async function retiredReopenFixture(providerId: 'claude' | 'pi' | 'codex'
   inner.hookServer.createBinding = vi.fn(() => ({ bindingId: 'fresh-binding', endpoint: { url: 'http://127.0.0.1:0', token: 'fresh-token' },
     bindRun: vi.fn(async (id: string) => { client.agentSession(old.agentSessionId); binds.push(id) }), close: vi.fn(async () => {}) }))
   vi.spyOn(client, 'connect').mockResolvedValue()
-  vi.spyOn(client, 'probeAgent').mockResolvedValue({ providerId, executable: providerId, installed: true, capabilities: client.providers.get(providerId).catalog.capabilities })
+  vi.spyOn(client as unknown as { probePreparedAgent: typeof client.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId, executable: providerId, installed: true, capabilities: client.providers.get(providerId).catalog.capabilities })
   vi.spyOn(client as any, 'ensureManagedHooks').mockResolvedValue(undefined)
   inner.ensureTerminalHandshakeOrDegrade = async session => session
   client.onEvent(event => events.push(event))

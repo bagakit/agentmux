@@ -110,7 +110,7 @@ it('returns the original initial-message creation without repeating start or inp
     lifecycleOperationId: input.operationKey, workspacePath: input.cwd, program: input.program, args: input.args,
     pid: null, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0, nativeService: null }))
   const input = vi.spyOn(inner.kernel, 'input').mockRejectedValue(new Error('must not resend first input'))
-  vi.spyOn(f.client, 'probeAgent').mockResolvedValue({ providerId: 'claude', executable: 'claude', installed: true,
+  vi.spyOn(f.client as unknown as { probePreparedAgent: typeof f.client.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: 'claude', executable: 'claude', installed: true,
     capabilities: f.client.providers.get('claude').catalog.capabilities })
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })

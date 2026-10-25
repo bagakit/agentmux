@@ -36,7 +36,7 @@ it('resumes the original Agent after an old Hook times out without waiting for i
     kernel: Record<string, unknown>
     hookServer: AgentHookServer
     hookBindings: Map<string, ReturnType<AgentHookServer['createBinding']>>
-    probeAgent: unknown
+    probePreparedAgent: unknown
     ensureManagedHooks: unknown
     acceptHookEvent(event: NativeHookEnvelope, signal: AbortSignal): Promise<void>
   }
@@ -61,7 +61,7 @@ it('resumes the original Agent after an old Hook times out without waiting for i
     ...ended, runId: 'new-run', pid: 42, state: { type: 'running' as const }
   }))
   inner.kernel.start = startRun
-  inner.probeAgent = async () => ({ providerId: 'claude', executable: 'claude', installed: true,
+  inner.probePreparedAgent = async () => ({ providerId: 'claude', executable: 'claude', installed: true,
     capabilities: new AgentProviderRegistry().get('claude').catalog.capabilities })
   inner.ensureManagedHooks = async () => {}
   let hookAborted = false

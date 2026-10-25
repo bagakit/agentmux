@@ -90,7 +90,7 @@ async function recoveryFixture(options: { healthy?: boolean; age?: number; inter
   core.kernel.status = vi.fn(async (id: string) => id === oldRun.runId ? { ...h.run(id), state: options.healthy ? { type: 'running' } : { type: 'exited', code: 143, signal: null } } : currentRun())
   core.kernel.list = vi.fn(async () => started.length ? [currentRun()] : [])
   core.kernel.start = vi.fn(async (spec: any) => { started.push(spec); return currentRun() })
-  core.probeAgent = vi.fn(async () => ({ providerId: 'gemini', executable: provider.executable, installed: true, capabilities: provider.catalog.capabilities }))
+  core.probePreparedAgent = vi.fn(async () => ({ providerId: 'gemini', executable: provider.executable, installed: true, capabilities: provider.catalog.capabilities }))
   core.ensureTerminalHandshakeOrDegrade = async (value: any) => value
   core.hookServer.isRunning = () => true
   core.hookServer.createBinding = () => ({ bindingId: 'binding'.padEnd(43, 'B'), endpoint: { url: 'http://127.0.0.1:0', token: 'token'.padEnd(43, 'T') }, bindRun: async () => {}, close: async () => {} })
@@ -126,7 +126,7 @@ it('keeps a healthy original Run attach-only even outside the automatic window',
   const h = await recoveryFixture({ healthy: true, age: policy.confirmedIdleWindowMs + 1, fallback: true })
   try {
     expect(await h.client.ensureAgentContinuity(h.request)).toMatchObject({ kind: 'reattachable', run: h.oldRun })
-    expect(h.started).toHaveLength(0); expect(h.inner.kernel.input).not.toHaveBeenCalled(); expect(h.core.probeAgent).not.toHaveBeenCalled()
+    expect(h.started).toHaveLength(0); expect(h.inner.kernel.input).not.toHaveBeenCalled(); expect(h.core.probePreparedAgent).not.toHaveBeenCalled()
   } finally { await h.close() }
 })
 it('does not resume an ended original Run whose last active observation is outside the window', async () => {

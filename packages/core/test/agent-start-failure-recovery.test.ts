@@ -55,7 +55,7 @@ beforeEach(async () => {
     return { terminal: { type: 'not_requested' }, terminal_restore: new Uint8Array(0), resize_revision: 0, run: newRun, replay: [{ data: raw }] }
   })
   inner.kernel.attach = attach
-  vi.spyOn(client, 'probeAgent').mockResolvedValue({ providerId: provider.id, executable: 'fixture', installed: true,
+  vi.spyOn(client as unknown as { probePreparedAgent: typeof client.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: provider.id, executable: 'fixture', installed: true,
     capabilities: provider.catalog.capabilities })
   events = []; client.onEvent(event => { events.push(structuredClone(event)) })
   vi.spyOn(Date, 'now').mockReturnValue(1000)

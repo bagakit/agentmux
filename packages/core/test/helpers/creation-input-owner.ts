@@ -26,7 +26,7 @@ export async function creationInputOwner(postLaunch = false) {
   inner.ensureManagedHooks = async () => {}
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxStoredAgentSession) => session
   inner.screenEvidence.wait = vi.fn(async () => 0)
-  const probe = vi.spyOn(h.client, 'probeAgent').mockResolvedValue({ providerId: 'codex', executable: 'codex', installed: true, capabilities: provider.catalog.capabilities })
+  const probe = vi.spyOn(h.client as unknown as { probePreparedAgent: typeof h.client.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: 'codex', executable: 'codex', installed: true, capabilities: provider.catalog.capabilities })
   const submit = vi.spyOn(inner.promptSubmission, 'submitInputPlan').mockResolvedValue(undefined)
   if (postLaunch) {
     submit.mockRestore()

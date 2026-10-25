@@ -105,7 +105,7 @@ beforeEach(async () => {
   inner.hookServer = new AgentHookServer((event, signal) => inner.acceptHookEvent(event, signal), 0)
   inner.connected = true
   await inner.registry.load('local')
-  vi.spyOn(core, 'probeAgent').mockResolvedValue({ providerId: provider.id, installed: true,
+  vi.spyOn(core as unknown as { probePreparedAgent: typeof core.probeAgent }, 'probePreparedAgent').mockResolvedValue({ providerId: provider.id, installed: true,
     executable: provider.executable, capabilities: provider.catalog.capabilities })
   kernel = inner.kernel
   kernel.isConnected = () => true
