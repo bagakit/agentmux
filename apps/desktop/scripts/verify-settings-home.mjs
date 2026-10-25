@@ -10,6 +10,8 @@ import { root, desktopRequire as require, aliases } from './fixtures/settings-re
 const fixture = path.join(root,'apps/desktop/scripts/fixtures/settings-home')
 const conceptIntros = process.argv.includes('--concept-intros')
 const conceptIntroMutant = process.argv.includes('--concept-intro-mutation')
+const goalsArtMutant = process.argv.includes('--goals-art-mutation')
+assert.ok(!goalsArtMutant || conceptIntros, 'The Goals artwork mutation requires its bounded scenario')
 assert.ok(!conceptIntroMutant || conceptIntros, 'The concept mutation requires its bounded scenario')
 const evidenceRoot = path.join(root,conceptIntros?'.tmp/settings-companion-intros':'.tmp/settings-home')
 const evidence = path.join(evidenceRoot,'run-'+randomUUID())
@@ -24,8 +26,8 @@ const previewReturnMutant = process.argv.includes('--preview-return-mutation')
 const larkNavigationMutant = process.argv.includes('--lark-navigation-mutation')
 const focusContentMutant = process.argv.includes('--focus-content-mutation')
 const toolkitModelMutant = process.argv.includes('--toolkit-model-mutation')
-assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant,larkNavigationMutant,focusContentMutant,toolkitModelMutant,conceptIntroMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
-const nativeMutant = conceptIntroMutant || navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant || larkNavigationMutant || focusContentMutant || toolkitModelMutant
+assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant,larkNavigationMutant,focusContentMutant,toolkitModelMutant,conceptIntroMutant,goalsArtMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
+const nativeMutant = goalsArtMutant || conceptIntroMutant || navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant || larkNavigationMutant || focusContentMutant || toolkitModelMutant
 const pageArguments = process.argv.filter(argument => argument.startsWith('--pages='))
 assert.ok(pageArguments.length <= 1, 'One explicit page selection')
 const requestedPages = pageArguments.length ? pageArguments[0].slice('--pages='.length).split(',') : conceptIntros ? ['capsule','goals'] : null
@@ -37,7 +39,8 @@ if (requestedPages) {
 let navigationMutationLoads = 0, providerMutationLoads = 0, takeoverMutationLoads = 0, appearanceMutationLoads = 0
 let previewReturnMutationLoads = 0, larkNavigationMutationLoads = 0
 let toolkitModelMutationLoads = 0, conceptIntroMutationLoads = 0
-let conceptIntroMutationReceipt = null
+let conceptIntroMutationReceipt = null, goalsArtMutationReceipt = null
+let goalsArtMutationLoads = 0
 let focusContentMutationLoads = 0
 const focusContentMutationOwners = new Set()
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -94,6 +97,15 @@ try {
     },async transform(code,id){
       const file=id.split('?')[0]
       if(file.startsWith(root+'/')&&!file.includes('/node_modules/'))await bind(file)
+      if(goalsArtMutant&&file.endsWith('/components/settings/SettingsConceptIntro.tsx')) {
+        const image=/<img\b[^>]*\bsrc=\{goalsArt\}[^>]*\/>/gu
+        assert.equal([...code.matchAll(image)].length,1,'One original Goals artwork image consumer')
+        const mutated=code.replace(image,'{null}')
+        goalsArtMutationLoads++
+        goalsArtMutationReceipt={file:path.relative(root,file),original:sha(code),consumed:sha(mutated),change:'Remove the original Goals artwork image consumer'}
+        await fs.writeFile(path.join(evidence,'goals-art-mutation.json'),JSON.stringify(goalsArtMutationReceipt,null,2))
+        return {code:mutated,map:null}
+      }
       if(conceptIntroMutant&&file.endsWith('/components/settings/CapsuleSettingsPane.tsx')) {
         const anchor='<CapsuleIntroduction />'
         assert.equal(code.split(anchor).length,2,'One original Capsule introduction consumer')
@@ -192,7 +204,12 @@ try {
   await fs.writeFile(path.join(visual,'stderr.log'),stderr.join('\n'))
   const render = JSON.parse(await fs.readFile(path.join(visual,'render.json'),'utf8'))
   assert.equal(capture.timedOut,false)
-  if (conceptIntroMutant) {
+  if (goalsArtMutant) {
+    assert.equal(goalsArtMutationLoads,1,'The actual Goals artwork consumer mutation is loaded once')
+    assert.equal(capture.exitCode,1)
+    assert.equal(render.failure?.name,'AssertionError')
+    assert.match(render.failure.message,/The production Goals artwork image is present in its original introduction/u,'The real missing artwork assertion kills its consumer mutation')
+  } else if (conceptIntroMutant) {
     assert.equal(conceptIntroMutationLoads,1,'The actual introduction consumer mutation is loaded once')
     assert.equal(capture.exitCode,1)
     assert.equal(render.failure?.name,'AssertionError')
@@ -267,7 +284,7 @@ try {
   assert.ok(relevant.length>0)
   for (const [file,digest] of relevant) assert.equal(sha(await fs.readFile(file)),digest,'Changed candidate source: '+path.relative(root,file))
   const receipt={passed:true,captureOnly:!nativeMutant,aestheticReview:'not-performed',assertionRed:nativeMutant,testEvidence:runs.length?'passed-with-owning-mutations':nativeMutant?'native-control-assertion-red':'not-run',
-    runs,capture,render,callers,conceptIntroMutation:conceptIntroMutationReceipt,inputs:Object.fromEntries(relevant.map(([file,digest])=>[path.relative(root,file),digest])),boundary:render.boundary}
+    runs,capture,render,callers,conceptIntroMutation:conceptIntroMutationReceipt,goalsArtMutation:goalsArtMutationReceipt,inputs:Object.fromEntries(relevant.map(([file,digest])=>[path.relative(root,file),digest])),boundary:render.boundary}
   await fs.writeFile(path.join(evidence,'receipt.json'),JSON.stringify(receipt,null,2))
   await fs.writeFile(path.join(evidence,'review.md'),['# Settings Home visual review','',render.boundary,'',
     nativeMutant ? 'The owning mutation failed the expected native behavior assertion. This does not establish aesthetic approval.' : 'Capture succeeded; independent aesthetic review is still required. Read every complete frame before ranking the pages.','',

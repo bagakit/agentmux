@@ -174,10 +174,13 @@ app.whenReady().then(async () => {
         assert.equal(await read(`${intro}.parentElement.firstElementChild===${intro}`),true,'Introduction is the first content of its original editor')
         assert.equal(await read(`${intro}.querySelectorAll('button,input,select,textarea,[role="button"]').length`),0,'Introduction does not invent an interaction or setting')
         assert.ok(await read(`${intro}.querySelector('h3')?.textContent.trim().length`)>0,'Introduction has a visible product heading')
-        if (id==='capsule') {
-          await until(`${intro}.querySelector('img')?.complete&&${intro}.querySelector('img').naturalWidth>0`,'The actual Capsule art is decoded')
-          await until(`${node(capsuleRoot)}?.checkVisibility()`)
-        }
+        assert.equal(await read(`${intro}.querySelectorAll('img').length`),1,`The production ${id==='capsule'?'Capsule':'Goals'} artwork image is present in its original introduction`)
+        await until(`${intro}.querySelector('img').complete`,'The actual introduction artwork has finished loading')
+        const artwork=await read(`(() => {const image=${intro}.querySelector('img');return {source:image.currentSrc,width:image.naturalWidth,height:image.naturalHeight}})()`)
+        assert.ok(artwork.width>0&&artwork.height>0,'The actual introduction artwork is decoded')
+        result.interactions.push({kind:'concept-intro-artwork',page:id,size,...artwork})
+        if (id==='capsule') await until(`${node(capsuleRoot)}?.checkVisibility()`)
+
         for (const color of ['dark','light']) {
           await theme(color)
           await read(`${node(pane(id))}.scrollTop=0`)
