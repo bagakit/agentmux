@@ -118,6 +118,16 @@ it('publishes exact discovery and the real compiled CLI export into the existing
     bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent' })
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', join(candidate, 'bin/amux'))
   const output = join(candidate, 'original.cpuprofile'), env = objectCliEnvironment(f.root)
+  // Neighbouring public commands must remain independent after concurrent integration.
+  const changes = await runCompiledObjectCli(['agent', 'input', 'changes', '--input', '-'], env,
+    JSON.stringify({ hostId: 'local', agentSessionId: 'caller' }))
+  expect(changes.code, changes.stderr + changes.stdout).toBe(0)
+  expect(JSON.parse(changes.stdout).result).toMatchObject({ agentSessionId: 'caller', changes: [] })
+  const mailbox = await runCompiledObjectCli(['agent', 'input', 'ls', '--host-id', 'local', '--session', 'caller'], env)
+  expect(mailbox.code, mailbox.stderr + mailbox.stdout).toBe(0)
+  expect(JSON.parse(mailbox.stdout).result).toMatchObject({ agentSessionId: 'caller', items: [] })
+  expect(await f.rpc.call('agent.input.inspect', { key: { kind: 'prompt', agentSessionId: 'caller', expectedRun: { runId: 'run-caller' }, submissionId: 'absent' } }))
+    .toMatchObject({ record: null })
   const args = ['system', 'metrics', 'host-profile', 'capture', '--host', 'local', '--runtime', f.owner.runtimeId,
     '--owner', f.owner.ownerInstanceId, '--pid', String(process.pid), '--duration-ms', '1000', '--output', output]
   expect(AGENTMUX_RPC_NATIVE_METHODS['system.metrics.host-profile.capture']).toBe('long')
