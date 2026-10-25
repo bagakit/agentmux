@@ -3,7 +3,7 @@ import { encodeHostedValue, decodeHostedValue } from '@agentmux/core/public-rpc-
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { DurableIngressCore } from './durable-ingress.js'
 
-type HostedInput = Pick<AgentMuxHostedClient, 'recordExternalConversationMessage' | 'readAgentSession' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting' | 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission' | 'providers'> & Partial<Pick<AgentMuxHostedClient, 'runtimeOwnerIdentity' | 'forwardRpc' | 'runtimeSubject'>>
+type HostedInput = Pick<AgentMuxHostedClient, 'recordExternalConversationMessage' | 'readAgentSession' | 'submitAgentMessage' | 'inspectAgentInput' | 'readAgentInputChanges' | 'rejoinAgentInputWaiting' | 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission' | 'providers'> & Partial<Pick<AgentMuxHostedClient, 'runtimeOwnerIdentity' | 'forwardRpc' | 'runtimeSubject'>>
 /** Borrow the exact Host transport. Its semantic service must resolve original external authority in process. */
 export function createHostedIngressCorePort(clients: () => readonly { hostId: string; client: HostedInput }[]): (hostId: string, executionRuntimeId?: string) => DurableIngressCore | undefined {
   return (hostId, originalRuntimeId) => {
@@ -18,7 +18,7 @@ export function createHostedIngressCorePort(clients: () => readonly { hostId: st
       if (owner.runtimeId !== executionRuntimeId || current.length !== 1 || current[0]!.client !== client) throw new AgentMuxError('The original execution Runtime changed. No conversation or input was rerouted.', 'INGRESS_TARGET_UNCONFIRMED')
       return { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
     }
-    const invoke = async <T>(method: 'readAgentSession' | 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting' | 'runtimeSubject', args: unknown[], fence: NonNullable<Awaited<ReturnType<typeof target>>>): Promise<T> => {
+    const invoke = async <T>(method: 'readAgentSession' | 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'readAgentInputChanges' | 'rejoinAgentInputWaiting' | 'runtimeSubject', args: unknown[], fence: NonNullable<Awaited<ReturnType<typeof target>>>): Promise<T> => {
       const response = await client.forwardRpc!('runtime.invoke', { consumerId, fence,
         invocation: encodeHostedValue({ method, args }) as import('@agentmux/core/hosted').AgentMuxHostedInvocation }, {}, fence)
       return decodeHostedValue(response.value) as T
@@ -50,6 +50,10 @@ export function createHostedIngressCorePort(clients: () => readonly { hostId: st
         if (session && session.hostId !== 'local' && session.hostId !== hostId) throw new AgentMuxError(
           'The original Session metadata belongs to another Host. Existing Runs are retained.', 'INGRESS_TARGET_UNCONFIRMED')
         return session ? { ...session, hostId } : null
+      },
+      readAgentInputChanges: async input => {
+        const fence = await target()
+        return fence ? await invoke('readAgentInputChanges', [input], fence) : await client.readAgentInputChanges(input)
       },
       inspectAgentInput: async input => {
         const fence = await target()
