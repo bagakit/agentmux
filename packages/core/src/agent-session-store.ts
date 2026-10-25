@@ -1,3 +1,4 @@
+import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { mintObjectId } from './object-id.js'
 import { parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseAgentContinuityControlReceipts, type AgentMuxContinuityControlReceipt } from './agent-session-recovery/control-contract.js'
@@ -115,7 +116,7 @@ type AgentMuxLifecycleReservationBase = {
 /** Prepared before start; no Run or input is invented for this durable creation seed. */
 export type AgentMuxPreparedCreation = Pick<AgentMuxStoredAgentSession,
   'kind' | 'agentSessionId' | 'providerId' | 'executorId' | 'hostId' | 'workspacePath' | 'hookBindingId' | 'hookToken' |
-  'capabilityHash' | 'createdAt' | 'updatedAt' | 'creation' | 'forkedFrom' | 'nativeHandle' | 'launchOptions' | 'nativeActor' | 'initialInput'>
+  'capabilityHash' | 'createdAt' | 'updatedAt' | 'toolExecution' | 'creation' | 'forkedFrom' | 'nativeHandle' | 'launchOptions' | 'nativeActor' | 'initialInput'>
 
 export type AgentMuxLifecycleReservation = AgentMuxLifecycleReservationBase & (
   | { kind: 'create'; preparedCreation?: AgentMuxPreparedCreation; ownerReleased?: true; expectedRun?: never; stopOperation?: never }
@@ -685,6 +686,7 @@ function normalizeHistoryMetadata(value: unknown): AgentSessionHistoryMetadata {
     providerId,
     executorId: string(source.executorId, 'history.executorId'),
     workspacePath: string(source.workspacePath, 'history.workspacePath', MAX_PATH_BYTES),
+    ...(source.toolExecution === undefined ? {} : { toolExecution: parseAgentToolExecutionBinding(source.toolExecution) }),
     createdAt: timestamp(source.createdAt, 'history.createdAt'),
     ...(source.creation === undefined ? {} : { creation: parseAgentCreationFact(source.creation) }),
     ...(source.forkedFrom === undefined ? {} : { forkedFrom: parseAgentForkSource(source.forkedFrom) }),
@@ -1544,7 +1546,7 @@ function assertInitialInputWrite(previous: AgentMuxStoredAgentSession | null, ne
 function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
   const p = record(value, 'prepared creation')
   if (p.kind !== 'agent' || Object.keys(p).some(key => !['kind', 'agentSessionId', 'providerId', 'executorId', 'hostId', 'workspacePath',
-    'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'creation', 'forkedFrom', 'nativeHandle', 'launchOptions', 'nativeActor', 'initialInput'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
+    'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'toolExecution', 'creation', 'forkedFrom', 'nativeHandle', 'launchOptions', 'nativeActor', 'initialInput'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
   const creation = parseAgentCreationFact(p.creation), forkedFrom = p.forkedFrom === undefined ? undefined : parseAgentForkSource(p.forkedFrom)
   const initialInput = p.initialInput === undefined ? undefined : normalizeInitialInput(p.initialInput, String(p.agentSessionId))
   if (!creation.intentDigest || creation.createdRun || creation.initialInputKey || creation.persistence || creation.failure ||
@@ -1553,6 +1555,7 @@ function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
     forkedFrom && forkedFrom.expectedNativeHandle.providerId !== p.providerId) throw new AgentMuxError('Prepared creation intent is incomplete.', 'INVALID_AGENT_SESSION_STORE')
   return { kind: 'agent', agentSessionId: string(p.agentSessionId, 'agentSessionId'), providerId: string(p.providerId, 'providerId'),
     executorId: string(p.executorId, 'executorId'), hostId: string(p.hostId, 'hostId'), workspacePath: string(p.workspacePath, 'workspacePath', MAX_PATH_BYTES),
+    ...(p.toolExecution === undefined ? {} : { toolExecution: parseAgentToolExecutionBinding(p.toolExecution) }),
     hookBindingId: string(p.hookBindingId, 'hookBindingId'), hookToken: string(p.hookToken, 'hookToken'), capabilityHash: string(p.capabilityHash, 'capabilityHash'),
     createdAt: timestamp(p.createdAt, 'createdAt'), updatedAt: timestamp(p.updatedAt, 'updatedAt'), creation, ...(forkedFrom ? { forkedFrom } : {}),
     ...(p.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(p.nativeHandle) }),
@@ -1570,6 +1573,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
   const priorRuns = retiredRuns(source.retiredRuns, currentRun)
   const session: AgentMuxAgentSession = {
     kind: 'agent',
+    ...(source.toolExecution === undefined ? {} : { toolExecution: parseAgentToolExecutionBinding(source.toolExecution) }),
     ...(source.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: parseAgentContinuityControlReceipts(source.continuityControlReceipts, String(source.agentSessionId)) }),
     ...(source.continuity === undefined ? {} : { continuity: normalizeAgentContinuityOperation(source.continuity) }),
     ...(source.continuityOperations === undefined ? {} : { continuityOperations: Object.fromEntries(Object.entries(record(source.continuityOperations, 'continuity operations')).map(([id, value]) => {
@@ -2168,7 +2172,7 @@ function assertReservationPrecondition(
     throw new AgentMuxError('Agent Session changed before lifecycle reservation.', 'STALE_AGENT_SESSION')
   }
   if (reservation.kind === 'resume' && reservation.preparedSession &&
-    ['hostId', 'providerId', 'executorId', 'workspacePath', 'nativeHandle', 'launchOptions'].some(key =>
+    ['hostId', 'providerId', 'executorId', 'workspacePath', 'toolExecution', 'nativeHandle', 'launchOptions'].some(key =>
       !isDeepStrictEqual(current[key as keyof AgentMuxStoredAgentSession], reservation.preparedSession![key as keyof AgentMuxStoredAgentSession]))) {
     throw new AgentMuxError('The original prepared resume target changed.', 'STALE_AGENT_SESSION')
   }
@@ -2178,7 +2182,7 @@ function assertPreparedReopen(retirement: AgentMuxRetiredAgentSession, session: 
   const history = retirement.history
   if (!history || session.agentSessionId !== retirement.agentSessionId || session.hostId !== retirement.hostId ||
     session.providerId !== history.providerId || session.executorId !== history.executorId ||
-    session.workspacePath !== history.workspacePath || session.createdAt !== history.createdAt ||
+    session.workspacePath !== history.workspacePath || !isDeepStrictEqual(session.toolExecution, history.toolExecution) || session.createdAt !== history.createdAt ||
     JSON.stringify(session.nativeHandle) !== JSON.stringify(history.nativeHandle) || session.run.runId !== retirement.run.runId ||
     session.retiredRuns.length !== 0 || !session.hookBindingId || !session.hookToken || !session.capabilityHash) {
     throw new AgentMuxError('Prepared continue identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
@@ -2334,7 +2338,7 @@ function assertLifecycleCommit(
   if (reservation.kind === 'reopen') {
     const retirement = reservation.expectedRetirement, history = retirement.history
     if (!history || next.hostId !== retirement.hostId || next.providerId !== history.providerId ||
-      next.executorId !== history.executorId || next.workspacePath !== history.workspacePath ||
+      next.executorId !== history.executorId || next.workspacePath !== history.workspacePath || !isDeepStrictEqual(next.toolExecution, history.toolExecution) ||
       next.createdAt !== history.createdAt || JSON.stringify(next.nativeHandle) !== JSON.stringify(history.nativeHandle) ||
       JSON.stringify(next.reopenedFrom) !== JSON.stringify({ run: retirement.run, source: retirement.source, observedAt: retirement.observedAt }) ||
       next.run.runId === retirement.run.runId || !next.retiredRuns.some(run => run.runId === retirement.run.runId)) {
@@ -2351,7 +2355,7 @@ function assertLifecycleCommit(
   }
   if (reservation.kind === 'resume' && reservation.preparedSession) {
     const prepared = reservation.preparedSession, original = prepared.continuity, operation = next.continuity
-    if (['hostId', 'providerId', 'executorId', 'workspacePath', 'nativeHandle', 'hookBindingId', 'hookToken', 'capabilityHash'].some(
+    if (['hostId', 'providerId', 'executorId', 'workspacePath', 'toolExecution', 'nativeHandle', 'hookBindingId', 'hookToken', 'capabilityHash'].some(
       key => !isDeepStrictEqual(next[key as keyof AgentMuxStoredAgentSession], prepared[key as keyof AgentMuxStoredAgentSession])) ||
       original && (!operation || operation.operationId !== original.operationId || operation.requestDigest !== original.requestDigest || operation.action !== original.action ||
         !isDeepStrictEqual(operation.restartLaunch, original.restartLaunch) ||

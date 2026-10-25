@@ -1,3 +1,6 @@
+import { AgentExecutionJournal } from './agent-execution-journal.js'
+import { AgentExecutionHelperStore } from './agent-execution-helper-store.js'
+import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { parsePreparedAuthorProfile, publicAuthorProfile } from './author-profile.js'
 import { parseAgentInputChangesRead, type AgentInputChangesRead, type AgentInputChangesPage } from './agent-input-changes.js'
 import { imageBytes } from './session-history-resource.js'
@@ -229,6 +232,7 @@ const PROVIDER_READ_MAX_CONCURRENT = 4
 const AGENTMUX_CLI_PATH = resolveCoreBinPath('amux')
 
 export type AgentMuxAgentCreateInput = {
+  toolExecution?: import('./agent-tool-execution.js').AgentToolExecutionBinding
   agentSessionId?: string
   createOperationId?: string
   /** Original requested position only; it grants no placement, role or caller authority. */
@@ -270,7 +274,7 @@ export type AgentMuxAgentCreateInput = {
 
 /** Target-owned configuration, with a frozen revision; no source machine argv or environment. */
 export type AgentMuxHostAgentCreateInput = Pick<AgentMuxAgentCreateInput,
-  'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'agentMuxNote' | 'agentMuxTask' | 'optionalContext' |
+  'toolExecution' | 'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'agentMuxNote' | 'agentMuxTask' | 'optionalContext' |
   'launchOptions' | 'cols' | 'rows' | 'nativeResumeSource' | 'spatialIntent'> & {
   executorRevision: string
   /** Existing signed creation intent admission; an initial body is optional. */
@@ -680,7 +684,7 @@ export class AgentMuxClient {
   async createHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
     if (input?.spatialIntent !== undefined) input = { ...input, spatialIntent: parseAgentCreationSpatialIntent(input.spatialIntent) }
-    const allowed = ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt',
+    const allowed = ['toolExecution', 'agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt',
       'agentMuxNote', 'agentMuxTask', 'optionalContext', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId', 'nativeResumeSource', 'spatialIntent']
     if (!input || Object.keys(input).some(key => !allowed.includes(key)) || !input.agentSessionId || !input.createOperationId || !input.executorRevision ||
       input.agentMuxTask !== undefined && typeof input.agentMuxTask !== 'string') {
@@ -734,6 +738,7 @@ export class AgentMuxClient {
         if (descriptor.configRevision !== input.executorRevision) throw new AgentMuxError('Target Executor configuration changed. Refresh its inventory before a new operation.', 'EXECUTOR_REVISION_CONFLICT')
         resolved = {
           agentSessionId: input.agentSessionId!, createOperationId: input.createOperationId!,
+          ...(input.toolExecution === undefined ? {} : { toolExecution: input.toolExecution }),
           ...(input.spatialIntent === undefined ? {} : { spatialIntent: input.spatialIntent }),
           providerId: config.providerId, executorId: input.executorId, workspacePath: input.workspacePath,
           injectAgentMuxGuide: config.injectAgentMuxGuide, args: config.args, env: config.env, commandOverride: config.command,
@@ -1108,7 +1113,7 @@ export class AgentMuxClient {
         }
       },
       providers: { providers: this.providers, probeAgent: (...args) => this.probePreparedAgent(...args), providerLaunch: (...args) => this.providerLaunch(...args) },
-      executors: { hostExecutorOwner: this.hostExecutorOwner, sessionExecutorConfiguration: this.sessionExecutorConfiguration,
+      executors: { prepareToolExecutionLaunch: (...args) => this.prepareToolExecutionLaunch(...args), hostExecutorOwner: this.hostExecutorOwner, sessionExecutorConfiguration: this.sessionExecutorConfiguration,
         sessionExecutorOptions: (...args) => this.sessionExecutorOptions(...args) },
       hooks: {
         hookServer: this.hookServer,
@@ -4119,6 +4124,88 @@ export class AgentMuxClient {
     }
   }
 
+  private executionHelpers?: AgentExecutionHelperStore
+  private executionHelperStore(): AgentExecutionHelperStore {
+    return this.executionHelpers ??= new AgentExecutionHelperStore(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory)
+  }
+
+  private async prepareToolExecutionLaunch(provider: import('./agent-provider.js').AgentProvider, plan: import('./types.js').AgentLaunchPlan,
+    binding: import('./agent-tool-execution.js').AgentToolExecutionBinding, launchWorkspacePath: string, agentSessionId: string): Promise<import('./types.js').AgentLaunchPlan> {
+    binding = parseAgentToolExecutionBinding(binding)
+    if (!provider.prepareToolExecutionLaunch) throw new AgentMuxError('This Provider has no qualified native tool execution launch.', 'EXECUTION_PROVIDER_UNSUPPORTED')
+    const original = await this.executionHelperStore().read(binding.bindingId, 'frontend')
+    if (!original || original.input.providerId !== provider.id || original.input.agentSessionId !== agentSessionId || !isDeepStrictEqual(original.input.toolExecution, binding))
+      throw new AgentMuxError('The requested tool resource differs from the original frontend binding.', 'EXECUTION_BINDING_MISMATCH')
+    const endpoint = await this.executionHelperStore().pinFrontend(binding.bindingId, async record => {
+      const run = await this.inspectPreparedTerminal(record.preparation.prepared)
+      if (!run || run.state !== 'running') throw new AgentMuxError('The original frontend helper is not confirmed running; no replacement was started.', 'EXECUTION_HELPER_UNAVAILABLE')
+      const replay = await this.readRunReplay({ runId: run.runId }, 0, 'raw')
+      if (replay.gap) throw new AgentMuxError('The original frontend endpoint receipt is unavailable; its Run was preserved.', 'EXECUTION_PROTOCOL_GAP')
+      const parts: Uint8Array[] = []
+      let bytes = 0, cursor = 0
+      for (const chunk of replay.replay) {
+        if (chunk.startByte !== cursor) throw new AgentMuxError('The original helper endpoint receipt is not contiguous.', 'EXECUTION_PROTOCOL_GAP')
+        const data = Buffer.from(chunk.dataBytes)
+        const newline = data.indexOf(10)
+        const part = newline < 0 ? data : data.subarray(0, newline)
+        parts.push(part); bytes += part.length; cursor = chunk.endByte
+        if (bytes > 4096) throw new AgentMuxError('The original helper has no bounded endpoint receipt.', 'EXECUTION_HELPER_UNAVAILABLE')
+        if (newline < 0) continue
+        const frame = JSON.parse(Buffer.concat(parts, bytes).toString('utf8')) as { type?: unknown; url?: unknown }
+        if (frame.type !== 'ready' || typeof frame.url !== 'string') throw new AgentMuxError('The original helper has not confirmed its endpoint.', 'EXECUTION_HELPER_UNAVAILABLE')
+        return { runId: run.runId, ownerInstanceId: this.runtimeIdentity().instanceId, url: frame.url }
+      }
+      throw new AgentMuxError('The original helper endpoint is not yet observed. Recheck this binding; no replacement was started.', 'EXECUTION_HELPER_UNAVAILABLE')
+    })
+    if (this.runtimeIdentity().instanceId !== endpoint.ownerInstanceId) throw new AgentMuxError('The original execution helper Runtime is unavailable.', 'EXECUTION_RUNTIME_CHANGED')
+    const run = await this.inspectPreparedTerminal(original.preparation.prepared, { runId: endpoint.runId })
+    if (!run || run.state !== 'running') throw new AgentMuxError('The original execution helper is unavailable; the original Session remains retained.', 'EXECUTION_HELPER_UNAVAILABLE')
+    return await provider.prepareToolExecutionLaunch(plan, { binding, url: endpoint.url, launchWorkspacePath })
+  }
+
+  /** Inspect the exact resource owner's retained operation; no native action or replay. */
+  async inspectAgentExecutionOperation(key: import('./agent-execution-journal.js').AgentExecutionOperationKey): Promise<import('./agent-execution-journal.js').AgentExecutionOperation | null> {
+    key = structuredClone(key)
+    safeId(key.bindingId, 'Execution binding id')
+    safeId(key.streamGeneration, 'Execution stream generation')
+    const original = await this.executionHelperStore().read(key.bindingId, 'executor')
+    if (!original?.preparation.journalIdentity || original.input.grant?.bindingId !== key.bindingId)
+      throw new AgentMuxError('The original resource execution preparation is unavailable; no empty journal was substituted.', 'EXECUTION_HELPER_UNAVAILABLE')
+    return await AgentExecutionJournal.inspectRetained(join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory,
+      'agent-execution', key.bindingId), key, original.preparation.journalIdentity)
+  }
+
+  /** Prepare a Provider helper on this exact Host; no child is started here. */
+  async prepareAgentExecutionHelper(input: import('./agent-execution-helper.js').AgentExecutionHelperInput): Promise<import('./agent-execution-helper.js').AgentExecutionHelperPreparation> {
+    input = structuredClone(input)
+    safeId(input.bindingId, 'Execution binding id')
+    safeId(input.createOperationId, 'Execution helper creation id')
+    if (!['frontend', 'executor'].includes(input.role) || typeof input.workspacePath !== 'string' || !input.workspacePath || input.workspacePath.includes('\0'))
+      throw new AgentMuxError('The exact helper role and workspace are required.', 'INVALID_EXECUTION_BINDING')
+    if (input.role === 'executor' && (input.grant?.scope !== 'host-user' || input.grant.bindingId !== input.bindingId))
+      throw new AgentMuxError('This resource Host has no authorization for the selected execution binding.', 'EXECUTION_RESOURCE_NOT_AUTHORIZED')
+    const provider = this.providers.get(input.providerId)
+    if (!provider.prepareExecutionHelper) throw new AgentMuxError('This Provider has no qualified native tool execution transport.', 'EXECUTION_PROVIDER_UNSUPPORTED')
+    if (input.role === 'frontend') {
+      safeId(input.agentSessionId ?? '', 'Original execution Agent Session id')
+      input.toolExecution = parseAgentToolExecutionBinding(input.toolExecution)
+      if (input.toolExecution.bindingId !== input.bindingId) throw new AgentMuxError('Frontend and resource binding identities differ.', 'EXECUTION_BINDING_MISMATCH')
+    }
+    return await this.executionHelperStore().prepare(input, async () => {
+      const journalDirectory = join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'agent-execution', input.bindingId)
+      let journalIdentity: string | undefined
+      if (input.role === 'executor') {
+        const journal = await AgentExecutionJournal.open(journalDirectory)
+        try { journalIdentity = journal.identity } finally { await journal.close() }
+      }
+      const plan = await provider.prepareExecutionHelper!({ ...input, executable: provider.executable, journalDirectory,
+        ...(journalIdentity ? { journalIdentity } : {}) })
+      const prepared = await this.prepareTerminal({ workspacePath: input.workspacePath, createOperationId: input.createOperationId,
+        command: plan.command, args: plan.args, env: plan.env })
+      return { bindingId: input.bindingId, role: input.role, providerId: input.providerId, prepared, ...(journalIdentity ? { journalIdentity } : {}) }
+    })
+  }
+
   /** Capture this Host's complete launch request without starting or observing a Run. */
   async prepareTerminal(input: AgentMuxTerminalCreateInput): Promise<AgentMuxPreparedTerminal> {
     input = structuredClone(input)
@@ -4801,6 +4888,7 @@ export class AgentMuxClient {
     execute: (input: ActiveAgentCreation['input'], execution: AgentCreationExecution) => ReturnType<AgentMuxClient['createAgentWithDelivery']>
   ): ReturnType<AgentMuxClient['createAgentWithDelivery']> {
     const frozen = structuredClone(input)
+    if (frozen.toolExecution !== undefined) frozen.toolExecution = parseAgentToolExecutionBinding(frozen.toolExecution)
     if (frozen.spatialIntent !== undefined) frozen.spatialIntent = parseAgentCreationSpatialIntent(frozen.spatialIntent)
     frozen.createOperationId ??= mintObjectId()
     const cid = frozen.createOperationId
@@ -5026,7 +5114,9 @@ export class AgentMuxClient {
         throw executorUnavailableError(provider.label, capability)
       }
       const originalExecutable = plan.command
-      const managedLaunch = await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: forkSource ? 'fork' : nativeResumeSource ? 'resume' : 'create', prompt: launchPrompt })
+      const managedLaunch = input.toolExecution
+        ? { plan: await this.prepareToolExecutionLaunch(provider, plan, input.toolExecution, input.workspacePath, agentSessionId) }
+        : await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: forkSource ? 'fork' : nativeResumeSource ? 'resume' : 'create', prompt: launchPrompt })
       if (managedLaunch) plan = managedLaunch.plan
       const initialInput: AgentMuxContinuityLaunchInput | undefined = composed.text.trim() ? {
         input: { submissionId: `launch-prompt:${lifecycleOperationId}`, prompt: originalPrompt ?? '' },
@@ -5058,7 +5148,7 @@ export class AgentMuxClient {
       let preparedCreation: AgentMuxPreparedCreation | undefined
       if (reservation.kind === 'create') {
         const preparedAt = Date.now()
-        preparedCreation = { kind: 'agent', agentSessionId, providerId: input.providerId, executorId, hostId: 'local',
+        preparedCreation = { kind: 'agent', ...(input.toolExecution ? { toolExecution: input.toolExecution } : {}), agentSessionId, providerId: input.providerId, executorId, hostId: 'local',
           workspacePath: input.workspacePath, hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           ...(managedLaunch?.nativeActor ? { nativeActor: managedLaunch.nativeActor } : {}),
           ...(initialInput ? { initialInput } : {}),
@@ -5121,6 +5211,7 @@ export class AgentMuxClient {
       const boundInitialInput = bindInitialInput(initialInput, agentSessionId, runRef(run.runId))
       const session: AgentMuxStoredAgentSession = {
         kind: 'agent',
+        ...(input.toolExecution ? { toolExecution: input.toolExecution } : {}),
         agentSessionId,
         providerId: input.providerId,
         executorId,

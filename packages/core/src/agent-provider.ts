@@ -185,6 +185,8 @@ export type AgentProvider = {
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
   buildForkLaunch?(context: AgentProviderForkContext): AgentLaunchPlan
   /** Original executable has already been probed; this final plan also enters original lifecycle preparation. */
+  prepareToolExecutionLaunch?: import('./agent-tool-execution.js').PrepareAgentToolExecutionLaunch
+  prepareExecutionHelper?: import('./agent-execution-helper.js').AgentExecutionHelperLaunch
   prepareManagedLaunch?(plan: AgentLaunchPlan, lifecycleOperationId: string, context: { kind: 'create' | 'resume' | 'fork'; prompt?: string }): Promise<AgentProviderManagedLaunch>
   /** Encode replies from an exact Provider-read record; no caller-supplied display text. */
   planQuestionReply?(record: AgentSessionHistoryItem, answers: readonly AgentSessionHistoryQuestionAnswer[]): string
@@ -248,6 +250,8 @@ export type AgentProviderDefinition = {
     prompt: string | undefined,
     args: readonly string[]
   ) => string[]
+  prepareToolExecutionLaunch?: AgentProvider['prepareToolExecutionLaunch']
+  prepareExecutionHelper?: AgentProvider['prepareExecutionHelper']
   prepareManagedLaunch?: AgentProvider['prepareManagedLaunch']
   planQuestionReply?: AgentProvider['planQuestionReply']
   prepareNativeInput?: AgentProvider['prepareNativeInput']
@@ -453,6 +457,8 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     executable: catalog.executable,
     catalog,
     hook: definition.hook,
+    ...(definition.prepareToolExecutionLaunch ? { prepareToolExecutionLaunch: definition.prepareToolExecutionLaunch } : {}),
+    ...(definition.prepareExecutionHelper ? { prepareExecutionHelper: definition.prepareExecutionHelper } : {}),
     ...(definition.prepareManagedLaunch ? { prepareManagedLaunch: definition.prepareManagedLaunch } : {}),
     ...(definition.planQuestionReply ? { planQuestionReply: definition.planQuestionReply } : {}),
     ...(definition.prepareNativeInput ? { prepareNativeInput: definition.prepareNativeInput } : {}),

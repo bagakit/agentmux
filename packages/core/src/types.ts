@@ -848,7 +848,7 @@ export type AgentSessionHistoryCollaboration =
 
 /** Durable reading and provenance only; no authority to control a current Run or send input. */
 export type AgentSessionHistoryMetadata = Pick<AgentMuxStoredAgentSession,
-  'providerId' | 'executorId' | 'workspacePath' | 'nativeHandle' | 'observedNativeHandle' | 'createdAt' | 'creation' | 'forkedFrom'> & {
+  'providerId' | 'executorId' | 'workspacePath' | 'toolExecution' | 'nativeHandle' | 'observedNativeHandle' | 'createdAt' | 'creation' | 'forkedFrom'> & {
   previousNativeHandle?: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
 }
 
@@ -1216,6 +1216,7 @@ export type AgentMuxAgentCreationInspection = AgentMuxAgentSession |
   ({ kind: 'retired-agent' } & import('./agent-session-store.js').AgentMuxRetiredAgentSession)
 
 export type AgentMuxAgentSession = {
+  toolExecution?: import('./agent-tool-execution.js').AgentToolExecutionBinding
   /** Read-only admissions retained through explicit retirement and reopen. */
   continuityControlReceipts?: Record<string, import('./agent-session-recovery/control-contract.js').AgentMuxContinuityControlReceipt>
   /** Core-owned current decision and exact original operation receipts. */

@@ -198,3 +198,7 @@ export type { AgentInputImageReference, AgentInputImage, AgentInputResourceRead,
 export { parseAgentInputResourceRead, parseAgentInputResourceResult, inputImageMatches } from './agent-input-resource.js'
 export * from './v8-profile.js'
 export * from './runtime-v8-profile.js'
+
+export type { AgentExecutionHelperInput, AgentExecutionHelperPreparation, AgentExecutionResourceGrant } from './agent-execution-helper.js'
+export type { AgentToolExecutionBinding } from './agent-tool-execution.js'
+export type { AgentExecutionOperationKey, AgentExecutionOperation } from './agent-execution-journal.js'

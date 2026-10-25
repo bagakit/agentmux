@@ -1,3 +1,5 @@
+import { prepareCodexToolExecutionLaunch } from './codex-tool-execution-launch.js'
+import { prepareCodexExecutionHelper } from './codex-execution-helper.js'
 import { CODEX_USAGE_CAPABILITY } from './codex-usage.js'
 import { planCodexQuestionReply } from './codex-question.js'
 import { observeCodexTerminalFrontend, reconnectCodexTerminalFrontend } from './codex-managed-frontend.js'
@@ -191,6 +193,8 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
   })
   const verifyPromptExecutionTransport = createCodexPromptExecutionTransportVerifier()
   return defineAgentProvider({
+    prepareToolExecutionLaunch: (plan, context) => prepareCodexToolExecutionLaunch(plan, { workspacePath: context.binding.workspacePath, url: context.url }, { launchWorkspacePath: context.launchWorkspacePath }),
+    prepareExecutionHelper: prepareCodexExecutionHelper,
     prepareManagedLaunch: prepareCodexManagedLaunch,
     prepareNativeInput: prepareCodexNativeInput,
     planQuestionReply: planCodexQuestionReply,
