@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { nextCalendarOccurrence, latestCalendarOccurrence } from '@agentmux/core/schedule-calendar'
-import { ContinuousProgressLoopManager, type LoopTickHandler } from '@agentmux/host/continuous-progress-loop-manager'
+import { ContinuousProgressLoopManager, type LoopTickHandler, type LoopObservationProvider, type FutureProgressInputOwner } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { observeAgent, type ContinuousProgressLoop, type AgentMuxRpcCallContext, type AgentMuxPendingInteraction } from '@agentmux/core'
 import { parseAgentScheduleCalendar, type AgentScheduleCalendar } from '../../../packages/core/src/agent-schedule.js'
@@ -399,4 +399,166 @@ describe('minute repeating schedule', () => {
       expect(() => parseScheduleRpcParams('schedule.create', { target, prompt: 'x', operationId: 'x', ...timing })).toThrow()
     }
   })
+})
+
+describe('due busy schedule pre-observation', () => {
+  it('rechecks the exact busy target without repeatedly claiming or writing and delivers once it is idle', async () => {
+    let sent = 0
+    const h = await owner(async () => { sent++; return 'sent' })
+    const created = await h.manager.call('schedule.create', { target, everyMs: 60_000, prompt: 'original', operationId: 'busy-repeat' })
+    const due = created.schedule.nextCheckAt
+    const observe = vi.spyOn(h.manager as unknown as { observe: (...args: any[]) => Promise<any> }, 'observe')
+    const writes = vi.spyOn(h.store, 'save').mockResolvedValue(undefined)
+    h.set({ working: true })
+    for (let seconds = 0; seconds < 600; seconds++) {
+      const now = due + seconds * 1000; h.set({ now }); await h.manager.check(now)
+    }
+    expect(sent).toBe(0); expect(observe).toHaveBeenCalledTimes(600)
+    expect(writes.mock.calls.length).toBeLessThanOrEqual(11)
+    expect(h.manager.list()[0]).toMatchObject({ loopId: created.schedule.loopId, status: 'active', lastOutcome: 'skipped', lastDecision: 'stale-working', nextCheckAt: due + 540_000 })
+    expect(h.manager.list()[0]!.lastTickId).toBeUndefined()
+    h.set({ now: due + 599_000, working: false }); await h.manager.check(due + 599_000)
+    expect(sent).toBe(1)
+    expect(h.manager.list()[0]).toMatchObject({ loopId: created.schedule.loopId, lastOccurrenceAt: due + 540_000 })
+  })
+  it('does not claim or deliver after an explicit pause cancels an in-flight pre-observation', async () => {
+    let sent = 0
+    const h = await owner(async () => { sent++; return 'sent' })
+    const created = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'original', operationId: 'pause-probe' })
+    const entered = deferred(), release = deferred()
+    const ports = h.manager as unknown as { observe: (...args: any[]) => Promise<any> }, original = ports.observe
+    ports.observe = async (...args) => { const observation = await original(...args); entered.resolve(); await release.promise; return observation }
+    h.set({ now: created.schedule.nextCheckAt, working: true })
+    const checking = h.manager.check(); await entered.promise
+    await h.manager.call('schedule.pause', { scheduleId: created.schedule.loopId, expectedRevision: 1, operationId: 'pause-original' })
+    release.resolve(); await checking
+    expect(sent).toBe(0)
+    expect(h.manager.list()[0]).toMatchObject({ loopId: created.schedule.loopId, status: 'paused', nextCheckAt: created.schedule.nextCheckAt, lastDecision: 'Paused by you.' })
+    expect(h.manager.list()[0]!.lastTickId).toBeUndefined()
+  })
+  it('checks only the requested loop and does not observe or mutate an unrelated due target', async () => {
+    const h = await owner()
+    const a = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'A', operationId: 'scoped-a' })
+    const b = await h.manager.call('schedule.create', { target: { ...target, agentSessionId: 'other' }, afterMs: 60_000, prompt: 'B', operationId: 'scoped-b' })
+    h.set({ now: a.schedule.nextCheckAt })
+    const before = structuredClone(h.manager.list().find(loop => loop.loopId === b.schedule.loopId))
+    const observe = vi.spyOn(h.manager as unknown as { observe: (...args: any[]) => Promise<any> }, 'observe')
+    await h.manager.checkNow(a.schedule.loopId)
+    expect(observe.mock.calls.length).toBeGreaterThan(0)
+    expect(observe.mock.calls.every(call => call[0].loopId === a.schedule.loopId)).toBe(true)
+    expect(h.manager.list().find(loop => loop.loopId === b.schedule.loopId)).toEqual(before)
+  })
+  it('rechecks input occupation after a ready pre-observation before attempting delivery', async () => {
+    let sent = 0, calls = 0
+    const h = await owner(async () => { sent++; return 'sent' })
+    const created = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'original', operationId: 'input-changed' })
+    const ports = h.manager as unknown as { observe: LoopObservationProvider }, original = ports.observe
+    ports.observe = async (...args) => { const result = await original(...args); if (++calls === 1) h.set({ occupied: true }); return result }
+    h.set({ now: created.schedule.nextCheckAt }); await h.manager.check()
+    expect(calls).toBe(2); expect(sent).toBe(0)
+    expect(h.manager.list()[0]).toMatchObject({ status: 'active', nextCheckAt: created.schedule.nextCheckAt, lastDecision: 'user-input-changed' })
+  })
+  it('keeps the original failure and unknown state if the pre-observation fails', async () => {
+    let sent = 0
+    const h = await owner(async () => { sent++; return 'sent' })
+    const created = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'original', operationId: 'observation-failed' })
+    const ports = h.manager as unknown as { observe: LoopObservationProvider }
+    ports.observe = async () => { throw new Error('original observation unavailable') }
+    h.set({ now: created.schedule.nextCheckAt }); await h.manager.check()
+    expect(sent).toBe(0)
+    expect(h.manager.list()[0]).toMatchObject({ loopId: created.schedule.loopId, status: 'paused', lastOutcome: 'unknown', lastDecision: 'original observation unavailable' })
+    expect(await h.reload()).toEqual(h.manager.list())
+  })
+  it('restores the same due schedule after Host restart and delivers when the Agent is idle', async () => {
+    let sent = 0
+    const h = await owner(async () => { sent++; return 'sent' })
+    const created = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'original', operationId: 'busy-restart' })
+    const due = created.schedule.nextCheckAt
+    h.set({ now: due, working: true }); await h.manager.check(due)
+    expect((await h.reload())[0]).toMatchObject({ loopId: created.schedule.loopId, status: 'active', nextCheckAt: due, lastOutcome: 'skipped' })
+    await h.manager.stop()
+    const ports = h.manager as unknown as { observe: LoopObservationProvider; futureInputs: FutureProgressInputOwner }
+    const restarted = new ContinuousProgressLoopManager(h.store, async () => { sent++; return 'sent' }, () => due + 1000, ports.observe, ports.futureInputs)
+    managers.push(restarted); await restarted.start()
+    h.set({ now: due + 1000, working: false }); await restarted.check(due + 1000)
+    expect(sent).toBe(1)
+    expect(restarted.list()[0]).toMatchObject({ loopId: created.schedule.loopId, nextCheckAt: due, status: 'stopped', lastOccurrenceAt: due })
+  })
+})
+
+describe('ordered due targets', () => {
+  it('delivers ready A before observing a later blocked B', async () => {
+    const sent: string[] = [], entered = deferred(), release = deferred()
+    const h = await owner(async loop => { sent.push(loop.agentSessionId); return 'sent' })
+    const a = () => h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'A', operationId: 'counter-a' })
+    const b = () => h.manager.call('schedule.create', { target: { ...target, agentSessionId: 'other' }, afterMs: 60_000, prompt: 'B', operationId: 'counter-b' })
+    const first = await a(); await b()
+    const ports = h.manager as unknown as { observe: (...args: any[]) => Promise<any> }, original = ports.observe
+    ports.observe = async (...args) => { if (args[0].agentSessionId === 'other') { entered.resolve(); await release.promise }; return await original(...args) }
+    h.set({ now: first.schedule.nextCheckAt })
+    const checking = h.manager.check()
+    await entered.promise; const sentBeforeB = sent.includes(target.agentSessionId)
+    release.resolve(); await checking
+    expect(sentBeforeB).toBe(true)
+    expect(sent).toContain(target.agentSessionId)
+  })
+})
+
+it('keeps a later due schedule unchanged when it is cancelled while an earlier target is delivering', async () => {
+  const entered = deferred(), release = deferred(), seen: string[] = []
+  const h = await owner(async loop => {
+    seen.push(loop.agentSessionId)
+    if (loop.agentSessionId === target.agentSessionId) { entered.resolve(); await release.promise }
+    return 'sent'
+  })
+  const a = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'A', operationId: 'before-a' })
+  const b = await h.manager.call('schedule.create', { target: { ...target, agentSessionId: 'other' }, everyMs: 60_000, prompt: 'B', operationId: 'cancel-b' })
+  const now = a.schedule.nextCheckAt + 120_000
+  h.set({ now })
+  const checking = h.manager.check(now); await entered.promise
+  const cancelled = await h.manager.call('schedule.cancel', { scheduleId: b.schedule.loopId, expectedRevision: 1, operationId: 'cancel-original-b' })
+  release.resolve(); await checking
+  expect(seen).toEqual([target.agentSessionId])
+  expect(h.manager.list().find(loop => loop.loopId === b.schedule.loopId)).toEqual(cancelled.schedule)
+  expect((await h.reload()).find(loop => loop.loopId === b.schedule.loopId)).toEqual(cancelled.schedule)
+})
+
+it.each(['occupied', 'permission'] as const)('preserves the original due and avoids repeated writes while %s remains confirmed', async blocked => {
+  let sent = 0
+  const h = await owner(async () => { sent++; return 'sent' })
+  const created = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'same original message', operationId: 'held-' + blocked })
+  const due = created.schedule.nextCheckAt, writes = vi.spyOn(h.store, 'save').mockResolvedValue(undefined)
+  h.set({ [blocked]: true })
+  for (let seconds = 0; seconds < 120; seconds++) {
+    const now = due + seconds * 1000; h.set({ now }); await h.manager.check(now)
+  }
+  expect(sent).toBe(0); expect(writes).toHaveBeenCalledTimes(1)
+  expect(h.manager.list()[0]).toMatchObject({ loopId: created.schedule.loopId, status: 'active', nextCheckAt: due, lastOutcome: 'skipped', lastDecision: blocked === 'occupied' ? 'user-input-changed' : 'interaction-pending' })
+  h.set({ [blocked]: false }); await h.manager.check(due + 119_000)
+  expect(sent).toBe(1)
+  expect(h.manager.list()[0]).toMatchObject({ loopId: created.schedule.loopId, status: 'stopped', lastOccurrenceAt: due })
+})
+
+it('does not clone unrelated large due schedules while explicitly rechecking one unchanged busy target', async () => {
+  const h = await owner()
+  const created = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'original A', operationId: 'bounded-a' })
+  const scheduler = (h.manager as unknown as { scheduler: import('@agentmux/core').ContinuousProgressScheduler }).scheduler
+  const [original] = h.manager.list()
+  const unrelated = Array.from({ length: 256 }, (_, i) => ({ ...original!, loopId: `unrelated-${i}`, agentSessionId: `other-${i}`, prompt: 'unrelated large body '.repeat(800) }))
+  scheduler.restore([original!, ...unrelated])
+  vi.spyOn(h.store, 'save').mockResolvedValue(undefined)
+  h.set({ now: created.schedule.nextCheckAt, working: true })
+  await h.manager.checkNow(created.schedule.loopId)
+  const cloned = vi.spyOn(globalThis, 'structuredClone')
+  try {
+    await h.manager.checkNow(created.schedule.loopId)
+    expect(cloned.mock.calls.length).toBeGreaterThan(0)
+    const containsUnrelated = (value: unknown): boolean => {
+      if (!value || typeof value !== 'object') return false
+      if (Array.isArray(value)) return value.some(containsUnrelated)
+      return typeof (value as { loopId?: unknown }).loopId === 'string' && (value as { loopId: string }).loopId.startsWith('unrelated-')
+    }
+    expect(cloned.mock.calls.some(([value]) => containsUnrelated(value))).toBe(false)
+  } finally { cloned.mockRestore() }
+  expect(scheduler.get('unrelated-255')).toEqual(unrelated[255])
 })
