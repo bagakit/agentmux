@@ -43,8 +43,11 @@ it('keeps keyboard, mixed and incomplete input on the original manual pause path
     '\x1b[<64;10;20M\x1b[', '\x1b[?unknown',
     Uint8Array.of(27, 91, 77, 96, 32, 42), '\x1b[M \u00ff!'
   ]
+  const now = vi.spyOn(Date, 'now')
   try {
-    for (const data of edits) await bridge.api!.sessions.write(control, data, 'user')
+    // Each edit is its own burst here, so each one starts the original pause.
+    let clock = 1_000_000
+    for (const data of edits) { now.mockReturnValue(clock += 5_000); await bridge.api!.sessions.write(control, data, 'user') }
     const pauses = h.rpc.mock.calls.filter(([, method]) => method === 'agent.automation.pause')
     expect(pauses).toHaveLength(edits.length)
     for (const [host, , target] of pauses) {
@@ -52,6 +55,35 @@ it('keeps keyboard, mixed and incomplete input on the original manual pause path
       expect(target).toMatchObject({ agentSessionId: control.agentSessionId, expectedRun: control.run, ownerInstanceId: 'original-owner', operationId: expect.any(String) })
     }
     expect(h.write.mock.calls.map(([, data]) => data)).toEqual(edits)
+  } finally { await h.dispose() }
+})
+
+it('starts one original pause per continuous typing burst and never withholds a key', async () => {
+  const h = await fixture(), now = vi.spyOn(Date, 'now')
+  const other = { ...control, run: { runId: 'other-run' } }
+  try {
+    let clock = 2_000_000
+    const type = async (target: typeof control, text: string, gapMs = 120) => {
+      for (const key of text) { now.mockReturnValue(clock += gapMs); await bridge.api!.sessions.write(target, key, 'user') }
+    }
+    const pauses = () => h.rpc.mock.calls.filter(([, method]) => method === 'agent.automation.pause').map(([, , target]) => target as { expectedRun: { runId: string } })
+    await type(control, 'hello world, a long burst of keys')
+    expect(pauses(), 'one burst on one exact Run is one cancel-only pause').toHaveLength(1)
+    await type(other, 'abc')
+    expect(pauses().map(target => target.expectedRun.runId), 'another exact Run owns its own burst').toEqual([control.run.runId, other.run.runId])
+    now.mockReturnValue(clock += 2_000)
+    await type(control, 'next', 10)
+    expect(pauses(), 'a pause in typing ends the burst; the next key pauses afresh').toHaveLength(3)
+    expect(h.write.mock.calls.map(([, data]) => data).join(''), 'every key is still sent in order').toBe('hello world, a long burst of keysabcnext')
+    await bridge.api!.sessions.paste(control, 'paste', 'paste')
+    expect(pauses(), 'paste remains a discrete explicit pause inside a burst').toHaveLength(4)
+    await type(control, 'still typing', 10)
+    expect(pauses(), 'continued keys stay in the same burst').toHaveLength(4)
+    const target = { hostId: control.hostId, agentSessionId: control.agentSessionId, providerId: 'codex', workspacePath: 'private-workspace' }
+    // The explicit change ends the burst before its own Host request, whatever that request's outcome.
+    await bridge.api!.continuousProgress.action(target, 'loop', 'resume', {} as never, 'resume-operation').catch(() => {})
+    await type(control, 'x', 10)
+    expect(pauses(), 'after an explicit progress change the next key pauses afresh').toHaveLength(5)
   } finally { await h.dispose() }
 })
 
