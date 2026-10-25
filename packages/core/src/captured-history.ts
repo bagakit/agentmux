@@ -130,7 +130,7 @@ export function readCapturedPage(db: DatabaseSync, id: string, input: AgentCaptu
    WHERE v.session_id=? AND v.epoch=? AND v.sequence>? AND v.sequence<=? ORDER BY v.sequence LIMIT ?`).all(id, stream.epoch, input.afterSequence, cut, limit + 1);
   }
   else if (input.recordId !== undefined && input.recordRevision !== undefined) {
-    rows = db.prepare(`SELECT v.*,h.first_sequence FROM captured_record_versions v JOIN captured_record_heads h USING(session_id,epoch,record_id)
+    rows = db.prepare(`SELECT v.*,h.first_sequence FROM captured_record_versions v INDEXED BY captured_exact_version JOIN captured_record_heads h USING(session_id,epoch,record_id)
    WHERE v.session_id=? AND v.epoch=? AND v.record_id=? AND v.revision=? AND v.sequence<=? ORDER BY v.sequence DESC LIMIT 1`)
       .all(id, stream.epoch, input.recordId, input.recordRevision, cut);
   }
