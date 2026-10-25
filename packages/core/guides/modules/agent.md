@@ -24,6 +24,9 @@ window, then its original cursor. For folded process reading, add --process-deta
 and keep that representation on inspect/changes continuations. Deferred records retain exact
 original references and revisions; read their full body with the returned versioned anchor
 through inspect --input (omit processDetails). Speech and interactions stay complete.
+Original turnOutcome records completed, failed or interrupted independently of metrics and current
+activity; deferred headers retain it. Failed outcomes preserve the Provider diagnosis and exact
+original turn. Optional publicMessage is a safe sharing summary, not permission to publish or retry.
 This saves wire and Renderer payload, not initial source IO; agent history --source captured or native reads full
 retained sources. Use history --kind user-message for input records, retaining human,
 Agent, external, platform and unknown authorship. For replies, inspect original assistant
