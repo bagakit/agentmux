@@ -152,7 +152,9 @@ export async function createMoteInputFixture() {
     capabilities: provider.catalog.capabilities
   })
   let primaryIdle = false,
-    unknownNotice = false
+    unknownNotice = false,
+    refusedNotices = 0,
+    idleOpportunity = 0
   const writes: Array<{
     key: ReturnType<typeof nativeInputCorrelationKey>
     wire: string
@@ -167,7 +169,8 @@ export async function createMoteInputFixture() {
           ? 'working'
           : 'idle',
       sourceId: 'native-' + context.nativeHandle?.sessionId,
-      id: 'idle-1'
+      // Each idle() models one new authoritative primary idle opportunity.
+      id: 'idle-' + idleOpportunity
     }),
     prepareNativeInput: async (_context, target) => ({
       plan: {
@@ -184,6 +187,12 @@ export async function createMoteInputFixture() {
         const key = nativeInputCorrelationKey(plan.clientCorrelation!)
         writes.push({ key, wire, thread: plan.threadId, correlation: plan.clientCorrelation! })
         if (unknownNotice && key?.agentSessionId === 'primary') throw Error('Native notice ACK unavailable')
+        // The original native actor definitively rejects this whole attempt, as when the primary
+        // began other work after the observed idle opportunity.
+        if (refusedNotices > 0 && key?.agentSessionId === 'primary') {
+          refusedNotices--
+          return { outcome: 'not-applied', errorCode: -32001 }
+        }
         return plan.operation === 'queue-idle'
           ? {
               outcome: 'admitted',
@@ -234,6 +243,7 @@ export async function createMoteInputFixture() {
     rpc.call('agent.input.observation', { agentSessionId: 'member', observationId: observation(id) })
   const idle = () => {
     primaryIdle = true
+    idleOpportunity++
     observer.changed('primary')
   }
   const settle = async () => {
@@ -243,7 +253,7 @@ export async function createMoteInputFixture() {
       await Promise.all([...jobs.values()].map((value) => value.promise))
     }
   }
-  const append = async (id: string, qualified = true, padding = 0) => {
+  const answer = async (id: string, qualified = true) => {
     const keyValue = key(id),
       turn = 'turn-' + id
     await appendFile(
@@ -274,15 +284,43 @@ export async function createMoteInputFixture() {
             content: [{ type: 'output_text', text: 'Original result ' + id }],
             internal_chat_message_metadata_passthrough: { turn_id: turn }
           }
-        },
-        {
-          type: 'event_msg',
-          payload: { type: 'task_complete', turn_id: turn, ...(padding ? { diagnostic: 'x'.repeat(padding) } : {}) }
         }
       ])
     )
     observer.changed('member')
     await settle()
+  }
+  const complete = async (id: string, padding = 0) => {
+    await appendFile(
+      transcript,
+      jsonl([
+        {
+          type: 'event_msg',
+          payload: {
+            type: 'task_complete',
+            turn_id: 'turn-' + id,
+            ...(padding ? { diagnostic: 'x'.repeat(padding) } : {})
+          }
+        }
+      ])
+    )
+    observer.changed('member')
+    await settle()
+  }
+  const appendReplies = async (id: string, count: number, referencePadding = 0) => {
+    await appendFile(transcript, jsonl(Array.from({ length: count }, (_, index) => ({
+      type: 'response_item', payload: {
+        type: 'message', role: 'assistant', id: `reply-${id}-${index}-` + 'r'.repeat(referencePadding),
+        content: [{ type: 'output_text', text: `Reply ${index} for ${id}` }],
+        internal_chat_message_metadata_passthrough: { turn_id: 'turn-' + id }
+      }
+    }))))
+    observer.changed('member')
+    await settle()
+  }
+  const append = async (id: string, qualified = true, padding = 0) => {
+    await answer(id, qualified)
+    await complete(id, padding)
   }
   const cli = async (id: string) => {
     const result = await runSourceObjectCli(
@@ -323,11 +361,17 @@ export async function createMoteInputFixture() {
     observation,
     read,
     idle,
+    answer,
+    complete,
+    appendReplies,
     append,
     cli,
     settle,
     loseNotice: () => {
       unknownNotice = true
+    },
+    refuseNotices: (count: number) => {
+      refusedNotices = count
     },
     close: async () => {
       for (const close of cleanup.reverse()) await close()

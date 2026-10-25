@@ -9,6 +9,9 @@ import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { moteInputObservationId } from '../src/mote-input.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
+import { consumeConversationWindowPage } from '../src/conversation-changes.js'
+import { MoteInputOwner } from '../src/mote-input-owner.js'
+import { moteInputNoticeWireMatches } from '../src/mote-input.js'
 import { serializeMoteQuickMode } from '../../../apps/host/src/mote-model.js'
 import { questionReplyOwner } from './helpers/question-reply-owner.js'
 import { withInteractionOperation } from './fixtures/interaction-client.js'
@@ -550,4 +553,218 @@ it('the actual primary has an explicit self receipt and never receives another c
   )
   expect(f.writes.filter((w) => w.key?.agentSessionId === 'primary')).toHaveLength(1)
   expect(await f.queue.listMoteInputObservations()).toEqual([])
+})
+
+it('a proven not-applied notice is retried once at the next authoritative idle; its refused attempt stays inspectable', async () => {
+  const f = await fixture()
+  f.refuseNotices(1)
+  await f.submit('refused')
+  f.idle()
+  await f.settle()
+  // The original native actor rejected that whole attempt; it is retained, not counted as delivered.
+  await vi.waitFor(async () => expect((await f.read('refused')).inspection?.notices.input?.state).toBe('not-applied'))
+  const refused = (await f.read('refused')).inspection!.notices.input!
+  const primaryWrites = () => f.writes.filter((value) => value.key?.agentSessionId === 'primary')
+  expect(primaryWrites()).toHaveLength(1)
+  // The same observed opportunity is not a new chance; nothing is resent until the primary moves on.
+  f.observer.changed('primary')
+  await f.settle()
+  await f.observer.restore()
+  await f.settle()
+  expect(primaryWrites()).toHaveLength(1)
+  // A new authoritative idle opportunity admits one new attempt with its own original key.
+  f.idle()
+  await f.settle()
+  await vi.waitFor(async () => expect((await f.read('refused')).inspection?.notices.input?.state).toBe('submitted'))
+  const retried = (await f.read('refused')).inspection!.notices.input!
+  expect(retried.notificationId).not.toBe(refused.notificationId)
+  expect(primaryWrites()).toHaveLength(2)
+  expect(primaryWrites()[1]!.key).toMatchObject({ kind: 'prompt', submissionId: retried.notificationId })
+  expect(primaryWrites()[1]!.wire).toContain(f.observation('refused'))
+  // The refused attempt keeps its original receipt; the member input itself was sent exactly once.
+  expect(await f.queue.readNotification(refused.notificationId!)).toMatchObject({ state: 'not-applied' })
+  expect(f.writes.filter((value) => value.key?.agentSessionId === 'member')).toHaveLength(1)
+  // Once delivered, further idle opportunities and restores add nothing.
+  const count = f.writes.length
+  await f.observer.restore()
+  f.idle()
+  await f.settle()
+  expect(f.writes).toHaveLength(count)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('an unknown notice is never retried by a later idle opportunity', async () => {
+  const f = await fixture()
+  f.loseNotice()
+  await f.submit('lost')
+  f.idle()
+  await f.settle()
+  await vi.waitFor(async () =>
+    expect((await f.read('lost')).inspection, JSON.stringify((await f.read('lost')).inspection?.observation)).toMatchObject({
+      notices: { input: { state: 'unconfirmed' } }
+    })
+  )
+  const count = f.writes.length
+  f.idle()
+  await f.settle()
+  await f.observer.restore()
+  f.idle()
+  await f.settle()
+  expect(f.writes).toHaveLength(count)
+  expect((await f.read('lost')).inspection!.notices.input!.state).toBe('unconfirmed')
+})
+
+it('a reply read before its turn completion keeps the exact reply reference in the result', async () => {
+  const f = await fixture()
+  f.idle()
+  await f.submit('split')
+  await vi.waitFor(async () => expect((await f.read('split')).inspection?.notices.input?.state).toBe('submitted'))
+  await f.answer('split')
+  const between = (await f.read('split')).inspection!.observation
+  expect(between.nativeInput).toBeTruthy()
+  expect(between.result).toBeUndefined()
+  await f.complete('split')
+  await vi.waitFor(async () =>
+    expect((await f.read('split')).inspection?.observation.result).toMatchObject({ kind: 'native-turn', status: 'completed' })
+  )
+  const result = (await f.read('split')).inspection!.observation.result as Extract<
+    import('../src/mote-input.js').MoteInputObservation['result'],
+    { kind: 'native-turn' }
+  >
+  // The reply record read in the first batch must survive into the final result references.
+  const replies = await Promise.all(
+    result.records.map(async (value) => {
+      const page = consumeConversationWindowPage(
+        await f.client.readAgentConversation({
+          hostId: 'local',
+          agentSessionId: 'member',
+          record: value.record,
+          maxBytes: 64 * 1024
+        })
+      )
+      expect(page.kind).toBe('complete')
+      return page.kind === 'complete' ? page.snapshot.units.flatMap((unit) => unit.records) : []
+    })
+  )
+  const texts = JSON.stringify(replies)
+  expect(texts).toContain('Original result split')
+  expect(result.records.length).toBeGreaterThanOrEqual(2)
+  expect(new Set(result.records.map((value) => JSON.stringify(value.record))).size).toBe(result.records.length)
+  await vi.waitFor(async () => expect((await f.read('split')).inspection?.notices.result?.state).toBe('submitted'))
+  expect(f.writes.filter((value) => value.key?.agentSessionId === 'member')).toHaveLength(1)
+})
+
+it('repeated proven refusals keep the original coordination recoverable at each new idle', async () => {
+  const f = await fixture()
+  f.refuseNotices(4)
+  await f.submit('repeated-refusal')
+  const ids: string[] = []
+  for (let attempt = 0; attempt < 4; attempt++) {
+    f.idle()
+    await f.settle()
+    await vi.waitFor(async () => expect((await f.read('repeated-refusal')).inspection?.notices.input?.state).toBe('not-applied'))
+    const id = (await f.read('repeated-refusal')).inspection!.notices.input!.notificationId!
+    expect(ids).not.toContain(id)
+    ids.push(id)
+  }
+  f.idle()
+  await f.settle()
+  await vi.waitFor(async () => expect((await f.read('repeated-refusal')).inspection?.notices.input?.state).toBe('submitted'))
+  expect(f.writes.filter(value => value.key?.agentSessionId === 'primary')).toHaveLength(5)
+  expect(f.writes.filter(value => value.key?.agentSessionId === 'member')).toHaveLength(1)
+  for (const id of ids) expect(await f.queue.readNotification(id)).toMatchObject({ state: 'not-applied' })
+})
+
+it('a large original turn keeps every reply reference while the notification remains a small owner reference', async () => {
+  const f = await fixture()
+  f.idle()
+  await f.submit('many-replies')
+  await f.answer('many-replies')
+  await f.appendReplies('many-replies', 70, 1200)
+  await f.complete('many-replies')
+  await vi.waitFor(async () => expect((await f.read('many-replies')).inspection?.notices.result?.state).toBe('submitted'))
+  const inspection = (await f.read('many-replies')).inspection!, result = inspection.observation.result!
+  expect(result.kind).toBe('native-turn')
+  if (result.kind !== 'native-turn') throw Error('Expected the original native turn')
+  expect(result.records).toHaveLength(72)
+  expect(Buffer.byteLength(JSON.stringify(result))).toBeGreaterThan(64 * 1024)
+  expect(result.records.some(value => value.record.source.recordId.includes('reply-many-replies-0-'))).toBe(true)
+  const notification = (await f.queue.readNotification(inspection.notices.result!.notificationId!))!
+  expect(Buffer.byteLength(notification.wire)).toBeLessThan(4096)
+  expect(JSON.parse(notification.wire).result).toEqual({ kind: 'native-turn', status: 'completed' })
+  expect(JSON.parse(notification.wire).read.params.observationId).toBe(f.observation('many-replies'))
+  // Earlier saved wires may inline the exact result. Their bytes remain valid without rewriting them.
+  const originalWire = JSON.stringify({ ...JSON.parse(notification.wire), result })
+  expect(moteInputNoticeWireMatches(originalWire, inspection.observation, 'result')).toBe(true)
+  expect(moteInputNoticeWireMatches(originalWire.replace('many-replies', 'another-input'), inspection.observation, 'result')).toBe(false)
+})
+
+it('an original refused observation is rediscovered after reopening an old derived SQLite index in another process', async () => {
+  const f = await fixture()
+  f.idle()
+  await f.submit('retained-refusal')
+  await vi.waitFor(async () => expect((await f.read('retained-refusal')).inspection?.notices.input?.state).toBe('submitted'))
+  f.refuseNotices(1)
+  await f.append('retained-refusal')
+  await f.settle()
+  await vi.waitFor(async () => expect((await f.read('retained-refusal')).inspection?.notices.result?.state).toBe('not-applied'))
+  await f.observer.dispose()
+  const original = (await f.queue.readMoteInputObservation(f.observation('retained-refusal')))!
+  const { refused: _refused, ...old } = original
+  await f.queue.saveMoteInputObservation({ ...old, revision: old.revision + 1 }, old.revision)
+  const db = new DatabaseSync(f.queue.path)
+  try {
+    db.exec('DROP INDEX IF EXISTS mote_input_current')
+    db.prepare('UPDATE mote_input_observations SET active=0, primary_id=NULL WHERE id=?').run(original.id)
+  } finally { db.close() }
+  expect(await new DurableAgentMuxMessageQueue(f.queue.path).listMoteInputObservations('primary'))
+    .toMatchObject([{ id: original.id, origin: original.origin, binding: original.binding }])
+  // Reopen the same legacy-shaped projection in a separate process as well.
+  const oldIndex = new DatabaseSync(f.queue.path)
+  try {
+    oldIndex.exec('DROP INDEX IF EXISTS mote_input_current')
+    oldIndex.prepare('UPDATE mote_input_observations SET active=0, primary_id=NULL WHERE id=?').run(original.id)
+  } finally { oldIndex.close() }
+  const worker = join(f.root, 'reopen-mote-index.mjs')
+  await writeFile(worker, `import {DurableAgentMuxMessageQueue} from ${JSON.stringify(new URL('../src/agent-global-message-queue.ts', import.meta.url).href)};const queue=new DurableAgentMuxMessageQueue(process.argv[2]);console.log(JSON.stringify(await queue.listMoteInputObservations('primary')))`)
+  const loader = new URL('./fixtures/a2a-resumed-inbox/source-loader.mjs', import.meta.url)
+  const register = `import {register} from 'node:module';register(${JSON.stringify(loader.href)},${JSON.stringify(import.meta.url)});`
+  const { stdout } = await promisify(execFile)(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(register), worker, f.queue.path])
+  expect(JSON.parse(stdout)).toMatchObject([{ id: original.id, origin: original.origin, binding: original.binding }])
+  const restored = new MoteInputOwner({ ...Reflect.get(f.observer, 'deps'), queue: new DurableAgentMuxMessageQueue(f.queue.path) })
+  try {
+    await restored.restore()
+    f.idle()
+    restored.changed('primary')
+    await vi.waitFor(async () => expect((await f.read('retained-refusal')).inspection?.notices.result?.state).toBe('submitted'))
+    expect(f.writes.filter(value => value.key?.agentSessionId === 'member')).toHaveLength(1)
+    expect(await f.queue.readNotification(original.notices.result!)).toMatchObject({ state: 'not-applied' })
+  } finally { await restored.dispose() }
+})
+
+it('an unreadable Mote observation does not take away unrelated durable messages or healthy native input', async () => {
+  const f = await fixture()
+  await f.submit('unreadable-mote')
+  await f.observer.dispose()
+  const db = new DatabaseSync(f.queue.path)
+  try {
+    db.exec('DROP INDEX IF EXISTS mote_input_current')
+    db.prepare("UPDATE records SET json=json_set(json, '$.observation.sourceStatus', 'unreadable') WHERE sequence=(SELECT state_sequence FROM mote_input_observations WHERE id=?)")
+      .run(f.observation('unreadable-mote'))
+  } finally { db.close() }
+  const message = await f.queue.append({
+    messageId: 'unrelated-message', operationId: 'unrelated-operation', createdAt: 1,
+    sender: { kind: 'agent-session', agentSessionId: 'primary' },
+    recipient: { kind: 'agent-session', agentSessionId: 'stranger' },
+    senderSessionId: 'primary', senderRunId: 'run-primary', recipientSessionId: 'stranger', recipientRunId: 'run-stranger',
+    threadId: 'unrelated-thread', correlationId: 'unrelated-correlation', replyTo: null, workspaceId: null,
+    body: 'Continue the unrelated authorized work.'
+  })
+  expect(message.messageId).toBe('unrelated-message')
+  await f.hosted.submitAgentPrompt({ agentSessionId: 'stranger', operationId: 'healthy-manual-input',
+    expectedRun: { runId: 'run-stranger' }, admissionIntent: { kind: 'native-conversation', source: { providerId: 'codex', nativeSessionId: 'stranger-native' } },
+    execution: 'immediate', authorHuman: true, prompt: 'Continue healthy input.' })
+  expect(f.writes.filter(value => value.key?.agentSessionId === 'stranger')).toHaveLength(1)
+  await expect(f.queue.readMoteInputObservation(f.observation('unreadable-mote'))).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
