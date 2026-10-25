@@ -124,9 +124,9 @@ Desktop `RuntimeController.resumeSession` 和 `performRecovery` 在这两条实�
 | 后条 raw 等前条完整 ACK 才派发 | 拟移除重复的上层完成依赖；只保授权顺序和真实语义事务边界 |
 | 历史投影、可选屏幕确认、无关 Session 工作 | 不应成为原始输入的必需前置；相关成本归原消费者缩小范围，不另造调度层 |
 
-**收敛方案，尚不代表已实现**：先在 ctxmux 既有普通 Input 回执中公开 writer 已生成的准确范围，使 raw 输入无需调用前的 cursor 查询；不能从回执旁较晚的 Run 快照倒推范围。迁移范围限 `writeAgent`／`pasteAgent` 的原始写入；共用 helper 的 posture、handshake、typed response 与 prompt 恢复不随之改道。原始输入的逻辑 operationId 仍关联取消诊断、native-hook 的 unknown／accepted 和协议恢复边界。普通输入结果丢失仍为 unknown，不自动重发；需要原操作恢复的语义输入继续使用 recoverableInput。这个独立切片减少一次原生往返，仍保留当前完整 ACK 尾链，不能签为排队问题已解决。
+**收敛方案，尚不代表已实现**：先在 ctxmux 既有普通 Input 回执中公开 writer 已生成的准确范围，使 raw 输入无需调用前的 cursor 查询；不能从回执旁较晚的 Run 快照倒推范围。迁移范围限 `writeAgent`／`pasteAgent` 的原始写入；共用 helper 的 posture、handshake、typed response 与 prompt 恢复不随之改道。原始输入的逻辑 operationId 仍关联取消诊断、native-hook 的 unknown／accepted 和协议恢复边界。普通输入结果丢失仍为 unknown，不自动重发；需要原操作恢复的语义输入继续使用 recoverableInput。公开范围先作为独立的 Runtime 能力交付，不提前加入无消费者的 Core 方法。当前 `requireCurrentAgentRun` 还在首次副作用前校验 native cwd 与 Session 绑定；冷调用只有持久 metadata，不能把这项校验移到输入之后。因此，Core 的逐条查询与完整 ACK 尾链在下述独立控制连接接入时一起删除，不为过渡增加一份资格缓存。
 
-解除该尾链还需要独立的有序命令连接 owner。现有 Core Attachment 属于输出观察，会在 detach、换 view 或观察失败时结束；不能借其寿命决定健康输入是否可用，也不能把它描述成已经存在的独立控制通道。后续通道应复用 ctxmux 的 FIFO 接纳、命令关联与结果返回机制，明确原 daemon／Run 绑定、容量背压、连接关闭、晚回执与 unknown；Core 只组合授权和语义边界，不复制 Runtime 状态。完成这段合同与真实消费者验证后，删除 raw 的旧逐 ACK 尾链，不保留兼容分支或第二套队列。
+解除该尾链还需要独立的有序命令连接 owner。现有 Core Attachment 属于输出观察，会在 detach、换 view 或观察失败时结束；不能借其寿命决定健康输入是否可用，也不能把它描述成已经存在的独立控制通道。后续通道应复用 ctxmux 的 FIFO 接纳、命令关联与结果返回机制；opening 在同一连接返回原 RunInfo，让 Core 在首次输入前校验 Run／cwd，后续每条仍核当前 Session 绑定与授权。不可变身份随真实连接持有，可变 running／cursor 仍由原 writer 裁决。通道明确原 daemon／Run 绑定、容量背压、连接关闭、晚回执与 unknown；Core 只组合授权和语义边界，不复制 Runtime 状态。完成这段合同与真实消费者验证后，删除 raw 的旧逐 ACK 尾链，不保留兼容分支或第二套队列。
 
 验证按可推翻方案的边界展开：双 Client 交错写入仍取得各自准确范围；前条回执延迟时后条 raw 仍可接纳且实际字节有序；授权准备乱序、Run 替换、语义输入交错、观察 detach／失败、部分写与断连均不换目标、不丢字节、不自动重放未知输入。现场收益分别观察可信事件派发、Core 准备／排队、原生写入、输出解析与呈现；没有实际交互或尚未更新的实例不能代签流畅度改善。
 
