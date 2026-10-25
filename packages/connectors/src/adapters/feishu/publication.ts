@@ -217,9 +217,6 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     // reserve the largest possible continuation label for this source text.
     const count = Math.max(2, payload.text.length)
     const fits = (part: PublicationTextFragment, fragment: { ordinal: number; count: number }) => {
-      // Without line breaks there cannot be a native table. Its Markdown
-      // component preserves every source byte, so this lower bound is exact.
-      if (!/[\r\n]/u.test(part.text) && Buffer.byteLength(part.text) > FEISHU_MESSAGE_BODY_BYTES) return false
       const displayed = { ...payload, text: part.text, ...(part.presentationContext ? { presentationContext: part.presentationContext } : {}) }
       const role: FeishuRoleSpeaker = speaker ? { kind: speaker.kind, ...(speaker.name ? { name: speaker.name } : {}) } : { kind: 'unknown' }
       const card = speechCard(displayed, role, originalMessage, fragment)
