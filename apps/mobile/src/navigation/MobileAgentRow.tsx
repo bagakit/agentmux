@@ -1,3 +1,4 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { MobileObjectIdentity } from './MobileIdentity'
@@ -42,6 +43,6 @@ export function MobileAgentRow({ agentSessionId, identity, onOpen, beforeMenu, c
       onClick={event => { if (suppressClick.current && event.detail > 0) { event.preventDefault(); suppressClick.current = false; return }; suppressClick.current = false; onOpen() }}>
       {children}
     </button>
-    {showMenu && <button type="button" className="mobile-icon-button mobile-agent-row__more" aria-label={`${identity.name} · 更多操作`} onClick={openMenu}><SemanticIcon name="action.more" size={16} /></button>}
+    {showMenu && <IconButton className="mobile-icon-button mobile-agent-row__more" aria-label={`${identity.name} · 更多操作`} onClick={openMenu}><SemanticIcon name="action.more" size={16} /></IconButton>}
   </>
 }

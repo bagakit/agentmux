@@ -1,3 +1,4 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -368,12 +369,12 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const primaryHeader = workspaceVisible && !showSession && !source
   const sessionBackLabel = showGoalWork && workface.panel === 'terminal' ? '返回终端' : showGoalWork || workface.panel === 'terminal' ? '返回对话' : `返回 ${pageName}`
   const menuButton = <button className="mobile-settings-button" onClick={() => setSheet(workspaceVisible ? 'settings' : 'connection')} aria-label={workspaceVisible ? '手机设置与连接' : '连接你的 Mac'}><ThemeActionMenuIcon size={18} />{workspaceVisible && <small>菜单</small>}<span className="mobile-status-dot" aria-label={label} /></button>
-  const terminalToggle = <button type="button" className="mobile-icon-button mobile-session-view-toggle"
+  const terminalToggle = <IconButton className="mobile-icon-button mobile-session-view-toggle"
     aria-label={workface.panel === 'terminal' && !showGoalWork ? '查看对话' : '查看终端'}
     title={workface.panel === 'terminal' && !showGoalWork ? '查看对话' : '查看终端'}
     onClick={() => { navigationRevision.current += 1; setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' && !showGoalWork ? 'conversation' : 'terminal' })) }}>
     {workface.panel === 'terminal' && !showGoalWork ? <ThemeObjectConversationIcon size={18} /> : <ThemeObjectTerminalIcon size={18} />}
-  </button>
+  </IconButton>
 
   const exposed = sheet === null
   const moteConversation = showSession && objectIdentity?.mote && home === 'mote' && secondary === null
@@ -393,12 +394,12 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           : <><MobileIdentity identity={objectIdentity ?? { name: sessionTitle ?? '原会话', project: pageName }} session={selected} client={client} connected={connected} size={24} visible={exposed} /><span className="mobile-session-title">{sessionTitle ?? selected?.providerId ?? '原会话'}</span></>}
         <div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible} />
         {terminalToggle}
-        <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={18} /></button>
+        <IconButton className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={18} /></IconButton>
       </div> : <>
-        {workspaceVisible && showSession ? <button className="mobile-icon-button" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={20} /></button> : <span className="mobile-header-spacer" />}
+        {workspaceVisible && showSession ? <IconButton className="mobile-icon-button" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={20} /></IconButton> : <span className="mobile-header-spacer" />}
         {showSession && objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={38} visible={exposed} /></button>
           : <div className="mobile-brand"><img className="mobile-brand-icon" src={brandIcon} width={24} height={24} alt="" /><span>AgentMux</span></div>}
-        {showSession ? <div className="mobile-session-header-actions"><div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible} />{terminalToggle}<button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></button></div> : <span className="mobile-header-spacer" />}
+        {showSession ? <div className="mobile-session-header-actions"><div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible} />{terminalToggle}<IconButton className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></IconButton></div> : <span className="mobile-header-spacer" />}
       </>}
     </header>}
     <main className="mobile-main" tabIndex={-1}>
@@ -475,7 +476,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         }
         if (!current.focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。')
       }}>
-        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></Dialog.Close></div>
+        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close asChild><IconButton className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></IconButton></Dialog.Close></div>
         {sheet === 'settings' ? <>
           <Dialog.Description id="mobile-sheet-description">工作面与手机设置</Dialog.Description>
 
