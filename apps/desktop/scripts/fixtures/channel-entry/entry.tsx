@@ -12,7 +12,7 @@ import { WorkspaceWorkbench } from '../../../src/renderer/src/components/Workspa
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
-import { mountThemeRuntime } from '@agentmux/client-ui/theme'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { invalidateConnectorTarget } from '../../../src/renderer/src/lib/connector-room-intent'
 import type { ConnectionHostingTarget } from '../../../src/shared/contracts'
@@ -44,7 +44,8 @@ const composerConversationReads: string[] = []
 const composerNames = ['Research and Engineering - customer investigation and release planning', 'Cross-platform product collaboration and operational follow-up']
 const popoverClarity = new URLSearchParams(location.search).has('popover-clarity')
 const refusalClarity = new URLSearchParams(location.search).has('refusal-clarity')
-const groupActivityActions = new URLSearchParams(location.search).has('group-activity-actions')
+const statusPriority = new URLSearchParams(location.search).has('status-priority')
+const groupActivityActions = statusPriority || new URLSearchParams(location.search).has('group-activity-actions')
 const memberAccess = new URLSearchParams(location.search).has('member-access')
 const applicationAccess = new URLSearchParams(location.search).has('application-access'), memberScenario = memberAccess || applicationAccess
 const feishuScenario = memberScenario || sharedAudiences || popoverClarity || refusalClarity || groupActivityActions
@@ -57,15 +58,16 @@ let bindings: RoomBinding[] = []
 const hostingTarget: ConnectionHostingTarget = { hostId: 'preview-bot-host', runtimeId: 'preview-original-runtime' }
 const target = { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
 const headerStatus = new URLSearchParams(location.search).has('header-status')
-type Scenario = 'unbound' | 'owner-failure' | 'attention' | 'mixed' | 'unsupported'
+type Scenario = 'unbound' | 'owner-failure' | 'attention' | 'mixed' | 'unsupported' | 'healthy'
 const proof = { ready: false, omitOriginal: false, accessUnavailable: false, status: 'normal' as 'normal' | 'attention' | 'unavailable', scenario: 'unbound' as Scenario,
   lastDiagnosis: null as ConnectionDiagnosis | null,
   calls: [] as string[], targets: [] as (ConnectionHostingTarget | undefined)[], errors: [] as string[],
   requests: [] as { method: string; input: unknown; owner: ConnectionHostingTarget | undefined }[],
   hostingReads: 0, routes: [] as string[], channelSections: Object.fromEntries(settingsCatalog.channelEntries.map(entry => [entry.adapterId, entry.section])),
+  setTheme(appAppearance: 'light' | 'dark') { updateThemeSelection({ ...config.appearance, appAppearance }) },
   setScenario(value: Scenario) {
     proof.scenario = value; proof.status = value === 'attention' ? 'attention' : 'normal'
-    bindings = value === 'attention' || value === 'mixed' || value === 'unsupported' ? (value === 'mixed' || value === 'unsupported' ? [0] : [0, 1]).map((index): RoomBinding => ({ ...target, regionAnchor: { regionId: 'channel-preview-region' }, bindingId: 'preview-original-binding-' + index,
+    bindings = value === 'attention' || value === 'mixed' || value === 'unsupported' || value === 'healthy' ? (value === 'mixed' || value === 'unsupported' || value === 'healthy' ? [0] : [0, 1]).map((index): RoomBinding => ({ ...target, regionAnchor: { regionId: 'channel-preview-region' }, bindingId: 'preview-original-binding-' + index,
       revision: 1, state: 'active', connectionId: connection.config.connectionId, application: connection.config.application,
       externalConversationId: index ? '456789012345678901' : room.externalConversationId,
       scope: { input: 'mentions-and-replies', publication: refusalClarity ? 'future-native-user-facing' : 'future-shared-conversation' }, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } })) : []
@@ -141,8 +143,9 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
     const binding = bindings.find(binding => binding.bindingId === input.bindingId && binding.revision === input.bindingRevision)
     const mixed = (popoverClarity || groupActivityActions) && proof.scenario === 'mixed'
     const unsupported = refusalClarity && proof.scenario === 'unsupported'
-    const attention = proof.status === 'attention', sourceGap = (attention || groupActivityActions) && binding?.externalConversationId === room.externalConversationId
-    const unknownEffect = mixed || attention && !sourceGap
+    const healthy = statusPriority && proof.scenario === 'healthy'
+    const attention = proof.status === 'attention', sourceGap = (attention || groupActivityActions && (!statusPriority || mixed)) && binding?.externalConversationId === room.externalConversationId
+    const unknownEffect = mixed && !statusPriority || attention && !sourceGap
     const effective = binding && applicationAccess ? previewMemberAccess(binding).flatMap(member => member.effective?.state === 'active' ? [member.effective] : []) : null
     const report = { target: input, service: { value: { enabled: true, revision: 1 }, issue: null }, groups: { issue: null, value: { nextBindingId: null, items: binding ? [{
       target: groupTarget(binding), window: {}, limit: 5,
@@ -153,13 +156,13 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
         observation: proof.accessUnavailable ? { state: 'unavailable', reason: 'access-unconfirmed' } : sourceGap ? { state: 'unavailable', reason: 'content-unconfirmed' } : unknownEffect ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'ready' },
         sourceObservation: { state: 'ready', code: null, codeRecorded: false, checkpointKey: null },
         effectObservation: unknownEffect ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'ready' },
-        deliveries: mixed || unsupported ? (unsupported ? [1] : [1, 2, 3, 4, 5]).map(i => ({ kind: 'conversation' as const, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-recent-confirmed-' + i, state: 'confirmed' as const, receipt: 'confirmed' as const, platformMessageId: 'preview-platform-message-' + i, reason: null, resourceUpload: null })) : unknownEffect ? [1, 2].map(i => ({ kind: 'conversation' as const, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-original-' + i, state: 'unknown' as const, receipt: 'unknown' as const, platformMessageId: null, reason: 'effect-unconfirmed' as const, resourceUpload: null })) : [],
-        coverage: { state: sourceGap ? 'incomplete' : 'complete', nextContent: null, originCount: 0, omittedGapCount: 0, gaps: sourceGap ? (groupActivityActions ? [1] : [1, 2, 3]).map(i => ({ gapKey: 'preview-gap-' + i, reason: groupActivityActions ? 'public-content-unconfirmed' as const : 'source-gap' as const, code: null, codeRecorded: false, sourceKind: null, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null } })) : [] }
-      } }, incoming: { issue: null, value: { beforeIngressId: null, next: null, rows: attention || mixed || unsupported ? [{
-        ingressId: 'preview-original-intake-' + binding.bindingId, sourceConnectionId: binding.connectionId, kind: 'message', state: sourceGap || unsupported ? 'refused' : 'claimed',
-        code: unsupported ? 'INGRESS_CONTENT_UNSUPPORTED' : sourceGap ? 'INGRESS_ACTOR_NOT_AUTHORIZED' : null, codeRecorded: sourceGap || unsupported, bindingId: binding.bindingId, bindingRevision: binding.revision,
-        targetConnectionId: binding.connectionId, scope: 'current-binding', inputOperationId: sourceGap || unsupported ? null : 'preview-original-agent-input',
-        recording: unsupported ? { state: 'refused', code: 'INGRESS_CONTENT_UNSUPPORTED' } : { state: 'recorded' }, coreStatus: sourceGap || unsupported ? null : mixed ? 'bytes-accepted' : 'admitted', coreObservation: sourceGap || unsupported ? 'not-started' : 'observed', nativeAdoption: sourceGap || unsupported ? null : 'unknown', waiting: null
+        deliveries: mixed || unsupported || healthy ? (unsupported ? [1] : [1, 2, 3, 4, 5]).map(i => ({ kind: statusPriority && i === 5 ? 'binding-notice' as const : 'conversation' as const, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-recent-confirmed-' + i, state: 'confirmed' as const, receipt: 'confirmed' as const, platformMessageId: 'preview-platform-message-' + i, reason: null, resourceUpload: null })) : unknownEffect ? [1, 2].map(i => ({ kind: 'conversation' as const, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-original-' + i, state: 'unknown' as const, receipt: 'unknown' as const, platformMessageId: null, reason: 'effect-unconfirmed' as const, resourceUpload: null })) : [],
+        coverage: { state: sourceGap ? 'incomplete' : 'complete', nextContent: null, originCount: 0, omittedGapCount: 0, gaps: sourceGap ? (statusPriority ? [1, 2] : groupActivityActions ? [1] : [1, 2, 3]).map(i => ({ gapKey: 'preview-gap-' + i, reason: groupActivityActions ? 'public-content-unconfirmed' as const : 'source-gap' as const, code: null, codeRecorded: false, sourceKind: null, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null } })) : [] }
+      } }, incoming: { issue: null, value: { beforeIngressId: null, next: null, rows: attention || mixed || unsupported || healthy ? [{
+        ingressId: 'preview-original-intake-' + binding.bindingId, sourceConnectionId: binding.connectionId, kind: statusPriority && mixed ? 'action' : 'message', state: sourceGap || unsupported ? 'refused' : 'claimed',
+        code: unsupported ? 'INGRESS_CONTENT_UNSUPPORTED' : sourceGap ? statusPriority ? 'INGRESS_ACTION_UNSUPPORTED' : 'INGRESS_ACTOR_NOT_AUTHORIZED' : null, codeRecorded: sourceGap || unsupported, bindingId: statusPriority && mixed ? null : binding.bindingId, bindingRevision: statusPriority && mixed ? null : binding.revision,
+        targetConnectionId: statusPriority && mixed ? null : binding.connectionId, scope: statusPriority && mixed ? 'group-event' : 'current-binding', inputOperationId: sourceGap || unsupported ? null : 'preview-original-agent-input',
+        recording: statusPriority && mixed ? null : unsupported ? { state: 'refused', code: 'INGRESS_CONTENT_UNSUPPORTED' } : { state: 'recorded' }, coreStatus: sourceGap || unsupported ? null : mixed ? 'bytes-accepted' : 'admitted', coreObservation: sourceGap || unsupported ? 'not-started' : 'observed', nativeAdoption: sourceGap || unsupported ? null : 'unknown', waiting: null
       }] : [] } }
     }] : [] } } } satisfies ConnectionDiagnosis
     if (popoverClarity || refusalClarity || groupActivityActions) proof.lastDiagnosis = structuredClone(report)

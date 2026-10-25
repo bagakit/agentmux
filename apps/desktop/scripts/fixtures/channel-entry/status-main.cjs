@@ -7,13 +7,15 @@ const [html, privateRoot, evidence] = process.argv.slice(2)
 const popoverClarity = process.argv.includes('--popover-clarity')
 const refusalClarity = process.argv.includes('--refusal-clarity')
 const groupActivityActions = process.argv.includes('--group-activity-actions')
+const statusPriority = process.argv.includes('--status-priority')
+const statusPriorityDetails = process.argv.includes('--status-priority-details')
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { passed: false, frames: [], scenes: [], interactions: [], hoverGeometry: {}, boundary: 'Actual production Workbench, split Regions, channel contributions, header/menu, original group form and CSS; controlled typed public connection/diagnosis/member/retained-link DTOs. Native pointer/keyboard operates the original components. No IPC/SDK, live account, delivery, installed App or healthy-Agent qualification.' }
 let win
 app.whenReady().then(async () => {
   try {
     win = new BrowserWindow({ width: 1380, height: 980, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
-    await win.loadFile(html, { query: { 'header-status': '1', ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}) } })
+    await win.loadFile(html, { query: { 'header-status': '1', ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}), ...(statusPriority ? { 'status-priority': '1' } : {}) } })
     const { read, until, settle, click, press } = nativeRendererInput(win, result.interactions, '')
     const region = '[data-workbench-region-id="channel-preview-region"]'
     const entry = adapter => region + ' [data-channel-entry="' + adapter + '"]'
@@ -25,7 +27,7 @@ app.whenReady().then(async () => {
       return {rects:{button:rect(button),glyph:rect(button.querySelector(':scope > :is(img,svg)')),header:rect(header),neighbors:[...header.querySelectorAll('.agent-region-header__name,.agent-region-header__more,[data-channel-entry]')].map(node=>({identity:node.dataset.channelEntry??node.className,rect:rect(node)}))},menu:rect(document.querySelector(${JSON.stringify(menu)})),
       paint:{button:paint(button),before:paint(button,'::before'),after:paint(button,'::after'),headerBefore:paint(header,'::before')},hover:button.matches(':hover'),focus:document.activeElement===button,open:button.dataset.state==='open'};})()`)
     const facts = () => read(`(() => {const region=document.querySelector(${JSON.stringify(region)}),menu=document.querySelector(${JSON.stringify(menu)});return {
-      viewport:{width:innerWidth,height:innerHeight},region:region?.getBoundingClientRect().toJSON(),regionCount:document.querySelectorAll('[data-workbench-region-id]').length,
+      viewport:{width:innerWidth,height:innerHeight},appearance:document.documentElement.dataset.appearance,region:region?.getBoundingClientRect().toJSON(),regionCount:document.querySelectorAll('[data-workbench-region-id]').length,
       entries:[...region.querySelectorAll('[data-channel-entry]')].map(node=>({adapter:node.dataset.channelEntry,state:node.dataset.channelState,label:node.getAttribute('aria-label'),title:node.title,html:node.outerHTML})),
       header:region.querySelector('.agent-region-header')?.outerHTML,menu:menu?.outerHTML??null,draft:window.channelEntryProof.draft(),
       focus:document.activeElement?.outerHTML,calls:[...window.channelEntryProof.calls]}})()`)
@@ -77,6 +79,46 @@ app.whenReady().then(async () => {
     await until('window.channelEntryProof?.ready && document.querySelector(' + JSON.stringify(entry('discord')) + ')')
     await read('window.__connectionsTrustedEvents=[];for(const type of ["click","keydown","input","mousemove"])document.addEventListener(type,event=>window.__connectionsTrustedEvents.push({type,trusted:event.isTrusted,key:event.key}),true)')
     win.showInactive(); win.focus(); win.webContents.focus(); await until('document.hasFocus()')
+    if (statusPriority) {
+      const group = '.agent-connector-dialog [aria-label="Group delivery"]'
+      for (const scenario of ['mixed', 'healthy']) {
+        const appearance = scenario === 'mixed' ? 'dark' : 'light'
+        await read('window.channelEntryProof.setTheme(' + JSON.stringify(appearance) + ')')
+        await until('document.documentElement.dataset.appearance===' + JSON.stringify(appearance))
+        await read('window.channelEntryProof.setScenario(' + JSON.stringify(scenario) + ')')
+        for (const narrow of [false, true]) {
+          win.setContentSize(1380, 980); await until('innerWidth===1380')
+          await layout(narrow); await open('feishu')
+          const outgoing = '.connector-traffic-summary [data-direction="outgoing"]'
+          await until('document.querySelector(' + JSON.stringify(menu + ' ' + outgoing) + ')?.textContent.includes(' + JSON.stringify(scenario === 'mixed' ? 'Some conversation content is not shared yet' : '4 conversation updates delivered') + ')')
+          if (scenario === 'mixed' && !statusPriorityDetails) await capture(narrow ? 'status-header-narrow-dark' : 'status-header-wide-dark')
+          await click('js:[...document.querySelectorAll(".connector-header-menu__item")].find(node=>node.getAttribute("aria-label")?.includes("345678901234567890"))')
+          await until('document.querySelector(' + JSON.stringify(group) + ')?.textContent.includes(' + JSON.stringify(scenario === 'mixed' ? 'Latest group event.' : 'Accepted by Agent') + ')')
+          if (narrow) { win.setContentSize(520, 980); await until('innerWidth===520') }
+          const first = await read(`(() => {const d=document.querySelector('.agent-connector-dialog'),body=d.querySelector('.agent-connector-dialog__body'),identity=d.querySelector('[aria-label="Agent and group conversation"]'),activity=d.querySelector('[aria-label="Group delivery"]'),config=d.querySelector('[aria-label="Group connection status"]');return {identity:identity.getBoundingClientRect().toJSON(),activity:activity.getBoundingClientRect().toJSON(),config:config.getBoundingClientRect().toJSON(),scrollTop:body.scrollTop,opened:d.querySelectorAll('.agent-connector-panel[open]').length,copy:activity.textContent}})()`)
+          assert.ok(first.identity.top < first.activity.top && first.activity.top < first.config.top, 'Identity and actual message observations precede saved configuration')
+          assert.equal(first.opened, 0, 'Secondary forms begin folded without unmounting their original controls')
+          assert.ok(first.copy.includes('4 conversation updates delivered') && first.copy.includes('1 connection notice delivered'))
+          assert.ok(!first.copy.includes('5 conversation updates delivered'))
+          if (scenario === 'mixed') assert.ok(first.copy.includes('Action not supported'))
+          await capture('status-details-' + scenario + '-' + (narrow ? 'narrow-' : 'wide-') + appearance)
+          if (scenario === 'mixed' && !narrow) {
+            await click('[data-connection-panel="members"] > summary')
+            await until('document.querySelector(\'[data-connection-panel="members"]\').open')
+            assert.equal(await read('document.querySelector(\'[data-connection-section="members"]\').closest("details").open'), true)
+            result.interactions.push({ kind: 'opens-original-member-section', focus: await read('document.activeElement.outerHTML') })
+          }
+          await click('[aria-label="Close group setup"]'); await until('!document.querySelector(".agent-connector-dialog")')
+        }
+      }
+      const readMethods = new Set(['connection.ls','connection.inspect','connection.binding.ls','connection.binding.inspect','connection.service.get','connection.diagnose','connection.room.get','connection.room.members','connection.room.link.inspect','connection.profile.get','connection.profile.ls','connection.application.access.get','connection.setup.ls','connection.metadata.get','connection.metadata.refresh'])
+      result.requests = await read('window.channelEntryProof.requests')
+      assert.ok(result.requests.length > 0)
+      assert.deepEqual([...new Set(result.requests.map(request => request.method))].filter(method => !readMethods.has(method)), [], 'Captured presentation uses only original read operations')
+      assert.deepEqual(await read('window.channelEntryProof.errors'), [])
+      result.passed = true
+      return
+    }
     if (groupActivityActions) {
       await read('window.channelEntryProof.setScenario("mixed")')
       const group = '.agent-connector-dialog [aria-label="Group delivery"]'
@@ -91,7 +133,7 @@ app.whenReady().then(async () => {
         if (narrow) { win.setContentSize(520, 980); await until('innerWidth===520') }
         await read('document.querySelector(' + JSON.stringify(group) + ').scrollIntoView({block:"start"})')
         assert.equal(await read('(document.querySelector(' + JSON.stringify(overview) + ').textContent.match(/Member request was refused/g)||[]).length'), 1)
-        assert.equal(await read('document.querySelector(' + JSON.stringify(overview) + ').textContent.includes("5 recent updates delivered")'), true)
+        assert.equal(await read('document.querySelector(' + JSON.stringify(overview) + ').textContent.includes("5 conversation updates delivered")'), true)
         await capture(narrow ? 'group-activity-narrow' : 'group-activity-wide')
         if (!narrow) {
           for (const [label, section] of [['View content details', 'content'], ['View delivery details', 'receipts']]) {
@@ -260,8 +302,8 @@ app.whenReady().then(async () => {
     await capture('group-details-wide')
     win.setContentSize(520, 980); await until('innerWidth===520 && innerHeight===980')
     for (const [label, section] of [['Members', 'members'], ['Sharing', 'sharing'], ['Join group', 'joining']]) {
-      await click('js:[...document.querySelectorAll(' + JSON.stringify('[aria-label="Group connection sections"] button') + ')].find(node=>node.querySelector("span")?.textContent===' + JSON.stringify(label) + ')')
-      await until('document.activeElement===document.querySelector(' + JSON.stringify('[data-connection-section="' + section + '"]') + ')')
+      await click('[data-connection-panel="' + section + '"] > summary')
+      await until('document.querySelector(' + JSON.stringify('[data-connection-panel="' + section + '"]') + ').open')
       result.interactions.push({ kind: 'original-section-navigation', label, section, focus: await read('document.activeElement.outerHTML') })
     }
     await click('js:[...document.querySelectorAll("[data-connection-section=members] .agent-connector-person")].find(node=>node.querySelector("strong")?.textContent==="Ava Chen")?.querySelector("button")')
