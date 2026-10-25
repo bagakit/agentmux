@@ -55,12 +55,14 @@ export type ConversationSourceRecord = {
 }
 /** Minimal original relation facts; readers need not copy full original bodies to reuse association. */
 export type ConversationInputRecord = Pick<ConversationSourceRecord, 'id' | 'reference' | 'revision'> & {
-  original: { kind: 'native'; item: Pick<AgentSessionHistoryItem, 'kind' | 'turnId' | 'conversation'> }
+  original: { kind: 'native'; item: Pick<AgentSessionHistoryItem, 'kind' | 'turnId' | 'turnOutcome' | 'conversation'> }
     | { kind: 'captured'; item: Pick<AgentTimelineItem, 'kind' | 'source' | 'inputRef' | 'a2aNotificationId' | 'conversation'> }
 }
 /** Bounded original-reading witnesses, not a claim of whole-Session uniqueness. No bodies or write authority. */
 export type ConversationInputWitness = { record: ConversationItemRef; recordRevision: string; semanticItemId: string; turnId: string; clientCorrelation: string; key?: AgentPromptInputKey }
 export type ConversationInputAdoptionContext = { unconfirmed?: true; witnesses: readonly ConversationInputWitness[] }
+/** Internal aggregation keeps each event’s uncertainty on its original input keys. */
+export type ConversationInputAdoptionEvidence = ConversationInputAdoptionContext & { unconfirmedKeys?: ReadonlySet<string> }
 export type ConversationEvent = {
   id: string
   revision: string
@@ -248,7 +250,12 @@ export function conversationInputKey(record: ConversationInputRecord): string | 
 }
 export const conversationInputIdentity = (hostId: string, key: AgentPromptInputKey): string => JSON.stringify([hostId, key.kind, key.agentSessionId, key.expectedRun.runId, agentPromptInputId(key)])
 export const conversationInputWitnessKey = (fact: ConversationInputWitness): string | undefined => fact.key ? conversationInputIdentity(fact.record.hostId, fact.key) : undefined
-const inputWitnessGroup = (fact: ConversationInputWitness): string => {
+export const conversationInputWitnessTurn = (record: ConversationItemRef, turnId: string): string => {
+  const source = record.source
+  return JSON.stringify([record.hostId, record.agentSessionId, source.kind === 'native' ? source.providerId : null,
+    source.kind === 'native' ? source.nativeSessionId : null, turnId])
+}
+export const conversationInputWitnessGroup = (fact: ConversationInputWitness): string => {
   const source = fact.record.source
   return JSON.stringify([fact.record.hostId, fact.record.agentSessionId, source.kind === 'native' ? source.providerId : null,
     source.kind === 'native' ? source.nativeSessionId : null, fact.turnId, fact.clientCorrelation])
@@ -263,41 +270,73 @@ export function conversationNativeInputWitness(record: ConversationInputRecord):
     ? { record: record.reference, recordRevision: record.revision, semanticItemId: fact.semanticItemId, turnId: fact.turnId,
       clientCorrelation: fact.clientCorrelation, ...(adopted ? { key: adopted.key } : {}) } : undefined
 }
-/** One edge owner for accepted inventory plus retained, bounded original reading witnesses. */
-export function conversationInputAdoptionEdges(records: readonly ConversationInputRecord[], context?: ConversationInputAdoptionContext): {
-  targets: ReadonlyMap<string, ConversationItemRef>; byKey: ReadonlyMap<string, readonly ConversationInputWitness[]>; ambiguous: ReadonlySet<string>; unconfirmed: boolean; witnesses: readonly ConversationInputWitness[]
+/** Merge wire contexts without promoting one event's unknown input into a whole-window failure. */
+export function mergeConversationInputAdoptionContexts(groups: readonly { records: readonly ConversationInputRecord[]; context?: ConversationInputAdoptionContext | undefined }[]): ConversationInputAdoptionEvidence {
+  return { witnesses: groups.flatMap(group => group.context?.witnesses ?? []),
+    unconfirmedKeys: new Set(groups.flatMap(group => group.context?.unconfirmed
+      ? [...conversationInputAdoptionEdges(group.records, group.context).recordKeys.values()].flatMap(keys => [...keys]) : [])) }
+}
+/** Keep an exact qualification and enough distinct originals to preserve ambiguity. */
+export function mergeConversationInputWitness(facts: readonly ConversationInputWitness[], fact: ConversationInputWitness): readonly ConversationInputWitness[] {
+  const known = [...facts], duplicate = known.findIndex(value => conversationRecordId(value.record) === conversationRecordId(fact.record) && value.semanticItemId === fact.semanticItemId)
+  if (duplicate >= 0) { if (!known[duplicate]!.key && fact.key) known[duplicate] = fact }
+  else if (known.length < 2) known.push(fact)
+  else if (fact.key && !known.some(value => value.key)) known[1] = fact
+  return known
+}
+/** One edge owner for accepted inventory plus retained original reading witnesses. */
+export function conversationInputAdoptionEdges(records: readonly ConversationInputRecord[], context?: ConversationInputAdoptionEvidence): {
+  targets: ReadonlyMap<string, ConversationItemRef>; byKey: ReadonlyMap<string, readonly ConversationInputWitness[]>; ambiguous: ReadonlySet<string>; unconfirmed: boolean; unconfirmedKeys: ReadonlySet<string>; recordKeys: ReadonlyMap<string, ReadonlySet<string>>; witnesses: readonly ConversationInputWitness[]
 } {
-  const byKey = new Map<string, ConversationInputWitness[]>(), groups = new Map<string, ConversationInputWitness[]>(), ambiguous = new Set<string>(), targets = new Map<string, ConversationItemRef>()
-  const current = new Map(records.map(record => [record.id, record]))
-  const unconfirmed = !!context?.unconfirmed || (context?.witnesses ?? []).some(fact => {
+  const byKey = new Map<string, ConversationInputWitness[]>(), groups = new Map<string, readonly ConversationInputWitness[]>(), ambiguous = new Set<string>(), targets = new Map<string, ConversationItemRef>()
+  const current = new Map(records.map(record => [record.id, record])), unconfirmedKeys = new Set(context?.unconfirmedKeys), unconfirmedGroups = new Set<string>()
+  const unconfirmed = !!context?.unconfirmed
+  for (const fact of context?.witnesses ?? []) {
     const record = current.get(conversationRecordId(fact.record))
-    if (!record || record.revision === fact.recordRevision) return false
+    if (!record || record.revision === fact.recordRevision) continue
     const next = conversationNativeInputWitness(record)
-    return !next || next.semanticItemId !== fact.semanticItemId || inputWitnessGroup(next) !== inputWitnessGroup(fact) ||
-      !!fact.key && conversationInputWitnessKey(next) !== conversationInputWitnessKey(fact)
-  })
-  for (const fact of [...records.flatMap(record => { const value = conversationNativeInputWitness(record); return value ? [value] : [] }), ...(context?.witnesses ?? [])]) {
-    const group = inputWitnessGroup(fact), known = groups.get(group) ?? []
-    const duplicate = known.findIndex(value => conversationRecordId(value.record) === conversationRecordId(fact.record) && value.semanticItemId === fact.semanticItemId)
-    if (duplicate >= 0) {
-      if (!known[duplicate]!.key && fact.key) known[duplicate] = fact
-    } else if (known.length < 2) known.push(fact)
-    // Two originals suffice for conflict, but later qualification must not be lost
-    // behind two earlier candidates. Keep that exact positive and one counterexample.
-    else if (fact.key && !known.some(value => value.key)) known[1] = fact
-    groups.set(group, known)
+    if (!next || next.semanticItemId !== fact.semanticItemId || conversationInputWitnessGroup(next) !== conversationInputWitnessGroup(fact) ||
+        !!fact.key && conversationInputWitnessKey(next) !== conversationInputWitnessKey(fact)) {
+      for (const value of next ? [fact, next] : [fact]) {
+        unconfirmedGroups.add(conversationInputWitnessGroup(value))
+        const key = conversationInputWitnessKey(value); if (key) unconfirmedKeys.add(key)
+      }
+    }
   }
-  for (const facts of groups.values()) for (const key of new Set(facts.flatMap(fact => { const key = conversationInputWitnessKey(fact); return key ? [key] : [] }))) {
+  for (const fact of [...records.flatMap(record => { const value = conversationNativeInputWitness(record); return value ? [value] : [] }), ...(context?.witnesses ?? [])]) {
+    const group = conversationInputWitnessGroup(fact)
+    groups.set(group, mergeConversationInputWitness(groups.get(group) ?? [], fact))
+  }
+  for (const [group, facts] of groups) for (const key of new Set(facts.flatMap(fact => { const key = conversationInputWitnessKey(fact); return key ? [key] : [] }))) {
     const known = byKey.get(key) ?? []
     for (const fact of facts) if (!known.some(value => conversationRecordId(value.record) === conversationRecordId(fact.record) && value.semanticItemId === fact.semanticItemId)) known.push(fact)
     byKey.set(key, known)
     if (known.length > 1) ambiguous.add(key)
+    if (unconfirmedGroups.has(group)) unconfirmedKeys.add(key)
+  }
+  const keysByTurn = new Map<string, Set<string>>(), keysByOriginal = new Map<string, Set<string>>()
+  for (const [key, facts] of byKey) for (const fact of facts) {
+    for (const [map, id] of [[keysByTurn, conversationInputWitnessTurn(fact.record, fact.turnId)], [keysByOriginal, conversationRecordId(fact.record)]] as const) {
+      const keys = map.get(id) ?? new Set<string>(); keys.add(key); map.set(id, keys)
+    }
+  }
+  const recordKeys = new Map<string, ReadonlySet<string>>()
+  for (const record of records) {
+    const key = conversationInputKey(record), keys = new Set(key ? [key] : [])
+    if (record.original.kind === 'native' && record.reference) {
+      for (const known of keysByOriginal.get(record.id) ?? []) keys.add(known)
+      const turn = record.original.item.turnId
+      if (turn && record.original.item.turnOutcome) for (const known of keysByTurn.get(conversationInputWitnessTurn(record.reference, turn)) ?? []) {
+        if (ambiguous.has(known) || unconfirmedKeys.has(known) || context?.unconfirmed) keys.add(known)
+      }
+    }
+    if (keys.size) recordKeys.set(record.id, keys)
   }
   for (const record of records) {
     const key = conversationInputKey(record), candidates = key ? byKey.get(key) : undefined
-    if (record.original.kind === 'captured' && key && candidates?.length === 1 && candidates[0]!.key && !unconfirmed && !ambiguous.has(key)) targets.set(record.id, candidates[0]!.record)
+    if (record.original.kind === 'captured' && key && candidates?.length === 1 && candidates[0]!.key && !unconfirmed && !unconfirmedKeys.has(key) && !ambiguous.has(key)) targets.set(record.id, candidates[0]!.record)
   }
-  return { targets, byKey, ambiguous, unconfirmed, witnesses: [...groups.values()].flat() }
+  return { targets, byKey, ambiguous, unconfirmed, unconfirmedKeys, recordKeys, witnesses: [...groups.values()].flat() }
 }
 /** Resolve only original accepted edges. A cycle retains each original record identity. */
 export function conversationRecordAnchors(records: readonly Pick<ConversationSourceRecord, 'id'>[], targets: ReadonlyMap<string, string>): { anchors: ReadonlyMap<string, string>; cyclicRecordIds: readonly string[] } {
@@ -333,7 +372,7 @@ export type ConversationStreamInput = {
   coverage: readonly ConversationSourceCoverage[]
   nativeSource?: AgentSessionHistorySource
   sourceHostConflict?: true
-  inputAdoption?: ConversationInputAdoptionContext
+  inputAdoption?: ConversationInputAdoptionEvidence
 }
 
 /** One semantic owner over accepted original records. No IO, state or input authority. */
@@ -372,7 +411,7 @@ function projectConversationGraph<Event>(input: ConversationStreamInput,
     const provenance = record.original.item.conversation
     const target = provenance?.sameEvent ?? adopted.targets.get(record.id)
     const inputKey = conversationInputKey(record)
-    if (inputKey && (adopted.ambiguous.has(inputKey) || adopted.unconfirmed)) adoptionGap(record,
+    if (inputKey && (adopted.ambiguous.has(inputKey) || adopted.unconfirmed || adopted.unconfirmedKeys.has(inputKey))) adoptionGap(record,
       adopted.ambiguous.has(inputKey) ? 'CONVERSATION_INPUT_ADOPTION_AMBIGUOUS' : 'CONVERSATION_INPUT_ADOPTION_COVERAGE_UNKNOWN',
       'The accepted source contains inputs with conflicting or incomplete native item witnesses. Original utterances and submissions remain independently readable.')
     const diagnostic = record.original.item.conversationDiagnostic
@@ -453,10 +492,15 @@ function projectConversationGraph<Event>(input: ConversationStreamInput,
     const primary = byId.get(id) ?? group.find(record => record.original.kind === 'native') ?? group[0]!
     const related = [...new Set(group.flatMap(record => [...(relationsByRecord.get(record.id) ?? [])]))]
     const coalesces = conversationEventCoalesces(group, id, input.nativeSource, adopted.targets)
-    const localIds = new Set(group.map(record => record.id)), inputKeys = new Set(group.flatMap(record => { const key = conversationInputKey(record); return key ? [key] : [] }))
-    const witnesses = [...inputKeys].flatMap(key => adopted.byKey.get(key) ?? []).filter(fact => !localIds.has(conversationRecordId(fact.record)))
-    const inputAdoption = inputKeys.size && (witnesses.length || adopted.unconfirmed)
-      ? { ...(adopted.unconfirmed ? { unconfirmed: true as const } : {}), witnesses } : undefined
+    const localRecords = new Map(group.map(record => [record.id, record])), inputKeys = new Set(group.flatMap(record => [...(adopted.recordKeys.get(record.id) ?? [])]))
+    const witnesses = [...inputKeys].flatMap(key => adopted.byKey.get(key) ?? []).filter(fact => {
+      const local = localRecords.get(conversationRecordId(fact.record)), next = local && conversationNativeInputWitness(local)
+      return !local || !next || next.semanticItemId !== fact.semanticItemId ||
+        conversationInputWitnessGroup(next) !== conversationInputWitnessGroup(fact) || conversationInputWitnessKey(next) !== conversationInputWitnessKey(fact)
+    })
+    const unconfirmed = adopted.unconfirmed || [...inputKeys].some(key => adopted.unconfirmedKeys.has(key))
+    const inputAdoption = inputKeys.size && (witnesses.length || unconfirmed)
+      ? { ...(unconfirmed ? { unconfirmed: true as const } : {}), witnesses } : undefined
     const body = [primary, ...group.filter(record => record !== primary)]
     const content = body.flatMap(record => selectors(record).map(selector => ({ recordId: record.id, recordRevision: record.revision, selector, placement: record === primary ? 'body' as const : 'detail' as const })))
     const attribution = conversationEventAuthor(group, primary, agentSessionId)

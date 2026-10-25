@@ -2,7 +2,7 @@ import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { ConnectionIngressMessage } from '@agentmux/core/connections'
-import { conversationInputAdoptionEdges, conversationInputIdentity, type ConversationInputWitness, type ConversationUnit } from '@agentmux/core/conversation'
+import { conversationInputAdoptionEdges, mergeConversationInputAdoptionContexts, conversationInputIdentity, type ConversationInputWitness, type ConversationUnit } from '@agentmux/core/conversation'
 import type { PublicationBoundary, PublicationOperation, PublicationStore, QueryFeedbackPayload } from './publication-store.js'
 
 const queryStages: readonly (readonly QueryFeedbackPayload['stage'][])[] = [
@@ -80,8 +80,7 @@ export function queueQueryFeedback(store: PublicationStore, boundary: Publicatio
 /** Consumes the original Core window and qualified adoption relation, never rendered reply text. */
 export function projectQueryFeedback(store: PublicationStore, boundary: PublicationBoundary, units: readonly ConversationUnit[], authorized?: (query: ConnectionIngressMessage) => boolean): void {
   const records = units.flatMap(unit => unit.records).filter(isCompleteConversationRecord)
-  const context = { witnesses: units.flatMap(unit => unit.event.inputAdoption?.witnesses ?? []),
-    ...(units.some(unit => unit.event.inputAdoption?.unconfirmed) ? { unconfirmed: true as const } : {}) }
+  const context = mergeConversationInputAdoptionContexts(units.map(unit => ({ records: unit.records.filter(isCompleteConversationRecord), context: unit.event.inputAdoption })))
   const edges = conversationInputAdoptionEdges(records, context)
   const byInput = store.database.prepare(`SELECT record_json FROM connection_ingress_message
     WHERE json_extract(record_json,'$.input.hostId')=? AND json_extract(record_json,'$.input.agentSessionId')=?
@@ -103,7 +102,7 @@ export function projectQueryFeedback(store: PublicationStore, boundary: Publicat
     if (row) { const query = JSON.parse(String(row.record_json)) as ConnectionIngressMessage; if (query.state === 'claimed' && (!authorized || authorized(query))) queueQueryFeedback(store, boundary, query, 'received') }
   }
   if (!edges.unconfirmed) for (const [key, witnesses] of edges.byKey) {
-    if (edges.ambiguous.has(key) || witnesses.length !== 1) continue
+    if (edges.unconfirmedKeys.has(key) || edges.ambiguous.has(key) || witnesses.length !== 1) continue
     const witness = witnesses[0]!, query = queryFor(witness)
     if (!query) continue
     queueQueryFeedback(store, boundary, query, 'received')
@@ -127,7 +126,7 @@ export function projectQueryFeedback(store: PublicationStore, boundary: Publicat
       if (!witness?.key) continue
       const accepted = conversationInputAdoptionEdges(records, { ...context, witnesses: [...context.witnesses, witness] })
       const key = conversationInputIdentity(witness.record.hostId, witness.key)
-      if (accepted.unconfirmed || accepted.ambiguous.has(key) || accepted.byKey.get(key)?.length !== 1) continue
+      if (accepted.unconfirmed || accepted.unconfirmedKeys.has(key) || accepted.ambiguous.has(key) || accepted.byKey.get(key)?.length !== 1) continue
       const query = queryFor(witness)
       if (query) queueQueryFeedback(store, boundary, query, item.turnOutcome.status, witness, { record: ref, revision: record.revision })
     }
