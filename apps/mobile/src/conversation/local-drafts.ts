@@ -1,5 +1,5 @@
 import type { MobileQuestionReplyAttempt } from './question-replies'
-import type { AgentInputSubmissionReceipt, AgentInputWaitRef, AgentInputWaitStopReceipt, AgentSessionHistoryQuestionAnswer, AgentMuxAgentInteractionInput } from '@agentmux/core'
+import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentInputWaitRef, AgentInputWaitStopReceipt, AgentSessionHistoryQuestionAnswer, AgentMuxAgentInteractionInput } from '@agentmux/core'
 import type { AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { DeviceWorkfaceRecordChangedError, getDeviceWorkface, type ConversationBucket, type ConversationCommit, type ConversationConflict, type ConversationEdit, type ConversationValue, type DraftRecord, type DeviceWorkface } from '../recovery/device-workface'
 
@@ -7,6 +7,8 @@ export type PromptAttempt = {
   operationId: string
   runId: string | null
   draft: string
+  /** Frozen at explicit input; absence on an old operation remains unknown on retry. */
+  moteSource?: AgentInputMoteSource
   phase: 'sending' | 'unknown' | 'rejected' | 'confirmed'
   message: string
   request?: { condition: AgentPromptCondition; execution: 'default' | 'immediate'; explicit: boolean; runtimeId: string | null }
@@ -114,6 +116,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
           draft: intent.phase === 'confirmed' && !intent.manualInput ? '' : intent.draft, phase: intent.phase,
           ...(intent.request ? { request: structuredClone(intent.request) } : {}), ...(intent.logId ? { logId: intent.logId } : {}),
           ...(intent.manualInput ? { manualInput: structuredClone(intent.manualInput) } : {}),
+          ...(intent.moteSource ? { moteSource: structuredClone(intent.moteSource) } : {}),
           ...(intent.inputRequested !== undefined ? { inputRequested: intent.inputRequested } : {}),
           ...(intent.originalRuntimeId !== undefined ? { originalRuntimeId: intent.originalRuntimeId } : {}),
           ...(intent.originalHostId !== undefined ? { originalHostId: intent.originalHostId } : {}),

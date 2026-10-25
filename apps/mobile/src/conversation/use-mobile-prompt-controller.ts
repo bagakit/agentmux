@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentTimelineSnapshot } from '@agentmux/core'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { expandSemanticReferences } from '@agentmux/client-ui'
@@ -17,7 +17,7 @@ import { getDeviceWorkface } from '../recovery/device-workface'
 function dispatchedPromptIdentity(original: PromptAttempt): string {
   const input = original.manualInput
   return JSON.stringify([original.operationId, original.runId, original.draft, original.originalRuntimeId,
-    original.originalHostId, original.explicit, original.request,
+    original.originalHostId, original.explicit, original.request, original.moteSource,
     input && [input.agentSessionId, input.expectedRun, input.runtimeId]])
 }
 
@@ -29,6 +29,7 @@ function originalPromptRequest(session: AgentMuxAgentSession | null | undefined,
     const condition = validateAgentPromptCondition(saved.condition)
     return { agentSessionId: session.agentSessionId, operationId: attempt.operationId, ...condition,
       prompt: expandSemanticReferences(attempt.draft), authorHuman: true as const, execution: saved.execution,
+      ...(attempt.moteSource ? { moteSource: structuredClone(attempt.moteSource) } : {}),
       ...(saved.explicit ? { allowUncertainTurn: true as const } : {}) }
   }
   const admission = session?.promptCompletionAdmission, intent = admission?.intent, message = intent?.message
@@ -42,6 +43,7 @@ function originalPromptRequest(session: AgentMuxAgentSession | null | undefined,
   // The Host supplies this call's authenticated device; Core checks it against the original message.
   return { agentSessionId: session.agentSessionId, operationId: attempt.operationId, expectedRun: { ...intent.run },
     afterSubmissionId: attempt.operationId, prompt: intent.prompt, authorHuman: true as const, execution: intent.execution,
+    ...(attempt.moteSource ? { moteSource: structuredClone(attempt.moteSource) } : {}),
     ...(intent.execution === 'immediate' ? { allowUncertainTurn: true } : {}) }
 }
 function originalPromptRefused(session: AgentMuxAgentSession | null | undefined, agentSessionId: string | null,
@@ -76,6 +78,7 @@ type MobilePromptControllerOptions = {
   local: ReturnType<typeof createLocalDrafts>
   client: AgentMuxHostedClient | null
   agentSessionId: string | null
+  moteSource?: AgentInputMoteSource | undefined
   session: AgentMuxAgentSession | null
   timeline: AgentTimelineSnapshot | null
   connection: MobileConnection
@@ -94,7 +97,7 @@ export type MobilePromptPreparation = {
 type PendingInputAction = { cancelled: boolean; dispatched: boolean; saving: boolean; allowUpdate: () => void }
 
 /** Coordinates original device intents with Core; local-drafts remains the durable owner. */
-export function useMobilePromptController({ local, client, agentSessionId, session, timeline, connection,
+export function useMobilePromptController({ local, client, agentSessionId, moteSource, session, timeline, connection,
   disconnected, visible, refresh }: MobilePromptControllerOptions) {
   const draftKey = JSON.stringify(['draft', agentSessionId])
   const drafts = useRef(local.drafts), attempts = useRef(local.attempts)
@@ -262,6 +265,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
       const pending = observed ? source.rejoinAgentInputWaiting({ ref: observed.ref })
         : source.submitAgentPrompt({ agentSessionId: input.agentSessionId, operationId: original.operationId,
           expectedRun: input.expectedRun, admissionIntent: { kind: 'manual-actor' }, prompt: expandSemanticReferences(original.draft),
+          ...(original.moteSource ? { moteSource: structuredClone(original.moteSource) } : {}),
           execution: 'immediate', authorHuman: true })
       action.dispatched = true; action.allowUpdate(); if (mounted.current) redraw(value => value + 1)
       const receipt = await pending
@@ -393,6 +397,8 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     if (mounted.current) redraw(value => value + 1)
   }
   async function submit(explicit = true, originalBody?: PromptAttempt, selectedKey = draftKey, preparation?: MobilePromptPreparation | null, bodyOnly = false): Promise<void> {
+    const frozenMoteSource = originalBody ? originalBody.moteSource : moteSource
+    const originalMoteSource = frozenMoteSource ? structuredClone(frozenMoteSource) : undefined
     const existing = attempts.current.get(selectedKey)
     const initialBody = originalBody?.draft ?? drafts.current.get(selectedKey) ?? ''
     let body = initialBody
@@ -463,6 +469,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
       const originalClient = client, originalId = agentSessionId
       const original: PromptAttempt = { operationId: randomClientRequestId(), runId: session?.run.runId ?? null,
         draft: body, phase: 'sending', message: '正在发送输入…', inputRequested: false,
+        ...(originalMoteSource ? { moteSource: originalMoteSource } : {}),
         originalRuntimeId: originalClient?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
         originalHostId: session?.hostId ?? null, explicit }
       let seed = startDeliveryAttempt({ agentSessionId: originalId, operationId: original.operationId,
@@ -508,6 +515,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
         rpcRequested = true
         const pendingReceipt = originalClient.submitAgentPrompt({ agentSessionId: originalId, operationId: original.operationId,
           prompt: expandSemanticReferences(original.draft), authorHuman: true,
+          ...(original.moteSource ? { moteSource: structuredClone(original.moteSource) } : {}),
           ...(original.manualInput ? { expectedRun: original.manualInput.expectedRun, admissionIntent: { kind: 'manual-actor' as const }, execution: 'immediate' as const }
             : { ...original.request!.condition, execution: original.request!.execution }) })
         removeDispatch = trackDispatchedPrompt(originalClient, originalKey, original)

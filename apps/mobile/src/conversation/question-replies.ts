@@ -1,4 +1,4 @@
-import type { AgentMuxAgentSession } from '@agentmux/core'
+import type { AgentInputMoteSource, AgentMuxAgentSession } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { agentPromptCondition, agentPromptNotApplied } from '@agentmux/core/prompt-condition'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
@@ -10,7 +10,7 @@ export type MobileQuestionReplyAttempt = QuestionReplyAttempt & { runtimeId: str
 type Local = ReturnType<typeof createLocalDrafts>
 const notAppliedDiagnostic = { code: 'QUESTION_REPLY_NOT_APPLIED', message: 'Core 已确认原答复完全未应用；草稿和原操作保留，可明确重新发送答案。' }
 export async function submitMobileQuestionReply(local: Local, sessionId: string, client: AgentMuxHostedClient | null,
-  input: ConversationQuestionInput, notify: () => void): Promise<void> {
+  input: ConversationQuestionInput, notify: () => void, moteSource?: AgentInputMoteSource): Promise<void> {
   const key = questionReplyKey(sessionId, input)
   await submitQuestionReply<MobileQuestionReplyAttempt>({
     sessionId,
@@ -19,7 +19,8 @@ export async function submitMobileQuestionReply(local: Local, sessionId: string,
       if (!client) throw new Error('原 Host 尚未连接，答案草稿保留；连接恢复后可继续发送。')
       const session = client.agentSession(sessionId)
       return { phase: 'sending', runtimeId: client.runtimeOwnerIdentity()?.runtimeId ?? null, hostId: session.hostId,
-        input: structuredClone({ ...input, ...agentPromptCondition(session), operationId: randomClientRequestId() }) }
+        input: structuredClone({ ...input, ...agentPromptCondition(session), operationId: randomClientRequestId(),
+          ...(moteSource ? { moteSource } : {}) }) }
     },
     retain: async (next, expected) => {
       if (local.questions.get(key) !== expected) throw new Error('另一页面已更新原答复；原操作和草稿保留，请核对原记录。')

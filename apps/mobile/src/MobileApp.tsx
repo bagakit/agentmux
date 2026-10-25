@@ -14,6 +14,7 @@ import { MobileAgentActions } from './conversation/MobileAgentActions'
 import { recoverMobileAgent } from './conversation/mobile-agent-recovery'
 import { MobileAgentMenuContext, type MobileAgentMenuTarget } from './navigation/MobileAgentRow'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
+import { mobileMoteInputSource } from './conversation/mote-input-source'
 
 import { useHostAppearance } from './appearance/useHostAppearance'
 import { bindMobileViewport, bindNativeDevice } from './platform/native/device'
@@ -172,6 +173,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       setGoalsContext(value => ({ ...value, discussion: null }))
   }
   const [objectIdentity, setObjectIdentity] = useState<MobileObjectIdentity | null>(initial.current.presentation?.identity ?? null)
+  const [identityRecipient, setIdentityRecipient] = useState<string | null>(initial.current.workface.selectedSessionId)
   const [profileIdentity, setProfileIdentity] = useState<MobileObjectIdentity | null>(initial.current.presentation?.profile?.identity ?? null)
   const [profileSourcePath, setProfileSourcePath] = useState<string | null>(initial.current.presentation?.profile?.sourcePath ?? null)
   const navigationRevision = useRef(0)
@@ -179,7 +181,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const openSession = useCallback((id: string, identity: MobileObjectIdentity) => {
     navigationRevision.current += 1
     if (identity.mote) setRecentMoteSpaceId(identity.mote.spaceId)
-    setObjectIdentity(identity); setShowGoalWork(false)
+    setObjectIdentity(identity); setIdentityRecipient(id); setShowGoalWork(false)
     setWorkface(value => ({ ...value, selectedSessionId: id, panel: 'conversation' }))
     setShowSession(true)
   }, [])
@@ -298,7 +300,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       if (!isCurrent()) return
       const target = mobileChatStart(result.catalog, recentMoteSpaceId)
       setChatStartIssue(target.issue)
-      if (target.identity) setObjectIdentity(target.identity)
+      if (target.identity) { setObjectIdentity(target.identity); setIdentityRecipient(target.sessionId) }
       if (!target.sessionId) return
       chatStartDone.current = true
       setHome('mote'); setSecondary(null)
@@ -448,7 +450,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
             {chatStartIssue && <button type="button" className="mobile-text-button" onClick={() => { chatStartDone.current = false; chatStartExpectedRevision.current = navigationRevision.current; retryChatStart(value => value + 1) }}>重新核对</button>}</div>
         </div>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
-          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} toolbarTarget={conversationToolsTarget} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))}
+          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} moteSource={mobileMoteInputSource(objectIdentity, workface.selectedSessionId, identityRecipient)} connection={connection} platform={platform} toolbarTarget={conversationToolsTarget} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))}
             onShowGoals={trigger => { goalReturn.current = { trigger, sessionId: workface.selectedSessionId }; setShowGoalWork(true) }} openHttpLink={openBrowserHttpLink} />
         </div>
       </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel !== 'terminal'}>

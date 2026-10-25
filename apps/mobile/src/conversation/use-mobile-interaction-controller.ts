@@ -40,9 +40,15 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
     if (!client || !session || !request || !requestRun || !requestKey || responseDisabled) return
     const previous = responseAttempt
     if (previous?.phase === 'sending' || previous?.phase === 'unknown' || previous?.phase === 'confirmed') return
-    const originalKey = JSON.stringify([session.agentSessionId, requestRun.runId, request.id, intent.operationId])
+    // A remounted Card has no operation ref. An unchanged refused answer still
+    // belongs to the device's original operation, including an unknown source.
+    const priorInput = previous?.original?.input
+    const input = priorInput && JSON.stringify(priorInput.response) === JSON.stringify(response)
+      ? structuredClone(priorInput)
+      : structuredClone({ agentSessionId: session.agentSessionId, expectedRun: requestRun, response, ...intent })
+    const originalKey = JSON.stringify([session.agentSessionId, requestRun.runId, request.id, input.operationId])
     const original: ResponseAttempt = { phase: 'sending', message: '正在发送原请求的答复…', original: {
-      input: structuredClone({ agentSessionId: session.agentSessionId, expectedRun: requestRun, response, ...intent }),
+      input,
       hostId: session.hostId, runtimeId: client.runtimeOwnerIdentity?.()?.runtimeId ?? null } }
     responses.current.set(originalKey, original)
     const retained = await local.save()

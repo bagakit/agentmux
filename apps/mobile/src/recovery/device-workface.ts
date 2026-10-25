@@ -4,6 +4,7 @@ import { moteQuickDraftKey, parseMoteQuickDraft, parseMoteQuickDrafts, MoteQuick
 import { parseQuestionReplyAttempt } from '@agentmux/client-ui/conversation-question-reply'
 import type { MobileQuestionReplyAttempt } from '../conversation/question-replies'
 import type { AgentSessionHistoryQuestionAnswer } from '@agentmux/core'
+import { parseAgentInputMoteSource } from '@agentmux/core/mote-input-source'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { withDeviceStorageLock, DEVICE_WORKFACE_KEY } from './device-storage-lock'
 import { parseMobileGoalOperationRecord, type MobileGoalOperationRecord } from './goal-operation-record'
@@ -117,10 +118,12 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     if (item && typeof item === 'object' && Object.hasOwn(item, 'originalHostId')) keys.push('originalHostId')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'explicit')) keys.push('explicit')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'manualInput')) keys.push('manualInput')
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'moteSource')) keys.push('moteSource')
     const attempt = record(item, keys)
     if (!id(attempt.operationId) || !(attempt.runId === null || id(attempt.runId))
       || !body(attempt.draft) || !phase(attempt.phase)) throw invalid()
     if (attempt.logId !== undefined) validateDeliveryLogId(attempt.logId)
+    if (attempt.moteSource !== undefined) parseAgentInputMoteSource(attempt.moteSource)
     if (attempt.inputRequested !== undefined && typeof attempt.inputRequested !== 'boolean') throw invalid()
     if (attempt.explicit !== undefined && typeof attempt.explicit !== 'boolean') throw invalid()
     if (attempt.originalRuntimeId !== undefined && !(attempt.originalRuntimeId === null || id(attempt.originalRuntimeId))) throw invalid()
@@ -162,7 +165,9 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     if (!phase(attempt.phase)) throw invalid()
     if (attempt.original !== undefined) {
       const original = record(attempt.original, ['input', 'hostId', 'runtimeId'])
-      const input = record(original.input, ['agentSessionId', 'expectedRun', 'operationId', 'expectedRequest', 'response'])
+      const input = record(original.input, ['agentSessionId', 'expectedRun', 'operationId', 'expectedRequest', 'response',
+        ...Object.hasOwn(original.input ?? {}, 'moteSource') ? ['moteSource'] : []])
+      if (input.moteSource !== undefined) parseAgentInputMoteSource(input.moteSource)
       const run = record(input.expectedRun, ['runId'])
       // Storage validates the read reference, not Provider semantics or current permission.
       const request = input.expectedRequest as { id?: unknown; agentSessionId?: unknown; kind?: unknown }
@@ -176,6 +181,7 @@ export function parseDraftRecord(value: unknown): DraftRecord {
   }
   if (v.questions !== undefined) for (const [, item] of entries(v.questions)) {
     const attempt = parseQuestionReplyAttempt(item), scope = item as MobileQuestionReplyAttempt
+    if (attempt.input.moteSource !== undefined) parseAgentInputMoteSource(attempt.input.moteSource)
     if (!(scope.runtimeId === null || id(scope.runtimeId)) || !id(scope.hostId) || !attempt.input.answers.length) throw invalid()
   }
   if (v.questionDrafts !== undefined) for (const [, item] of entries(v.questionDrafts)) {

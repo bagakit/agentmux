@@ -13,7 +13,7 @@ import { currentAgentSemanticStatus, nativeTargetSourceUnconfirmed } from '@agen
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import type { AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentInputMoteSource, AgentSessionUserMessage } from '@agentmux/core'
 import type { InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
 import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
 import {
@@ -44,6 +44,7 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink'> & {
   client: AgentMuxHostedClient | null
   agentSessionId: string | null
+  moteSource?: AgentInputMoteSource | undefined
   connection: MobileConnection
   platform: ClientUiPlatform
   onAttach?: () => void
@@ -54,7 +55,7 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   displayName?: string
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName,
+export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const conversationPlatform = useMemo(() => ({ ...platform,
     readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
@@ -103,7 +104,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const current = useRef({ client, agentSessionId })
   current.current = { client, agentSessionId }
   const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue, preparationDetail,
-    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId,
+    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId, moteSource,
       session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   useMobileWebUpdateSafetyOwner(() => {
     if (local.saveIssue || local.recordChanged || local.hasUnconfirmedSave) return '草稿或原操作尚未确认保存在设备；请先恢复设备存储并保存，再更新网页。'
@@ -424,7 +425,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
               void local.save().then(() => { if (mounted.current) redraw(value => value + 1) })
             }}
             onQuestionReply={input => submitMobileQuestionReply(local, agentSessionId, pageClient ?? null, input,
-              () => { if (mounted.current) redraw(value => value + 1) })}
+              () => { if (mounted.current) redraw(value => value + 1) }, pageClient === client ? moteSource : undefined)}
             questionDraftNotice={local.notice ?? undefined}
             questionReplyRoute={questionCapability.route}
             questionReplyTarget={pageClient === client && session && !nativeTargetSourceUnconfirmed(session) && session.nativeHandle?.kind === 'provider' ? {
@@ -444,6 +445,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       }}>{reading.newerAvailable ? '有新回复 · 回到最新' : '回到最新'}</button>}
       {request && requestKey ? <div className="mobile-conversation__interaction">
         <AgentInteractionCard key={requestKey} request={request} labels={mobileInteractionLabels} disabled={responseDisabled}
+          getMoteSource={() => moteSource}
           {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : responseUnavailableReason ? { responseUnavailableReason } : {})}
           responseStatus={responseAttempt?.original ? responseStatus(responseEntry![0], responseAttempt) : undefined}
           {...(onShowTerminal ? { onOpenTerminal: onShowTerminal } : {})}
