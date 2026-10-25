@@ -203,9 +203,9 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   ...AGENTMUX_CAPSULE_CLI_COMMANDS,
-  ...(['list','create','action'] as const).map(action => ({ method: `agent.progress.${action}` as AgentProgressMethod,
-    usage: '--data <FILE|->', summary: `Read or explicitly ${action} original continuous progress. Creation, resume and check require an authenticated person or device; Agent callers may read, pause or stop an authorized exact target.`,
-    details: 'Uses the original connected background Host; Desktop exit does not stop delivery. Requires exact target. Mutations keep original operationId; action additionally names exact loopId and its full original expectedLoop snapshot. Unknown delivery must be inspected through the original loop and Agent input; never mint another operation automatically.',
+  ...(['list','create','action','update'] as const).map(action => ({ method: `agent.progress.${action}` as AgentProgressMethod,
+    usage: '--data <FILE|->', summary: `Read or explicitly ${action} original continuous progress. Creation, update, resume and check require an authenticated person or device; Agent callers may read, pause or stop an authorized exact target.`,
+    details: 'Uses the original connected background Host; Desktop exit does not stop delivery. Requires exact target. Mutations keep original operationId; action and update name the exact loopId and original expectedLoop. Update preserves the next check and any already claimed input. A list is an observation, not a disk receipt. Explicitly retry the same update request and operationId to confirm a save; never automatically replay an unknown operation.',
     flags: { '--data': 'data' as const }, parse: async (args: readonly string[]) => {
       if (args.length !== 2 || args[0] !== '--data') throw new AgentMuxError('Continuous progress accepts exactly --data <FILE|->.', 'INVALID_CLI_ARGUMENT')
       return parseAgentProgressParams(`agent.progress.${action}`, await readControlJsonInput(args[1]!, 'Continuous progress')) as unknown as Record<string, unknown>

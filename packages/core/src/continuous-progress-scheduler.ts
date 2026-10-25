@@ -24,7 +24,7 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   checkInState?: AgentScheduleCheckInState
   revision?: number
   creationOperationId?: string
-  lastMutation?: { operationId: string; action: 'pause' | 'resume' | 'cancel' | 'stop' | 'check'; expectedRevision: number }
+  lastMutation?: { operationId: string; action: 'pause' | 'resume' | 'cancel' | 'stop' | 'check'; expectedRevision: number } | { operationId: string; action: 'update'; expectedRevision: number; requestDigest: string }
   /** Initial input is saved in this same loop before the original input queue may send. */
   initialDelivery?: { operationId: string; prompt: string; condition: AgentPromptCondition; state: 'prepared' | 'unknown' | 'confirmed'; startedAt: number }
   futureIntentId?: string

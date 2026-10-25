@@ -351,6 +351,7 @@ const NATIVE_FIELDS = {
   'agent.progress.list': ['target'],
   'agent.progress.create': ['target','intervalMs','prompt','taskSource','operationId'],
   'agent.progress.action': ['target','loopId','action','expectedLoop','operationId'],
+  'agent.progress.update': ['target','loopId','expectedLoop','intervalMs','prompt','operationId'],
   'agent.automation.pause': ['agentSessionId', 'expectedRun', 'ownerInstanceId', 'operationId'],
   'agent.automation.inspect': ['agentSessionId', 'expectedRun', 'ownerInstanceId', 'operationId'],
   'browser.input.inspect': ['hostId', 'operationId'],
