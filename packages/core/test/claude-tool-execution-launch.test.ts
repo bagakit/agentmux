@@ -21,7 +21,9 @@ describe('Claude original execution launch', () => {
     const env = { CLAUDE_CONFIG_DIR: '/original/config', ANTHROPIC_BASE_URL: 'http://controlled.invalid', ORIGINAL_VALUE: 'retained' }
     const plan = await prepareClaudeToolExecutionLaunch({ command: f.command, args, env }, f.context)
     expect(plan.command).toBe(f.command); expect(plan.env).toEqual(env)
-    expect(plan.args.slice(-args.length)).toEqual(args)
+    expect(plan.args[plan.args.indexOf('--resume') + 1]).toBe('original-native-session')
+    expect(plan.args[plan.args.indexOf('--permission-mode') + 1]).toBe('default')
+    expect(plan.args.slice(-2)).toEqual(['--', 'literal --mcp-config prompt'])
     const at = plan.args.indexOf('--mcp-config')
     expect(JSON.parse(plan.args[at + 1]!)).toEqual({ mcpServers: { amux_exec: { type: 'ws', url: f.context.url } } })
     expect(plan.args).not.toContain('--dangerously-skip-permissions')
@@ -40,7 +42,9 @@ describe('Claude original execution launch', () => {
     expect(plan.args).not.toContain('--strict-mcp-config')
     expect(plan.args).toContain(originalMcp); expect(plan.args).toContain('/original/plugin')
     expect(plan.args.filter(value => value === '--mcp-config')).toHaveLength(1)
-    expect(plan.args.filter(value => value === '--plugin-dir')).toHaveLength(1)
+    expect(plan.args.filter(value => value === '--plugin-dir')).toHaveLength(2)
+    expect(plan.args[plan.args.indexOf('--plugin-dir') + 1]).toBe('/original/plugin')
+    expect(plan.args[plan.args.lastIndexOf('--plugin-dir') + 1]).toContain('/tool-execution/')
     const note = plan.args[plan.args.indexOf('--append-system-prompt') + 1]!
     expect(note).toContain('/original/resource/project'); expect(note.endsWith('Original authored instructions')).toBe(true)
     expect(plan.args.slice(-2)).toEqual(['--', 'Original prompt'])
@@ -62,6 +66,34 @@ describe('Claude original execution launch', () => {
     expect(await readFile(path, 'utf8')).toBe('Original file instructions\n')
     expect((await readFile(input, 'utf8')).endsWith('Original file instructions\n')).toBe(true)
     expect(plan.args).not.toContain('Original file instructions\n')
+  })
+
+  it.each(['--mcp-config', '--mcp-config='])('keeps the bound endpoint in the final effective repeated MCP list (%s)', async flag => {
+    const f = await fixture(), other = JSON.stringify({ mcpServers: { amux_exec: { type: 'ws', url: 'ws://127.0.0.1:54321/other-binding' } } })
+    const repeated = flag.endsWith('=') ? [flag + other] : [flag, other]
+    const plan = await prepareClaudeToolExecutionLaunch({ command: f.command, args: ['--mcp-config', '{}', ...repeated, '--', 'original prompt'], env: {} }, f.context)
+    const at = plan.args.lastIndexOf('--mcp-config')
+    expect(plan.args[at + 1]).toBe(other)
+    expect(JSON.parse(plan.args[at + 2]!)).toEqual({ mcpServers: { amux_exec: { type: 'ws', url: f.context.url } } })
+  })
+
+  it('adds resource context to the native effective final prompt while retaining earlier authored values', async () => {
+    const f = await fixture()
+    const plan = await prepareClaudeToolExecutionLaunch({ command: f.command, args: ['--append-system-prompt', 'Earlier authored value', '--append-system-prompt=Effective authored value'], env: {} }, f.context)
+    const at = plan.args.lastIndexOf('--append-system-prompt')
+    expect(plan.args[plan.args.indexOf('--append-system-prompt') + 1]).toBe('Earlier authored value')
+    expect(plan.args[at + 1]).toContain('/original/resource/project')
+    expect(plan.args[at + 1]!.endsWith('Effective authored value')).toBe(true)
+  })
+
+  it('reads the effective final prompt file without replacing the earlier file option', async () => {
+    const f = await fixture(), first = join(f.root, 'first.txt'), last = join(f.root, 'last.txt')
+    await writeFile(first, 'Earlier file instructions'); await writeFile(last, 'Effective file instructions')
+    const plan = await prepareClaudeToolExecutionLaunch({ command: f.command, args: ['--append-system-prompt-file', first, '--append-system-prompt-file=' + last], env: {} }, f.context)
+    expect(plan.args[plan.args.indexOf('--append-system-prompt-file') + 1]).toBe(first)
+    const file = plan.args[plan.args.lastIndexOf('--append-system-prompt-file') + 1]!
+    expect((await readFile(file, 'utf8')).endsWith('Effective file instructions')).toBe(true)
+    expect(await readFile(last, 'utf8')).toBe('Effective file instructions')
   })
 
   it('prepares an original resource helper using the selected Provider and retained grant/journal', async () => {
