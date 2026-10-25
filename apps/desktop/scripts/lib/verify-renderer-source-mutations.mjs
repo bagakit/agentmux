@@ -74,7 +74,7 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
     for (const file of ['package.json', 'tsconfig.base.json', 'vitest.setup.ts']) await cp(join(root, file), join(copy, file), { mode: fsConstants.COPYFILE_FICLONE })
     await symlink(join(root, 'node_modules'), join(copy, 'node_modules'))
     const packageDirectories = ['packages/core', 'packages/layout', 'packages/demand', 'packages/client-ui', 'packages/git',
-      'packages/identity', 'packages/relay', 'packages/diagnostic-evidence', 'apps/host']
+      'packages/identity', 'packages/relay', 'packages/diagnostic-evidence', 'apps/host', 'apps/mobile']
     for (const directory of packageDirectories) {
       const destination = join(copy, directory)
       await mkdir(destination, { recursive: true })
@@ -106,7 +106,7 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
 import { readFileSync, writeFileSync } from 'node:fs'; import { createHash } from 'node:crypto';
 export default defineConfig({ ...owning, resolve: { ...owning.resolve, conditions: ['browser', 'import', 'default'] }, ssr: { ...owning.ssr, noExternal: ['@agentmux/client-ui'], resolve: { conditions: ['browser', 'import', 'default'] } }, define: { ...owning.define, __AGENTMUX_WEB_PREVIEW__: 'true' },
 plugins: [...(owning.plugins ?? []), { name: 'actual-private-source-load', enforce: 'pre', transform(source, id) { const target = JSON.parse(readFileSync(${JSON.stringify(join(copy, 'current-load.json'))}, 'utf8')); if (target && id === target.file) writeFileSync(target.load, JSON.stringify({ file: id, sha256: createHash('sha256').update(source).digest('hex') })); } }],
-test: { ...owning.test, server: { ...owning.test?.server, sourcemap: false, deps: { inline: ['@agentmux/client-ui'] } }, include: ${JSON.stringify(tests)}, setupFiles: [${JSON.stringify(join(copy, 'vitest.setup.ts'))}] } });\n`)
+test: { ...owning.test, server: { ...owning.test?.server, sourcemap: false, deps: { inline: ['@agentmux/client-ui'] } }, include: ${JSON.stringify(tests)}, setupFiles: [...new Set([...(Array.isArray(owning.test?.setupFiles) ? owning.test.setupFiles : owning.test?.setupFiles ? [owning.test.setupFiles] : []), ${JSON.stringify(join(copy, 'vitest.setup.ts'))}])] } });\n`)
     assert.ok(mutations.length > 0, 'A mutation verification must select actual cases.')
     const baseline = await run('baseline-green')
     assert.equal(baseline.code, 0, baseline.output)
