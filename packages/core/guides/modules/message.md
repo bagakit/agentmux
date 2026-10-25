@@ -7,6 +7,10 @@ when: "Browse original A2A messages, inspect delivery, manage pending input or r
 # message
 
 <!-- amux:content -->
+[A2A communication contract](../shared/messaging/contract.md "amux:include")
+
+## Read original messages and receipts
+
 Core owns authenticated messages, ordered delivery, inbox generations and original
 dispatch threads. Use message ls --direction incoming|outgoing for bounded original metadata
 and body previews; message read --message-id ID retrieves one original body, without
@@ -57,5 +61,3 @@ operate one retained pending item, not a new message. Inbox acknowledgement reco
 of its exact generation and reader Run; it does not report work or complete a Goal. Dispatch
 report uses the actual source/reply and kind; worker_done is a report pending collection.
 Unknown/partial input remains original and cannot be blindly resent with fresh identities.
-
-[A2A communication contract](../shared/messaging/contract.md "amux:include")
