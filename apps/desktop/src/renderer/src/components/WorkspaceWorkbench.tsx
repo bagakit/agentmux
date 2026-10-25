@@ -400,17 +400,14 @@ function SortableWorkbenchTab({
     }
   }
 
-  const tabsToLeft = tabIdsForCloseScope(group.tabOrder, tab.id, 'left')
-  const tabsToRight = tabIdsForCloseScope(group.tabOrder, tab.id, 'right')
-  const otherTabs = tabIdsForCloseScope(group.tabOrder, tab.id, 'others')
-
+  const tabIndex = group.tabOrder.indexOf(tab.id)
 
   return (
     <>
       <WorkbenchTabContextMenu
-        canCloseOthers={otherTabs.length > 0}
-        canCloseLeft={tabsToLeft.length > 0}
-        canCloseRight={tabsToRight.length > 0}
+        canCloseOthers={tabIndex >= 0 && group.tabOrder.length > 1}
+        canCloseLeft={tabIndex > 0}
+        canCloseRight={tabIndex >= 0 && tabIndex < group.tabOrder.length - 1}
         canMoveToNewGroup={(!projection || placed) && group.tabOrder.length > 1}
         tabId={tab.id}
         onOpenWindow={() => void openWorkbenchWindow({ kind: 'tab', displayWorkspaceId: workspaceId, groupId: group.id, tabId: tab.id })}
@@ -422,9 +419,9 @@ function SortableWorkbenchTab({
         onRenameTab={naming.begin}
         renameLabel={naming.label}
         onClose={() => void requestTabsClose([tab.id])}
-        onCloseOthers={() => void requestTabsClose(otherTabs)}
-        onCloseLeft={() => void requestTabsClose(tabsToLeft)}
-        onCloseRight={() => void requestTabsClose(tabsToRight)}
+        onCloseOthers={() => void requestTabsClose(tabIdsForCloseScope(group.tabOrder, tab.id, 'others'))}
+        onCloseLeft={() => void requestTabsClose(tabIdsForCloseScope(group.tabOrder, tab.id, 'left'))}
+        onCloseRight={() => void requestTabsClose(tabIdsForCloseScope(group.tabOrder, tab.id, 'right'))}
         onMoveToNewGroup={(direction) => moveTabToNewGroup(
           workspaceId,
           tab.id,
@@ -1182,7 +1179,8 @@ function PaneGroup({
     disabled: projection?.placementConfirmed === false || Boolean(projection && !placed),
     data: { kind: 'pane', groupId: group.id } satisfies DropData
   })
-  const orderedTabIds = moteTabOrder(group.tabOrder, mote?.defaultConversation, workspaceId, group.id)
+  const orderedTabIds = useMemo(() => [...moteTabOrder(group.tabOrder, mote?.defaultConversation, workspaceId, group.id)],
+    [group.tabOrder, mote?.defaultConversation, workspaceId, group.id])
   const tabs = orderedTabIds.flatMap((id) => (tabsById[id] ? [tabsById[id]] : []))
   const allGroup = allLayout.groups.find((candidate) => candidate.id === group.id)
   const bodyTabs = (allGroup?.tabOrder ?? group.tabOrder).flatMap((id) => (
@@ -1247,7 +1245,7 @@ function PaneGroup({
     title={mote ? 'New discussion' : 'New tab'} aria-label={mote ? 'New discussion' : 'New Tab'}>
     <ThemeActionCreateTabIcon size={13} />
   </button>
-  const tabNavigation = <SortableContext items={[...orderedTabIds]} strategy={horizontalListSortingStrategy}>
+  const tabNavigation = <SortableContext items={orderedTabIds} strategy={horizontalListSortingStrategy}>
     <WorkbenchTabStrip visible={surfaceVisible} activeTabId={group.activeTabId} tabIds={orderedTabIds}
       trailingAction={mote && !showEmptySpace ? createTabAction : undefined}>{tabs.map(tab => <SortableWorkbenchTab key={tab.id} tab={tab} group={group} workspaceId={workspaceId} visible={surfaceVisible} />)}</WorkbenchTabStrip>
   </SortableContext>

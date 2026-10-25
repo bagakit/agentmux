@@ -144,7 +144,8 @@ export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, 
     selected.set(groupId, reference)
   }
   const groups = layout.groups.map(group => {
-    const tabOrder = group.tabOrder.filter(id => (scope.entity.kind === 'zone' ? inTree.has(group.id) : placements.get(group.id)?.has(id)) && members.has(id) && members.get(id)?.workspaceId === tabs[id]?.workspaceId)
+    const filtered = group.tabOrder.filter(id => (scope.entity.kind === 'zone' ? inTree.has(group.id) : placements.get(group.id)?.has(id)) && members.has(id) && members.get(id)?.workspaceId === tabs[id]?.workspaceId)
+    const tabOrder = filtered.length === group.tabOrder.length ? group.tabOrder : filtered
     if (automaticZoneSelection) {
       const preferences = scope.selection.filter(reference => tabOrder.includes(reference.tabId))
       const held = preferences.filter(reference => reference.displayWorkspaceId === scope.displayWorkspaceId && reference.groupId === group.id).at(-1) ?? preferences.at(-1)
