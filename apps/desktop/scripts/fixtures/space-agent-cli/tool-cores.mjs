@@ -1,3 +1,4 @@
+import { startRemoteToolCore } from './tool-remote.mjs'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -5,8 +6,8 @@ import { connectAgentMuxRpc } from '../../../../../packages/core/dist/public-rpc
 import { connectHostedAgentMux } from '../../../../../packages/core/dist/hosted-client.js'
 
 // Two real isolated owners for the existing Desktop consumer fixture. No model requests or tools are simulated.
-export async function startToolCores(root, packageRoot, evidence, owners, cleanup) {
-  for (const name of ['local', 'agent']) {
+export async function startToolCores(root, packageRoot, evidence, owners, cleanup, remoteReceipt, direction = 'remote-agent') {
+  for (const name of remoteReceipt ? ['local'] : ['local', 'agent']) {
     const base = path.join(root, name)
     for (const dir of ['home', 'codex', 'runtime', 'state', 'workspace']) await fs.mkdir(path.join(base, dir), { recursive: true, mode: 0o700 })
     const env = Object.fromEntries(['PATH', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL'].flatMap(key => process.env[key] ? [[key, process.env[key]]] : []))
@@ -32,11 +33,15 @@ export async function startToolCores(root, packageRoot, evidence, owners, cleanu
     owner.rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: owner.socketPath } })
     owner.client = await connectHostedAgentMux({ rpc: owner.rpc }); await owner.client.connectRuntime()
   }
-  const agent = owners.find(owner => owner.name === 'agent')
+  if (remoteReceipt) await startRemoteToolCore(root, path.resolve(packageRoot, '../..'), evidence, owners, cleanup, remoteReceipt)
+  const agentHostId = direction === 'local-agent' ? 'local' : 'agent'
+  const resourceHostId = direction === 'local-agent' ? 'agent' : 'local'
+  const agent = owners.find(owner => owner.name === agentHostId)
+  const resource = owners.find(owner => owner.name === resourceHostId)
   const configured = await agent.client.configureHostExecutor({ executorId: 'native-tool-proof', config: {
     label: 'Private native tool creation', providerId: 'codex', command: 'codex', args: ['--no-alt-screen', '--dangerously-bypass-approvals-and-sandbox'], env: {}, injectAgentMuxGuide: false,
   } })
-  const description = { endpoints: Object.fromEntries(owners.map(owner => [owner.name, { transport: 'unix', path: owner.socketPath }])), actualMachines: 1, agentWorkspacePath: path.join(root, 'agent/workspace'), executor: configured.executor,
+  const description = { endpoints: Object.fromEntries(owners.map(owner => [owner.name, owner.endpoint ?? { transport: 'unix', path: owner.socketPath }])), actualMachines: remoteReceipt ? 2 : 1, direction, agentHostId, resourceHostId, agentWorkspacePath: agent.workspacePath ?? path.join(agent.base, 'workspace'), resourceWorkspacePath: resource.workspacePath ?? path.join(root, 'repo'), remoteHost: owners.find(owner => owner.remote)?.hostConfig, executor: configured.executor,
     identities: Object.fromEntries(owners.map(owner => [owner.name, owner.client.runtimeOwnerIdentity()])) }
   await fs.writeFile(path.join(root, 'tool-owners.json'), JSON.stringify(description), { mode: 0o600 })
   await fs.writeFile(path.join(evidence, 'tool-owners.json'), JSON.stringify(description, null, 2), { mode: 0o600 })
@@ -52,6 +57,14 @@ export async function stopToolCores(owners, evidence, cleanup) {
     })
     await cleanup.step({ owner: owner.name, ownerRoot: owner.base, action: 'save-owner-log' },
       () => fs.writeFile(path.join(evidence, `tool-owner-${owner.name}.log`), owner.logs.join(''), { mode: 0o600 }))
+  }
+  for (const owner of owners.filter(owner => owner.remote)) {
+    for (const session of owner.sessions) await cleanup.step({ owner: owner.name, ownerRoot: owner.base, action: 'stop-agent', agentSessionId: session.agentSessionId, run: session.run }, () => owner.client.stopAgent(session.agentSessionId, session.run))
+    for (const runId of owner.runs) await cleanup.step({ owner: owner.name, ownerRoot: owner.base, action: 'stop-terminal', run: { runId } }, () => owner.client.stopTerminal({ runId }))
+    if (owner.client) await cleanup.step({ owner: owner.name, ownerRoot: owner.base, action: 'dispose-client' }, () => owner.client.dispose())
+    if (owner.rpc) await cleanup.step({ owner: owner.name, ownerRoot: owner.base, action: 'dispose-rpc' }, () => owner.rpc.dispose())
+    owner.sessions = []; owner.runs = []; owner.client = undefined; owner.rpc = undefined
+    if (owner.stopRemote) await cleanup.step({ owner: owner.name, ownerRoot: owner.base, action: 'stop-original-remote-supervisor' }, () => owner.stopRemote())
   }
   try { await cleanup.finish(owners) } catch { /* Exact errors remain in the required cleanup receipt. */ }
   return cleanup.report.errors
