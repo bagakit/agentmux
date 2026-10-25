@@ -3,7 +3,6 @@ import type { ProviderConversationChangesContext, ProviderConversationChangesPag
 import type { AgentPromptPreparationWaitReason } from './prompt-preparation.js'
 import { AgentMuxError } from './errors.js'
 import {
-  cloneLaunchOptions,
   describeLaunchOptions,
   resolveLaunchOptionArgv,
   validateLaunchOptionDeclarations,
@@ -329,12 +328,49 @@ function assertManagedHookContribution(contribution: {
   }
 }
 
-export function defineAgentProvider(definition: AgentProviderDefinition): AgentProvider {
-  assertManagedHookContribution(definition)
-  if (Boolean(definition.listNativeSessions) !== Boolean(definition.assertNativeResumeSource)) {
+/** Pure contribution checks run before registry mutation; they never inspect or revoke a Run. */
+function assertProviderContributions(contribution: AgentProviderDefinition | AgentProvider): void {
+  assertManagedHookContribution(contribution)
+  const { catalog } = contribution
+  if ('id' in contribution && (contribution.id !== catalog.id || contribution.label !== catalog.label ||
+      contribution.executable !== catalog.executable)) {
+    throw new AgentMuxError('Provider identity must match its catalog.', 'INVALID_AGENT_PROVIDER')
+  }
+  if (catalog.capabilities.providerResume !== (catalog.resumeStrategy.kind === 'provider-native')) {
+    throw new AgentMuxError('Native resume capability and strategy must agree.', 'INVALID_AGENT_PROVIDER')
+  }
+  if (Boolean(contribution.listNativeSessions) !== Boolean(contribution.assertNativeResumeSource)) {
     throw new AgentMuxError('Native conversation discovery and exact source verification must be contributed together.', 'INVALID_AGENT_PROVIDER')
   }
-  const { catalog: catalogSeed } = definition
+  if ((contribution.readSessionHistoryRecord || contribution.readConversationChanges || contribution.observeSessionHistory) &&
+      !contribution.readSessionHistoryPage) {
+    throw new AgentMuxError('Native history details, changes and observation require the original page reader.', 'INVALID_AGENT_PROVIDER')
+  }
+  if (catalog.capabilities.nativeConversationInput && !contribution.prepareNativeInput) {
+    throw new AgentMuxError('Native conversation input requires its exact input contribution.', 'INVALID_AGENT_PROVIDER')
+  }
+  if (catalog.capabilities.asyncQuestionReply && (!contribution.prepareNativeInput || !contribution.planQuestionReply)) {
+    throw new AgentMuxError('Native question replies require input and reply planning contributions.', 'INVALID_AGENT_PROVIDER')
+  }
+}
+
+function assertRegisteredProvider(provider: AgentProvider): void {
+  assertProviderContributions(provider)
+  if ((provider.catalog.capabilities.providerResume && typeof provider.buildResumeLaunch !== 'function') ||
+      Boolean(provider.catalog.capabilities.providerFork?.current) !== Boolean(provider.buildForkLaunch)) {
+    throw new AgentMuxError('Native lifecycle capabilities require their launch contributions.', 'INVALID_AGENT_PROVIDER')
+  }
+}
+
+export function defineAgentProvider(definition: AgentProviderDefinition): AgentProvider {
+  assertProviderContributions(definition)
+  const catalogSeed = structuredClone(definition.catalog)
+  if (catalogSeed.capabilities.providerResume !== Boolean(definition.buildResumeArgs)) {
+    throw new AgentMuxError('Native resume capability and its launch contribution must be declared together.', 'INVALID_AGENT_PROVIDER')
+  }
+  if (catalogSeed.capabilities.permission === 'respond' && !definition.interaction && !definition.hook.permissionDecision) {
+    throw new AgentMuxError('Permission response capability requires a native response contribution.', 'INVALID_AGENT_PROVIDER')
+  }
   if (Boolean(catalogSeed.capabilities.providerFork?.current) !== Boolean(definition.buildForkArgs)) {
     throw new AgentMuxError('Native fork capability and its launch contribution must be declared together.', 'INVALID_AGENT_PROVIDER')
   }
@@ -454,7 +490,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
         executable: command,
         installed: observation ? observation.availability === 'available' : await probe.hasExecutable(command),
         ...(observation ? { executableObservation: observation } : {}),
-        capabilities: { ...catalog.capabilities }
+        capabilities: structuredClone(catalog.capabilities)
       }
     },
     buildLaunch(context) {
@@ -604,7 +640,7 @@ export class AgentProviderRegistry {
   registerAll(providers: readonly AgentProvider[]): void {
     const ids = new Set(this.providers.keys())
     for (const provider of providers) {
-      assertManagedHookContribution(provider)
+      assertRegisteredProvider(provider)
       if (ids.has(provider.id)) {
         throw new AgentMuxError(`Agent provider already registered: ${provider.id}`, 'DUPLICATE_PROVIDER')
       }
@@ -614,7 +650,7 @@ export class AgentProviderRegistry {
   }
 
   replace(provider: AgentProvider): void {
-    assertManagedHookContribution(provider)
+    assertRegisteredProvider(provider)
     this.providers.set(provider.id, provider)
   }
 
@@ -629,24 +665,7 @@ export class AgentProviderRegistry {
   list(): AgentProvider[] { return [...this.providers.values()] }
 
   catalog(): AgentCatalogEntry[] {
-    return this.list().map((provider) => ({
-      ...provider.catalog,
-      readySignal: { ...provider.catalog.readySignal },
-      hookStrategy: { ...provider.catalog.hookStrategy },
-      resumeStrategy: { ...provider.catalog.resumeStrategy },
-      acpStrategy: { ...provider.catalog.acpStrategy },
-      capabilities: { ...provider.catalog.capabilities },
-      launchOptions: cloneLaunchOptions(provider.catalog.launchOptions),
-      ...(provider.catalog.postureControl
-        ? {
-            postureControl: {
-              id: provider.catalog.postureControl.id,
-              label: provider.catalog.postureControl.label,
-              modes: provider.catalog.postureControl.modes.map((mode) => ({ ...mode }))
-            }
-          }
-        : {})
-    }))
+    return this.list().map((provider) => structuredClone(provider.catalog))
   }
 }
 
