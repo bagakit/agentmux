@@ -32,6 +32,9 @@ for (const folder of [...(await readdir(join(root, 'packages'))).map(name => joi
 }
 aliases.sort((a, b) => Number(a.wildcard) - Number(b.wildcard) || b.id.length - a.id.length)
 const mutations = [
+  { name: 'foreign-app-sender', file: 'apps/desktop/src/main/ipc.ts',
+    from: "requireTrustedSender('browser:answerCertificate', event)", to: 'void event',
+    assertion: 'A foreign App sender must be refused' },
   { name: 'lost-native-handle', file: 'apps/desktop/src/main/browser-view-manager.ts',
     from: 'const contents = pending.contents', to: 'const contents = pending.view.webContents', cleanupFailure: true,
     assertion: 'Owner browsers disposal failed' },
