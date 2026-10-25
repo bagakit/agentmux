@@ -16,6 +16,7 @@ const mutationTests = Object.fromEntries([
 ])
 export const productFiles = [
   'apps/desktop/src/renderer/src/components/settings/RemoteExecutionSettingsPane.tsx',
+  'apps/desktop/src/renderer/src/components/settings/RemoteExecutionGuide.tsx',
   'apps/desktop/src/renderer/src/components/settings/modules/remote-execution.tsx',
   'apps/desktop/src/renderer/src/components/settings/settings-modules.ts',
   'apps/desktop/src/renderer/src/components/settings/settings-catalog.ts',

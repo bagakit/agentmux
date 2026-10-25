@@ -10,6 +10,14 @@ node apps/desktop/scripts/capture-remote-execution-settings.mjs --run <printed-d
 `--run <directory> --first` captures only the initial wide dark page. Its
 `first-receipt.json` is not the seventeen-frame completion receipt.
 
+`--run <directory> --guidance` captures the nine-frame project-entry/guide slice:
+the collapsed preparation page, guide in both themes and at narrow width,
+continuing-work instructions, the visible ordinary Launcher choice, explicit
+runtime project selection, short Launcher and a native click back to the same
+Settings guide. Machine browsing uses declared synthetic select setup; project
+and guide actions use native Renderer clicks. This slice does not requalify the
+unchanged binding library or native execution.
+
 The fixture compiles production SettingsPanel, Remote execution and Mote
 Settings, Store, WorkspaceWorkbench, Launcher and CSS. Two typed preview Agent
 Sessions have opposite Agent/resource Host roles, exact retained bindings and

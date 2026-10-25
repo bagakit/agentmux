@@ -3,6 +3,7 @@ import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AgentExecutionInspection } from '@agentmux/core'
+import { AGENT_EXECUTION_GUIDE } from '@agentmux/core/agent-execution-guide'
 import type { AppConfig } from '../src/shared/contracts'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { remoteExecutionSettingsModule } from '../src/renderer/src/components/settings/modules/remote-execution'
@@ -45,8 +46,89 @@ async function chooseProject(id: string) {
   expect(select).not.toBeNull()
   await act(async () => { select.value = id; select.dispatchEvent(new Event('change', { bubbles: true })) })
 }
+async function toggleGuide(open: boolean) {
+  const guide = dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="guide"]')
+  expect(guide).not.toBeNull()
+  await act(async () => { guide!.open = open; guide!.dispatchEvent(new Event('toggle')) })
+  return guide!
+}
+function guideText(content: string) {
+  return content.replace(/^## /gmu, '').replace(/^\d+\. /gmu, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/gu, '$1').replace(/\*\*|`/gu, '').replace(/\s+/gu, '')
+}
 
 describe('Remote execution Settings', () => {
+  it('reveals the same guide after retained narrow binding detail without replacing original work', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ width: 600 } as DOMRect))
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    const observe = vi.spyOn(api.sessions, 'observeExecutionBinding').mockReturnValue(vi.fn())
+    const launch = vi.spyOn(api.sessions, 'launchAgent'), resume = vi.spyOn(api.sessions, 'resume'), stop = vi.spyOn(api.sessions, 'stop')
+    const first = { section: 'remote-execution' as const }
+    await dom.render(<SettingsPanel initialSection="remote-execution" visible navigationRequest={first} onClose={close} />)
+    await dom.click('[data-resource-row="original-one"]')
+    expect(dom.container.querySelector<HTMLElement>('[data-settings-field="prepare"]')!.hidden).toBe(true)
+    expect(dom.container.querySelector('[data-remote-binding="binding-one"]')).not.toBeNull()
+    const drafts = useAppStore.getState().agentComposerDrafts
+    const sessions = useAppStore.getState().sessions
+    await dom.render(<SettingsPanel initialSection="remote-execution" visible={false} navigationRequest={first} onClose={close} />)
+    await dom.render(<SettingsPanel initialSection="remote-execution" visible navigationRequest={{ section: 'remote-execution', field: 'guide' }} onClose={close} />)
+    const guide = dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="guide"]')!
+    await act(async () => guide.dispatchEvent(new Event('toggle')))
+    expect(guide.closest('[hidden], [inert]')).toBeNull()
+    expect(guide.open).toBe(true)
+    expect(guide.querySelector('.remote-execution-guide__body')).not.toBeNull()
+    expect(dom.container.querySelector('[data-resource-row="original-one"][aria-selected="true"]')).not.toBeNull()
+    expect(dom.container.querySelector('[data-remote-binding="binding-one"]')).not.toBeNull()
+    expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+    expect(useAppStore.getState().sessions).toBe(sessions)
+    expect(useAppStore.getState().sessions[0]).toBe(one)
+    expect(launch).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+    expect(observe).toHaveBeenCalled()
+  })
+  it('expands the complete Core guide as read-only Markdown and hides it without creating, resuming or stopping work', async () => {
+    const launch = vi.spyOn(api.sessions, 'launchAgent'), resume = vi.spyOn(api.sessions, 'resume'), stop = vi.spyOn(api.sessions, 'stop')
+    const prepare = vi.spyOn(useAppStore.getState(), 'openLauncher')
+    const before = useAppStore.getState()
+    await pane()
+    expect(dom.container.querySelector('.remote-execution-guide__body')).toBeNull()
+    const guide = await toggleGuide(true)
+    const body = guide.querySelector<HTMLElement>('.remote-execution-guide__body')
+    expect(body).not.toBeNull()
+    expect(body!.querySelector('.md-document')).not.toBeNull()
+    expect(AGENT_EXECUTION_GUIDE.length).toBeGreaterThan(1000)
+    expect(guideText(body!.textContent!)).toBe(guideText(AGENT_EXECUTION_GUIDE))
+    const sourceHeadings = [...AGENT_EXECUTION_GUIDE.matchAll(/^## (.+)$/gmu)].map(match => match[1])
+    expect(sourceHeadings.length).toBeGreaterThan(0)
+    expect([...body!.querySelectorAll('.md-heading[data-level="2"]')].map(heading => heading.textContent)).toEqual(sourceHeadings)
+    expect(body!.querySelector('button, a, [contenteditable="true"]')).toBeNull()
+    await toggleGuide(false)
+    expect(guide.querySelector('.remote-execution-guide__body')).toBeNull()
+    await toggleGuide(true); await pane(false)
+    expect(guide.open).toBe(true)
+    expect(guide.querySelector('.remote-execution-guide__body')).toBeNull()
+    await pane(true)
+    expect(guide.querySelector('.remote-execution-guide__body')).not.toBeNull()
+    expect(useAppStore.getState().sessions).toBe(before.sessions)
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(prepare).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled()
+    expect(resume).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+  })
+
+  it('resolves the real SettingsPanel guide deep link to the expanded original field', async () => {
+    const launch = vi.spyOn(api.sessions, 'launchAgent'), stop = vi.spyOn(api.sessions, 'stop')
+    await dom.render(<SettingsPanel initialSection="remote-execution" navigationRequest={{ section: 'remote-execution', field: 'guide' }} onClose={close} />)
+    const guide = dom.container.querySelector<HTMLDetailsElement>('[data-settings-pane="remote-execution"] [data-settings-field="guide"]')
+    expect(guide).not.toBeNull()
+    expect(guide!.open).toBe(true)
+    expect(document.activeElement).toBe(guide)
+    expect(guide!.dataset.settingsSearchHighlight).toBe('')
+    // Native details dispatches toggle after presentation; flush that event for happy-dom.
+    await act(async () => guide!.dispatchEvent(new Event('toggle')))
+    expect(guideText(guide!.querySelector('.remote-execution-guide__body')!.textContent!)).toBe(guideText(AGENT_EXECUTION_GUIDE))
+    expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+  })
+
   it('is one compiled Remote navigation contribution and its real page is reachable', async () => {
     expect(settingsNavGroups('').find(group => group.id === 'remote')?.items.map(item => item.id)).toEqual(['hosts', 'remote-execution', 'mobile'])
     expect(visibleSettingsSections('Remote execution').map(item => item.id)).toContain('remote-execution')
