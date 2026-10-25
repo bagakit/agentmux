@@ -3,7 +3,7 @@ import { publicationInputImages } from './publication-input-images.js'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { publicationMarkdown } from './publication-markdown.js'
 import { AgentMuxError, parseAgentInputResourceResult, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
-import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPageForWindow, parseConversationCheckpointPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationSourceRef, type ConversationCheckpointInput, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
+import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPageForWindow, parseConversationCheckpointPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationSourceRef, type ConversationCheckpointInput, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationContentRef, type ConversationRef } from '@agentmux/core/conversation'
 import { readRoomPublicationBinding, roomPublicationReference, connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { credentialLookupFailure } from './credential-observation.js'
@@ -34,7 +34,7 @@ export interface PublicationPermissionsPort {
 }
 export type PublicationObservation = ConnectionDeliveryObservation
 type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | undefined; failure?: { code?: string } }
-type Lane = { portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
+type Lane = { portraitAfter?: string; queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; contentReads?: Map<string, Promise<void>>; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; queryInput?: PublicationQueryInputPort; speaker?: PublicationSpeakerReader }
 
 // Optional display observation only: expiry leaves the original author/body usable.
@@ -321,7 +321,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const failure = nativeFailure ?? lane.watch?.failure
     if (failure) this.sourceUnavailable(lane, nativeFailure ? 'source-gap' : 'source-unconfirmed', failure.code ? new AgentMuxError('The original publication source is unavailable.', failure.code) : undefined, connectionDiagnosisCheckpointKey(after))
     else lane.sourceObservation = { state: 'ready', code: null, codeRecorded: false, checkpointKey: connectionDiagnosisCheckpointKey(after) }
-    await this.recoverContent(lane, adapter)
+    this.recoverContent(lane, adapter)
     lane.observation = this.store.coverage(binding).state === 'incomplete' ? { state: 'unavailable', reason: 'content-unconfirmed' }
       : lane.sourceObservation?.state === 'ready' && lane.watch?.handle && !lane.watch.failure && !lane.watch.handle.closed.aborted ? { state: 'ready' } : { state: 'unavailable', reason: 'source-unconfirmed' }
   }
@@ -384,15 +384,20 @@ export class PublicationHost implements ConnectionDeliveryPort {
     }
     return result
   }
-  private async resolve(reference: ConversationRef, units: readonly ConversationUnit[], signal: AbortSignal, binding: RoomBinding, adapter: PublicationAdapter): Promise<Map<string, ResolvedPublicationPart>> {
+  private async resolve(reference: ConversationRef, units: readonly ConversationUnit[], signal: AbortSignal, binding: RoomBinding, adapter: PublicationAdapter, resource?: ConversationContentRef): Promise<Map<string, ResolvedPublicationPart>> {
     const result = new Map<string, ResolvedPublicationPart>()
     for (const unit of units) {
       const captured = binding.sourceFrontier && unit.records.every(isCompleteConversationRecord) && unit.records.some(record => record.original.kind === 'captured' && record.original.item.kind === 'user_message')
         ? new Set(publicationContent(unit, binding, binding.sourceFrontier, { resolved: new Map(), origin: () => undefined }).pieces.map(piece => publicationPartKey(piece.part))) : new Set<string>()
       for (const slot of unit.event.content) {
         const record = unit.records.find(record => record.id === slot.recordId)!
+        const readResources = resource?.recordRevision === record.revision && publicationPartKey(resource) === publicationPartKey({ record: record.reference!, selector: slot.selector })
+        const originalPart = isCompleteConversationRecord(record) && record.original.kind === 'native' && slot.selector.kind === 'native-part' ? record.original.item.contentParts[slot.selector.partIndex] : undefined
+        const retained = isCompleteConversationRecord(record) && record.original.kind === 'native' && (record.original.item.questionRequest || record.original.item.questionAnswers?.length) ? undefined
+          : this.store.retainedResource(binding, { record: record.reference!, recordRevision: record.revision, selector: slot.selector }, originalPart?.kind === 'resource')
+        if (retained) { result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), retained); continue }
         if (captured.has(publicationPartKey({ record: record.reference!, selector: slot.selector })) && isCompleteConversationRecord(record) && record.original.kind === 'captured' && slot.selector.kind === 'captured-field' && slot.selector.field === 'content' && record.original.item.kind === 'user_message') {
-          const value = await publicationInputImages(record.original.item, reference, this.options.conversation.inputResource, adapter.images, signal)
+          const value = await publicationInputImages(record.original.item, reference, readResources ? this.options.conversation.inputResource : undefined, adapter.images, signal)
           if (value) result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), value)
           continue
         }
@@ -408,7 +413,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
           const response = await this.options.conversation.resource(reference, input, signal)
           if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign Markdown resource Session')
           return response
-        }, adapter.images, signal, (textSha256, start, end) => this.store.retainedDiagram(binding,
+        }, readResources ? adapter.images : undefined, signal, (textSha256, start, end) => this.store.retainedDiagram(binding,
           { record: record.reference!, recordRevision: record.revision, selector: slot.selector }, text, textSha256, start, end))
         if (part.kind === 'text') {
           const value = await markdown(part.text)
@@ -421,6 +426,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
           ((part.resourceType === 'image' || deferred) && adapter.images || (part.resourceType === 'file' || deferred) && adapter.files)) {
           const key = publicationPartKey({ record: record.reference!, selector: slot.selector })
           result.set(key, { kind: part.resourceType === 'file' ? 'file-unavailable' : 'image-unavailable' })
+          if (!readResources) continue
           const input = { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id,
             ...(item.turnId ? { turnId: item.turnId } : {}), partIndex: slot.selector.partIndex, expectedReference: part.reference }
           if ((part.resourceType === 'image' || deferred) && adapter.images) try {
@@ -448,6 +454,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
           continue
         }
         if (part.resourceType !== 'text' || !part.content || part.content.kind === 'resource' || binding.scope.publication === 'future-native-user-facing' && part.content.kind !== 'text') continue
+        if (!readResources) continue
         try {
           const value = await readSessionHistoryTextResource(part, slot.selector.partIndex,
             { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id, ...(item.turnId ? { turnId: item.turnId } : {}) },
@@ -503,8 +510,12 @@ export class PublicationHost implements ConnectionDeliveryPort {
     }).catch(() => { /* The exact durable gap retains its original target; ordinary publication stays usable. */ })
       .finally(() => { lane.originalReading = undefined; if (recovered && !signal.aborted && this.authorized(binding)) this.wake(lane) })
   }
-  private async recoverContent(lane: Lane, adapter: PublicationAdapter): Promise<void> {
+  private recoverContent(lane: Lane, adapter: PublicationAdapter): void {
     const binding = lane.binding, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }, signal = lane.abort.signal
+    const active = lane.contentReads ??= new Map()
+    // Bound active resource observations, not the number or age of durable gaps.
+    // The original cursor continues when a slot completes; slow reads do not own speech.
+    if (active.size >= 4) return
     const gaps = this.store.recoverableGaps(binding, lane.gapAfter ?? 0)
     if (!gaps.length) { delete lane.gapAfter; return }
     for (const { ordinal, gap } of gaps) {
@@ -515,12 +526,22 @@ export class PublicationHost implements ConnectionDeliveryPort {
       }
       lane.gapAfter = ordinal
       if (!gap.part) continue
-      try {
-        for (const unit of await this.gapUnits(lane, gap)) {
+      const key = JSON.stringify([publicationPartKey(gap.part), gap.part.recordRevision])
+      if (active.has(key)) continue
+      const work = Promise.resolve().then(async () => {
+        for (const unit of await this.until(this.gapUnits(lane, gap), signal)) {
           const speakers = await this.speakers(reference, [unit], signal)
-          this.store.recoverPart(binding, gap, unit, await this.resolve(reference, [unit], signal, binding, adapter), () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) : undefined, speakers.get(unit.event.id))
+          const resolved = await this.until(this.resolve(reference, [unit], signal, binding, adapter, gap.part), signal)
+          signal.throwIfAborted()
+          this.store.recoverPart(binding, gap, unit, resolved, () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, adapter.fragmentText ? (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) : undefined, speakers.get(unit.event.id))
         }
-      } catch { signal.throwIfAborted() /* Original exact gap remains durable and other contents continue. */ }
+      }).catch(() => { /* The exact original gap remains durable; no input or effect is replayed. */ })
+        .finally(() => {
+          active.delete(key)
+          if (!signal.aborted && this.authorized(binding)) this.wake(lane)
+        })
+      active.set(key, work)
+      if (active.size >= 4) break
     }
   }
   private effectObservation(binding: RoomBinding, projectionId?: string): PublicationObservation | undefined {
