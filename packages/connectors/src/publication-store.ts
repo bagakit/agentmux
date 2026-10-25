@@ -1166,7 +1166,7 @@ export class PublicationStore {
     })
   }
   unconfirmedCards(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>): PublicationOperation[] {
-    return this.database.prepare("SELECT operation_json,state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND json_extract(operation_json,'$.cardPreparation.receipt.state')='dispatching'")
+    return this.database.prepare("SELECT operation_json,state FROM connector_publication_operation INDEXED BY connector_publication_card_preparation WHERE binding_id=? AND binding_revision=? AND json_extract(operation_json,'$.cardPreparation.receipt.state')='dispatching'")
       .all(...scopeKey(boundary)).map(row => this.read(row)!)
   }
   portraitAudiences(uploadOperationId: string): Array<{ bindingId: string; revision: number }> {
