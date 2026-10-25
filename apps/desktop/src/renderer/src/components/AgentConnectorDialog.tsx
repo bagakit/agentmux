@@ -208,7 +208,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     ...(creatorInvitation.creator ? [{ application: binding.application, ...creatorInvitation.creator }] : []),
     ...(actorType && actorId ? [{ application: binding.application, idType: actorType, userId: actorId }] : [])
   ] : []
-  const roomFacts = useConnectorRoomFacts(connection, audience, hostingTarget, visibleActors)
+  const roomFacts = useConnectorRoomFacts(connection, audience, hostingTarget, visibleActors, showingCurrentBinding ? section === 'members' : !!audience && !binding && !detached)
   function observeBinding(bindingId: string, current: RoomBinding | null) {
     setBindings(previous => {
       const known = previous.find(item => item.bindingId === bindingId)

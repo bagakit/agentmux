@@ -4,23 +4,37 @@ import type { ChannelProfileAdapter } from '../../channel-profile-adapter.js'
 import type { ChannelStoragePort } from '../../channel-storage.js'
 import type { DiscordClients } from './client.js'
 import { discordId } from './protocol.js'
+import { CDN } from '@discordjs/rest'
 
 const key = (subject: ChannelMetadataSubject) => subject.kind === 'actor' ? 'actor-profile:' + channelActorKey(subject.actor) : 'conversation-profile:' + JSON.stringify(subject.externalConversationId)
 type Read = { config: ConnectionConfig; subject: ChannelMetadataSubject; storage: ChannelStoragePort }
-export function observeDiscordConversation(input: { config: ConnectionConfig; storage: ChannelStoragePort }, channel: { id: string; name?: string | null }, expectedRevision?: string | null): ChannelConversationProfileObservation {
+export type DiscordConversationProfile = { id: string; type?: number; name?: string | null; icon?: string | null }
+const cdn = new CDN()
+export function observeDiscordConversation(input: { config: ConnectionConfig; storage: ChannelStoragePort }, channel: DiscordConversationProfile, expectedRevision?: string | null): ChannelConversationProfileObservation {
   const id = discordId(channel.id), now = Date.now()
-  const observation = parseChannelConversationProfileObservation({ application: input.config.application, externalConversationId: id, checkedAt: now,
-    state: 'observed', freshness: 'current', profile: { ...(channel.name ? { name: channel.name } : {}), observedAt: now } })
-  const storageKey = key({ kind: 'conversation', externalConversationId: id })
+  const storageKey = key({ kind: 'conversation', externalConversationId: id }), row = input.storage.get(storageKey)
+  const previous = row?.value.kind === 'json' ? parseChannelConversationProfileObservation(row.value.value) : null
+  // Only a group DM owns channel.icon. A guild icon is a different subject.
+  let avatarUrl: string | null | undefined
+  if (channel.type !== undefined && channel.type !== 3 || channel.icon === null) avatarUrl = null
+  else if (channel.type === 3 && channel.icon !== undefined) {
+    if (!/^[a-zA-Z0-9_]+$/u.test(channel.icon)) throw Error('The native group DM icon is unconfirmed')
+    avatarUrl = cdn.channelIcon(id, channel.icon, { extension: 'png', size: 128 })
+  }
+  const retainedName = channel.name === undefined && previous?.profile?.name, retainedAvatar = avatarUrl === undefined && previous?.profile?.avatarUrl
+  const observedAt = retainedName || retainedAvatar ? previous!.profile!.observedAt : now
+  const observation = parseChannelConversationProfileObservation({ application: input.config.application, externalConversationId: id,
+    state: 'observed', freshness: now - observedAt < 5 * 60_000 ? 'current' : 'stale', profile: { ...(channel.name || retainedName ? { name: channel.name || retainedName } : {}), ...(avatarUrl || retainedAvatar ? { avatarUrl: avatarUrl || retainedAvatar } : {}), observedAt }, checkedAt: now })
   input.storage.put({ key: storageKey, expectedRevision: expectedRevision === undefined ? input.storage.get(storageKey)?.revision ?? null : expectedRevision, value: { kind: 'json', value: observation } })
   return observation
 }
+
 export function createDiscordMetadataCache(actors: Pick<ChannelProfileAdapter, 'readActor'>) {
   const getMetadata = (input: Read) => {
     const row = input.storage.get(key(input.subject))
     const observation = input.subject.kind === 'actor' ? actors.readActor({ actor: input.subject.actor, storage: input.storage }) : !row
       ? { application: input.config.application, externalConversationId: input.subject.externalConversationId, state: 'unknown', profile: null, checkedAt: Date.now(), freshness: 'unknown', reason: 'not-observed' }
-      : row.value.kind === 'json' ? (() => { const original = parseChannelConversationProfileObservation(row.value.value); return { ...original, freshness: original.profile ? original.state === 'observed' && Date.now() - original.checkedAt < 5 * 60_000 ? 'current' : 'stale' : 'unknown' } })() : (() => { throw Error('The original channel profile is not metadata') })()
+      : row.value.kind === 'json' ? (() => { const original = parseChannelConversationProfileObservation(row.value.value); return { ...original, freshness: original.profile ? original.state === 'observed' && Date.now() - original.profile.observedAt < 5 * 60_000 ? 'current' : 'stale' : 'unknown' } })() : (() => { throw Error('The original channel profile is not metadata') })()
     return parseChannelMetadataEntry({ subject: input.subject, observation, cacheRevision: row?.revision ?? null }, input.config.application)
   }
   return {
@@ -52,7 +66,7 @@ export function createDiscordMetadata(clients: DiscordClients, actors: ChannelPr
       let observation: ChannelConversationProfileObservation
       try {
         await clients.identity(input.config, credential, signal)
-        const channel = await clients.rest(input.config, credential).get(`/channels/${input.externalConversationId}`, { signal }) as { id: string; name?: string | null }
+      const channel = await clients.rest(input.config, credential).get(`/channels/${input.externalConversationId}`, { signal }) as DiscordConversationProfile
         if (channel.id !== input.externalConversationId) throw Error('The original native channel changed')
         signal.throwIfAborted()
         return observeDiscordConversation(input, channel, original?.revision ?? null)

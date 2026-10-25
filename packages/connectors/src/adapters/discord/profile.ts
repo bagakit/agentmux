@@ -15,14 +15,16 @@ export function readDiscordActor(input: ChannelActorProfileRead): ChannelActorPr
   const observation = parseChannelActorProfileObservation(row.value.value)
   if (channelActorKey(observation.actor) !== channelActorKey(input.actor)) throw Error('The original Discord profile belongs to another actor')
   // Gateway user observations and explicit refresh update this native cache. Age alone does not certify current data.
-  return { ...observation, freshness: observation.profile ? observation.state === 'observed' && Date.now() - observation.checkedAt < 5 * 60_000 ? 'current' : 'stale' : 'unknown' }
+  return { ...observation, freshness: observation.profile ? observation.state === 'observed' && Date.now() - observation.profile.observedAt < 5 * 60_000 ? 'current' : 'stale' : 'unknown' }
 }
 export function observeDiscordActor(storage: ChannelStoragePort, actor: ConnectionActor, user: APIUser, expectedRevision?: string | null): ChannelActorProfileObservation {
   if (discordId(user.id) !== actor.userId || actor.idType !== 'snowflake') throw Error('The native user does not match the original actor')
-  const now = Date.now(), avatarUrl = discordAvatar(user)
-  const observation = parseChannelActorProfileObservation({ actor, state: 'observed', checkedAt: now, freshness: 'current',
-    profile: { name: user.global_name || user.username, ...(avatarUrl ? { avatarUrl } : {}), observedAt: now } })
   const old = storage.get(key(actor))
+  const previous = readDiscordActor({ actor, storage }).profile
+  const now = Date.now(), avatarUrl = discordAvatar(user), retainedAvatar = user.avatar === undefined && previous?.avatarUrl
+  const observedAt = retainedAvatar ? previous!.observedAt : now
+  const observation = parseChannelActorProfileObservation({ actor, state: 'observed', checkedAt: now, freshness: now - observedAt < 5 * 60_000 ? 'current' : 'stale',
+    profile: { name: user.global_name || user.username, ...(avatarUrl || retainedAvatar ? { avatarUrl: avatarUrl || retainedAvatar } : {}), observedAt } })
   storage.put({ key: key(actor), value: { kind: 'json', value: observation }, expectedRevision: expectedRevision === undefined ? old?.revision ?? null : expectedRevision })
   return observation
 }
