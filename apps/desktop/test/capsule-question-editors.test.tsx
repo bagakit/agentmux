@@ -29,7 +29,7 @@ function track<T>(set: Set<Promise<unknown>>, promise: Promise<T>): Promise<T> {
 async function settle(set = reads) { while (set.size) await act(async () => { await Promise.allSettled([...set]) }) }
 function editor(scope: ParentNode = container) { const found = scope.querySelector<HTMLTextAreaElement>('textarea'); expect(found).not.toBeNull(); return found! }
 function button(text: string, scope: ParentNode = container) {
-  const found = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)
+  const found = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => (node.getAttribute('aria-label') ?? node.textContent) === text)
   expect(found, 'Connected action: ' + text).toBeDefined(); return found!
 }
 async function click(text: string, wait = true, scope: ParentNode = container) {

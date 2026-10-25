@@ -34,7 +34,7 @@ function editor(question = originalQuestion) {
   expect(found, 'The original question has a connected editor').toBeDefined(); return found!
 }
 function button(text: string, scope: ParentNode = container) {
-  const found = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)
+  const found = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => (node.getAttribute('aria-label') ?? node.textContent) === text)
   expect(found, 'Connected action: ' + text).toBeDefined(); return found!
 }
 async function click(text: string, scope: ParentNode = container) { await act(async () => button(text, scope).click()); await settle() }
