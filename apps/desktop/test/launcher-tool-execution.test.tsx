@@ -308,3 +308,23 @@ it.each([false, true])('configures an authoritatively empty ordinary SSH runtime
   expect(specialized ? openHostExecutors : openHost).toHaveBeenCalledExactlyOnceWith(remote.id)
   expect(open).not.toHaveBeenCalled()
 })
+
+it('shows reference labels in the collapsed request summary without changing the durable prompt or submission', async () => {
+  await mount()
+  const raw = 'Review [local.md](agentmux-file:%40local.md) and [Build skill](agentmux-skill:%2Fskills%2Fbuild%20workflow.md)\nKeep the next line intact.'
+  await act(async () => useAppStore.getState().setAgentComposerDraft('input', raw))
+  const before = useAppStore.getState()
+  await dom.click('[aria-label="Collapse Agents"]')
+  const summary = dom.container.querySelector<HTMLElement>('.launcher-agent-entry small')!
+  expect(summary.textContent).toBe('Review local.md and Build skill')
+  expect(summary.title).toBe('Review local.md and Build skill\nKeep the next line intact.')
+  expect(summary.textContent).not.toMatch(/agentmux-|%40|%2F/u)
+  expect(useAppStore.getState().agentComposerDrafts.input).toBe(raw)
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  await dom.click('[aria-label="Expand Agents"]')
+  expect(useAppStore.getState().agentComposerDrafts.input).toBe(raw)
+  const launch = vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(Object.assign(new Error('Not applied'), { controlFailure: { disposition: 'not_applied' } }))
+  await dom.click('.launcher-launch-button')
+  expect(launch).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'Review @local.md and /skills/build workflow.md\nKeep the next line intact.' }), undefined)
+  expect(useAppStore.getState().agentComposerDrafts.input).toBe(raw)
+})
