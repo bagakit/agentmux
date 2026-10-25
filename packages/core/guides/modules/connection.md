@@ -17,6 +17,13 @@ user explicitly selected another identity. A standalone platform CLI uses its ow
 account; choosing its bot mode does not connect it to an AgentMux binding. Do not silently
 substitute another Agent’s bot, a tool’s default application or a user account.
 
+For a reaction to an original connected message, retain its exact application, conversation
+and platform message identity; a Core MID is a journal reading identity, not a platform message
+ID. The connector manages only waiting and input-delivered markers. After starting work, decide
+whether and how to express progress or a result through this bound identity; no automatic
+completion reaction is required. Do not remove unrelated reactions or treat any reaction as an
+input, permission, reading or completion receipt.
+
 For a native business API call, discover an explicit bot identity with
 connection api identities --session ID on its exact hosting endpoint. A managed Agent can list
 only its authenticated original Session. Human-created and Agent-created bot bindings use the

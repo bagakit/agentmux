@@ -45,6 +45,16 @@ Managed Agents notify and inspect only references in which they are original par
 at their authenticated Host; every selected MID must satisfy this same boundary.
 These observations are not
 model adoption, task acceptance or business completion.
+A Channel input may carry a short original request directly and refer to its longer retained
+context, or refer to a long original body. Follow the exact MID and field named by the platform
+reminder; use message read --help for the available bounded field reads and retain their
+continuation unchanged. Do not fetch unrelated history or assume a reference contains the body.
+Original external attribution remains external; a retained MID does not turn its author into an
+Agent. Reading is not acknowledgement, task acceptance or proof that the original quote was
+injected. For a reaction, discover this Session’s original bound identity through connection
+--skill and choose any processing or result expression yourself within the task’s authorization.
+A connector’s waiting or delivered marker is a transport fact, not your completion report.
+
 Use message inbox check only for explicit batch consumption, and read the exact original message or
 dispatch before replying. Keep operationId, messageId, source message, thread and reply
 identities. Pending drafts, queued input, delivery and business reports are different states.
