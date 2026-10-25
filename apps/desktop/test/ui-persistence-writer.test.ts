@@ -4,15 +4,15 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { StorageValue } from 'zustand/middleware'
 import {
-  createDebouncedPersistentStorage,
+  createBatchedPersistentStorage,
   createWriteFencedStorage,
   registerUnloadFlush
 } from '../src/renderer/src/lib/persisted-ui-writer.js'
 
 /**
- * The renderer-side debounced layout writer. A layout gesture (dock drag, split-ratio, tab reorder)
+ * The renderer-side batched layout writer. A layout gesture (dock drag, split-ratio, tab reorder)
  * fires many state changes per second; writing localStorage synchronously on each one is what this
- * coalesces into one trailing write. Equal input keeps the durable deadline. Unload flush saves the
+ * coalesces with JSON encoding into one bounded write. Later input keeps the durable deadline. Unload flush saves the
  * remaining pending value on ordinary shutdown; abrupt shutdown does not run that handler.
  *
  * Mutation intent:
@@ -43,20 +43,20 @@ type TestState = { value: string }
 const persisted = (value: string): StorageValue<TestState> => ({ state: { value }, version: 1 })
 const encoded = (value: string): string => JSON.stringify(persisted(value))
 
-describe('createDebouncedPersistentStorage', () => {
+describe('createBatchedPersistentStorage', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
 
   it('reads pass straight through to the base storage', () => {
     const base = recordingStorage()
     base.storage.setItem('k', encoded('seed'))
-    const { storage } = createDebouncedPersistentStorage<TestState>(base.storage, 400)
+    const { storage } = createBatchedPersistentStorage<TestState>(base.storage, 400)
     expect(storage.getItem('k')).toEqual(persisted('seed'))
   })
 
   it('coalesces a burst of writes into a single trailing write of the newest value', () => {
     const base = recordingStorage()
-    const { storage } = createDebouncedPersistentStorage<TestState>(base.storage, 400)
+    const { storage } = createBatchedPersistentStorage<TestState>(base.storage, 400)
 
     storage.setItem('layout', persisted('a'))
     storage.setItem('layout', persisted('b'))
@@ -69,9 +69,37 @@ describe('createDebouncedPersistentStorage', () => {
     expect(base.writes).toEqual([{ name: 'layout', value: encoded('c') }])
   })
 
+  it('encodes only the latest immutable input at the batch deadline', () => {
+    const base = recordingStorage(), { storage } = createBatchedPersistentStorage<TestState>(base.storage)
+    const stringify = vi.spyOn(JSON, 'stringify'), read = vi.spyOn(base.storage, 'getItem')
+    for (const value of ['first', 'second', 'latest']) storage.setItem('layout', persisted(value))
+    expect(stringify).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(400)
+    expect(stringify).toHaveBeenCalledExactlyOnceWith(persisted('latest'))
+    expect(read).toHaveBeenCalledOnce()
+    stringify.mockRestore()
+    expect(base.writes).toEqual([{ name: 'layout', value: encoded('latest') }])
+  })
+
+  it('retains the original pending value after encoding or storage read fails', () => {
+    for (const failure of ['encode', 'read']) {
+      const base = recordingStorage(), { storage, flush } = createBatchedPersistentStorage<TestState>(base.storage)
+      const input = persisted('retained original')
+      storage.setItem('layout', input)
+      const failed = failure === 'encode' ? vi.spyOn(JSON, 'stringify') : vi.spyOn(base.storage, 'getItem')
+      failed.mockImplementationOnce(() => { throw Error('temporary persistence failure') })
+      expect(() => flush()).toThrow('temporary persistence failure')
+      expect(base.writes).toEqual([])
+      failed.mockRestore()
+      storage.setItem('layout', input)
+      vi.advanceTimersByTime(400)
+      expect(base.writes).toEqual([{ name: 'layout', value: encoded('retained original') }])
+    }
+  })
+
   it('flush lands the pending value immediately without waiting for the timer', () => {
     const base = recordingStorage()
-    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage, 400)
+    const { storage, flush } = createBatchedPersistentStorage<TestState>(base.storage, 400)
 
     storage.setItem('layout', persisted('pending'))
     expect(base.writes).toEqual([])
@@ -86,27 +114,27 @@ describe('createDebouncedPersistentStorage', () => {
 
   it('flush is a no-op when nothing is pending', () => {
     const base = recordingStorage()
-    const { flush } = createDebouncedPersistentStorage<TestState>(base.storage, 400)
+    const { flush } = createBatchedPersistentStorage<TestState>(base.storage, 400)
     flush()
     expect(base.writes).toEqual([])
   })
 
   it('a remove cancels a pending write for that key and removes from the base', () => {
     const base = recordingStorage()
-    const { storage } = createDebouncedPersistentStorage<TestState>(base.storage, 400)
+    const { storage } = createBatchedPersistentStorage<TestState>(base.storage, 400)
 
     storage.setItem('layout', persisted('stale'))
     storage.removeItem('layout')
     vi.advanceTimersByTime(400)
 
-    // The debounced value must not resurrect a key the store just deleted.
+    // The batched value must not resurrect a key the store just deleted.
     expect(base.writes).toEqual([])
     expect(base.removes).toEqual(['layout'])
   })
 
   it('equal pending content keeps the first durable deadline while updates continue', () => {
     const base = recordingStorage()
-    const { storage } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const { storage } = createBatchedPersistentStorage<TestState>(base.storage)
     storage.setItem('layout', persisted('new draft'))
     for (let tick = 0; tick < 20; tick += 1) {
       vi.advanceTimersByTime(100)
@@ -116,13 +144,13 @@ describe('createDebouncedPersistentStorage', () => {
     expect(base.writes).toEqual([{ name: 'layout', value: encoded('new draft') }])
   })
 
-  it('a genuinely changed pending value starts a new trailing deadline', () => {
+  it('continuous changed input keeps the first pending save deadline', () => {
     const base = recordingStorage()
-    const { storage } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const { storage } = createBatchedPersistentStorage<TestState>(base.storage)
     storage.setItem('layout', persisted('first'))
     vi.advanceTimersByTime(300)
     storage.setItem('layout', persisted('newest'))
-    vi.advanceTimersByTime(399)
+    vi.advanceTimersByTime(99)
     expect(base.writes).toEqual([])
     vi.advanceTimersByTime(1)
     expect(base.writes).toEqual([{ name: 'layout', value: encoded('newest') }])
@@ -130,7 +158,7 @@ describe('createDebouncedPersistentStorage', () => {
 
   it('an already durable value does not start another write or resurrect a reverted edit', () => {
     const base = recordingStorage()
-    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const { storage, flush } = createBatchedPersistentStorage<TestState>(base.storage)
     storage.setItem('layout', persisted('saved'))
     flush()
     storage.setItem('layout', persisted('temporary'))
@@ -143,7 +171,7 @@ describe('createDebouncedPersistentStorage', () => {
   it('unchanged projected identity skips JSON encoding and storage reads', () => {
     const base = recordingStorage()
     const read = vi.spyOn(base.storage, 'getItem')
-    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const { storage, flush } = createBatchedPersistentStorage<TestState>(base.storage)
     const input = persisted('same projection')
     storage.setItem('layout', input)
     flush()
@@ -159,7 +187,7 @@ describe('createDebouncedPersistentStorage', () => {
 
   it('clear invalidates the identity cache so the same projection can be saved again', () => {
     const base = recordingStorage()
-    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const { storage, flush } = createBatchedPersistentStorage<TestState>(base.storage)
     const input = persisted('same projection')
     storage.setItem('layout', input)
     flush()
@@ -175,7 +203,7 @@ describe('createDebouncedPersistentStorage', () => {
 
   it('rehydrate invalidates the input cache and rereads the durable authority', () => {
     const base = recordingStorage()
-    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const { storage, flush } = createBatchedPersistentStorage<TestState>(base.storage)
     const input = persisted('old projection')
     storage.setItem('layout', input)
     flush()
@@ -188,7 +216,7 @@ describe('createDebouncedPersistentStorage', () => {
 
   it('a storage version change is a real write even when projected identity is unchanged', () => {
     const base = recordingStorage()
-    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const { storage, flush } = createBatchedPersistentStorage<TestState>(base.storage)
     const input = persisted('same projection')
     storage.setItem('layout', input)
     flush()
@@ -203,7 +231,7 @@ describe('createDebouncedPersistentStorage', () => {
   it('a synchronous failed write remains pending for a flush retry', () => {
     const base = recordingStorage()
     const write = vi.spyOn(base.storage, 'setItem').mockImplementationOnce(() => { throw new Error('disk unavailable') })
-    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const { storage, flush } = createBatchedPersistentStorage<TestState>(base.storage)
     storage.setItem('layout', persisted('keep this draft'))
     expect(() => flush()).toThrow('disk unavailable')
     expect(base.writes).toEqual([])
@@ -215,7 +243,7 @@ describe('createDebouncedPersistentStorage', () => {
   it('the same projected input retries after a failed write without needing another durable change', () => {
     const base = recordingStorage()
     vi.spyOn(base.storage, 'setItem').mockImplementationOnce(() => { throw new Error('disk unavailable') })
-    const { storage, flush } = createDebouncedPersistentStorage<TestState>(base.storage)
+    const { storage, flush } = createBatchedPersistentStorage<TestState>(base.storage)
     const input = persisted('keep this draft')
     storage.setItem('layout', input)
     expect(() => flush()).toThrow('disk unavailable')
@@ -226,7 +254,7 @@ describe('createDebouncedPersistentStorage', () => {
 
   it('the outer startup fence rejects writes before queueing, then admits the same restored input', () => {
     const base = recordingStorage()
-    const writer = createDebouncedPersistentStorage<TestState>(base.storage)
+    const writer = createBatchedPersistentStorage<TestState>(base.storage)
     const fence = createWriteFencedStorage(writer.storage)
     const input = persisted('restored layout')
     fence.storage.setItem('layout', input)
@@ -340,7 +368,7 @@ describe('createWriteFencedStorage', () => {
   })
 })
 
-describe('store.ts wiring: the persist layer uses the debounced writer with an unload flush', () => {
+describe('store.ts wiring: the persist layer uses the batched writer with an unload flush', () => {
   // Actual Store behavior is covered by workbench-persistence-relevance.test.ts with private browser
   // storage. These small source guards additionally pin the fence/queue ownership and unload wiring;
   // they are not substitutes for the actual Store tests. Comments cannot supply a match.
@@ -353,10 +381,10 @@ describe('store.ts wiring: the persist layer uses the debounced writer with an u
       .replace(/(^|[^:])\/\/.*$/gm, '$1')
   }
 
-  it('feeds the debounced writer as the persist storage, not the raw synchronous one', async () => {
+  it('feeds the batched writer as the persist storage, not the raw synchronous one', async () => {
     const source = stripComments(await readFile(storePath, 'utf8'))
-    expect(source).toContain('createDebouncedPersistentStorage<PersistedAppState>(')
-    // The persist config must consume the debounced storage; reverting it to the raw guarded storage
+    expect(source).toContain('createBatchedPersistentStorage<PersistedAppState>(')
+    // The persist config must consume the batched storage; reverting it to the raw guarded storage
     // (a synchronous write per layout change) is the regression this guards.
     expect(source).toContain('storage: workbenchWriteFence.storage')
     expect(source).toContain('createWriteFencedStorage(persistentWorkbenchStorage.storage)')
@@ -376,7 +404,7 @@ describe('store.ts wiring: the persist layer uses the debounced writer with an u
     // 闸必须在场，且 persist 消费的那条链是 persist → fence → typed debounce → JSON。
     expect(source).toContain('createWriteFencedStorage(')
     expect(source).toContain('storage: workbenchWriteFence.storage')
-    expect(source).toContain('createDebouncedPersistentStorage<PersistedAppState>(')
+    expect(source).toContain('createBatchedPersistentStorage<PersistedAppState>(')
 
     // 闸的判断必须只有 lib 里那一份。这个模块里若又出现一个「按标志决定要不要写」的分支，就是第二份
     // 手抄——而它会与 lib 那份独立漂移（漏改一处不会红，正是这个缺陷此前的形状）。

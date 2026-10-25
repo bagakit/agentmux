@@ -127,6 +127,23 @@ function status(observedAt: number): void {
 }
 
 describe('actual workbench writes request native storage commit', () => {
+  it('batches real draft encoding and commits the latest input by the first deadline', async () => {
+    await initialize()
+    const stringify = vi.spyOn(JSON, 'stringify')
+    const encodedStates = () => stringify.mock.calls.filter(([value]) => value && typeof value === 'object' && 'state' in value && 'version' in value)
+    const start = Date.now()
+    store.getState().setAgentComposerDraft(sessionId, 'First unsent input')
+    await vi.advanceTimersByTimeAsync(300)
+    store.getState().setAgentComposerDraft(sessionId, 'Latest unsent input')
+    expect(encodedStates()).toEqual([])
+    expect(trace).toEqual([])
+    await vi.advanceTimersByTimeAsync(100)
+    expect(encodedStates()).toHaveLength(1)
+    expect(trace.map(item => [item.kind, item.at - start])).toEqual([['write', 400], ['commit', 400]])
+    expect(api.ui.requestStorageFlush).toHaveBeenCalledOnce()
+    expect(JSON.parse(backing.get(storageName)!).state.agentComposerDrafts[sessionId]).toBe('Latest unsent input')
+  })
+
   it('requests one commit after a real batch writes, while 200 accepted Agent events keep arriving', async () => {
     await initialize()
     const start = Date.now()
