@@ -366,10 +366,10 @@ try {
         assert.equal(await exists(agent, workspace), true);
         if(collision) { assert.equal(await read(agent,collision.requestedAbsolutePath),collision.agentOriginal);collision.agentUnchanged=true;collision.resourceAfter=await read(resource,collision.requestedAbsolutePath);assert.equal(collision.resourceAfter,'modified\n');await save(name+'-same-path.json',collision); }
         const originalControl=await nativeWhoami(resource,workspace,'initial',session,true);
-        for(const negative of ['device','missing']) {
+        for(const [negative,expectedCode] of [['device','AGENT_CAPABILITY_INVALID'],['missing','MANAGED_AGENT_CONTEXT_REQUIRED']]) {
             assert.notEqual((await read(resource,join(workspace,'control-'+negative+'-status'))).trim(),'0','A managed or missing caller cannot acquire user/device authority');
             const failure=(await read(resource,join(workspace,'control-'+negative+'.err'))).split('\n').flatMap(line=>{try{return [JSON.parse(line)]}catch{return []}}).find(packet=>packet.ok===false);
-            assert.equal(failure?.error?.code,'AGENT_CAPABILITY_INVALID','The exact relay must reject invalid authority, not merely fail a command');
+            assert.equal(failure?.error?.code,expectedCode,'The exact CLI or relay boundary must reject invalid authority, not merely fail a command');
         }
         await save(name+'-original-control.json',originalControl);
         const originalFrames = await frames(agent, originalPair.frontend.runId);
