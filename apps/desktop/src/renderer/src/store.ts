@@ -5262,9 +5262,31 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (booting) {
         enqueueSessionMembershipEvent(pendingSessionEvents, event)
+        // Connection observations describe this wait; they do not need the Session
+        // membership cut. Keep that cut buffered while the original loading surface
+        // can explain the current Host's progress, including exact-boundary recovery.
+        if (event.endpointWarning !== undefined || event.endpointObservation) set(state => {
+          const warnings = runtimeEndpointWarningsAfterObservation(state.runtimeEndpointWarnings, event.hostId, event.endpointWarning)
+          const observation = event.endpointObservation
+          return { runtimeEndpointWarnings: observation ? runtimeEndpointWarningsAfterObservation(
+            warnings, event.hostId, observation.warning, observation.step, observation.resolvedSteps) : warnings }
+        })
         return
       }
       get().applyEvent(event)
+    })
+    // Main may already hold a pending connection before this Renderer subscribes.
+    // Read that existing cut without waiting for spatial or Session reads, then
+    // retain the newer exact-boundary events in the original startup buffer.
+    void api.sessions.endpointWarnings().then(warnings => {
+      if (!observing || !booting) return
+      let current: RuntimeEndpointWarning[] | undefined = warnings
+      for (const { hostId, warning, observationStep } of pendingSessionEvents.endpointWarnings.values()) {
+        current = runtimeEndpointWarningsAfterObservation(current, hostId, warning, observationStep)
+      }
+      set({ runtimeEndpointWarnings: current })
+    }).catch(error => {
+      if (observing && booting) get().reportError(new Error('Runtime connection progress could not be read. Original Sessions are retained. ' + presentError(error)))
     })
     const disposeBrowsers = api.browser.onEvent((event) => {
       if (browserBooting) {

@@ -991,6 +991,7 @@ const mockApi: AgentMuxDesktopApi = {
     creation: async () => { throw new Error('A Core creation receipt requires the Desktop host.') },
     resolveCreationSessionId: async () => { throw new Error('A Core creation binding requires the Desktop host.') },
     snapshot: async () => structuredClone(mockSnapshot),
+    endpointWarnings: async () => structuredClone(mockSnapshot.runtimeEndpointWarnings ?? []),
     launchAgent: async (input) => {
       const executor = mockConfig.executors[input.executorId]
       if (!executor) throw new Error(`Unknown Agent Executor: ${input.executorId}`)

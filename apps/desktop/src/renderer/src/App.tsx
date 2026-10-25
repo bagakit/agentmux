@@ -131,6 +131,7 @@ function DesktopApp() {
   const loading = useAppStore((state) => state.loading)
   const workbenchWindows = useWorkbenchWindows(!loading)
   const startupProgress = useAppStore((state) => state.startupProgress)
+  const runtimeEndpointWarnings = useAppStore((state) => state.loading ? state.runtimeEndpointWarnings : undefined)
   const error = useAppStore((state) => state.error)
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -653,7 +654,7 @@ function DesktopApp() {
   }, [])
 
   if (loading) {
-    return <StartupLoadingSurface progress={startupProgress}
+    return <StartupLoadingSurface progress={startupProgress} runtimeEndpointWarnings={runtimeEndpointWarnings}
       detailSuffix={!config && initialTheme?.status === 'unavailable' ? '\n' + initialTheme.message : ''} />
   }
 
