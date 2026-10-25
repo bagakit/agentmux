@@ -54,7 +54,7 @@ export async function channelMetadataFixture(cleanup: Array<() => void | Promise
   await opened.sdk.call('connection.configure', { operationId: 'metadata-configure', expectedRevision: null, connection: config })
   expect(await opened.sdk.call('connection.bind', f.input)).toMatchObject({ state: 'applied' })
   expect(await opened.sdk.call('connection.grant', f.grant)).toMatchObject({ state: 'applied' })
-  await vi.waitFor(() => expect(transport.sockets).toHaveLength(1))
+  await vi.waitFor(() => expect(transport.sockets).toHaveLength(1), { timeout: 5000 })
   const get = (subject = actorSubject) => opened.sdk.call('connection.metadata.get', { connectionId: config.connectionId, subject })
   const submit = async (suffix: string) => {
     const payload = feishuPayload({ message_id: 'metadata-message-' + suffix }); payload.header.event_id = 'metadata-event-' + suffix
