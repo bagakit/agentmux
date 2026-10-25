@@ -118,6 +118,8 @@ export type FocusRetainedProject = {
   key: string; projectId: string; name: string; hostId: string
   identity: AgentFocusHistoryIdentity; lastFocusedAt: number | null
   lastActivityAt: number | null; recent: boolean; state: 'active' | 'retired' | 'unknown'
+  /** Original visit observations for reading, never current Session membership. */
+  observations: readonly AgentFocusHistoryEntry[]
 }
 /** Only retained observations contribute historical projects. Never fabricate
  * current Contexts, control references or task activity from a focus visit. */
@@ -130,12 +132,18 @@ export function deriveRetainedFocusProjects(entries: readonly AgentFocusHistoryE
   const projects = new Map<string, FocusRetainedProject>()
   const sources = new Map(options.sources?.map(source => [JSON.stringify([source.hostId, source.agentSessionId]), source]))
   const members = new Map<string, Map<string, AgentSessionHistoryDescriptor | undefined>>()
+  const observations = new Map<string, Map<string, AgentFocusHistoryEntry>>()
   for (const entry of entries) {
     const identity = entry.identity
     if (identity?.kind !== 'agent' || !identity.hostId || !identity.project?.id || !identity.project.name) continue
     const key = focusProjectKey(identity.hostId, identity.project.id)
     if (current.has(key)) continue
     const lastFocusedAt = Number.isSafeInteger(entry.focusedAt) && entry.focusedAt > 0 && entry.focusedAt <= now ? entry.focusedAt : null
+    const visits = observations.get(key) ?? new Map<string, AgentFocusHistoryEntry>()
+    const visit = visits.get(entry.sessionId)
+    const previousAt = visit && Number.isSafeInteger(visit.focusedAt) && visit.focusedAt > 0 && visit.focusedAt <= now ? visit.focusedAt : null
+    if (!visit || lastFocusedAt !== null && (previousAt === null || lastFocusedAt > previousAt)) visits.set(entry.sessionId, entry)
+    observations.set(key, visits)
     const source = options.sourcesAvailable ? sources.get(JSON.stringify([identity.hostId, entry.sessionId])) : undefined
     const recorded = members.get(key) ?? new Map<string, AgentSessionHistoryDescriptor | undefined>()
     recorded.set(entry.sessionId, source); members.set(key, recorded)
@@ -147,9 +155,13 @@ export function deriveRetainedFocusProjects(entries: readonly AgentFocusHistoryE
       if ((previous.lastFocusedAt ?? -Infinity) >= (lastFocusedAt ?? -Infinity)) continue
     }
     projects.set(key, { key, projectId: identity.project.id, name: identity.project.name, hostId: identity.hostId, identity, lastFocusedAt,
-      lastActivityAt: Math.max(previous?.lastActivityAt ?? 0, lastActivityAt ?? 0) || null, recent: false, state: 'unknown' })
+      lastActivityAt: Math.max(previous?.lastActivityAt ?? 0, lastActivityAt ?? 0) || null, recent: false, state: 'unknown', observations: [] })
   }
   for (const project of projects.values()) {
+    project.observations = [...observations.get(project.key)!.values()].sort((a, b) => {
+      const time = (entry: AgentFocusHistoryEntry) => Number.isSafeInteger(entry.focusedAt) && entry.focusedAt > 0 && entry.focusedAt <= now ? entry.focusedAt : -Infinity
+      return time(b) - time(a) || a.sessionId.localeCompare(b.sessionId)
+    })
     const recorded = [...members.get(project.key)!.values()]
     project.state = recorded.every(source => source?.state === 'retired') ? 'retired'
       : recorded.some(source => source?.state === 'active') ? 'active' : 'unknown'

@@ -107,7 +107,7 @@ function FocusProjectObservation({ project, recent = false, onRead }: { project:
   const activity = project.lastActivityAt !== null && project.lastActivityAt > (project.lastFocusedAt ?? 0)
   const at = activity ? project.lastActivityAt : project.lastFocusedAt
   const status = project.state === 'retired' ? 'Closed source' : project.state === 'active' ? 'Stored source · No current Context' : 'Current status unknown'
-  return <button type="button" className="focus-retained-projects__row" data-retained-project={recent ? undefined : project.key} data-recent-project={recent ? project.key : undefined}
+  return <div className="focus-retained-projects__project"><button type="button" className="focus-retained-projects__row" data-retained-project={recent ? undefined : project.key} data-recent-project={recent ? project.key : undefined}
     aria-label={`View ${project.name} focus history`} disabled={at === null}
     title={[project.name, status, 'Observed project · Focus visits and task activity are separate', displayPath(project.identity.workspacePath, project.hostId), project.identity.branch, project.identity.topicId, at === null ? 'Focus time not recorded' : time.detailed(at)].filter(Boolean).join('\n')}
     onPointerDownCapture={event => {
@@ -118,6 +118,20 @@ function FocusProjectObservation({ project, recent = false, onRead }: { project:
     <span className="focus-retained-projects__date">{activity ? 'Last active' : 'Last focused'} {at === null ? '· Time unknown' : <time dateTime={new Date(at).toISOString()}>{time.dateClock(at)}</time>}</span>
     {recent ? <span className="focus-retained-projects__date">{status}</span> : null}
   </button>
+    <ul className="focus-retained-projects__tasks" aria-label={`Saved tasks in ${project.name}`}>
+      {project.observations.map(entry => {
+        const identity = entry.identity!
+        const dated = Number.isSafeInteger(entry.focusedAt) && entry.focusedAt > 0 && entry.focusedAt <= Date.now()
+        const location = [identity.branch, identity.topicId].filter(Boolean).join(' / ')
+        return <li key={entry.sessionId} data-saved-focus-session={entry.sessionId}
+          title={[`Saved observation · ${entry.sessionId}`, identity.hostId, displayPath(identity.workspacePath, identity.hostId), location].filter(Boolean).join('\n')}>
+          <span className="focus-retained-projects__task-name">{identity.name || entry.sessionId}</span>
+          {location ? <span className="focus-retained-projects__task-location">{location}</span> : null}
+          <span className="focus-retained-projects__date">{dated ? <>Last focused <time dateTime={new Date(entry.focusedAt).toISOString()}>{time.dateClock(entry.focusedAt)}</time></> : 'Focus time unknown'}</span>
+        </li>
+      })}
+    </ul>
+  </div>
 }
 
 /** A lightweight view of the original focus observations, not another lane or

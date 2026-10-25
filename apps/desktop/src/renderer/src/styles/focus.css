@@ -536,6 +536,10 @@
 .focus-retained-projects__row:hover, .focus-retained-projects__toggle:hover { background: var(--surface-2); color: var(--text); }
 .focus-retained-projects__row:focus-visible, .focus-retained-projects__toggle:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 .focus-retained-projects__row:disabled { cursor: default; }
+.focus-retained-projects__tasks { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0 12px 10px 31px; list-style: none; }
+.focus-retained-projects__tasks > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; padding: 5px 8px; border-left: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
+.focus-retained-projects__task-name { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.focus-retained-projects__task-location { min-width: 0; max-width: 100%; overflow-wrap: anywhere; color: var(--text-3); font-size: var(--fs-micro); }
 
 .focus-search-locations { flex: 0 0 auto; max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 3px; padding: 6px; min-width: 0; }
 .focus-search-locations > small { color: var(--text-muted); }
