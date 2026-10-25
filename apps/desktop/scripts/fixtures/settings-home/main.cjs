@@ -159,6 +159,82 @@ app.whenReady().then(async () => {
     assert.equal(await read('window.settingsHomeProbe.saves.length'), saves, 'Story navigation never saves configuration')
     await click(`${story}.querySelectorAll('button')[0]`)
   }
+  const conceptIntroductions = async () => {
+    const pane = id => `[data-settings-pane="${id}"]`
+    const capsuleRoot = pane('capsule')+' [aria-label="New Capsule content root"]'
+    const goalsFinished = pane('goals')+' [aria-label="Show finished goals by default"]'
+    const savesBefore = await read('window.settingsHomeProbe.saves.length')
+    const capsuleWrites = () => read('window.settingsHomeProbe.conceptProbe.calls.filter(call=>call.method==="capsule.config.update")')
+    for (const [width,height,size] of [[1440,940,'wide'],[500,840,'compact']]) {
+      await resize(width,height)
+      for (const id of ['capsule','goals']) {
+        await nav(id)
+        const intro = node(pane(id)+` .settings-concept-intro[data-concept="${id}"]`)
+        assert.equal(await read(`!!${intro}`),true,`The production ${id==='capsule'?'Capsule':'Goals'} introduction is present in its original pane`)
+        assert.equal(await read(`${intro}.parentElement.firstElementChild===${intro}`),true,'Introduction is the first content of its original editor')
+        assert.equal(await read(`${intro}.querySelectorAll('button,input,select,textarea,[role="button"]').length`),0,'Introduction does not invent an interaction or setting')
+        assert.ok(await read(`${intro}.querySelector('h3')?.textContent.trim().length`)>0,'Introduction has a visible product heading')
+        if (id==='capsule') {
+          await until(`${intro}.querySelector('img')?.complete&&${intro}.querySelector('img').naturalWidth>0`,'The actual Capsule art is decoded')
+          await until(`${node(capsuleRoot)}?.checkVisibility()`)
+        }
+        for (const color of ['dark','light']) {
+          await theme(color)
+          await read(`${node(pane(id))}.scrollTop=0`)
+          const geometry=await read(`(() => {const n=${intro},r=n.getBoundingClientRect(),p=${node(pane(id))}.getBoundingClientRect();return {width:r.width,height:r.height,left:r.left,right:r.right,paneLeft:p.left,paneRight:p.right,heading:n.querySelector('h3').textContent}})()`)
+          assert.ok(geometry.width>0&&geometry.height>0&&geometry.left>=geometry.paneLeft-1&&geometry.right<=geometry.paneRight+1,'Introduction fits the original reader')
+          result.interactions.push({kind:'concept-intro-geometry',page:id,theme:color,size,...geometry})
+          await captureSegments(`page-${id}${size==='compact'?'-compact':''}-${color}`,id,color)
+        }
+      }
+    }
+    assert.equal(await read('window.settingsHomeProbe.saves.length'),savesBefore,'Reading introductions and original navigation never saves configuration')
+    assert.deepEqual(await capsuleWrites(),[],'Reading introductions never writes Capsule defaults')
+    await resize(1440,940); await theme('dark'); await nav('capsule')
+    const capsuleDraft='/private/concept-intros/edited-content'
+    await fill(capsuleRoot,capsuleDraft)
+    await read(`window.originalConceptCapsuleRoot=${node(capsuleRoot)}`)
+    await nav('goals')
+    const originalFinished=await read(`${node(goalsFinished)}.checked`)
+    await choose(goalsFinished)
+    await read(`window.originalConceptGoalsFinished=${node(goalsFinished)}`)
+    await nav('capsule')
+    assert.equal(await read(`${node(capsuleRoot)}===window.originalConceptCapsuleRoot`),true,'The original Capsule draft input survives cross-page navigation')
+    assert.equal(await read(`${node(capsuleRoot)}.value`),capsuleDraft,'Capsule introduction preserves its original unsaved content location')
+    await nav('goals')
+    assert.equal(await read(`${node(goalsFinished)}===window.originalConceptGoalsFinished`),true,'The original Goals draft input survives cross-page navigation')
+    assert.equal(await read(`${node(goalsFinished)}.checked`),!originalFinished,'Goals introduction preserves its original unsaved preference')
+    assert.equal(await read('window.settingsHomeProbe.saves.length'),savesBefore,'Draft navigation does not implicitly save')
+    assert.deepEqual(await capsuleWrites(),[],'Draft navigation does not implicitly save Capsule defaults')
+    await click(node(pane('goals')+' [data-settings-save-bar] button'))
+    await until(`window.settingsHomeProbe.saves.length===${savesBefore+1}&&${node(pane('goals')+' [data-settings-save-bar] button')}.disabled`)
+    const goalsSave=await read(`window.settingsHomeProbe.saves[${savesBefore}]`)
+    assert.equal(goalsSave.next.goals.showFinished,!originalFinished,'Explicit Goals save keeps the original edited preference')
+    assert.equal(goalsSave.expected.goals.showFinished,originalFinished,'Explicit Goals save keeps the original expected preference')
+    const {showFinished:nextFinished,...nextOther}=goalsSave.next.goals
+    const {showFinished:expectedFinished,...expectedOther}=goalsSave.expected.goals
+    assert.deepEqual(nextOther,expectedOther,'The introduction adds no Goals configuration fields')
+    assert.deepEqual(goalsSave.next.goalsCommonActions,goalsSave.expected.goalsCommonActions)
+    await nav('capsule')
+    await click(button(pane('capsule'),'Save defaults'))
+    await until(`${button(pane('capsule'),'Save defaults')}.disabled&&${node(pane('capsule')+' .capsule-settings__defaults')}.textContent.includes('Confirmed by the Capsule owner.')`)
+    const writes=await capsuleWrites()
+    assert.equal(writes.length,1,'Only the explicit Capsule save reaches its original mutation port')
+    assert.equal(writes[0].params.expectedRevision,1)
+    assert.deepEqual(writes[0].params.changes,{contentRoot:capsuleDraft},'Explicit Capsule save preserves the original edit payload')
+    assert.ok(writes[0].params.operationId)
+    const calls=await read('window.settingsHomeProbe.conceptProbe.calls')
+    assert.ok(calls.every(call=>['capsule.runtime.inspect','capsule.config.inspect','capsule.ls','capsule.config.update'].includes(call.method)),'Introduction review never starts a service or creates or opens a page')
+    for(const id of ['capsule','goals']) result.interactions.push({kind:'page-interactions-complete',page:id,actions:1,implicitSaves:0,explicitSaves:1,originalInputRetained:true})
+    result.conceptIntros={boundary:await read('window.settingsHomeProbe.conceptProbe.boundary'),calls,goalsSave,draftsRetained:true,implicitSaves:0,explicitSaves:2}
+    await click(node('[aria-label="Close settings"]'))
+    result.preserved=await read('window.settingsHomeProbe.surface()')
+    assert.equal(result.preserved.exact,true,'Introduction review preserves the original work surface')
+    result.events=await read('window.settingsHomeProbe.events')
+    assert.ok(result.events.some(event=>event.type==='click'&&event.trusted))
+    assert.ok(result.events.some(event=>event.type==='input'&&event.trusted))
+    assert.deepEqual(await read('window.settingsHomeProbe.errors'),[])
+  }
   let catalog
   const nav = async id => {
     const entry = id === 'overview' ? {id,title:'Overview'} : catalog.find(item=>item.id===id)
@@ -828,7 +904,7 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({width:1440,height:940,show:false,webPreferences:{contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false}})
     result.console = []
     win.webContents.on('console-message', details => result.console.push({level:details.level,message:details.message}))
-    await win.loadFile(html)
+    await win.loadFile(html,mode==='concept-intros'?{query:{conceptIntros:'true'}}:undefined)
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
@@ -851,6 +927,7 @@ app.whenReady().then(async () => {
     assert.equal(await title(),'Overview','Ordinary App Settings opens Overview')
     assert.equal(await read('document.querySelectorAll("[data-settings-pane]").length'),0,'Home does not mount configuration editors')
     assert.deepEqual(await read('Array.from(document.querySelectorAll("[data-settings-directory] [data-settings-section]")).map(n=>n.dataset.settingsSection)'),catalog.map(item=>item.id))
+    if (mode==='concept-intros') { await conceptIntroductions(); result.passed=true; return }
     if (mode==='navigation') { await disclosureGeometry(); result.passed=true; return }
     if (mode==='lark-navigation') { await nav('lark'); await larkInteractions(true); result.passed=true; return }
     if (mode==='provider-scroll') { await providerScroll(); result.passed=true; return }
