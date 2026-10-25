@@ -17,6 +17,7 @@ import { amuxProtocolsSettingsModule } from './modules/amux-protocols'
 import { profileSettingsModule } from './modules/profile'
 import { focusSettingsModule } from './modules/focus'
 import { hostsSettingsModule } from './modules/hosts'
+import { remoteExecutionSettingsModule } from './modules/remote-execution'
 import { mobileSettingsModule } from './modules/mobile'
 import { inappConversationSettingsModule } from './modules/inapp-conversation'
 import { toolkitSettingsModule } from './modules/toolkit'
@@ -52,6 +53,7 @@ export const settingsModules = [
   notesSettingsModule,
   toolkitSettingsModule,
   hostsSettingsModule,
+  remoteExecutionSettingsModule,
   mobileSettingsModule,
   inappConversationSettingsModule,
   larkSettingsModule,
