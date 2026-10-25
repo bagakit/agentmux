@@ -427,7 +427,7 @@ describe('due busy schedule pre-observation', () => {
     const created = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'original', operationId: 'pause-probe' })
     const entered = deferred(), release = deferred()
     const ports = h.manager as unknown as { observe: (...args: any[]) => Promise<any> }, original = ports.observe
-    ports.observe = async (...args) => { const observation = await original(...args); entered.resolve(); await release.promise; return observation }
+    ports.observe = async (...args) => { const observation = structuredClone(await original(...args)); entered.resolve(); await release.promise; return observation }
     h.set({ now: created.schedule.nextCheckAt, working: true })
     const checking = h.manager.check(); await entered.promise
     await h.manager.call('schedule.pause', { scheduleId: created.schedule.loopId, expectedRevision: 1, operationId: 'pause-original' })
