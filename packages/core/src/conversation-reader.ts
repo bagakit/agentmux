@@ -567,16 +567,21 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
           replay: encode({ ...state, position: {}, batch: state.batch! }), checkpoint, outside: snapshot.outside, navigation: { older: complete ? historyCursor(navigation.older) : null, newer: complete ? historyCursor(navigation.newer, 'newer') : null } },
         ...(mode === 'changes' ? { checkpoint, more: !complete || batch.more } : {}) }
     }
-    const fits = (entry: ConversationUnitEntry, index: number, offset: number) => Buffer.byteLength(JSON.stringify(result(index, offset, [...items, entry]))) <= budgetBytes
+    // The envelope changes with the cursor; accepted entries do not. Count the
+    // original JSON bytes and commas without re-encoding the accepted prefix.
+    let itemsBytes = 0
+    const entryBytes = (entry: ConversationUnitEntry) => Buffer.byteLength(JSON.stringify(entry)) + (items.length ? 1 : 0)
+    const fits = (entry: ConversationUnitEntry, index: number, offset: number) => Buffer.byteLength(JSON.stringify(result(index, offset, []))) + itemsBytes + entryBytes(entry) <= budgetBytes
+    const append = (entry: ConversationUnitEntry) => { itemsBytes += entryBytes(entry); items.push(entry) }
     let index = state.batch!.index, offset = state.batch!.offset
     while (index < units.length && items.length < (input.limit ?? 30)) {
       const unit = units[index]!, buffer = Buffer.from(JSON.stringify(unit)), whole: ConversationUnitEntry = { kind: 'item', item: unit }
-      if (!offset && fits(whole, index + 1, 0)) { items.push(whole); index++; continue }
+      if (!offset && fits(whole, index + 1, 0)) { append(whole); index++; continue }
       const fragment = (length: number): ConversationUnitEntry => ({ kind: 'fragment', itemId: unit.event.id, encoding: 'json-utf8-base64', sha256: digests[index]!.sha256, offsetBytes: offset, totalBytes: buffer.length, dataBase64: buffer.subarray(offset, offset + length).toString('base64') })
       let low = 0, high = buffer.length - offset
       while (low < high) { const middle = Math.ceil((low + high) / 2), complete = offset + middle === buffer.length; if (fits(fragment(middle), complete ? index + 1 : index, complete ? 0 : offset + middle)) low = middle; else high = middle - 1 }
       if (!low) break
-      items.push(fragment(low)); offset += low; if (offset === buffer.length) { index++; offset = 0 }; break
+      append(fragment(low)); offset += low; if (offset === buffer.length) { index++; offset = 0 }; break
     }
     const page = result(index, offset)
     if (Buffer.byteLength(JSON.stringify(page)) > budgetBytes || index < units.length && !items.length) return fail('The original unit and continuation cannot fit this budget. Increase maxBytes; no record or cut was skipped.', 'AGENT_SESSION_HISTORY_BUDGET')
