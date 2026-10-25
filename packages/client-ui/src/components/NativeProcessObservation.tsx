@@ -102,7 +102,7 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
       if (conversationProcessPeer(record)) return <div key={key}>{renderRecord(record)}</div>
       const item = record.original.kind === 'native' ? record.original.item : undefined
       return <div key={key} className="native-process-observation__step" hidden={!expanded} inert={!expanded}>{expanded || readOnce ? item ? renderRecord(record, body =>
-        <NativeProcessStep item={item} {...(first?.startedAt === undefined ? {} : { origin: first.startedAt })}
+        <NativeProcessStep item={item} source={record.source.kind === 'native' ? record.source : undefined} {...(first?.startedAt === undefined ? {} : { origin: first.startedAt })}
           {...(disclosure?.steps.get(key) === undefined ? {} : { expanded: disclosure.steps.get(key)! })}
           {...(disclosure ? { onExpandedChange: (open: boolean) => disclosure.onStepExpandedChange(key, open) } : {})}>{body}</NativeProcessStep>)
         : renderRecord(record, undefined, disclosure) : null}</div>
@@ -111,8 +111,9 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
     ? [<p key={JSON.stringify([item.id, index])} className="conversation-metrics__notice" role="status">{diagnostic.message}</p>] : []))}</div>
 }
 
-export function NativeProcessStep({ item, origin, children, bodyOnly = false, expanded: controlledExpanded, onExpandedChange }: {
+export function NativeProcessStep({ item, source, origin, children, bodyOnly = false, expanded: controlledExpanded, onExpandedChange }: {
   item: AgentSessionHistoryItem
+  source?: AgentSessionHistorySource | undefined
   bodyOnly?: boolean
   origin?: number
   children: ReactNode
@@ -130,12 +131,13 @@ export function NativeProcessStep({ item, origin, children, bodyOnly = false, ex
   const time = recordTime(item, origin)
   const status = recordedStatus(item)
   const call = item.contentParts.find(part => part.kind === 'tool-call')
+  const result = item.contentParts.find(part => part.kind === 'tool-result')
   const title = useMemo(() => collaboration?.kind === 'operation'
     ? operationTitle(collaboration.operation)
     : collaboration?.kind === 'agent-activity'
       ? `Agent ${collaboration.event}`
       : call?.kind === 'tool-call' ? stepTitle(call.name, call.name, call.input, '')
-        : item.title ?? (item.contentParts.some(part => part.kind === 'reasoning') ? 'Reasoning' : 'Recorded activity'), [item])
+        : item.title ?? (result?.name ? `${result.name} result` : result ? 'Tool result' : item.contentParts.some(part => part.kind === 'reasoning') ? 'Reasoning' : 'Recorded activity'), [item])
   function toggle(): void {
     if (!expanded) setReadOnce(true)
     setExpanded(!expanded)
@@ -145,7 +147,7 @@ export function NativeProcessStep({ item, origin, children, bodyOnly = false, ex
     {!bodyOnly ? <WorkflowToolRow observation={{ id: item.id, title, source: NATIVE_CONVERSATION_SOURCE, persistentSource: true,
       ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
       className="log-row" icon={collaboration ? <SemanticIcon name="object.collaboration" size={12} /> : <SemanticIcon name={call ? 'conversation.tool-call' : item.contentParts.some(part => part.kind === 'tool-result') ? 'conversation.tool-result' : 'object.activity'} size={12} />}
-      expanded={expanded} controls={bodyId} onToggle={toggle} /> : null}
+      missingStatusInDetails expanded={expanded} controls={bodyId} onToggle={toggle} /> : null}
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>
       {expanded || readOnce ? <>
         {collaboration?.kind === 'operation' ? <>
@@ -176,6 +178,12 @@ export function NativeProcessStep({ item, origin, children, bodyOnly = false, ex
           {collaboration.path === undefined ? null : <div><dt>Native agent path</dt><dd><code>{collaboration.path}</code></dd></div>}
         </dl> : null}
         {collaboration ? <ConversationRetainedDetails className="wf-native-process__raw" summary="Original record">{() => children}</ConversationRetainedDetails> : children}
+        <ConversationRetainedDetails summary="Recorded source">{() => <dl className="wf-native-process__references" aria-label="Recorded step source">
+          <div><dt>Source</dt><dd>{NATIVE_CONVERSATION_SOURCE}</dd></div>
+          {source ? <><div><dt>Provider</dt><dd>{source.providerId}</dd></div><div><dt>Native session</dt><dd><code>{source.nativeSessionId}</code></dd></div></> : null}
+          <div><dt>Record</dt><dd><code>{item.id}</code></dd></div>
+          <div><dt>Recorded status</dt><dd>{status ?? 'Status not recorded'}</dd></div>
+        </dl>}</ConversationRetainedDetails>
       </> : null}
     </div>
   </div>

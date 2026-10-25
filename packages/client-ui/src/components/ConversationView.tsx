@@ -203,7 +203,7 @@ export const ConversationView = memo(function ConversationView({
         renderDetail={snapshot => {
           const detail = projectConversationWindow(snapshot)
           return detail.records.map(original => original.original.kind === 'native'
-            ? renderNativeRecord(original.original.item, body => <NativeProcessStep item={original.original.kind === 'native' ? original.original.item : neverCaptured()} bodyOnly>{body}</NativeProcessStep>, original, undefined, detail.historyPage)
+            ? renderNativeRecord(original.original.item, body => <NativeProcessStep item={original.original.kind === 'native' ? original.original.item : neverCaptured()} source={detail.historyPage?.source} bodyOnly>{body}</NativeProcessStep>, original, undefined, detail.historyPage)
             : <CapturedProcessRecord key={original.id} record={original} bodyOnly {...(reading.workspaceRoot ? { workspaceRoot: reading.workspaceRoot } : {})} />)
         }} />
     : record.original.kind === 'native'
@@ -234,6 +234,7 @@ export const ConversationView = memo(function ConversationView({
               <dt>原生接收者</dt><dd>{collaboration.recipient ?? '未记录'}</dd>
               <dt>身份范围</dt><dd>原生会话中的参与者，不代表 AgentMux Session 身份或当前投递状态。</dd>
             </dl> } : {})}
+          processContent={record.role === 'process' && Boolean(wrapBody) && !collaboration && item.kind !== 'system-message'}
           continuation={!original && continuedProgress.has(record.id) && locatedMessageKey !== conversationMessageSourceKey(sessionId, record.source)}
           renderSubmissionOriginal={source => { const original = originals.get(source.id); return original ? <ConversationOriginalRecordContent record={original} renderRecord={renderOriginal} /> : null }}
           {...(a2aNotificationId ? { a2aNotificationId, notificationRecords: record.records, locatedSourceKey: locatedMessageKey } : {})}

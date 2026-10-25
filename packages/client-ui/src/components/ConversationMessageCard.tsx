@@ -29,6 +29,14 @@ export function ConversationSpeechCard({ sender, renderBody, ...slots }: Message
   return <MessageCardFrame {...slots} heading={<span className="log-turn__sender">{sender}</span>}>{renderBody()}</MessageCardFrame>
 }
 
+/** The owning process step supplies the heading; body actions and provenance keep their original owners. */
+export function ConversationProcessCard({ badges, time, actions, feedback, details, metadata, renderBody }: MessageCardSlots & MessageCardBody) {
+  return <>
+    <div className="log-turn__head"><div className="log-turn__identity">{badges}{time}</div>{actions}{details}{feedback}</div>
+    {metadata}{renderBody()}
+  </>
+}
+
 export function SystemRecordCard({ identity, title, summary, hasContent, renderBody, ...slots }: MessageCardSlots & MessageCardBody & {
   identity: object; title: string; summary: string | undefined; hasContent: boolean
 }) {

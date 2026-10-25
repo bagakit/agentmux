@@ -40,3 +40,9 @@
   .conversation-reply-observation__toggle,
   .log-turn__collaboration-toggle { min-height: 44px; }
 }
+
+/* A process heading belongs to the exact step, while its body keeps original actions and details. */
+.log-turn[data-process-content] { grid-template-columns: minmax(0, 1fr); }
+.log-turn[data-process-content] > .log-turn__head,
+.log-turn[data-process-content] > .log-turn__meta,
+.log-turn[data-process-content] > .log-turn__body { grid-column: 1; }
