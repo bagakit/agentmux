@@ -63,9 +63,9 @@ CLI/RPC 历史分页复用原 `agent history` / `agent.history`；Native Resume 
 
 现有 `agent.execution.create`、`agent.execution.binding`、`agent.execution.rejoin` 与 `agent.execution.inspect` RPC／同名对象 CLI 复用 [Core 执行协调器](src/agent-execution-coordinator.ts)。Provider 贡献原生接法；客户端继续使用同一绑定、原 Session 与操作回执。`rejoin` 重接原 reader，不重发未知的工具操作。
 
-[Claude Provider](src/providers/claude.ts) 的分端适配当前限定于 Claude Code 2.1.314 的原生模块与 `mcp serve` 合同。原文件工具由资源端原生服务执行，`Bash`／资源任务 `TaskStop` 由该原 helper 的进程句柄执行；资源授权为绑定中明确给出的 `host-user`。原调用的工具池、权限模式与 `PreToolUse` 判定先成立，资源 MCP 自身的许可另行成立，不添加整类工具自动授权。用户已有 MCP、插件、提示与原生会话配置继续由 Claude 加载。
+[Claude Provider](src/providers/claude.ts) 的分端适配当前限定于 Claude Code 2.1.314 的原生模块与 `mcp serve` 合同。原文件工具由资源端原生服务执行，`Bash`／资源任务 `TaskStop` 由该原 helper 的进程句柄执行；资源授权为绑定中明确给出的 `host-user`。原工具池、主 Agent 的原生权限查询与资源 MCP 许可分别成立，不添加整类工具自动授权。用户已有 MCP、插件、提示与原生会话配置继续由 Claude 加载。
 
-原调用与嵌套 MCP 是两个原生调用：原 `PreToolUse` 可拒绝操作，实际执行的后置 Hook 使用 MCP 工具名与调用 ID；嵌套审批处于主循环。配置按原工具名匹配后置 Hook、按子 Agent 身份审批，或依赖其他模块替换执行时，需要核对这些具体语义，不能由连接成功宣称任意扩展完全等价。该原生版本的 debug 日志还会记录被替换的本地检查取消，它不代表资源工具的拒绝回执。此范围不影响普通 Claude 会话，也不要求删除用户 Hook 才能使用分端执行。
+文件校验与读取状态由资源端原生服务持有；不在 Agent 本机重放整条原工具调用作为权限探测。原生配置、Hooks 与 Skills 从 Agent 运行端加载，不自动同步资源端的同名项目配置。实际 Hook 使用 MCP 工具名与调用 ID，审批处于主循环；按原工具名匹配的 Hook 或按子 Agent 身份审批的配置需要核对该差异。当前公开权限查询无法指定子 Agent，因此子调用仅保留原生工具确认 `isReadOnly` 且原查询已允许的操作；其余本次操作明确报告权限上下文未确认，主 Agent 与其他已确认操作继续工作。原生工具池仍负责准入，直接调用替换名不能扩大子 Agent 工具范围。这些边界由原绑定 notice 公开，不能由连接成功宣称任意扩展完全等价，也不要求删除用户 Hook 才能使用分端执行。
 
 ## Runtime 边界
 
