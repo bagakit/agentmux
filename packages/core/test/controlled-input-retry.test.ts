@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
+import { parseAgentInputMailboxPage } from '../src/agent-input-mailbox-codec.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
@@ -86,6 +87,21 @@ async function fixture(plan: 'single' | 'render' | 'native' = 'single') {
     await settled(); return await read()
   }
   const rejoin = (receipt: AgentInputSubmissionReceipt) => rpc.call('agent.input.rejoin', { ref: receipt.ref })
+  const wireMailboxes = async (receipt: AgentInputSubmissionReceipt) => {
+    const read = { agentSessionId: 'recipient' }
+    const [routed, hosted] = await Promise.all([rpc.call('agent.input.ls', { hostId: 'local', ...read }), peer.readAgentInputMailbox(read)])
+    for (const page of [routed, hosted]) {
+      expect(page.items).toHaveLength(1)
+      expect(page.items[0]).toMatchObject({ kind: 'item', item: { kind: 'controlled', intent: { key }, receipt } })
+    }
+    const tampered = structuredClone(hosted), entry = tampered.items[0]!
+    if (entry.kind !== 'item' || entry.item.kind !== 'controlled' || !entry.item.receipt?.control.deliveryKey) throw new Error('Expected original controlled successor')
+    const delivery = entry.item.receipt.control.deliveryKey
+    if (delivery.kind !== 'message') throw new Error('Expected original message input')
+    delivery.messageId = 'foreign-logical-message'
+    expect(() => parseAgentInputMailboxPage(tampered, read)).toThrow()
+    return hosted
+  }
   const recipientRejoin = (receipt: AgentInputSubmissionReceipt, capability = h.capability) => rpc.call('agent.input.rejoin', { ref: receipt.ref },
     { credentials: { agentSessionId: 'recipient', capability } })
   const reopen = async () => {
@@ -105,7 +121,7 @@ async function fixture(plan: 'single' | 'render' | 'native' = 'single') {
     delete next.promptCompletionAdmission; delete next.terminalPromptSubmission
     await h.store.compareAndSwap(previous, next); await (client as unknown as typeof h.inner).registry.load('local')
   }
-  return { ...h, get client() { return client }, key, old, read, submit, rejoin, recipientRejoin, reopen, resumeFacts, rpc, settled, writes, nativeWrites, assertCurrent,
+  return { ...h, get client() { return client }, key, old, read, submit, rejoin, wireMailboxes, recipientRejoin, reopen, resumeFacts, rpc, settled, writes, nativeWrites, assertCurrent,
     setMode(value: typeof mode) { mode = value }, revoke() { authorized = false }, expireAfterNextCheck() { expireAfterCheck = true },
     disconnect() { Reflect.set(client, 'connected', false) },
     advanceCursor: () => baseInput(activeRun, { operationId: 'independent-terminal-input', expectedByte: h.run(activeRun).acceptedInputBytes!, data: 'intervening input' }),
@@ -132,6 +148,7 @@ it.each(['single', 'render'] as const)('public author rejoin creates one %s succ
   expect(h.writes.mock.calls.length - writesBefore).toBe(plan === 'single' ? 1 : 2)
   const mailbox = await h.client.readAgentInputMailbox({ agentSessionId: 'recipient' })
   expect(mailbox.items).toHaveLength(1)
+  await h.wireMailboxes(completed)
   if (useCli) {
     const result = await h.cli(first.ref)
     expect(result.code, result.stderr).toBe(0)
@@ -153,6 +170,11 @@ it('retries a confirmed whole native refusal with a fresh correlation and the sa
   expect(successorPlan!.clientCorrelation).not.toEqual(originalPlan!.clientCorrelation)
   expect(await h.client.inspectAgentPromptSubmission(h.key)).toEqual(original)
   expect(h.writes).not.toHaveBeenCalled()
+  const page = await h.wireMailboxes(complete), entry = structuredClone(page.items[0]!)
+  if (entry.kind !== 'item' || entry.item.kind !== 'controlled' || !entry.item.receipt?.control.deliveryKey) throw new Error('Expected original native successor')
+  entry.item.receipt.control.deliveryKey.expectedRun = { runId: 'unrelated-native-run' }
+  entry.item.receipt.admission = null; entry.item.receipt.status = 'unknown'
+  expect(() => parseAgentInputMailboxPage({ ...page, items: [entry] }, { agentSessionId: 'recipient' })).toThrow()
 })
 
 it('allows the exact recipient to continue one refused external input while rechecking its original author', async () => {
@@ -187,6 +209,7 @@ it('reconstructs an unclaimed successor after Core reopens and verifies the same
   expect(h.writes.mock.calls.slice(before).map(([id]) => id)).toEqual(['resumed-original-run'])
   expect(await h.client.inspectAgentPromptSubmission(h.key)).toEqual(original)
   expect(h.assertCurrent).toHaveBeenCalled()
+  await h.wireMailboxes(await h.read())
 })
 
 it.each(['unknown', 'partial', 'accept'] as const)('does not create another attempt for %s original effects', async effect => {
