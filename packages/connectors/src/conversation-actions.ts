@@ -34,7 +34,25 @@ export class ConversationActions implements PublicationPermissionsPort {
       CREATE INDEX IF NOT EXISTS connection_ingress_action_original ON connection_ingress_event(json_extract(record_json,'$.input.author.actionRef'),json_extract(record_json,'$.input.author.actor'),json_extract(record_json,'$.input.author.grantRevision'),intake_sequence) WHERE json_extract(record_json,'$.kind')='action' AND json_extract(record_json,'$.state')='claimed';
       CREATE INDEX IF NOT EXISTS connection_ingress_action_operation ON connection_ingress_event(json_extract(record_json,'$.input.operationId')) WHERE record_json IS NOT NULL AND json_extract(record_json,'$.input.operationId') IS NOT NULL;
     `)
+    const database = this.options.connections.database
+    if (!database.prepare('PRAGMA table_info(connection_ingress_action_intent)').all().some(column => column.name === 'recovery_pending'))
+      database.exec('ALTER TABLE connection_ingress_action_intent ADD COLUMN recovery_pending INTEGER NOT NULL DEFAULT 1')
+    database.exec("CREATE INDEX IF NOT EXISTS connection_ingress_action_recovery ON connection_ingress_action_intent(json_extract(intent_json,'$.externalAction.connectionId'),operation_id) WHERE recovery_pending=1")
     this.initialized = true
+  }
+  /** Derived unresolved work only. A candidate grants no authority and proves no execution outcome. */
+  recoveryCandidates(connectionId: string, after: number, limit: number): Array<{ ingressId: string; sequence: number }> {
+    this.initialize()
+    // Unary + removes the TEXT column affinity so the JSON expression index can seek this operation.
+    return this.options.connections.database.prepare(`SELECT event.ingress_id,event.intake_sequence FROM connection_ingress_action_intent work INDEXED BY connection_ingress_action_recovery
+      JOIN connection_ingress_event event ON event.rowid=(SELECT rowid FROM connection_ingress_event
+        WHERE record_json IS NOT NULL AND json_extract(record_json,'$.input.operationId')=+work.operation_id ORDER BY intake_sequence LIMIT 1)
+      WHERE work.recovery_pending=1 AND json_extract(work.intent_json,'$.externalAction.connectionId')=? AND event.intake_sequence>?
+      ORDER BY event.intake_sequence LIMIT ?`).all(connectionId, after, limit).map(row => ({ ingressId: String(row.ingress_id), sequence: Number(row.intake_sequence) }))
+  }
+  executionObserved(operationId: string): void {
+    this.initialize()
+    this.options.connections.database.prepare('UPDATE connection_ingress_action_intent SET recovery_pending=0 WHERE operation_id=?').run(operationId)
   }
   private reference(actionRef: string): Reference | null {
     this.initialize()
@@ -184,6 +202,12 @@ export class ConversationActions implements PublicationPermissionsPort {
     if (!mapping || JSON.parse(String(mapping.operation_json)).mapping?.messageId !== record.sourceMessageId) failure('INGRESS_AUTHORITY_REVISED')
     if (record.input && (record.input.hostId !== ref!.binding.executionHostId || record.input.agentSessionId !== ref!.binding.agentSessionId || record.input.expectedRun.runId !== ref!.run.runId ||
         record.input.author.bindingId !== ref!.binding.bindingId || record.input.author.bindingRevision !== ref!.binding.revision || !same({ kind: record.input.author.grantSource ?? 'room', grantId: record.input.author.grantId, revision: record.input.author.grantRevision }, grant!.source))) failure('INGRESS_AUTHORITY_REVISED')
+    if (record.input) {
+      const source = record.input.author.authoritySource
+      if (this.options.authoritySource && ref!.binding.executionHostId !== 'local' && !source ||
+          source && (!same(source, this.options.authoritySource?.(ref!.binding.executionHostId, ref!.binding.executionRuntimeId)) ||
+            ref!.binding.executionRuntimeId !== undefined && source.executionRuntimeId !== ref!.binding.executionRuntimeId)) failure('INGRESS_TARGET_UNCONFIRMED')
+    }
     return ref!
   }
   questionForm(input: ConnectionQuestionFormInput): ConnectionQuestionForm | null {
@@ -212,14 +236,17 @@ export class ConversationActions implements PublicationPermissionsPort {
       if (ref.kind === 'question' && !same(this.questionAnswers(ref, record), (input as AgentMuxSessionQuestionReplyInput).answers)) failure('INGRESS_AUTHORITY_REVISED')
       return { record: { ...record, state: 'claimed', input: original.input! }, input, own: false }
     }
+    const source = ref.binding.executionHostId === 'local' || ref.binding.executionRuntimeId
+      ? this.options.authoritySource?.(ref.binding.executionHostId, ref.binding.executionRuntimeId) : undefined
+    if (this.options.authoritySource && ref.binding.executionHostId !== 'local' && !source) failure('INGRESS_TARGET_UNCONFIRMED')
     const author = parseAgentExternalInteractionAuthor({ kind: 'external-action', connectionId: record.connectionId, actor: record.actor,
       externalConversationId: record.externalConversationId, sourceMessageId: record.sourceMessageId, actionRef: record.actionRef,
-      bindingId: ref.binding.bindingId, bindingRevision: ref.binding.revision, ...grantAuthorReference(grant) })
+      bindingId: ref.binding.bindingId, bindingRevision: ref.binding.revision, ...grantAuthorReference(grant), ...(source ? { authoritySource: source } : {}) })
     const input: ExternalActionInput = ref.kind === 'question' ? { ...ref.target, agentSessionId: ref.binding.agentSessionId, expectedRun: ref.run,
       operationId: mintObjectId(), answers: this.questionAnswers(ref, record), externalAction: author } : { agentSessionId: ref.binding.agentSessionId, expectedRun: ref.run,
       operationId: mintObjectId(), expectedRequest: ref.request,
       response: { kind: 'permission', requestId: ref.request.id, decision: ref.decision }, externalAction: author }
-    database.prepare('INSERT INTO connection_ingress_action_intent VALUES (?,?)').run(input.operationId, encode(input))
+    database.prepare('INSERT INTO connection_ingress_action_intent(operation_id,intent_json,recovery_pending) VALUES (?,?,1)').run(input.operationId, encode(input))
     return { record: { ...record, state: 'claimed', input: { hostId: ref.binding.executionHostId, agentSessionId: input.agentSessionId,
       expectedRun: input.expectedRun, operationId: input.operationId, intentDigest: externalActionIntentDigest(input), author, ...(ref.kind === 'question' ? { responseKind: 'question' as const } : {}) } }, input, own: true }
   }
@@ -294,7 +321,7 @@ export class ConversationActions implements PublicationPermissionsPort {
   }
   async refreshQuestions(binding: RoomBinding, store: PublicationStore): Promise<void> {
     this.initialize()
-    const core = this.options.core(binding.executionHostId), session = core?.agentSession?.(binding.agentSessionId)
+    const core = this.options.core(binding.executionHostId, binding.executionRuntimeId), session = core?.agentSession?.(binding.agentSessionId)
     if (!session) return
     const database = this.options.connections.database
     // Later answers and withdrawals mask old candidates, including non-Question
