@@ -57,8 +57,8 @@ export type AgentInputJournalIntent = {
         /** Wire frozen at first intake, before waiting or Provider preparation. */
         promptWire?: string }
     | { kind: 'message'; messageId: string; originalControlOperationId: string;
-        /** Original quote wire, frozen at the first journal save before waiting. */
-        promptWire?: string }
+        /** Original wire, frozen at the first journal save before waiting. */
+        promptWire?: string; representation?: import('./agent-message-input.js').AgentMessageInputRepresentation }
 }
 export type AgentInputDispatchLink = { ref: AgentInputWaitRef; gateId: string; deliveryKey?: AgentPromptInputKey }
 /** A confirmed whole-input refusal remains at previousKey; this successor has its own transport identity. */

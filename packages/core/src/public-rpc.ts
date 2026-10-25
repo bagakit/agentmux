@@ -292,7 +292,7 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'message.inbox.ack': { generation: number; readerRun: import('./types.js').AgentMuxRunRef }
   'message.notify': { operationId: string; messageIds: readonly string[]; hostId: string }
   'message.notify.inspect': { operationId: string; hostId: string }
-  'message.read': import('./agent-message-query.js').AgentMuxMessageRead & { hostId?: string }
+  'message.read': import('./agent-message-query.js').AgentMuxMessageReadRequest & { hostId?: string }
   'message.events': Omit<import('./agent-message-events.js').AgentMuxMessageEventsQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
   'message.ls': Omit<import('./agent-message-query.js').AgentMuxMessageQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
   'message.dispatch.open': { sourceMessageId: string }
@@ -389,7 +389,8 @@ type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   'message.inbox.ack': Awaited<ReturnType<AgentMuxClient['ackDeliveryBatch']>>
   'message.notify': Awaited<ReturnType<AgentMuxClient['notifyMessages']>> & { hostId: string }
   'message.notify.inspect': Awaited<ReturnType<AgentMuxClient['inspectMessageNotification']>> & { hostId: string }
-  'message.read': { hostId: string; message: Awaited<ReturnType<AgentMuxClient['readMessage']>> }
+  'message.read': { hostId: string; message: import('./agent-message-query.js').AgentMuxMessageReadView | null; field?: never } |
+    { hostId: string; message: null; field: import('./agent-message-query.js').AgentMuxMessageFieldPage | null }
   'message.ls': import('./agent-message-query.js').AgentMuxMessagePage & { hostId: string }
   'message.events': import('./agent-message-events.js').AgentMuxMessageEventsPage & { hostId: string }
   'message.dispatch.open': Awaited<ReturnType<AgentMuxClient['openDispatch']>>
