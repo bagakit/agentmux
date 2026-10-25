@@ -7,7 +7,7 @@ export type MobileWebUpdateResult = { status: 'navigating' } | { status: 'blocke
 type SafetyOwner = () => string | null
 type ConnectionCheck = () => Promise<() => boolean>
 type DispatchMatch = (candidate: unknown) => boolean
-type SafetyContext = { apply(): Promise<MobileWebUpdateResult>; register(owner: SafetyOwner): () => void;
+type SafetyContext = { apply(signal?: AbortSignal): Promise<MobileWebUpdateResult>; register(owner: SafetyOwner): () => void;
   trackDispatch(key: string, match: DispatchMatch): () => void; isDispatched(key: string, candidate: unknown): boolean; attachmentOwner(): AttachmentPageOwner }
 const unavailable = '当前页面无法确认原连接；请保留工作内容并恢复原 Mac 连接后重试。'
 const Safety = createContext<SafetyContext | null>(null)
@@ -69,8 +69,9 @@ export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prep
       owners.current.add(owner); ownersRevision.current++
       return () => { if (owners.current.delete(owner)) ownersRevision.current++ }
     },
-    async apply() {
+    async apply(signal) {
       const blocked = (message: string): MobileWebUpdateResult => ({ status: 'blocked', message })
+      if (signal?.aborted) return blocked('本次网页重开已取消；当前页面保留。')
       if (current.current.native) return blocked('当前不是手机网页，请使用设备的应用更新方式。')
       const originalOwnersRevision = ownersRevision.current
       const checkOwners = () => { const issue = attachment.current?.issue(); if (issue) return issue; for (const owner of owners.current) { const issue = owner(); if (issue) return issue } return null }
@@ -79,17 +80,26 @@ export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prep
       const original = current.current
       let connectionStillOriginal: () => boolean, finalConnectionStillOriginal: () => boolean, workfaceStillSaved: () => boolean
       const abort = new AbortController()
+      const cancel = () => abort.abort()
+      signal?.addEventListener('abort', cancel, { once: true })
       let timeout: ReturnType<typeof setTimeout> | undefined
       try {
         const result = await Promise.race([
           (async () => {
             const connection = await original.verifyConnection()
+            abort.signal.throwIfAborted()
             const workface = await getDeviceWorkface().preparePageReload(abort.signal)
+            abort.signal.throwIfAborted()
             const response = await fetch('/', { method: 'GET', cache: 'no-store', credentials: 'same-origin', redirect: 'follow', signal: abort.signal })
+            abort.signal.throwIfAborted()
             const finalConnection = await original.verifyConnection()
+            abort.signal.throwIfAborted()
             return { connection, finalConnection, workface, response }
           })(),
-          new Promise<never>((_, reject) => { timeout = setTimeout(() => { abort.abort(); reject(new Error('Observation ended')) }, 15000) })
+          new Promise<never>((_, reject) => {
+            abort.signal.addEventListener('abort', () => reject(new Error('Observation ended')), { once: true })
+            timeout = setTimeout(() => abort.abort(), 15000)
+          })
         ])
         connectionStillOriginal = result.connection
         finalConnectionStillOriginal = result.finalConnection
@@ -101,7 +111,8 @@ export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prep
         }
       } catch {
         return blocked('原连接或新版入口暂时无法确认；当前页面和工作内容保留，请恢复连接及设备存储后重试。')
-      } finally { clearTimeout(timeout); abort.abort() }
+      } finally { clearTimeout(timeout); signal?.removeEventListener('abort', cancel); abort.abort() }
+      if (signal?.aborted) return blocked('本次网页重开已取消；当前页面保留。')
       const finalIssue = checkOwners()
       if (finalIssue) return blocked(finalIssue)
       if (ownersRevision.current !== originalOwnersRevision || current.current.verifyConnection !== original.verifyConnection || current.current.prepareReload !== original.prepareReload || current.current.native !== original.native || !connectionStillOriginal() || !finalConnectionStillOriginal() || !workfaceStillSaved()) {
@@ -111,9 +122,10 @@ export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prep
       let rollback: (() => void) | undefined
       try {
         rollback = original.prepareReload?.()
-        if (checkOwners() || ownersRevision.current !== originalOwnersRevision || !finalConnectionStillOriginal() || !workfaceStillSaved()) {
+        if (signal?.aborted || checkOwners() || ownersRevision.current !== originalOwnersRevision || !finalConnectionStillOriginal() || !workfaceStillSaved()) {
           rollback?.(); return blocked('连接或工作面发生变化；当前页面保留，请核对后重试。')
         }
+        if (signal?.aborted) { rollback?.(); return blocked('本次网页重开已取消；当前页面保留。') }
         location.assign('/' + mobileUpdateFragment); return { status: 'navigating' }
       } catch { try { rollback?.() } catch { /* Retain any unresolved handoff. */ } return blocked('原身份交接或网页重开未确认；当前页面保留，请恢复设备存储后重试。') }
     }
