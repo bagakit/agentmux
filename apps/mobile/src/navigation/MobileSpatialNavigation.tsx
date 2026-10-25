@@ -1,3 +1,4 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import type { MobileAgentCreateTarget } from './MobileAgentCreate'
 import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
@@ -296,7 +297,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
         members.set(id, member)
       }
       return <div className="mobile-mote-contents">
-        <div className="mobile-mote-agents-heading"><h3>Agents</h3>{onCreateAgent && <button type="button" className="mobile-icon-button" aria-label={`在 ${owner.name} 新建 Agent`} onClick={() => onCreateAgent({ spaceId: owner.spaceId, ...(facts?.content && ownerZones.has(facts.content.zoneId) ? { zoneId: facts.content.zoneId } : {}) })}><SemanticIcon name="action.create-agent" size={16} /></button>}</div>
+        <div className="mobile-mote-agents-heading"><h3>Agents</h3>{onCreateAgent && <IconButton className="mobile-icon-button" aria-label={`在 ${owner.name} 新建 Agent`} onClick={() => onCreateAgent({ spaceId: owner.spaceId, ...(facts?.content && ownerZones.has(facts.content.zoneId) ? { zoneId: facts.content.zoneId } : {}) })}><SemanticIcon name="action.create-agent" size={16} /></IconButton>}</div>
         <ul className="mobile-session-list mobile-mote-agents" aria-label={`${owner.name} 的 Agents`}>{[...members].map(([id, member]) => sessionRow(member.session, id, member.places.length === 1 ? member.places[0] : null, undefined, member.places))}</ul>
         {!members.size && <p className="mobile-spatial-empty">{unconfirmedAgent ? '原 Agent 绑定尚未确认；主 Agent 入口与原工作面保留。' : '尚无已绑定 Agent；可从主 Agent 入口设置，或明确新建。'}</p>}
         {facts?.issue && <MobileNotice identity={[owner.spaceId,facts.issue]} className="mobile-spatial-notice" role="status">{facts.issue}</MobileNotice>}
@@ -330,7 +331,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   return <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><section className="mobile-spatial-panel">
     <div className="mobile-section-heading mobile-page-header"><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
-      <div className="mobile-section-actions">{onCreateAgent && <button className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></button>}<button className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></button></div></div>
+      <div className="mobile-section-actions">{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，原工作面与最近目录保留。</MobileNotice>}
     <MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>

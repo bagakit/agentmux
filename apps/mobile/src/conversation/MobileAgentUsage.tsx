@@ -1,3 +1,4 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentTurnUsage } from '@agentmux/core'
@@ -5,9 +6,10 @@ import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { MobileNotice } from '../notices/MobileNotice'
 import { getDeviceWorkface } from '../recovery/device-workface'
 
-function TokenCounts({ usage }: { usage: Pick<AgentTurnUsage, 'inputTokens' | 'outputTokens' | 'totalTokens'> }) {
-  return <dl>{([['输入', usage.inputTokens], ['输出', usage.outputTokens], ['合计', usage.totalTokens]] as const).map(([name, count]) =>
-    <div key={name}><dt>{name}</dt><dd>{Number.isFinite(count) && count >= 0 ? count.toLocaleString() : '未上报'}</dd></div>)}</dl>
+function UsageRow({ label, usage, missing }: { label: string; usage: Pick<AgentTurnUsage, 'inputTokens' | 'outputTokens' | 'totalTokens'> | undefined; missing: string }) {
+  return <tr><th scope="row">{label}</th>{usage
+    ? [usage.inputTokens, usage.outputTokens, usage.totalTokens].map((count, index) => <td key={index}>{Number.isFinite(count) && count >= 0 ? count.toLocaleString() : '未上报'}</td>)
+    : <td colSpan={3}>{missing}</td>}</tr>
 }
 
 /** A visible, exact-SID read; no polling, billing estimate or lifecycle action. */
@@ -53,12 +55,15 @@ export function MobileAgentUsage({ client, agentSessionId, connected, beforeRead
   const usage = session?.turnUsage, context = usage?.context
   const contextKnown = context && Number.isFinite(context.usedTokens) && context.usedTokens >= 0 && Number.isFinite(context.capacityTokens) && context.capacityTokens > 0
   return <section className="mobile-agent-usage" aria-label="Agent 消耗">
-    <div className="mobile-agent-usage__heading"><h3>消耗</h3><span role="status">{reading ? '正在核对…' : usage ? '原生观测' : '尚无观测'}</span><button className="mobile-icon-button" aria-label="刷新消耗" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={15} /></button></div>
+    <div className="mobile-agent-usage__heading"><h3>消耗</h3><span role="status">{reading ? '正在核对…' : usage ? '原生观测' : '尚无观测'}</span><IconButton className="mobile-icon-button" aria-label="刷新消耗" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={15} /></IconButton></div>
     {issue && <MobileNotice owner={client} identity={[agentSessionId, scope, revision, issue]} role="status">{issue}</MobileNotice>}
     <div className="mobile-agent-usage__context"><span>上下文窗口</span><strong>{contextKnown ? `${context.usedTokens.toLocaleString()} / ${context.capacityTokens.toLocaleString()} tokens` : '已用量与容量尚未上报'}</strong></div>
     {contextKnown && <progress aria-label="上下文已用量" value={context.usedTokens} max={context.capacityTokens} />}
-    <div className="mobile-agent-usage__sample"><h3>原生 Session 累计</h3>{usage?.cumulative?.scope === 'native-session' ? <TokenCounts usage={usage.cumulative} /> : <p>累计用量尚未上报</p>}</div>
-    <div className="mobile-agent-usage__sample"><h3>{usage?.scope === 'response' ? '最近回复' : '最近样本 · 范围未确认'}</h3>{usage ? <TokenCounts usage={usage} /> : <p>原生样本尚未上报</p>}</div>
+    <table className="mobile-agent-usage__samples" aria-label="Token 用量">
+      <thead><tr><th scope="col">范围</th><th scope="col">输入</th><th scope="col">输出</th><th scope="col">合计</th></tr></thead>
+      <tbody><UsageRow label="原生 Session 累计" usage={usage?.cumulative?.scope === 'native-session' ? usage.cumulative : undefined} missing="累计用量尚未上报" />
+        <UsageRow label={usage?.scope === 'response' ? '最近回复' : '最近样本 · 范围未确认'} usage={usage} missing="原生样本尚未上报" /></tbody>
+    </table>
     <details className="mobile-agent-usage__source"><summary>观测详情{usage ? ` · ${new Date(usage.observedAt).toLocaleTimeString()}` : ''}</summary><p>{usage ? `观测于 ${new Date(usage.observedAt).toLocaleString()}` : '暂无原生观测'}{session ? ` · Run ${session.run.runId}` : ''}。上下文不含未发送草稿；未推算费用。</p></details>
   </section>
 }
