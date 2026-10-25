@@ -116,6 +116,8 @@ flowchart LR
 
 Renderer 桥使用 Core [`conversation-changes`](../../packages/core/src/conversation-changes.ts) 的 `parseConversationReadPageForWindow`／`parseConversationChangesPageForWindow`，严格解析后持有本次响应的不可变副本。窗口组装只复用该准确对象已经完成的 unit 校验，不重复规范化原记录和计算 revision；拷贝或 raw 页仍走原严格校验，fragment 完整后仍校验其原内容。该私有持有权不跨响应缓存或 wire，不改变普通 SDK parser 的可变 DTO，也不授予作者、输入或恢复权限。
 
+[`PublicationStore.commitPage`](../../packages/connectors/src/publication-store.ts) 在核对当前页请求后，复用同一 Core owner 的 `parseConversationUnitsForPage`：只有该不可变页内的原 item 对象免去重复正文校验；复制、其他页或跨页组装的单位仍严格解析。成员身份只在本次调用内比较，不建立另一份长期缓存；Binding 授权、原 frontier 与发布事务不变。
+
 [`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 保持阅读锚点和返回位置，沿同一 view 的 `navigation.older`／`navigation.newer` 补充相邻范围。时间范围读取、Current／Previous source 仍是明确阅读意图。退休 Session、History 和当前对话复用共同读取与呈现；来源失败保原内容及恢复入口。窗口提交调用共同呈现端口，待提交数据仍由原 Reader 持有；Focus pin 保留完整 accepted frame，不裁出 records 再重投影。
 
 [`RecentFocusTimeline`](../../apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx) 仅为已选择的 Context 挂载共同 view；已读 Context 的完整 frame 在原呈现预算内保留，未选中的观察停放且不读。淘汰以完整 frame 为单位，当前和 pin 的原内容保留；Core 暂存已过期时明确显示错误，不能把旧 frame 当可继续的 cursor。Context 目录、已记录工作区间与时间尺仍由原 Focus owner 提供，不成为对话关联来源。
