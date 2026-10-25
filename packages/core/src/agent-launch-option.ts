@@ -53,11 +53,15 @@ export type LaunchOption = {
  * {@link resolveLaunchOptionArgv} reads the argv half core-side.
  */
 export type LaunchOptionChoiceDeclaration = LaunchOptionChoice & {
+  /** Provider-confirmed unrestricted posture; never inferred from labels or risk tiers. */
+  readonly unrestricted?: true
   readonly argv: readonly string[]
 }
 
 /** SSOT declaration: an option fused with every choice's argv contribution. */
 export type LaunchOptionDeclaration = {
+  /** Native aliases absent from the choice argv; only needed to replace conflicting authored arguments. */
+  readonly argumentAliases?: readonly { readonly flag: string; readonly arity: 0 | 1 }[]
   id: string
   label: string
   description?: string
@@ -120,6 +124,10 @@ export function validateLaunchOptionDeclarations(
         `Launch option '${option.id}' on provider ${providerId} must declare at least one choice.`,
         'INVALID_LAUNCH_OPTION'
       )
+    }
+    if (option.choices.filter(choice => choice.unrestricted === true).length > 1 ||
+        option.argumentAliases?.some(alias => !/^--?[^\s=]+$/.test(alias.flag) || ![0, 1].includes(alias.arity))) {
+      throw new AgentMuxError(`Launch option '${option.id}' on provider ${providerId} has an ambiguous unrestricted contribution.`, 'INVALID_LAUNCH_OPTION')
     }
     const seenChoiceIds = new Set<string>()
     for (const choice of option.choices) {
@@ -203,332 +211,34 @@ export function resolveLaunchOptionArgv(
   return argv
 }
 
-// SSOT launch-option declarations. Every flag below was verified against the installed CLI's own --help
-// before it was declared; nothing is invented. Each choice's argv is the exact flag pair the CLI accepts,
-// and the label is what the renderer shows — one declaration, so the two can never drift. AgentMux drives
-// these as real PTY processes, so these are honestly launch-time choices, not live switches. They live in
-// this node-free module (it imports only ./errors.js and ./types.js) so both the Provider catalog and the
-// browser-only preview mock read the SAME constant — the mock projects its DESCRIBE half via
-// describeLaunchOptions, exactly as the real catalog does, and can never hand-copy a diverging catalog.
-
-// codex top-level (interactive) flags. `-s/--sandbox <read-only|workspace-write|danger-full-access>` and
-// `-a/--ask-for-approval <on-request|never>` verified via `codex --help`. Two options that compose.
-export const CODEX_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
-  {
-    id: 'sandbox',
-    label: 'Sandbox',
-    description: 'How much of the machine Codex may touch when it runs commands.',
-    choices: [
-      { id: 'read-only', label: 'Read only', tier: 'safe', argv: ['--sandbox', 'read-only'] },
-      {
-        id: 'workspace-write',
-        label: 'Workspace write',
-        description: 'Writes limited to the workspace.',
-        tier: 'caution',
-        argv: ['--sandbox', 'workspace-write']
-      },
-      {
-        id: 'danger-full-access',
-        label: 'Full access',
-        description: 'No sandbox — full machine access.',
-        tier: 'danger',
-        argv: ['--sandbox', 'danger-full-access']
-      }
-    ]
-  },
-  {
-    id: 'approval',
-    label: 'Approval policy',
-    description: 'When Codex pauses for human approval before running a command.',
-    choices: [
-      {
-        id: 'on-request',
-        label: 'On request',
-        description: 'The model decides when to ask.',
-        tier: 'caution',
-        argv: ['--ask-for-approval', 'on-request']
-      },
-      {
-        id: 'never',
-        label: 'Never',
-        description: 'Never pauses for approval.',
-        tier: 'danger',
-        argv: ['--ask-for-approval', 'never']
-      }
-    ]
-  }
-]
-
-// claude top-level flags, all verified via `claude --help`:
-//   `--model <alias>` ENUMERATES the aliases `fable` / `opus` / `sonnet` (it also accepts full model
-//     names, but only the enumerated aliases are declared — a hand-written full-name list would go stale
-//     the moment Anthropic ships a new model, exactly why the free-string `-m` on other providers gets no
-//     option at all).
-//   `--effort <level>` ENUMERATES `low | medium | high | xhigh | max`.
-//   `--permission-mode <acceptEdits|auto|bypassPermissions|manual|dontAsk|plan>`.
-// model and effort choices carry NO tier on purpose: RiskTier grades how dangerous an approval/sandbox
-// posture is, and picking a model or a reasoning depth neither widens nor narrows any permission — a tier
-// there would paint a false risk mark on the roster row and the launcher summary. permission-mode is the
-// only one that moves the permission posture, so it is the only one tiered. All three compose in
-// declaration order and fold in cleanly ahead of the positional prompt.
-export const CLAUDE_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
-  {
-    id: 'model',
-    label: 'Model',
-    description: 'Which Claude model this session runs on.',
-    choices: [
-      { id: 'fable', label: 'Fable', argv: ['--model', 'fable'] },
-      { id: 'opus', label: 'Opus', argv: ['--model', 'opus'] },
-      { id: 'sonnet', label: 'Sonnet', argv: ['--model', 'sonnet'] }
-    ]
-  },
-  {
-    id: 'effort',
-    label: 'Effort',
-    description: 'Reasoning effort for this launch. Model support and configured limits can cap the level.',
-    choices: [
-      { id: 'low', label: 'Low', description: 'Less reasoning for straightforward work; uses fewer resources.', argv: ['--effort', 'low'] },
-      { id: 'medium', label: 'Medium', description: 'A moderate reasoning budget between Low and High.', argv: ['--effort', 'medium'] },
-      { id: 'high', label: 'High', description: 'Deeper reasoning for complex work; uses more resources.', argv: ['--effort', 'high'] },
-      { id: 'xhigh', label: 'Extra high', description: 'More reasoning than High for demanding work.', argv: ['--effort', 'xhigh'] },
-      { id: 'max', label: 'Max', description: 'Highest reasoning effort; can use substantially more tokens.', argv: ['--effort', 'max'] }
-    ]
-  },
-  {
-    id: 'permission-mode',
-    label: 'Permission mode',
-    description: 'How Claude handles tool-permission prompts for this session.',
-    choices: [
-      { id: 'manual', label: 'Manual', description: 'Ask for each action.', tier: 'safe', argv: ['--permission-mode', 'manual'] },
-      { id: 'plan', label: 'Plan', description: 'Plan first, no edits.', tier: 'safe', argv: ['--permission-mode', 'plan'] },
-      { id: 'acceptEdits', label: 'Accept edits', description: 'Auto-accept file edits.', tier: 'caution', argv: ['--permission-mode', 'acceptEdits'] },
-      { id: 'auto', label: 'Auto', tier: 'caution', argv: ['--permission-mode', 'auto'] },
-      { id: 'dontAsk', label: "Don't ask", tier: 'caution', argv: ['--permission-mode', 'dontAsk'] },
-      { id: 'bypassPermissions', label: 'Bypass permissions', description: 'Skip all permission checks.', tier: 'danger', argv: ['--permission-mode', 'bypassPermissions'] }
-    ]
-  }
-]
-
-// gemini top-level flag `--approval-mode <default|auto_edit|yolo|plan>`, verified against the installed
-// binary's own `--help` choices list. `-y/--yolo` is an alias for `--approval-mode yolo`, so it is NOT
-// declared as a second option — one control, no double-set. `-m/--model` takes a free string with no
-// enum, so no model option is declared (a hand-written model list would go stale the moment the vendor
-// changes its lineup). Choices ordered safe → danger.
-export const GEMINI_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
-  {
-    id: 'approval-mode',
-    label: 'Approval mode',
-    description: 'When Gemini pauses for approval before using a tool.',
-    choices: [
-      { id: 'default', label: 'Default', description: 'Prompt for approval.', tier: 'safe', argv: ['--approval-mode', 'default'] },
-      { id: 'plan', label: 'Plan', description: 'Read-only mode.', tier: 'safe', argv: ['--approval-mode', 'plan'] },
-      { id: 'auto_edit', label: 'Auto edit', description: 'Auto-approve edit tools.', tier: 'caution', argv: ['--approval-mode', 'auto_edit'] },
-      { id: 'yolo', label: 'YOLO', description: 'Auto-approve all tools.', tier: 'danger', argv: ['--approval-mode', 'yolo'] }
-    ]
-  }
-]
-
-// grok top-level flag `--permission-mode <default|acceptEdits|auto|dontAsk|bypassPermissions|plan>`,
-// verified against the installed binary's own `--help` possible-values list. This is the SPAWN-time
-// analogue of grok's live posture control (`/always-approve [on|off]`, declared in agent-provider.ts):
-// the launch option sets the initial posture in argv, the posture control flips it in-band mid-session —
-// the two are complementary, which is why grok should carry both. `-m/--model` is a free string — no enum,
-// so no model option. Choices ordered safe → danger.
-export const GROK_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
-  {
-    id: 'permission-mode',
-    label: 'Permission mode',
-    description: 'How Grok handles tool-permission prompts for this session.',
-    choices: [
-      { id: 'default', label: 'Default', description: 'Ask for approval.', tier: 'safe', argv: ['--permission-mode', 'default'] },
-      { id: 'plan', label: 'Plan', description: 'Plan first, no edits.', tier: 'safe', argv: ['--permission-mode', 'plan'] },
-      { id: 'acceptEdits', label: 'Accept edits', description: 'Auto-accept file edits.', tier: 'caution', argv: ['--permission-mode', 'acceptEdits'] },
-      { id: 'auto', label: 'Auto', tier: 'caution', argv: ['--permission-mode', 'auto'] },
-      { id: 'dontAsk', label: "Don't ask", tier: 'caution', argv: ['--permission-mode', 'dontAsk'] },
-      { id: 'bypassPermissions', label: 'Bypass permissions', description: 'Skip all permission checks.', tier: 'danger', argv: ['--permission-mode', 'bypassPermissions'] }
-    ]
-  }
-]
-
-// traex top-level flags, verified against the installed binary's own `--help`:
-//   `-s/--sandbox <read-only|workspace-write|danger-full-access>` — an explicit possible-values list.
-//   `--permission-mode <default|bypass_permissions|auto>` — the FULL enum, confirmed by reading the
-//     complete `--help` output. The batch table flagged this as truncated because each value carries a
-//     multi-line description; the `auto` value sat below that fold. Two options that compose.
-// `-m/--model` is a free string — no enum, so no model option. Choices ordered safe → danger.
-export const TRAEX_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
-  {
-    id: 'sandbox',
-    label: 'Sandbox',
-    description: 'How much of the machine TraeX may touch when it runs commands.',
-    choices: [
-      { id: 'read-only', label: 'Read only', tier: 'safe', argv: ['--sandbox', 'read-only'] },
-      {
-        id: 'workspace-write',
-        label: 'Workspace write',
-        description: 'Writes limited to the workspace.',
-        tier: 'caution',
-        argv: ['--sandbox', 'workspace-write']
-      },
-      {
-        id: 'danger-full-access',
-        label: 'Full access',
-        description: 'No sandbox — full machine access.',
-        tier: 'danger',
-        argv: ['--sandbox', 'danger-full-access']
-      }
-    ]
-  },
-  {
-    id: 'permission-mode',
-    label: 'Permission mode',
-    description: 'How TraeX handles tool-permission prompts for this session.',
-    choices: [
-      {
-        id: 'default',
-        label: 'Default',
-        description: 'Edit the workspace and run commands; the network or other files need approval.',
-        tier: 'safe',
-        argv: ['--permission-mode', 'default']
-      },
-      {
-        id: 'auto',
-        label: 'Auto',
-        description: 'Workspace-write, with on-request approvals routed to an auto-reviewer.',
-        tier: 'caution',
-        argv: ['--permission-mode', 'auto']
-      },
-      {
-        id: 'bypass_permissions',
-        label: 'Bypass permissions',
-        description: 'Edit files outside the workspace and access the internet without approval.',
-        tier: 'danger',
-        argv: ['--permission-mode', 'bypass_permissions']
-      }
-    ]
-  }
-]
-
-// cursor-agent top-level flags, verified against the installed binary's own `--help`:
-//   `--mode <plan|ask>` — an explicit choices list (`plan`: read-only planning; `ask`: read-only Q&A).
-//     There is no `--mode full`; full read/edit/run is the no-flag default, so the 'default' choice
-//     contributes NO argv.
-//   `--sandbox <enabled|disabled>` — an explicit choices list.
-//   `-f/--force` — a boolean ("Force allow commands unless explicitly denied"); the ask default
-//     contributes no argv. `--yolo` is a documented alias for `--force`, so it is NOT a second option.
-// Three options that compose. `--model` is a free string — no enum, so no model option.
-export const CURSOR_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
-  {
-    id: 'mode',
-    label: 'Execution mode',
-    description: 'How much Cursor may change while it works.',
-    choices: [
-      { id: 'default', label: 'Full', description: 'Read, edit, and run.', tier: 'caution', argv: [] },
-      { id: 'plan', label: 'Plan', description: 'Analyze and propose, no edits.', tier: 'safe', argv: ['--mode', 'plan'] },
-      { id: 'ask', label: 'Ask', description: 'Q&A only, read-only.', tier: 'safe', argv: ['--mode', 'ask'] }
-    ]
-  },
-  {
-    id: 'sandbox',
-    label: 'Sandbox',
-    description: 'Whether Cursor runs commands inside its sandbox.',
-    choices: [
-      { id: 'enabled', label: 'Sandboxed', description: 'Commands run sandboxed.', tier: 'safe', argv: ['--sandbox', 'enabled'] },
-      { id: 'disabled', label: 'Unsandboxed', description: 'Commands run without the sandbox.', tier: 'danger', argv: ['--sandbox', 'disabled'] }
-    ]
-  },
-  {
-    id: 'approvals',
-    label: 'Approvals',
-    description: 'Whether Cursor asks before running a command.',
-    choices: [
-      { id: 'default', label: 'Ask', description: 'Prompt before running commands.', tier: 'safe', argv: [] },
-      { id: 'force', label: 'Run everything', description: 'Allow every command unless explicitly denied.', tier: 'danger', argv: ['--force'] }
-    ]
-  }
-]
-
-// hermes top-level boolean `--yolo` ("Bypass all dangerous command approval prompts"), verified against
-// the installed binary's own `--help`. A boolean switch, so it is expressed as two choices whose argv is
-// the honest thing each does: the conservative default contributes NO argv (hermes keeps prompting) and
-// the yolo choice contributes the flag. `-m/--model` is a free string — no enum, so no model option.
-export const HERMES_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
-  {
-    id: 'yolo',
-    label: 'Approvals',
-    description: 'Whether Hermes bypasses its dangerous-command approval prompts.',
-    choices: [
-      { id: 'default', label: 'Ask', description: 'Prompt before dangerous commands.', tier: 'safe', argv: [] },
-      { id: 'yolo', label: 'YOLO', description: 'Bypass all dangerous-command approval prompts.', tier: 'danger', argv: ['--yolo'] }
-    ]
-  }
-]
-
-// antigravity (agy) top-level boolean `--sandbox` ("Run in a sandbox with terminal restrictions enabled"),
-// verified against the installed binary's own `--help`. A boolean switch expressed as two choices: the
-// default contributes NO argv (agy's normal, unsandboxed mode) and the sandboxed choice contributes the
-// flag. The flag ADDS containment, so enabling it is the 'safe' tier; the unsandboxed default runs terminal
-// commands without restriction and honestly carries 'caution'. `--model` is a free string — no enum.
-export const ANTIGRAVITY_LAUNCH_OPTIONS: readonly LaunchOptionDeclaration[] = [
-  {
-    id: 'sandbox',
-    label: 'Sandbox',
-    description: 'Whether Antigravity runs with terminal restrictions.',
-    choices: [
-      { id: 'default', label: 'Off', description: 'No sandbox — terminal commands run unrestricted.', tier: 'caution', argv: [] },
-      { id: 'sandboxed', label: 'Sandboxed', description: 'Run with terminal restrictions enabled.', tier: 'safe', argv: ['--sandbox'] }
-    ]
-  }
-]
-
-/**
- * Which Provider declares which launch options, by id.
- *
- * Every declaration above is already reachable by name, and each `defineAgentProvider` call imports the
- * one it needs directly — that stays the readable way to write a Provider. What was missing is the
- * reverse lookup, for a caller that has an id and no way to reach the Provider itself.
- *
- * The one such caller is the Desktop browser preview: Core's real `catalog()` pulls node:path and
- * node:crypto, so the preview cannot import it and instead projects one entry per id from
- * `BUILT_IN_AGENT_PROVIDER_IDS`. Before this map it answered that question with a hand-written
- * `id === 'codex' ? … : id === 'claude' ? … : []`, which silently hid the controls of the six other
- * Providers that do declare options — and a comment claimed those two were the only node-free
- * declarations, which was never true: all eight live in this module, and it imports only ./errors.js
- * and ./types.js. Two places deciding the same thing is how that gap opened, so the answer lives here
- * once. A Provider absent from this map declares nothing, which is the honest answer for the four ids
- * that genuinely have no options (pi, kimi, droid, copilot).
- */
-export const LAUNCH_OPTIONS_BY_PROVIDER_ID: Readonly<Record<string, readonly LaunchOptionDeclaration[]>> =
-  Object.freeze({
-    codex: CODEX_LAUNCH_OPTIONS,
-    claude: CLAUDE_LAUNCH_OPTIONS,
-    gemini: GEMINI_LAUNCH_OPTIONS,
-    grok: GROK_LAUNCH_OPTIONS,
-    traex: TRAEX_LAUNCH_OPTIONS,
-    cursor: CURSOR_LAUNCH_OPTIONS,
-    hermes: HERMES_LAUNCH_OPTIONS,
-    antigravity: ANTIGRAVITY_LAUNCH_OPTIONS
+/** Apply only explicitly declared unrestricted choices to a future launch's authored args. */
+export function withUnrestrictedLaunchOptionArgs(
+  declarations: readonly LaunchOptionDeclaration[], args: readonly string[]
+): string[] | null {
+  const selected = declarations.flatMap(option => {
+    const choice = option.choices.find(value => value.unrestricted === true)
+    return choice ? [{ option, choice }] : []
   })
-
-/** Explicit, provider-verified unattended launch posture used by the one-click YOLO action. */
-export function yoloArgsForProvider(providerId: string): string[] | null {
-  if (providerId === 'codex') return ['--dangerously-bypass-approvals-and-sandbox']
-  if (providerId === 'claude') return ['--dangerously-skip-permissions']
-  return null
-}
-
-export function withYoloArgs(providerId: string, args: readonly string[]): string[] | null {
-  const yolo = yoloArgsForProvider(providerId)
-  if (!yolo) return null
-  const blocked = new Set([
-    '--dangerously-skip-permissions', '--dangerously-bypass-approvals-and-sandbox', '--yolo',
-    '--sandbox', '--ask-for-approval', '--permission-mode'
-  ])
-  const result: string[] = []
-  for (let i = 0; i < args.length; i += 1) {
-    const token = args[i]!
-    if (!blocked.has(token) && ![...blocked].some((flag) => token.startsWith(`${flag}=`))) { result.push(token); continue }
-    if (token === '--sandbox' || token === '--ask-for-approval' || token === '--permission-mode') i += 1
+  if (!selected.length) return null
+  const replaced = new Map<string, number>()
+  for (const { option } of selected) {
+    // Every regular spelling and value arity already belongs to the existing choice argv.
+    for (const choice of option.choices) for (let index = 0; index < choice.argv.length; index++) {
+      const flag = choice.argv[index]!
+      if (!flag.startsWith('-')) continue
+      const arity = index + 1 < choice.argv.length && !choice.argv[index + 1]!.startsWith('-') ? 1 : 0
+      replaced.set(flag, arity)
+      index += arity
+    }
+    for (const alias of option.argumentAliases ?? []) replaced.set(alias.flag, alias.arity)
   }
-  return [...result, ...yolo]
+  const result: string[] = []
+  for (let index = 0; index < args.length; index++) {
+    const token = args[index]!
+    if (token === '--') { result.push(...selected.flatMap(({ choice }) => [...choice.argv]), ...args.slice(index)); return result }
+    const flag = token.split('=', 1)[0]!, arity = replaced.get(flag)
+    if (arity === undefined) { result.push(token); continue }
+    if (!token.includes('=') && arity === 1 && args[index + 1] !== undefined && !args[index + 1]!.startsWith('-')) index++
+  }
+  return [...result, ...selected.flatMap(({ choice }) => [...choice.argv])]
 }

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { join, resolve } from 'node:path'
-import { CURSOR_LAUNCH_OPTIONS } from '../agent-launch-option.js'
+import { CURSOR_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { normalizeNativeHook, type AgentNativeHookSpecification } from '../hook-normalizer.js'

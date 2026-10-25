@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
-import { HERMES_LAUNCH_OPTIONS } from '../agent-launch-option.js'
+import { HERMES_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { readHermesSessionHistoryPage } from './hermes-native-history.js'
