@@ -14,8 +14,9 @@ import { resolveAutomationPreferences } from '../../../shared/automation-prefere
 export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 
 /** Read the original Host only for this visible Session consumer; retained forms stay mounted. */
-export function ContinuousProgressControl({ session, onStatusChange, presented = true, visible = presented }: {
+export function ContinuousProgressControl({ session, targetName, onStatusChange, presented = true, visible = presented }: {
   session: Extract<SessionSnapshot, { kind: 'agent' }>
+  targetName?: string | undefined
   onStatusChange?: (status: ContinuousProgressStatus) => void
   /** Only the detail DOM waits for first use; observation and action state stay mounted. */
   presented?: boolean
@@ -157,7 +158,7 @@ export function ContinuousProgressControl({ session, onStatusChange, presented =
         <button type="submit" className="small-button" disabled={!!loop || busy || !prompt.trim() || (bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))}>Enable continuous progress</button>
       </form>
   return <div className="continuous-progress-control" data-progress-state={status}>
-    <div className="automation-target"><span>Sending to</span><strong>{session.label}</strong><small>{target.agentSessionId}</small></div>
+    <div className="automation-target"><span>Sending to</span><strong>{targetName || session.label}</strong><small>{target.agentSessionId}</small></div>
     <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={visible} unified
       progress={presented ? progress : null} progressForm={presented ? progressForm : null} />
     {presented ? <>
