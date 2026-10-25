@@ -11,7 +11,7 @@ The scheduler owns schedule identity, timing, lifecycle and original run referen
 Reading this module creates no schedule or periodic Loop. Begin with schedule list/inspect
 and retain the exact schedule ID, current revision and requested trigger.
 Use schedule list --data <FILE|-> with {"scope":{"hostId":"EXACT_HOST","workspacePath":"EXACT_WORKSPACE"}}
-to read saved calendar arrangements and one-shot countdowns across discussions at that exact Host and
+to read saved calendar arrangements, one-shot countdowns and repeating messages across discussions at that exact Host and
 execution directory. scope and the complete target selector are mutually exclusive. A scope is a read
 filter; it does not change any arrangement target or grant control authority. Keep each original Session.
 The SDK schedule-calendar projection can show rule estimates in a finite visible window; those estimates
@@ -24,6 +24,10 @@ workspacePath}, original prompt and operationId. Choose exactly one timing form:
 - calendar: an explicit civil-time once/daily/weekly/monthly/yearly rule with its timezone and policies.
 - afterMs: a positive safe integer in milliseconds, for example 90000 for 90 seconds or 300000 for
   five minutes. This is a one-shot countdown, not a recurring interval. It cannot enable checkIn.
+- everyMs: a whole number of minutes in milliseconds, at least 60000, for recurring messages.
+  The first due time anchors the cadence; older missed occurrences collapse to the latest eligible one.
+  An occupied or unready Agent retains its due occurrence; an unknown receipt keeps the original operation.
+  It cannot enable checkIn.
 
 Read amux schedule create --help for the complete current schema. The first creation of the original
 operation fixes nextCheckAt as its absolute deadline. Repeating the same operationId, restarting the owner
