@@ -12,6 +12,7 @@ import { feishuConfig, feishuSdkTransport } from '../../../packages/connectors/t
 import { feishuMediaPlatform } from '../../../packages/connectors/test/fixtures/feishu-media-platform.js'
 import { discordConfig, discordTransport } from '../../../packages/connectors/test/fixtures/discord.js'
 import { startAgentMuxHost } from '../src/host.js'
+import { preparePublicUserProfile } from '../src/public-author-profile.js'
 const privateHome = vi.hoisted(() => ({ directory: undefined as string | undefined }))
 vi.mock('node:os', async load => { const original = await load<typeof import('node:os')>(); return { ...original, homedir: () => privateHome.directory ?? original.homedir() } })
 const cleanup: Array<() => unknown | Promise<unknown>> = []
@@ -46,8 +47,8 @@ async function fixture() {
   }
   const upload = (id: string) => ({ hostId: 'local', agentSessionId: 'image-agent', expectedRun: { runId: 'run-image-agent' }, operationId: id, name: 'image', mimeType: 'image/png', byteLength: png.length, revision: fileUploadRevision(png) })
   const source = join(original.root, '.agentmux', 'pasted', 'a'.repeat(64) + '.png')
-  const send = async (prompt: string, inputImages?: core.AgentInputImageReference[], operationId = 'original-selected-input') => {
-    await host!.client.submitAgentPrompt({ agentSessionId: 'image-agent', expectedRun: { runId: 'run-image-agent' }, operationId, prompt, ...(inputImages ? { inputImages } : {}), authorHuman: true, sourceChannel: 'message-tool', admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' })
+  const send = async (prompt: string, inputImages?: core.AgentInputImageReference[], operationId = 'original-selected-input', authorProfile?: core.AgentPreparedAuthorProfile) => {
+    await host!.client.submitAgentPrompt({ agentSessionId: 'image-agent', expectedRun: { runId: 'run-image-agent' }, operationId, prompt, ...(inputImages ? { inputImages } : {}), ...(authorProfile ? { authorProfile } : {}), authorHuman: true, sourceChannel: 'message-tool', admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' })
     opened.at(-1)!.publication!.refresh()
   }
   const operations = () => ['feishu-binding', 'discord-binding'].flatMap(bindingId => opened.at(-1)!.publication!.store.list({ bindingId, revision: 1 })).filter(operation => operation.payload.kind !== 'binding-lifecycle')
@@ -77,6 +78,45 @@ it.each(['selected', 'legacy', 'missing', 'changed'] as const)('default Host pro
   expect(originalText(await f.conversation())).toContain(f.source)
 }, 60000)
 function originalText(value: unknown) { return JSON.stringify(value) }
+
+it.each(['image-first', 'text-first'] as const)('publishes a named %s input and updates its observation without replaying its image', async order => {
+  const f = await fixture(), path = '@' + f.source, body = 'Original named image input'
+  const prompt = order === 'image-first' ? path + ' ' + body : body + ' ' + path, upload = f.upload('named-paste')
+  expect(await f.rpc.call('file.upload', { ...upload, dataBase64: png.toString('base64') })).toMatchObject({ status: 'uploaded' })
+  await f.send(prompt, [{ start: prompt.indexOf(path), end: prompt.indexOf(path) + path.length, bodyRevision: fileUploadRevision(new TextEncoder().encode(prompt)), upload }],
+    'original-named-input', preparePublicUserProfile({ displayName: 'Original public person' })!)
+  await vi.waitFor(() => {
+    expect(f.operations()).toHaveLength(4)
+    expect(f.operations().every(op => ['confirmed', 'cancelled'].includes(op.state))).toBe(true)
+  }, { timeout: 30000 })
+  expect(f.operations().map(op => op.state)).toEqual(Array(4).fill('confirmed'))
+  for (const bindingId of ['feishu-binding', 'discord-binding']) {
+    const original = f.operations().filter(op => op.bindingId === bindingId)
+    expect(original.map(op => op.payload.kind)).toEqual(order === 'image-first' ? ['image', 'speech'] : ['speech', 'image'])
+    const speech = original.find(op => op.payload.kind === 'speech')!
+    expect(speech.speaker).toMatchObject({ kind: 'human', name: 'Original public person' })
+    expect(speech.payload.kind === 'speech' && speech.payload.inputSubmission).toBeTruthy()
+    expect(await f.rpc.call('connection.delivery.inspect', { operationId: speech.operationId })).toMatchObject({ delivery: { state: 'confirmed' } })
+  }
+  const images = f.operations().filter(op => op.payload.kind === 'image')
+  const mediaSends = () => [f.feishu.calls.filter(call => call.method === 'POST' && call.path === '/open-apis/im/v1/messages' && JSON.stringify(call.body).includes('img_key')).length,
+    f.discord.calls.filter(call => call.method === 'POST' && call.path === '/channels/300/messages' && call.body.includes('filename')).length]
+  const beforeSends = mediaSends(); expect(beforeSends).toEqual([1, 1])
+  await f.restart(); await f.send('Independent input after named image', undefined, 'after-named-image')
+  await vi.waitFor(() => {
+    const updated = f.operations().filter(op => op.payload.kind === 'speech' && op.payload.text.includes(body) && op.payload.inputSubmission?.observation === 'rejoin-needed')
+    expect(updated).toHaveLength(2); expect(updated.map(op => op.state)).toEqual(['confirmed', 'confirmed'])
+  }, { timeout: 30000 })
+  for (const op of images) expect(f.services().publication!.store.inspect(op.operationId)).toEqual(op)
+  expect(mediaSends()).toEqual(beforeSends)
+  expect(f.feishu.uploads).toEqual([png]); expect(f.discord.uploads).toEqual([png])
+  for (const wire of [JSON.stringify(f.feishu.calls), JSON.stringify(f.discord.calls)]) {
+    expect(wire).toContain(body); expect(wire).toContain('Original public person'); expect(wire).not.toContain(f.source)
+  }
+  const cli = await runCompiledObjectCli(['--endpoint', 'unix:' + f.socketPath, 'connection', 'delivery', 'inspect', '--operation-id', images[0]!.operationId], objectCliEnvironment(f.original.root))
+  expect(cli.code, cli.stderr).toBe(0)
+  expect(JSON.parse(cli.stdout).result).toEqual(await f.rpc.call('connection.delivery.inspect', { operationId: images[0]!.operationId }))
+}, 60000)
 
 it('keeps multiple selected images in order and retains original delivery identities after the default Host reopens', async () => {
   const f = await fixture(), first = '@' + f.source, second = '@' + f.source.replace('a'.repeat(64), 'b'.repeat(64))

@@ -1,11 +1,13 @@
 import { DatabaseSync } from 'node:sqlite'
+import { createHash } from 'node:crypto'
 import { expect, it } from 'vitest'
 import { createNativeInputCorrelation } from '../../core/src/native-input-correlation.js'
 import { conversationNativeInputWitness, conversationRevision, projectConversationTimeline, type ConversationInputAdoptionContext, type ConversationCheckpoint, type ConversationChangesPage } from '@agentmux/core/conversation'
 import type { AgentSessionHistoryItem, AgentTimelineItem } from '@agentmux/core'
 import type { RoomBinding } from '@agentmux/core/connections'
 import { PublicationStore } from '../src/publication-store.js'
-import { publicationContent } from '../src/publication-content.js'
+import { publicationContent, publicationPartKey } from '../src/publication-content.js'
+import type { ResolvedPublicationPart } from '../src/publication-resource.js'
 
 const source = { providerId: 'codex', nativeSessionId: 'original-native' }
 const key = { kind: 'prompt' as const, agentSessionId: 'recipient', expectedRun: { runId: 'original-run' }, submissionId: 'original-input' }
@@ -24,7 +26,7 @@ const native = (id = 'original-native-input', input = key): AgentSessionHistoryI
   nativeInput: { source, semanticItemId: id, turnId: 'original-turn', clientCorrelation: createNativeInputCorrelation(input) }, adoptedInput: { key: input }
 }, contentParts: [{ kind: 'text', text: 'Public body\nPrivate generated note', contentEligibility: 'unconfirmed' }] })
 
-function fixture() {
+function fixture(mixed?: { imageFirst: boolean; attributed: boolean; trailingText?: boolean }) {
   const db = new DatabaseSync(':memory:'); let store = new PublicationStore(db), sequence = 10
   const commit = (captured: AgentTimelineItem[], items: AgentSessionHistoryItem[], context?: ConversationInputAdoptionContext, before = false) => {
     sequence++
@@ -37,11 +39,69 @@ function fixture() {
     const page: ConversationChangesPage = { hostId: 'local', agentSessionId: 'recipient', sourceHostId: 'local', scope: start.frontier.scope, coverage: timeline.coverage,
       order: { ...timeline.order, direction: 'newest-first' }, items: [...units].reverse().map(item => ({ kind: 'item', item })), nextCursor: null, budgetBytes: 4 * 1024 * 1024, checkpoint, more: false,
       window: { id: 'original-window', revision: sequence, itemCount: units.length, complete: true, view: 'original-view', replay: 'original-replay', checkpoint, outside: { older: null, newer: null }, navigation: { older: null, newer: null } } }
-    store.commitPage(binding, store.checkpoint(binding, 'local'), page, () => true, { units, resolvedText: new Map() })
+    const resolvedText = new Map<string, ResolvedPublicationPart>()
+    if (mixed) {
+      const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64')
+      const image = { mimeType: 'image/png' as const, dataBase64: bytes.toString('base64'), byteLength: bytes.length, width: 1, height: 1, sha256: createHash('sha256').update(bytes).digest('hex') }
+      for (const unit of units) for (const slot of unit.event.content) {
+        const record = unit.records.find(record => record.id === slot.recordId)!
+        const segments = mixed.imageFirst ? [{ text: '', image }, { text: 'Public body' }] : [{ text: 'Public body' }, { text: '', image }]
+        if (mixed.trailingText) segments.push({ text: 'Trailing body' })
+        resolvedText.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), { kind: 'markdown', text: 'Public body', segments, complete: true })
+      }
+    }
+    const speakers = mixed?.attributed ? new Map(units.map(unit => [unit.event.id, { kind: 'human' as const, name: 'Original user' }])) : undefined
+    store.commitPage(binding, store.checkpoint(binding, 'local'), page, () => true, { units, resolvedText, ...(speakers ? { speakers } : {}) })
     return timeline
   }
   return { db, commit, get store() { return store }, reopen() { store = new PublicationStore(db) }, gaps: () => store.coverage(binding).gaps, operations: () => store.list(binding) }
 }
+
+it.each([[false, false], [false, true], [true, false], [true, true]])('qualifies mixed input with imageFirst=%s and attributed=%s', (imageFirst, attributed) => {
+  const f = fixture({ imageFirst, attributed })
+  try {
+    f.commit([capture()], [])
+    expect(f.operations().length).toBeGreaterThan(1)
+    expect(f.store.qualifyPending(binding, f.operations()[0]!, new Map(), start)).toBe('qualified')
+    expect(f.gaps()).toEqual([])
+  } finally { f.db.close() }
+})
+
+it('qualifies mixed input across an observation change while retaining its uploaded pending image', () => {
+  const f = fixture({ imageFirst: true, attributed: true })
+  try {
+    f.commit([capture()], [])
+    const image = f.operations()[0]!
+    expect(image.payload.kind).toBe('image')
+    expect(f.store.claimResourceUpload(image.operationId, () => true)).toBeTruthy()
+    const original = f.store.settleResourceUpload(image.operationId, 1, { state: 'confirmed', imageKey: 'original-image-key' })
+    f.reopen()
+    f.commit([{ ...capture(), inputSubmission: { status: 'admitted', observation: 'rejoin-needed' } }], [])
+    expect(f.operations().filter(op => op.payload.kind === 'image')).toEqual([original])
+    expect(f.store.qualifyPending(binding, original, new Map(), start)).toBe('qualified')
+    const updated = f.operations().find(op => op.payload.kind === 'speech' && op.payload.inputSubmission?.observation === 'rejoin-needed')!
+    expect(updated.sourceRevision).not.toBe(original.sourceRevision)
+    expect(f.store.qualifyPending(binding, updated, new Map(), start)).toBe('qualified')
+    expect(f.store.inspect(original.operationId)).toEqual(original)
+  } finally { f.db.close() }
+})
+
+it.each(['text', 'observation', 'absent-observation'] as const)('rejects mixed input with altered %s in a retained speech fragment', change => {
+  const f = fixture({ imageFirst: false, attributed: true, trailingText: true })
+  try {
+    f.commit([capture()], [])
+    const speech = f.operations().filter(op => op.payload.kind === 'speech')
+    expect(speech).toHaveLength(2)
+    const altered = structuredClone(speech[1]!)
+    if (altered.payload.kind !== 'speech') throw Error('The actual trailing speech is missing')
+    if (change === 'text') altered.payload.text = 'Different unqualified text'
+    else if (change === 'observation') altered.payload.inputSubmission = { status: 'admitted', observation: 'rejoin-needed' }
+    else delete altered.payload.inputSubmission
+    f.db.prepare('UPDATE connector_publication_operation SET operation_json=? WHERE operation_id=?').run(JSON.stringify(altered), altered.operationId)
+    expect(f.store.qualifyPending(binding, f.operations()[1]!, new Map(), start)).toBe('cancelled')
+    expect(f.operations().every(op => op.state === 'cancelled' && op.attempt === undefined)).toBe(true)
+  } finally { f.db.close() }
+})
 
 it.each(['co-resident', 'captured-first', 'native-first'] as const)('retains the exact public span for %s aliases, version changes and reopen', order => {
   const f = fixture()
