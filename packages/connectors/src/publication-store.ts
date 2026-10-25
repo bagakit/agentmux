@@ -1007,13 +1007,19 @@ export class PublicationStore {
       }
       // Verify the original whole payload and its exact stored fragments as well as each qualified slot.
       if (!failures.length) {
-        const payload = representation(rows.map(row => row.value), content.phase, content.relay, '\n\n', content.kind === 'speech' ? content.inputSubmission : undefined)
         const original = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE projection_id=? AND source_revision=? ORDER BY fragment_ordinal,ordinal')
           .all(operation.projectionId, operation.sourceRevision).map(row => this.read(row)!).filter(value => value.effect === 'upsert')
         const frozen = [...new Map(original.map(value => [value.fragment.ordinal, value])).values()]
         const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal')
           .all(operation.projectionId).map(row => this.read(row)!).filter(value => value.effect === 'upsert')
+        const latestSpeech = latest.find(value => value.payload.kind === 'speech')?.payload
+        const payload = representation(rows.map(row => row.value), content.phase, content.relay, '\n\n', latestSpeech?.kind === 'speech' ? latestSpeech.inputSubmission : undefined)
         const assemble = (operations: PublicationOperation[], currentImages = false) => {
+          // Media has no input observation. Each whole version uses its own speech
+          // metadata, including absence, even when an unchanged image spans versions.
+          const speeches = operations.flatMap(value => value.payload.kind === 'speech' ? [value.payload] : [])
+          const inputSubmission = speeches[0]?.inputSubmission
+          if (speeches.some(value => !same(value.inputSubmission, inputSubmission))) return
           const questions = operations.filter(value => value.payload.kind === 'question')
           if (questions.length > 1 || questions.length && operations.at(-1) !== questions[0]) return
           // Qualification above still owns every accepted part. Compare its current observation
@@ -1022,7 +1028,7 @@ export class PublicationStore {
             ? payload.parts.find((part): part is ImagePublicationPayload => part.kind === 'image' && sameImageEffect(part, image))?.part ?? image.part : image.part
           const body = representation(operations.filter(value => value.payload.kind !== 'question').map(value => value.payload.kind === 'image' ? { text: '', part: currentPart(value.payload), image: value.payload.image }
             : value.payload.kind === 'file' ? { text: '', part: value.payload.part, file: value.payload.file }
-            : { text: value.payload.kind === 'speech' ? value.payload.text : '' }), content.phase, content.relay, '', content.kind === 'speech' ? content.inputSubmission : undefined)
+            : { text: value.payload.kind === 'speech' ? value.payload.text : '' }), content.phase, content.relay, '', inputSubmission)
           return { body, whole: questions.length ? questionRepresentation(body, questions[0]!.payload as QuestionPublicationPayload) : body }
         }
         const retained = assemble(latest, true), prior = assemble(frozen)
