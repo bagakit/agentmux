@@ -83,7 +83,7 @@
 }
 .agent-interaction__grant-text { min-width: 0; display: grid; gap:var(--sp-1); }
 .agent-interaction__grant-text small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
-.agent-interaction button.is-primary .agent-interaction__grant-text small { color: var(--scrim-3); }
+.agent-interaction button.is-primary .agent-interaction__grant-text small { color: inherit; }
 /* The original declared tier selects its drawing; absence stays unclassified. */
 .agent-interaction__tier { flex: 0 0 auto; width: 6px; height: 6px; margin-top:var(--sp-2); background: var(--text-3); mask: var(--native-permission-unknown-mask) center / contain no-repeat; }
 .agent-interaction__tier--safe { background: var(--success); mask-image: var(--native-permission-safe-mask); }
