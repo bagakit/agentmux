@@ -16,7 +16,7 @@ import type { AppConfig, WorkspaceRecord } from '../../../../apps/desktop/src/sh
 import { encodeCwdDirname } from '../../../core/src/providers/grok-native-history.js'
 import { grokChunk, grokDone, grokUpdate } from '../../../core/test/fixtures/grok-updates.js'
 import { feishuConfig } from './feishu.js'
-import { feishuPublicationHttp } from './feishu-publication.js'
+import { feishuPublicationHttp, type FeishuHttpCall, type FeishuHttpResponse } from './feishu-publication.js'
 import { FeishuAdapter } from '../../src/adapters/feishu/index.js'
 import { signedRoomAdapter, type SignedRoomMessage } from './signed-room-adapter.js'
 
@@ -24,13 +24,13 @@ const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
 type DirectMessage = SignedRoomMessage & { nativeKind: 'direct' | 'group' }
 
-export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false, nativeProvider: 'claude' | 'grok' = 'claude') {
+export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false, nativeProvider: 'claude' | 'grok' = 'claude', publicationHttp?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined) {
   const publicationRefresh = vi.spyOn(PublicationHost.prototype, 'refresh')
   const original = await rpcOwnerFixture([], core)
   const client = original.client as core.AgentMuxClient
   const grokHome = join(original.root, 'grok')
   if (nativeProvider === 'grok') vi.stubEnv('GROK_HOME', grokHome)
-  const feishu = nativeProvider === 'grok' ? await feishuPublicationHttp() : undefined
+  const feishu = nativeProvider === 'grok' ? await feishuPublicationHttp(publicationHttp) : undefined
   if (feishu) cleanup.push(feishu.close)
   cleanup.push(async () => {
     try { await original.close() } catch (error) {
