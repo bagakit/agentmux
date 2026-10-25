@@ -2857,7 +2857,9 @@ export class AgentMuxClient {
       const source = opening.scope.sources.find(s => s.kind === 'native')
       if (source?.kind === 'native') {
         const checkpointCoverage = opening.coverage
+        let observationFailureReported = false
         const unavailable = (code: string, message: string) => {
+          observationFailureReported = true
           // The opening includes failures that happened before it was returned.
           // Keep other sources and their checkpoint coverage intact.
           opening = { ...opening!, coverage: checkpointCoverage.map(value => isDeepStrictEqual(value.source, source)
@@ -2877,7 +2879,12 @@ export class AgentMuxClient {
             native.dispose(); native = undefined
             throw new AgentMuxError('The native observation resolved another source. Its accepted scope and records are retained; explicitly refresh to inspect the current source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
           }
-          nativeEnded = () => unavailable('AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'The original native observation ended; its scope is retained and captured changes remain readable.')
+          nativeEnded = () => {
+            // Resource closure alone does not prove that the accepted source changed.
+            // Keep any original failure already supplied by this exact observation.
+            if (!observationFailureReported) unavailable('AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE',
+              'The original native observation ended; its scope is retained and captured changes remain readable.')
+          }
           native.closed?.addEventListener('abort', nativeEnded, { once: true })
           if (native.closed?.aborted) nativeEnded()
           if (pendingNative) onNative(pendingNative)
