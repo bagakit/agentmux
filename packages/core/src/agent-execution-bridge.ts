@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { MAX_FRAME_BYTES, type ClientFrame } from '@ctxmux/sdk'
 import type { AgentMuxClient } from './client.js'
 import type { AgentMuxClientEvent, AgentMuxRunDataEvent, AgentMuxRunInputOperation } from './types.js'
 import { AgentMuxError } from './errors.js'
@@ -17,8 +18,31 @@ export interface AgentExecutionBridgeState {
   bindingId: string
   frontend: AgentExecutionBridgePosition
   executor: AgentExecutionBridgePosition
-  pending?: { source: Side; sourceStartByte: number; sourceEndByte: number; digest: string; operation: Omit<AgentMuxRunInputOperation, 'data'> }
+  pending?: { source: Side; sourceStartByte: number; sourceEndByte: number; digest: string; operation: Omit<AgentMuxRunInputOperation, 'data'>; chunk?: { offset: number; bytes: number } }
 }
+
+// The public recoverableInput wire contract encodes each byte as a JSON number:
+// at most three digits plus a comma. Reserve its exact identity envelope and the
+// largest legal cursor; the bound applies to transport chunks, never native frames.
+function inputEnvelopeBytes(runId: string, operation: Omit<AgentMuxRunInputOperation, 'data'>, expectedByte: number): number {
+  const envelope: ClientFrame = { type: 'request', request: { type: 'recoverable_input', operation: {
+    daemon_instance: operation.ownerInstanceId, operation_key: operation.operationId, id: runId,
+    expected_byte: expectedByte, data: [] } } }
+  return Buffer.byteLength(JSON.stringify(envelope))
+}
+function inputChunkBytes(runId: string, operation: Omit<AgentMuxRunInputOperation, 'data'>): number {
+  const bytes = Math.floor((MAX_FRAME_BYTES - inputEnvelopeBytes(runId, operation, Number.MAX_SAFE_INTEGER)) / 4)
+  if (bytes < 1) throw new AgentMuxError('The original Input identity exceeds the Runtime transport frame budget.', 'EXECUTION_INPUT_SIZE_UNCONFIRMED')
+  return bytes
+}
+function retainedInputFits(runId: string, operation: Omit<AgentMuxRunInputOperation, 'data'>, data: Uint8Array): boolean {
+  if (data.byteLength > MAX_FRAME_BYTES) return false
+  let bytes = inputEnvelopeBytes(runId, operation, operation.expectedByte) - 1
+  for (const value of data) bytes += value < 10 ? 2 : value < 100 ? 3 : 4
+  return bytes <= MAX_FRAME_BYTES
+}
+const chunkOperationId = (binding: string, side: Side, endByte: number, offset: number): string =>
+  createHash('sha256').update(JSON.stringify([binding, side, endByte, offset])).digest('hex')
 
 /**
  * A reader/forwarder over two existing ctxmux Runs. It owns no processes, byte
@@ -127,12 +151,12 @@ export class AgentExecutionBridge {
       const forward = side === 'frontend' ? ['request', 'closed', 'agent-rpc-context', 'agent-rpc-response', 'agent-rpc-closed'].includes(String(frame.type)) : ['response', 'agent-rpc-request', 'agent-rpc-close'].includes(String(frame.type))
       if (forward) {
         const target = side === 'frontend' ? 'executor' : 'frontend'
-        const operationId = createHash('sha256').update(JSON.stringify([this.state.bindingId, side, sourceEndByte])).digest('hex')
+        const operationId = chunkOperationId(this.state.bindingId, side, sourceEndByte, 0)
         const operation = { ownerInstanceId: this.state[target].ownerInstanceId, operationId,
           expectedByte: this.state[target].inputByte }
         const original = Buffer.concat([line, Buffer.from('\n')])
         const digest = createHash('sha256').update(original).digest('hex')
-        await this.save({ ...this.state, pending: { source: side, sourceStartByte: this.state[side].outputByte, sourceEndByte, digest, operation } })
+        await this.save({ ...this.state, pending: { source: side, sourceStartByte: this.state[side].outputByte, sourceEndByte, digest, operation, chunk: { offset: 0, bytes: inputChunkBytes(this.state[target].runId, operation) } } })
         await this.deliverPending(original)
       } else {
         await this.options.onFrame(side, frame)
@@ -174,17 +198,37 @@ export class AgentExecutionBridge {
     }
     if (data.byteLength !== pending.sourceEndByte - pending.sourceStartByte || createHash('sha256').update(data).digest('hex') !== pending.digest)
       throw new AgentMuxError('The original pending Input bytes do not match their retained claim.', 'EXECUTION_INPUT_SOURCE_MISMATCH')
-    const receipt = await this.options.ports[target].writeTerminal({ runId: position.runId }, { ...pending.operation, data })
-    const bytes = data.byteLength
-    const end = pending.operation.expectedByte + bytes
-    if (receipt.runId !== position.runId || receipt.appliedByteRange?.startByte !== pending.operation.expectedByte ||
-      receipt.appliedByteRange.endByte !== end || receipt.acceptedThroughByte === null || receipt.acceptedThroughByte < end)
-      throw new AgentMuxError('Execution Input receipt does not identify the original byte range.', 'EXECUTION_INPUT_RECEIPT_MISMATCH')
-    const next = { ...this.state, [target]: { ...position, inputByte: end },
-      [pending.source]: { ...this.state[pending.source], outputByte: pending.sourceEndByte } }
-    delete next.pending
-    await this.save(next)
-    this.readThrough[pending.source] = Math.max(this.readThrough[pending.source], pending.sourceEndByte)
+    while (this.state.pending) {
+      const current = this.state.pending
+      const offset = current.chunk?.offset ?? 0
+      const limit = current.chunk?.bytes ?? data.byteLength
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset >= data.byteLength || !Number.isSafeInteger(limit) || limit < 1 ||
+          (current.chunk ? Math.min(limit, data.byteLength - offset) > inputChunkBytes(position.runId, current.operation) : !retainedInputFits(position.runId, current.operation, data)))
+        throw new AgentMuxError('The retained Input layout exceeds its original Runtime transport budget; its outcome remains unknown.', 'EXECUTION_INPUT_SIZE_UNCONFIRMED')
+      // A previously persisted whole-frame operation has no chunk layout. Its ID
+      // and bytes remain exact: an oversized unknown claim is never repartitioned.
+      const part = data.subarray(offset, Math.min(data.byteLength, offset + limit))
+      const receipt = await this.options.ports[target].writeTerminal({ runId: position.runId }, { ...current.operation, data: part })
+      const end = current.operation.expectedByte + part.byteLength
+      if (receipt.runId !== position.runId || receipt.appliedByteRange?.startByte !== current.operation.expectedByte ||
+        receipt.appliedByteRange.endByte !== end || receipt.acceptedThroughByte === null || receipt.acceptedThroughByte < end)
+        throw new AgentMuxError('Execution Input receipt does not identify the original byte range.', 'EXECUTION_INPUT_RECEIPT_MISMATCH')
+      const through = offset + part.byteLength
+      if (through < data.byteLength) {
+        const operation = { ...current.operation, expectedByte: end,
+          operationId: chunkOperationId(this.state.bindingId, current.source, current.sourceEndByte, through) }
+        // Keep the source cursor at the start of the entire JSON frame. A new
+        // reader must reassemble and verify that frame before resuming this chunk.
+        await this.save({ ...this.state, [target]: { ...this.state[target], inputByte: end },
+          pending: { ...current, operation, chunk: { offset: through, bytes: limit } } })
+      } else {
+        const next = { ...this.state, [target]: { ...this.state[target], inputByte: end },
+          [current.source]: { ...this.state[current.source], outputByte: current.sourceEndByte } }
+        delete next.pending
+        await this.save(next)
+        this.readThrough[current.source] = Math.max(this.readThrough[current.source], current.sourceEndByte)
+      }
+    }
   }
   async close(): Promise<void> {
     this.stopped = true
