@@ -70,9 +70,25 @@ const receipt = { privateRoot, schema: 'agentmux.space-agent-cli.native.v1', pas
     'No user App, profile, Session, Run, config or shared Runtime is accessed.'] }
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory()
   ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
+// Renderer resolves client-ui's browser exports from src; Main/Host imports its
+// dist exports. Connectors/native-desktop use dist, while layout exports src.
+// Record both source provenance and consumed artifacts without rewriting either.
+const workspacePackages = ['client-ui', 'connectors', 'native-desktop', 'layout']
+const workspacePackageFiles = (await Promise.all(workspacePackages.map(async name => {
+  const packageRoot = path.join(root, 'packages', name)
+  const exactRoot = await fs.realpath(packageRoot)
+  for (const consumer of ['apps/desktop', 'apps/host']) {
+    assert.equal(await fs.realpath(path.join(root, consumer, 'node_modules/@agentmux', name)), exactRoot,
+      `${consumer} must consume this candidate's @agentmux/${name}, not another checkout`)
+  }
+  const source = await files(path.join(packageRoot, 'src'))
+  const compiled = name === 'layout' ? [] : await files(path.join(packageRoot, 'dist'))
+  assert(source.length > 0 && (name === 'layout' || compiled.length > 0), `Missing workspace consumer files: ${name}`)
+  return [path.join(packageRoot, 'package.json'), ...source, ...compiled]
+}))).flat()
 const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scripts/probe-process.mjs'),
   path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture),
-  ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'apps/host/src')), ...await files(path.join(root, 'packages/core/src')),
+  ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'apps/host/src')), ...workspacePackageFiles, ...await files(path.join(root, 'packages/core/src')),
   ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/core/bin')), ...await files(path.join(root, 'packages/core/vendor/ctxmux')),
   path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'), path.join(root, 'packages/core/scripts/fixtures/execution-proof-cleanup.mjs'), path.join(root, 'packages/core/scripts/fixtures/cross-host-execution-owner.mjs'),
   path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml')]
@@ -83,7 +99,7 @@ const criticalConsumers = new Set(['apps/desktop/src/main/runtime-controller.ts'
   'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/shared/space-addresses.ts'])
 // This fixture imports compiled Core. Concurrent unconsumed Core source is provenance,
 // not the identity of the running artifact; bin/dist/vendor remain exact inputs.
-const creationConsumer = name => name.startsWith('packages/core/') && !name.startsWith('packages/core/src/') || criticalConsumers.has(name)
+const creationConsumer = name => name.startsWith('packages/core/') && !name.startsWith('packages/core/src/') || criticalConsumers.has(name) || workspacePackages.some(packageName => name.startsWith(`packages/${packageName}/`))
 const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'AGENTMUX_SPATIAL_STATE_STORE'].map(name => [name, process.env[name]]))
 let client
