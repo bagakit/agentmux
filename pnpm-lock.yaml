@@ -977,7 +977,7 @@ packages:
     resolution: {integrity: sha512-SzKYY68rseOrb9KILVzPsl6SjkQtdWw01SRGB5aCVI5kFcHltQsOYV3JB0Ffst72DgkvHCyDQ0NLwxtmCCf97Q==}
 
   '@ctxmux/sdk@file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz':
-    resolution: {integrity: sha512-Uf9PLpmXdrkA2rV1m/ikvup+YyDXWgkcVpSYNO3VfwIrranDSa8YMDq+6qAgDKyRJ5DnXBmoQZ0uvV3vtjcE4g==, tarball: file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz}
+    resolution: {integrity: sha512-3Kx2ScK3c348oIX8Bruc8YKqW6mLBuuXQujqFKPcPUJ/D+bznzr3q3iPSDzRsxHelMO8hXKmPYH6uymV6p4wXg==, tarball: file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz}
     version: 0.0.0
     engines: {node: '>=24'}
 
