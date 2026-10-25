@@ -32,7 +32,9 @@ describe('continuous progress panel', () => {
   it('keeps the same composing continuation field when a late read finds an existing loop', async () => {
     let resolve!: (loops: ContinuousProgressLoop[]) => void
     vi.spyOn(api.continuousProgress, 'list').mockReturnValue(new Promise(done => { resolve = done }))
-    await dom.render(<ContinuousProgressControl session={composerSession()} />)
+    await dom.render(<ContinuousProgressControl session={composerSession()} targetName="Original task agent" />)
+    expect(dom.container.querySelector('.automation-target')!.textContent).toContain('Original task agent')
+    expect(dom.container.querySelector('.automation-target')!.textContent).toContain(target.agentSessionId)
     const panel = dom.container.querySelector<HTMLDetailsElement>('.automation-create')!
     await act(async () => {
       panel.open = true; panel.dispatchEvent(new Event('toggle'))
