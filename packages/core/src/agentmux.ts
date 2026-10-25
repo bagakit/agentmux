@@ -79,6 +79,7 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (method === 'system.metrics.scene.capture') { const capture=body.capture as {scene:{status:string};persistence:{status:string}}; if(capture.scene.status !== 'completed' || capture.persistence.status !== 'confirmed') return true }
   if (method === 'system.metrics.scene.inspect' && (body.inspection as {status:string}).status !== 'available') return true
   if (method === 'system.metrics.animations.inspect' && (body.observation as { status: string }).status !== 'completed') return true
+  if ((method === 'system.metrics.cache.inspect' || method === 'system.metrics.cache.reclaim') && (body.observation as { status: string }).status !== 'completed') return true
   if (method === 'system.metrics.memory.inspect' && (body.observation as { status: string }).status !== 'completed') return true
   if (body.outcome === 'partial' || body.outcome === 'unknown' || body.outcome === 'refused') return true
   if (method === 'space.inspect' && Object.hasOwn(body, 'request')) {

@@ -2,6 +2,7 @@ import { parseRendererAllocationsInput, parseRendererAllocationsResult } from '.
 import { isObjectId } from './object-id.js'
 import { parseRendererSceneCaptureInput, parseRendererSceneCaptureResult, parseRendererSceneInspectInput, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { parseRendererV8ProfileInput, parseRendererV8ProfileResult } from './renderer-v8-profile.js'
+import { parseRendererCacheInput, parseRendererCacheResult } from './renderer-cache.js'
 import { parseRendererMemoryInput, parseRendererMemoryResult } from './renderer-memory.js'
 import { parseRendererHeapSnapshotInput, parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspectInput, parseRendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 import { parseRendererAnimationsInput, parseRendererAnimationsResult } from './renderer-animations.js'
@@ -315,6 +316,11 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target'], 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
       ...parseRendererAnimationsInput({ target: source.target }) }
+  }
+  if (source.operation === 'metrics.cache.inspect' || source.operation === 'metrics.cache.reclaim') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target'], 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      ...parseRendererCacheInput({ target: source.target }) }
   }
   if (source.operation === 'metrics.memory.inspect') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target'], 'INVALID_CONTROL_REQUEST')
@@ -1225,6 +1231,11 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
       result: { observation: parseRendererAnimationsResult(result.observation) } }
+  }
+  if (operation === 'metrics.cache.inspect' || operation === 'metrics.cache.reclaim') {
+    settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { observation: parseRendererCacheResult(result.observation, undefined, operation === 'metrics.cache.inspect' ? 'inspect' : 'reclaim') } }
   }
   if (operation === 'metrics.memory.inspect') {
     settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')

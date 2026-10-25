@@ -10,6 +10,8 @@ export * from './v8-profile.js'
 export * from './renderer-v8-profile.js'
 export * from './renderer-trace.js'
 export * from './renderer-memory.js'
+export * from './renderer-cache.js'
+import type { RendererCacheInput, RendererCacheResult } from './renderer-cache.js'
 export * from './renderer-animations.js'
 export * from './app-memory-evidence.js'
 import type { AppMemoryEvidence } from './app-memory-evidence.js'
@@ -112,6 +114,8 @@ export type HostResourceSnapshot = {
 export type MetricsSubscription = { dispose(): void }
 /** The host owns observation. Core only frames, validates and releases consumption. */
 export interface AgentMuxMetricsPort {
+  inspectCache?(input: RendererCacheInput, signal?: AbortSignal): Promise<RendererCacheResult>
+  reclaimCache?(input: RendererCacheInput, signal?: AbortSignal): Promise<RendererCacheResult>
   inspectAppMemory?(): Promise<AppMemoryEvidence>
   captureHeapSnapshot?(input: RendererHeapSnapshotInput, signal?: AbortSignal): Promise<RendererHeapSnapshotResult>
   inspectHeapSnapshot?(input: RendererHeapSnapshotInspectInput, signal?: AbortSignal): Promise<RendererHeapSnapshotInspection>

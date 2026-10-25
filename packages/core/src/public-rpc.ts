@@ -99,6 +99,8 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'system.metrics.scene.capture': 'metrics.scene.capture',
   'system.metrics.scene.inspect': 'metrics.scene.inspect',
   'system.metrics.profile.capture': 'metrics.profile.capture',
+  'system.metrics.cache.inspect': 'metrics.cache.inspect',
+  'system.metrics.cache.reclaim': 'metrics.cache.reclaim',
   'system.metrics.memory.inspect': 'metrics.memory.inspect',
   'system.metrics.heap.capture': 'metrics.heap.capture',
   'system.metrics.heap.inspect': 'metrics.heap.inspect',

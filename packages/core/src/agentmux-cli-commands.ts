@@ -14,6 +14,7 @@ import { parseRendererSceneCaptureInput, parseRendererSceneInspectInput } from '
 import { parseAgentContinuityControlInput } from './agent-session-recovery/control-contract.js'
 import { parseRuntimeV8ProfileInput } from './runtime-v8-profile.js'
 import { parseRendererV8ProfileInput } from './renderer-v8-profile.js'
+import { parseRendererCacheInput } from './renderer-cache.js'
 import { parseRendererMemoryInput } from './renderer-memory.js'
 import { parseRendererHeapSnapshotInput, parseRendererHeapSnapshotInspectInput } from './renderer-heap-snapshot.js'
 import { parseRendererAnimationsInput } from './renderer-animations.js'
@@ -995,6 +996,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     { '--window-id': 'value', '--web-contents-id': 'value', '--generation': 'value', '--pid': 'value', '--creation-time': 'value' }, f =>
       parseRendererAnimationsInput({ target: numbers(f, { '--window-id': 'windowId', '--web-contents-id': 'webContentsId', '--generation': 'generation', '--pid': 'pid', '--creation-time': 'creationTime' }) }) as unknown as Record<string, unknown>,
     'Use the exact original metrics window/WebContents/generation/PID/creationTime. One static document.getAnimations() read returns at most 128 instances, native timing/state and bounded tag/class ancestry; omitted entries and truncation stay explicit. This document excludes iframe/worker coverage. Labels and running state do not prove CPU cost or Runtime identity. No DOM text/IDs, layout, animation mutation, debugger attachment, automatic collection, retry or history. Existing DevTools stays available. Evaluation-requested/settled and source checks remain in completed/failed/unknown receipts; a late result cannot change the original reply.'),
+  ...(['inspect', 'reclaim'] as const).map(action => command(`system.metrics.cache.${action}`,
+    '--window-id W --web-contents-id WC --generation G --pid PID --creation-time MS',
+    action === 'inspect' ? 'Read platform cache counters for the exact Renderer process; no cleanup.' : 'Explicitly reclaim platform caches in the exact Renderer process, preserving documents and user state.',
+    { '--window-id': 'value', '--web-contents-id': 'value', '--generation': 'value', '--pid': 'value', '--creation-time': 'value' }, f =>
+      parseRendererCacheInput({ target: numbers(f, { '--window-id': 'windowId', '--web-contents-id': 'webContentsId', '--generation': 'generation', '--pid': 'pid', '--creation-time': 'creationTime' }) }) as unknown as Record<string, unknown>,
+    'Discover the exact five-field target from system metrics get: window plus renderer process PID/creationTime. Window is the routing anchor; the cache action affects its Renderer process. inspect reads only. reclaim is an explicit side effect: native cache eviction and memory-pressure notification may briefly pause work and refill caches later. It does not close documents, delete Session/Run/conversation views, clear website storage or request separate GC. Native sizeBytes includes encoded, decoded and overhead; decodedBytes maps native liveSize and is not live/unused memory. Counts are not all-App memory, RSS savings or expected reclaimable bytes. Before/after counters can be missing independently of a completed native action. requested is not execution; completed means native return with exact source verification. Unknown replies never retry automatically; a later inspect cannot reconstruct the old ACK.')),
   command('system.metrics.memory.inspect', '--window-id W --web-contents-id WC --generation G --pid PID --creation-time MS', 'Explicitly read one exact Renderer V8 isolate heap/backing counter snapshot in bytes.',
     { '--window-id': 'value', '--web-contents-id': 'value', '--generation': 'value', '--pid': 'value', '--creation-time': 'value' }, f =>
       parseRendererMemoryInput({ target: numbers(f, { '--window-id': 'windowId', '--web-contents-id': 'webContentsId', '--generation': 'generation', '--pid': 'pid', '--creation-time': 'creationTime' }) }) as unknown as Record<string, unknown>,
