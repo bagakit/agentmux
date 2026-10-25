@@ -9,8 +9,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_SESSION_INPUT_MUTATION
 const edits: Record<string, Array<{ path: string; before: string; after: string }>> = {
   'original-run': [{ path: 'packages/core/src/client.ts',
-    before: 'const deliveryKey = { ...key, expectedRun: { ...selected.run } } as AgentPromptInputKey',
-    after: 'const deliveryKey = { ...key, expectedRun: { ...key.expectedRun } } as AgentPromptInputKey' }],
+    before: 'const deliveryKey = { ...agentInputDeliveryKey(saved.control), expectedRun: { ...selected.run } } as AgentPromptInputKey',
+    after: 'const deliveryKey = { ...agentInputDeliveryKey(saved.control), expectedRun: { ...key.expectedRun } } as AgentPromptInputKey' }],
   'unverified-target': [{ path: 'packages/core/src/client.ts',
     before: 'matchesProviderNativeSessionTarget(expected.nativeHandle, session.nativeHandle) &&\n      sessionSemanticResumeSourceRuns(session).includes(intent.key.expectedRun.runId)',
     after: 'true' }],
@@ -23,8 +23,8 @@ const edits: Record<string, Array<{ path: string; before: string; after: string 
       after: 'intent.source.authorHuman === true &&' }
   ],
   'missing-delivery-binding': [{ path: 'packages/core/src/agent-global-message-queue.ts',
-    before: "control: { ref, state: 'dispatch-authorized', gateId, ...(deliveryKey ? { deliveryKey } : {}), at: Date.now() }",
-    after: "control: { ref, state: 'dispatch-authorized', gateId, at: Date.now() }" }],
+    before: "control: { ref, state: 'dispatch-authorized', gateId, ...(deliveryKey ? { deliveryKey } : {}), ...(current.control.retry ? { retry: current.control.retry } : {}), at: Date.now() }",
+    after: "control: { ref, state: 'dispatch-authorized', gateId, ...(current.control.retry ? { retry: current.control.retry } : {}), at: Date.now() }" }],
   'late-target-release': [{ path: 'packages/core/src/client.ts',
     before: 'targetChanged ||= !sameRun(current.run, attemptRun)', after: 'targetChanged ||= false' }]
 }
