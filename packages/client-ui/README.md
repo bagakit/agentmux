@@ -38,6 +38,23 @@ Run `node packages/client-ui/scripts/verify-shared-conversation.mjs --mutation-a
 
 `node packages/client-ui/scripts/capture-shared-conversation.mjs` builds the actual Desktop Gallery and records normal/narrow scenes in a private Electron profile. Capture receipts and images are retained for independent review; capture success alone is not an aesthetic approval.
 
+## Native actions
+
+Import `Button` and `IconButton` from `@agentmux/client-ui/components/Button` and
+`@agentmux/client-ui/components/IconButton`. Both render a native button, default
+`type` to `button`, and forward native props and React 19 refs. Use an explicit
+`type="submit"` for form submission. Callers retain their original handlers,
+`disabled`, `aria-busy`, requests and drafts; busy presentation never disables an
+otherwise available action or retries an operation.
+
+`Button` accepts `variant="secondary" | "primary" | "danger"` (default secondary).
+`IconButton` requires `aria-label`, defaults its native title to that name, and
+accepts `intent="neutral" | "danger"`. Explicit titles remain intact. The existing
+`.small-button`, `.primary-button`, `.danger-button` and `.icon-button` classes
+have one shared owner in `styles/buttons.css`; include
+`@agentmux/client-ui/styles/buttons.css` when importing individual styles.
+Hosts keep surface-specific geometry and supply the original theme tokens.
+
 ## Inputs
 
 `src/input/` is the shared native field module: import `TextInput`, `Textarea` and `InputGroup` from `@agentmux/client-ui/input`, and `@agentmux/client-ui/input/styles.css` when not using the full shared stylesheet. Each component forwards native props and React 19 refs; callers retain labels, values, validation and actions. `InputGroup` is the existing field container with one focus boundary, not an extra wrapper or form state provider. Surface classes retain their own geometry.
