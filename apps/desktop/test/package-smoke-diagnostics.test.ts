@@ -44,7 +44,7 @@ async function executeOriginalMain(appOnly: boolean, evidenceUnavailable = false
     PRODUCT_NAME: 'AgentMux', manifest: { version: '0.1.0' }, appOnly, installRequested: false,
     brandApplication: noop, copyRuntimeApplication: noop, verifyIdentity: noop, verifyThirdPartyNotices: noop,
     verifyNativeDesktopCopy: noop, verifyNativeDesktopSigning: noop,
-    auditBundleSymlinks: noop, auditRuntimeReferences: noop, verifyWorkspaceMoveHelper: noop,
+    auditBundle: noop, verifyWorkspaceMoveHelper: noop,
     signAndVerifyMacosApplication: async () => ({ kind: 'certificate' }), sha256: async () => 'original-digest',
     verifyPackagedRuntime: noop, createDmg: noop, verifyLaunchServices: verification, verifyDmg: verification,
     rm: async (...args: Parameters<typeof rm>) => {
