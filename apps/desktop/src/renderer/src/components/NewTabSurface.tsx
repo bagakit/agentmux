@@ -176,6 +176,7 @@ export function NewTabSurface({
   const agentWorkspace = splitExecution ? config?.workspaces.find(item => item.id === agentTarget.agentWorkspaceId) : workspace
   const splitWorkspaceSupported = Boolean(workspace && agentWorkspace && !isScratchWorkspaceId(workspace.id) && !isScratchWorkspaceId(agentWorkspace.id))
   const agentHost = agentWorkspace ? config?.hosts.find(candidate => candidate.id === agentWorkspace.hostId) : undefined
+  const usesHostInventory = splitExecution || agentHost?.kind === 'ssh'
   const inventory = useAppStore(state => agentWorkspace ? state.hostExecutorInventories[agentWorkspace.hostId] : undefined)
   const displayedExecutorId = splitExecution ? agentTarget?.agentExecutor?.executorId ?? '' : ordinaryExecutorId
   const checkAgents = (hostId: string, options?: { onlyUnconfirmed?: boolean }) => detectExecutors(hostId, { ...options, ...(splitExecution ? { source: 'host' as const } : {}) })
@@ -220,6 +221,9 @@ export function NewTabSurface({
   const selectedExecutor = executors.find(executor => executor.id === displayedExecutorId && (!splitExecution || agentTarget?.agentExecutor?.hostId === agentWorkspace?.hostId && agentTarget?.agentExecutor?.executorRevision === executor.executorRevision))
   const unconfirmedAvailability = (splitExecution || agentHost?.kind === 'ssh') && (!hostExecutorInventoryMatches(inventory, agentHost) || inventory.state !== 'ready') ||
     executors.some(executor => executor.detection?.state !== 'ready' && executor.detection?.state !== 'missing')
+  const emptyHostInventoryUnconfirmed = executors.length === 0 && usesHostInventory &&
+    (!hostExecutorInventoryMatches(inventory, agentHost) || inventory?.state !== 'ready')
+  const confirmedEmptyExecutors = executors.length === 0 && !emptyHostInventoryUnconfirmed
   const retryingAvailability = useLauncherExecutorRecovery(agentHost,
     motionActive && inputRegionActive && !controlNavigation && sections.agents !== 'hidden', unconfirmedAvailability, splitExecution ? 'host' : undefined)
   function setSection(section: LauncherSection, mode: LauncherSectionMode) {
@@ -409,6 +413,13 @@ export function NewTabSurface({
     disabled: false, insertion: insertionRef, feedback, document: dialogDocument, shortcutActive: visible && presentationActive && sections.agents === 'expanded',
     onRemoteFiles: () => setFileReferencesOpen(true) })
 
+  const unconfirmedConfigurations = <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+    step: 'Agent configurations are unconfirmed',
+    mode: `${agentHost?.label ?? agentWorkspace?.hostId ?? 'Agent environment'}: ${inventory?.detail ?? (inventory?.state === 'checking' ? 'Reading the original Host configuration.' : 'The original Host inventory has not been confirmed.')} Your draft and saved selection are kept.`,
+    restore: agentWorkspace ? 'Check this Host again to read its configurations, or choose another Agent environment.' : 'Choose the registered Agent environment to read its configurations.'
+  } }} actions={agentWorkspace ? <button type="button" className="small-button" disabled={inventory?.state === 'checking'}
+    onClick={() => void checkAgents(agentWorkspace.hostId)}>{inventory?.state === 'checking' ? 'Checking…' : 'Check again'}</button> : undefined} />
+
   return (
     <SurfaceState ref={surfaceRef} className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}
       data-density={regionHeight !== null && regionHeight < 520 ? 'compact' : 'normal'}
@@ -443,10 +454,10 @@ export function NewTabSurface({
           : 'Choose an Agent explicitly, then Launch here; or wait for the original bot facts to recover.'
       } }} /> : null}
 
-      {topicPreparation || (executors.length === 0 && prompt) ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+      {topicPreparation || (confirmedEmptyExecutors && prompt && sections.agents !== 'expanded') ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: topicPreparation ? 'Mote Topic preparation is unconfirmed' : 'No Agent Executor is configured',
-        mode: `${executors.length === 0 ? 'No Agent Executor is configured. ' : ''}Your request has not been sent. ${topicPreparation ? 'The same Topic, Region and complete draft are kept.' : 'The same Region and complete draft are kept.'}`,
-        restore: executors.length === 0 ? 'Add an Agent in Settings, then Launch agent here with the preserved request.' : 'Launch agent here to retry preparation for this same Topic, then send the preserved request.'
+        mode: `${confirmedEmptyExecutors ? 'No Agent Executor is configured. ' : ''}Your request has not been sent. ${topicPreparation ? 'The same Topic, Region and complete draft are kept.' : 'The same Region and complete draft are kept.'}`,
+        restore: confirmedEmptyExecutors ? 'Add an Agent in Settings, then Launch agent here with the preserved request.' : 'Launch agent here to retry preparation for this same Topic, then send the preserved request.'
       } }} /> : null}
       {persistenceIssue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: persistenceIssue?.includes('could not be read') ? 'Saved Launcher preferences could not be read' : 'Launcher preferences could not be saved', mode: `${persistenceIssue ?? ''} Current sections and drafts remain usable in this window. They may not survive a restart.`, restore: persistenceIssue?.includes('could not be read') ? 'Copy any new drafts before reopening this window to retry reading saved preferences. The existing saved data is kept.' : 'Restore local storage access, then change a section or edit the draft to retry saving.' } }} /> : null}
 
@@ -464,9 +475,11 @@ export function NewTabSurface({
 
       {sections.agents === 'expanded' ? <>
         {moteId && displayedExecutorId && !executors.some(item => item.id === displayedExecutorId) ? <div className="launcher-error" role="status">Saved Agent {displayedExecutorId} is unavailable. Choose another Agent or edit this Mote’s quick mode.</div> : null}
-        <AgentExecutorPicker executors={executors} selected={selectedExecutor?.id ?? null}
-          active={visible && presentationActive} onSelect={chooseExecutor}
-          onConfigure={splitExecution && agentWorkspace ? () => settings?.openHostExecutors?.(agentWorkspace.hostId) : undefined} />
+        {emptyHostInventoryUnconfirmed ? unconfirmedConfigurations
+          : <AgentExecutorPicker executors={executors} selected={selectedExecutor?.id ?? null}
+            active={visible && presentationActive} onSelect={chooseExecutor}
+            onConfigure={usesHostInventory && agentWorkspace && settings ? () => settings.openHostExecutors
+              ? settings.openHostExecutors(agentWorkspace.hostId) : settings.openHost(agentWorkspace.hostId) : undefined} />}
         <div className="launcher-composer composer" onFocusCapture={attachments.claimScreenshotTarget}><ComposerCompletionEditor completionConfig={completion.completionConfig} commands={completion.commands} skills={completion.skills}
           references={completion.references} promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
           completionFeedback={completion.completionFeedback} active={visible && presentationActive} aria-label="Agent prompt" disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
@@ -493,7 +506,7 @@ export function NewTabSurface({
           <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busy === 'agent' ? 'Launching…' : 'Launch'}</button>
         </div>
       </div> : null}
-      {(splitExecution || agentHost?.kind === 'ssh') && inventory && inventory.state !== 'ready' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+      {emptyHostInventoryUnconfirmed && sections.agents !== 'hidden' ? sections.agents === 'expanded' ? null : unconfirmedConfigurations : (splitExecution || agentHost?.kind === 'ssh') && inventory && inventory.state !== 'ready' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: inventory.state === 'checking' ? 'Checking agents on this host' : 'Host Executor discovery failed', mode: `${agentHost?.label ?? agentWorkspace?.hostId}: ${inventory.detail ?? 'Current inventory is unknown.'} Previously read configurations remain selectable.`,
         restore: inventory.state === 'checking' ? 'Checking this host. Existing configurations remain selectable.'
           : retryingAvailability ? 'Rechecking automatically. You can keep writing or check again now.'
