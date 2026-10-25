@@ -31,7 +31,7 @@ await verifyRendererSourceMutations({
       before: 'ref={addressInput} aria-label="Browser address" value={address}',
       after: 'ref={addressInput} aria-label="Browser address" value=""' },
     { label: 'history-must-offer-more-than-eight', file: start,
-      before: 'loaded.entries.slice(0, expanded ? undefined : 12)',
+      before: 'loaded.entries.slice(0, expanded ? undefined : limit)',
       after: 'loaded.entries.slice(0, 8)' },
     { label: 'preview-must-match-original-profile', file: start,
       before: 'result.preview.scope.profileId === scope.profileId', after: 'true' }

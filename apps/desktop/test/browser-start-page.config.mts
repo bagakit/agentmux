@@ -10,5 +10,5 @@ const hostAliases = Object.entries(exports).map(([name, entry]) => ({
 })).sort((a, b) => b.find.length - a.find.length)
 export default defineConfig({ ...owning,
   resolve: { ...owning.resolve, alias: [...hostAliases, ...(owning.resolve?.alias as { find: string; replacement: string }[])] },
-  test: { ...owning.test, include: ['apps/desktop/test/browser-start-page.test.tsx', 'apps/desktop/test/browser-address-input.test.tsx'] }
+  test: { ...owning.test, include: ['apps/desktop/test/browser-start-page.test.tsx', 'apps/desktop/test/browser-address-input.test.tsx', 'apps/desktop/test/start-page-atmosphere.test.tsx'] }
 })
