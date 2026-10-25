@@ -327,6 +327,7 @@ type PendingProfileSwitch = {
   token: number
   profileId: string
   view: WebContentsView
+  contents: WebContents
   rejectCancellation(error: Error): void
   attached: boolean
   released: boolean
@@ -1919,6 +1920,7 @@ export class BrowserViewManager {
       token: ++entry.switchRevision,
       profileId,
       view: candidate,
+      contents: candidate.webContents,
       rejectCancellation,
       attached: false,
       released: false
@@ -4317,8 +4319,11 @@ export class BrowserViewManager {
         pending.attached = false
       } catch (error) { errors.push(error) }
     }
-    try { if (!pending.view.webContents.isDestroyed()) pending.view.webContents.close() } catch (error) { errors.push(error) }
-    pending.released = !pending.attached && pending.view.webContents.isDestroyed()
+    // Electron may clear the view's webContents getter during close. Retain the exact handle
+    // through its destruction receipt instead of consulting the detached view again.
+    const contents = pending.contents
+    try { if (!contents.isDestroyed()) contents.close() } catch (error) { errors.push(error) }
+    pending.released = !pending.attached && contents.isDestroyed()
     if (!pending.released && !errors.length) errors.push(new Error('Browser profile candidate cleanup is not confirmed. Its original cleanup reference is kept.'))
     if (errors.length) throw new AggregateError(errors, 'Browser profile candidate cleanup failed: ' + errors.map(error => error instanceof Error ? error.message : String(error)).join('; '))
   }
