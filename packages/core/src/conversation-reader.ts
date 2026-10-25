@@ -6,7 +6,7 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { projectConversationStream, conversationRecordRole, conversationRecordId, conversationRevision, conversationValuesEqual as same, conversationSourceKey, conversationInputAdoptionEdges,
   type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationInputAdoptionEvidence } from './conversation-stream.js'
-import { parseConversationTimelineReadInput, parseConversationChangesInput, parseConversationFrontier, parseConversationReadPage, parseConversationChangesPage,
+import { parseConversationTimelineReadInput, parseConversationChangesInput, parseConversationFrontier, parseConversationReadPageForWindow, parseConversationChangesPageForWindow, parseRoutedConversationPage,
   CONVERSATION_DEFAULT_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, CONVERSATION_MAX_WINDOW_RECORDS, type ConversationTimelineReadInput, type ConversationChangesInput, type ConversationFrontier,
   type ConversationCheckpointPage, type AgentConversationReadPage, type ConversationChangesPage, type ConversationUnit, type ConversationUnitEntry, type ConversationVersionedAnchor, type ConversationReadWindow } from './conversation-changes.js'
 import type { NativeConversationCheckpoint, NativeConversationChangesPage } from './session-history-changes.js'
@@ -583,7 +583,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     }
     const page = result(index, offset)
     if (Buffer.byteLength(JSON.stringify(page)) > budgetBytes || index < units.length && !items.length) return fail('The original unit and continuation cannot fit this budget. Increase maxBytes; no record or cut was skipped.', 'AGENT_SESSION_HISTORY_BUDGET')
-    const parsed = mode === 'changes' ? parseConversationChangesPage(page, { ...input, ...target, checkpoint: { ...(input as ConversationChangesInput).checkpoint, ...target } } as ConversationChangesInput) : parseConversationReadPage(page, { ...input, ...target })
+    const parsed = mode === 'changes' ? parseConversationChangesPageForWindow(page, { ...input, ...target, checkpoint: { ...(input as ConversationChangesInput).checkpoint, ...target } } as ConversationChangesInput) : parseConversationReadPageForWindow(page, { ...input, ...target })
     port.signal?.throwIfAborted()
     if (page.window.complete && !snapshot.committed) {
       if (view.revision !== state.viewRevision) return fail('Another read already advanced this accepted window. Retain this response as uncommitted and read the current view.')
@@ -648,7 +648,7 @@ export async function readRoutedConversation<T extends AgentConversationReadPage
     if (sourceBudget < 4096) break
     const page = await readOriginal(sourceBudget, replay), result = forwardConversationPage(page, input, expectedSourceHostId)
     const overflow = Buffer.byteLength(JSON.stringify(result)) - budget
-    if (overflow <= 0) return result
+    if (overflow <= 0) return parseRoutedConversationPage(page, result, input) as T
     sourceBudget -= overflow + 32; replay = page.window.replay
   }
   return fail('The original source unit and complete route envelope cannot fit this byte budget. Increase maxBytes; its original input and cut remain valid.', 'AGENT_SESSION_HISTORY_BUDGET')
