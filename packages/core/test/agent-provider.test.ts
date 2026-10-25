@@ -2,8 +2,9 @@ import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { LAUNCH_OPTIONS_BY_PROVIDER_ID } from '../src/agent-launch-option.js'
+import { LAUNCH_OPTIONS_BY_PROVIDER_ID } from '../src/providers/launch-options.js'
 
 describe('built-in agent providers', () => {
   const providers = new AgentProviderRegistry()
@@ -563,7 +564,8 @@ describe('built-in agent providers', () => {
     })).toEqual({
       command: 'claude',
       // Claude places args before the positional prompt, so the flag pair precedes it — still valid.
-      args: ['--resume', 'native-2', '--permission-mode', 'plan', 'resume now'],
+      args: ['--resume', 'native-2', '--permission-mode', 'plan', 'resume now', '--plugin-dir',
+        join(fixturePath('tmp/work'), '.claude', 'agentmux', 'native-activity')],
       env: {}
     })
   })

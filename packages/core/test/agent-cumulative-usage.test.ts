@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { build } from 'esbuild'
 import { extractTurnUsage, parseTurnUsage } from '../src/agent-usage-transcript.js'
+import { decodeClaudeUsage } from '../src/providers/claude-usage.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions, normalizeAgentSession } from '../src/agent-session-store.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
@@ -145,7 +146,7 @@ describe('native Session cumulative usage through original public consumers', ()
       expect(normalizeAgentSession({ kind: 'agent', agentSessionId: 'sample', providerId: 'codex', executorId: 'codex',
         hostId: 'local', workspacePath: 'fixture', run: { runId: 'sample-run' }, retiredRuns: [], createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1), turnUsage: { ...valid, cumulative: bad } }).turnUsage).toEqual(valid)
     }
-    expect(extractTurnUsage({ kind: 'native-transcript', transcriptFormat: 'claude-jsonl' }, JSON.stringify({
+    expect(extractTurnUsage(decodeClaudeUsage, JSON.stringify({
       message: { usage: { input_tokens: 3, output_tokens: 2, total_token_usage: rawCumulative } } }), 1)?.cumulative).toBeUndefined()
   })
 
