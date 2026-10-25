@@ -56,6 +56,14 @@ Core 的 [`agent-outbound-message`](../../packages/core/src/agent-outbound-messa
 
 当前实时合同是来源 `invalidated`／`unavailable` 通知唤醒准确读取，再交付新版完整窗口。`ConversationEvent` 保留贡献版本与关系，没有一个包办身份、正文结束、投递和采用的 `final` 位；各项确认沿原协议事实。晚到准确关系由同一语义流更新事件和 coalescence，关联缺证仍保独立原记录，不能从同文、时间或终端 ACK 补造。
 
+## 原生结果的现有接线与目标边界
+
+现有 [`AgentFailure`](../../packages/core/src/types.ts) 经 Provider 状态观察进入 Core `ensureNativeStatusObservation`／`statusAgent`。Codex 的 [`codexTurnRecordEvidence`](../../packages/core/src/providers/codex-prompt-execution-evidence.ts) 与 [`codexFailure`](../../packages/core/src/providers/codex-errors.ts) 解释原生终局错误，Core 可保留当前失败状态与 captured lifecycle 记录。这条状态路径本身不能证明历史读取、公共对话及外部发布已取得相同的类型化结果。
+
+当前原生历史的 [`codex-saved-history`](../../packages/core/src/providers/codex-saved-history.ts) 另行生成 turn metrics，外部 [`publication-query-feedback`](../../packages/connectors/src/publication-query-feedback.ts) 消费其状态；共同内容由 [`publication-content`](../../packages/connectors/src/publication-content.ts) 选择。这些是需要一并核对的真实消费入口，不能用状态分类器已经存在代签错误卡链路。请求失败、当前活动、读取诊断和平台投递的事实 owner 仍分别保留。
+
+已确认的目标是沿这些原 owner 贯通同一个 `turnOutcome`，移除 metrics 的结果语义，并让共享卡片与 Channel publication 消费同一结果；具体合同归[原生结果协议](../specs/conversation-protocol.md#native-request-and-turn-outcomes)，客户端目标接线归[共同消费设计](../design/conversation-client-architecture.md#原生结果的共同消费)。本节列出当前机制与待替换边界，不声明目标已实现、已安装或已通过真实消费验收。
+
 ## 三种来源怎样读取
 
 Provider 的原生历史解释与 Hook 回调解释消费不同的原信号，提交记录则由 Core 输入 writer 产生；出现多路记录本身不表示同一 payload 被解析两次。它们进入同一 Conversation 处理边界，接入方不承担厂商信号整合。Core 原 Reader 持有有界接受窗口与跨批贡献，Desktop、Mobile 和 Focus 消费该 Reader 的完整窗口。
