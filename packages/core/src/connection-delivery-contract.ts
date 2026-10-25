@@ -41,7 +41,7 @@ export type ConnectionDeliveryReference = ConversationItemRef | { hostId: string
 export type ConnectionDeliveryState = 'pending' | 'dispatching' | 'unknown' | 'confirmed' | 'not-applied' | 'cancelled' | 'superseded'
 export type ConnectionDeliveryReceiptReason = 'effect-unconfirmed' | 'platform-rejected' | 'adapter-unavailable' | 'platform-unavailable' | 'rate-limited' | 'thread-unavailable' | 'unsupported-format'
 export type ConnectionDeliveryReason = ConnectionDeliveryReceiptReason | 'binding-revised' | 'original-speech-withdrawn' | 'outside-conversation-scope' | 'private-content' | 'public-content-unconfirmed' | 'version-unavailable'
-export type ConnectionDeliveryMapping = { messageId: string; threadId?: string; reactionId?: string }
+export type ConnectionDeliveryMapping = { messageId: string; threadId?: string; reactionId?: string; nativeCard?: { id: string; operationId: string } }
 /** Original platform outcome remains separate from the operation's current queue fate. */
 export type ConnectionDeliveryReceipt =
   | { state: 'confirmed'; mapping: ConnectionDeliveryMapping }
@@ -68,6 +68,11 @@ export type ConnectionDelivery = {
   relay?: ConnectionDeliveryRelay
   /** Resource upload is distinct from the original chat-message effect. No bytes or platform asset key are exposed. */
   resourceUpload?: { kind: 'image' | 'file'; part: ConversationContentRef; attempt: number; state: 'pending' | 'dispatching' | 'unknown' | 'confirmed' }
+  /** Optional presentation effects never replace the original message receipt. */
+  presentation?: {
+    entity?: { state: 'dispatching' | 'unknown' | 'confirmed' | 'not-applied'; reason?: ConnectionDeliveryReceiptReason }
+    portrait?: { state: 'pending' | 'dispatching' | 'unknown' | 'confirmed' | 'not-applied' | 'superseded'; reason?: ConnectionDeliveryReceiptReason }
+  }
 }
 /** Lane-level source, qualification or effect observation for this Binding scope. Each original delivery receipt owns its specific platform result; this is not Agent health. */
 export type ConnectionDeliveryObservation = {

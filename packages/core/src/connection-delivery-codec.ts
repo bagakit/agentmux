@@ -22,8 +22,10 @@ function reason(value: unknown, queue = false): ConnectionDeliveryReason {
   return value as ConnectionDeliveryReason
 }
 function mapping(value: unknown): ConnectionDeliveryMapping {
-  const p = object(value, ['messageId', 'threadId', 'reactionId'])
-  return { messageId: text(p.messageId), ...(p.threadId === undefined ? {} : { threadId: text(p.threadId) }), ...(p.reactionId === undefined ? {} : { reactionId: text(p.reactionId) }) }
+  const p = object(value, ['messageId', 'threadId', 'reactionId', 'nativeCard'])
+  const card = p.nativeCard === undefined ? undefined : object(p.nativeCard, ['id', 'operationId'])
+  if (card && p.reactionId !== undefined) fail()
+  return { messageId: text(p.messageId), ...(p.threadId === undefined ? {} : { threadId: text(p.threadId) }), ...(p.reactionId === undefined ? {} : { reactionId: text(p.reactionId) }), ...(card ? { nativeCard: { id: text(card.id), operationId: text(card.operationId) } } : {}) }
 }
 function reference(value: unknown): import('./connection-delivery-contract.js').ConnectionDeliveryReference {
   const p = object(value, ['hostId', 'agentSessionId', 'source']), source = object(p.source, ['kind', 'providerId', 'nativeSessionId', 'recordId', 'runId', 'requestId', 'requestDigest', 'operationId', 'event', 'ingressId'])
@@ -110,7 +112,7 @@ export function parseConnectionDeliveryReceipt(value: unknown): ConnectionDelive
   return { state: p.state as 'unknown' | 'not-applied', reason: reason(p.reason) as ConnectionDeliveryReceiptReason }
 }
 export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
-  const p = object(value, ['operationId', 'projectionId', 'sourceRevision', 'bindingId', 'bindingRevision', 'reference', 'target', 'effect', 'fragment', 'state', 'predecessorOperationId', 'mapping', 'reason', 'receipt', 'event', 'relay', 'resourceUpload', 'queryFeedback'])
+  const p = object(value, ['operationId', 'projectionId', 'sourceRevision', 'bindingId', 'bindingRevision', 'reference', 'target', 'effect', 'fragment', 'state', 'predecessorOperationId', 'mapping', 'reason', 'receipt', 'event', 'relay', 'resourceUpload', 'queryFeedback', 'presentation'])
   const target = object(p.target, ['connectionId', 'application', 'externalConversationId']), app = object(target.application, ['domain', 'appId']), fragment = object(p.fragment, ['ordinal', 'count'])
   const domain = text(app.domain), ordinal = integer(fragment.ordinal, 0), count = integer(fragment.count, 0)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(text(app.appId))) fail()
@@ -119,7 +121,7 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
   const why = p.reason === undefined ? undefined : reason(p.reason, true)
   if (p.state === 'confirmed' && (!mapped || why !== undefined) || (p.state === 'unknown' || p.state === 'not-applied') && (why === undefined || !CONNECTION_DELIVERY_RECEIPT_REASONS.includes(why as ConnectionDeliveryReceiptReason))) fail()
   if (p.effect === 'withdraw' && ['dispatching', 'unknown', 'confirmed', 'not-applied'].includes(p.state as string) && !mapped) fail()
-  if (receipt?.state === 'confirmed' && (!mapped || receipt.mapping.messageId !== mapped.messageId || receipt.mapping.threadId !== mapped.threadId || receipt.mapping.reactionId !== mapped.reactionId)) fail()
+  if (receipt?.state === 'confirmed' && (!mapped || receipt.mapping.messageId !== mapped.messageId || receipt.mapping.threadId !== mapped.threadId || receipt.mapping.reactionId !== mapped.reactionId || receipt.mapping.nativeCard?.id !== mapped.nativeCard?.id || receipt.mapping.nativeCard?.operationId !== mapped.nativeCard?.operationId)) fail()
   if (receipt && ['confirmed', 'unknown', 'not-applied'].includes(p.state as string) && (receipt.state !== p.state || receipt.state !== 'confirmed' && receipt.reason !== why)) fail()
   const operationId = text(p.operationId), predecessorOperationId = p.predecessorOperationId === undefined ? undefined : text(p.predecessorOperationId)
   if (predecessorOperationId === operationId) fail()
@@ -143,9 +145,21 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
       (upload.state === 'pending' ? attempt !== 0 : attempt < 1)) fail()
     resourceUpload = { kind: upload.kind as NonNullable<ConnectionDelivery['resourceUpload']>['kind'], part: selected, attempt, state: upload.state as NonNullable<ConnectionDelivery['resourceUpload']>['state'] }
   }
+  let presentation: ConnectionDelivery['presentation']
+  if (p.presentation !== undefined) {
+    const v = object(p.presentation, ['entity', 'portrait'])
+    const effect = (value: unknown, portrait: boolean) => {
+      const e = object(value, ['state', 'reason'])
+      if (!(portrait ? ['pending', 'dispatching', 'unknown', 'confirmed', 'not-applied', 'superseded'] : ['dispatching', 'unknown', 'confirmed', 'not-applied']).includes(String(e.state))) fail()
+      if (['unknown', 'not-applied'].includes(String(e.state)) ? e.reason === undefined : e.reason !== undefined) fail()
+      return { state: e.state, ...(e.reason === undefined ? {} : { reason: reason(e.reason) }) }
+    }
+    if (v.entity === undefined && v.portrait === undefined || queryFeedback) fail()
+    presentation = { ...(v.entity === undefined ? {} : { entity: effect(v.entity, false) }), ...(v.portrait === undefined ? {} : { portrait: effect(v.portrait, true) }) } as ConnectionDelivery['presentation']
+  }
   return { operationId, projectionId: text(p.projectionId), sourceRevision: text(p.sourceRevision), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), reference: original,
     target: { connectionId: text(target.connectionId), application: { domain, appId: text(app.appId) }, externalConversationId: text(target.externalConversationId) }, effect: p.effect as ConnectionDelivery['effect'], fragment: { ordinal, count }, state: p.state as ConnectionDeliveryState,
-    ...(predecessorOperationId === undefined ? {} : { predecessorOperationId }), ...(mapped === undefined ? {} : { mapping: mapped }), ...(why === undefined ? {} : { reason: why }), ...(receipt === undefined ? {} : { receipt }), ...(p.event === undefined ? {} : { event: event(p.event) }), ...(p.relay === undefined ? {} : { relay: relay(p.relay, original) }), ...(resourceUpload ? { resourceUpload } : {}), ...(queryFeedback ? { queryFeedback } : {}) }
+    ...(predecessorOperationId === undefined ? {} : { predecessorOperationId }), ...(mapped === undefined ? {} : { mapping: mapped }), ...(why === undefined ? {} : { reason: why }), ...(receipt === undefined ? {} : { receipt }), ...(p.event === undefined ? {} : { event: event(p.event) }), ...(p.relay === undefined ? {} : { relay: relay(p.relay, original) }), ...(resourceUpload ? { resourceUpload } : {}), ...(queryFeedback ? { queryFeedback } : {}), ...(presentation ? { presentation } : {}) }
 }
 export function parseConnectionDeliveryObservation(value: unknown): ConnectionDeliveryObservation {
   const p = object(value, ['state', 'reason'])
