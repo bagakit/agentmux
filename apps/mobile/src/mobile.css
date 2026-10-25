@@ -388,3 +388,12 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-notice-settings p { color: var(--text-muted); font-size: 13px; line-height: 1.6; }
 
 .mobile-service-notice > .mobile-notice__body { display: flex; gap: 7px; align-items: flex-start; }
+
+/* Deferred feedback must be styled before optional workface styles arrive. */
+.mobile-deferred-surface { min-width: 0; padding: 12px; color: var(--text-2); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.mobile-deferred-surface > p { margin: 0 0 4px; }
+.mobile-deferred-surface > details { color: var(--text-3); }
+.mobile-deferred-surface > details > summary { box-sizing: border-box; min-height: 44px; padding-block: 12px; cursor: pointer; }
+.mobile-deferred-surface > details > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.mobile-deferred-surface > .mobile-text-button { display: inline-flex; min-width: 44px; margin-inline-end: 12px; }
+.mobile-sheet .mobile-deferred-surface { padding: 8px 0; }
