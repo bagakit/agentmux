@@ -1,3 +1,4 @@
+import { parseAgentInputResourceRead } from './agent-input-resource.js'
 import { isConnectionApiMethod, parseConnectionApiParams } from './connection-api-codec.js'
 import { isBackgroundLocalAgentOpen } from './spatial-agent-open-contract.js'
 import { parseGoalParticipationConfirm } from './goal-participation.js'
@@ -135,7 +136,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
-  'submitAgentPrompt' | 'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
+  'submitAgentPrompt' | 'readAgentInputMailbox' | 'inspectAgentInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
@@ -349,6 +350,7 @@ const NATIVE_FIELDS = {
   'agent.automation.pause': ['agentSessionId', 'expectedRun', 'ownerInstanceId', 'operationId'],
   'agent.automation.inspect': ['agentSessionId', 'expectedRun', 'ownerInstanceId', 'operationId'],
   'browser.input.inspect': ['hostId', 'operationId'],
+  'agent.input.resource': ['key', 'index', 'revision', 'maxBytes'],
   'agent.input.inspect': ['key', 'kind', 'originalControlOperationId'],
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent'],
@@ -2320,6 +2322,13 @@ export class AgentMuxRpcService {
           const { hostId: _sourceRoute, ...page } = forwarded
           return page
         })
+        break
+      }
+      case 'agent.input.resource': {
+        const input = parseAgentInputResourceRead(p), { client } = await this.originalInputOwner(input.key.agentSessionId, caller)
+        if (caller && caller.client !== client) throw new AgentMuxError('Input resources cannot cross semantic owners.', 'CONTROL_PERMISSION_DENIED')
+        if (client.forwardRpc) return await client.forwardRpc('agent.input.resource', input, context) as AgentMuxRpcResult<M>
+        result = await client.readAgentInputResource(input, caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined)
         break
       }
       case 'agent.input.inspect': {

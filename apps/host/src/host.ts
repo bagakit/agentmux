@@ -56,6 +56,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const path = options.socketPath ?? defaultAgentMuxControlSocketPath()
   const desktopPath = options.desktopSocketPath ?? `${path}.desktop`
   const connectionOwner = options.connections ? createHostConnectionOwner(options.connections) : undefined
+  const fileUploads = options.fileUploads ?? new FileUploadOwner()
   let runtime: Awaited<ReturnType<typeof startHeadlessAgentMux>> | undefined
   let authority: DeviceAuthority | undefined
   let relay: RelayTransportController | undefined
@@ -129,7 +130,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     snapshot: createHostSnapshotObservation(configurationPath, spatialState),
     spatialPresentation: createHostSpatialPresentation({ ...(configurationPath ? { configurationPath } : {}), clients: () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])] }),
     mobileAssets,
-    fileUploads: options.fileUploads ?? new FileUploadOwner(),
+    fileUploads,
     ...(agentLearning ? { agentLearning } : {}),
     ...(connectionOwner ? { connections: connectionOwner.connections,
       ...(connectionOwner.moteChat ? { moteChat: connectionOwner.moteChat } : {}),
@@ -232,7 +233,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     // Reserve the public endpoint before constructing/loading any Core owner. A live old owner
     // is never displaced or adopted by speculative workflow probes.
     const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
-    runtime = await startHeadlessAgentMux({ ...(options.prepareExecutionEnvironment ? { prepareExecutionEnvironment: options.prepareExecutionEnvironment } : {}), store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
+    runtime = await startHeadlessAgentMux({ inputResources: { inspect: identity => fileUploads.inspect(identity), read: (identity, maxBytes) => fileUploads.read?.(identity, maxBytes) ?? Promise.resolve(null) }, ...(options.prepareExecutionEnvironment ? { prepareExecutionEnvironment: options.prepareExecutionEnvironment } : {}), store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
       ...(configurationPath ? { sessionExecutorConfiguration: (executorId: string) => readConfiguredExecutor(configurationPath, executorId) } : {}),
       ...(options.connections?.clients ? { coreClients: options.connections.clients } : {}),
       ...(options.providers ? { providers: options.providers } : {}), service,

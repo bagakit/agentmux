@@ -1,3 +1,4 @@
+import { parseAgentInputResourceRead } from './agent-input-resource.js'
 import { mintObjectId } from './object-id.js'
 import { parseTerminalRecoveryInput } from './terminal-recovery.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
@@ -244,6 +245,10 @@ export class AgentMuxHostedRuntimeService {
     if (invocation.method === 'readAgentSession' && (invocation.args.length !== 1 ||
         typeof invocation.args[0] !== 'string' || !/^[A-Za-z0-9_-]+$/u.test(invocation.args[0]))) throw new AgentMuxError(
       'Session metadata reading accepts one complete original Session ID.', 'INVALID_CONTROL_REQUEST')
+    if (invocation.method === 'readAgentInputResource') {
+      if (invocation.args.length !== 1) throw new AgentMuxError('Input resource reading accepts one original request; the Host supplies caller authority.', 'INVALID_CONTROL_REQUEST')
+      invocation.args[0] = parseAgentInputResourceRead(invocation.args[0])
+    }
     if (invocation.method === 'readAgentInputMailbox') {
       if (invocation.args.length !== 1) throw new AgentMuxError('Mailbox reading accepts one exact read; author authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
       invocation.args[0] = parseAgentInputMailboxRead(invocation.args[0])
@@ -373,7 +378,7 @@ export class AgentMuxHostedRuntimeService {
       }
       const pending = operation.apply(this.client, rawAgentInput ? [invocation.args[0], rawContext]
         : rawTerminalInput ? [invocation.args[0], invocation.args[1], invocation.args[2], rawContext]
-        : invocation.method === 'readAgentInputMailbox' ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl || invocation.method === 'ensureAgentContinuity' ? [...invocation.args, {
+        : (invocation.method === 'readAgentInputMailbox' || invocation.method === 'readAgentInputResource') ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl || invocation.method === 'ensureAgentContinuity' ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),
         ...(invocation.method === 'ensureAgentContinuity' && this.inputContextCaptureReader ? { captureReader: this.inputContextCaptureReader } : {})
