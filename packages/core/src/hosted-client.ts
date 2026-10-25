@@ -578,7 +578,13 @@ export async function connectHostedAgentMux(options: {
       })().catch(error => { if (attached.get(key) === reading && !disposed && epoch === controlEpoch)
         attachmentUnavailable(reading, error, 'The independent reread did not complete') }).finally(() => { delete reading.recovering })
     }
-    const timer = setTimeout(() => failed(new AgentMuxError('Attachment transfer did not complete; its Run remains live.', 'CONTROL_TIMEOUT')), 60_000)
+    let transferProgressAt = performance.now()
+    const checkProgress = () => {
+      const remaining = 60_000 - (performance.now() - transferProgressAt)
+      if (remaining > 0) timer = setTimeout(checkProgress, remaining)
+      else failed(new AgentMuxError('Attachment transfer made no progress; its Run remains live.', 'CONTROL_TIMEOUT'))
+    }
+    let timer = setTimeout(checkProgress, 60_000)
     try {
       const params = { consumerId, fence: expected, target: { ...target, ...(runId ? { runId } : {}) }, afterByte, view }
       subscription = await rpc.subscribe(replayOnly ? 'runtime.replay-watch' : 'runtime.attachment-watch',
@@ -596,7 +602,12 @@ export async function connectHostedAgentMux(options: {
               if (value.type !== 'snapshot') return
               if (!initialSeen && value.data.transferId !== transferId) throw new AgentMuxError('Attachment initial transfer changed identity.', 'CONTROL_PROTOCOL_ERROR')
               const received = transfer.accept(value.data) as AgentMuxHostedStreamValue | undefined
-              if (!received) return
+              if (!received) {
+                // Only validated, ordered bytes of this initial transfer count as
+                // progress. Unrelated events and empty frames cannot extend its wait.
+                if (!initialSeen && value.data.dataBase64.length > 0) transferProgressAt = performance.now()
+                return
+              }
               if (received.kind === 'initial') {
                 if (initialSeen) throw new AgentMuxError('Attachment repeated its initial observation.', 'CONTROL_PROTOCOL_ERROR')
                 const result = received.value as AgentMuxRunAttachment | { session: AgentMuxAgentSession; attachment: AgentMuxRunAttachment }
