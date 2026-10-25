@@ -45,7 +45,7 @@ it('keeps a stable action and the original Launcher draft while whitespace canno
   expect(Object.values(useLauncherState.getState().drafts).some(draft => draft.prompt === '我的问题')).toBe(true)
   await act(async () => action.click())
   expect(prepare).toHaveBeenCalledOnce()
-  expect(prepare.mock.calls[0][2]).toEqual({ question: '我的问题' })
+  expect(prepare.mock.calls[0]![2]).toEqual({ question: '我的问题' })
   expect(field().value).toBe('我的问题')
 })
 

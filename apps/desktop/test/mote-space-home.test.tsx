@@ -34,6 +34,8 @@ function material(params: FileReadParams): FileReadResult {
 }
 async function type(selector: string, value: string) {
   const input = node<HTMLTextAreaElement>(selector)
+  const disclosure = input.closest<HTMLDetailsElement>('.mote-new-discussion')
+  if (disclosure && !disclosure.open) await moteClick(disclosure.querySelector<HTMLElement>('summary')!)
   await act(async () => {
     input.focus(); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, value)
     input.dispatchEvent(new Event('input', { bubbles: true }))
@@ -50,7 +52,6 @@ beforeEach(() => {
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.continuousProgress, 'goals').mockResolvedValue([])
   vi.spyOn(api.schedule, 'list').mockResolvedValue({ schedules: [], executionScope: 'connected-host' })
-  vi.spyOn(api.schedule, 'onChanged').mockImplementation(() => () => {})
 })
 afterEach(async () => { await app.dispose() })
 
@@ -182,7 +183,7 @@ it.each(['Profile', 'another Topic'] as const)('a delayed persona read retains l
   await app.mount(); await editPersona(owner.topic.id)
   expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, owner.path)
   if (later === 'another Topic') await moteClick(node<HTMLElement>('[data-space-nav="topic:' + PMO_TEAMS_TOPIC_ID + '"]'))
-  else await moteClick(button('Profile'))
+  await moteClick(button('Profile'))
   await type('[aria-label="A question for this Mote"]', 'Keep this later question unsent.')
   const before = useAppStore.getState(), home = homeExpanded(), input = node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')
   expect(home).not.toBeNull(); expect(document.activeElement).toBe(input)
@@ -391,7 +392,11 @@ it('returns to each original home and Ideas reading position with its unsent inp
 })
 
 it('keeps the original private-chat draft and manual question through Ideas and Calendar navigation', async () => {
-  const chatRead = vi.spyOn(api.moteChat, 'call').mockResolvedValue({ configuration: null, operation: null })
+  useAppStore.setState({ manualConnectionSelections: { lark: { hostId: 'local', runtimeId: 'original-chat-host' } } })
+  const chatRead = vi.spyOn(api.moteChat, 'call').mockImplementation(async method => {
+    if (method === 'space.mote.chat.inspect') return { configuration: null, operation: null }
+    throw new Error('Chat activity observation is outside this navigation fixture. Original input stays available.')
+  })
   await app.mount(); await moteClick(button('Profile')); await settleMoteApp()
   const chat = node('[data-mote-private-chat]'), interval = node<HTMLInputElement>('[aria-label="Conversation update interval in minutes"]')
   expect(chat.closest('.mote-profile__preferences')).toBeNull()
@@ -408,7 +413,10 @@ it('keeps the original private-chat draft and manual question through Ideas and 
   expect(interval.value).toBe('47')
   expect(node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]').value).toBe('Keep this new-discussion question unsent.')
   expect(chatRead.mock.calls.length).toBeGreaterThan(0)
-  for (const [method, input] of chatRead.mock.calls) { expect(method).toBe('space.mote.chat.inspect'); expect(input).toEqual(target) }
+  for (const [method, input, owner] of chatRead.mock.calls) {
+    expect(['space.mote.chat.inspect', 'space.mote.chat.diagnose']).toContain(method)
+    expect(input).toEqual(target); expect(owner).toEqual({ hostId: 'local', runtimeId: 'original-chat-host' })
+  }
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().moteChatIntents).toEqual(before.moteChatIntents)
@@ -442,10 +450,12 @@ const homeExpanded = () => app.container.querySelector('[data-surface-tool-dock]
 const originalComposer = () => node<HTMLElement>('.workspace-workbench-slot[data-workspace-id="' + SCRATCH_WORKSPACE_ID + '"] .workbench-tab-slot[data-workbench-tab-id="' + defaultTab.id + '"] [aria-label="Message Agent"]')
 async function openHome() {
   await moteClick(node<HTMLButtonElement>('[data-space-nav="topic:' + PMO_TEAMS_TOPIC_ID + '"]'))
+  expect(homeExpanded()).toBeNull()
+  await moteClick(button('Profile'))
   expect(homeExpanded()).not.toBeNull()
 }
 
-it('opens the companion home from the actual directory and returns to the same original discussion and Composer', async () => {
+it('opens the original discussion from the directory, then explicitly opens Profile and returns to the same Composer', async () => {
   useAppStore.setState({ projectRailOpen: true })
   await app.mount()
   const input = originalComposer()
@@ -553,22 +563,23 @@ it('shows a bounded reading of original arrangements and opens the selected row 
   confirmOriginalHome()
   const saved = [arrangement('later', 40000), arrangement('ended', 1, 'stopped'), arrangement('next', 20000), arrangement('first', 10000), arrangement('third', 30000)]
   vi.mocked(api.schedule.list).mockImplementation(async params => ({ schedules: params.scope ? saved : saved.filter(record => record.agentSessionId === params.target?.agentSessionId), executionScope: 'connected-host' }))
-  const listeners = new Set<(value: ContinuousProgressLoop) => void>()
-  vi.mocked(api.schedule.onChanged).mockImplementation(listener => { listeners.add(listener); return () => { listeners.delete(listener) } })
+  const intervals = vi.spyOn(window, 'setInterval'), cleared = vi.spyOn(window, 'clearInterval')
+  const activeReaders = () => intervals.mock.calls.filter(([, delay], index) => delay === 5000 &&
+    intervals.mock.results[index]?.type === 'return' && !cleared.mock.calls.some(([timer]) => timer === intervals.mock.results[index]?.value)).length
   await app.mount(); await moteClick(button('Profile'))
   expect(vi.mocked(api.schedule.list).mock.calls.filter(([params]) => params.scope).map(([params]) => params)).toEqual([{ scope: { hostId: defaultAgent.hostId, workspacePath: defaultAgent.workspacePath } }])
   const upcoming = node('[aria-label="Next arrangements"]')
   expect([...upcoming.querySelectorAll('[data-upcoming-id]')].map(row => row.getAttribute('data-upcoming-id'))).toEqual(['first', 'next', 'third'])
-  const visibleConsumers = listeners.size
+  const visibleConsumers = activeReaders()
   expect(visibleConsumers).toBeGreaterThan(0)
   const drafts = useAppStore.getState().agentComposerDrafts
   await moteClick(button('Ideas'))
-  expect(listeners.size).toBe(visibleConsumers - 1)
+  expect(activeReaders()).toBe(visibleConsumers - 1)
   const reads = vi.mocked(api.schedule.list).mock.calls.filter(([params]) => params.scope).length
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, updatedAt: session.updatedAt + 1 })) })))
   await settleMoteApp(); expect(vi.mocked(api.schedule.list).mock.calls.filter(([params]) => params.scope)).toHaveLength(reads)
   await moteClick(button('Profile'))
-  expect(listeners.size).toBe(visibleConsumers)
+  expect(activeReaders()).toBe(visibleConsumers)
   await moteClick(node('[data-upcoming-id="next"]'))
   expect(button('Calendar').getAttribute('aria-selected')).toBe('true')
   await vi.waitFor(() => expect(node<HTMLDetailsElement>('.mote-calendar [data-schedule-id="next"] details').open).toBe(true))
@@ -617,6 +628,8 @@ it('keeps the original on-open recovery eligible while its companion home covers
     await app.mount()
     expect(recover).not.toHaveBeenCalled()
     await moteClick(node<HTMLButtonElement>('[data-space-nav="topic:' + customMoteId + '"]'))
+    expect(homeExpanded()).toBeNull()
+    await moteClick(button('Profile'))
     expect(homeExpanded()).not.toBeNull()
     expect(recover).toHaveBeenCalledExactlyOnceWith(customAgent.control, customAgent.workspacePath, expect.any(String), { trigger: 'workspace-open', timingOverride: 'on-open' })
     await moteClick(button('Discussion'))
@@ -684,11 +697,13 @@ it.each([false, true])('reveals a newly saved home arrangement after the existin
 })
 
 
-it('keeps one shared navigation and reachable question across all four Mote pages without replacing the original workface', async () => {
+it('keeps one shared navigation and original new-discussion draft across all four Mote pages without replacing the original workface', async () => {
   useAppStore.setState({ projectRailOpen: true })
   await app.mount(); await openHome()
   const navigation = node('[aria-label="Mote pages"]')
   const question = node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')
+  const disclosure = question.closest<HTMLDetailsElement>('.mote-new-discussion')!
+  expect(disclosure.open).toBe(false)
   const composer = originalComposer()
   await type('[aria-label="A question for this Mote"]', 'A new question, kept separately from the current discussion.')
   const before = useAppStore.getState()
@@ -703,6 +718,9 @@ it('keeps one shared navigation and reachable question across all four Mote page
     expect(button(mode).getAttribute('aria-selected')).toBe('true')
     expect(originalComposer()).toBe(composer)
   }
+  await moteClick(disclosure.querySelector<HTMLElement>('summary')!)
+  expect(disclosure.open).toBe(false)
+  expect(disclosure.querySelector('summary')?.textContent).toContain('Continue draft')
   expect(question.value).toBe('A new question, kept separately from the current discussion.')
   expect(vi.mocked(api.files.readPublic).mock.calls).toHaveLength(reads)
   expect(useAppStore.getState().tabs).toBe(before.tabs)
@@ -720,6 +738,10 @@ it('retains the original pending question across local page switches and prepare
   const question = node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')
   await moteClick(button('Prepare this question in a new discussion'))
   expect(replies).toHaveLength(2)
+  const disclosure = question.closest<HTMLDetailsElement>('.mote-new-discussion')!
+  await moteClick(disclosure.querySelector<HTMLElement>('summary')!)
+  expect(disclosure.open).toBe(false)
+  expect(disclosure.querySelector('summary')?.textContent).toContain('Preparing discussion')
   for (const page of ['Discussion', 'Ideas', 'Calendar', 'Profile']) {
     await moteClick(button(page))
     expect(node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')).toBe(question)
@@ -749,6 +771,86 @@ it('lists recent original discussions and opens the exact selected Tab without c
   expect(button('Discussion').getAttribute('aria-selected')).toBe('true')
   expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: neighborTab.id, groupId: 'mote-group', regionId: neighborTab.layout.activeRegionId })
   expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+
+function savePrimaryLocation(tabId = defaultTab.id) {
+  const topics = moteTopics.map(topic => topic.id === PMO_TEAMS_TOPIC_ID ? { ...topic, quickMode: {
+    status: 'saved' as const, version: revision, defaults: { conversation: { hostId: 'local', sessionId: defaultAgent.id,
+      displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'mote-group', tabId, regionId: defaultTab.layout.activeRegionId } }
+  } } : topic)
+  vi.mocked(api.scratch.listTopics).mockResolvedValue(topics)
+  vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => topics.find(topic => topic.id === id) ?? null)
+  useAppStore.setState(state => ({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
+    [SCRATCH_WORKSPACE_ID]: { ...state.scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!, topics } } }))
+}
+
+it('returns from a chosen member and Profile to the saved main Agent without replacing either original workface or draft', async () => {
+  savePrimaryLocation()
+  useAppStore.setState({ projectRailOpen: true })
+  await app.mount()
+  expect(app.container.querySelector('.mote-space-frame__primary')).toBeNull()
+  const before = useAppStore.getState(), composer = originalComposer()
+  await moteClick(button('Profile'))
+  await moteClick(node<HTMLElement>('[aria-label="Recent discussions"] [data-mote-discussion="' + neighborTab.id + '"]'))
+  expect(useAppStore.getState().workbenchSpaceSelection?.tabId).toBe(neighborTab.id)
+  await moteClick(button('Return to main Agent'))
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: defaultTab.id, regionId: defaultTab.layout.activeRegionId })
+  expect(homeExpanded()).toBeNull()
+  expect(app.container.querySelector('.mote-space-frame__primary')).toBeNull()
+  await moteClick(button('Profile'))
+  await moteClick(button('Return to main Agent'))
+  expect(homeExpanded()).toBeNull()
+  expect(originalComposer()).toBe(composer)
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+it('keeps the member workface usable when the saved main Agent location is unknown and offers its existing settings', async () => {
+  savePrimaryLocation('missing-original-primary-tab')
+  await app.mount()
+  const before = useAppStore.getState(), composer = originalComposer()
+  expect(node('.mote-space-frame__issue').textContent).toContain('not confirmed')
+  expect(button('Review main Agent')).toBeDefined()
+  expect(composer.closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull()
+  await moteType(composer, 'Keep this original member input.')
+  await moteClick(button('Review main Agent'))
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Quick mode')
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+it('offers explicit main Agent selection when unconfigured without choosing the currently visible member', async () => {
+  await app.mount()
+  const before = useAppStore.getState()
+  await moteClick(button('Choose main Agent'))
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Quick mode')
+  expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+
+it('returns to the saved main Agent location when its execution observation is unknown while preserving healthy members', async () => {
+  savePrimaryLocation()
+  await app.mount()
+  await moteClick(button('Profile'))
+  await moteClick(node<HTMLElement>('[aria-label="Recent discussions"] [data-mote-discussion="' + neighborTab.id + '"]'))
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id !== defaultAgent.id) })))
+  await settleMoteApp()
+  const before = useAppStore.getState()
+  expect(node('.mote-space-frame__issue').textContent).toContain('execution Host is unconfirmed')
+  await moteClick(button('Return to main Agent'))
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: defaultTab.id, regionId: defaultTab.layout.activeRegionId })
+  expect(homeExpanded()).toBeNull()
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
 })
