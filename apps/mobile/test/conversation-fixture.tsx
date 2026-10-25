@@ -92,6 +92,16 @@ export async function mount(content: ReactNode) {
 export async function click(element: Element) {
   await act(async () => { element.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
 }
+/** Wait for the requested production surface, including its first module read. */
+export async function waitForElement<T extends Element = HTMLElement>(element: ParentNode, selector: string): Promise<T> {
+  let found: T | null = null
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    found = element.querySelector<T>(selector)
+    expect(found, `Actual requested element ${selector}`).not.toBeNull()
+  }, { timeout: 10000, interval: 10 })
+  return found!
+}
 export function button(element: HTMLElement, label: string): HTMLButtonElement {
   const match = [...element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.getAttribute('aria-label') === label || value.textContent?.trim() === label)
   expect(match, `Actual mounted action ${label}`).toBeDefined()

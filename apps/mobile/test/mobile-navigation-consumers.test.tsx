@@ -5,7 +5,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { saveMobileHome } from '../src/navigation/home-preference'
-import { button, click, evidence, fixture, mount, mounted, session } from './conversation-fixture'
+import { button, click, evidence, fixture, mount, mounted, session, waitForElement } from './conversation-fixture'
 
 const connection = { state: 'connected' as const, message: '已连接' }
 beforeEach(async () => { window.history.replaceState(null, ''); localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
@@ -33,6 +33,7 @@ async function app(presentation: boolean | 'missing-provider' = true) {
   const original = owner.snapshot().record.conversation
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={{ ...createBrowserPlatform(), copyText: copy }} />)
   await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+  await waitForElement(view.element, '.mobile-session-list')
   expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(true)
   return { ...f, ...view, fullDirectory, pointRead, copy, ensure, original, failCatalog: () => { catalogFails = true } }
 }
@@ -62,17 +63,19 @@ it('ignores unrelated Session and Run events while refreshing the exact selected
   await act(async () => f.emit({ type: 'agent-session', session: { ...session('peer'), updatedAt: 2 } }))
   await act(async () => f.emit({ type: 'run-removed', agentSessionId: 'peer', run: { runId: 'run-peer' }, evidence }))
   expect(f.pointRead).not.toHaveBeenCalled(); expect(f.fullDirectory).not.toHaveBeenCalled()
+  // The root metadata and retained attachment scope each point-read the same Session.
+  // The static-loading control has the same two consumers; unrelated Sessions stay untouched.
   await act(async () => f.emit({ type: 'agent-session', session: { ...session(), updatedAt: 3 } }))
-  expect(f.pointRead.mock.calls).toEqual([['session-original']])
+  expect(f.pointRead.mock.calls).toEqual([['session-original'], ['session-original']])
   f.pointRead.mockClear()
   await act(async () => f.emit({ type: 'run-removed', run: { runId: 'run-original' }, evidence }))
-  expect(f.pointRead.mock.calls).toEqual([['session-original']])
+  expect(f.pointRead.mock.calls).toEqual([['session-original'], ['session-original']])
   f.pointRead.mockClear()
   await act(async () => f.emit({ type: 'connection-state', state: 'lost', evidence }))
-  expect(f.pointRead.mock.calls).toEqual([['session-original']])
+  expect(f.pointRead.mock.calls).toEqual([['session-original'], ['session-original']])
   f.pointRead.mockClear()
   await act(async () => f.emit({ type: 'connection-state', state: 'restored', evidence }))
-  expect(f.pointRead.mock.calls).toEqual([['session-original']])
+  expect(f.pointRead.mock.calls).toEqual([['session-original'], ['session-original']])
   expect(f.fullDirectory).not.toHaveBeenCalled()
   expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
   expect(getDeviceWorkface().snapshot().record.conversation).toEqual(f.original)
