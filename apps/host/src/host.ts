@@ -97,8 +97,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     runtime: () => { if (!runtime) throw new AgentMuxError('The original Host is not yet available. Learning operations and existing Agents are retained.', 'CONTROL_UNAVAILABLE'); return runtime },
     desktop: desktopClient
   }) : undefined
-  const mobileAccessState = (): AgentMuxRpcMobileAccessState => {
-    try { return { ...mobileState, ...(offerUrl ? { origin: new URL(offerUrl()).origin } : {}) } }
+  const mobileAccessState = (url?: string): AgentMuxRpcMobileAccessState => {
+    try { return { ...mobileState, ...(url || offerUrl ? { origin: new URL(url ?? offerUrl!()).origin } : {}) } }
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const spatialState = connectionOwner?.spatial ?? new AgentMuxSpatialStateStore()
@@ -143,7 +143,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       }
     },
     deviceAdministration: createDeviceAdministration(authorityReady, mobileAccessState, () => {
-      if (!offerUrl || mobileState.state !== 'connected') throw new AgentMuxError(mobileState.message, 'CONTROL_UNAVAILABLE')
+      if (!offerUrl) throw new AgentMuxError(mobileState.message, 'CONTROL_UNAVAILABLE')
       return offerUrl()
     }),
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {

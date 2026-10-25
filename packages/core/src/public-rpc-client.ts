@@ -491,7 +491,7 @@ class RpcClient implements AgentMuxRpcClient {
     return { response, reader: finalReader!, ...(subscriptionId === undefined ? {} : { subscriptionId }) }
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, options: AgentMuxRpcCallOptions = {}): Promise<AgentMuxRpcResult<M>> {
-    if (isAgentMuxRpcDeviceMethod(method) && method !== 'device.hello' && this.endpoint.transport !== 'unix') {
+    if (isAgentMuxRpcDeviceMethod(method) && method !== 'device.hello' && method !== 'device.link' && this.endpoint.transport !== 'unix') {
       throw new AgentMuxError('Device management requires the local Unix endpoint and a local user. Nothing was connected or submitted.', 'CONTROL_PERMISSION_DENIED')
     }
     if (isAgentMuxRpcStream(method, rpcRecord(params))) throw new AgentMuxError('This method returns a subscription; use subscribe().', 'INVALID_CONTROL_REQUEST')

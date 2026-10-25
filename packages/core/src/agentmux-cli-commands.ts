@@ -281,7 +281,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     {'--tab':'data','--region':'data','--direction':'value'}, f => ({tabId:id(f,'--tab'),regionId:id(f,'--region'),direction:value(f,'--direction',true)})),
   empty('whoami', 'Read your verified Session, Run, presentation and available capabilities.'),
   empty('device.ls', 'Read original Host devices, authenticated key fingerprints, latest connection times and peer IP/HTTP User-Agent. Unrecorded identification remains unknown.'),
-  empty('device.link', 'Read the complete connection offer URL from the local Host.'),
+  empty('device.link', 'Read this authenticated Host’s complete mobile link, page URL, Relay endpoint and connection state without changing device authorization.'),
   command('device.hello', '--name NAME', 'Name this authenticated encrypted device.',
     { '--name': 'data' }, f => ({ name: value(f, '--name', true)! } satisfies AgentMuxRpcParams<'device.hello'>)),
   command('device.revoke', '--device ID', 'Revoke the exact device from the local Host.',

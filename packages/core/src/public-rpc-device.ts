@@ -37,7 +37,7 @@ export type AgentMuxRpcDeviceParameterMap = {
 }
 export type AgentMuxRpcDeviceResultMap = {
   'device.ls': { hostId: string; devices: readonly TrustedDevice[]; mobileAccess: AgentMuxRpcMobileAccessState }
-  'device.link': { hostId: string; url: string }
+  'device.link': { hostId: string; url: string; pageUrl: string; relay: { endpoint: string; useTls: boolean }; mobileAccess: AgentMuxRpcMobileAccessState }
   'device.hello': { hostId: string; device: TrustedDevice }
   'device.revoke': { hostId: string; device: TrustedDevice }
 }
@@ -98,7 +98,7 @@ export function parseAgentMuxRpcDeviceResult<M extends AgentMuxRpcDeviceMethod>(
     }
     return d as unknown as TrustedDevice
   }
-  const keys = method === 'device.ls' ? ['hostId', 'devices', 'mobileAccess'] : method === 'device.link' ? ['hostId', 'url'] : ['hostId', 'device']
+  const keys = method === 'device.ls' ? ['hostId', 'devices', 'mobileAccess'] : method === 'device.link' ? ['hostId', 'url', 'pageUrl', 'relay', 'mobileAccess'] : ['hostId', 'device']
   const p = rpcRecord(value, keys, code)
   if (Object.keys(p).length !== keys.length) fail()
   identifier(p.hostId, code)
@@ -106,6 +106,11 @@ export function parseAgentMuxRpcDeviceResult<M extends AgentMuxRpcDeviceMethod>(
     if (typeof p.url !== 'string') fail()
     const offer = parseConnectionOfferUrl(p.url as string)
     if (!offer || offer.serverId !== p.hostId) fail()
+    const page = new URL(p.url as string); page.hash = ''
+    const relay = rpcRecord(p.relay, ['endpoint', 'useTls'], code)
+    if (p.pageUrl !== page.href || relay.endpoint !== offer!.relay.endpoint || relay.useTls !== offer!.relay.useTls) fail()
+    const access = rpcRecord(p.mobileAccess, ['state', 'message', 'origin'], code)
+    if (!['starting', 'connected', 'disconnected', 'unavailable'].includes(access.state as string) || typeof access.message !== 'string' || access.message.length > 4096 || access.origin !== page.origin) fail()
   } else if (method === 'device.ls') {
     const access = rpcRecord(p.mobileAccess, ['state','message','origin'], code)
     if (!['starting','connected','disconnected','unavailable'].includes(access.state as string) || typeof access.message !== 'string' || access.message.length > 4096) fail()
