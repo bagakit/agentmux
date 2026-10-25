@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '../src/errors.js'
+import { isObjectId } from '../src/object-id.js'
 import type { AgentProvider } from '../src/agent-provider.js'
 import type { AgentMuxClient } from '../src/client.js'
 import type { AgentMuxRunInputData } from '../src/types.js'
@@ -25,42 +26,75 @@ function deferred<T>() {
   const promise = new Promise<T>(yes => { resolve = yes })
   return { promise, resolve }
 }
+async function reached<T>(promise: Promise<T>, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([promise, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), 3000)
+    })])
+  } finally { if (timer) clearTimeout(timer) }
+}
 type Input = { operationId: string; expectedByte: number; data: AgentMuxRunInputData }
 async function fixture() {
   const h = await rpcOwnerFixture(['original']); cleanup.push(h.close)
   let cursor = 0
-  const writes: Input[] = []
+  const writes: Array<{ data: AgentMuxRunInputData; transaction: Input | null;
+    appliedByteRange: { startByte: number; endByte: number } | null }> = []
   const run = (id = 'run-original'): CtxmuxAdapterRun => ({ ...h.run(id), pid: 123, acceptedInputBytes: cursor })
+  const send = (data: AgentMuxRunInputData, transaction: Input | null) => {
+    const startByte = cursor
+    cursor += typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength
+    const appliedByteRange = { startByte, endByte: cursor }
+    writes.push({ data, transaction, appliedByteRange })
+    return Promise.resolve({ appliedByteRange })
+  }
+  h.rawInput.mockImplementation((_id, data) => send(data, null))
   Object.assign(h.inner.kernel, { identity: () => ({ daemonInstanceId: 'private-daemon', protocolVersion: 18, buildIdentity: 'private-fixture' }),
     status: async (id: string) => run(id), list: async () => [run()],
-    input: async (_id: string, input: Input) => {
-      expect(input.expectedByte).toBe(cursor); writes.push(input)
-      const startByte = cursor
-      cursor += typeof input.data === 'string' ? Buffer.byteLength(input.data) : input.data.byteLength
-      return { run: run(), appliedByteRange: { startByte, endByte: cursor } }
+    openInput: async (id: string) => ({ run: run(id), waitWritable: h.waitWritable,
+      input: (data: AgentMuxRunInputData) => h.rawInput(id, data) }),
+    input: async (id: string, input: Input) => {
+      expect(input.expectedByte).toBe(cursor)
+      const accepted = await send(input.data, input)
+      return { run: run(id), ...accepted }
     } })
+  // Observe the original Core logical cause, without inventing an operation ID
+  // on the native raw writer. The spy calls the real cancellation owner.
+  const preempt = vi.spyOn(h.client as unknown as {
+    cancelPromptRenderObservation(session: unknown, source: unknown, cause: Record<string, unknown>): void
+  }, 'cancelPromptRenderObservation')
+  const causes = () => preempt.mock.calls.map(call => call[2])
   const target = { agentSessionId: 'original', expectedRun: { runId: 'run-original' } }
-  return { ...h, run, writes, target }
+  return { ...h, run, writes, causes, target }
 }
-function preparation(h: Awaited<ReturnType<typeof fixture>>) {
-  const entered = deferred<AbortSignal>()
-  vi.spyOn(h.client.providers.get('codex') as Required<Pick<AgentProvider, 'readPromptExecutionEvidence'>>, 'readPromptExecutionEvidence').mockImplementation(context => {
-    const signal = context.signal!; entered.resolve(signal)
-    return new Promise((_resolve, reject) => {
-      if (signal.aborted) reject(signal.reason)
-      else signal.addEventListener('abort', () => reject(signal.reason), { once: true })
-    })
-  })
-  return entered.promise
-}
-function claimedRefreshPreparation(h: Awaited<ReturnType<typeof fixture>>) {
-  // Whole mouse reports now preserve preclaim qualification. Exercise the diagnostic
-  // after a real refresh claim/ACK, while the real Screen owner awaits a later frame.
-  const provider = h.client.providers.get('codex'), entered = deferred<AbortSignal>()
+function interruptPreparationProvider(h: Awaited<ReturnType<typeof fixture>>) {
+  const provider = h.client.providers.get('codex')
   const catalog = Object.getOwnPropertyDescriptor(provider, 'catalog')!
   Object.defineProperty(provider, 'catalog', { ...catalog, value: { ...provider.catalog, capabilities: {
     ...provider.catalog.capabilities, promptExecution: { immediate: 'interrupt-before-input' } } } })
   cleanup.push(async () => { Object.defineProperty(provider, 'catalog', catalog) })
+  return provider
+}
+function preparation(h: Awaited<ReturnType<typeof fixture>>) {
+  const provider = interruptPreparationProvider(h), entered = deferred<AbortSignal>()
+  let finishRead: (() => void) | undefined
+  cleanup.push(async () => { finishRead?.() })
+  vi.spyOn(provider as Required<Pick<AgentProvider, 'readPromptExecutionEvidence'>>, 'readPromptExecutionEvidence').mockImplementation(context => {
+    const signal = context.signal!; entered.resolve(signal)
+    return new Promise((_resolve, reject) => {
+      const finish = (reason: unknown) => { signal.removeEventListener('abort', abort); reject(reason) }
+      const abort = () => finish(signal.reason)
+      finishRead = () => finish(new Error('Fixture preparation observation ended.'))
+      if (signal.aborted) abort()
+      else signal.addEventListener('abort', abort, { once: true })
+    })
+  })
+  return reached(entered.promise, 'The declared interrupt-before-input preparation was not entered.')
+}
+function claimedRefreshPreparation(h: Awaited<ReturnType<typeof fixture>>) {
+  // Whole mouse reports now preserve preclaim qualification. Exercise the diagnostic
+  // after a real refresh claim/ACK, while the real Screen owner awaits a later frame.
+  const provider = interruptPreparationProvider(h), entered = deferred<AbortSignal>()
   vi.spyOn(provider, 'planPromptInput').mockImplementation(prompt => ({ kind: 'render-then-submit',
     payload: prompt, renderedText: prompt, submit: '\r', prepare: { refresh: '\x0c', interrupt: '\x1b', endEvent: 'turn-end' } }))
   vi.spyOn(provider, 'readPromptExecutionEvidence').mockResolvedValue({ sourceId: 'private-refresh-source', id: 'private-idle', state: 'idle' })
@@ -72,6 +106,7 @@ function claimedRefreshPreparation(h: Awaited<ReturnType<typeof fixture>>) {
     observeOutput: async () => ({ run: run(), resizeRevision: 0, gap: null, terminal: { type: 'not-requested' },
       replay: [{ startByte: 0, endByte: bytes.length, dataBytes: bytes }], close: async () => {} }) })
   const screen = (h.client as unknown as { screenEvidence: AgentScreenEvidenceStore }).screenEvidence
+  cleanup.push(async () => { screen.discardAll() })
   const wait = screen.wait.bind(screen)
   vi.spyOn(screen, 'wait').mockImplementation((session, boundary, after, predicate, options) => {
     const result = wait(session, boundary, after, predicate, options)
@@ -84,7 +119,7 @@ function claimedRefreshPreparation(h: Awaited<ReturnType<typeof fixture>>) {
     }
     return result
   })
-  return entered.promise
+  return reached(entered.promise, 'The acknowledged refresh did not enter its frame observation.')
 }
 function submit(h: Awaited<ReturnType<typeof fixture>>, client: Pick<AgentMuxClient, 'submitAgentPrompt'> = h.client) {
   return client.submitAgentPrompt({ ...h.target, operationId: 'original-prompt', afterSubmissionId: null,
@@ -98,49 +133,60 @@ function detail(error: AgentMuxError): { source: string; competingInput: Record<
 }
 
 it.each(['accepted', 'not_applied', 'unknown'] as const)('freezes cancellation before the lane independently of eventual %s', async outcome => {
-  const h = await fixture(), firstEntered = deferred<void>(), release = deferred<void>()
-  const originalInput = h.inner.kernel.input as (id: string, input: Input) => Promise<unknown>
+  const h = await fixture(), capacityEntered = deferred<void>(), release = deferred<void>()
+  const originalInput = h.rawInput.getMockImplementation()!
   const failure = new AgentMuxError('Original raw transport result', 'FIXTURE_INPUT_RESULT', outcome)
-  h.inner.kernel.input = async (id: string, input: Input) => {
-    if (input.data === 'prior') { firstEntered.resolve(); await release.promise }
-    if (input.data === '雪' && outcome !== 'accepted') { h.writes.push(input); throw failure }
-    return await originalInput(id, input)
-  }
-  const prior = h.client.writeAgent({ ...h.target, data: 'prior', source: 'user' }); await firstEntered.promise
+  h.rawInput.mockImplementation((id, data) => {
+    if (data === '雪' && outcome !== 'accepted') {
+      h.writes.push({ data, transaction: null, appliedByteRange: null })
+      return Promise.reject(failure)
+    }
+    return originalInput(id, data)
+  })
+  await h.client.writeAgent({ ...h.target, data: 'prior', source: 'user' })
   const entered = preparation(h), prompt = submit(h), signal = await entered
+  h.waitWritable.mockImplementationOnce(async (_bytes, signal) => {
+    capacityEntered.resolve(); await release.promise; signal?.throwIfAborted()
+  })
   const raw = h.client.writeAgent({ ...h.target, data: '雪', source: 'user' }).then(value => value, error => error)
   try {
+    await reached(capacityEntered.promise, 'The original raw input did not reach native capacity.')
     const error = await prompt, snapshot = detail(error), frozen = JSON.stringify(snapshot)
-    expect(h.writes).toEqual([]); expect(signal.aborted).toBe(true)
+    expect(h.writes.map(write => write.data)).toEqual(['prior']); expect(signal.aborted).toBe(true)
     expect(snapshot.competingInput).toEqual({ agentSessionId: 'original', runId: 'run-original',
-      operationId: expect.stringMatching(/^[0-9a-f-]{36}$/u), inputKind: 'write', encoding: 'utf8', byteLength: 3,
+      operationId: h.causes()[1]!.operationId, inputKind: 'write', encoding: 'utf8', byteLength: 3,
       bytePattern: 'other', phase: 'before-input-lane', expectedByte: null,
       acknowledgementAtCancellation: 'not-attempted', confirmedInputBytesAtCancellation: 0, eventualOutcome: 'unknown' })
+    expect(isObjectId(snapshot.competingInput.operationId)).toBe(true)
+    expect(Object.isFrozen(h.causes()[1])).toBe(true)
     expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
-    release.resolve(); await prior; const result = await raw
+    release.resolve(); const result = await raw
     expect(h.writes.map(write => write.data)).toEqual(['prior', '雪'])
-    expect(h.writes[1]!.operationId).toBe(snapshot.competingInput.operationId); expect(h.writes[1]!.expectedByte).toBe(5)
-    if (outcome === 'accepted') expect(result).toEqual({ runId: 'run-original', appliedByteRange: { startByte: 5, endByte: 8 }, acceptedThroughByte: 8 })
-    else expect(result).toBe(failure)
+    expect(h.writes[1]!.transaction).toBeNull()
+    if (outcome === 'accepted') {
+      expect(result).toEqual({ runId: 'run-original', appliedByteRange: { startByte: 5, endByte: 8 }, acceptedThroughByte: 8 })
+      expect(h.writes[1]!.appliedByteRange).toEqual({ startByte: 5, endByte: 8 })
+    } else expect(result).toBe(failure)
     expect(JSON.stringify(detail(error))).toBe(frozen)
     const lookup = await h.client.readDeliveryAttempt(error.logId!)
     expect(lookup.availability).toBe('found'); expect(detail({ detail: lookup.record!.error.detail } as AgentMuxError)).toEqual(snapshot)
     expect(JSON.stringify(lookup)).not.toContain('private failed prompt body'); expect(frozen).not.toContain('雪')
-  } finally { release.resolve(); await Promise.allSettled([prior, prompt, raw]) }
+  } finally { release.resolve(); await Promise.allSettled([prompt, raw]) }
 })
 
 it('preserves the first cause across multiple competing inputs', async () => {
   const h = await fixture(), entered = preparation(h), prompt = submit(h), signal = await entered
   // Read the original boundary created by the public submit; do not inject an observation or cause.
-  const lanes = (h.client as unknown as { agentInputTails: Map<string, { renderObservations: Set<{ protocolInput?: { cancelled?: Error } }> }> }).agentInputTails
+  const lanes = (h.client as unknown as { agentInputLanes: Map<string, { renderObservations: Set<{ protocolInput?: { cancelled?: Error } }> }> }).agentInputLanes
   const boundary = [...lanes.get('original')!.renderObservations][0]!.protocolInput!
   const first = h.client.writeAgent({ ...h.target, data: 'first-private-body', source: 'user' })
+  await expect.poll(() => signal.aborted).toBe(true)
   const firstReason = signal.reason as AgentMuxError, firstDetail = firstReason.detail
   const second = h.client.writeAgent({ ...h.target, data: '\x1b[<64;10;20M', source: 'user' })
   const error = await prompt; await Promise.all([first, second])
   expect(signal.reason).toBe(firstReason); expect(boundary.cancelled).toBe(firstReason); expect(firstReason.detail).toBe(firstDetail)
-  expect(detail(error).competingInput.operationId).toBe(h.writes[0]!.operationId)
-  expect(detail(error).competingInput.operationId).not.toBe(h.writes[1]!.operationId)
+  expect(detail(error).competingInput.operationId).toBe(h.causes()[0]!.operationId)
+  expect(detail(error).competingInput.operationId).not.toBe(h.causes()[1]!.operationId)
   expect(JSON.stringify(detail(error))).not.toContain('first-private-body')
 })
 
@@ -159,7 +205,7 @@ it.each([
   const entered = claimedMouse ? claimedRefreshPreparation(h) : preparation(h), prompt = submit(h), signal = await entered
   if (claimedMouse) expect((await h.store.load())[0]).toMatchObject({ agentSessionId: 'original',
     promptCompletionAdmission: { submissionId: 'original-prompt', frameRefresh: { acknowledged: true,
-      operationId: h.writes[0]!.operationId, inputByteRange: { startByte: 0, endByte: 1 } } } })
+      operationId: h.writes[0]!.transaction!.operationId, inputByteRange: { startByte: 0, endByte: 1 } } } })
   const raw = h.client.writeAgent({ ...h.target, data, source: 'user' }), error = await prompt, snapshot = detail(error).competingInput; await raw
   expect(signal.aborted).toBe(true)
   if (claimedMouse) {
@@ -169,7 +215,8 @@ it.each([
   }
   expect(snapshot.bytePattern).toBe(expectedPattern); expect(snapshot.encoding).toBe(typeof data === 'string' ? 'utf8' : 'binary')
   expect(snapshot.byteLength).toBe(typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength)
-  expect(snapshot.operationId).toBe(h.writes[claimedMouse ? 1 : 0]!.operationId)
+  expect(snapshot.operationId).toBe(h.causes().at(-1)!.operationId)
+  expect(h.writes[claimedMouse ? 1 : 0]!.transaction).toBeNull()
   expect(Object.keys(snapshot).sort()).toEqual(['agentSessionId', 'runId', 'operationId', 'inputKind', 'encoding', 'byteLength',
     'bytePattern', 'phase', 'expectedByte', 'acknowledgementAtCancellation', 'confirmedInputBytesAtCancellation', 'eventualOutcome'].sort())
 })
@@ -180,7 +227,9 @@ it.each(['paste', 'posture'] as const)('records the actual public %s entry and e
   const raw = kind === 'paste' ? h.client.pasteAgent({ ...h.target, text: 'private pasted 雪', terminalData: 'ignored terminal data' })
     : h.client.setAgentPosture({ ...h.target, modeId: 'fixture-declared-mode' })
   const snapshot = detail(await prompt).competingInput; await raw; const actual = h.writes[0]!
-  expect(snapshot.inputKind).toBe(kind); expect(snapshot.operationId).toBe(actual.operationId)
+  expect(snapshot.inputKind).toBe(kind); expect(snapshot.operationId).toBe(h.causes().at(-1)!.operationId)
+  if (kind === 'posture') expect(actual.transaction!.operationId).toBe(snapshot.operationId)
+  else expect(actual.transaction).toBeNull()
   expect(snapshot.byteLength).toBe(typeof actual.data === 'string' ? Buffer.byteLength(actual.data) : actual.data.byteLength)
   expect(JSON.stringify(snapshot)).not.toContain('private pasted')
 })
@@ -193,7 +242,7 @@ it('keeps empty/wrong-Run inputs and protocol handoff unchanged', async () => {
   expect(signal.aborted).toBe(false); expect(h.writes).toEqual([])
   await h.client.writeAgent({ ...h.target, data: '\x1b[24;80R', source: 'terminal-protocol' }); expect(signal.aborted).toBe(false)
   await h.client.writeAgent({ ...h.target, data: 'z', source: 'user' })
-  expect(detail(await prompt).competingInput.operationId).toBe(h.writes[1]!.operationId)
+  expect(detail(await prompt).competingInput.operationId).toBe(h.causes().at(-1)!.operationId)
   expect(h.writes.map(write => write.data)).toEqual(['\x1b[24;80R', 'z'])
 })
 
@@ -206,7 +255,7 @@ it('preserves actual detail/logid through Hosted SDK, Unix RPC and compiled CLI 
   const hosted = await connectHostedAgentMux({ rpc }); cleanup.push(() => hosted.dispose())
   const entered = claimedRefreshPreparation(h), prompt = submit(h, hosted), signal = await entered
   expect((await h.store.load())[0]).toMatchObject({ agentSessionId: 'original', promptCompletionAdmission: {
-    submissionId: 'original-prompt', frameRefresh: { acknowledged: true, operationId: h.writes[0]!.operationId,
+    submissionId: 'original-prompt', frameRefresh: { acknowledged: true, operationId: h.writes[0]!.transaction!.operationId,
       inputByteRange: { startByte: 0, endByte: 1 } } } })
   await hosted.writeAgent({ ...h.target, data: '\x1b[<64;10;20M', source: 'user' })
   const error = await prompt, snapshot = detail(error), first = await hosted.readDeliveryAttempt(error.logId!)
@@ -214,7 +263,8 @@ it('preserves actual detail/logid through Hosted SDK, Unix RPC and compiled CLI 
   expect(error.controlFailure?.disposition).not.toBe('not_applied')
   expect(h.writes.map(write => write.data)).toEqual(['\x0c', '\x1b[<64;10;20M'])
   expect(detail({ detail: first.record!.error.detail } as AgentMuxError)).toEqual(snapshot)
-  expect(snapshot.competingInput.operationId).toBe(h.writes[1]!.operationId)
+  expect(snapshot.competingInput.operationId).toBe(h.causes().at(-1)!.operationId)
+  expect(h.writes[1]!.transaction).toBeNull()
   const connect = vi.spyOn(h.client, 'connect'); h.inner.connected = false
   expect((await hosted.readDeliveryAttempt(error.logId!)).record).toEqual(first.record); expect(connect).not.toHaveBeenCalled()
   const { build } = await import('esbuild'), output = join(root, 'agentmux.mjs')
@@ -233,7 +283,7 @@ it('preserves actual detail/logid through Hosted SDK, Unix RPC and compiled CLI 
   if (evidence) {
     await writeFile(join(evidence, 'public-cli.mjs'), await readFile(output)); await writeFile(join(evidence, 'public-cli.metafile.json'), JSON.stringify(built.metafile))
     await writeFile(join(evidence, 'public-consumer.json'), JSON.stringify({ error: { code: error.code, detail: error.detail, logId: error.logId,
-      controlFailure: error.controlFailure }, snapshot, first, result, actualRawInputOperation: h.writes[1]!.operationId,
+      controlFailure: error.controlFailure }, snapshot, first, result, cancellationOperationId: h.causes().at(-1)!.operationId, nativeRawRange: h.writes[1]!.appliedByteRange,
       refresh: h.client.agentSession('original').promptCompletionAdmission?.frameRefresh, offline: true }))
   }
 }, 15_000)
