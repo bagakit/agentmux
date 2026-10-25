@@ -536,6 +536,9 @@ export type AgentCapabilities = {
   timeline: 'unavailable' | 'complete-events' | 'streaming'
   permission: 'none' | 'observe' | 'respond'
   providerResume: boolean
+  /** Verified categories this adapter can interpret, not complete source coverage.
+   * Missing declarations and records without an outcome remain unknown; [] contributes none. */
+  turnOutcomes?: { observation?: AgentTurnOutcome['status'][]; history?: AgentTurnOutcome['status'][] }
   /** Explicit native turn-interruption recognition. Missing evidence remains unknown when supported. */
   nativeInterruption?: true
   /** Native copies preserve their Provider context and receive a new conversation identity. */
@@ -568,7 +571,7 @@ export type AgentCapabilities = {
  */
 export type AgentUsageCapability = {
   kind: 'native-transcript'
-  transcriptFormat: 'claude-jsonl' | 'codex-rollout'
+  transcriptFormat: string
 }
 
 /** Latest native usage sample delivered by the existing Hook. It is not a whole-turn total. */

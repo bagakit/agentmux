@@ -336,6 +336,12 @@ function assertProviderContributions(contribution: AgentProviderDefinition | Age
       contribution.executable !== catalog.executable)) {
     throw new AgentMuxError('Provider identity must match its catalog.', 'INVALID_AGENT_PROVIDER')
   }
+  for (const categories of Object.values(catalog.capabilities.turnOutcomes ?? {})) {
+    if (!Array.isArray(categories) || categories.some(value => !['completed', 'failed', 'interrupted'].includes(value)) ||
+        new Set(categories).size !== categories.length) {
+      throw new AgentMuxError('Turn outcome coverage must name distinct verified result categories.', 'INVALID_AGENT_PROVIDER')
+    }
+  }
   if (catalog.capabilities.providerResume !== (catalog.resumeStrategy.kind === 'provider-native')) {
     throw new AgentMuxError('Native resume capability and strategy must agree.', 'INVALID_AGENT_PROVIDER')
   }
@@ -613,7 +619,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       const mainInteraction = normalized.mainSubject ? definition.interaction : undefined
       const interaction = mainInteraction
         ? normalizeTerminalInteraction(resolvedEnvelope, normalized.status.observedAt, mainInteraction,
-          definition.hook.resolveInteractionToolCallId?.(normalized.eventName, resolvedEnvelope.payload ?? {}, correlationContext))
+          definition.hook.resolveInteractionToolCallId?.(normalized.eventName, resolvedEnvelope.payload ?? {}, correlationContext), normalized.lifecycleEvent)
         : undefined
       const interactionCompletion = mainInteraction
         ? normalizeTerminalInteractionCompletion(resolvedEnvelope, normalized.status.observedAt, mainInteraction) : undefined

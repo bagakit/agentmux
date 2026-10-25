@@ -6,51 +6,21 @@ import {
   readTurnUsageFromTranscript
 } from './agent-usage-transcript.js'
 import {
-  canonicalHookLifecycleEvent,
-  rawEventNamesForLifecycle,
   resolveHookEventName,
   HOOK_EVENT_NAME_PAYLOAD_KEYS,
   type AgentHookEventNameSource,
   type HookEventNamePayloadKey
 } from './agent-hook-event.js'
-import type { AgentUsageCapability } from './types.js'
+import { usageTranscriptDecoder } from './providers/usage-transcript.js'
 
 const MAX_HOOK_INPUT_BYTES = 128 * 1024
 
-/**
- * 只在这些收尾类事件读取最近响应的用量样本；收尾观测不把响应样本升级为整轮累计。
- * 在别的事件（工具前后、prompt 提交）上读 transcript 既读不到本 turn 终值，也白白多一次 IO，
- * 所以用量抽取只挂在收尾事件上，这也是「开销可忽略」的一半。
- *
- * **从 canonical 生命周期表派生**，不再手写字面量。此前这里硬编码 `['Stop','StopFailure']`——只有
- * PascalCase 的两家命中，Hermes 的 `on_session_end`/`post_llm_call` 与 Pi 的 `agent_settled`
- * 同样是 turn 收尾却永远读不到用量。派生保证「新增一个 Provider 的收尾事件」只需在映射表里加一行。
- *
- * 派生而非手写还挡住反向的错：Pi 的 `agent_end` **看着**像收尾却不是（之后还有 retry/compaction/
- * queued 三条续跑路径，见 providers/pi.ts），此刻 transcript 尚未落定。手写清单很容易把它算进来，
- * 而那会读到半个 turn 的数、还会把上一 turn 的用量抹掉。
- *
- * 导出为 SSOT：client.ts 的会话侧要用同一份集合判定「这是收尾事件却没抽到用量」——那种情况必须
- * 清掉上一轮的 turnUsage，绝不让陈旧数字挂在最近用量标签下（读 transcript 失败/竞态截断/记录
- * 落在 256KiB 窗口外都会命中这条）。两侧共用一个集合，才不会一处新增收尾事件、另一处忘了跟。
- */
-export const USAGE_FINALIZATION_EVENTS: ReadonlySet<string> = new Set(
-  rawEventNamesForLifecycle('turn-end')
-)
-
-/**
- * 从 hook 环境读出这个 Provider 声明的 usage transcript 格式。
- *
- * 这个变量由 Core 从 catalog SSOT 注入（见 client.ts 的 agentEnvironment）——未声明 usage 的 Provider
- * 根本不带这个变量，于是这里返回 `null`，hook 进程对它们连尾部读都不做。值域收窄到已知的两种格式，
- * 任何意外值都当作"没声明"处理，绝不放一个 hook 进程不认识的格式进去。
- */
-function resolveUsageCapability(env: NodeJS.ProcessEnv = process.env): AgentUsageCapability | null {
-  const format = env.AGENTMUX_USAGE_TRANSCRIPT_FORMAT
-  if (format === 'claude-jsonl' || format === 'codex-rollout') {
-    return { kind: 'native-transcript', transcriptFormat: format }
-  }
-  return null
+/** Exact launch metadata; raw event names from another Provider never qualify a sample read. */
+export function usageFinalizationEvents(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string> {
+  try {
+    const values: unknown = JSON.parse(env.AGENTMUX_HOOK_USAGE_EVENTS ?? '[]')
+    return new Set(Array.isArray(values) && values.every(value => typeof value === 'string') ? values : [])
+  } catch { return new Set() }
 }
 
 /** 从 hook payload 里取出 transcript 路径——各 Provider 的键名与 normalizer 侧保持一致。 */
@@ -139,10 +109,8 @@ export function isAgentMuxManagedHookEnvironment(env: NodeJS.ProcessEnv = proces
 export function hookResponseFor(provider: string | null, eventName: string | null): string {
   if (provider === 'antigravity') {
     if (eventName === 'PreToolUse') return '{"decision":"ask"}\n'
-    // 收尾用 canonical 生命周期事件判，不比原始拼法：`Stop` 与 `StopFailure` 都归一到 `turn-end`
-    // （agent-hook-event.ts），比字面 `=== 'Stop'` 会漏掉 `StopFailure`——与本文件顶上
-    // USAGE_FINALIZATION_EVENTS 从 canonical 表派生、不再手写 `['Stop','StopFailure']` 是同一个决定。
-    if (canonicalHookLifecycleEvent(eventName ?? undefined) === 'turn-end') return '{"decision":""}\n'
+    // This passive response is Antigravity's protocol, not a common turn-completion fact.
+    if (eventName === 'Stop' || eventName === 'StopFailure') return '{"decision":""}\n'
   }
   return '{}\n'
 }
@@ -217,11 +185,11 @@ export async function runAgentHookCommand(): Promise<void> {
     if (url && token) {
       // 在收尾事件上，为声明了 usage 能力的 Provider 读一次 transcript 尾部，把本 turn 的真实 token 数并进
       // 既有回执——usage 由此「随既有事件流到达」，不新增轮询、不新增通道。读失败/无用量一律不写，缺席保持缺席。
-      const usageCapability = resolveUsageCapability()
-      if (eventName && usageCapability && USAGE_FINALIZATION_EVENTS.has(eventName)) {
+      const decodeUsage = usageTranscriptDecoder(resolveHookProvider() ?? undefined, process.env.AGENTMUX_USAGE_TRANSCRIPT_FORMAT)
+      if (eventName && decodeUsage && usageFinalizationEvents().has(eventName)) {
         const transcriptPath = transcriptPathFromPayload(payload)
         if (transcriptPath) {
-          const usage = await readTurnUsageFromTranscript(usageCapability, transcriptPath, Date.now())
+          const usage = await readTurnUsageFromTranscript(decodeUsage, transcriptPath, Date.now())
           if (usage) payload = { ...payload, [HOOK_PAYLOAD_USAGE_KEY]: usage }
         }
       }

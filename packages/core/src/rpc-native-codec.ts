@@ -110,6 +110,13 @@ function promptExecution(value: unknown): void {
 function agentCapabilities(value: unknown): void {
   const capabilities = record(value)
   promptExecution(capabilities.promptExecution)
+  if (capabilities.turnOutcomes !== undefined) {
+    const outcomes = record(capabilities.turnOutcomes, ['observation', 'history'])
+    for (const categories of [outcomes.observation, outcomes.history]) if (categories !== undefined) {
+      array(categories, value => member(value, ['completed', 'failed', 'interrupted']))
+      if (new Set(categories as unknown[]).size !== (categories as unknown[]).length) fail()
+    }
+  }
   if (capabilities.nativeConversationInput !== undefined && record(capabilities.nativeConversationInput, ['managedRuns']).managedRuns !== true) fail()
   if (capabilities.nativeInterruption !== undefined && capabilities.nativeInterruption !== true) fail()
   if (capabilities.asyncQuestionReply !== undefined) member(capabilities.asyncQuestionReply, ['native-input'])
@@ -123,7 +130,7 @@ function agentCapabilities(value: unknown): void {
   member(capabilities.replyCorrelation, ['none', 'native-turn-id', 'acp-turn-id'])
   if (capabilities.usage !== undefined) {
     const usage = record(capabilities.usage, ['kind', 'transcriptFormat'])
-    member(usage.kind, ['native-transcript']); member(usage.transcriptFormat, ['claude-jsonl', 'codex-rollout'])
+    member(usage.kind, ['native-transcript']); text(usage.transcriptFormat)
   }
 }
 function runRef(value: unknown): Record<string, unknown> { const run = record(value, ['runId']); string(run.runId); return run }
@@ -382,7 +389,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.native.ls': {
         record(p, ['hostId', 'executorId', 'providerId', 'capabilities', 'availability', 'sessions', 'issues'])
         string(p.hostId); string(p.executorId); string(p.providerId)
-        record(p.capabilities, ['terminal', 'timeline', 'permission', 'providerResume', 'nativeInterruption', 'providerFork', 'replyCorrelation', 'asyncQuestionReply', 'promptExecution', 'nativeConversationInput', 'usage'])
+        record(p.capabilities, ['terminal', 'timeline', 'permission', 'providerResume', 'turnOutcomes', 'nativeInterruption', 'providerFork', 'replyCorrelation', 'asyncQuestionReply', 'promptExecution', 'nativeConversationInput', 'usage'])
         agentCapabilities(p.capabilities)
         if (p.hostId !== input.hostId || p.executorId !== input.executorId) fail()
         member(p.availability, ['available', 'unsupported'])

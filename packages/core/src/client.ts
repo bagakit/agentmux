@@ -7716,6 +7716,7 @@ export class AgentMuxClient {
       // AGENTMUX_AGENT_SESSION_ID 只是上下文提示，改一下就能冒充，故不能用于认证。
       AGENTMUX_AGENT_CAPABILITY: capability,
       ...(usage ? { AGENTMUX_USAGE_TRANSCRIPT_FORMAT: usage.transcriptFormat } : {}),
+      AGENTMUX_HOOK_USAGE_EVENTS: JSON.stringify(provider.hook.usageFinalizationEvents ?? []),
       ...(source?.kind === 'payload' ? { AGENTMUX_HOOK_PAYLOAD_KEY: source.payloadKey } : {})
     }
     if (source?.kind !== 'payload') {
@@ -9569,26 +9570,32 @@ export class AgentMuxClient {
 
   private async acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted()
-    // 进程已经终结的 run 不再收它的 hook。这一条挡的是**两个**写入点：下面既发 agent-status 事件、又把
-    // semanticStatus 落盘。只挡其一都不够——留在磁盘上的 working 会在下次冷启动被读回来继续撒谎。
-    //
-    // 为什么退出之后还会有 hook：hook 是 Agent 自己的进程在 exec 一条命令，它与内核的退出事件是两条
-    // 独立的到达路径，谁先到不定；而自然退出不解绑 registry（解绑只发生在 stop/retire），所以下面那条
-    // 会话绑定检查照旧命中。一条被收下的迟到 hook 会让 Agent 永久转圈：exited 之后再不会有 process-state
-    // 来拨正它，而 working 的时钟衰减只降到 running，降不到 exited。
-    //
-    // 这不会误伤「打断当轮」：那条路径根本不产生 process-state、run 仍是 running，此时的 hook 是正常
-    // 刷新，照收。
-    if (this.endedRuns.has(envelope.runId)) return
     const session = this.registry.findByRun(runRef(envelope.runId))
     if (
       !session ||
       session.agentSessionId !== envelope.agentSessionId ||
       session.providerId !== envelope.providerId
     ) return
+    // This authenticated original binding can retain its receipt after Run end, but can no
+    // longer establish current native identity, permissions or activity. Keep the diagnostic
+    // record without fabricating a typed result or replaying the original operation.
+    const retainUnconfirmedEndedHook = async (): Promise<void> => {
+      const observedAt = Date.now(), code = 'AGENT_HOOK_OUTCOME_UNCONFIRMED'
+      const message = 'The original Run ended before native Hook verification. Its receipt is retained; the native outcome is unconfirmed. No input, permission or recovery action was replayed.'
+      const evidence = { source: 'native-hook' as const, run: { ...session.run }, hookReceiptId: envelope.receiptId, observedAt }
+      await this.persistAndPublishTimeline({ type: 'upsert', agentSessionId: session.agentSessionId, item: {
+        id: JSON.stringify(['unconfirmed-native-hook', envelope.runId, envelope.receiptId]), agentSessionId: session.agentSessionId,
+        kind: 'lifecycle', status: 'complete', source: 'native-hook', createdAt: observedAt, updatedAt: observedAt,
+        title: 'Native Hook verification unconfirmed', contentEligibility: 'unconfirmed',
+        content: JSON.stringify({ eventName: envelope.eventName, payload: envelope.payload }),
+        conversationDiagnostic: { code, message }
+      } }, evidence, session.hostId, signal)
+      this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code, message, evidence })
+    }
+    if (this.endedRuns.has(envelope.runId)) { await retainUnconfirmedEndedHook(); return }
     const provider = this.providers.get(envelope.providerId)
     const witness = await this.hookNativeWitness(session, envelope, signal)
-    if (this.endedRuns.has(envelope.runId)) return
+    if (this.endedRuns.has(envelope.runId)) { await retainUnconfirmedEndedHook(); return }
     // Source change is an observation, never permission to apply the new conversation's semantics to the old binding.
     const protectedTarget = session.nativeHandle !== undefined
     // Partial process witnesses may omit a retained locator; an explicit contradiction cannot replace it.
@@ -9685,6 +9692,15 @@ export class AgentMuxClient {
         evidence: { source: 'agentmux', run: { ...session.run }, observedAt: normalized.status.observedAt } })
       throw new AgentMuxError(message, 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
     }
+    // Original native results are historical records. Current-activity ordering, a newer
+    // turn or a later CAS winner may reject their projection, never their original evidence.
+    const outcomeMutations = normalized.timeline.filter(mutation => normalized.mainSubject && !witnessTargetMismatch &&
+      mutation.type !== 'update' && mutation.item.turnOutcome)
+    for (const mutation of outcomeMutations) {
+      await this.persistAndPublishTimeline(mutation, { source: 'native-hook', observedAt: normalized.status.observedAt,
+        run: { ...session.run }, hookReceiptId: envelope.receiptId }, session.hostId, signal)
+    }
+    if (this.endedRuns.has(envelope.runId)) return
     const canPromoteLocator = !witnessTargetMismatch
     const precedingInteractionReceiptId = normalized.interaction?.nativeToolCallId &&
       !nativeHookToolCallId(envelope.payload ?? {}) ? context.previousHookReceipt?.id : undefined
@@ -9732,7 +9748,7 @@ export class AgentMuxClient {
     const updatesSemanticStatus = !(nativeEnd && normalized.mainSubject && normalized.lifecycleEvent === 'turn-end') && hookEventUpdatesSemanticStatus(
       turnPhase,
       normalized.lifecycleEvent,
-      provider.hook.rules.some((rule) => eventNamesCanReopenTurn(rule.events, rule.lifecycleEvent))
+      provider.hook.rules.some((rule) => eventNamesCanReopenTurn(rule.events, rule.lifecycleEvent, provider.hook.lifecycle))
     ) && (normalized.semanticState !== 'unknown' || normalized.lifecycleEvent === 'turn-end')
     if (updatesSemanticStatus && acceptsAgentActivityState(session.activityCommit, session.run, normalized.status)) {
       // This bounded lookup is only for a candidate transition, never each tool/output observation.
@@ -10107,6 +10123,7 @@ export class AgentMuxClient {
     }
     if (next.activityCommit?.latest.id === activityId) await this.flushAgentActivity(next)
     for (const mutation of normalized.timeline) {
+      if (outcomeMutations.includes(mutation)) continue
       try { await this.persistAndPublishTimeline(mutation, evidence, next.hostId, signal) }
       catch (error) {
         if (signal.aborted || (error instanceof AgentMuxError &&

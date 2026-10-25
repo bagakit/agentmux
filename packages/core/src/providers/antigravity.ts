@@ -15,6 +15,12 @@ export const ANTIGRAVITY_HOOK_EVENTS = [
 ] as const
 
 export const ANTIGRAVITY_HOOKS: AgentNativeHookSpecification = {
+  lifecycle: {
+    SessionStart: 'session-start',
+    UserPromptSubmit: 'user-prompt-submit',
+    PreToolUse: 'tool-use-start',
+    PostToolUse: 'tool-use-end',
+  },
   // 事件名靠 `--event` 旗标送达（见下方 createAntigravityManagedHookPlan 往 command 尾部追加 --event）。
   eventNameSource: { kind: 'flag' },
   rules: [

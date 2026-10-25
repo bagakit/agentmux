@@ -1,3 +1,4 @@
+import { CLAUDE_USAGE_CAPABILITY } from './claude-usage.js'
 import { inspectHookDisableSetting } from './shared.js'
 import { listClaudeNativeSessions, assertClaudeNativeResumeSource } from './claude-native-catalog.js'
 import { readClaudeSessionHistoryPage, readClaudeSessionHistoryRecord, readClaudeConversationChanges } from './claude-native-history.js'
@@ -57,6 +58,17 @@ export const CLAUDE_HOOK_EVENTS = [
 ] as const
 
 export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
+  lifecycle: {
+    SessionStart: 'session-start',
+    UserPromptSubmit: 'user-prompt-submit',
+    PermissionRequest: 'permission-request',
+    PreToolUse: 'tool-use-start',
+    PostToolUse: 'tool-use-end',
+    PostToolUseFailure: 'tool-use-end',
+    SubagentStart: 'subagent-start',
+    StopFailure: 'turn-end',
+  },
+  usageFinalizationEvents: ['Stop', 'StopFailure'],
   observationFailure: claudeNativeObservationFailure,
   currentActivity: claudeNativeActivity,
   nativeTurnIdKeys: ['turnId'],
@@ -154,10 +166,11 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
+        turnOutcomes: { observation: ['failed'] },
         terminal: true, timeline: 'complete-events', permission: 'respond',
         providerResume: true, nativeInterruption: true, replyCorrelation: 'none',
         providerFork: { current: true },
-        usage: { kind: 'native-transcript', transcriptFormat: 'claude-jsonl' }
+        usage: CLAUDE_USAGE_CAPABILITY
       }
     }),
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
@@ -194,16 +207,31 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     normalizeHook(envelope, context) {
       const normalized = provider.normalizeHook(envelope, context)
       if (normalized.eventName === 'StopFailure') {
-        // This callback does not identify the purpose of its last assistant text.
-        return { ...normalized, timeline: normalized.timeline.map(mutation =>
-          mutation.type !== 'update' && mutation.item.kind === 'assistant_message' && mutation.item.content !== undefined
-            ? { ...mutation, item: { ...mutation.item, contentEligibility: 'unconfirmed' as const } }
-            : mutation) }
-      }
-      if (normalized.eventName === 'turn.complete' && normalized.semanticState === 'error' &&
-        normalized.currentActivity?.state === 'idle') {
+        // Classic StopFailure exposes error text but no native turn identity. Keep its local
+        // diagnostic without borrowing the most recent turn or publishing its last answer.
+        const payload = envelope.payload ?? {}
+        const detail = [payload.error, payload.error_details].filter(value => typeof value === 'string').join(': ')
         return { ...normalized, status: { ...normalized.status,
-          detail: 'Native turn ended in error; the Provider did not supply a structured error code.' } }
+          detail: detail || 'Native request failed; its native turn identity is unconfirmed.' },
+          timeline: normalized.timeline.map(mutation => mutation.type === 'update' ? mutation : {
+            ...mutation, item: { ...mutation.item,
+              ...(mutation.item.kind === 'assistant_message' ? { contentEligibility: 'unconfirmed' as const } :
+                detail ? { content: detail } : {}) }
+          }) }
+      }
+      if (normalized.eventName === 'turn.complete' && normalized.mainSubject &&
+        normalized.semanticState === 'error' && normalized.currentActivity?.state === 'idle') {
+        const nativeTurnId = normalized.currentActivity.nativeTurnId
+        if (!nativeTurnId) return normalized
+        // The native runner identifies its error end, but exposes no original API error fields.
+        const failure = { code: 'AGENT_PROVIDER_ERROR', nativeTurnId,
+          message: 'The native Claude turn ended in error; the original error code is unavailable.',
+          publicMessage: 'Claude could not finish this request.',
+          recovery: 'Inspect the original Agent for details. Retry only after choosing to submit again.' }
+        return { ...normalized, status: { ...normalized.status, failure, detail: failure.message },
+          timeline: normalized.timeline.map(mutation => mutation.type === 'update' ? mutation : {
+            ...mutation, item: { ...mutation.item, turnOutcome: { status: 'failed' as const, failure } }
+          }) }
       }
       return normalized
     },
