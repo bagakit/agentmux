@@ -59,6 +59,14 @@ Host 已持有的派生图片字节可复用 `readSessionHistoryImageBytes(bytes
 
 CLI/RPC 历史分页复用原 `agent history` / `agent.history`；Native Resume 仍通过 Core Session 生命周期完成。Hook、Permission、Usage 和问题回答是各自独立声明的能力，不能因 history reader 可用而冒充已接入。
 
+## Agent 与工具分端执行
+
+现有 `agent.execution.create`、`agent.execution.binding`、`agent.execution.rejoin` 与 `agent.execution.inspect` RPC／同名对象 CLI 复用 [Core 执行协调器](src/agent-execution-coordinator.ts)。Provider 贡献原生接法；客户端继续使用同一绑定、原 Session 与操作回执。`rejoin` 重接原 reader，不重发未知的工具操作。
+
+[Claude Provider](src/providers/claude.ts) 的分端适配当前限定于 Claude Code 2.1.314 的原生模块与 `mcp serve` 合同。原文件工具由资源端原生服务执行，`Bash`／资源任务 `TaskStop` 由该原 helper 的进程句柄执行；资源授权为绑定中明确给出的 `host-user`。原调用的工具池、权限模式与 `PreToolUse` 判定先成立，资源 MCP 自身的许可另行成立，不添加整类工具自动授权。用户已有 MCP、插件、提示与原生会话配置继续由 Claude 加载。
+
+原调用与嵌套 MCP 是两个原生调用：原 `PreToolUse` 可拒绝操作，实际执行的后置 Hook 使用 MCP 工具名与调用 ID；嵌套审批处于主循环。配置按原工具名匹配后置 Hook、按子 Agent 身份审批，或依赖其他模块替换执行时，需要核对这些具体语义，不能由连接成功宣称任意扩展完全等价。该原生版本的 debug 日志还会记录被替换的本地检查取消，它不代表资源工具的拒绝回执。此范围不影响普通 Claude 会话，也不要求删除用户 Hook 才能使用分端执行。
+
 ## Runtime 边界
 
 `@agentmux/core` 是 ctxmux 的 Client，不是 ctxmux 的宿主。ctxmux 自己的 daemon、CLI、
