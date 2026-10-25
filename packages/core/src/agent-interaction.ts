@@ -1,7 +1,7 @@
 import { AgentMuxError } from './errors.js'
-import { canonicalHookLifecycleEvent } from './agent-hook-event.js'
 import { nativeHookToolCallId } from './hook-normalizer.js'
 import type {
+  AgentHookLifecycleEvent,
   AgentMuxInteractionInputPlan,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
@@ -269,7 +269,8 @@ export function normalizeTerminalInteraction(
   envelope: NativeHookEnvelope,
   observedAt: number,
   protocol: AgentTerminalInteractionDetection,
-  resolvedToolCallId?: string
+  resolvedToolCallId?: string,
+  lifecycleEvent?: AgentHookLifecycleEvent | null
 ): AgentMuxInteractionRequest | undefined {
   const payload = envelope.payload ?? {}
   // 消费 adapter 已得到的 normalized.eventName（通过内部解析后的信封传递），不重新看 payload 字段猜名。
@@ -287,13 +288,8 @@ export function normalizeTerminalInteraction(
       payload.tool_input ?? payload.toolInput ?? payload.input
     )
   }
-  // 按 canonical 生命周期判，不比原始拼法：`PermissionRequest`（claude/codex）与
-  // `permissionRequest`（copilot）都归一到 `permission-request`（agent-hook-event.ts:73,279）。
-  // 字面比较只认 PascalCase 那一种——今天恰好不咬，因为只有 claude 与 codex 声明了 interaction
-  // 协议、两者都是 PascalCase；但哪天一个 camelCase/snake_case 的 Provider 拿到 interaction 协议，
-  // 它的授权请求就会静默不弹框（question 那条走 protocol.questionEvents，是 Provider 自己声明的
-  // 拼法，不受影响），于是 Agent 一直停在等待、用户无从批准。与 7377272b 是同一个决定。
-  if (canonicalHookLifecycleEvent(eventName ?? undefined) === 'permission-request') {
+  // Only the exact Provider's normalized lifecycle may establish a permission request.
+  if (lifecycleEvent === 'permission-request') {
     const toolInput = serializedInput(payload.tool_input ?? payload.toolInput)
     const nativeToolCallId = nativeHookToolCallId(payload) ?? resolvedToolCallId
     return {

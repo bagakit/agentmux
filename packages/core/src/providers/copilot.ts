@@ -71,6 +71,15 @@ export const COPILOT_HOOK_EVENTS = [
  * 「等我点一下」和「正在干活」在界面上长得一模一样（与 Cursor 的两个授权门同一判断）。
  */
 export const COPILOT_HOOKS: AgentNativeHookSpecification = {
+  lifecycle: {
+    sessionStart: 'session-start',
+    userPromptSubmitted: 'user-prompt-submit',
+    permissionRequest: 'permission-request',
+    preToolUse: 'tool-use-start',
+    postToolUse: 'tool-use-end',
+    postToolUseFailure: 'tool-use-end',
+    subagentStart: 'subagent-start',
+  },
   // 事件名靠 `--event` 旗标送达（负载不带任何事件名键，见 createCopilotManagedHookPlan 的说明）。
   eventNameSource: { kind: 'flag' },
   resolveSubject(payload, context) {

@@ -41,6 +41,13 @@ export const DROID_HOOK_EVENTS = [
 ] as const
 
 export const DROID_HOOKS: AgentNativeHookSpecification = {
+  lifecycle: {
+    SessionStart: 'session-start',
+    UserPromptSubmit: 'user-prompt-submit',
+    PreToolUse: 'tool-use-start',
+    PostToolUse: 'tool-use-end',
+    SubagentStop: 'subagent-stop',
+  },
   // 事件名随负载到达：每个事件的基础键里都有 `hook_event_name`（见上方 DROID_HOOK_EVENTS 的说明）。
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   rules: [

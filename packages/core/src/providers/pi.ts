@@ -34,6 +34,13 @@ export const PI_HOOK_EVENTS = [
  * - Pi 自身无交互权限事件，catalog.permission 记 `none`；工具与轮次无双向关联，replyCorrelation 记 `none`。
  */
 export const PI_HOOKS: AgentNativeHookSpecification = {
+  lifecycle: {
+    before_agent_start: 'session-start',
+    agent_start: 'session-start',
+    tool_call: 'tool-use-start',
+    tool_execution_start: 'tool-use-start',
+    tool_execution_end: 'tool-use-end',
+  },
   matchesNativeSession: (eventName, rawPayload, context) => {
     const incomingId = normalizeNativeSessionId(rawPayload.session_id)
     if (!incomingId) return false

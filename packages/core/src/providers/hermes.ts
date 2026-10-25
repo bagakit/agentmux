@@ -48,6 +48,13 @@ function extraField(payload: Readonly<Record<string, unknown>>, field: string): 
 }
 
 export const HERMES_HOOKS: AgentNativeHookSpecification = {
+  lifecycle: {
+    on_session_start: 'session-start',
+    pre_llm_call: 'turn-start',
+    pre_tool_call: 'tool-use-start',
+    post_tool_call: 'tool-use-end',
+    subagent_stop: 'subagent-stop',
+  },
   // 事件名随负载到达：Hermes 的 `_serialize_payload` 每条事件都写 `hook_event_name`（本机第一方源码
   // 实测：`~/.hermes/.../shell_hooks.py`）。所以它虽不带 `--event`、也不注入 env，仍然安全。
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },

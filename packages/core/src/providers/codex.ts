@@ -1,3 +1,4 @@
+import { CODEX_USAGE_CAPABILITY } from './codex-usage.js'
 import { planCodexQuestionReply } from './codex-question.js'
 import { observeCodexTerminalFrontend, reconnectCodexTerminalFrontend } from './codex-managed-frontend.js'
 import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from './codex-prompt-execution-evidence.js'
@@ -94,6 +95,15 @@ export const CODEX_HOOK_EVENTS = [
 ] as const
 
 export const CODEX_HOOKS: AgentNativeHookSpecification = {
+  lifecycle: {
+    SessionStart: 'session-start',
+    UserPromptSubmit: 'user-prompt-submit',
+    PermissionRequest: 'permission-request',
+    PreToolUse: 'tool-use-start',
+    PostToolUse: 'tool-use-end',
+    SubagentStart: 'subagent-start',
+  },
+  usageFinalizationEvents: ['Stop', 'StopFailure'],
   permissionDecision: {
     eventName: 'PermissionRequest',
     outputs: {
@@ -195,12 +205,13 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
       acpStrategy: { kind: 'none' },
       capabilities: {
+        turnOutcomes: { observation: ['completed', 'failed', 'interrupted'] },
         terminal: true, timeline: 'complete-events', permission: 'respond',
         providerResume: true, nativeInterruption: true, replyCorrelation: 'none', nativeConversationInput: { managedRuns: true },
         asyncQuestionReply: 'native-input',
         providerFork: { current: true },
         promptExecution: { immediate: 'terminal-submit' },
-        usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
+        usage: CODEX_USAGE_CAPABILITY
       }
     }),
     buildArgs: (prompt, args) => codexInvocation(args, [], prompt),

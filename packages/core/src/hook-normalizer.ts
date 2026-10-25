@@ -25,6 +25,7 @@ import {
   canonicalHookLifecycleEvent,
   resolveHookEventName,
   type AgentHookEventNameSource,
+  type AgentHookLifecycleDialect,
   type HookEventNamePayloadKey
 } from './agent-hook-event.js'
 import { agentDisplayState } from './agent-status-freshness.js'
@@ -37,7 +38,7 @@ export type AgentNativeHookStateRule = {
   toolNames?: readonly string[]
   /** A pure predicate over the flattened native payload; first matching rule wins. */
   matches?: (payload: Readonly<Record<string, unknown>>) => boolean
-  /** Undefined uses native-name semantics; null explicitly declares no lifecycle. */
+  /** Undefined uses only this Provider's declared dialect; null explicitly declares no lifecycle. */
   lifecycleEvent?: AgentHookLifecycleEvent | null
 }
 
@@ -60,6 +61,9 @@ export type AgentNativeSubagentTracking = {
 }
 
 export type AgentNativeHookSpecification = {
+  lifecycle?: AgentHookLifecycleDialect
+  /** Transcript sample availability is independent of final turn outcome. */
+  usageFinalizationEvents?: readonly string[]
   /** Pure projection from the original native payload, only after current main-subject verification. */
   continuity?: (eventName: string, payload: Readonly<Record<string, unknown>>,
     context: AgentProviderHookNormalizationContext) => AgentHookContinuityObservation | undefined
@@ -649,7 +653,7 @@ export function normalizeNativeHook(
   const rule = eventRule(specification, eventName, payload)
   // 归一化到 Core canonical 生命周期事件。认不出就是 `undefined`——语义状态照旧只由 Provider 的
   // `rules` 给出，绝不因为归一化失败而伪造 working/done。
-  const nativeLifecycleEvent = canonicalHookLifecycleEvent(eventName, rule?.lifecycleEvent)
+  const nativeLifecycleEvent = canonicalHookLifecycleEvent(eventName, rule?.lifecycleEvent, specification.lifecycle)
   const declaredSubject = specification.resolveSubject?.(payload, context)
   const childSubject = declaredSubject ? declaredSubject.kind === 'child' : nativeHookHasSubagentSubject(specification, eventName, payload)
   const incomingId = sessionIdField(payload, specification.nativeHandle?.sessionIdKeys ?? [])

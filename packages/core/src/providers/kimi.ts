@@ -28,6 +28,12 @@ type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
  * 4. TS 2.1.1 中无 SubagentStart/SubagentStop hook，不声明 subagentTracking；亦不预设未证 agentName 别名猜测。
  */
 export const KIMI_HOOKS: AgentNativeHookSpecification = {
+  lifecycle: {
+    UserPromptSubmit: 'user-prompt-submit',
+    PreToolUse: 'tool-use-start',
+    PostToolUse: 'tool-use-end',
+    PostToolUseFailure: 'tool-use-end',
+  },
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   rules: [
     // Stop 是 afterStep 上的可 veto 探测，可能继续执行，不当 main done 或 turn-end

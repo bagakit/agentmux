@@ -39,6 +39,14 @@ export const GROK_HOOK_EVENTS = [
  * 那是零依赖叶子，hook 子进程靠它拿表，不能反向依赖本模块。此处只保留配置侧清单与 rules。
  */
 export const GROK_HOOKS: AgentNativeHookSpecification = {
+  lifecycle: {
+    session_start: 'session-start',
+    user_prompt_submit: 'user-prompt-submit',
+    pre_tool_use: 'tool-use-start',
+    post_tool_use: 'tool-use-end',
+    post_tool_use_failure: 'tool-use-end',
+    subagent_start: 'subagent-start',
+  },
   // 事件名随负载到达，键是 camelCase 的 `hookEventName`（**投递侧**拼法）。注意这与配置侧不同：
   // 配置写 PascalCase `PreToolUse`，负载报 snake_case 值（`pre_tool_use`）藏在 `hookEventName` 里。
   // 声明的是投递侧那个键——子进程读的就是它（见文件头「两个面」的说明）。

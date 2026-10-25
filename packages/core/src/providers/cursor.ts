@@ -40,7 +40,7 @@ export const CURSOR_HOOK_EVENTS = [
  * `tool_use_id`）——normalizer 的既有读取顺序已覆盖这些键，所以时间轴不需要 Cursor 专属分支。
  *
  * `stop` 状态按 status 诚实区分：
- * 官方 2026.10.01-e373342 实测，Cursor 在 stop 负载里传递 status（"completed" / "aborted" / "error"）。
+ * 官方构建 e373342 实测，Cursor 在 stop 负载里传递 status（"completed" / "aborted" / "error"）。
  * 只有已证明成功的 "completed" 赋予 state: 'done' 与 successful completion 身份（放行 automatic 进度）；
  * 实际 "error" 诚实映射为 state: 'error'，lifecycleEvent: 'turn-end'（放行 manual 下一轮，automatic 零写拒绝）；
  * "aborted" 取消收尾使用已有诚实语义 state: 'unknown'，lifecycleEvent: 'turn-end'（无 completion 身份）；
@@ -58,12 +58,18 @@ export const CURSOR_HOOK_EVENTS = [
  * 隔离子代理事件（`subagentStart`/`subagentStop` 携带 `subagent_id`），防止子代理覆盖主会话句柄。
  */
 export const CURSOR_HOOKS: AgentNativeHookSpecification = {
+  lifecycle: {
+    beforeSubmitPrompt: 'user-prompt-submit',
+    preToolUse: 'tool-use-start',
+    postToolUse: 'tool-use-end',
+    postToolUseFailure: 'tool-use-end',
+  },
   // 固定第一方版本同时提供 hook_event_name；托管配置继续显式用 --event 传递事件名。
   eventNameSource: { kind: 'flag' },
   rules: [
     // 授权门：Cursor 正等一个决定。
     { events: ['beforeShellExecution', 'beforeMCPExecution'], state: 'waiting' },
-    { events: ['stop'], matches: payload => payload.status === 'completed', state: 'done' },
+    { events: ['stop'], matches: payload => payload.status === 'completed', state: 'done', lifecycleEvent: 'turn-end' },
     { events: ['stop'], matches: payload => payload.status === 'error', state: 'error', lifecycleEvent: 'turn-end' },
     { events: ['stop'], matches: payload => payload.status === 'aborted', state: 'unknown', lifecycleEvent: 'turn-end' },
     { events: ['stop'], state: 'unknown', lifecycleEvent: null },
