@@ -15,13 +15,36 @@ import type { AgentMuxRunRef, AgentMuxStoredAgentSession, AgentPromptInputPlan, 
 /** Pure original-input record decoding, shared by durable storage and public receipts. */
 export const MAX_STORED_TEXT_BYTES = 1024 * 1024
 const MAX_ID_BYTES = 512
-const ENCODER = new TextEncoder()
+/**
+ * Whether the UTF-8 encoding of `value` stays within `maxBytes`, without encoding it.
+ * Every stored Session row is normalized on each read and write, and these bodies can be
+ * hundreds of KB; allocating a full copy only to read its length dominated that cost.
+ * A UTF-16 unit encodes to 1..3 bytes (a surrogate pair to 4 = 2 units x 2), so the
+ * length bounds decide almost every value; only the ambiguous band is counted exactly.
+ * Lone surrogates count 3 bytes, matching TextEncoder's U+FFFD replacement.
+ */
+function utf8WithinBytes(value: string, maxBytes: number): boolean {
+  if (value.length > maxBytes) return false
+  if (value.length * 3 <= maxBytes) return true
+  let bytes = 0
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index)
+    if (unit < 0x80) bytes += 1
+    else if (unit < 0x800) bytes += 2
+    else if (unit >= 0xd800 && unit <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1)
+      if (next >= 0xdc00 && next <= 0xdfff) { bytes += 4; index++ } else bytes += 3
+    } else bytes += 3
+    if (bytes > maxBytes) return false
+  }
+  return true
+}
 function record(value: unknown, name: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError(`${name} must be an object.`, 'INVALID_AGENT_SESSION_STORE')
   return value as Record<string, unknown>
 }
 function string(value: unknown, name: string, maxBytes = MAX_ID_BYTES): string {
-  if (typeof value !== 'string' || !value.trim() || ENCODER.encode(value).length > maxBytes || /[\0\r\n]/.test(value)) throw new AgentMuxError(`${name} is invalid.`, 'INVALID_AGENT_SESSION_STORE')
+  if (typeof value !== 'string' || !value.trim() || !utf8WithinBytes(value, maxBytes) || /[\0\r\n]/.test(value)) throw new AgentMuxError(`${name} is invalid.`, 'INVALID_AGENT_SESSION_STORE')
   return value
 }
 function timestamp(value: unknown, name: string): number {
@@ -268,7 +291,7 @@ export function normalizePromptInputIntent(value: unknown): NonNullable<NonNulla
   }
   const plan = record(source.plan, 'promptCompletionAdmission.intent.plan')
   const bytes = (value: unknown): string => {
-    if (typeof value !== 'string' || !value.length || ENCODER.encode(value).length > MAX_STORED_TEXT_BYTES) {
+    if (typeof value !== 'string' || !value.length || !utf8WithinBytes(value, MAX_STORED_TEXT_BYTES)) {
       throw new AgentMuxError('Frozen prompt input is invalid.', 'INVALID_AGENT_SESSION_STORE')
     }
     return value
