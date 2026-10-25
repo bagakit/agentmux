@@ -119,7 +119,12 @@ export async function createConnectionServices(options: { directory: string | un
             }
             return { state: 'ready' as const }
           } } : {}) }) : undefined
-        publication = routing && options.publication ? new PublicationHost({ connections, ...(publicationStore ? { store: publicationStore } : {}), bindings: routing, conversation: options.publication, ...(ingress ? { permissions: ingress.permissions, queryFeedback: true } : {}),
+        publication = routing && options.publication ? new PublicationHost({ connections, ...(publicationStore ? { store: publicationStore } : {}), bindings: routing, conversation: options.publication, ...(ingress ? { permissions: ingress.permissions, queryFeedback: true, queryInput: {
+          observe: (binding, wake) => ingress!.observeQueryInputs(binding, wake),
+          changes: (binding, input) => ingress!.readQueryInputChanges(binding, input),
+          inspect: input => ingress!.inspect(input),
+          authorized: (query, binding) => ingress!.queryAuthorized(query) && (query.conversationKind !== 'direct' || moteChat?.hasAdmission(query.ingressId, query.input?.author.bindingId ?? binding.bindingId, query.actor) === true)
+        } } : {}),
           ...(options.speaker ? { speaker: async (reference, signal) => {
             const generation = moteChat?.store.generationBySession(reference.agentSessionId)?.generation
             const target = generation?.executionHostId === reference.hostId ? generation.target : undefined

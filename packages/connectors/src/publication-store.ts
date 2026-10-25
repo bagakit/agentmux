@@ -1,5 +1,6 @@
+import { queryInputPosition, queryInputPage, queryInputPending, queryInputReceipt, type QueryInputPosition } from './publication-query-input.js'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
-import { projectQueryFeedback, queueQueryFeedback } from './publication-query-feedback.js'
+import { projectQueryFeedback, queueQueryFeedback, queryFeedbackOperationId } from './publication-query-feedback.js'
 import { externalConversationAuthor, externalConversationRecordId } from '@agentmux/core'
 import { createHash } from 'node:crypto'
 import type { PublicationImage, PublicationFile, ResourceUploadReceipt, ResolvedPublicationPart } from './publication-resource.js'
@@ -41,7 +42,7 @@ export type BindingLifecyclePayload = {
   synchronization: boolean | null
 }
 export type PublicationTextFragment = { text: string; presentationContext?: { before: string; after: string; literal?: true } }
-export type QueryFeedbackPayload = { kind: 'query-feedback'; stage: 'received' | 'started' | 'completed'; messageId: string }
+export type QueryFeedbackPayload = { kind: 'query-feedback'; stage: 'received' | 'queued' | 'dispatched' | 'started' | 'completed'; messageId: string }
 export type PublicationPayload = QueryFeedbackPayload | PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | ImagePublicationPayload | FilePublicationPayload | {
   kind: 'speech'
   text: string
@@ -69,6 +70,8 @@ export type PublicationOperation = ConnectionDelivery & {
   sourceRecords?: ConversationItemRef[]
   /** Exact immutable journal body, qualified before queuing; the source remains its original notification record. */
   originalMessage?: Pick<PublicationOriginalMessage, 'messageId' | 'senderSessionId' | 'notificationId'>
+  /** Private unfinished receipt observation; never an input state or a platform effect state. */
+  queryPending?: true
   /** Original qualified adoption proof retained with its effect for later turn completion. */
   queryTurn?: import('@agentmux/core/conversation').ConversationInputWitness
   queryCompletion?: { record: ConversationItemRef; revision: string }
@@ -82,12 +85,13 @@ export type PublicationOperation = ConnectionDelivery & {
 /** Reuse the original public receipt codec without accepting private request or body fields. */
 const parseReceipt = parseConnectionDeliveryReceipt
 export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
-  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, originalMessage: _originalMessage, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, ...delivery } = operation
+  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, originalMessage: _originalMessage, uploads: _uploads, presentationTime: _presentationTime, speaker: _speaker, avatarUploads: _avatarUploads, avatarSource: _avatarSource, queryTurn: _queryTurn, queryCompletion: _queryCompletion, queryPending: _queryPending, ...delivery } = operation
   const last = operation.uploads?.at(-1)
   return parseConnectionDelivery({ ...delivery, ...((operation.payload.kind === 'image' || operation.payload.kind === 'file') && operation.effect === 'upsert' && !operation.prepared?.request.multipart ? { resourceUpload: { kind: operation.payload.kind, part: operation.payload.part, attempt: operation.uploads?.length ?? 0, state: last?.state ?? 'pending' } } : {}) })
 }
 export type PublicationPageOptions = {
   queryFeedback?: true
+  queryAuthorized?: (query: import('@agentmux/core/connections').ConnectionIngressMessage) => boolean
   fragmentBytes?: number
   fragmentText?: (payload: Extract<PublicationPayload, { kind: 'speech' }>, speaker?: PublicationSpeaker, originalMessage?: PublicationOperation['originalMessage']) => readonly PublicationTextFragment[] | undefined
   units: readonly ConversationUnit[]
@@ -216,6 +220,9 @@ export class PublicationStore {
           json_extract(operation_json,'$.target.connectionId'),json_extract(operation_json,'$.target.application.domain'),
           json_extract(operation_json,'$.target.application.appId'),json_extract(operation_json,'$.speaker.avatar.image.sha256'),ordinal DESC)
         WHERE json_array_length(json_extract(operation_json,'$.avatarUploads'))>0;
+      CREATE INDEX IF NOT EXISTS connector_publication_query_pending
+        ON connector_publication_operation(binding_id,binding_revision,ordinal)
+        WHERE json_extract(operation_json,'$.queryPending')=1;
       CREATE INDEX IF NOT EXISTS connector_publication_query_turn
         ON connector_publication_operation(binding_id,binding_revision,
           json_extract(operation_json,'$.queryTurn.record.source.providerId'),
@@ -297,6 +304,17 @@ export class PublicationStore {
   /** Called only after the original ingress/admission owner authorizes this exact query. */
   queueQueryReceived(boundary: PublicationBoundary, query: import('@agentmux/core/connections').ConnectionIngressMessage, directBinding?: RoomBinding): void {
     queueQueryFeedback(this, boundary, query, 'received', undefined, undefined, directBinding)
+  }
+  queryReceived(boundary: PublicationBoundary, ingressId: string): PublicationOperation | null {
+    return this.inspect(queryFeedbackOperationId(boundary, ingressId, 'received'))
+  }
+  queryInputPosition(boundary: PublicationBoundary) { return queryInputPosition(this, boundary) }
+  queryInputPending(boundary: PublicationBoundary, after: number, through?: number) { return queryInputPending(this, boundary, after, through) }
+  commitQueryInputPage(boundary: PublicationBoundary, after: QueryInputPosition | null, page: import('@agentmux/core').AgentInputChangesPage, authorized: () => boolean): void {
+    this.transaction(() => { if (!authorized()) throw Error('Original query audience unavailable'); queryInputPage(this, boundary, after, page) })
+  }
+  commitQueryInputReceipt(boundary: PublicationBoundary, original: PublicationOperation, inspection: import('@agentmux/core/connections').ConnectionIngressInspection, authorized: () => boolean): void {
+    this.transaction(() => { if (!authorized()) throw Error('Original query audience unavailable'); queryInputReceipt(this, boundary, original, inspection) })
   }
   /** A new relationship boundary skips only ordinary effects that never crossed the dispatch boundary. */
   retireBindingPending(boundary: RoomBinding): void {
@@ -517,7 +535,7 @@ export class PublicationStore {
       if (!authorized()) throw new AgentMuxError('This exact Binding no longer authorizes publication.', 'PUBLICATION_NOT_AUTHORIZED')
       const row = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), 'unified')
       if (!row || !same(JSON.parse(String(row.checkpoint_json)), after)) throw new AgentMuxError('The retained publication frontier changed.', 'PUBLICATION_CHECKPOINT_CONFLICT')
-      if (options.queryFeedback) projectQueryFeedback(this, boundary, units)
+      if (options.queryFeedback) projectQueryFeedback(this, boundary, units, options.queryAuthorized)
       for (const original of questionRecords) this.saveDecision(boundary, 'question-read-' + digest(original.question), 'current', { kind: 'question-read', ...original })
       for (const coverage of page.coverage) {
         const key = conversationSourceKey(coverage.source)
@@ -839,13 +857,15 @@ export class PublicationStore {
       original = original.predecessorOperationId ? this.inspect(original.predecessorOperationId) : null
     return original
   }
-  next(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string): PublicationOperation | null {
-    return this.read(this.candidate(boundary, projectionId))
+  next(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string, after?: string): PublicationOperation | null {
+    return this.read(this.candidate(boundary, projectionId, after))
   }
   /** One exact eligible head per projection. Both preparation and atomic claim use this selection. */
-  private candidate(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string) {
+  private candidate(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string, after?: string) {
+    const cursor = after === undefined ? undefined : this.database.prepare('SELECT ordinal FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND operation_id=?').get(...scopeKey(boundary), after)
     return this.database.prepare(`SELECT original.operation_json, original.state FROM connector_publication_operation original
       WHERE original.binding_id=? AND original.binding_revision=?
+        AND original.ordinal>?
         AND original.state IN ('pending','dispatching','unknown','not-applied') AND original.state='pending'
         AND ${projectionId === undefined ? "json_extract(original.operation_json,'$.reference.source.kind') IN ('native','captured','ingress')" : 'original.projection_id=?'}
         AND NOT EXISTS (SELECT 1 FROM connector_publication_operation earlier
@@ -856,7 +876,7 @@ export class PublicationStore {
           SELECT 1 FROM connector_publication_operation predecessor WHERE predecessor.operation_id=json_extract(original.operation_json,'$.predecessorOperationId')
             AND predecessor.binding_id=original.binding_id AND predecessor.binding_revision=original.binding_revision AND predecessor.projection_id=original.projection_id
             AND predecessor.state='confirmed' AND json_type(predecessor.operation_json,'$.mapping')='object'))
-      ORDER BY original.ordinal LIMIT 1`).get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId]))
+      ORDER BY original.ordinal LIMIT 1`).get(...scopeKey(boundary), Number(cursor?.ordinal ?? 0), ...(projectionId === undefined ? [] : [projectionId]))
   }
   /** Read-only recovery advances through this audience's retained open rows, never another queue or history. */
   nextUnconfirmed(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, after?: string, projectionId?: string): PublicationOperation | null {

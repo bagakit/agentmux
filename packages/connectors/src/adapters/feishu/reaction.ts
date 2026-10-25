@@ -4,7 +4,7 @@ import type { PreparedPublication } from '../../publication-wire.js'
 import { feishuFailure, feishuIdentity } from './message.js'
 
 const path = '/open-apis/im/v1/messages/'
-const reactions = { received: 'Get', started: 'OnIt', completed: 'DONE' } as const
+const reactions = { received: 'Get', queued: 'OneSecond', dispatched: 'CheckMark', started: 'OnIt', completed: 'DONE' } as const
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 export type FeishuQueryReaction = { messageId: string; emojiType: string }
 

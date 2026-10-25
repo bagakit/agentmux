@@ -32,8 +32,8 @@ export interface PublicationPermissionsPort {
 }
 export type PublicationObservation = ConnectionDeliveryObservation
 type LaneWatch = { handle?: ConversationObservationHandle; viewId: string | undefined; failure?: { code?: string } }
-type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
-export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; speaker?: PublicationSpeakerReader }
+type Lane = { queryInput?: PublicationQueryInputObserver; querySkipAfter?: string | undefined; binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; originalReading?: Promise<void> | undefined; inspectionAfter?: string; watch?: LaneWatch | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
+export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; queryInput?: PublicationQueryInputPort; speaker?: PublicationSpeakerReader }
 
 
 /** Durable external publication. Each Binding has an independent read/effect lane, outside original Core input. */
@@ -70,10 +70,19 @@ export class PublicationHost implements ConnectionDeliveryPort {
         this.lanes.set(binding.bindingId, lane)
         try {
           const current = lane, adapter = this.options.connections.publicationAdapter(binding.connectionId)
+        if (this.options.queryInput && this.options.connections.publicationAdapter(binding.connectionId)?.queryFeedback) {
+          const current = lane
+          lane.queryInput = new PublicationQueryInputObserver(this.store, binding, this.options.queryInput, lane.abort.signal,
+            () => this.authorized(binding), () => this.wake(current))
+          lane.queryInput.wake()
+        }
           lane.permissionStop = adapter?.permissionActions === true || adapter?.questionActions === true ? this.options.permissions?.observe(binding, () => this.wake(current)) : undefined
         } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
         this.wake(lane)
-      } else if (!recoveryOnly || lane.observation.state !== 'ready' || !lane.watch?.handle || lane.watch.failure || lane.watch.handle.closed.aborted) this.wake(lane)
+      } else {
+        if (!recoveryOnly || lane.queryInput?.failed) lane.queryInput?.wake()
+        if (!recoveryOnly || lane.observation.state !== 'ready' || !lane.watch?.handle || lane.watch.failure || lane.watch.handle.closed.aborted) this.wake(lane)
+      }
     }
   }
   /** Optional feedback has no network work on the ingress path; its durable effect wakes only this audience. */
@@ -86,7 +95,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const original = readRoomPublicationBinding(this.options.bindings, binding)
       if (!original) { if (lane) lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }; return }
       this.store.queueQueryReceived(original, record, record.conversationKind === 'direct' ? binding : undefined)
-      if (lane) this.wake(lane)
+      if (lane) { lane.queryInput?.wake(); this.wake(lane) }
     } catch {
       if (lane) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }
       console.warn('[AgentMux] PUBLICATION_QUERY_FEEDBACK_STORAGE_UNCONFIRMED: optional feedback persistence could not be confirmed; the original input remains available.')
@@ -290,7 +299,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const originals = binding.scope.publication === 'future-shared-conversation'
         ? new Map(ordered.map(unit => [unit.event.id, publicationMessageTargets(unit, binding.sourceFrontier).map(target => ({ key: target.key, ...(target.notificationId ? { notificationId: target.notificationId } : {}), record: target.record, revision: target.revision, ...(target.startUnconfirmed ? { startUnconfirmed: true as const } : {}), ...(target.part ? { part: target.part } : {}), messages: [], unavailable: true }))])) : new Map()
       const questions = adapter.questionActions ? this.options.permissions?.questions?.(binding, ordered) : undefined
-      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, originals, ...(this.options.queryFeedback && adapter.queryFeedback ? { queryFeedback: true } : {}), fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) } : {}), ...(questions ? { questions } : {}) })
+      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, originals, ...(this.options.queryFeedback && adapter.queryFeedback ? { queryFeedback: true, ...(this.options.queryInput ? { queryAuthorized: (query: import('@agentmux/core/connections').ConnectionIngressMessage) => this.options.queryInput!.authorized(query, binding) } : {}) } : {}), fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker, originalMessage) => adapter.fragmentText!(payload, binding, speaker, originalMessage) } : {}), ...(questions ? { questions } : {}) })
       after = page.checkpoint; lane.view = page.window.view!; lane.viewId = page.window.id; lane.read = { after }
       if (lane.watch?.viewId !== lane.viewId) lane.dirty = true
       if (!page.more) { lane.read = undefined; break }
@@ -529,7 +538,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const qualified = new Set<string>() // One frozen representation is verified once in this bounded drain.
     for (let count = 0; count < 16; count++) {
       if (signal.aborted || !authorized()) return
-      let original = this.store.next(binding, projectionId)
+      let original = this.store.next(binding, projectionId, after)
       if (!original) return this.effectObservation(binding, projectionId)
       let credential: string | null
       try { credential = await this.options.connections.resolveCredential(binding.connectionId) }
@@ -541,15 +550,25 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (!qualified.has(frozen) && !original.originalMessage && ['speech', 'image', 'file', 'question'].includes(original.payload.kind) && original.effect === 'upsert' && ['native', 'captured'].includes(original.reference.source.kind)) {
         const reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
         try {
+  private queryAuthorized(operation: PublicationOperation, binding: RoomBinding): boolean {
+    if (!operation.queryFeedback || operation.queryFeedback.stage === 'received' || !this.options.queryInput) return true
+    const row = this.store.database.prepare('SELECT record_json FROM connection_ingress_message WHERE ingress_id=?').get(operation.queryFeedback.ingressId)
+    return !!row && this.options.queryInput.authorized(JSON.parse(String(row.record_json)), binding)
+  }
           for (const record of relevant) {
             const key = conversationRecordId(record)
             if (accepted.has(key)) continue
             let cursor: string | undefined, pending: ConversationWindowAssembly | undefined, complete = false
             while (!complete) {
+    let after = projectionId === undefined ? lane.querySkipAfter : undefined
+    if (projectionId === undefined) lane.querySkipAfter = undefined
               signal.throwIfAborted()
               const input = { ...reference, record, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
               const page = parseConversationReadPage(await this.options.conversation.inspect(input, signal), input)
               const before = (pending?.bytes ?? 0) + (pending?.fragment?.receivedBytes ?? 0)
+      // Authority belongs to this one query; keep its original pending effect
+      // and continue independent projections without turning feedback into a lane gate.
+      if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
               const consumed = consumeConversationWindowPage(page, pending)
               if (consumed.kind === 'complete') {
                 const unit = consumed.snapshot.units.find(unit => unit.records.some(value => conversationRecordId(value.reference!) === key))
@@ -614,11 +633,11 @@ export class PublicationHost implements ConnectionDeliveryPort {
         }
       }
       if (['permission', 'question'].includes(original.payload.kind) && !this.options.permissions?.authorized(original)) return { state: 'unavailable', reason: 'source-unconfirmed' }
-      const claimed = this.store.claimNext(binding, original.operationId, () => authorized() && (!['permission', 'question'].includes(original!.payload.kind) || this.options.permissions?.authorized(original!) === true), adapter, projectionId)
+      const claimed = this.store.claimNext(binding, original.operationId, () => authorized() && this.queryAuthorized(original!, binding) && (!['permission', 'question'].includes(original!.payload.kind) || this.options.permissions?.authorized(original!) === true), adapter, original.projectionId)
       if (!claimed) {
         // A concurrent original claim may expose another candidate. Re-enter qualification
         // on the existing lane, but never spin on the same unchanged pending operation.
-        const next = this.store.next(binding, projectionId)
+        const next = this.store.next(binding, projectionId, after)
         if (next && next.operationId !== original.operationId) lane.dirty = true
         return this.effectObservation(binding, projectionId)
       }
@@ -637,7 +656,10 @@ export class PublicationHost implements ConnectionDeliveryPort {
       catch { try { settle({ state: 'unknown', reason: 'effect-unconfirmed' }) } catch { /* Retain already confirmed outcome or unconfirmed storage. */ } }
     }
     // Only real dispatchable work continues immediately. Old unknown reads wait for an original wake/recovery.
-    if (this.store.next(binding, projectionId)) lane.dirty = true
+    if (this.store.next(binding, projectionId, after)) {
+      if (projectionId === undefined) lane.querySkipAfter = after
+      lane.dirty = true
+    }
     return this.effectObservation(binding, projectionId)
   }
   private until<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -646,15 +668,18 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const stop = () => reject(new Error('External effect observation ended.'))
       signal.addEventListener('abort', stop, { once: true })
       work.then(value => { signal.removeEventListener('abort', stop); resolve(value) }, error => { signal.removeEventListener('abort', stop); reject(error) })
+      if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
     })
   }
   observation(bindingId: string, revision: number): PublicationObservation {
+        if (!this.queryAuthorized(original, binding)) { after = original.operationId; continue }
     const lane = this.lanes.get(bindingId)
     const requested = this.options.bindings.readExact(bindingId, revision)
     if (requested && lane?.binding.revision === roomPublicationReference(requested).revision) return lane.observation.state === 'ready' || lane.observation.reason === 'effect-unconfirmed'
       ? this.effectObservation(lane.binding) ?? { ...lane.observation } : { ...lane.observation }
     if (this.closed) return { state: 'unknown', reason: 'not-started' }
     const authority = this.authority({ bindingId, revision })
+      if (!this.queryAuthorized(claimed, binding)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); after = claimed.operationId; continue }
     return authority === null ? { state: 'unavailable', reason: 'storage-unconfirmed' } : authority.authorized ? { state: 'unknown', reason: 'not-started' } : { state: 'disabled' }
   }
   async inspect(value: ConnectionDeliveryOperationInput) {
@@ -684,6 +709,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     this.closed = true; clearInterval(this.timer)
     for (const lane of this.lanes.values()) { lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.handle?.dispose() } catch { /* Release failure cannot change an Agent lifecycle. */ } }
     this.lanes.clear()
+    if (requested && lane?.binding.revision === roomPublicationReference(requested).revision && lane.queryInput?.failed) return { state: 'unavailable', reason: 'source-unconfirmed' }
     for (const lane of this.notices.values()) lane.abort.abort()
     this.notices.clear()
   }

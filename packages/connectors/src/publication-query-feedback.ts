@@ -5,11 +5,19 @@ import type { ConnectionIngressMessage } from '@agentmux/core/connections'
 import { conversationInputAdoptionEdges, conversationInputIdentity, type ConversationInputWitness, type ConversationUnit } from '@agentmux/core/conversation'
 import type { PublicationBoundary, PublicationOperation, PublicationStore, QueryFeedbackPayload } from './publication-store.js'
 
+export function queryFeedbackOperationId(boundary: PublicationBoundary, ingressId: string, stage: QueryFeedbackPayload['stage']): string {
+  return 'publication-query-feedback-' + createHash('sha256').update(JSON.stringify([boundary.bindingId, boundary.revision, ingressId, stage])).digest('base64url')
+}
+
 /** These effects use the existing Outbox. No separate input state, retry queue or Runtime. */
 export function queueQueryFeedback(store: PublicationStore, boundary: PublicationBoundary, query: ConnectionIngressMessage, stage: QueryFeedbackPayload['stage'], witness?: ConversationInputWitness, completion?: PublicationOperation['queryCompletion'], directBinding?: import('@agentmux/core/connections').RoomBinding): void {
-  // Only an explicit original ready admission can supply a direct received target.
-  // Native adoption/completion still use the existing group contract below.
-  const direct = query.conversationKind === 'direct' && stage === 'received' ? directBinding : undefined
+  // Later direct milestones can only borrow this exact query's original received target.
+  const anchor = query.conversationKind === 'direct' && stage !== 'received' ? store.queryReceived(boundary, query.ingressId) : null
+  const direct = query.conversationKind === 'direct' ? stage === 'received' ? directBinding : anchor ? {
+    bindingId: anchor.bindingId, revision: anchor.bindingRevision, connectionId: anchor.target.connectionId,
+    executionHostId: anchor.reference.hostId, agentSessionId: anchor.reference.agentSessionId,
+    application: anchor.target.application, externalConversationId: anchor.target.externalConversationId
+  } : undefined : undefined
   const target = query.conversationKind === 'group' ? query.group?.target : direct ? {
     bindingId: direct.bindingId, bindingRevision: direct.revision, connectionId: direct.connectionId,
     hostId: direct.executionHostId, agentSessionId: direct.agentSessionId
@@ -18,9 +26,8 @@ export function queueQueryFeedback(store: PublicationStore, boundary: Publicatio
     !store.publicationMember(boundary, target.bindingId, target.bindingRevision) || target.connectionId !== boundary.connectionId ||
     target.hostId !== boundary.executionHostId || target.agentSessionId !== boundary.agentSessionId ||
     query.connectionId !== boundary.connectionId || query.externalConversationId !== boundary.externalConversationId || !isDeepStrictEqual(query.application, boundary.application)) return
-  const identity = [boundary.bindingId, boundary.revision, query.ingressId, stage]
-  const projectionId = 'query-feedback-' + createHash('sha256').update(JSON.stringify(identity)).digest('base64url')
-  const operationId = 'publication-' + projectionId
+  const operationId = queryFeedbackOperationId(boundary, query.ingressId, stage)
+  const projectionId = operationId.slice('publication-'.length)
   if (store.inspect(operationId)) return
   const payload: QueryFeedbackPayload = { kind: 'query-feedback', stage, messageId: query.externalMessageId }
   const operation: PublicationOperation = {
@@ -28,6 +35,7 @@ export function queueQueryFeedback(store: PublicationStore, boundary: Publicatio
     bindingId: boundary.bindingId, bindingRevision: boundary.revision, reference: { hostId: target.hostId, agentSessionId: target.agentSessionId, source: { kind: 'ingress', ingressId: query.ingressId } },
     target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
     publicationScope: boundary.scope.publication, payload, queryFeedback: { stage, ingressId: query.ingressId, messageId: query.externalMessageId },
+    ...(stage === 'received' ? { queryPending: true as const } : {}),
     ...(witness ? { queryTurn: witness } : {}), ...(completion ? { queryCompletion: completion } : {}), effect: 'upsert', fragment: { ordinal: 0, count: 1 }, state: 'pending'
   }
   store.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
@@ -35,7 +43,7 @@ export function queueQueryFeedback(store: PublicationStore, boundary: Publicatio
 }
 
 /** Consumes the original Core window and qualified adoption relation, never rendered reply text. */
-export function projectQueryFeedback(store: PublicationStore, boundary: PublicationBoundary, units: readonly ConversationUnit[]): void {
+export function projectQueryFeedback(store: PublicationStore, boundary: PublicationBoundary, units: readonly ConversationUnit[], authorized?: (query: ConnectionIngressMessage) => boolean): void {
   const records = units.flatMap(unit => unit.records).filter(isCompleteConversationRecord)
   const context = { witnesses: units.flatMap(unit => unit.event.inputAdoption?.witnesses ?? []),
     ...(units.some(unit => unit.event.inputAdoption?.unconfirmed) ? { unconfirmed: true as const } : {}) }
@@ -49,7 +57,7 @@ export function projectQueryFeedback(store: PublicationStore, boundary: Publicat
     const row = byInput.get(boundary.executionHostId, key.agentSessionId, key.expectedRun.runId, key.messageId)
     if (!row) return
     const query = JSON.parse(String(row.record_json)) as ConnectionIngressMessage
-    return query.state === 'claimed' && query.input && conversationInputIdentity(query.input.hostId,
+    return query.state === 'claimed' && (!authorized || authorized(query)) && query.input && conversationInputIdentity(query.input.hostId,
       { kind: 'message', agentSessionId: query.input.agentSessionId, expectedRun: query.input.expectedRun, messageId: query.input.messageId }) === conversationInputIdentity(witness.record.hostId, key) ? query : undefined
   }
   // Captured input may precede native adoption. Recovery can still create the original received effect.
@@ -57,7 +65,7 @@ export function projectQueryFeedback(store: PublicationStore, boundary: Publicat
     if (record.original.kind !== 'captured' || record.original.item.inputRef?.kind !== 'message') continue
     const key = record.original.item.inputRef
     const row = byInput.get(boundary.executionHostId, key.agentSessionId, key.expectedRun.runId, key.messageId)
-    if (row) { const query = JSON.parse(String(row.record_json)) as ConnectionIngressMessage; if (query.state === 'claimed') queueQueryFeedback(store, boundary, query, 'received') }
+    if (row) { const query = JSON.parse(String(row.record_json)) as ConnectionIngressMessage; if (query.state === 'claimed' && (!authorized || authorized(query))) queueQueryFeedback(store, boundary, query, 'received') }
   }
   if (!edges.unconfirmed) for (const [key, witnesses] of edges.byKey) {
     if (edges.ambiguous.has(key) || witnesses.length !== 1) continue

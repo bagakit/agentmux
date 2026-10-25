@@ -41,7 +41,7 @@ export interface IngressAuthenticator {
   /** Native history is quoted data, never another authenticated input or grant. */
   readHistory?(config: ConnectionConfig, input: { externalConversationId: string; range: ChannelQuoteRange; knownThreadIds?: string[]; assertCurrent?(): void }, credential: string, signal: AbortSignal): Promise<ChannelTranscriptQuote>
 }
-export type DurableIngressCore = Pick<AgentMuxClient, 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'> & Partial<Pick<AgentMuxClient, 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission' | 'runtimeSubject'>> & {
+export type DurableIngressCore = Pick<AgentMuxClient, 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'> & Partial<Pick<AgentMuxClient, 'readAgentInputChanges' | 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission' | 'runtimeSubject'>> & {
   readAgentSession(id: string, expectedRuntimeId?: string): ReturnType<AgentMuxClient['readAgentSession']>
   providers?: { get(id: string): { catalog: import('@agentmux/core').AgentCatalogEntry } }
 }
@@ -113,6 +113,28 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     })
     try { this.contextPositions = new IngressContextPositions(this.database) }
     catch { /* Each original preparation exposes this metadata observation gap. */ }
+  }
+  /** Feedback borrows this original input owner; events only invalidate exact receipt reads. */
+  observeQueryInputs(binding: RoomBinding, wake: () => void): () => void {
+    const client = this.options.core(binding.executionHostId, binding.executionRuntimeId)
+    if (!client?.onEvent) throw new AgentMuxError('Original input observation is unavailable.', 'INGRESS_TARGET_UNCONFIRMED')
+    return client.onEvent(event => {
+      if (event.type === 'agent-input' && event.receipt.key.agentSessionId === binding.agentSessionId ||
+          event.type === 'agent-input-recorded' && event.agentSessionId === binding.agentSessionId ||
+          event.type === 'attachment-state' && event.agentSessionId === binding.agentSessionId && event.state === 'restored' ||
+          event.type === 'connection-state' && event.state === 'restored' ||
+          event.type === 'control-endpoint-state' && event.state === 'available') wake()
+    })
+  }
+  async readQueryInputChanges(binding: RoomBinding, input: import('@agentmux/core').AgentInputChangesRead): Promise<import('@agentmux/core').AgentInputChangesPage> {
+    const client = this.options.core(binding.executionHostId, binding.executionRuntimeId)
+    if (!client?.readAgentInputChanges || input.agentSessionId !== binding.agentSessionId)
+      throw new AgentMuxError('Original input changes cannot be observed.', 'INGRESS_TARGET_UNCONFIRMED')
+    return await client.readAgentInputChanges(input)
+  }
+  /** Current original author authority; never grants access from a feedback operation or a label. */
+  queryAuthorized(query: ConnectionIngressMessage): boolean {
+    try { this.authorize(query, query.input); return true } catch { return false }
   }
   /** Cancels only optional original history observation, never an Agent or a Core input. */
   close(): void { this.historyAbort.abort() }
