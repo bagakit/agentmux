@@ -321,6 +321,89 @@ c.close()`], { input: JSON.stringify({ file, reads: [event, failure] }), encodin
     boundary: 'Actual ConnectionServices/PublicationHost/PublicationStore from loaded source, Core transcript reader, public RPC and compiled CLI; controlled external adapter. VM steps read this same isolated journal through Python SQLite.' })
 }, 15_000)
 
+it('recoverable gap scan keeps original paging and bounded work as diagnostic history grows', async () => {
+  const f = await fixture(), database = f.services.database!, store = f.services.publication!.store, prepare = database.prepare.bind(database)
+  const reads: Array<{ sql: string; parameters: Parameters<ReturnType<typeof prepare>['all']>; host: boolean }> = []
+  vi.spyOn(database, 'prepare').mockImplementation(sql => {
+    const statement = prepare(sql), stack = new Error().stack ?? ''
+    if (stack.includes('recoverableGaps')) {
+      const all = statement.all.bind(statement)
+      statement.all = (...parameters) => { reads.push({ sql, parameters, host: stack.includes('recoverContent') }); return all(...parameters) }
+    }
+    return statement
+  })
+  await appendFile(f.transcript, row('recoverable-cost-original', 'Original reply beside retained diagnostics'))
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('confirmed'), { timeout: 8_000 })
+  const original = structuredClone(f.speech()[0]!), hostRead = reads.find(read => read.host)
+  expect(hostRead, 'The actual PublicationHost must consume this Store recovery query').toBeDefined()
+  // Reconstruct the Store on an original journal carrying the obsolete derived index.
+  database.exec("CREATE INDEX IF NOT EXISTS connector_publication_content_gap ON connector_publication_decision(binding_id,binding_revision) WHERE json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved'")
+  new PublicationStore(database)
+  const insert = prepare('INSERT INTO connector_publication_decision(binding_id,binding_revision,source_key,record_id,source_revision,reason,decision_json) VALUES (?,?,?,?,?,?,?)')
+  const add = (id: string, gap: object, state = 'unresolved', bindingId = f.binding.bindingId, revision = f.binding.revision) => {
+    const value = { kind: 'gap', state, gap: { gapId: id, ...gap } }
+    return Number(insert.run(bindingId, revision, 'unified', id, 'original-version', 'content-accounted', JSON.stringify(value)).lastInsertRowid)
+  }
+  add('original-diagnostic', { reason: 'version-unavailable' })
+  expect(store.coverage(f.binding)).toMatchObject({ state: 'incomplete', gaps: [expect.objectContaining({ gapId: 'original-diagnostic' })] })
+  // These private rows exercise the SQL object's qualification and ordering;
+  // the A2A/media consumer tests retain and recover complete original anchors.
+  const media = { reason: 'resource-unavailable', anchor: {}, part: {}, event: {} }
+  const a2a = { reason: 'version-unavailable', anchor: {}, code: 'PUBLICATION_A2A_ORIGINAL_UNAVAILABLE' }
+  const excluded = [
+    add('foreign-recovery', media, 'unresolved', 'another-binding'),
+    add('other-revision-recovery', media, 'unresolved', f.binding.bindingId, f.binding.revision + 1),
+    add('resolved-recovery', media, 'resolved'), add('no-original-anchor', { ...media, anchor: null }),
+    add('no-original-part', { ...media, part: null }), add('no-original-event', { ...media, event: null }),
+    add('other-diagnostic-reason', { ...media, reason: 'public-content-unconfirmed' })
+  ]
+  const eligible = Array.from({ length: 6 }, (_, index) => ({ id: 'original-recovery-' + index,
+    ordinal: add('original-recovery-' + index, index % 2 ? a2a : media) }))
+  const first = store.recoverableGaps(f.binding), second = store.recoverableGaps(f.binding, first.at(-1)!.ordinal)
+  expect(first.map(value => value.gap.gapId)).toEqual(eligible.slice(0, 4).map(value => value.id))
+  expect(second.map(value => value.gap.gapId)).toEqual(eligible.slice(4).map(value => value.id))
+  expect([...first, ...second].map(value => value.ordinal)).toEqual(eligible.map(value => value.ordinal))
+  expect(excluded.some(ordinal => [...first, ...second].some(value => value.ordinal === ordinal))).toBe(false)
+  const after = eligible.at(-1)!.ordinal, file = database.location()!, costs: Array<{ diagnostics: number; steps: number; rows: number; sqliteVersion: string }> = []
+  const parameters = [...hostRead!.parameters.slice(0, 2), after]
+  const measure = (diagnostics: number) => {
+    const result = JSON.parse(execFileSync('python3', ['-c', `import json,sqlite3,sys
+x=json.load(sys.stdin)
+c=sqlite3.connect('file:'+x['file']+'?mode=ro',uri=True)
+steps=0
+def tick():
+ global steps
+ steps+=1
+ return 0
+c.set_progress_handler(tick,1)
+rows=c.execute(x['sql'],x['parameters']).fetchall()
+c.set_progress_handler(None,0)
+print(json.dumps({'steps':steps,'rows':len(rows),'sqliteVersion':sqlite3.sqlite_version}))
+c.close()`], { input: JSON.stringify({ file, sql: hostRead!.sql, parameters }), encoding: 'utf8' }))
+    costs.push({ diagnostics, ...result })
+  }
+  measure(0)
+  let diagnostics = 0
+  for (const count of [128, 896]) {
+    database.exec('BEGIN')
+    for (let index = 0; index < count; index++) add('retained-diagnostic-' + diagnostics++, { reason: 'version-unavailable' })
+    database.exec('COMMIT'); measure(diagnostics)
+  }
+  expect(costs.map(cost => cost.rows)).toEqual([0, 0, 0])
+  for (const cost of costs) expect(cost.steps, JSON.stringify(costs)).toBeLessThanOrEqual(costs[0]!.steps + 8)
+  const plan = prepare('EXPLAIN QUERY PLAN ' + hostRead!.sql).all(...parameters)
+  expect(plan.some(value => String(value.detail).includes('connector_publication_recoverable_gap'))).toBe(true)
+  add('later-recoverable-media', media); add('later-recoverable-a2a', a2a)
+  expect(store.recoverableGaps(f.binding, after).map(value => value.gap.gapId)).toEqual(['later-recoverable-media', 'later-recoverable-a2a'])
+  expect(Number(prepare("SELECT count(*) AS n FROM connector_publication_decision WHERE record_id LIKE 'retained-diagnostic-%' AND json_extract(decision_json,'$.state')='unresolved'").get()!.n)).toBe(diagnostics)
+  expect(prepare("SELECT json_extract(decision_json,'$.state') AS state FROM connector_publication_decision WHERE record_id='original-diagnostic'").get()!.state).toBe('unresolved')
+  expect(prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='connector_publication_content_gap'").get()).toBeUndefined()
+  expect(store.inspect(original.operationId)).toEqual(original)
+  if (process.env.PUBLICATION_RECOVERABLE_GAP_FACTS) await writeFile(process.env.PUBLICATION_RECOVERABLE_GAP_FACTS,
+    JSON.stringify({ sql: hostRead!.sql, parameters, costs, plan, nodeSQLite: prepare('SELECT sqlite_version() AS version').get(),
+      selected: eligible, diagnosticRowsRetained: diagnostics, actualHostReads: reads.filter(read => read.host).length, originalOperationId: original.operationId }, null, 2) + '\n')
+})
+
 it('card recovery keeps original scope and in-flight effects with bounded work as completed history grows', async () => {
   const bytes = Buffer.from('original-avatar'), image = { mimeType: 'image/png' as const, dataBase64: bytes.toString('base64'), byteLength: bytes.length,
     width: 1, height: 1, sha256: createHash('sha256').update(bytes).digest('hex') }
