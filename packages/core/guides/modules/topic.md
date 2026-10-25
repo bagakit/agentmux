@@ -58,3 +58,16 @@ preview and expected facts. A preview or navigation never certifies a completed 
 After an unknown write, read the same original Topic/knowledge/migration owner before an
 explicit retry. Preserve original files and working surfaces until actual saved results
 are confirmed, and report gaps rather than guessing that absent observations mean deletion.
+
+## Promote an original Topic
+
+Use `amux topic inspect --topic ID` to retain its exact content and Zone. After the
+user authorizes promotion, call `amux topic promote apply --topic ID --operation-id OPERATION`.
+Promotion retains the original Agents, conversations, files, category entry and knowledge.
+It adds a persistent Mote identity; it does not send messages or start Agents.
+
+Read `amux topic promote inspect --topic ID` to discover its original operation.
+After a partial or unknown result, inspect with the original `--operation-id`;
+explicitly apply that same operation to continue. Do not generate another operation
+or create a replacement Mote. A complete receipt confirms personality, directory
+and spatial registration together. Knowledge commands keep using the original Topic ID.
