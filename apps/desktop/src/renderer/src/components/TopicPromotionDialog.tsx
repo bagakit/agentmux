@@ -50,6 +50,12 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
   }, [])
 
   async function complete(result: TopicPromotionReceipt) {
+    // The authoritative receipt ends the activity immediately. Projection refresh
+    // may be slow, but is not another stage of the promotion.
+    onPromoted(result)
+    // A dismissed view still reports to its original group; only the live view
+    // may close itself, preserving a later dialog and its focus.
+    if (alive.current) onClose()
     // Refresh the exact content and graph projections. Selection, drafts and layouts retain their owners.
     try {
       await refreshTopicSpatial()
@@ -57,7 +63,6 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
     } catch (cause) {
       useAppStore.getState().reportError(new Error(`晋升已经保存，界面尚未刷新。${presentError(cause)}`))
     }
-    if (alive.current) { onPromoted(result); onClose() }
   }
 
   async function promote() {
@@ -89,6 +94,10 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
         <div className="topic-promotion__scene" aria-hidden="true">
           <img className="topic-promotion__art topic-promotion__art--before" src={topicArt} alt="" draggable={false} />
           <img className="topic-promotion__art topic-promotion__art--after" src={moteArt} alt="" draggable={false} />
+          {busy ? <div className="topic-promotion__energy">
+            <span className="topic-promotion__halo" />
+            {Array.from({ length: 6 }, (_, index) => <span key={index} className="topic-promotion__particle" />)}
+          </div> : null}
           <span className="topic-promotion__journey"><span>TOPIC</span><span className="topic-promotion__line" /><MoteIcon size={15} /><span>MOTE</span></span>
         </div>
         <div className="topic-promotion__body">
@@ -96,7 +105,7 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
           <Dialog.Title className="topic-promotion__title">{target.title}</Dialog.Title>
           <p className="topic-promotion__invitation">让这个方向，成为有自己人格的伙伴。</p>
           <Dialog.Description className="topic-promotion__continuity">原来的 Agent、对话和资料都会保留。</Dialog.Description>
-          {partial || error ? <div className="topic-promotion__recovery" role="status">
+          {!busy && (partial || error) ? <div className="topic-promotion__recovery" role="status">
             <strong>{partial ? '晋升尚未完成' : '结果待确认'}</strong>
             <p>原来的工作仍可继续。{partial ? '可以接着完成这次晋升。' : '先查看这次操作的结果。'}</p>
             <details><summary>查看详情</summary><p>{error ?? receipt?.unavailable.map(issue => issue.message).join(' ')}</p></details>
@@ -105,7 +114,7 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
             <button type="button" className="small-button topic-promotion__cancel" onClick={onClose}>{busy || partial || phase === 'unknown' ? '稍后查看' : '暂时不用'}</button>
             {phase === 'unknown' ? <button type="button" className="primary-button topic-promotion__submit" onClick={() => void observe()}>查看结果</button>
               : <button type="button" className="primary-button topic-promotion__submit" disabled={busy || reading} onClick={() => void promote()}>
-                <MoteIcon size={17} />{busy ? '正在晋升…' : reading ? '正在读取…' : partial ? '继续晋升' : '晋升为 Mote'}
+                {busy ? <span className="topic-promotion__activity" aria-hidden="true" /> : <MoteIcon size={17} />}{busy ? '正在晋升…' : reading ? '正在读取…' : partial ? '继续晋升' : '晋升为 Mote'}
               </button>}
           </footer>
           {busy ? <p className="topic-promotion__progress" role="status">正在延续原来的工作。关闭后也可回来查看。</p> : null}
