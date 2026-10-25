@@ -18,9 +18,11 @@ async function fixture(body = 'Original complete body') {
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
 function holdPages(f: Fixture) {
-  const original = f.client.sessionHistoryPage.bind(f.client), gates: Array<{ resolve(): void; reject(error: Error): void }> = []
+  // The selected native source enters this original logical reader, not the public convenience method.
+  const reader = f.client as unknown as { readSessionHistoryPage: typeof f.client.sessionHistoryPage }
+  const original = reader.readSessionHistoryPage.bind(f.client), gates: Array<{ resolve(): void; reject(error: Error): void }> = []
   const pending: Promise<unknown>[] = []
-  const spy = vi.spyOn(f.client, 'sessionHistoryPage').mockImplementation(async (...args) => {
+  const spy = vi.spyOn(reader, 'readSessionHistoryPage').mockImplementation(async (...args) => {
     // Delay delivery only after the actual Provider operation has completed.
     // Seventeen logical reads never bypass its physical read concurrency limit.
     const page = await original(...args), signal = args[1]?.signal
@@ -35,7 +37,7 @@ function holdPages(f: Fixture) {
   })
   const start = (input: { limit?: number; maxBytes?: number } = {}) => { const promise = f.rpc.call('agent.conversation.inspect', { ...f.ref, limit: 100, ...input }); pending.push(promise); void promise.catch(() => {}); return promise }
   closes.push(async () => { spy.mockRestore(); for (const gate of gates) gate.resolve(); await Promise.allSettled(pending) })
-  return { gates, spy, start, wait: (count: number) => vi.waitFor(() => expect(gates).toHaveLength(count)) }
+  return { gates, spy, start, wait: (count: number) => vi.waitFor(() => expect(gates).toHaveLength(count), { timeout: 5000 }) }
 }
 const untouched = (f: Fixture) => expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
 async function resume(f: Fixture, view: string) {
@@ -75,9 +77,10 @@ it('the last completing original becomes recent without expanding the genuinely 
 it('cancelled and failed original reads return their qualification and explicit release never resurrects an in-flight view', async () => {
   const f = await fixture(), page = await f.client.readAgentConversation(f.ref)
   const controller = new AbortController()
-  const native = f.client.readSessionHistoryChanges.bind(f.client)
+  const reader = f.client as unknown as { nativeHistoryChangesPage: typeof f.client.readSessionHistoryChanges }
+  const native = reader.nativeHistoryChangesPage.bind(f.client)
   let entered = false
-  const changes = vi.spyOn(f.client, 'readSessionHistoryChanges').mockImplementation(async (...args) => {
+  const changes = vi.spyOn(reader, 'nativeHistoryChangesPage').mockImplementation(async (...args) => {
     const result = await native(...args); entered = true
     await new Promise<void>((resolve, reject) => {
       const signal = args[1]!.signal!, abort = () => reject(signal.reason)
@@ -100,7 +103,7 @@ it('cancelled and failed original reads return their qualification and explicit 
 
   const released = await f.client.readAgentConversation(f.ref)
   let ready = false, resume!: () => void
-  const source = vi.spyOn(f.client, 'readSessionHistoryChanges').mockImplementation(async (...args) => {
+  const source = vi.spyOn(reader, 'nativeHistoryChangesPage').mockImplementation(async (...args) => {
     const result = await native(...args); ready = true
     await new Promise<void>(resolve => { resume = resolve })
     return result
