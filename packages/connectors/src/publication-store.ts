@@ -621,7 +621,7 @@ export class PublicationStore {
         const keys = references.map(reference => 'projection-' + digest([...scopeKey(boundary), ...(reference.source.kind === 'native' ? [reference.source.providerId, reference.source.nativeSessionId, reference.source.recordId, 'speech'] : ['captured', reference.source.recordId, 'conversation'])]))
         const eventIds = [unit.event.id, ...(unit.event.coalesces ?? []).flatMap(edge => edge.fromEventIds)]
         const represented = eventIds.flatMap(id => {
-          const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND record_id=? AND json_extract(decision_json,'$.kind')='event-representation' ORDER BY rowid DESC LIMIT 1").get(...scopeKey(boundary), 'event-' + digest(id))
+          const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND json_extract(decision_json,'$.kind')='event-representation' ORDER BY rowid DESC LIMIT 1").get(...scopeKey(boundary), 'event-' + digest(id))
           return row ? [JSON.parse(String(row.decision_json)).projectionId as string] : []
         })
         const allowedEvents = new Set(eventIds), qualification = new Map<string, boolean>()
@@ -635,7 +635,7 @@ export class PublicationStore {
         for (const record of unit.records) {
           const prior = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='representation' AND json_extract(decision_json,'$.part.record')=?")
             .all(...scopeKey(boundary), encode(record.reference))
-          const retainedFailure = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND record_id=? AND source_revision='current' AND json_extract(decision_json,'$.kind')='failure-record'").get(...scopeKey(boundary), 'failure-record-' + digest(record.reference))
+          const retainedFailure = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision='current' AND json_extract(decision_json,'$.kind')='failure-record'").get(...scopeKey(boundary), 'failure-record-' + digest(record.reference))
           if (retainedFailure && !qualified(JSON.parse(String(retainedFailure.decision_json)).projectionId)) ambiguous.add(record.id)
           if (prior.some(row => { const intent = JSON.parse(String(row.decision_json)) as RepresentationIntent; return intent.text && !qualified(intent.projectionId) })) ambiguous.add(record.id)
         }
@@ -796,7 +796,7 @@ export class PublicationStore {
           event: { id: unit.event.id, revision: unit.event.revision }, record: value.record, ...(value.part ? { part: value.part } : {}),
           anchor: { record: value.record, revision: value.revision, frontier } }
         this.saveDecision(boundary, gapId, value.revision, { kind: 'gap', gap, state: 'unresolved' })
-      } else this.database.prepare("UPDATE connector_publication_decision SET decision_json=json_set(decision_json,'$.state','resolved') WHERE binding_id=? AND binding_revision=? AND record_id=?").run(...scopeKey(boundary), gapId)
+      } else this.database.prepare("UPDATE connector_publication_decision SET decision_json=json_set(decision_json,'$.state','resolved') WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=?").run(...scopeKey(boundary), gapId)
       // A native direct input's public body is the journal original, not its raw envelope.
       // Resolve only the exact text-wire gap; unrelated resources and purposes keep their own gaps.
       const record = unit.records.find(record => same(record.reference, value.record) && record.revision === value.revision)
@@ -839,9 +839,9 @@ export class PublicationStore {
     if (!plan.complete) return false
     return this.transaction(() => {
       if (!authorized()) throw new AgentMuxError('Original audience no longer authorizes this content.', 'PUBLICATION_NOT_AUTHORIZED')
-      const row = this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND record_id=? AND json_extract(decision_json,'$.state')='unresolved'").get(...scopeKey(boundary), gap.gapId)
+      const row = this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND json_extract(decision_json,'$.state')='unresolved'").get(...scopeKey(boundary), gap.gapId)
       if (!row || !same(JSON.parse(String(row.decision_json)).gap, gap)) return false
-      const represented = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND record_id=? AND json_extract(decision_json,'$.kind')='event-representation' ORDER BY rowid DESC LIMIT 1").get(...scopeKey(boundary), 'event-' + digest(event.id))
+      const represented = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND json_extract(decision_json,'$.kind')='event-representation' ORDER BY rowid DESC LIMIT 1").get(...scopeKey(boundary), 'event-' + digest(event.id))
       // The original event already has a retained projection even when all its
       // parts were gaps. Recovery updates that intent, never creates a second
       // event/message or substitutes a newer original record.
@@ -854,7 +854,7 @@ export class PublicationStore {
     })
   }
   versionUnavailable(boundary: PublicationBoundary, gap: ConnectionDeliveryGap, code: string): void {
-    const row = this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND record_id=? AND json_extract(decision_json,'$.state')='unresolved'").get(...scopeKey(boundary), gap.gapId)
+    const row = this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND json_extract(decision_json,'$.state')='unresolved'").get(...scopeKey(boundary), gap.gapId)
     if (row) this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...JSON.parse(String(row.decision_json)), gap: { ...gap, reason: 'version-unavailable', code } }), Number(row.rowid))
   }
   /** Original request projection uses this same outbox, not a fabricated history record or source cut. */
@@ -967,7 +967,7 @@ export class PublicationStore {
       const current = this.inspect(operation.operationId)
       if (!current || current.state !== 'pending' || !same(current, operation)) return 'unavailable'
       if (operation.payload.kind === 'failure') {
-        const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND record_id=? AND source_revision='current' AND json_extract(decision_json,'$.kind')='failure-representation'").get(...scopeKey(boundary), 'failure-' + digest(operation.projectionId))
+        const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision='current' AND json_extract(decision_json,'$.kind')='failure-representation'").get(...scopeKey(boundary), 'failure-' + digest(operation.projectionId))
         // The original transaction qualified this exact public summary. Reopen must not
         // reclassify a later raw record or grant sharing to an unqualified old operation.
         return row && same(JSON.parse(String(row.decision_json)).payload, operation.payload) ? 'qualified' : 'unavailable'
