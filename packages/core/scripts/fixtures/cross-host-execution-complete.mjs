@@ -15,6 +15,17 @@ export async function readEvidence(reference) {
   assert.equal(hash(bytes), reference.sha256, 'Original evidence changed: ' + reference.path)
   return JSON.parse(bytes)
 }
+export function applyVerificationInputs(expected, overlay, commit) {
+  assert(overlay?.schema === 'agentmux.verification-inputs.v1' && overlay.sourceCommit === commit && /^[a-f0-9]{40}$/.test(overlay.verificationCommit))
+  assert(Array.isArray(overlay.changes) && overlay.changes.length > 0)
+  const result = { ...expected }
+  for (const change of overlay.changes) {
+    assert(/^apps\/desktop\/(?:scripts|test)\//.test(change.path) && !change.path.split('/').includes('..'), 'Only explicit test harness inputs may differ from the product archive')
+    assert(change.originalSha256 === expected[change.path] && /^[a-f0-9]{64}$/.test(change.sha256), 'The test correction must retain its exact archived source')
+    result[change.path] = change.sha256
+  }
+  return result
+}
 export function validateUiInputs(receipt, expected) {
   assert(nonempty(receipt.inputs) && nonempty(expected), 'Original UI build inputs are absent')
   assert.deepEqual(receipt.inputsAfter, receipt.inputs, 'The final isolated UI candidate changed during execution')
@@ -161,6 +172,11 @@ export async function runComplete({ authorization, receiptPath, candidate, build
   try {
     assert(preflight.installationQualification.bin === 'verified' && preflight.installationQualification.vendor === 'verified', 'Complete installed-artifact qualification is required')
     const core = await coreEvidence(candidate, buildReceipt); summary.localSemantics = core.references
+    const verification = authorization.executionQualification?.verificationInputs
+    if (verification) {
+      core.expectedInputs = applyVerificationInputs(core.expectedInputs, await readEvidence(verification), candidate.sourceCommit)
+      summary.verificationInputs = verification
+    }
     const refs = authorization.executionQualification?.ui
     assert(Array.isArray(refs) && refs.length === 2 && new Set(refs.map(value => value.direction)).size === 2, 'Two exact original UI direction receipts are required')
     for (const ref of refs) {

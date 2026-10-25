@@ -4,11 +4,21 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readEvidence, validateUi, validateUiInputs, validateRemote } from '../scripts/fixtures/cross-host-execution-complete.mjs'
+import { readEvidence, applyVerificationInputs, validateUi, validateUiInputs, validateRemote } from '../scripts/fixtures/cross-host-execution-complete.mjs'
 
 const commit = 'a'.repeat(40), sha = 'b'.repeat(64)
 const candidate = { sourceCommit: commit, remote: { endpoint: { transport: 'ssh', host: 'authorized-host', user: 'owner' }, installedRoot: '/private/test-candidate' } }
 const hashes = { 'packages/core/dist/index.js': sha }
+test('an explicit harness correction cannot replace product sources or lose the original archive identity', () => {
+  const path = 'apps/desktop/scripts/verify-space-agent-cli.mjs', original = { [path]: sha }, updated = 'c'.repeat(64)
+  const overlay = { schema: 'agentmux.verification-inputs.v1', sourceCommit: commit, verificationCommit: 'd'.repeat(40), changes: [{ path, originalSha256: sha, sha256: updated }] }
+  assert.deepEqual(applyVerificationInputs(original, overlay, commit), { [path]: updated })
+  for (const change of [{ ...overlay.changes[0], path: 'apps/desktop/src/main/runtime-controller.ts' },
+    { ...overlay.changes[0], originalSha256: updated }, { ...overlay.changes[0], path: 'apps/desktop/scripts/../src/product.ts' }]) {
+    assert.throws(() => applyVerificationInputs(original, { ...overlay, changes: [change] }, commit))
+  }
+  assert.throws(() => applyVerificationInputs(original, overlay, 'e'.repeat(40)))
+})
 test('the same Core cannot certify a UI built from different or unrecorded workspace sources', () => {
   const inputs = Object.fromEntries(['apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/renderer/src/lib/control-api.ts',
     'apps/host/src/configured-host-clients.ts', 'packages/client-ui/src/index.ts'].map(file => [file, sha]))
