@@ -171,3 +171,71 @@ it('a missing exact Group is still unknown and never borrows another display occ
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
  } finally { await f.close() }
 })
+
+it.each([false, true])('opens an Agent Session with no confirmed Region and keeps its new Focus location (old reference: %s)', async (staleReference) => {
+ const f = await fixture()
+ try {
+  // The fixture's second Agent belongs to the resource Workspace's Host, so its only missing fact is a Region.
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === f.other.id
+   ? { ...session, hostId: f.resource.hostId, control: { ...session.control, hostId: f.resource.hostId } } as typeof session : session) })))
+  const placeless = f.other.id
+  if (staleReference) await act(async () => useAppStore.setState(state => ({ agentFocus: {
+   ...state.agentFocus, execution: { ...state.agentFocus.execution, sessionId: placeless,
+    reference: { displayWorkspaceId: f.resource.id, groupId: 'removed-group', tabId: 'removed-tab', regionId: 'removed-region' } }
+  } })))
+  expect(Object.values(useAppStore.getState().tabs).some(tab => Object.values(tab.regions).some(region =>
+   (region.kind === 'agent' || region.kind === 'terminal') && region.sessionId === placeless))).toBe(false)
+  const card = f.container.querySelector<HTMLButtonElement>(`button.focus-context[data-session-id="${placeless}"]`)
+  expect(card).not.toBeNull()
+  await act(async () => card!.click())
+  const notice = f.container.querySelector('.focus-location-recovery')
+  expect(notice?.textContent).toContain(staleReference
+   ? 'The selected Tab or Region occurrence is no longer confirmed'
+   : 'No work surface occurrence is currently confirmed for this Session')
+  expect(notice?.textContent).not.toContain('Choose a confirmed location')
+  expect(notice?.textContent).toContain('Its Run is interrupted')
+  const before = useAppStore.getState()
+  const open = notice!.querySelector<HTMLButtonElement>('button[data-focus-open-placeless]')
+  expect(open?.textContent).toContain('Open in a new Tab')
+  await act(async () => open!.click())
+  const after = useAppStore.getState()
+  const placed = Object.values(after.tabs).flatMap(tab => Object.values(tab.regions).flatMap(region =>
+   region.kind === 'agent' && region.sessionId === placeless ? [{ tab, region }] : []))
+  expect(placed).toHaveLength(1)
+  expect(placed[0]!.region.phase).toBe('attached')
+  expect(after.mainSurface).toBe('agents')
+  expect(f.container.querySelector('.focus-location-recovery')).toBeNull()
+  expect(f.container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(placed[0]!.tab.id)
+  expect(f.container.querySelector(`[data-selection-session="${placeless}"]`)).not.toBeNull()
+  expect(after.sessions).toBe(before.sessions)
+  expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(after.tabs[f.exact.id]).toBe(before.tabs[f.exact.id])
+  expect(after.agentFocus.execution.reference).toMatchObject({ tabId: placed[0]!.tab.id, regionId: placed[0]!.region.regionId })
+  await act(async () => f.container.querySelector<HTMLButtonElement>(`button.focus-context[data-session-id="${placeless}"]`)!.click())
+  expect(f.container.querySelector('.focus-location-recovery')).toBeNull()
+  expect(f.container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(placed[0]!.tab.id)
+ } finally { await f.close() }
+})
+
+it('explains an unavailable resource Workspace and keeps the unplaced Agent and retry action', async () => {
+ const f = await fixture()
+ try {
+  // This original preview Agent is on another Host, with no matching resource Workspace.
+  const card = f.container.querySelector<HTMLButtonElement>(`button.focus-context[data-session-id="${f.other.id}"]`)
+  expect(card).not.toBeNull()
+  await act(async () => card!.click())
+  const before = useAppStore.getState()
+  const open = f.container.querySelector<HTMLButtonElement>('button[data-focus-open-placeless]')
+  expect(open).not.toBeNull()
+  await act(async () => open!.click())
+  const after = useAppStore.getState()
+  expect(after.tabs).toBe(before.tabs)
+  expect(after.layouts).toBe(before.layouts)
+  expect(after.sessions).toBe(before.sessions)
+  expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(after.mainSurface).toBe('agents')
+  expect(after.notificationEvents.some(event => event.message.includes('resource Workspace is not available'))).toBe(true)
+  expect(f.container.querySelector('.focus-location-recovery')?.textContent).toContain('Open in a new Tab')
+  expect(f.container.textContent).toContain('resource Workspace is not available')
+ } finally { await f.close() }
+})
