@@ -1,3 +1,4 @@
+import { projectConversationTimeline } from '../src/conversation-timeline.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -5,7 +6,7 @@ import { paginatedFixture, user, source, turn, jsonl } from './helpers/codex-pag
 import { createNativeInputCorrelation } from '../src/native-input-correlation.js'
 import { confirmNativeInputAdoption } from '../src/native-input-adoption.js'
 import { consumeConversationWindowPage, parseConversationUnit, type ConversationWindowAssembly } from '../src/conversation-changes.js'
-import { projectConversationTimeline, conversationRevision, conversationNativeInputWitness } from '../src/conversation-stream.js'
+import { conversationRevision, conversationNativeInputWitness } from '../src/conversation-stream.js'
 import type { AgentPromptSubmissionRecord, AgentTimelineItem } from '../src/types.js'
 import { DatabaseSync } from 'node:sqlite'
 import { PublicationStore, type PublicationOperation } from '../../connectors/src/publication-store.js'
@@ -222,7 +223,7 @@ it('does not let an old witness adopt a changed original version, and preserves 
   }
 })
 
-it('the original Reader makes adoption unknown on witness overflow while its bounded window and every normal body remain readable', async () => {
+it('the original Reader preserves exact adoption through normal witness growth and bounded body eviction', async () => {
   const f = await fixture(); await f.capture()
   // Controlled typed Reader port: original-claim qualification is independently
   // exercised above. This case isolates the existing view's exact retention bound.
@@ -247,9 +248,9 @@ it('the original Reader makes adoption unknown on witness overflow while its bou
     page = await readOriginalWindow({ ...ref, limit: 100, maxBytes: 4 * 1024 * 1024, cursor: page.nextCursor }, port)
   }
   expect(page.nextCursor).toBeNull(); expect(last).toBeDefined(); expect(last!.units.length).toBeLessThanOrEqual(1200)
-  expect(last!.coverage.flatMap(c => c.gaps).map(g => g.code)).toContain('CONVERSATION_INPUT_ADOPTION_COVERAGE_UNKNOWN')
+  expect(last!.coverage.flatMap(c => c.gaps).map(g => g.code)).not.toContain('CONVERSATION_INPUT_ADOPTION_COVERAGE_UNKNOWN')
   const original = last!.units.find(unit => unit.records.some(record => record.original.kind === 'captured'))!
-  expect(original.records).toHaveLength(1); expect(original.event.inputAdoption?.unconfirmed).toBe(true)
+  expect(original.records).toHaveLength(2); expect(original.event.inputAdoption?.unconfirmed).toBeUndefined()
   expect(last!.units.flatMap(unit => unit.records).every(record => record.original.kind === 'captured' || record.original.item.contentParts.length > 0)).toBe(true)
   expect(port.nativeChanges).not.toHaveBeenCalled()
 })
@@ -264,7 +265,7 @@ function publicationFixture(f: Awaited<ReturnType<typeof fixture>>) {
   return { store, binding }
 }
 
-it('keeps the qualified captured public span after adoption and durably gaps native system context in the original publication owner', async () => {
+it('keeps the captured public span and accounts its exact native transport alias without publishing system context', async () => {
   const f = await fixture(), { store, binding } = publicationFixture(f)
   await f.capture(); await appendFile(f.transcriptPath, jsonl([f.native()]))
   const page = await f.client.readConversationChanges({ hostId: 'local', agentSessionId: f.key.agentSessionId, checkpoint: f.checkpoint, limit: 100 })
@@ -273,7 +274,7 @@ it('keeps the qualified captured public span after adoption and durably gaps nat
   const operations = store.list(binding), coverage = store.coverage(binding)
   expect(operations).toHaveLength(1); expect(operations[0]!.payload).toMatchObject({ kind: 'speech', text: expect.stringContaining(f.captured.content!) })
   expect(JSON.stringify(operations)).not.toContain('Private Core system context')
-  expect(coverage.state).toBe('incomplete'); expect(coverage.gaps.some(gap => gap.reason === 'public-content-unconfirmed')).toBe(true)
+  expect(coverage.state).toBe('complete'); expect(coverage.gaps).toEqual([])
   expect(operations[0]!.reference.source.kind).toBe('native')
   expect(operations[0]!.relay?.sources.some(source => source.part.record.source.kind === 'captured')).toBe(true)
   expect(binding.sourceFrontier).toEqual(f.checkpoint)
@@ -289,7 +290,7 @@ it('late captured input joins its accepted native event without rewriting or rep
   const prepare = vi.fn((operation: Readonly<PublicationOperation>) => ({ adapterId: 'private-adapter', renderVersion: 'original-render', requestKey: operation.operationId,
     request: { method: 'POST' as const, path: '/private/messages', body: JSON.stringify(operation.payload), contentType: 'application/json' as const } }))
   const adapter = { adapterId: 'private-adapter', renderVersion: 'original-render', supportedRenderVersions: ['original-render'], prepare }
-  const dispatched = store.claimNext(binding, () => true, adapter)!
+  const dispatched = store.claimNext(binding, store.next(binding)!.operationId, () => true, adapter)!
   store.settle(dispatched.operationId, dispatched.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
   const unknown = structuredClone(store.inspect(dispatched.operationId))
   await appendFile(f.transcriptPath, jsonl([f.native()]))
@@ -299,7 +300,7 @@ it('late captured input joins its accepted native event without rewriting or rep
   expect(joined.snapshot.units).toHaveLength(1)
   store.commitPage(binding, first.checkpoint, changed, () => true, { units: joined.snapshot.units, resolvedText: new Map() })
   expect(store.inspect(dispatched.operationId)).toEqual(unknown)
-  expect(store.claimNext(binding, () => true, adapter)).toBeNull()
+  expect(store.claimNext(binding, dispatched.operationId, () => true, adapter)).toBeNull()
   expect(prepare).toHaveBeenCalledTimes(1)
   const nativeFirst = await fixture(); await appendFile(nativeFirst.transcriptPath, jsonl([nativeFirst.native()]))
   const opened = await nativeFirst.read(); await nativeFirst.capture()
