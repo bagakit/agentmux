@@ -6,7 +6,7 @@ import path from 'node:path'
 import { execFile as execFileCallback } from 'node:child_process'
 import { promisify } from 'node:util'
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { AgentMuxControlServer, AgentMuxFileAgentSessionStore } from '@agentmux/core'
+import { AgentMuxControlServer, AgentMuxFileAgentSessionStore, AgentExecutionBindingService, connectAgentMuxRpc, connectHostedAgentMux } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { DesktopControlIpcBridge } from '../../../src/main/control-ipc-bridge'
@@ -17,10 +17,13 @@ import { createSpaceZoneResource } from '../../../src/main/space-zone-resources'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
 import { observeClientRpcSnapshot } from '../../../src/main/rpc-client-observations'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { DatabaseSync } from 'node:sqlite'
 import type { AppConfig } from '../../../src/shared/contracts'
 
 const execFile = promisify(execFileCallback)
 const [html, privateRoot, phase, preload, evidence, nodeExecutable, cliPath] = process.argv.slice(2)
+const toolMode = phase === 'tool-workspace'
+const toolOwners = toolMode ? JSON.parse(await fs.readFile(path.join(privateRoot, 'tool-owners.json'), 'utf8')) : null
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
@@ -35,11 +38,32 @@ const initialConfig: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'loc
     { id: 'other', hostId: 'local', name: 'Destination', path: path.join(privateRoot, 'other'), kind: 'folder' },
     { id: SCRATCH_WORKSPACE_ID, hostId: 'local', name: 'Topics', path: path.join(privateRoot, 'topics'), kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
-let config: AppConfig = phase === 'seed' ? initialConfig : JSON.parse(await fs.readFile(path.join(privateRoot, 'config.json'), 'utf8'))
+if (toolMode) {
+  initialConfig.hosts.push({ id: 'agent', kind: 'ssh', label: 'Private Agent owner', hostname: 'private-endpoint.invalid' })
+  initialConfig.workspaces.push({ id: 'agent-launch', hostId: 'agent', name: 'Agent launch', path: path.join(privateRoot, 'agent/workspace'), kind: 'folder' })
+}
+let config: AppConfig = phase === 'seed' || toolMode ? initialConfig : JSON.parse(await fs.readFile(path.join(privateRoot, 'config.json'), 'utf8'))
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
 const spatialState = new AgentMuxSpatialStateStore(process.env.AGENTMUX_SPATIAL_STATE_STORE)
 const topics = new ScratchTopics()
-const runtime = new RuntimeController(store, localRuntimeConnector, topics)
+const privateTransports: Array<{ dispose(): Promise<void> }> = []
+const runtime = new RuntimeController(store, toolMode ? async host => {
+  const endpoint = toolOwners.endpoints[host.id]
+  assert.equal(typeof endpoint, 'string', 'One exact fixture Host route is required')
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: endpoint } })
+  privateTransports.push(rpc)
+  const client = await connectHostedAgentMux({ rpc }); await client.connectRuntime()
+  return client
+} : localRuntimeConnector, topics)
+const executionBindings = toolMode ? new AgentExecutionBindingService(path.join(privateRoot, 'execution-bindings'), {
+  resolveHost: async hostId => {
+    const scopes = runtime.rpcClients().filter(scope => scope.hostId === hostId)
+    assert.equal(scopes.length, 1)
+    const client = scopes[0]!.client
+    await client.connect()
+    return { runtimeId: (await client.agentCreationAuthority()).runtimeId, client }
+  }
+}) : undefined
 let registrationFault = false
 const owner = new ConfigOwner({ read: () => config, save: async next => {
   if (registrationFault) { registrationFault = false; throw new Error('Private registration receipt is unavailable after Git creation') }
@@ -62,16 +86,18 @@ const bridge = new DesktopControlIpcBridge({ isAvailable: () => Boolean(win && !
   sendRequest: request => win.webContents.send('agentmux:control-request', request),
   sendCancellation: cancellation => win.webContents.send('agentmux:control-cancel', cancellation) })
 ipcMain.on('control:response', (_event, response) => bridge.accept(response))
-ipcMain.handle('space-proof:request', async (_event, operation, ...args) => {
+ipcMain.handle('space-proof:request', async (event, operation, ...args) => {
+  assert.equal(event.sender, win.webContents, 'Private IPC must retain its original trusted renderer')
   calls.push({ operation, args })
   switch (operation) {
     case 'setup': return { phase, config }
     case 'spatial-read': return spatialState.read()
     case 'spatial-commit': return spatialState.commit(args[0])
+    case 'providers': return args[0] === undefined ? runtime.providerCatalog() : runtime.providerCatalog(args[0])
     case 'topics': return topics.list(config.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)!)
     case 'create-resource': return createSpaceZoneResource(args[0], { config: () => config, topics: () => topics.list(config.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)!),
       host: id => runtime.executionHost(id), worktrees, register: fields => registerWorkspace(fields, owner, id => runtime.executionHost(id)) })
-    case 'launch': return runtime.launchAgent(args[0], config)
+    case 'launch': return runtime.launchAgent(args[0], config, undefined, executionBindings)
     case 'creation': return runtime.agentCreation(args[0], args[1])
     case 'snapshot': if (emptySnapshot) return { sessions: [], timelines: {}, recoveryCandidates: [] }; return runtime.snapshot(config)
     case 'recover': return runtime.recoverSession(args[0], config, args[1])
@@ -154,17 +180,21 @@ async function finish(passed: boolean) {
   disposeSpatial()
   // Server.stop waits for this deliberately abandoned request; app exit owns its private socket.
   if (!result.admission) await server?.stop().catch(error => { result.cleanupFailure = String(error); result.passed = false })
+  await executionBindings?.dispose()
   await runtime.dispose().catch(error => { result.cleanupFailure = String(error); result.passed = false })
   await fs.writeFile(path.join(evidence, `${phase}.json`), JSON.stringify(result, null, 2))
+  for (const transport of privateTransports) await transport.dispose()
   if (win && !win.isDestroyed()) win.destroy()
   app.exit(result.passed ? 0 : 1)
 }
 app.whenReady().then(async () => {
   try {
-    if (phase === 'seed') {
+    if (phase === 'seed' || toolMode) {
       await fs.writeFile(path.join(privateRoot, 'config.json'), JSON.stringify(config))
-      await topics.ensure(config.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)!, 'view:private-topic', 'Private Topic')
-      await topics.ensureMote(config.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)!, PMO_TEAMS_TOPIC_ID)
+      if (!toolMode) {
+        await topics.ensure(config.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)!, 'view:private-topic', 'Private Topic')
+        await topics.ensureMote(config.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)!, PMO_TEAMS_TOPIC_ID)
+      }
     }
     runtime.commit(await runtime.prepare(config))
     // Read the original complete document before Renderer initialization may add the new empty resource layout.
@@ -178,7 +208,7 @@ app.whenReady().then(async () => {
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until('window.spaceReady === true && !window.spaceState().loading')
     if (phase === 'seed') await win.webContents.executeJavaScript('window.spaceSelectCaller()')
-    server = new AgentMuxControlServer({ execute: request => bridge.execute(request), coreClients: () => runtime.rpcClients(),
+    server = new AgentMuxControlServer({ ...(executionBindings ? { executionBindings } : {}), execute: request => bridge.execute(request), coreClients: () => runtime.rpcClients(),
       snapshot: params => observeClientRpcSnapshot(config, topics, params), spatialState,
       socketPath: path.join(privateRoot!, 'runtime', 'control.sock') })
     await server.start()
@@ -186,6 +216,60 @@ app.whenReady().then(async () => {
     // Keep the deliberate startup outage active until its visible state is observed.
     // Runtime events can otherwise request a second canonical snapshot before this read.
     emptySnapshot = false
+    if (toolMode) {
+      const discovered = await cli(['space', 'ls'])
+      const zone = discovered.catalog.zones.find((one: any) => one.directoryPath === path.join(privateRoot, 'caller'))
+      assert.ok(zone, 'Original local display Zone must be discovered')
+      const args = ['agent', 'open', '--executor', toolOwners.executor.executorId, '--execution-workspace', 'agent-launch',
+        '--tool-workspace', 'repo', '--zone', zone.zoneId, '--new-tab', '--operation-id', 'private:tool-open']
+      const opened = await cli(args)
+      result.originalToolOpen = opened
+      assert.equal(opened.outcome, 'opened', JSON.stringify(opened.issues))
+      assert.equal(opened.agent.hostId, 'agent')
+      assert.equal(opened.agent.cwd, path.join(privateRoot, 'agent/workspace'))
+      assert.deepEqual(opened.agent.toolExecution, { bindingId: opened.agent.toolExecution.bindingId, resourceHostId: 'local',
+        resourceRuntimeId: toolOwners.identities.local.runtimeId, workspacePath: path.join(privateRoot, 'repo') })
+      const scopes = runtime.rpcClients()
+      const agentClient = scopes.find(scope => scope.hostId === 'agent')!.client
+      const resourceClient = scopes.find(scope => scope.hostId === 'local')!.client
+      const original = await agentClient.readAgentSession(opened.agent.agentSessionId)
+      assert.ok(original)
+      assert.equal(original!.run.runId, opened.agent.runId)
+      assert.equal(original!.workspacePath, opened.agent.cwd)
+      assert.deepEqual(original!.toolExecution, opened.agent.toolExecution)
+      const bindingId = original!.toolExecution!.bindingId
+      assert.equal(typeof bindingId, 'string')
+      assert.equal(original!.creation!.createOperationId, 'private:tool-open')
+      const db = new DatabaseSync(path.join(privateRoot, 'execution-bindings/bindings.sqlite'), { readOnly: true })
+      let retained: any
+      try { const row = db.prepare('SELECT input,record FROM bindings JOIN binding_intents USING(id) WHERE id=?').get(bindingId)!;
+        retained = { ...JSON.parse(String(row.record)), input: JSON.parse(String(row.input)) } } finally { db.close() }
+      assert.equal(retained.input.agent.agentSessionId, original!.agentSessionId)
+      assert.equal(retained.input.agentHostId, 'agent'); assert.equal(retained.input.resourceHostId, 'local')
+      const frontend = await agentClient.readRunReplay({ runId: retained.bridge.frontend.runId }, 0, 'raw')
+      const executor = await resourceClient.readRunReplay({ runId: retained.bridge.executor.runId }, 0, 'raw')
+      assert.equal(frontend.run.state, 'running'); assert.equal(executor.run.state, 'running')
+      const before = { agent: (await agentClient.listRuns()).map(run => run.runId).sort(), resource: (await resourceClient.listRuns()).map(run => run.runId).sort() }
+      const launches = calls.filter(call => call.operation === 'launch').length
+      const repeated = await cli(args)
+      assert.equal(repeated.agent.agentSessionId, original!.agentSessionId)
+      assert.equal(repeated.agent.runId, original!.run.runId)
+      assert.deepEqual(repeated.agent.toolExecution, original!.toolExecution)
+      assert.equal(calls.filter(call => call.operation === 'launch').length, launches)
+      assert.deepEqual((await agentClient.listRuns()).map(run => run.runId).sort(), before.agent)
+      assert.deepEqual((await resourceClient.listRuns()).map(run => run.runId).sort(), before.resource)
+      const inspection = await cli(['space', 'inspect', '--operation-id', 'private:tool-open'])
+      assert.deepEqual(inspection.request.report.agent.toolExecution, original!.toolExecution)
+      const snapshot = await runtime.snapshot(config)
+      assert(snapshot.sessions.some(one => one.control.kind === 'agent' && one.control.agentSessionId === original!.agentSessionId && one.toolExecution?.bindingId === bindingId))
+      const launch = calls.find(call => call.operation === 'launch')!.args[0] as any
+      assert.deepEqual(launch.toolWorkspace, { id: 'repo', hostId: 'local', path: path.join(privateRoot, 'repo') })
+      assert.equal(launch.executionWorkspaceId, 'agent-launch')
+      result.toolBinding = { original, opened, repeated, inspection, coordinator: retained, frontend: frontend.run, executor: executor.run,
+        snapshot: snapshot.sessions, launch, actualMachines: 1, modelTurnSubmitted: false }
+      await finish(true)
+      return
+    }
     const discovered = await cli(['space', 'ls'])
     const catalog = discovered.catalog
     const repo = catalog.spaces.find((one: any) => one.directoryPath === path.join(privateRoot, 'repo'))

@@ -26,7 +26,7 @@ api.spatial = {
 }
 const setup = await request('setup')
 api.config.get = async () => setup.config
-api.providers.list = async () => []
+api.providers.list = async options => request('providers', options)
 api.demands.list = async () => []
 api.files.readDirectory = async () => []
 api.files.observe = async () => {}
