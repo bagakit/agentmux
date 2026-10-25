@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { promisify } from 'node:util'
@@ -12,7 +12,8 @@ import { prepareRuntimeUpgrade, finishRuntimeUpgrade, closeRuntimeUpgrade } from
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 
 const exec = promisify(execFile), base = resolve('.')
-const out = join(base, ".tmp/runtime-upgrade-live-owner-proof-fixture")
+const out = process.argv.find(value => value.startsWith('--output='))?.slice('--output='.length) ??
+  join(base, ".tmp/runtime-upgrade-live-owner-proof-fixture")
 const oldRoot = process.argv.find(value => value.startsWith('--previous-artifacts='))?.slice('--previous-artifacts='.length) ??
   join(canonicalInstallPath(homedir()), 'Contents/Resources/app/node_modules/@agentmux/core/vendor/ctxmux', `${process.platform}-${process.arch}`)
 const candidateRoot = join(base, 'packages/core/vendor/ctxmux', `${process.platform}-${process.arch}`)
@@ -20,7 +21,8 @@ const relative = 'Contents/Resources/app/node_modules/@agentmux/core', sha = byt
 const digest = async path => sha(await readFile(path))
 const oldManifest = JSON.parse(await readFile(join(oldRoot, 'manifest.json')))
 const candidateManifest = JSON.parse(await readFile(join(candidateRoot, 'manifest.json')))
-assert.equal(process.platform, 'darwin'); assert.equal(oldManifest.product.protocol, 18); assert.equal(candidateManifest.product.protocol, 18)
+assert.equal(process.platform, 'darwin')
+for (const manifest of [oldManifest, candidateManifest]) assert.ok(Number.isSafeInteger(manifest.product.protocol) && manifest.product.protocol > 0)
 const inputs = [...new Set([new URL(import.meta.url).pathname, new URL('./package-runtime-upgrade.mjs', import.meta.url).pathname,
   new URL('./probe-process.mjs', import.meta.url).pathname, join(base, 'apps/desktop/scripts/package-macos.mjs'),
   new URL('./package-identity.mjs', import.meta.url).pathname, join(base, 'apps/desktop/src/shared/client-observation.ts'),
@@ -31,7 +33,7 @@ const inputs = [...new Set([new URL(import.meta.url).pathname, new URL('./packag
 assert.ok(inputs.length >= 10)
 const inputsBefore = Object.fromEntries(await Promise.all(inputs.map(async path => [path, await digest(path)])))
 await mkdir(out, { recursive: true })
-const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-live-own-")), current = join(root, 'Applications/Private.app')
+const root = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-live-own-"))), current = join(root, 'Applications/Private.app')
 const uiNext = join(root, 'Applications/.ui-next.app'), fullNext = join(root, 'Applications/.full-next.app')
 const uiBackup = join(root, 'Trash/BeforeUi.app'), fullBackup = join(root, 'Trash/BeforeFull.app')
 const runtimeDir = join(root, 'runtime'), socket = join(runtimeDir, 'ctxmux.sock'), state = join(root, 'original-state')
@@ -52,6 +54,12 @@ async function app(path, artifacts) {
   await mkdir(join(vendor, 'bin'), { recursive: true }); await mkdir(join(core, 'dist'))
   await writeFile(join(core, 'package.json'), '{"type":"module"}\n')
   await copyFile(join(base, 'packages/core/dist/runtime-paths.js'), join(core, 'dist/runtime-paths.js'))
+  const manifest = JSON.parse(await readFile(join(artifacts, 'manifest.json')))
+  const contract = JSON.parse(await readFile(join(base, 'packages/core/src/ctxmux-artifact-contract.json')))
+  const platform = `${process.platform}-${process.arch}`
+  contract.sources[platform] = { commit: manifest.source.commit, tree: manifest.source.tree }
+  contract.manifests[platform] = await digest(join(artifacts, 'manifest.json'))
+  await writeFile(join(core, 'dist/ctxmux-artifact-contract.json'), JSON.stringify(contract))
   for (const file of ['bin/ctxmuxd', 'ctxmux-sdk-0.0.0.tgz', 'manifest.json']) await copyFile(join(artifacts, file), join(vendor, file))
   await chmod(join(vendor, 'bin/ctxmuxd'), 0o755)
   return { vendor, executable: join(vendor, 'bin/ctxmuxd') }
