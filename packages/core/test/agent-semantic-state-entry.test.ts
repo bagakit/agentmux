@@ -49,8 +49,8 @@ type Internals = {
     identity(): { daemonInstanceId: string }
     status(runId: string): Promise<CtxmuxAdapterRun>
     input(runId: string, input: Input): Promise<Ack>
+    openInput(runId: string): Promise<import('../src/ctxmux-run-adapter.js').CtxmuxAdapterInputChannel>
   }
-  agentInputCursors: Map<string, number>
   acp: AgentMuxAcpBridge
   screenEvidence: AgentScreenEvidenceStore
   acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void>
@@ -109,6 +109,9 @@ async function harness(initial = session(), store: AgentMuxAgentSessionStore = n
     await beforeAck?.()
     return receipt
   }
+  let rawId = 0
+  inner.kernel.openInput = async runId => ({ run: run(), waitWritable: async () => {},
+    input: data => inner.kernel.input(runId, { operationId: `ordinary-${++rawId}`, expectedByte: cursor, data }) })
   vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(0)
   const events: AgentMuxClientEvent[] = []
   client.onEvent((event) => { events.push(event) })
@@ -262,7 +265,7 @@ it.each([
   expect(h.writes.map((input) => input.data)).toEqual([data])
   const bytes = typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength
   expect(ack.appliedByteRange).toEqual({ startByte: 0, endByte: bytes })
-  expect(h.inner.agentInputCursors.get('entry-agent')).toBe(bytes)
+  expect(ack.acceptedThroughByte).toBe(bytes)
 })
 
 it('a failed raw input does not consume durable idle evidence', async () => {
@@ -322,7 +325,6 @@ it('raw ACK requires no semantic Store write and preserves state when that Store
   await expect(h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: 'x', source: 'user' })).resolves.toEqual({
     runId: 'entry-run', appliedByteRange: { startByte: 0, endByte: 1 }, acceptedThroughByte: 1
   })
-  expect(h.inner.agentInputCursors.get('entry-agent')).toBe(1)
   expect(save).not.toHaveBeenCalled()
   expect(metadataSave).not.toHaveBeenCalled()
   expect(h.events.filter((event) => event.type === 'agent-error')).toEqual([])

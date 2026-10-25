@@ -148,13 +148,11 @@ describe('explicit Stop retry continues the original lifecycle', () => {
       const reopened = { ...prepared, run: { runId: 'reopened-run' }, retiredRuns: [f.original.run],
         reopenedFrom: { run: f.original.run, source: 'user', observedAt: retired.observedAt } }
       await f.internal.registry.commitLifecycle(reservation, reopened)
-      f.internal.agentInputCursors.set(f.original.agentSessionId, 999)
-      f.internal.agentInputTails.set(f.original.agentSessionId, { tail: Promise.resolve(), renderObservations: new Set() })
+      f.internal.agentInputLanes.set(f.original.agentSessionId, { admission: Promise.resolve(), pending: new Set(), renderObservations: new Set() })
       releaseClose()
       expect(await second).toBe('Agent stopped but Agent Session cleanup failed.')
       expect(f.internal.registry.get(f.original.agentSessionId).run).toEqual({ runId: 'reopened-run' })
-      expect(f.internal.agentInputCursors.get(f.original.agentSessionId)).toBe(999)
-      expect(f.internal.agentInputTails.has(f.original.agentSessionId)).toBe(true)
+      expect(f.internal.agentInputLanes.has(f.original.agentSessionId)).toBe(true)
       f.internal.kernel.status.mockResolvedValue({ ...observed, runId: 'reopened-run' })
       f.internal.kernel.stop.mockImplementation(async () => {})
       f.internal.acp.unbind.mockImplementation(async () => {})

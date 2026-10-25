@@ -196,7 +196,7 @@ async function coordinator() {
   const providers = new core.AgentProviderRegistry(); providers.get('codex').prepareNativeInput = prepare
   const kernel = { identity: () => ({ daemonInstanceId: 'private-daemon' }), status: async () => run, input: vi.fn() }
   const owner = new core.AgentPromptSubmissionCoordinator({ store, registry, providers, kernel, publisher: new core.AgentMuxClientEventPublisher(),
-    screenEvidence: {}, agentInputCursors: new Map(), requireAgentSession: (id: string) => registry.get(id), assertAgentRun() {},
+    screenEvidence: {}, requireAgentSession: (id: string) => registry.get(id), assertAgentRun() {},
     updateExactAgentSession: (id: string, expectedRun: unknown, update: any) => registry.update(id, expectedRun, update) })
   const key = { kind: 'prompt', agentSessionId: session.agentSessionId, expectedRun: session.run, submissionId: 'original-input' }
   const source = { providerId: 'codex', nativeSessionId: 'initial-native' }

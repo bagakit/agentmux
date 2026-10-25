@@ -97,7 +97,6 @@ async function coordinatorFixture(stored = session()) {
     providers: new AgentProviderRegistry(),
     registry,
     publisher,
-    agentInputCursors: new Map(),
     screenEvidence: screenEvidence as never,
     requireAgentSession: (agentSessionId: string) => registry.get(agentSessionId),
     assertAgentRun: () => {},
