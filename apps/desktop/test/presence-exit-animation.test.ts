@@ -27,9 +27,11 @@ const repositoryDir = new URL('../../../', import.meta.url)
 const styles = allStyles().replace(/\/\*[\s\S]*?\*\//g, '')
 
 // Read the actual opening tag; a 600-character window could borrow a child's className.
-const PRESENCE_PART = /^(?:Dialog|DropdownMenu|ContextMenu|Menu|Popover|Tooltip|HoverCard|Select|AlertDialog)\.(?:Content|SubContent|Overlay)$/
+const PRESENCE_PART_NAMES = ['Content', 'SubContent', 'Overlay']
+const PRESENCE_PART = new RegExp('^(?:Dialog|DropdownMenu|ContextMenu|Menu|Popover|Tooltip|HoverCard|Select|AlertDialog)\\.(?:' + PRESENCE_PART_NAMES.join('|') + ')$')
 function classesInSource(source: string): Set<string> {
   const found = new Set<string>()
+  if (!PRESENCE_PART_NAMES.some(name => source.includes(name))) return found
   const file = ts.createSourceFile('surface.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const readClass = (node: ts.Node): void => {
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
@@ -61,7 +63,9 @@ function classesInSource(source: string): Set<string> {
   return found
 }
 
+let presenceClasses: Map<string, string[]> | undefined
 function presenceClassNames(): Map<string, string[]> {
+  if (presenceClasses) return presenceClasses
   const found = new Map<string, string[]>()
   const walk = (dir: URL): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -76,7 +80,37 @@ function presenceClassNames(): Map<string, string[]> {
     }
   }
   for (const dir of sourceRoots) walk(dir)
+  presenceClasses = found
   return found
+}
+
+// Only the final compound selector owns a node's animation. Descendants and pseudo-elements
+// do not set the animationName that Radix reads from its Presence element.
+function selectorSubjects(text: string): Array<{ selector: string; subject: string }> {
+  const cuts = (value: string, separator: (letter: string) => boolean): number[] => {
+    const result: number[] = []; let quote = '', escaped = false, brackets = 0, parentheses = 0
+    for (let index = 0; index < value.length; index++) {
+      const letter = value[index]!
+      if (escaped) { escaped = false; continue }
+      if (letter === '\\') { escaped = true; continue }
+      if (quote) { if (letter === quote) quote = ''; continue }
+      if (letter === '"' || letter === "'") { quote = letter; continue }
+      if (letter === '[') brackets++; else if (letter === ']') brackets--
+      else if (letter === '(') parentheses++; else if (letter === ')') parentheses--
+      else if (!brackets && !parentheses && separator(letter)) result.push(index)
+    }
+    return result
+  }
+  const result: Array<{ selector: string; subject: string }> = []; let start = 0
+  for (const end of [...cuts(text, letter => letter === ','), text.length]) {
+    const selector = text.slice(start, end).trim(); start = end + 1
+    const separators = cuts(selector, letter => /[\s>+~]/.test(letter))
+    const subject = selector.slice((separators.at(-1) ?? -1) + 1)
+    const colons = cuts(subject, letter => letter === ':')
+    const pseudoElement = colons.some((index, position) => colons[position + 1] === index + 1)
+    if (subject && !pseudoElement) result.push({ selector, subject })
+  }
+  return result
 }
 
 // Every rule in the sheet that declares a keyframe animation, paired with its selector text. Skips
@@ -115,19 +149,29 @@ describe('Radix Presence exit animation', () => {
     expect([...classesInSource('<Dialog.Content className={`panel-${size}`} />')]).toEqual([])
   })
 
+  it('keeps descendant and pseudo-element animation outside the Presence owner', () => {
+    expect(selectorSubjects(".dialog[data-phase='writing'] .line::before")).toEqual([])
+    expect(selectorSubjects('.dialog > .line')).toEqual([{ selector: '.dialog > .line', subject: '.line' }])
+    expect(selectorSubjects('.dialog+.line')).toEqual([{ selector: '.dialog+.line', subject: '.line' }])
+    const sourceOwner = '.dialog[data-source="provider::event"]'
+    expect(selectorSubjects(sourceOwner)).toEqual([{ selector: sourceOwner, subject: sourceOwner }])
+    expect(selectorSubjects(".dialog[data-title='two words'][data-state='open']:is(.one,.two), .other").map(value => value.subject))
+      .toEqual([".dialog[data-title='two words'][data-state='open']:is(.one,.two)", '.other'])
+  })
+
   it('scopes Presence animations to open entry or an explicit distinct finite closed exit', () => {
     const classNames = presenceClassNames()
     expect(classNames.size).toBeGreaterThan(0)
     const rules = animationRules()
     expect(rules.length).toBeGreaterThan(0)
     const offenders: string[] = []
-    for (const { selector: selectors, declaration } of rules) for (const selector of selectors.split(',')) {
+    for (const { selector: selectors, declaration } of rules) for (const { selector, subject } of selectorSubjects(selectors)) {
       for (const [className, sites] of classNames) {
         // Match the class as a whole token so `.tab-context-menu__item` does not read as
         // `.tab-context-menu`; only the Presence node itself is under this rule.
-        if (!new RegExp(`\\.${className}(?![\\w-])`).test(selector)) continue
-        if (selector.includes("data-state='open'") || selector.includes('data-state="open"')) continue
-        if (selector.includes("data-state='closed'") || selector.includes('data-state="closed"')) {
+        if (!new RegExp(`\\.${className}(?![\\w-])`).test(subject)) continue
+        if (subject.includes("data-state='open'") || subject.includes('data-state="open"')) continue
+        if (subject.includes("data-state='closed'") || subject.includes('data-state="closed"')) {
           const name = declaration.split(/\s+/)[0]!
           const durations = [...declaration.matchAll(/(?:^|\s)(\d+(?:\.\d+)?(?:ms|s))\b|var\((--[\w-]+)\)/g)].map(match => {
             const value = match[1] ?? new RegExp(`${match[2]}\\s*:\\s*([\\d.]+(?:ms|s))`).exec(styles)?.[1]
