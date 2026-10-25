@@ -20,6 +20,12 @@ const correlation = '__agentmux_original_call_id'
 const originals = new Map()
 const transports = new Map()
 const callKey = event => JSON.stringify([event.agentId ?? null, event.tool_use_id])
+const childUnknown = 'This Claude interface cannot confirm this child operation in its original permission context. The main Agent can request it with its own native permission.'
+
+function argumentsOf(event) {
+  const { tool, tool_use_id, agentId, requestMeta, ...input } = event
+  return input
+}
 
 function nativeResult(remote) {
   if (typeof remote.deny === 'string') return { deny: remote.deny }
@@ -38,58 +44,61 @@ function sameInput(left, right) {
   return keys.length === Object.keys(right).length && keys.every(key => Object.hasOwn(right, key) && sameInput(left[key], right[key]))
 }
 
+function localTask(event) {
+  return event.tool === 'TaskStop' && !(typeof (event.task_id ?? event.shell_id) === 'string' && (event.task_id ?? event.shell_id).startsWith(resourceTaskPrefix))
+}
+
+async function routeOriginal($, event, verdict) {
+  const key = callKey(event)
+  if (typeof event.tool_use_id !== 'string' || originals.has(key)) return { deny: 'The original native call identity is unavailable.' }
+  const input = argumentsOf(event)
+  originals.set(key, { tool: event.tool, input, child: event.agentId !== undefined, verdict })
+  try { return nativeResult(await $.tool.call({ ...input, tool: alias(event.tool), [correlation]: key })) }
+  finally { originals.delete(key) }
+}
+
 export function register(on) {
+  // This entry must precede the combined hook and must not enter it for a
+  // child call. Native queries skip every active ancestor registration.
+  on('tool.call', { tool: nativeTools, agentId: /.+/ }, ($, event, next) => localTask(event)
+    ? next(event) : routeOriginal($, event)).catch(() => ({ deny: unavailable }))
+
+  on('tool.*', async ($, event, next) => {
+    const name = event.tool
+    if (!nativeTools.includes(name)) return next(event)
+    if (next.event === 'tool.check') {
+      const verdict = await next(event)
+      // A query from the alias hook has no child actor. Keep only the native
+      // tool's confirmed read-only input and an existing allow. The main
+      // wrapper's own query skips this same registration by native contract.
+      if (next.origin.plugin !== plugin || event.tool_use_id !== undefined) return verdict
+      if (verdict.decision === 'deny') return verdict
+      return event.isReadOnly === true && verdict.decision === 'allow' ? verdict : { decision: 'deny', reason: childUnknown }
+    }
+    if (next.event !== 'tool.call') return next(event)
+    if (localTask(event)) return next(event)
+    if (event.agentId !== undefined) return { deny: childUnknown }
+    // Native query is permission-only. Running the original tool's next()
+    // would validate resource files against the Agent Host's local read state.
+    const verdict = await $.tool.check({ tool: name, input: argumentsOf(event) })
+    if (verdict?.decision === 'deny') return { deny: verdict.reason ?? 'The original native tool permission refused this call.' }
+    return routeOriginal($, event, verdict)
+  }).catch(($, event, next) => {
+    if (next.event === 'tool.check') return { decision: 'deny', reason: 'The original native tool permission could not be evaluated.' }
+    return next.event === 'tool.call' ? { deny: unavailable } : next(event)
+  })
+
   for (const name of nativeTools) {
     const tool = alias(name)
-    on('tool.call', { tool: name }, async ($, event, next) => {
-      if (name === 'TaskStop' && !(typeof (event.task_id ?? event.shell_id) === 'string' && (event.task_id ?? event.shell_id).startsWith(resourceTaskPrefix))) return next(event)
-      const key = callKey(event)
-      if (typeof event.tool_use_id !== 'string' || originals.has(key)) return { deny: 'The original native call identity is unavailable.' }
-      let capture
-      const replacement = new Promise(resolve => { capture = resolve })
-      const original = { tool: name, agentId: event.agentId, capture }
-      originals.set(key, original)
-      try {
-        // Reach this exact actor's native PreToolUse and permission check. Keep
-        // its local effect suspended until this wrapper returns: native next's
-        // documented pending-call cancellation prevents any local replacement.
-        return await Promise.race([replacement, next(event)])
-      } finally { originals.delete(key) }
-    }).catch(() => ({ deny: unavailable }))
-
-    on('tool.check', { tool: name }, async ($, event, next) => {
-      const original = originals.get(callKey(event))
-      if (!original || original.tool !== name || original.agentId !== event.agentId) return next(event)
-      const verdict = await next(event)
-      if (verdict.decision === 'deny') return verdict
-      original.checked = { verdict, input: event.input }
-      try {
-        // A native $ call pauses this hook's budget while the resource runs or
-        // the person answers. A bare parked promise would time out after 10s.
-        const remote = await $.tool.call({ ...event.input, tool, [correlation]: callKey(event) })
-        original.capture(nativeResult(remote))
-      } catch { original.capture({ deny: unavailable }) }
-      // Let the outer result cancel this pending local continuation. Returning
-      // any verdict here creates either a false denial or a second local effect.
-      return new Promise((resolve, reject) => {
-        const cancel = () => reject(next.signal.reason)
-        if (next.signal.aborted) cancel()
-        else next.signal.addEventListener('abort', cancel, { once: true })
-      })
-    }).catch(($, event, next) => {
-      if (next.signal.aborted) throw next.signal.reason
-      return { decision: 'deny', reason: 'The original native tool permission could not be evaluated.' }
-    })
-
     // Only this plugin can correlate a nested transport with the exact original
     // native actor and call. The private key never reaches MCP or native hooks.
     on('tool.call', { tool }, async ($, event, next) => {
       const { [correlation]: id, ...forward } = event
       const original = originals.get(id)
-      if (next.origin.plugin !== plugin || original?.tool !== name || !original.checked || typeof event.tool_use_id !== 'string')
+      if (next.origin.plugin !== plugin || original?.tool !== name || typeof event.tool_use_id !== 'string')
         return { deny: 'Use the original native tool for this resource operation.' }
       const key = callKey(event)
-      transports.set(key, original.checked)
+      transports.set(key, original)
       try { return await next(forward) }
       finally { transports.delete(key) }
     })
@@ -99,7 +108,7 @@ export function register(on) {
       if (!checked || !sameInput(checked.input, event.input)) return { decision: 'deny', reason: 'The resource call no longer matches its original native permission check.' }
       const transport = await next(event)
       if (transport.decision === 'deny') return transport
-      const original = checked.verdict
+      const original = checked.child ? await $.tool.check({ tool: name, input: event.input }) : checked.verdict
       if (original.decision === 'deny') return original
       return transport.decision === 'ask' ? transport : original
     }).catch(() => ({ decision: 'deny', reason: 'The original native tool permission could not be evaluated.' }))
