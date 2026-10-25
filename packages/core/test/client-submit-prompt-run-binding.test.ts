@@ -24,6 +24,7 @@ afterEach(async () => {
   vi.restoreAllMocks()
   await Promise.all(clients.splice(0).map((client) => client.dispose()))
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+  vi.unstubAllEnvs()
 })
 
 type Input = { operationId: string; expectedByte: number; data: string | Uint8Array }
@@ -49,16 +50,20 @@ function deferred() {
 
 async function fixture(singlePhase = false, durable = false) {
   const template = new AgentProviderRegistry().get('codex')
-  const { providerFork: _fork, promptExecution: _immediate, ...capabilities } = template.catalog.capabilities
+  const { providerFork: _fork, promptExecution: _immediate, nativeConversationInput: _nativeInput, asyncQuestionReply: _question, ...capabilities } = template.catalog.capabilities
   const generic = defineAgentProvider({
-    catalog: { ...template.catalog, capabilities, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
+    catalog: { ...template.catalog, capabilities: { ...capabilities, providerResume: false }, resumeStrategy: { kind: 'none' }, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     hook: template.hook,
     buildArgs: (_prompt, args) => [...args]
   })
   const providerId = singlePhase ? generic.id : 'codex'
-  const root = durable ? await mkdtemp(join(tmpdir(), 'amux-future-admission-')) : undefined
-  if (root) roots.push(root)
-  const store = root ? new AgentMuxFileAgentSessionStore(join(root, 'sessions.json')) : new AgentMuxMemoryAgentSessionStore()
+  const root = await mkdtemp(join(tmpdir(), 'amux-future-admission-'))
+  roots.push(root)
+  for (const [key] of Object.entries(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root)
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
+  const store = durable ? new AgentMuxFileAgentSessionStore(join(root, 'sessions.json')) : new AgentMuxMemoryAgentSessionStore()
   const initial: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'bound-agent', providerId, executorId: providerId,
     hostId: 'local', workspacePath: fixturePath("repo"), run: { runId: 'original-run' }, retiredRuns: [],
@@ -169,7 +174,7 @@ describe('conditional exact Run prompt admission', () => {
     await h.client.submitAgentPrompt(h.input)
     expect(h.writes.map(({ runId, data }) => ({ runId, data }))).toEqual(singlePhase
       ? [{ runId: 'original-run', data: 'hello\r' }]
-      : [{ runId: 'original-run', data: 'hello' }, { runId: 'original-run', data: '\r' }])
+      : [{ runId: 'original-run', data: '\u001b[200~hello\u001b[201~' }, { runId: 'original-run', data: '\r' }])
     const firstWrites = [...h.writes]
     const restored = await h.freshClient()
     await restored.client.submitAgentPrompt(h.input)
@@ -189,7 +194,7 @@ describe('conditional exact Run prompt admission', () => {
     await h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession('bound-agent')), agentSessionId: 'bound-agent', operationId: 'fresh-operation', prompt: 'fresh' })
     expect(h.writes.map(({ runId, data }) => ({ runId, data }))).toEqual(singlePhase
       ? [{ runId: 'replacement-run', data: 'fresh\r' }]
-      : [{ runId: 'replacement-run', data: 'fresh' }, { runId: 'replacement-run', data: '\r' }])
+      : [{ runId: 'replacement-run', data: '\u001b[200~fresh\u001b[201~' }, { runId: 'replacement-run', data: '\r' }])
   })
 
   it('retains the existing exact Run fence while a bound prompt waits behind actual raw input', async () => {
@@ -238,7 +243,7 @@ describe('conditional exact Run prompt admission', () => {
     expect(h.client.agentSession('bound-agent').run).toEqual({ runId: 'replacement-run' })
     expect(h.writes.map(({ runId, data }) => ({ runId, data }))).toEqual(singlePhase
       ? [{ runId: 'original-run', data: 'hello\r' }]
-      : [{ runId: 'original-run', data: 'hello' }, { runId: 'original-run', data: '\r' }])
+      : [{ runId: 'original-run', data: '\u001b[200~hello\u001b[201~' }, { runId: 'original-run', data: '\r' }])
     const history = h.events.filter((event) => event.type === 'agent-timeline')
     expect(history).toHaveLength(1)
     expect(history[0]).toMatchObject({ evidence: { run: { runId: 'original-run' } },
@@ -373,7 +378,7 @@ describe('saved future-message admission', () => {
   })
 })
 
-it('allows a saved later future occurrence at a passively confirmed native idle frame while interval remains consumed', async () => {
+it('refuses to renew consumed automatic input authority from an idle screen while keeping the saved intent', async () => {
   const h = await fixture(true)
   await h.client.submitAgentPrompt(h.input)
   await h.client.saveAgentFuturePromptIntent({ agentSessionId: 'bound-agent', intentId: 'schedule-1', operationId: 'saved-operation', prompt: 'hello', active: true })
@@ -385,9 +390,10 @@ it('allows a saved later future occurrence at a passively confirmed native idle 
     frames.push(options); matcher?.({ geometryRevision: 2, snapshot: () => ({}) } as never); return 123
   })
   const before = h.client.agentSession('bound-agent'), count = h.writes.length
-  await h.client.submitAgentPrompt({ ...h.input, ...agentPromptCondition(before), operationId: 'future-operation', expectedInputByte: h.run('original-run').acceptedInputBytes!, expectedFutureIntent: { intentId: 'schedule-1', occurrenceAt: 1000 } })
-  expect(h.writes.length).toBe(count + 1)
-  expect(frames.some(frame => frame?.requireFrameAfterBoundary === true && frame?.requireCompleteFrame === true && frame?.checkpointFrameFence?.resizeRevision === 2)).toBe(true)
+  await expect(h.client.submitAgentPrompt({ ...h.input, ...agentPromptCondition(before), operationId: 'future-operation', expectedInputByte: h.run('original-run').acceptedInputBytes!, expectedFutureIntent: { intentId: 'schedule-1', occurrenceAt: 1000 } })).rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
+  expect(h.writes.length).toBe(count)
+  expect(frames).toEqual([])
+  expect(await h.client.readAgentFuturePromptIntent('bound-agent', 'schedule-1')).not.toHaveProperty('lastOccurrenceAt')
   const admitted = h.client.agentSession('bound-agent')
   await expect(h.client.submitAgentPrompt({ ...h.input, ...agentPromptCondition(admitted), operationId: 'interval-operation', expectedInputByte: h.run('original-run').acceptedInputBytes!, expectedCompletionId: '["original-run",100]' })).rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
 })
