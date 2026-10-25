@@ -24,6 +24,7 @@ const out = process.env.AGENTMUX_CERT_OUT!, assets = process.env.AGENTMUX_CERT_A
 const urls = JSON.parse(process.env.AGENTMUX_CERT_URLS!) as { first: string; second: string; h2: string; rotate: string }
 const receipt: any = { passed: false, cases: [], images: [], calls: [], cleanup: [], runtimeConnections: 0, clipboardWrites: 0 }
 let rendererLoaded = false
+let outsider: BrowserWindow | undefined
 let win: BrowserWindow | undefined, windows: WorkbenchWindows | undefined, runtime: RuntimeController | undefined
 let progress: ContinuousProgressLoopManager | undefined, access: ReturnType<typeof createDesktopApplicationAccessOwner> | undefined
 let dispose: (() => Promise<void>) | undefined, pageServer: Server | undefined, manager: BrowserViewManager | undefined
@@ -108,6 +109,13 @@ app.whenReady().then(async () => {
     assert.equal(pending()?.requestId, first.requestId, 'Wrong answers preserve the original pending request')
   }
   assert.throws(() => manager!.answerCertificate('sibling', { ...first, allow: true }), /No certificate request/)
+  outsider = new BrowserWindow({ show: false, webPreferences: { preload: join(assets, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } })
+  await outsider.loadURL('data:text/html,<!doctype html><title>Foreign test sender</title>')
+  await assert.rejects(outsider.webContents.executeJavaScript(`globalThis.agentmux.browser.answerCertificate('original',${JSON.stringify({ ...first, allow: true })})`),
+    /Untrusted/, 'A foreign App sender must be refused')
+  assert.equal(pending()?.requestId, first.requestId)
+  outsider.destroy(); outsider = undefined
+
   await manager!.create('concurrent', urls.second, 'certificate-workspace', original.profileId)
   const concurrent = await until(() => pending('concurrent') || false, 'concurrent same-Profile request')
   assert.notEqual(concurrent.requestId, first.requestId)
@@ -131,7 +139,7 @@ app.whenReady().then(async () => {
 
   // DOM-generated clicks cannot stand in for the person in the actual Renderer.
   await evaluate(`[...document.querySelectorAll('button')].find(e=>e.textContent==='Continue to site').click()`)
-  await settle(); assert.equal(pending()?.requestId, first.requestId); assert.equal(receipt.calls.length, 0)
+  await settle(); assert.equal(pending()?.requestId, first.requestId); assert.equal(receipt.calls.filter((row: any) => row.exactSender).length, 0)
   win.webContents.debugger.attach('1.3')
   for (const shape of [{ name: 'normal-light', width: 1100, height: 780, theme: 'light' }, { name: 'narrow-dark', width: 430, height: 820, theme: 'dark' }]) {
     win.setContentSize(shape.width, shape.height)
@@ -154,7 +162,8 @@ app.whenReady().then(async () => {
   assert.equal(contents.id, contentsId)
   assert.equal(manager!.target('original')!.certificateRequest, null)
   assert.equal(manager!.target('original')!.control?.owner, original.control.owner)
-  assert.ok(receipt.calls.length === 2 && receipt.calls.every((row: any) => row.exactSender && row.exactFrame))
+  assert.equal(receipt.calls.filter((row: any) => row.exactSender && row.exactFrame).length, 2)
+  assert.equal(receipt.calls.filter((row: any) => !row.exactSender).length, 1)
   assert.throws(() => manager!.answerCertificate('original', { ...allowed, allow: true }), /No certificate request/)
   await manager!.navigate('sibling', urls.first)
   await until(() => sibling.getTitle() === 'Private TLS page' && !sibling.isLoading() || false, 'same-Profile accepted connection reuse')
@@ -217,7 +226,7 @@ app.whenReady().then(async () => {
   receipt.passed = true
 }).catch(error => { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; receipt.owners = [...views].map(([id,view]) => ({ id, destroyed: view.webContents.isDestroyed(), ...(!view.webContents.isDestroyed() ? { url: view.webContents.getURL(), title: view.webContents.getTitle(), loading: view.webContents.isLoading(), target: manager?.target(id), pending: pending(id) } : {}) })) }).finally(async () => {
   for (const [owner, cleanup] of [ ['renderer', () => win && !win.isDestroyed() ? evaluate('globalThis.certificateProof?.dispose()') : undefined],
-    ['ipc', () => dispose?.()], ['progress', () => progress?.stop()], ['access', () => access?.dispose()], ['runtime', () => runtime?.dispose()],
+    ['foreign-sender-window', () => { if (outsider && !outsider.isDestroyed()) outsider.destroy() }], ['ipc', () => dispose?.()], ['progress', () => progress?.stop()], ['access', () => access?.dispose()], ['runtime', () => runtime?.dispose()],
     ['windows', () => windows?.dispose()], ['window', () => { if (win && !win.isDestroyed()) win.destroy() }],
     ['http', async () => { pageServer?.closeAllConnections(); if (pageServer?.listening) await new Promise<void>(done => pageServer!.close(() => done())) }] ] as const) {
     try { await cleanup() } catch (error) { receipt.cleanup.push({ owner, message: String(error), detail: error, errors: error instanceof AggregateError ? error.errors.map(e => ({message:String(e), cause: String(e.cause), errors: e instanceof AggregateError ? e.errors.map(String) : undefined, stack:e.stack})) : undefined }) }
