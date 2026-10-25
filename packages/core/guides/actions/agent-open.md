@@ -21,3 +21,5 @@ original Agent in Focus list without changing the filters or transferring input.
 focus.agent for actual card visibility. space focus and goal focus navigate exact objects. Selection,
 presentation and actual caret eligibility are separate facts. Never stop a healthy Run to repair
 an observation or handshake. Reader cancellation only detaches that reader.
+
+[Remote execution from a project](remote-execution.md "amux:include")
