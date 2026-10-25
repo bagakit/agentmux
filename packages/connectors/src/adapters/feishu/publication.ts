@@ -313,8 +313,8 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     const mapping = operation.mapping
     if (mapping) feishuIdentity(mapping.messageId)
     if (operation.payload.kind === 'query-feedback') {
-      if (operation.effect !== 'upsert' || mapping && (mapping.messageId !== operation.payload.messageId || mapping.threadId !== undefined)) feishuFailure('FEISHU_QUERY_FEEDBACK_INVALID')
-      return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: feishuQueryReaction(operation.payload) }
+      if (mapping && (mapping.messageId !== operation.payload.messageId || mapping.threadId !== undefined || mapping.nativeCard !== undefined)) feishuFailure('FEISHU_QUERY_FEEDBACK_INVALID')
+      return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: feishuQueryReaction(operation.payload, operation.effect, mapping) }
     }
     if (operation.effect === 'withdraw') {
       if (!mapping) feishuFailure('FEISHU_PUBLICATION_MAPPING_REQUIRED')
@@ -396,7 +396,8 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       parsePreparedPublication(prepared, this)
       if (prepared.request.body !== undefined && Buffer.byteLength(prepared.request.body) > FEISHU_MESSAGE_BODY_BYTES) return false
       const reaction = readFeishuQueryReaction(prepared)
-      if (reaction) return mapping === undefined || mapping.messageId === reaction.messageId && mapping.threadId === undefined
+      if (reaction) return (reaction.reactionId === undefined || mapping?.reactionId === reaction.reactionId) &&
+        (mapping === undefined || mapping.messageId === reaction.messageId && mapping.threadId === undefined && mapping.nativeCard === undefined)
       if (mapping?.nativeCard && prepared.request.method !== 'DELETE') return prepared.request.method === 'PUT' && prepared.request.path === `${cardsPath}/${encodeURIComponent(mapping.nativeCard.id)}` &&
         prepared.request.query === undefined && prepared.request.contentType === 'application/json' && requestCard(prepared)?.schema === '2.0' && nativeSequence(object(JSON.parse(prepared.request.body!)), prepared)
       if (mapping) return prepared.request.path === `${path}/${encodeURIComponent(feishuIdentity(mapping.messageId))}` &&
@@ -460,6 +461,8 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     const reaction = readFeishuQueryReaction(prepared)
     if (reaction) {
       if (!this.valid(prepared, target, mapping)) return null
+      // A missing delete ACK stays unknown: list absence cannot attest to that original DELETE.
+      if (reaction.reactionId !== undefined) return null
       // A missing ACK can only read this original message/stage; absence never authorizes another POST.
       try {
         let token: string | undefined, confirmed: PublicationMapping | undefined

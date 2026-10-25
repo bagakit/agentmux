@@ -5,8 +5,41 @@ import type { ConnectionIngressMessage } from '@agentmux/core/connections'
 import { conversationInputAdoptionEdges, conversationInputIdentity, type ConversationInputWitness, type ConversationUnit } from '@agentmux/core/conversation'
 import type { PublicationBoundary, PublicationOperation, PublicationStore, QueryFeedbackPayload } from './publication-store.js'
 
-export function queryFeedbackOperationId(boundary: PublicationBoundary, ingressId: string, stage: QueryFeedbackPayload['stage']): string {
+const queryStages: readonly QueryFeedbackPayload['stage'][] = ['received', 'queued', 'dispatched', 'started', 'completed']
+
+export function queryFeedbackOperationId(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, ingressId: string, stage: QueryFeedbackPayload['stage']): string {
   return 'publication-query-feedback-' + createHash('sha256').update(JSON.stringify([boundary.bindingId, boundary.revision, ingressId, stage])).digest('base64url')
+}
+
+/** Reuse the five original facts and their mappings; this is presentation, never input state. */
+export function reconcileQueryFeedback(store: PublicationStore, original: PublicationOperation): void {
+  if (!original.queryFeedback) return
+  const boundary = { bindingId: original.bindingId, revision: original.bindingRevision }
+  const stages = queryStages.map(stage => store.inspect(queryFeedbackOperationId(boundary, original.queryFeedback!.ingressId, stage)))
+  const latest = stages.reduce((last, operation, index) => operation ? index : last, -1)
+  const confirmed = stages.reduce((last, operation, index) => operation?.state === 'confirmed' && operation.mapping?.reactionId ? index : last, -1)
+  for (const [index, operation] of stages.entries()) {
+    if (!operation) continue
+    // A newer fact supersedes an unsent display only; original in-flight effects keep their identity.
+    if (index < latest && operation.state === 'pending' && operation.attempt === undefined && !operation.prepared) {
+      const next: PublicationOperation = { ...operation, state: 'superseded' }
+      store.database.prepare('UPDATE connector_publication_operation SET operation_json=?,state=? WHERE operation_id=?')
+        .run(JSON.stringify(next), next.state, next.operationId)
+    }
+    if (index >= confirmed || operation.state !== 'confirmed' || !operation.mapping?.reactionId) continue
+    const digest = createHash('sha256').update(JSON.stringify([operation.operationId, 'withdraw'])).digest('base64url')
+    const operationId = 'publication-query-feedback-' + digest
+    if (store.inspect(operationId)) continue
+    const withdrawal: PublicationOperation = {
+      operationId, projectionId: operation.projectionId, sourceRevision: digest,
+      bindingId: operation.bindingId, bindingRevision: operation.bindingRevision,
+      reference: operation.reference, target: operation.target, ...(operation.publicationScope ? { publicationScope: operation.publicationScope } : {}),
+      payload: operation.payload, queryFeedback: operation.queryFeedback!,
+      effect: 'withdraw', predecessorOperationId: operation.operationId, fragment: { ordinal: 0, count: 1 }, state: 'pending'
+    }
+    store.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
+      .run(operationId, withdrawal.projectionId, digest, 0, withdrawal.bindingId, withdrawal.bindingRevision, JSON.stringify(withdrawal), 'pending')
+  }
 }
 
 /** These effects use the existing Outbox. No separate input state, retry queue or Runtime. */

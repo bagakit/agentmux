@@ -130,7 +130,8 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
   if (p.queryFeedback !== undefined) {
     const q = object(p.queryFeedback, ['stage', 'ingressId', 'messageId'])
     if (!['received', 'queued', 'dispatched', 'started', 'completed'].includes(String(q.stage)) || original.source.kind !== 'ingress' ||
-      p.effect !== 'upsert' || ordinal !== 0 || count !== 1 || p.relay !== undefined || p.resourceUpload !== undefined || predecessorOperationId !== undefined) fail()
+      ordinal !== 0 || count !== 1 || p.relay !== undefined || p.resourceUpload !== undefined ||
+      (p.effect === 'upsert' ? predecessorOperationId !== undefined : predecessorOperationId === undefined)) fail()
     queryFeedback = { stage: q.stage as NonNullable<ConnectionDelivery['queryFeedback']>['stage'], ingressId: text(q.ingressId), messageId: text(q.messageId) }
     if (original.source.kind !== 'ingress' || original.source.ingressId !== queryFeedback.ingressId) fail()
     if (mapped && (mapped.messageId !== queryFeedback.messageId || !mapped.reactionId || mapped.threadId !== undefined)) fail()

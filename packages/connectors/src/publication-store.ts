@@ -1,6 +1,6 @@
 import { queryInputPosition, queryInputPage, queryInputPending, queryInputReceipt, type QueryInputPosition } from './publication-query-input.js'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
-import { projectQueryFeedback, queueQueryFeedback, queryFeedbackOperationId } from './publication-query-feedback.js'
+import { projectQueryFeedback, queueQueryFeedback, queryFeedbackOperationId, reconcileQueryFeedback } from './publication-query-feedback.js'
 import { externalConversationAuthor, externalConversationRecordId } from '@agentmux/core'
 import { createHash } from 'node:crypto'
 import type { PublicationImage, PublicationFile, ResourceUploadReceipt, ResolvedPublicationPart } from './publication-resource.js'
@@ -1188,7 +1188,11 @@ export class PublicationStore {
   claimNext(boundary: PublicationBoundary, expectedOperationId: string, authorized: () => boolean, adapter: PublicationPreparer, projectionId?: string): PublicationOperation | null {
     return this.transaction(() => {
       if (!authorized()) return null
-      const first = this.read(this.candidate(boundary, projectionId))
+      let first = this.read(this.candidate(boundary, projectionId))
+      if (first?.queryFeedback) {
+        reconcileQueryFeedback(this, first)
+        first = this.read(this.candidate(boundary, projectionId))
+      }
       if (!first || first.operationId !== expectedOperationId) return null
       if ((first.publicationScope ?? 'future-native-user-facing') !== boundary.scope.publication)
         throw new AgentMuxError('The original publication retains another sharing scope. Inspect its Binding revision without replacing the operation.', 'PUBLICATION_SCOPE_CONFLICT')
@@ -1254,6 +1258,7 @@ export class PublicationStore {
         ? { ...retained, state: 'confirmed', mapping: result.mapping, receipt: result }
         : { ...retained, state: result.state, reason: result.reason, receipt: result }
       this.write(settled)
+      if (result.state === 'confirmed' && settled.effect === 'upsert' && settled.queryFeedback) reconcileQueryFeedback(this, settled)
       if (result.state === 'not-applied') {
         const successors = this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE projection_id=? AND fragment_ordinal=? AND state='pending' AND json_extract(operation_json,'$.predecessorOperationId')=? ORDER BY ordinal")
           .all(original.projectionId, original.fragment.ordinal, original.operationId).map(row => this.read(row)!)
