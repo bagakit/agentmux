@@ -36,6 +36,7 @@ import { registerBrowserResourceIpc } from './browser-resource-ipc.js'
 import { browserAgentAuthority } from './browser-agent-authority.js'
 import { createBrowserInputContextPorts, registerBrowserInputContextIpc } from './browser-input-context-ipc.js'
 import { RendererV8Profiler } from './renderer-v8-profile.js'
+import { RendererCacheController } from './renderer-cache.js'
 import { RendererMemoryInspector } from './renderer-memory.js'
 import { RendererAnimationInspector } from './renderer-animations.js'
 import { registerPerformanceCaptureIpc } from './performance-capture-ipc.js'
@@ -592,10 +593,11 @@ export async function registerIpc(args: {
   }
   const allocations = new RendererAllocationSampler(contents, currentRendererCaptureTarget)
   const profiler = new RendererV8Profiler(contents, currentRendererCaptureTarget)
+  const cache = new RendererCacheController(controlBridge, currentRendererCaptureTarget)
   const memory = new RendererMemoryInspector(contents, currentRendererCaptureTarget)
   const animations = new RendererAnimationInspector(contents, currentRendererCaptureTarget)
   const tracer = new RendererTimelineTracer(contents, currentRendererCaptureTarget)
-  const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler, tracer, memory, animations, allocations,
+  const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler, tracer, memory, animations, allocations, cache,
     ...(args.performanceHeap ? { heap: { owner: args.performanceHeap, dependencies: { contents, currentTarget: currentRendererCaptureTarget,
       host: () => ({ kind: 'unix-host' as const, hostId: 'local' as const, hostname: hostname(), mainPid: process.pid }) } } } : {}),
     ...(args.appMemory ? { appMemory: args.appMemory } : {}),

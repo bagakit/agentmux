@@ -21,6 +21,7 @@ function source<T>(data: T | null, observedAt: number | null, reason: string | n
 export function createResourceMetricsPort(args: {
   sampler: ProcessResourceSampler; currentWindow(): MetricsWindow | null; now?: () => number
   appMemory?: AppMemoryEvidenceOwner
+  cache?: { inspect: NonNullable<AgentMuxMetricsPort['inspectCache']>; reclaim: NonNullable<AgentMuxMetricsPort['reclaimCache']>; dispose(): void }
   allocations?: { capture: NonNullable<AgentMuxMetricsPort['captureAllocations']>; dispose(): void }
   scene?: { owner: PerformanceSceneOwner; currentTarget(): RendererV8ProfileTarget | null; loaded(): RendererSceneLoaded }
   heap?: { owner: RendererHeapSnapshotOwner; dependencies: RendererHeapSnapshotDependencies }
@@ -32,6 +33,10 @@ export function createResourceMetricsPort(args: {
   const consumers = new Set<() => void>()
   let disposed = false
   const port: AgentMuxMetricsPort & { dispose(): void } = {
+    ...(args.cache ? {
+      inspectCache: (input, signal) => args.cache!.inspect(input, signal),
+      reclaimCache: (input, signal) => args.cache!.reclaim(input, signal)
+    } : {}),
     ...(args.appMemory ? { inspectAppMemory: async () => {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
       return args.appMemory!.inspect()
@@ -123,6 +128,7 @@ export function createResourceMetricsPort(args: {
       args.allocations?.dispose()
       args.profiler?.dispose()
       args.memory?.dispose()
+      args.cache?.dispose()
       args.animations?.dispose()
       args.tracer?.dispose()
       for (const close of [...consumers]) close()

@@ -1572,7 +1572,10 @@ export type AgentMuxDesktopApi = {
     report(token: string, report: import('@agentmux/core').AgentMuxClientIncidentReport): Promise<{ accepted: boolean; logId?: string }>
   }
   conversation: import('./conversation-read').ConversationReadApi
+  executeRendererCache(input: import('@agentmux/core/control').RendererCacheInput, action: import('@agentmux/core/control').RendererCacheAction): import('@agentmux/core/control').RendererCacheResult
   performance: {
+    inspectCache(input: import('@agentmux/core/control').RendererCacheInput): Promise<import('@agentmux/core/control').RendererCacheResult>
+    reclaimCache(input: import('@agentmux/core/control').RendererCacheInput): Promise<import('@agentmux/core/control').RendererCacheResult>
     captureHeapSnapshot(input: import('@agentmux/core/control').RendererHeapSnapshotInput): Promise<import('@agentmux/core/control').RendererHeapSnapshotResult>
     inspectHeapSnapshot(input: import('@agentmux/core/control').RendererHeapSnapshotInspectInput): Promise<import('@agentmux/core/control').RendererHeapSnapshotInspection>
     saveHeapSnapshot(input: { captureId: string }): Promise<{ status: 'saved'; path: string } | { status: 'cancelled' }>

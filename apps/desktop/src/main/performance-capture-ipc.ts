@@ -1,4 +1,5 @@
 import { parseRendererAllocationsInput, parseRendererAllocationsResult, parseRendererSceneCaptureInput, parseRendererSceneCaptureResult, parseRendererSceneInspectInput, parseRendererSceneInspection } from '@agentmux/core/control'
+import { parseRendererCacheInput, parseRendererCacheResult } from '@agentmux/core/control'
 import type { IpcMainInvokeEvent } from 'electron'
 import { parseRendererAnimationsInput, parseRendererAnimationsResult } from '@agentmux/core/control'
 import { parseRendererHeapSnapshotInput, parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspectInput, parseRendererHeapSnapshotInspection } from '@agentmux/core/control'
@@ -9,6 +10,11 @@ import { parseRendererV8ProfileInput, parseRendererV8ProfileResult, parseRendere
 /** Desktop is another consumer of the original public metrics capture owner. */
 export function registerPerformanceCaptureIpc(metrics: AgentMuxMetricsPort,
   handle: (channel: string, listener: (event: IpcMainInvokeEvent, input: unknown) => unknown) => void): void {
+  for (const action of ['inspect', 'reclaim'] as const) handle(action === 'inspect' ? 'metrics:inspectCache' : 'metrics:reclaimCache', async (_event, raw) => {
+    const input = parseRendererCacheInput(raw), call = action === 'inspect' ? metrics.inspectCache : metrics.reclaimCache
+    if (!call) throw new AgentMuxError('Renderer platform cache operation is unavailable.', 'METRICS_UNSUPPORTED')
+    return parseRendererCacheResult(await call.call(metrics, input), input, action)
+  })
   handle('metrics:captureHeapSnapshot', async (_event, raw) => {
     const input = parseRendererHeapSnapshotInput(raw)
     if (!metrics.captureHeapSnapshot) throw new AgentMuxError('Native heap capture is unavailable.', 'METRICS_UNSUPPORTED')

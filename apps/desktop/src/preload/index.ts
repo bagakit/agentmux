@@ -1,3 +1,4 @@
+import { executeRendererCache } from './renderer-cache'
 import { createExecutionBindingApi } from './execution-binding'
 import { unwrapSessionInputOperationResult } from '../shared/session-input-result.js'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -103,7 +104,10 @@ const api: AgentMuxPreloadApi = {
     report: (token, report) => ipcRenderer.invoke('clientIncidents:report', token, report)
   },
   conversation: createPreloadConversationRead(ipcRenderer),
+  executeRendererCache,
   performance: {
+    inspectCache: input => ipcRenderer.invoke('metrics:inspectCache', input),
+    reclaimCache: input => ipcRenderer.invoke('metrics:reclaimCache', input),
     captureHeapSnapshot: input => ipcRenderer.invoke('metrics:captureHeapSnapshot', input),
     inspectHeapSnapshot: input => ipcRenderer.invoke('metrics:inspectHeapSnapshot', input),
     saveHeapSnapshot: input => ipcRenderer.invoke('metrics:saveHeapSnapshot', input),
