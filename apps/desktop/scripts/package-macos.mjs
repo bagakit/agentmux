@@ -498,7 +498,7 @@ async function processIdsForApplication(appPath, previousOwners = []) {
   return (await scopedProcesses(appPath, previousOwners)).serving
 }
 
-async function waitForProcessExit(findProcessIds, timeoutMs) {
+export async function waitForProcessExit(findProcessIds, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   let remaining = await findProcessIds()
   while (remaining.length > 0) {
@@ -507,7 +507,13 @@ async function waitForProcessExit(findProcessIds, timeoutMs) {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, delay))
     remaining = await findProcessIds()
   }
-  return remaining
+  // A slow final snapshot can outlive a short-lived process. Signal zero only
+  // checks existence; permission errors and every result other than ESRCH stay protected.
+  return remaining.filter(pid => {
+    if (!Number.isSafeInteger(pid) || pid < 2) return true
+    try { process.kill(pid, 0); return true }
+    catch (error) { return error?.code !== 'ESRCH' }
+  })
 }
 
 async function waitForPath(path, deadline, isAlive) {
@@ -792,7 +798,7 @@ async function quitInstalledApplication(appPath, originalOwners = [], semanticHo
   }, 20_000)
   if (remaining.length > 0) throw Object.assign(new Error(
     `Application has not exited gracefully (pids ${remaining.join(', ')}). Installation stopped; no processes were force-killed. Finish or save current work before retrying.`),
-  { ownershipDiagnostic: applicationQuitOwnershipDiagnostic(lastScope, originalOwners) })
+  { ownershipDiagnostic: applicationQuitOwnershipDiagnostic({ ...lastScope, serving: remaining }, originalOwners) })
   return { wasRunning: true, pids: running, admissions: previousOwners }
 }
 
