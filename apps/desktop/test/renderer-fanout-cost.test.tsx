@@ -7,6 +7,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { PROMPT_REACTION_STARTERS } from '@agentmux/core/prompt-reaction'
 import { msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { MoteWorkfaceContext } from '../src/renderer/src/lib/mote-workface'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { useAgentAttentionNotifications } from '../src/renderer/src/hooks/useAgentAttentionNotifications'
 import { useConversationReactions } from '../src/renderer/src/lib/conversation-reactions'
@@ -130,6 +131,123 @@ it.each([1, 32, 100])('bounds actual retained Workbench metadata and Pane reacti
   expect(document.querySelector('.confirmation-dialog')).toBeNull()
   expect(useAppStore.getState().tabs[actionTarget]).toBe(original.tabs[actionTarget])
   expect(useAppStore.getState().agentComposerDrafts['owned-0']).toBe('Original unsent draft')
+  expect(useAppStore.getState().sessions.filter(session => session.id.startsWith('owned-')).map(session => session.control.run.runId)).toEqual(original.sessions.map(session => session.control.run.runId))
+})
+
+function tabDemandProbe() {
+  const orders: { workspaceId: string; groupId: string; items: readonly string[] }[] = []
+  const ranges: { order: readonly string[]; target: string; scope: string }[] = []
+  const requests: (readonly string[])[] = []
+  vi.stubGlobal('__workbenchTabDemandProbe', {
+    order(workspaceId: string, groupId: string, items: readonly string[]) { orders.push({ workspaceId, groupId, items }) },
+    range(order: readonly string[], target: string, scope: string) { ranges.push({ order, target, scope }) },
+    request(ids: string[]) { requests.push(ids) }
+  })
+  return { orders, ranges, requests }
+}
+const tabButton = (id: string) => {
+  const button = dom.container.querySelector<HTMLButtonElement>(`[data-workbench-tab-id="${id}"]`)
+  expect(button).not.toBeNull()
+  return button!
+}
+async function tabMenu(id: string) {
+  await act(async () => tabButton(id).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 80, clientY: 20 })))
+  const item = (label: string) => {
+    const node = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.trim() === label)
+    expect(node, label).toBeDefined()
+    return node!
+  }
+  return item
+}
+async function cancelTabClose() {
+  const cancel = document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')
+  expect(cancel).not.toBeNull()
+  await act(async () => cancel!.click())
+  expect(document.querySelector('.confirmation-dialog')).toBeNull()
+}
+
+it.each([4, 24])('keeps actual Tab demand stable through selection with %i tabs', async count => {
+  const original = fixture(count), probe = tabDemandProbe()
+  await dom.render(<WorkspaceWorkbench workspaceId="workspace" />)
+  expect(dom.container.querySelectorAll('button[data-workbench-tab-id]')).toHaveLength(count)
+  expect(probe.orders.length).toBeGreaterThan(0)
+  const order = probe.orders.at(-1)!.items
+  expect(order).toEqual(original.layout.groups[0]!.tabOrder)
+  expect(probe.ranges).toHaveLength(0)
+  const before = useAppStore.getState(), terminal = document.querySelector('[data-original-terminal]')
+  const editor = document.querySelector('.tiptap'), button = tabButton('tab-1')
+  probe.orders.length = 0
+  await act(async () => button.click())
+  const state = useAppStore.getState()
+  expect(state.layouts.workspace!.groups[0]!.activeTabId).toBe('tab-1')
+  expect(state.workbenchSpaceSelection).toMatchObject({ workspaceId: 'workspace', groupId: original.layout.groups[0]!.id, tabId: 'tab-1' })
+  expect(button.classList.contains('workbench-tab--active')).toBe(true)
+  expect(probe.orders.length).toBeGreaterThan(0)
+  expect(probe.orders.every(value => value.items === order)).toBe(true)
+  expect(probe.ranges).toHaveLength(0)
+  expect(state.tabs).toBe(before.tabs)
+  expect(state.layouts.workspace!.groups[0]!.tabOrder).toBe(before.layouts.workspace!.groups[0]!.tabOrder)
+  expect(state.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(state.sessions.map(session => session.control.run.runId)).toEqual(before.sessions.map(session => session.control.run.runId))
+  expect(document.querySelector('[data-original-terminal]')).toBe(terminal)
+  expect(terminal?.isConnected).toBe(true); expect(editor?.isConnected).toBe(true)
+  await act(async () => useAppStore.getState().setAgentComposerDraft('unrelated-draft', 'Unrelated original draft'))
+  expect(probe.orders.every(value => value.items === order)).toBe(true)
+  expect(probe.ranges).toHaveLength(0)
+  const menu = await tabMenu('tab-1')
+  expect(probe.ranges).toHaveLength(0)
+  expect(menu('Close Tabs to the Left').hasAttribute('data-disabled')).toBe(false)
+  await act(async () => menu('Close Tabs to the Left').click())
+  expect(probe.ranges).toEqual([{ order: original.layout.groups[0]!.tabOrder, target: 'tab-1', scope: 'left' }])
+  expect(probe.requests).toEqual([['tab-0']])
+  expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Stop Agent Session?')
+  await cancelTabClose()
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().agentComposerDrafts['owned-0']).toBe('Original unsent draft')
+  expect(useAppStore.getState().sessions.map(session => session.control.run.runId)).toEqual(before.sessions.map(session => session.control.run.runId))
+})
+
+it('uses original close ranges when a pinned Tab has a different display order', async () => {
+  const original = fixture(4), probe = tabDemandProbe(), groupId = original.layout.groups[0]!.id
+  const reference = { hostId: 'local', sessionId: 'owned-3', displayWorkspaceId: 'workspace', groupId, tabId: 'tab-3', regionId: 'region-3' }
+  const context = { workspace: composerConfig.workspaces[0]!, topic: { id: 'original-topic', directoryPath: 'original-topic', topicPath: 'original-topic/topic.md', title: 'Original Mote', summary: '', collaborators: [] },
+    rootPath: '', floating: false, defaultConversation: reference,
+    selectTab: (id: string, group: string) => useAppStore.getState().activateTab('workspace', group, id, 'local') }
+  const render = (pinned: boolean) => <MoteWorkfaceContext.Provider value={pinned ? context : { ...context, defaultConversation: undefined }}><WorkspaceWorkbench workspaceId="workspace" /></MoteWorkfaceContext.Provider>
+  await dom.render(render(true))
+  const order = probe.orders.at(-1)!.items
+  expect(order).toEqual(['tab-3', 'tab-0', 'tab-1', 'tab-2'])
+  probe.orders.length = 0
+  await act(async () => tabButton('tab-2').click())
+  expect(probe.orders.length).toBeGreaterThan(0)
+  expect(probe.orders.every(value => value.items === order)).toBe(true)
+  expect(probe.ranges).toHaveLength(0)
+  for (const [label, scope, ids] of [['Close Tabs to the Left', 'left', ['tab-0', 'tab-1']],
+    ['Close Others', 'others', ['tab-0', 'tab-1', 'tab-3']], ['Close Tabs to the Right', 'right', ['tab-3']]] as const) {
+    const menu = await tabMenu('tab-2')
+    expect(probe.ranges).toHaveLength(probe.requests.length)
+    await act(async () => menu(label).click())
+    expect(probe.ranges.at(-1)).toEqual({ order: original.layout.groups[0]!.tabOrder, target: 'tab-2', scope })
+    expect(probe.requests.at(-1)).toEqual(ids)
+    if (scope === 'right') {
+      // The original close owner protects the pinned conversation, despite its different display order.
+      expect(document.querySelector('.confirmation-dialog')).toBeNull()
+      expect(useAppStore.getState().error).toContain('The default conversation stays open')
+    } else {
+      expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Stop 2 Agent Sessions?')
+      await cancelTabClose()
+    }
+    expect(useAppStore.getState().tabs).toBe(original.tabs)
+  }
+  await dom.render(render(false))
+  expect(probe.orders.at(-1)!.items).toEqual(original.layout.groups[0]!.tabOrder)
+  expect(probe.orders.at(-1)!.items).not.toBe(order)
+  const first = await tabMenu('tab-0')
+  expect(first('Close Tabs to the Left').hasAttribute('data-disabled')).toBe(true)
+  await act(async () => first('Close Tabs to the Left').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  const last = await tabMenu('tab-3')
+  expect(last('Close Tabs to the Right').hasAttribute('data-disabled')).toBe(true)
+  expect(probe.ranges).toHaveLength(3)
   expect(useAppStore.getState().sessions.filter(session => session.id.startsWith('owned-')).map(session => session.control.run.runId)).toEqual(original.sessions.map(session => session.control.run.runId))
 })
 

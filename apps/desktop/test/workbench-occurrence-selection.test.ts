@@ -20,6 +20,23 @@ function fixture() {
 }
 
 describe('original Zone workbench explicit occurrence selection', () => {
+  it('retains the original Tab order reference only when every original member survives projection', () => {
+    const f = fixture()
+    const complete = projectWorkbenchProjection(f.layout, f.tabs, f.scope)
+    expect(complete.layout?.groups).toHaveLength(f.layout.groups.length)
+    for (const [index, group] of complete.layout!.groups.entries()) expect(group.tabOrder).toBe(f.layout.groups[index]!.tabOrder)
+    const outsider = createWorkbenchTab('outside-zone', { kind: 'launcher', workspaceId: f.tab.workspaceId, regionId: 'outside-region' })
+    const layout = { ...f.layout, groups: f.layout.groups.map(group => ({ ...group, tabOrder: [...group.tabOrder, outsider.id] })) }
+    const filtered = projectWorkbenchProjection(layout, { ...f.tabs, [outsider.id]: outsider }, f.scope)
+    expect(filtered.layout?.groups).toHaveLength(layout.groups.length)
+    for (const [index, group] of filtered.layout!.groups.entries()) {
+      expect(group.tabOrder).toEqual([f.tab.id])
+      expect(group.tabOrder).not.toBe(layout.groups[index]!.tabOrder)
+      expect(layout.groups[index]!.tabOrder).toEqual([f.tab.id, outsider.id])
+    }
+    expect(filtered.selection).toEqual([f.reference])
+  })
+
   it('keeps both legal bindings and members while selecting only the confirmed Group', () => {
     const f = fixture(), before = JSON.stringify(f.layout)
     const result = projectWorkbenchProjection(f.layout, f.tabs, f.scope)

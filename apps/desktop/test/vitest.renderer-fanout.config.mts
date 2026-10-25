@@ -15,7 +15,9 @@ const mutations = {
  'notices-no-cache': ['apps/desktop/src/renderer/src/lib/session-service-notices.ts', 'if (known && facts.every((fact, index) => fact === known.facts[index]))', 'if (known && false && facts.every((fact, index) => fact === known.facts[index]))', 1],
  'fingerprint-no-cache': ['apps/desktop/src/renderer/src/lib/use-service-notices.ts', 'if (known && facts.length === known.facts.length && facts.every((fact, index) => fact === known.facts[index]))', 'if (known && false && facts.length === known.facts.length && facts.every((fact, index) => fact === known.facts[index]))', 1],
  'index-no-cache': ['apps/desktop/src/renderer/src/lib/session-presentation.ts', 'let index = sessionIndexes.get(sessions)', 'let index = undefined as ReadonlyMap<string, SessionSnapshot> | undefined', 1],
- 'surface-body-memo': ['apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', 'const SurfaceContentBody = memo(function SurfaceContentBody(', 'const SurfaceContentBody = (function SurfaceContentBody(', 1]
+ 'surface-body-memo': ['apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', 'const SurfaceContentBody = memo(function SurfaceContentBody(', 'const SurfaceContentBody = (function SurfaceContentBody(', 1],
+ 'tab-sort-order': ['apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', 'const tabNavigation = <SortableContext items={orderedTabIds}', 'const tabNavigation = <SortableContext items={[...orderedTabIds]}', 1],
+ 'tab-close-eager': ['apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', 'const tabIndex = group.tabOrder.indexOf(tab.id)', "const tabsToLeft = tabIdsForCloseScope(group.tabOrder, tab.id, 'left'); const tabsToRight = tabIdsForCloseScope(group.tabOrder, tab.id, 'right'); const otherTabs = tabIdsForCloseScope(group.tabOrder, tab.id, 'others'); const tabIndex = group.tabOrder.indexOf(tab.id)", 1]
 } as const
 const counter = (name: string) => `;globalThis.__rendererFanoutCounts ??= {}; globalThis.__rendererFanoutCounts[${JSON.stringify(name)}] = (globalThis.__rendererFanoutCounts[${JSON.stringify(name)}] ?? 0) + 1;`
 const instrument = [
@@ -41,6 +43,20 @@ export default defineConfig({ ...source, cacheDir: resolve(root, '.tmp/renderer-
    assert.equal(code.split(find).length-1,count,'Unique actual source mutation anchor'); code=code.split(find).join(replacement);changed=true
   }}
   const effective=code
+  if (file === 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx') {
+    // Observe the exact original prop delivered to SortableContext; return it unchanged.
+    const order = /const tabNavigation = <SortableContext items=\{([^}]+)\}/g
+    assert.equal([...code.matchAll(order)].length, 1, 'Unique actual SortableContext order consumer')
+    code = code.replace(order, (_match, items) => `const tabNavigation = <SortableContext items={((value) => { globalThis.__workbenchTabDemandProbe?.order(workspaceId, group.id, value); return value })(${items})}`)
+    const request = 'async function requestTabsClose(tabIds: readonly string[]): Promise<void> {'
+    assert.equal(code.split(request).length - 1, 1, 'Unique actual close request consumer')
+    code = code.replace(request, request + '\nglobalThis.__workbenchTabDemandProbe?.request(tabIds);')
+  }
+  if (file === 'apps/desktop/src/renderer/src/lib/workbench-tab-actions.ts') {
+    const range = /export function tabIdsForCloseScope\([^]*?\): string\[\] \{/g
+    assert.equal([...code.matchAll(range)].length, 1, 'Unique actual close range owner')
+    code = code.replace(range, match => match + '\nglobalThis.__workbenchTabDemandProbe?.range(tabOrder, targetTabId, scope);')
+  }
   for(const [path,pattern,name] of instrument) if(file===path && !process.env.AGENTMUX_RENDERER_BASELINE){
    assert.equal([...code.matchAll(new RegExp(pattern.source,'g'))].length,1,'Unique loaded source instrumentation')
    code=code.replace(pattern,match=>match+counter(name))
