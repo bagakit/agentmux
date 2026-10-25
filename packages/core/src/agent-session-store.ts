@@ -3161,13 +3161,13 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       document.sessions.filter(session => session.agentSessionId === agentSessionId),
       document.retiredAgentSessions.filter(session => session.agentSessionId === agentSessionId),
       reopenCorrelations(document.reservations.filter(reservation => reservation.agentSessionId === agentSessionId))
-    )[0] ?? null, signal)
+    )[0] ?? null, signal, true)
   }
 
   async readFuturePromptIntent(agentSessionId: string, intentId: string): Promise<AgentFuturePromptIntent | null> {
     await this.sessionWrites(agentSessionId)
     return await this.withReadDatabase(db => this.futureIntent(db, agentSessionId, intentId),
-      document => structuredClone(document.sessions.find(session => session.agentSessionId === agentSessionId)?.futurePromptIntents?.[intentId] ?? null))
+      document => structuredClone(document.sessions.find(session => session.agentSessionId === agentSessionId)?.futurePromptIntents?.[intentId] ?? null), undefined, true)
   }
 
   async listFuturePromptIntents(agentSessionId: string, options: { afterIntentId?: string; limit?: number } = {}): Promise<AgentMuxFuturePromptPage> {
@@ -3185,7 +3185,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const index = options.afterIntentId === undefined ? -1 : entries.findIndex(([id]) => id === options.afterIntentId)
       if (options.afterIntentId !== undefined && index < 0) throw new AgentMuxError('Future-message cursor does not name an original intent.', 'INVALID_CONTROL_REQUEST')
       return futurePromptPage(entries.slice(index + 1, index + 2 + limit).map(([intentId, intent]) => ({ intentId, intent })), limit)
-    })
+    }, undefined, true)
   }
 
   async compareAndSwapMetadata(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
@@ -3347,7 +3347,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const row = session ? undefined : db.prepare('SELECT json FROM retired_sessions WHERE id=?').get(agentSessionId)
       return continuityControlStoredResult(session, row ? retiredAgentSession(JSON.parse(String(row.json))) : null, operationId)
     }, document => continuityControlStoredResult(document.sessions.find(session => session.agentSessionId === agentSessionId) ?? null,
-      document.retiredAgentSessions.find(session => session.agentSessionId === agentSessionId) ?? null, operationId))
+      document.retiredAgentSessions.find(session => session.agentSessionId === agentSessionId) ?? null, operationId), undefined, true)
   }
 
   async readLifecycleReservation(agentSessionId: string): Promise<AgentMuxLifecycleReservation | null> {
@@ -3355,7 +3355,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return await this.withReadDatabase(db => {
       const row = db.prepare('SELECT json FROM reservations WHERE id=?').get(agentSessionId)
       return row ? lifecycleReservation(JSON.parse(String(row.json))) : null
-    }, document => structuredClone(document.reservations.find(item => item.agentSessionId === agentSessionId) ?? null))
+    }, document => structuredClone(document.reservations.find(item => item.agentSessionId === agentSessionId) ?? null), undefined, true)
   }
   async loadResumeCorrelation(agentSessionId: string, operationId: string) {
     await this.sessionWrites(agentSessionId)
@@ -3366,7 +3366,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }, document => {
       const reservation = document.reservations.find(item => item.agentSessionId === agentSessionId)
       return reservation?.kind === 'resume' && reservation.operationId === operationId ? structuredClone(reservation) : null
-    })
+    }, undefined, true)
   }
   async recordRestartStartNotApplied(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, failure: { code: string; message: string; observedAt: number }) {
     let next!: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
