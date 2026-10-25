@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { parseConnectionIngressRecord, type ConnectionIngressMessage } from '@agentmux/core/connections'
 import type { AgentInputSubmissionReceipt, ChannelTranscriptQuote } from '@agentmux/core'
+import { renderAgentMuxMessageEnvelope } from '../../core/src/agent-message-render.js'
 import { IngressContextPositions } from '../src/ingress-context.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
@@ -29,6 +30,7 @@ function admitted(record: ConnectionIngressMessage): AgentInputSubmissionReceipt
   const ref = record.input!
   return { key: { kind: 'message', agentSessionId: ref.agentSessionId, messageId: ref.messageId, expectedRun: ref.expectedRun },
     originalControlOperationId: ref.operationId, status: 'admitted', admission: { admission: { transport: 'native', acknowledged: true,
+      intent: { prompt: renderAgentMuxMessageEnvelope({ sender: ref.author, body: record.body, channelQuote: ref.channelQuote! }) },
       native: { outcome: 'admitted', plan: { sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), threadId: source.nativeSessionId } } } } } as AgentInputSubmissionReceipt
 }
 async function fixture(baseline: unknown = base('baseline')) {

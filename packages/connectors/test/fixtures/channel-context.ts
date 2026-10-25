@@ -129,6 +129,6 @@ export async function channelContextFixture(cleanup: Array<() => void | Promise<
   }
   const cli = async (args: string[]) => { const result = await runSourceObjectCli(['--endpoint', 'unix:' + desktopPath, ...args], objectCliEnvironment(f.root,
     process.env.INPUT_CONTEXT_CONTINUITY_CLI_LOADED ? { AGENTMUX_RESUMED_INBOX_CLI_LOADED: process.env.INPUT_CONTEXT_CONTINUITY_CLI_LOADED } : {}), '', 20_000, pathToFileURL(resolve('packages/core/test/fixtures/a2a-resumed-inbox/source-loader.mjs'))); expect(result.code, result.stdout + result.stderr).toBe(0); return JSON.parse(result.stdout).result }
-  return { ...f, source, config, binding, actor, nativeSend, transport, discord, remote, nativeRows, addNative, addHistory, receive, inspect, wait, cli, outcome: (value: typeof outcome) => { outcome = value },
+  return { ...f, hosted, source, config, binding, actor, nativeSend, transport, discord, remote, nativeRows, addNative, addHistory, receive, inspect, wait, cli, outcome: (value: typeof outcome) => { outcome = value },
     get services() { return services }, get rpc() { return rpc }, reopen: async () => { await close(); await open(); await vi.waitFor(() => expect(discord ? discord.sessions.length : transport.sockets.length).toBeGreaterThan(1)) } }
 }
