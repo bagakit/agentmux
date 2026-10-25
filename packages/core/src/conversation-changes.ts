@@ -79,6 +79,13 @@ function ownParsedPage<T extends AgentConversationReadPage>(page: T, original?: 
   return Object.freeze(owned)
 }
 
+/** Reuse only exact immutable items owned by this page; copies and assembled fragments remain strict. */
+export function parseConversationUnitsForPage(values: readonly ConversationUnit[], page: AgentConversationReadPage): ConversationUnit[] {
+  const ownedItems = new Set(ownsParsedPage(page) ? page.items.flatMap(entry => entry.kind === 'item' ? [entry.item] : []) : [])
+  const ref = { hostId: page.sourceHostId, agentSessionId: page.agentSessionId }
+  return values.map(unit => ownedItems.has(unit) ? unit : parseConversationUnit(unit, ref, page.scope))
+}
+
 /** Wire assembly only. Semantic accumulation and replacement belong to the backend Reader. */
 export function consumeConversationWindowPage(page: AgentConversationReadPage, pending?: ConversationWindowAssembly):
   { kind: 'pending'; pending: ConversationWindowAssembly } | { kind: 'complete'; snapshot: ConversationWindowSnapshot } {
