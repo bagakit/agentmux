@@ -81,6 +81,9 @@ Load only the journey needed now:
   Delivery, saved knowledge and later use remain separate.
 - Independent Session communication: amux message --skill for the full shared contract.
 - Create an Agent: amux agent open --help for configured Executor discovery and opening workflow.
+  For a new Agent with separate project tools, use --execution-workspace AGENT_WORKSPACE
+  and --tool-workspace RESOURCE_WORKSPACE. This requires a transport-authenticated user/device
+  without a managed Agent caller; native resume, fork and new Zone creation cannot change this binding.
 - Original creator/child relations: amux agent spawn --help. Keep the original creation operation after an unknown receipt; never create a replacement to recover its result.
 - Saved native conversations or resume: amux agent native --help.
 - Original output, input mailbox, history or conversation: use that agent action's --help.
