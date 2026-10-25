@@ -1,4 +1,5 @@
 import { mintObjectId } from './object-id.js'
+import { assertAgentToolContextAvailable } from './agent-tool-context.js'
 import process from 'node:process'
 import { sendHookReceipt, requestHookPermissionDecision } from './agent-hook-delivery.js'
 import {
@@ -144,6 +145,7 @@ export async function runAgentHookCommand(): Promise<void> {
   }
   if (!isAgentMuxManagedHookEnvironment() || hookResponseFor(resolveHookProvider(), earlyEvent) !== '{}\n') passive()
   try {
+    assertAgentToolContextAvailable()
 
     // The command is stored in shared Provider config. A foreign Provider process may therefore
     // execute it; keep the passive stdout contract, but never let that process read AgentMux

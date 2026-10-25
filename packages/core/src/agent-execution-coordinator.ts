@@ -8,6 +8,7 @@ import { AgentExecutionBridge, type AgentExecutionBridgeState, type AgentExecuti
 import type { AgentMuxClient, AgentMuxHostAgentCreateInput } from './client.js'
 import type { AgentMuxAgentSession } from './types.js'
 import { AgentMuxError } from './errors.js'
+import { parseAgentExecutionNotices, type AgentExecutionNotice } from './agent-execution-helper.js'
 
 export type AgentExecutionHostPort = AgentExecutionBridgePort & Pick<AgentMuxClient,
   'prepareAgentExecutionHelper' | 'inspectPreparedTerminal' | 'createPreparedTerminal' | 'createHostAgentWithDelivery' | 'listHostExecutors' | 'readAgentSession'>
@@ -21,7 +22,7 @@ export interface AgentExecutionOpenInput {
   resourceGrant: import('./agent-execution-helper.js').AgentExecutionResourceGrant
   agent: Omit<AgentMuxHostAgentCreateInput, 'toolExecution'> & { agentSessionId: string; createOperationId: string }
 }
-type RecordValue = { input: AgentExecutionOpenInput; diagnostic?: AgentExecutionInspection['diagnostic']; attempts?: Partial<Record<'frontend' | 'executor', { ownerInstanceId: string }>>; bridge?: AgentExecutionBridgeState; frontend?: AgentExecutionBridgeState['frontend']; executor?: AgentExecutionBridgeState['executor'] }
+type RecordValue = { input: AgentExecutionOpenInput; notices?: AgentExecutionNotice[]; diagnostic?: AgentExecutionInspection['diagnostic']; attempts?: Partial<Record<'frontend' | 'executor', { ownerInstanceId: string }>>; bridge?: AgentExecutionBridgeState; frontend?: AgentExecutionBridgeState['frontend']; executor?: AgentExecutionBridgeState['executor'] }
 export interface AgentExecutionInspection {
   bindingId: string
   agentHostId: string
@@ -29,6 +30,7 @@ export interface AgentExecutionInspection {
   agentSessionId: string
   resourceWorkspacePath: string
   state: 'unavailable' | 'connected'
+  notices?: AgentExecutionNotice[]
   diagnostic?: { code: string; message: string; generation?: string; operation?: import('./agent-execution-journal.js').AgentExecutionOperationKey }
 }
 const nativeLock = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
@@ -108,10 +110,10 @@ export class AgentExecutionCoordinator {
     void next.finally(() => { if (this.lanes.get(id) === next) this.lanes.delete(id) }).catch(() => {})
     return next
   }
-  private observe(input: AgentExecutionOpenInput, diagnostic?: AgentExecutionInspection['diagnostic']): void {
+  private observe(input: AgentExecutionOpenInput, diagnostic?: AgentExecutionInspection['diagnostic'], notices?: AgentExecutionNotice[]): void {
     const value: AgentExecutionInspection = { bindingId: input.bindingId, agentHostId: input.agentHostId, resourceHostId: input.resourceHostId,
       agentSessionId: input.agent.agentSessionId, resourceWorkspacePath: input.resourceWorkspacePath,
-      state: diagnostic ? 'unavailable' : 'connected', ...(diagnostic ? { diagnostic } : {}) }
+      state: diagnostic ? 'unavailable' : 'connected', ...(notices === undefined ? {} : { notices }), ...(diagnostic ? { diagnostic } : {}) }
     this.observations.set(input.bindingId, value)
     try { this.options.onObservation?.(structuredClone(value)) } catch { /* A reader cannot change this operation or healthy helpers. */ }
   }
@@ -121,6 +123,7 @@ export class AgentExecutionCoordinator {
     return structuredClone(this.observations.get(bindingId) ?? { bindingId, agentHostId: record.input.agentHostId,
       resourceHostId: record.input.resourceHostId, agentSessionId: record.input.agent.agentSessionId,
       resourceWorkspacePath: record.input.resourceWorkspacePath, state: 'unavailable',
+      ...(record.notices === undefined ? {} : { notices: record.notices }),
       diagnostic: record.diagnostic ?? { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: 'The original helpers have not been observed by this Core connection.' } })
   }
   /** Resume only retained bridge readers. This never creates or restores an Agent Run. */
@@ -137,7 +140,7 @@ export class AgentExecutionCoordinator {
   }
   private observeFailure(input: AgentExecutionOpenInput, error: unknown): void {
     this.observe(input, { code: error instanceof AgentMuxError ? error.code : 'EXECUTION_OBSERVATION_UNCONFIRMED',
-      message: error instanceof Error ? error.message : String(error) })
+      message: error instanceof Error ? error.message : String(error) }, this.read(input.bindingId)?.notices)
   }
   private async hosts(input: AgentExecutionOpenInput) {
     const [agent, resource] = await Promise.all([this.options.resolveHost(input.agentHostId), this.options.resolveHost(input.resourceHostId)])
@@ -160,13 +163,13 @@ export class AgentExecutionCoordinator {
             ...(typeof value.generation === 'string' && value.generation.length > 0 ? { generation: value.generation } : {}),
             ...(value.operation?.bindingId === record.input.bindingId && value.operation.streamGeneration === value.generation &&
               (typeof value.operation.nativeRequestId === 'string' || Number.isSafeInteger(value.operation.nativeRequestId)) ? { operation: structuredClone(value.operation) } : {}) }
-          this.save(record); this.observe(record.input, record.diagnostic)
+          this.save(record); this.observe(record.input, record.diagnostic, record.notices)
         }
       },
       onError: error => this.observeFailure(record.input, error) })
     this.bridges.set(id, bridge)
     await bridge.start()
-    this.observe(record.input, record.diagnostic)
+    this.observe(record.input, record.diagnostic, record.notices)
   }
   /** Original user-authorized creation; retries retain both Host identities and all original operation IDs. */
   async create(value: AgentExecutionOpenInput): Promise<{ session: AgentMuxAgentSession; execution: AgentExecutionInspection }> {
@@ -199,6 +202,11 @@ export class AgentExecutionCoordinator {
           const original = await client.prepareAgentExecutionHelper({ bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId,
             providerId: selected.providerId, role, workspacePath: role === 'executor' ? input.resourceWorkspacePath : input.agent.workspacePath,
             createOperationId: creationId(input.bindingId, role), ...(role === 'executor' ? { grant: input.resourceGrant } : { toolExecution }) })
+          if (original.notices !== undefined) {
+            const notices = parseAgentExecutionNotices(original.notices, { providerId: selected.providerId, role })
+            record.notices = [...(record.notices ?? []).filter(notice => notice.role !== role), ...notices]
+            this.save(record)
+          }
           const retained = record[role]
           if (retained) {
             const observed = await client.inspectPreparedTerminal(original.prepared, { runId: retained.runId })

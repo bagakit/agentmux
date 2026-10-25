@@ -201,7 +201,7 @@ export * from './runtime-v8-profile.js'
 
 export { AgentExecutionBridge } from './agent-execution-bridge.js'
 export type { AgentExecutionBridgePort, AgentExecutionBridgeState, AgentExecutionBridgePosition } from './agent-execution-bridge.js'
-export type { AgentExecutionHelperInput, AgentExecutionHelperPreparation, AgentExecutionResourceGrant } from './agent-execution-helper.js'
+export type { AgentExecutionHelperInput, AgentExecutionHelperPreparation, AgentExecutionResourceGrant, AgentExecutionNotice, AgentExecutionHelperLaunchPlan } from './agent-execution-helper.js'
 
 export type { AgentToolExecutionBinding } from './agent-tool-execution.js'
 export type { AgentExecutionOperationKey, AgentExecutionOperation } from './agent-execution-journal.js'

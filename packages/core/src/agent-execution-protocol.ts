@@ -23,5 +23,5 @@ export type AgentExecutionMessage =
 export interface AgentExecutionProtocol {
   parse(input: unknown): AgentExecutionMessage
   parseServer(input: unknown): AgentExecutionMessage
-  executor: { command: string; args: string[]; env?: Record<string, string>; cwd: string }
+  executor: { command: string; args: string[]; env?: Record<string, string | undefined>; cwd: string }
 }

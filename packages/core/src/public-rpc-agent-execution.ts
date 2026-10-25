@@ -1,5 +1,6 @@
 import { isAbsolute } from 'node:path'
 import { AgentMuxError } from './errors.js'
+import { parseAgentExecutionNotices } from './agent-execution-helper.js'
 import { rpcRecord } from './rpc-data.js'
 import { normalizeLaunchOptionSelection } from './agent-launch-option.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
@@ -63,11 +64,12 @@ export function parseAgentExecutionBinding(value: unknown): { bindingId: string 
 export function parseAgentExecutionInspection(value: unknown, expected: { bindingId: string } & Partial<Pick<AgentExecutionInspection,
   'agentHostId' | 'resourceHostId' | 'agentSessionId' | 'resourceWorkspacePath'>>): AgentExecutionInspection {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const result = rpcRecord(value, ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId', 'resourceWorkspacePath', 'state', 'diagnostic'], code)
+  const result = rpcRecord(value, ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId', 'resourceWorkspacePath', 'state', 'diagnostic', 'notices'], code)
   for (const field of ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId']) identity(result[field], code)
   workspace(result.resourceWorkspacePath, code)
   for (const [field, original] of Object.entries(expected)) if (result[field] !== original) invalid('Execution observation belongs to another original binding.', code)
   if (result.state !== 'connected' && result.state !== 'unavailable' || (result.state === 'connected') === (result.diagnostic !== undefined)) invalid('Execution observation has inconsistent service state.', code)
+  if (result.notices !== undefined) parseAgentExecutionNotices(result.notices, {}, code)
   if (result.diagnostic !== undefined) {
     const diagnostic = rpcRecord(result.diagnostic, ['code', 'message', 'generation', 'operation'], code)
     identity(diagnostic.code, code); text(diagnostic.message, code)

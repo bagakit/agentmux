@@ -1,3 +1,4 @@
+import { parseAgentExecutionNotices } from './agent-execution-helper.js'
 import { AgentExecutionJournal } from './agent-execution-journal.js'
 import { AgentExecutionHelperStore } from './agent-execution-helper-store.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
@@ -4219,7 +4220,8 @@ export class AgentMuxClient {
         ...(journalIdentity ? { journalIdentity } : {}) })
       const prepared = await this.prepareTerminal({ workspacePath: input.workspacePath, createOperationId: input.createOperationId,
         command: plan.command, args: plan.args, env: plan.env })
-      return { bindingId: input.bindingId, role: input.role, providerId: input.providerId, prepared, ...(journalIdentity ? { journalIdentity } : {}) }
+      return { bindingId: input.bindingId, role: input.role, providerId: input.providerId, prepared,
+        ...(plan.notices === undefined ? {} : { notices: parseAgentExecutionNotices(plan.notices, { providerId: input.providerId, role: input.role }) }), ...(journalIdentity ? { journalIdentity } : {}) }
     })
   }
 

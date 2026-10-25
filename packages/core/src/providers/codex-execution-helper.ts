@@ -1,9 +1,8 @@
 import { fileURLToPath } from 'node:url'
 import { delimiter, isAbsolute, join, resolve } from 'node:path'
-import type { AgentExecutionHelperContext } from '../agent-execution-helper.js'
+import type { AgentExecutionHelperContext, AgentExecutionHelperLaunchPlan } from '../agent-execution-helper.js'
 import { classifyExecutable } from '../executable-probe.js'
 import { runProcess } from '../process-runner.js'
-import type { AgentLaunchPlan } from '../types.js'
 import { validateCodexExecutionRunConfiguration } from './codex-execution-run.js'
 
 /** Qualify the actual Host invocation, not another helper's similarly named CLI. */
@@ -26,7 +25,7 @@ export async function qualifyCodexExecutionExecutable(command: string, options: 
 }
 
 /** Qualifies only this new helper operation; never restarts or replaces an Agent. */
-export async function prepareCodexExecutionHelper(context: AgentExecutionHelperContext): Promise<AgentLaunchPlan> {
+export async function prepareCodexExecutionHelper(context: AgentExecutionHelperContext): Promise<AgentExecutionHelperLaunchPlan> {
   const executable = await qualifyCodexExecutionExecutable(context.executable, { workspacePath: context.workspacePath, env: process.env })
   const configuration = { ...context, executable }
   validateCodexExecutionRunConfiguration(configuration)
@@ -34,5 +33,16 @@ export async function prepareCodexExecutionHelper(context: AgentExecutionHelperC
     command: process.execPath,
     args: ['--disable-warning=ExperimentalWarning', fileURLToPath(new URL('./codex-execution-run.js', import.meta.url)), '--agentmux-execution-helper', JSON.stringify(configuration)],
     env: { ELECTRON_RUN_AS_NODE: '1' },
+    notices: context.role === 'frontend' ? [
+      { providerId: 'codex', role: 'frontend', capability: 'hooks', state: 'unqualified', code: 'CODEX_EXECUTION_HOOKS_UNQUALIFIED',
+        message: 'Hooks have not been qualified for cross-Host native tool execution.', action: 'Qualify original Agent Host hook delivery before relying on hook observations.' },
+      { providerId: 'codex', role: 'frontend', capability: 'skills', state: 'unverified', code: 'CODEX_EXECUTION_SKILLS_UNVERIFIED',
+        message: 'Skill discovery across the Agent and resource Hosts has not been verified.', action: 'Verify the intended skill sources on their original Hosts.' },
+    ] : [
+      { providerId: 'codex', role: 'executor', capability: 'mcp', state: 'unsupported', code: 'CODEX_EXECUTION_MCP_UNSUPPORTED',
+        message: 'MCP calls are not supported by this native tool execution transport.', action: 'Use a separately qualified Provider MCP capability for MCP calls.' },
+      { providerId: 'codex', role: 'executor', capability: 'agent-control', state: 'unconfigured', code: 'AGENT_TOOL_CONTEXT_UNAVAILABLE',
+        message: 'amux has no configured original Agent Host route or current credentials in native tool children.', action: 'Use the original Agent Host control endpoint until tool-side Agent control is configured.' },
+    ],
   }
 }
