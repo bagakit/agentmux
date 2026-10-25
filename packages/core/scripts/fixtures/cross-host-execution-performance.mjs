@@ -10,6 +10,41 @@ function deferred() { let resolve; const promise = new Promise(done => resolve =
 const percentile = (samples, fraction) => [...samples].sort((a,b)=>a-b)[Math.min(samples.length-1, Math.ceil(samples.length*fraction)-1)];
 const stats = samples => { assert(samples.length > 0); return {count:samples.length, minMs:Math.min(...samples), medianMs:percentile(samples,.5), p95Ms:percentile(samples,.95), maxMs:Math.max(...samples)}; };
 
+// Read only bytes after the exact producer cut. The previous byte lets the first
+// newline discard a possible partial old frame without guessing its JSON boundary.
+export async function waitForProducerOutput(client,runId,until,release) {
+    const subject=await client.runtimeSubject({kind:'terminal-run',runId});
+    assert.equal(subject.run.runId,runId);
+    let cursor=Math.max(0,subject.run.latestOutputBytes-1),discardPrefix=cursor>0,pending=Buffer.alloc(0);
+    const observation={startByte:cursor,endByte:cursor,readCount:0,bytes:0};
+    await release();
+    await until(async()=>{
+        const replay=await client.readRunReplay({runId},cursor,'raw');
+        assert.equal(replay.run.runId,runId);assert.equal(replay.gap,null);observation.readCount++;
+        const parts=[pending];
+        for(const chunk of replay.replay){assert.equal(chunk.startByte,cursor);assert.equal(chunk.endByte-chunk.startByte,chunk.dataBytes.length);parts.push(Buffer.from(chunk.dataBytes));cursor=chunk.endByte;observation.bytes+=chunk.dataBytes.length;}
+        const bytes=Buffer.concat(parts);let from=0,found=false;
+        for(;;){const end=bytes.indexOf(10,from);if(end<0)break;
+            if(discardPrefix)discardPrefix=false;
+            else if(end>from){const frame=JSON.parse(bytes.subarray(from,end).toString());if(frame.payload?.method==='process/output'&&frame.payload.params.chunk?.startsWith(Buffer.from('s'.repeat(12)).toString('base64')))found=true;}
+            from=end+1;
+        }
+        pending=bytes.subarray(from);observation.endByte=cursor;return found;
+    },'Original producer output underway');
+    return observation;
+}
+
+export function nativeConcurrencyWindow(producer,samples,commands) {
+    const valid=value=>Number.isSafeInteger(value.startedAt)&&Number.isSafeInteger(value.completedAt)&&value.completedAt>=value.startedAt;
+    assert(valid(producer)&&producer.completedAt>producer.startedAt&&producer.outputBytes===4*MiB);
+    assert(samples.length===6&&commands.length===6&&new Set(commands.map(row=>row.index)).size===6);
+    const nativeCommands=samples.map(step=>{const command=commands.find(row=>row.label===step.label&&row.index===step.index);assert(command&&valid(command));return {...command,callId:step.callId};});
+    const overlappingCallIds=nativeCommands.filter(value=>value.startedAt>=producer.startedAt&&value.completedAt<=producer.completedAt).map(value=>value.callId);
+    assert(overlappingCallIds.length>0,'No healthy native command completed during actual production; concurrent progress is unqualified');
+    return {clock:'resource-host-monotonic-ms',scope:'Native command execution through stdout write callback; tool reply timestamps are separate, not full stream delivery times',producer,nativeCommands,totalCount:samples.length,overlapCount:overlappingCallIds.length,overlappingCallIds,
+        excludedSamples:samples.filter(step=>!overlappingCallIds.includes(step.callId)).map(({callId,emittedAt,completedAt,roundtripMs})=>({callId,emittedAt,completedAt,roundtripMs}))};
+}
+
 // Tool timing is measured at the controlled Responses endpoint: emitted native tool
 // instruction to its original call_id output in a subsequent model request. It is
 // a full native tool roundtrip, not an inference from terminal presentation text.
@@ -56,7 +91,7 @@ export async function runPerformance(h) {
     for(const owner of [local,remote]) await writeResource(owner,collision,sentinels[owner.name]+'\n');
     const nodePath=resource.name==='local'?process.execPath:remoteNodePath;
     const contexts=[], terminals=[], gates=[];
-    const small = (label,index) => ({label,code:`require('node:fs').appendFileSync('effects-${label}.txt',${JSON.stringify(index+'\n')});console.log(${JSON.stringify(label+'_'+index)})`});
+    const small = (label,index) => ({label,index,code:`const f=require('node:fs'),clock=()=>Number(process.hrtime.bigint()/1000000n),startedAt=clock();f.appendFileSync('effects-${label}.txt',${JSON.stringify(index+'\n')});process.stdout.write(${JSON.stringify(label+'_'+index+'\n')},()=>f.appendFileSync('command-times.jsonl',JSON.stringify({label:${JSON.stringify(label)},index:${index},startedAt,completedAt:clock()})+'\\n'))`});
     const fileBytes = ('x'.repeat(1023)+'\n').repeat(1024);
     const largePath=join(scope,'one-mib.txt');
     const underLoad=deferred();gates.push(underLoad);
@@ -70,7 +105,7 @@ export async function runPerformance(h) {
         ...Array.from({length:6},(_,index)=>small('reused',index)),
         {label:'file-1mib',patch:'*** Begin Patch\n*** Add File: '+largePath+'\n'+fileBytes.trimEnd().split('\n').map(line=>'+'+line).join('\n')+'\n*** End Patch'},
         {label:'output-1mib',code:`process.stdout.write('o'.repeat(${MiB}))`},
-        {label:'slow-output',code:`const f=require('node:fs');f.writeFileSync('producer-ready','ready');const wait=setInterval(()=>{if(f.existsSync('release-producer')){clearInterval(wait);let count=0;const stream=setInterval(()=>{process.stdout.write('s'.repeat(65536));if(++count===64){clearInterval(stream);f.writeFileSync('producer-done','done')}},250)}},50)`}
+        {label:'slow-output',code:`const f=require('node:fs'),clock=()=>Number(process.hrtime.bigint()/1000000n);f.writeFileSync('producer-ready','ready');const wait=setInterval(()=>{if(f.existsSync('release-producer')){clearInterval(wait);const startedAt=clock();let count=0;const stream=setInterval(()=>{const last=++count===64;if(last)clearInterval(stream);process.stdout.write('s'.repeat(65536),last?()=>f.writeFileSync('producer-times.json',JSON.stringify({startedAt,completedAt:clock(),outputBytes:4194304})):undefined)},250)}},50)`}
     ]);
     const secondary=createContext('healthy',[
         ...Array.from({length:6},(_,index)=>small('baseline',index)),
@@ -105,9 +140,8 @@ export async function runPerformance(h) {
         const written=await read(resource,largePath);assert.equal(Buffer.byteLength(written),MiB);assert.equal(digest(written),digest(fileBytes));
         slowReader=await control(resource,'start-slow-reader',{runId:primary.originalPair.executor.runId});
         const slowInterval={startedAt:performance.now(),reader:slowReader};
-        await writeResource(resource,join(scope,'release-producer'),'release');
         // First original output bytes must exist before healthy requests are sent.
-        await until(async()=>{const list=await frames(resource,primary.originalPair.executor.runId);return list.some(frame=>frame.payload?.method==='process/output'&&frame.payload.params.chunk?.startsWith(Buffer.from('s'.repeat(12)).toString('base64')))},'Original producer output underway');
+        slowInterval.observation=await waitForProducerOutput(resource.client,primary.originalPair.executor.runId,until,()=>writeResource(resource,join(scope,'release-producer'),'release'));
         underLoad.resolve();
         await until(()=>primary.completedAt!==undefined&&secondary.completedAt!==undefined,'Both controlled native performance turns complete');
         slowInterval.endedAt=performance.now();
@@ -133,17 +167,17 @@ export async function runPerformance(h) {
                 const notifications=executor.filter(row=>row.frame.payload?.method==='process/output'&&row.frame.payload.params.processId===request.payload.params.processId);
                 assert(notifications.length>0);const received=Buffer.concat(notifications.map(row=>Buffer.from(row.frame.payload.params.chunk,'base64')));
                 assert.equal(received.length,bytes);assert.equal(digest(received),digest(Buffer.alloc(bytes,char)));
-                outputs.push({label,bytes,sha256:digest(received),notifications:notifications.length,nativeProcessId:request.payload.params.processId,roundtripMs:step.roundtripMs,MiBPerSecond:bytes/MiB/(step.roundtripMs/1000)});
+                outputs.push({label,bytes,sha256:digest(received),notifications:notifications.length,nativeProcessId:request.payload.params.processId,toolReplyMs:step.roundtripMs,nativeCompletion:'process/exited:0',deliveryDuration:{state:'unknown',reason:'A native tool reply may yield before completion; complete replay bytes prove delivery, not a measured delivery interval'}});
             }
             if(context===primary)assert(frontend.some(frame=>frame.payload?.method==='fs/writeFile'&&frame.payload.params.path===pathToFileURL(largePath).href),'1MiB transfer must use native fs/writeFile');
-            evidence.push({role:context.role,bindingId:context.bindingId,agentSessionId:context.session.agentSessionId,nativeHandle:retained.nativeHandle,helpers:after,generations:[...generations],initializeCount:initialize.length,requestCount:frontend.filter(frame=>frame.type==='request').length,requestDigest:digest(JSON.stringify(frontend)),protocolRequestBytes:frontendRanges.at(-1).endByte,protocolOutputBytes:executor.at(-1).endByte,outputs,coldCreateToFirstResultMs:context.steps[0].completedAt-context.createStartedAt,samples:context.steps.map(({label,callId,emittedAt,completedAt,roundtripMs})=>({label,callId,emittedAt,completedAt,roundtripMs}))});
+            evidence.push({role:context.role,bindingId:context.bindingId,agentSessionId:context.session.agentSessionId,nativeHandle:retained.nativeHandle,helpers:after,generations:[...generations],initializeCount:initialize.length,requestCount:frontend.filter(frame=>frame.type==='request').length,requestDigest:digest(JSON.stringify(frontend)),protocolRequestBytes:frontendRanges.at(-1).endByte,protocolOutputBytes:executor.at(-1).endByte,outputs,coldCreateToFirstResultMs:context.steps[0].completedAt-context.createStartedAt,samples:context.steps.map(({label,index,callId,emittedAt,completedAt,roundtripMs})=>({label,index,callId,emittedAt,completedAt,roundtripMs}))});
         }
         for(const [label,count] of [['reused',6],['baseline',6],['under-load',6]])assert.equal(await read(resource,join(scope,'effects-'+label+'.txt')),Array.from({length:count},(_,i)=>i+'\n').join(''),'Original effects occur exactly once');
         const underSamples=secondary.steps.filter(step=>step.label==='under-load');
-        const producerStep=primary.steps.find(step=>step.label==='slow-output');
-        const overlapSamples=underSamples.filter(step=>step.emittedAt>=producerStep.emittedAt&&step.completedAt<=producerStep.completedAt);
-        assert(overlapSamples.length>0,'No healthy request completed during the measured producer window; concurrent progress is unqualified');
-        const concurrencyWindow={producer:{emittedAt:producerStep.emittedAt,completedAt:producerStep.completedAt},totalCount:underSamples.length,overlapCount:overlapSamples.length,overlappingCallIds:overlapSamples.map(step=>step.callId),excludedSamples:underSamples.filter(step=>!overlapSamples.includes(step)).map(({callId,emittedAt,completedAt,roundtripMs})=>({callId,emittedAt,completedAt,roundtripMs}))};
+        const producerTimes=JSON.parse(await read(resource,join(scope,'producer-times.json')));
+        const commandTimes=(await read(resource,join(scope,'command-times.jsonl'))).trim().split('\n').map(line=>JSON.parse(line)).filter(row=>row.label==='under-load');
+        const concurrencyWindow=nativeConcurrencyWindow(producerTimes,underSamples,commandTimes);
+        const overlapSamples=underSamples.filter(step=>concurrencyWindow.overlappingCallIds.includes(step.callId));
         const rootsFor=owner=>[owner.corePid,owner.nativePid,...evidence.flatMap(value=>Object.values(value.helpers).filter(fact=>fact.core.runtimeId===owner.owner.runtimeId).map(fact=>fact.run.pid))].filter(value=>Number.isInteger(value));
         // Include both actual Agent TUI PIDs from their original Run facts.
         const agentPids=[];for(const context of contexts)agentPids.push((await agent.client.readRunReplay(context.session.run,0,'raw')).run.pid);
