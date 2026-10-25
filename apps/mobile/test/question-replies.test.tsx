@@ -10,7 +10,7 @@ import { createLocalDrafts } from '../src/conversation/local-drafts'
 import { reconcileMobileQuestionReplies, submitMobileQuestionReply } from '../src/conversation/question-replies'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { DEVICE_WORKFACE_KEY, emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, deferred, fixture, history, mount, mounted } from './conversation-fixture'
+import { button, click, deferred, fixture, history, mount, mounted, waitForElement } from './conversation-fixture'
 vi.mock('@xterm/xterm', () => ({ Terminal: class {
   options: Record<string, unknown>; unicode = { activeVersion: '6' }; textarea = document.createElement('textarea'); rows = 24
   buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } }; element: HTMLElement | undefined
@@ -147,7 +147,7 @@ it('actual MobileApp edits two answers, copies a plain answer, opens the same or
   await click(button(view.element, 'Copy answer: 补充说明')); expect(copy.mock.calls[0]![0]).toBe('  第二题答案\n保留空白  ')
   const draft = structuredClone(record().questionDrafts), frozen = structuredClone(attempt())
   await click(button(view.element, '打开原终端'))
-  expect(view.element.querySelector('.mobile-terminal')?.getAttribute('data-control')).toBe('watch')
+  expect((await waitForElement(view.element, '.mobile-terminal')).getAttribute('data-control')).toBe('watch')
   expect(JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!).selectedSessionId).toBe(sid)
   expect(f.write).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled(); expect(f.rpc.mock.calls.some(([method]) => method === 'agent.question.reply' || method.includes('goal.pause'))).toBe(false)
   await click(button(view.element, '控制终端')); await click(button(view.element, '终端 Esc'))
