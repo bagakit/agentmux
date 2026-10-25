@@ -8,6 +8,9 @@ import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentPromptSubmissionCoordinator } from '../src/prompt-submission.js'
+import { MAX_FRAME_BYTES, type ClientFrame } from '@ctxmux/sdk'
+import { agentPromptNotApplied } from '../src/agent-prompt-condition.js'
+import { parsePromptSubmissionRecord } from '../src/prompt-submission-record.js'
 import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
 import type {
   AgentMuxAgentSession,
@@ -748,4 +751,128 @@ it('reuses the original single-phase operation and byte range after an unknown o
   await fixture.coordinator.submitInputPlan(fixture.registry.get(stored.agentSessionId), run(5), 'auto', 'next', plan, agentPromptCondition(fixture.registry.get(stored.agentSessionId)), '["run-1",1]', undefined, false, undefined, 5)
   expect(fixture.kernel.input.mock.calls).toEqual([first, first])
   expect(fixture.registry.get(stored.agentSessionId).promptCompletionAdmission).toMatchObject({ startByte: 0, endByte: 5 })
+})
+
+function chunkRuntime() {
+  let cursor = 0, failure: { at: number; disposition: 'not_applied' | 'unknown' } | undefined
+  const writes: Array<{ operationId: string; expectedByte: number; data: Buffer }> = []
+  const applied = new Map<string, { startByte: number; endByte: number; data: Buffer }>()
+  return { writes, applied, current: () => run(cursor), fail: (at: number, disposition: 'not_applied' | 'unknown') => { failure = { at, disposition } },
+    bind(fixture: Awaited<ReturnType<typeof coordinatorFixture>>) {
+      fixture.kernel.status.mockImplementation(async () => run(cursor))
+      fixture.kernel.input.mockImplementation(async (_runId, operation) => {
+        const op = operation as typeof operation & { operationId: string; ownerInstanceId: string }
+        const data = Buffer.from(op.data), prior = applied.get(op.operationId)
+        writes.push({ operationId: op.operationId, expectedByte: op.expectedByte, data })
+        const stored = fixture.registry.get('agent-1'), submission = stored.terminalPromptSubmission
+        const claims = submission ? [submission.payload, submission.submit].flatMap(phase => phase.chunks ?? [phase])
+          : stored.promptCompletionAdmission!.chunks!
+        expect(claims.find(claim => claim.operationId === op.operationId)).toMatchObject({
+          inputByteRange: { startByte: op.expectedByte, endByte: op.expectedByte + data.length }, acknowledged: false })
+        const frame: ClientFrame = { type: 'request', request: { type: 'recoverable_input', operation: {
+          daemon_instance: op.ownerInstanceId, operation_key: op.operationId, id: _runId, expected_byte: op.expectedByte, data: [...data] } } }
+        expect(Buffer.byteLength(JSON.stringify(frame))).toBeLessThanOrEqual(MAX_FRAME_BYTES)
+        const fault = failure?.at === writes.length ? failure : undefined
+        if (fault) failure = undefined
+        if (fault?.disposition === 'not_applied') throw new AgentMuxError('chunk refused before dispatch', 'CTXMUX_io', 'not_applied', { disposition: 'not_applied', confirmedInputBytes: 0 })
+        if (prior) {
+          expect(op.expectedByte).toBe(prior.startByte); expect(data.equals(prior.data)).toBe(true)
+        } else {
+          expect(op.expectedByte).toBe(cursor)
+          applied.set(op.operationId, { startByte: cursor, endByte: cursor + data.length, data }); cursor += data.length
+        }
+        if (fault?.disposition === 'unknown') throw new AgentMuxError('chunk acknowledgement lost', 'CTXMUX_io', 'unknown', { disposition: 'unknown', confirmedInputBytes: null })
+        return { run: run(cursor), appliedByteRange: { startByte: op.expectedByte, endByte: op.expectedByte + data.length } }
+      })
+    }
+  }
+}
+
+it.each([['ASCII', false], ['Unicode', false], ['ASCII', true], ['Unicode', true]] as const)(
+  'delivers the complete %s prompt through persisted bounded byte chunks (single phase: %s)', async (shape, single) => {
+  const original = session(), fixture = await coordinatorFixture(original), runtime = chunkRuntime()
+  runtime.bind(fixture)
+  const body = shape === 'ASCII' ? 'x'.repeat(900_000) : '中文🙂'.repeat(90_000)
+  const plan = single ? { kind: 'single-phase' as const, data: body + '\r' } : new AgentProviderRegistry().get('codex').planPromptInput(body)
+  await fixture.coordinator.submitInputPlan(original, runtime.current(), 'large-chunks', body, plan, agentPromptCondition(original))
+  const saved = fixture.registry.get('agent-1')
+  const chunks = single ? saved.promptCompletionAdmission!.chunks! : saved.terminalPromptSubmission!.payload.chunks!
+  expect(chunks.length).toBeGreaterThan(1)
+  expect(chunks.every(chunk => chunk.acknowledged)).toBe(true)
+  expect(saved.promptCompletionAdmission!.acknowledged).toBe(true)
+  expect(Buffer.concat([...runtime.applied.values()].map(value => value.data)).equals(Buffer.from(single ? body + '\r' : '\u001b[200~' + body + '\u001b[201~\r'))).toBe(true)
+  const parsed = parsePromptSubmissionRecord({ agentSessionId: saved.agentSessionId, run: saved.run,
+    admission: saved.promptCompletionAdmission, terminalPromptSubmission: saved.terminalPromptSubmission })
+  expect(single ? parsed.admission!.chunks : parsed.terminalPromptSubmission!.payload.chunks).toEqual(chunks)
+})
+
+it.each([['not_applied', false], ['unknown', false], ['not_applied', true], ['unknown', true]] as const)(
+  'retains the accepted prefix and exact middle chunk after %s across a new coordinator (single phase: %s)', async (disposition, single) => {
+  const original = session(), fixture = await coordinatorFixture(original), runtime = chunkRuntime()
+  runtime.bind(fixture); runtime.fail(2, disposition)
+  const body = '中🙂'.repeat(125_000), plan = single ? { kind: 'single-phase' as const, data: body + '\r' } : new AgentProviderRegistry().get('codex').planPromptInput(body)
+  await expect(fixture.coordinator.submitInputPlan(original, runtime.current(), 'chunk-recovery', body, plan, agentPromptCondition(original))).rejects.toMatchObject({ detail: 'unknown', controlFailure: { disposition: 'unknown' } })
+  const retained = fixture.registry.get('agent-1'), chunks = single ? retained.promptCompletionAdmission!.chunks! : retained.terminalPromptSubmission!.payload.chunks!
+  expect(chunks.map(chunk => chunk.acknowledged)).toEqual([true, ...chunks.slice(1).map(() => false)])
+  expect(retained.promptCompletionAdmission?.notApplied).not.toBe(true)
+  expect(agentPromptNotApplied(retained)).toBeUndefined()
+  // Even inconsistent stale whole-input bookkeeping cannot erase its ACKed prefix.
+  expect(agentPromptNotApplied({ ...retained, promptCompletionAdmission: { ...retained.promptCompletionAdmission!, notApplied: true } })).toBeUndefined()
+  expect(retained.terminalPromptDelivery).toMatchObject({ reason: 'input-unconfirmed' })
+  expect(runtime.writes.some(write => write.data.equals(Buffer.from('\r')))).toBe(false)
+  const restart = await coordinatorFixture(retained); runtime.bind(restart)
+  await restart.coordinator.submitInputPlan(retained, runtime.current(), 'chunk-recovery', body, plan, agentPromptCondition(retained))
+  expect(runtime.writes[2]).toEqual(runtime.writes[1])
+  expect(runtime.writes.filter(write => write.operationId === chunks[0]!.operationId)).toHaveLength(1)
+  expect(Buffer.concat([...runtime.applied.values()].map(value => value.data)).equals(Buffer.from(single ? body + '\r' : '\u001b[200~' + body + '\u001b[201~\r'))).toBe(true)
+})
+
+it.each([false, true])('classifies only an untouched first chunk as a whole-input refusal (single phase: %s)', async single => {
+  const original = session(), fixture = await coordinatorFixture(original), runtime = chunkRuntime()
+  runtime.bind(fixture); runtime.fail(1, 'not_applied')
+  const body = 'x'.repeat(900_000), plan = single ? { kind: 'single-phase' as const, data: body + '\r' } : new AgentProviderRegistry().get('codex').planPromptInput(body)
+  await expect(fixture.coordinator.submitInputPlan(original, runtime.current(), 'unapplied-chunk', body, plan, agentPromptCondition(original)))
+    .rejects.toMatchObject({ detail: 'not_applied', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+  const retained = fixture.registry.get('agent-1')
+  expect(runtime.applied.size).toBe(0)
+  expect(runtime.writes).toHaveLength(1)
+  expect(agentPromptNotApplied(retained)).toEqual({ submissionId: 'unapplied-chunk', run: original.run })
+  const chunks = single ? retained.promptCompletionAdmission!.chunks : retained.terminalPromptSubmission!.payload.chunks
+  expect(chunks!.every(chunk => !chunk.acknowledged)).toBe(true)
+})
+
+it('rejoins the same chunk when its ACK cannot be persisted, and never sends before the phase claim is saved', async () => {
+  const original = session(), fixture = await coordinatorFixture(original), runtime = chunkRuntime()
+  runtime.bind(fixture)
+  const body = 'z'.repeat(900_000), plan = new AgentProviderRegistry().get('codex').planPromptInput(body)
+  const update = fixture.registry.update.bind(fixture.registry)
+  const failed = vi.spyOn(fixture.registry, 'update').mockImplementation(async (...args) => {
+    const projected = args[2](fixture.registry.get('agent-1'))
+    if (projected.terminalPromptSubmission?.payload.chunks?.some(chunk => chunk.acknowledged)) throw new Error('chunk ACK store unavailable')
+    return update(...args)
+  })
+  await expect(fixture.coordinator.submitInputPlan(original, runtime.current(), 'lost-store', body, plan, agentPromptCondition(original))).rejects.toThrow('chunk ACK store unavailable')
+  expect(runtime.writes).toHaveLength(1)
+  const retained = fixture.registry.get('agent-1')
+  expect(retained.terminalPromptSubmission!.payload.chunks!.every(chunk => !chunk.acknowledged)).toBe(true)
+  failed.mockRestore()
+  const restarted = await coordinatorFixture(retained); runtime.bind(restarted)
+  await restarted.coordinator.submitInputPlan(retained, runtime.current(), 'lost-store', body, plan, agentPromptCondition(retained))
+  expect(runtime.writes[1]).toEqual(runtime.writes[0])
+  expect(Buffer.concat([...runtime.applied.values()].map(value => value.data)).equals(Buffer.from('\u001b[200~' + body + '\u001b[201~\r'))).toBe(true)
+})
+
+it('keeps old whole-phase identity after an unknown result instead of inventing a new chunk layout', async () => {
+  const original = session(), fixture = await coordinatorFixture(original), body = 'x'.repeat(900_000)
+  const plan = new AgentProviderRegistry().get('codex').planPromptInput(body)
+  fixture.kernel.input.mockRejectedValue(new AgentMuxError('unknown old write', 'CTXMUX_io', 'unknown'))
+  await expect(fixture.coordinator.submitInputPlan(original, run(), 'old-layout', body, plan, agentPromptCondition(original))).rejects.toThrow('unknown old write')
+  const retained = fixture.registry.get('agent-1')
+  delete retained.terminalPromptSubmission!.payload.chunks
+  const restarted = await coordinatorFixture(retained)
+  restarted.kernel.input.mockRejectedValue(new AgentMuxError('original whole-frame remains unknown', 'CTXMUX_io', 'unknown'))
+  await expect(restarted.coordinator.submitInputPlan(retained, run(), 'old-layout', body, plan, agentPromptCondition(retained))).rejects.toThrow('original whole-frame remains unknown')
+  expect(restarted.kernel.input.mock.calls[0]![1]).toMatchObject({ operationId: retained.terminalPromptSubmission!.payload.operationId, expectedByte: 0 })
+  expect(Buffer.byteLength(restarted.kernel.input.mock.calls[0]![1].data)).toBeGreaterThan(900_000)
+  expect(restarted.registry.get('agent-1').terminalPromptSubmission!.payload.chunks).toBeUndefined()
 })
