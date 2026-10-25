@@ -11,7 +11,7 @@ import { feishuPublicationHttp, type FeishuHttpCall, type FeishuHttpResponse } f
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
-const stages = [['received', 'Get'], ['queued', 'OneSecond'], ['dispatched', 'CheckMark'], ['started', 'OnIt'], ['completed', 'DONE']] as const
+const stages = [['received', 'Get'], ['queued', 'OneSecond'], ['dispatched', 'CheckMark'], ['started', 'OnIt'], ['completed', 'DONE'], ['failed', 'CrossMark'], ['interrupted', 'MinusOne']] as const
 function operation(stage: typeof stages[number][0] = 'received'): PublicationOperation {
   return { operationId: 'query-' + stage, projectionId: 'original-query-projection', sourceRevision: 'original-query-revision', bindingId: 'original-binding', bindingRevision: 1,
     reference: { hostId: 'local', agentSessionId: 'original-session', source: { kind: 'ingress', ingressId: 'original-ingress' } },
@@ -73,12 +73,12 @@ it('withdraws only an exact retained reaction without deleting the original quer
     const original = operation(stage)
     expect((await f.publisher.dispatch(f.publisher.prepare(original), original.target, 'synthetic-credential', signal)).state).toBe('confirmed')
   }
-  expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['Get', 'OneSecond', 'CheckMark', 'OnIt', 'DONE'])
+  expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['Get', 'OneSecond', 'CheckMark', 'OnIt', 'DONE', 'CrossMark', 'MinusOne'])
   const mapping = { messageId: 'original-user-query', reactionId: 'reaction-1' }
   const withdrawal = f.publisher.prepare({ ...operation(), effect: 'withdraw', mapping })
   expect(withdrawal.request).toEqual({ method: 'DELETE', path: '/open-apis/im/v1/messages/original-user-query/reactions/reaction-1' })
   expect(await f.publisher.dispatch(withdrawal, operation().target, 'synthetic-credential', signal, mapping)).toEqual({ state: 'confirmed', mapping })
-  expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['OneSecond', 'CheckMark', 'OnIt', 'DONE'])
+  expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['OneSecond', 'CheckMark', 'OnIt', 'DONE', 'CrossMark', 'MinusOne'])
   expect(() => f.publisher.prepare({ ...operation(), effect: 'withdraw' })).toThrow()
   expect(() => f.publisher.prepare({ ...operation(), mapping: { messageId: 'another-user-query', reactionId: 'reaction-1' } })).toThrow()
   expect(() => f.publisher.prepare({ ...operation(), mapping: { messageId: 'original-user-query', threadId: 'another-thread' } })).toThrow()
