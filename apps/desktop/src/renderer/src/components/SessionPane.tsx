@@ -629,7 +629,7 @@ export function SessionPane({
     hostId: executionHostId, agentSessionId: sessionId, workspaceId: sourceWorkspaceId,
     tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, displayWorkspaceId: linkOrigin.workspaceId,
     ...(linkOrigin.tabGroupId ? { groupId: linkOrigin.tabGroupId } : {}),
-    diagnostic: continuityNotice?.reason ?? session?.status.detail ?? 'Original Session state is not confirmed.'
+    diagnostic: session?.status.detail ?? continuityNotice?.reason ?? 'Original Session state is not confirmed.'
   } : null
 
   async function refreshUnobserved(): Promise<void> {
@@ -936,7 +936,8 @@ export function SessionPane({
           : exited
             ? `${noun} process exited`
             : `${noun} session unavailable`)
-  const recoveryDetail = exitNotice?.detail ?? recoverableFrontendNotice?.detail ?? continuityNotice?.reason ??
+  const recoveryDetail = [exitNotice?.detail ?? recoverableFrontendNotice?.detail,
+    continuityNotice ? session.status.detail ?? continuityNotice.reason : undefined].filter(Boolean).join(' ') ||
     humanizeDetail(session.interruptionReason, session.status.detail, exited || missing, session.status.exitReason)
 
   async function refreshOriginal(): Promise<void> {
@@ -982,7 +983,7 @@ export function SessionPane({
     restore: 'Re-read original to check again. Your Session and draft are kept.'
   } }} /> : null
   const identityNotice = (exitNotice || frontendSurface) && continuityNotice ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
-    step: continuityNotice.title, mode: continuityNotice.reason,
+    step: continuityNotice.title, mode: session.status.detail ?? continuityNotice.reason,
     restore: continuityNotice.remedy.kind === 'refresh' ? 'Re-read original checks again without restarting the Agent or resending messages.' : 'Recovery remains a separate explicit action.'
   } }} /> : null
   const frontendObservationCause = originalReadError?.source === activitySourceKey ? originalReadError.message
@@ -1018,7 +1019,7 @@ export function SessionPane({
     title: recovering ? 'Restoring your session' : exitNotice?.title ?? (continuityNotice ? continuityNotice.title
       : restoreFailed ? recoveryTitle
         : coreRestorePresentation?.title ?? (exited ? 'Agent process exited' : 'Session state unconfirmed')),
-    detail: exitNotice?.detail ?? continuityNotice?.reason ?? (restoreFailed
+    detail: exitNotice?.detail ?? (continuityNotice ? session.status.detail ?? continuityNotice.reason : undefined) ?? (restoreFailed
       ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
       : coreRestorePresentation?.detail ?? (exited && !session.runUnobserved
         ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)

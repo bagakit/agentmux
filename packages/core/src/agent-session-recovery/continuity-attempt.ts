@@ -14,6 +14,7 @@ import { AGENT_TERMINAL_HANDSHAKE_FAILED } from '../agent-terminal-handshake-out
 import { agentPromptNotApplied } from '../agent-prompt-condition.js'
 import { sameRun } from '../agent-session-identity.js'
 import { AgentMuxError } from '../errors.js'
+import { executorUnavailableError } from '../executable-probe.js'
 import { agentLifecycleOperationIdentity } from '../agent-session-store.js'
 import { normalizeAgentContinuityPolicy, DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { decideAgentSessionContinuity, agentContinuityAdmission } from './continuity-policy.js'
@@ -416,8 +417,12 @@ export async function performAgentContinuity(
       launchExecutable = plan.command
       capabilityContext = { workspacePath: current.workspacePath, env: terminalEnvironment(plan.env) }
       capability = await ports.providers.probeAgent(current.providerId, plan.command, capabilityContext)
+      // This fresh observation replaces the previous preflight failure for this attempt.
+      // Other operation receipts and failures after an admitted Start remain intact.
+      delete receipt.error; delete receipt.errorCode
     } catch (error) {
       receipt.error = error instanceof Error ? error.message : String(error)
+      delete receipt.errorCode
       if (error instanceof AgentMuxError) receipt.errorCode = error.code
       if (prior) receipt.rechecks++
       return pending('provider-unverified', evidence, receipt.rechecks < policy.recheckMaxAttempts ? now + policy.recheckIntervalMs : undefined)
@@ -428,6 +433,9 @@ export async function performAgentContinuity(
     session: current ? ports.events.projectSession(current) : null, retirement: retirement ? structuredClone(retirement) : null,
     run, catalog, capability, ...(launchExecutable === undefined ? {} : { launchExecutable }) })
   if (decision.kind === 'reattachable' && current) {
+    if (prior && (prior.errorCode === 'AGENT_NOT_FOUND' || ['provider-unavailable', 'provider-unverified'].includes(prior.reason))) {
+      delete receipt.error; delete receipt.errorCode
+    }
     const provider = ports.providers.providers.get(current.providerId)
     await ports.terminal.ensureTerminalFrontendObservation(current)
     const frontend = ports.terminal.readFrontendObservation(current.agentSessionId)
@@ -559,6 +567,14 @@ export async function performAgentContinuity(
       ports.events.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_CONTINUITY_HOOK_UNCONFIRMED',
         message: receipt.error, evidence: { source: 'agentmux', run: input.expectedRun, observedAt: now } })
     })
+  }
+  if (decision.kind === 'unavailable' && decision.reason === 'provider-unavailable' && capability &&
+      !capability.installed && capability.executableObservation?.availability === 'missing' &&
+      capability.providerId === current?.providerId && capability.executable === launchExecutable &&
+      capability.executableObservation.executable === launchExecutable) {
+    const failure = executorUnavailableError(catalog!.label, capability)
+    receipt.error = failure.message
+    receipt.errorCode = failure.code
   }
   if (decision.kind !== 'resume') return record(decision)
   if (reservationObservationUnknown) return pending('operation-unconfirmed', evidence)
