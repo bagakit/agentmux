@@ -104,6 +104,12 @@ describe('original workface native presentation owner', () => {
     const input = { operationId: 'background-shell', target, focus: false }
     const page = await f.owner.call('app.window.open', input, context)
     const child = f.children[0]!
+    const calls = f.main.webContents.send.mock.calls
+    const prepare = calls.findIndex(([channel, value]) => channel === WORKBENCH_WINDOW_REQUEST && value.action === 'prepare')
+    expect(prepare).toBeGreaterThanOrEqual(0)
+    expect(calls.slice(0, prepare)).toContainEqual([WORKBENCH_WINDOW_CHANGED, expect.objectContaining({
+      windows: expect.arrayContaining([expect.objectContaining({ target, presentation: 'pending' })])
+    })])
     expect(page.recordedOperation).toMatchObject({ state: 'confirmed', input })
     expect(child.visible).toBe(true); expect(child.focused).toBe(false); expect(f.main.focused).toBe(true)
     await f.owner.call('app.window.open', { ...input, operationId: 'same-background-shell' }, context)

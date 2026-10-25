@@ -11,6 +11,8 @@ import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe
 const desktop = path.resolve(import.meta.dirname, '..'), root = path.resolve(desktop, '../..')
 const fixture = path.join(desktop, 'scripts/fixtures/unified-browser-children-ui')
 const proofRoot = path.join(root, '.tmp/unified-browser-children-ui'), prepared = path.join(proofRoot, 'prepared')
+const scenario = process.argv[3] === '--survey-alias' ? 'survey-alias' : 'unified-children'
+assert.ok(process.argv.length <= 3 || process.argv.length === 4 && scenario === 'survey-alias', 'Use [output] [--survey-alias]')
 const output = path.resolve(process.argv[2] ?? path.join(proofRoot, 'attempt-' + Date.now()))
 const require = createRequire(path.join(desktop, 'package.json')), { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')
@@ -23,16 +25,28 @@ const sourcePaths = [path.join(desktop, 'src/main/browser-view-manager.ts'), pat
   path.join(desktop, 'src/renderer/src/store.ts'), path.join(desktop, 'src/renderer/src/App.tsx'), path.join(desktop, 'src/renderer/src/components/BrowserPane.tsx'),
   path.join(desktop, 'src/renderer/src/components/BrowserSourceNavigation.tsx'), path.join(desktop, 'src/renderer/src/lib/browser-child-projection.ts'),
   path.join(desktop, 'src/renderer/src/lib/workbench-windows.tsx'), path.join(desktop, 'src/renderer/src/styles/browser.css'),
-  ...['entry.tsx', 'main.ts', 'preload-bridge.cjs', 'index.html'].map(name => path.join(fixture, name)), import.meta.filename]
+  path.join(desktop, 'src/renderer/src/components/StableWorkbenchView.tsx'), path.join(desktop, 'src/renderer/src/components/WorkspaceWorkbench.tsx'),
+  path.join(desktop, 'src/renderer/src/lib/workbench-presentation.ts'),
+  ...['entry.tsx', 'main.ts', 'survey-alias.ts', 'preload-bridge.cjs', 'index.html'].map(name => path.join(fixture, name)), import.meta.filename]
 const hashes = async () => Object.fromEntries(await Promise.all(sourcePaths.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
-const receipt = { schema: 'agentmux.unified-browser-children-ui.v1', passed: false, captureOnly: true, aestheticReview: 'not-performed', phases: [], images: [], sourceBefore: await hashes() }
+const receipt = { schema: 'agentmux.unified-browser-children-ui.v1', scenario, passed: false, captureOnly: true, aestheticReview: 'not-performed', phases: [], images: [], sourceBefore: await hashes() }
 const rendererInputs = await fileHashes([
   ...await files(path.join(desktop, 'src/renderer')), ...await files(path.join(desktop, 'src/shared')),
   ...await files(path.join(root, 'packages/client-ui/src')), ...await files(path.join(root, 'packages/layout/src')), ...await files(path.join(root, 'packages/core/dist')),
   ...await files(path.join(root, 'packages/native-desktop/dist')),
   path.join(fixture, 'entry.tsx'), path.join(fixture, 'index.html'), path.join(desktop, 'resources/icon-128.png'), path.join(root, 'pnpm-lock.yaml')
 ])
-const server = createServer((request, response) => {
+const httpRequests = []
+const server = createServer(async (request, response) => {
+  if (scenario === 'survey-alias') {
+    const body = []; for await (const chunk of request) body.push(chunk)
+    const requestBody = Buffer.concat(body).toString('utf8'), pathname = new URL(request.url, 'http://private.test').pathname
+    httpRequests.push({ method: request.method, path: pathname, body: requestBody })
+    const name = pathname === '/child-link' ? 'Link research' : pathname === '/child-post' ? 'Posted research' : pathname === '/sibling' ? 'Sibling research' : 'Original research'
+    response.setHeader('content-type', 'text/html; charset=utf-8')
+    response.end(`<!doctype html><meta charset="utf-8"><title>${name}</title><style>html,body{margin:0;background:#f1f5f3;color:#203d32;font:16px system-ui}main{max-width:680px;padding:40px}h1{font-size:28px;margin:12px 0}p{line-height:1.55;color:#5c7067}a,button,input{font:inherit}a,button{display:inline-block;margin:12px 16px 12px 0}button{background:#24644d;color:white;border:0;border-radius:6px;padding:10px 14px}input{display:block;width:320px;max-width:85%;padding:10px;border:1px solid #92aa9d;border-radius:6px}</style><main><small>PRIVATE SURVEY NAVIGATION PROOF</small><h1>${name}</h1><p id="method">${request.method} ${pathname}</p><p id="payload">${requestBody.replaceAll('&','&amp;').replaceAll('<','&lt;')}</p><label>Page draft<input id="page-draft" aria-label="Page draft" placeholder="Type on this exact page"></label>${pathname === '/source' ? '<a id="open-link" href="/child-link" target="_blank">Open linked research</a><form action="/child-post" method="post" target="_blank"><input type="hidden" name="proof" value="original-post-body"><button id="open-post" type="submit">Open posted research</button></form>' : '<p>This independent page stays readable and editable while switching Survey Tabs.</p>'}</main>`)
+    return
+  }
   response.setHeader('content-type', 'text/html; charset=utf-8')
   const child = request.url === '/child'
   response.end(`<!doctype html><meta charset="utf-8"><title>${child ? 'Related task' : 'Original research page'}</title><style>html,body{margin:0;background:#f1f5f3;color:#203d32;font:15px system-ui}main{max-width:660px;padding:42px}h1{font-size:29px;font-weight:650;margin:0 0 16px}p{line-height:1.6;color:#5c7067}button{font:inherit;background:#24644d;color:white;border:0;border-radius:7px;padding:11px 16px;margin-top:12px}</style><main><small>BROWSER WORKFACE · PRIVATE UI PROOF</small><h1>${child ? 'Related task' : 'Original research page'}</h1><p>${child ? 'This page was opened by the original document. Its page identity and full Browser controls stay together.' : 'Keep this original page and its exact Region while opening a related task in another window.'}</p>${child ? '<button id="continue">Continue review</button>' : '<button id="open-child" onclick="window.open(\'/child\',\'_blank\',\'width=840,height=620\')">Open related task</button>'}</main>`)
@@ -81,25 +95,33 @@ try {
   }
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   for (const name of Object.keys(env)) if (name.startsWith('AGENTMUX_') || name.startsWith('CTXMUX_')) delete env[name]
-  Object.assign(env, { HOME: path.join(privateRoot, 'home'), XDG_CACHE_HOME: path.join(privateRoot, 'cache'), XDG_CONFIG_HOME: path.join(privateRoot, 'config'), XDG_DATA_HOME: path.join(privateRoot, 'data'), AGENTMUX_CHILD_UI_TOOL_HOME: process.env.HOME, AGENTMUX_CHILD_UI_CAPTURE_HOLD: process.env.AGENTMUX_CHILD_UI_CAPTURE_HOLD ?? '0', AGENTMUX_CHILD_UI_CAPTURE_PROVIDER: process.env.AGENTMUX_CHILD_UI_CAPTURE_PROVIDER === 'orca' ? 'orca' : 'cua' })
-  const executable = electron
+  Object.assign(env, { HOME: path.join(privateRoot, 'home'), XDG_CACHE_HOME: path.join(privateRoot, 'cache'), XDG_CONFIG_HOME: path.join(privateRoot, 'config'), XDG_DATA_HOME: path.join(privateRoot, 'data'), AGENTMUX_CHILD_UI_TOOL_HOME: process.env.HOME, AGENTMUX_CHILD_UI_CAPTURE_HOLD: process.env.AGENTMUX_CHILD_UI_CAPTURE_HOLD ?? '0', AGENTMUX_CHILD_UI_CAPTURE_PROVIDER: process.env.AGENTMUX_CHILD_UI_CAPTURE_PROVIDER === 'agentmux' ? 'agentmux' : process.env.AGENTMUX_CHILD_UI_CAPTURE_PROVIDER === 'orca' ? 'orca' : 'cua' })
+  const launchServices = env.AGENTMUX_CHILD_UI_CAPTURE_PROVIDER === 'agentmux'
+  const electronApp = launchServices ? /^(.*\.app)\/Contents\/MacOS\/[^/]+$/.exec(electron)?.[1] : null
+  if (launchServices) assert.ok(process.platform === 'darwin' && electronApp && path.isAbsolute(electronApp), 'AgentMux native capture launches the exact macOS Electron.app path')
+  const executable = launchServices ? '/usr/bin/open' : electron
   receipt.compiled = Object.fromEntries(await Promise.all(['preload.cjs', 'main.mjs'].map(async name => [name, hash(await fs.readFile(path.join(prepared, name)))])))
-  for (const phase of ['seed', 'restore']) {
+  for (const phase of scenario === 'survey-alias' ? ['survey'] : ['seed', 'restore']) {
     const stderr = []
     const bootstrap = path.join(privateRoot, 'bootstrap.cjs'), stageFile = path.join(output, phase + '-bootstrap.json')
     await fs.writeFile(bootstrap, `const fs=require('node:fs'),path=require('node:path'),{app}=require('electron');const root=${JSON.stringify(privateRoot)},stage=${JSON.stringify(stageFile)};const save=value=>fs.writeFileSync(stage,JSON.stringify({value,pid:process.pid,at:Date.now()}));save('bootstrap-start');for(const key of ['home','appData','userData','sessionData']){const value=path.join(root,key);fs.mkdirSync(value,{recursive:true});app.setPath(key,value)}app.commandLine.appendSwitch('no-proxy-server');app.whenReady().then(()=>{save('app-ready');return import(${JSON.stringify(pathToFileURL(path.join(prepared, 'main.mjs')).href)})}).catch(error=>{save(String(error.stack||error));console.error(error);app.exit(1)});`)
-    const exit = await runProbeProcess(executable, [bootstrap, prepared, privateRoot, output, phase, pageUrl], {
+    const nativeArgs = [bootstrap, prepared, privateRoot, output, phase, pageUrl, scenario]
+    const nativeLogs = launchServices ? { stdout: `${phase}-native-stdout.log`, stderr: `${phase}-native-stderr.log` } : null
+    const launchArgs = launchServices ? ['-n', '-W', '-a', electronApp, '--stdout', path.join(output, nativeLogs.stdout), '--stderr', path.join(output, nativeLogs.stderr),
+      ...Object.entries(env).flatMap(([name, value]) => value !== undefined && (['HOME', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME'].includes(name) || name.startsWith('AGENTMUX_CHILD_UI_')) ? ['--env', `${name}=${value}`] : []), '--args', ...nativeArgs] : nativeArgs
+    const exit = await runProbeProcess(executable, launchArgs, {
       temporaryRoot: privateRoot, cwd: privateRoot, env, timeoutMs: env.AGENTMUX_CHILD_UI_CAPTURE_HOLD === '1' ? 480000 : 90000, onLine: line => { stderr.push(line); process.stderr.write(phase + ': ' + line.slice(0, 1800) + '\n') } })
     await fs.writeFile(path.join(output, `${phase}-stderr.log`), stderr.join('\n'))
     const native = await fs.readFile(path.join(output, phase + '.json'), 'utf8').then(JSON.parse).catch(() => ({ passed: false, bootstrap: null }))
     native.bootstrap = await fs.readFile(stageFile, 'utf8').then(JSON.parse).catch(() => null)
-    receipt.phases.push({ phase, exit, native })
+    receipt.phases.push({ phase, exit, native, ...(launchServices ? { launch: { method: 'macos-launch-services', application: electronApp, wrapper: executable, nativeExecutable: electron, nativeLogs } } : {}) })
     receipt.images.push(...native.images ?? [])
     assert.equal(exit.timedOut, false, phase + ' watchdog')
     assert.equal(exit.exitCode, 0, native.failure?.message)
     assert.equal(native.passed, true, native.failure?.message)
   }
-  assert.equal(new Set(receipt.phases.map(one => one.native.pid)).size, 2, 'Two actual Electron processes')
+  if (scenario !== 'survey-alias') assert.equal(new Set(receipt.phases.map(one => one.native.pid)).size, 2, 'Two actual Electron processes')
+  receipt.httpRequests = httpRequests
   receipt.sourceAfter = await hashes()
   assert.deepEqual(receipt.sourceAfter, receipt.sourceBefore, 'Candidate product and fixture files remained unchanged during native verification')
   receipt.rendererInputsAfter = await fileHashes(Object.keys(rendererInputs).map(file => path.join(root, file)))
