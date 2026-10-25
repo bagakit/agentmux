@@ -337,9 +337,9 @@ async function materializeDependency(sourcePackage, packageName, destination) {
   )
 }
 
-async function auditBundleSymlinks(root) {
+export async function auditBundle(root, { runtimeRoot = null, forbidden = [] } = {}) {
   const canonicalRoot = await realpath(root)
-  const visit = async (directory) => {
+  const visit = async (directory, inRuntime) => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name)
       if (entry.isSymbolicLink()) {
@@ -348,32 +348,19 @@ async function auditBundleSymlinks(root) {
         const canonicalTarget = await realpath(path)
         const offset = relative(canonicalRoot, canonicalTarget)
         assert(offset !== '..' && !offset.startsWith(`..${sep}`), `Bundle symlink escapes the application: ${path}`)
-      } else if (entry.isDirectory()) await visit(path)
-    }
-  }
-  await visit(root)
-}
-
-async function auditRuntimeReferences(appPath, temporaryRoot) {
-  const forbidden = [repositoryRoot, temporaryRoot]
-  const runtimeRoot = join(appPath, 'Contents', 'Resources', 'app')
-  const visit = async (directory) => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name)
-      if (entry.isDirectory()) {
-        await visit(path)
-        continue
-      }
-      if (!entry.isFile() || (await stat(path)).size > 2 * 1024 * 1024) continue
-      const content = await readFile(path)
-      if (content.includes(0)) continue
-      const text = content.toString('utf8')
-      for (const reference of forbidden) {
-        assert(!text.includes(reference), `Packaged runtime contains a build-machine path in ${path}.`)
+      } else if (entry.isDirectory()) {
+        await visit(path, inRuntime || path === runtimeRoot)
+      } else if (inRuntime && entry.isFile() && (await stat(path)).size <= 2 * 1024 * 1024) {
+        const content = await readFile(path)
+        if (content.includes(0)) continue
+        const text = content.toString('utf8')
+        for (const reference of forbidden) {
+          assert(!text.includes(reference), `Packaged runtime contains a build-machine path in ${path}.`)
+        }
       }
     }
   }
-  await visit(runtimeRoot)
+  await visit(root, root === runtimeRoot)
 }
 
 async function verifyIdentity(appPath) {
@@ -746,7 +733,7 @@ async function verifyDmg(dmgPath, temporaryRoot, source, signedWorkspaceMoveHelp
     await run('hdiutil', ['detach', mountPoint], { capture: true })
   }
   await verifyIdentity(installedApp)
-  await auditBundleSymlinks(installedApp)
+  await auditBundle(installedApp)
   await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', installedApp], { capture: true })
   await verifyPackagedRuntime(installedApp, verificationRoot, source, signedWorkspaceMoveHelperSha256)
   if (signingPlan?.kind === 'ad-hoc') {
@@ -1163,8 +1150,10 @@ async function main() {
     await copyRuntimeApplication(stagedApp, initialSource)
     await verifyIdentity(stagedApp)
     await verifyThirdPartyNotices(stagedApp)
-    await auditBundleSymlinks(stagedApp)
-    await auditRuntimeReferences(stagedApp, temporaryRoot)
+    await auditBundle(stagedApp, {
+      runtimeRoot: join(stagedApp, 'Contents', 'Resources', 'app'),
+      forbidden: [repositoryRoot, temporaryRoot]
+    })
     const stagedWorkspaceMoveHelper = join(stagedApp, 'Contents', 'Resources', 'app', 'resources', 'bin', 'agentmux-workspace-move')
     await verifyWorkspaceMoveHelper(stagedWorkspaceMoveHelper,
       await sha256(join(desktopRoot, 'resources', 'bin', 'agentmux-workspace-move')))
