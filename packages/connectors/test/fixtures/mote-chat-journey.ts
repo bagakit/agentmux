@@ -24,13 +24,13 @@ const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
 type DirectMessage = SignedRoomMessage & { nativeKind: 'direct' | 'group' }
 
-export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false, nativeProvider: 'claude' | 'grok' = 'claude', publicationHttp?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined) {
+export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false, nativeProvider: 'claude' | 'grok' | 'codex' = 'claude', publicationHttp?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined) {
   const publicationRefresh = vi.spyOn(PublicationHost.prototype, 'refresh')
   const original = await rpcOwnerFixture([], core)
   const client = original.client as core.AgentMuxClient
   const grokHome = join(original.root, 'grok')
   if (nativeProvider === 'grok') vi.stubEnv('GROK_HOME', grokHome)
-  const feishu = nativeProvider === 'grok' ? await feishuPublicationHttp(publicationHttp) : undefined
+  const feishu = nativeProvider !== 'claude' ? await feishuPublicationHttp(publicationHttp) : undefined
   if (feishu) cleanup.push(feishu.close)
   cleanup.push(async () => {
     try { await original.close() } catch (error) {
@@ -92,7 +92,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
       const source = sources.get(processId)
       return source && (!nativeAfterInput || inputCreatedSources.has(processId)) ? { handle: { kind: 'provider' as const, providerId: 'claude', sessionId: source.id, transcriptPath: source.path }, assertCurrent: async () => {} } : null
     })
-  } else {
+  } else if (nativeProvider === 'grok') {
     // Exact Hook/Run identity leaf; the real Grok normalizer supplies the native
     // handle. No Claude discovery or fake Grok changes method is substituted.
     inner.ensureTerminalHandshakeOrDegrade = async (session: core.AgentMuxAgentSession) => {
@@ -106,7 +106,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     }
   }
   const inputCreatedSources = new Set<number>()
-  if (nativeAfterInput) {
+  if (nativeAfterInput && nativeProvider !== 'codex') {
     const inputLeaf = vi.mocked(inner.kernel.input as (id: string, input: { operationId: string; expectedByte: number; data: string }) => Promise<unknown>)
     const originalInput = inputLeaf.getMockImplementation()!
     inputLeaf.mockImplementation(async (...args) => {
@@ -132,7 +132,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   const desktopAgents = mode === 'headless'
     ? createHostMoteChatAgents({ resources: createMoteChatResources({ topics, catalog: async () => spatialCatalog(graph), configuration: target => readMoteResourceConfiguration(configurationPath, target) }), clients })
     : (await import('../../../../apps/desktop/src/main/mote-chat-agents.js')).createMoteChatAgents({ config: () => config, catalog: async () => spatialCatalog(graph), topics, clients })
-  const wire = signedRoomAdapter(nativeProvider === 'grok' ? 'feishu' : 'signed-room'), application = { domain: nativeProvider === 'grok' ? 'open.feishu.cn' : 'signed.example', appId: nativeProvider === 'grok' ? feishuConfig.application.appId : 'original-mote-app' }
+  const wire = signedRoomAdapter(nativeProvider !== 'claude' ? 'feishu' : 'signed-room'), application = { domain: nativeProvider !== 'claude' ? 'open.feishu.cn' : 'signed.example', appId: nativeProvider !== 'claude' ? feishuConfig.application.appId : 'original-mote-app' }
   const creator = { application, idType: 'email', userId: 'creator@example.test' }, guest = { ...creator, userId: 'guest@example.test' }
   const verify = wire.adapter.ingress!.verify
   const adapter: ConnectionAdapter = { ...wire.adapter, ...(feishu ? { publication: new FeishuAdapter({ http: feishu.http }).publication } : {}),
