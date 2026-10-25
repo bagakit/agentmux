@@ -5,6 +5,7 @@ import rawInput from '../../../packages/core/test/raw-input-authority.config.mts
 
 const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.TOOLSET_INPUT_MUTATION
 const changes: Record<string, [string, string, string]> = {
+  'protocol-bypass': ['apps/desktop/src/main/runtime-controller.ts', "await this.write({ kind: 'agent', hostId, agentSessionId, run: { runId } }, data, 'terminal-protocol')", "await (await this.connectedClient(hostId, 'runtime')).writeAgent({ agentSessionId, expectedRun: { runId }, data, source: 'terminal-protocol' })"],
   'ack-order': ['packages/core/src/client.ts', "      releaseAdmission()\n      return await diagnostic.measure('native-input', () => completion)", "      const result = await diagnostic.measure('native-input', () => completion)\n      releaseAdmission()\n      return result"],
   'main-preflight': ['apps/desktop/src/main/runtime-controller.ts', "if (scope === 'raw-input' && 'runtimeOwnerIdentity' in client) return client", "if (false && scope === 'raw-input' && 'runtimeOwnerIdentity' in client) return client"],
   'terminal-context': ['packages/core/src/hosted-runtime-service.ts', ': rawTerminalInput ? [invocation.args[0], invocation.args[1], invocation.args[2], rawContext]', ': rawTerminalInput ? [invocation.args[0], invocation.args[1], invocation.args[2]]']
