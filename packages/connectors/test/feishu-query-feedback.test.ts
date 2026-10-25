@@ -150,7 +150,7 @@ it.each([231002, 99991672])('cancels only this feedback observation and leaves t
 })
 
 it('offers reaction write permission as an application requirement while existing read permission already covers reconciliation', () => {
-  const names = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:message.reactions:write_only', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:self_manage']
+  const names = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:message.reactions:write_only', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:self_manage', 'contact:contact.base:readonly', 'contact:user.base:readonly']
   const catalog = JSON.stringify({ scopes: names.map((name, index) => ({ name, id: index + 1, scopeType: [2] })) })
   const applied = JSON.stringify({ scopes: names.flatMap((name, index) => name === 'im:message.reactions:write_only' ? [{ id: index + 1, scopeIdentityType: 1 }] : [{ id: index + 1, scopeIdentityType: 2 }]) })
   const plan = reviewFeishuPermissions(catalog, applied, 'agent-conversation')

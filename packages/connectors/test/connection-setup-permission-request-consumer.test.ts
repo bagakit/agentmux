@@ -12,10 +12,10 @@ import { createConnectionServices } from '../src/connection-services.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
 const APP = 'cli_permission_request_original', effect = 'add-application-permissions' as const
-const NAMES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:patch', 'application:application:self_manage', 'im:message.reactions:write_only']
+const NAMES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:patch', 'application:application:self_manage', 'im:message.reactions:write_only', 'contact:contact.base:readonly', 'contact:user.base:readonly']
 const IDS = NAMES.map((_, index) => index % 2 ? String(100 + index) : 100 + index)
-const REQUIRED_NAMES = [...NAMES.slice(0, 3), NAMES[9], ...NAMES.slice(3, 7), NAMES[8]]
-const REQUIRED_IDS = [...IDS.slice(0, 3), IDS[9], ...IDS.slice(3, 7), IDS[8]]
+const REQUIRED_NAMES = [...NAMES.slice(0, 3), NAMES[9], ...NAMES.slice(3, 7), NAMES[8], ...NAMES.slice(10)]
+const REQUIRED_IDS = [...IDS.slice(0, 3), IDS[9], ...IDS.slice(3, 7), IDS[8], ...IDS.slice(10)]
 const clean: Array<() => void | Promise<void>> = []
 afterEach(async () => {
   const errors: unknown[] = []
@@ -113,6 +113,25 @@ it('SDK and compiled CLI review exact App rows then request only missing origina
     capabilities: { roomCreation: true, roomDiscovery: true, roomLink: true } })
 }, 30_000)
 
+it('the original App with endpoint access requests only its missing profile field scope', async () => {
+  const f = await fixture()
+  f.applied({ scopes: REQUIRED_IDS.slice(0, -1).map(id => ({ id, scopeIdentityType: 2 })) })
+  await f.read('permission-catalog'); await f.read('application-permissions')
+  const offered = await f.cli(['inspect', '--operation-id', f.input.operationId, '--application-configuration', effect, '--permission-purpose', 'agent-conversation'])
+  const configuration = offered.applicationConfiguration!
+  if (configuration.effect !== effect) throw Error('Wrong original permission effect')
+  expect(configuration.review!.permissions.filter(permission => permission.state === 'missing')).toEqual([{ name: 'contact:user.base:readonly', group: 'identity', state: 'missing' }])
+  expect(configuration.review!.permissions.find(permission => permission.name === 'contact:contact.base:readonly')?.state).toBe('requested')
+  const before = f.native.length
+  const result = await f.sdk.call('connection.setup.advance', action(offered, effect))
+  expect(result.applicationConfiguration!.selected).toMatchObject({ scopeNames: ['contact:user.base:readonly'], request: 'confirmed' })
+  expect(f.native.slice(before)).toEqual([{ path: '/developers/v1/scope/update/' + APP,
+    body: { clientId: APP, appScopeIDs: [IDS[11]], userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
+  f.applied({ scopes: REQUIRED_IDS.map(id => ({ id, scopeIdentityType: 2 })) }); await f.read('application-permissions')
+  expect((await f.inspect()).applicationConfiguration!.actions).toEqual([])
+  expect(f.native.filter(call => call.path === '/developers/v1/scope/update/' + APP)).toHaveLength(1)
+}, 30_000)
+
 it('offers only conversation permissions and keeps retired Mote permission selection read-only', async () => {
   const f = await fixture(); await f.read('permission-catalog'); await f.read('application-permissions')
   const base = await f.inspect(), before = [...f.native], retired = await f.inspect('mote-profile-sync')
@@ -205,7 +224,7 @@ it('an explicitly User-only catalog row sharing an App id cannot close a qualifi
   f.catalog({ scopes: [...NAMES.map((name, index) => ({ name, id: IDS[index], scopeType: [2] })), { name: 'user-only-unrelated', id: IDS[0], scopeType: [1] }] })
   await f.read('permission-catalog'); await f.read('application-permissions')
   const view = await f.inspect()
-  expect(view.applicationConfiguration).toMatchObject({ capability: 'disabled', review: { permissions: REQUIRED_NAMES.map((name, index) => ({ name, group: index < 3 ? 'messages' : index < 7 ? 'groups' : 'identity', state: 'missing' })) } })
+  expect(view.applicationConfiguration).toMatchObject({ capability: 'disabled', review: { permissions: REQUIRED_NAMES.map((name, index) => ({ name, group: index < 4 ? 'messages' : index < 8 ? 'groups' : 'identity', state: 'missing' })) } })
   expect(view.applicationConfiguration!.actions.map(a => a.kind)).toEqual([effect])
 }, 30_000)
 
