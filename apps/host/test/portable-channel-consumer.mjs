@@ -36,7 +36,7 @@ const env = { ...clean, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRE
 const facts = { schema: 'agentmux.portable-channel-consumer.v1', passed: false, platform: process.platform, arch: process.arch,
   node: process.versions.node, boundary: 'Controlled executable CLI and official SDK network leaves; real original default Host/Core/Provider/ctxmux. Local feasibility is separate from Linux SSH qualification.', steps: [] }
 facts.inputs = []
-for (const path of [entry, join(corePath, 'dist/index.js'), join(corePath, 'dist/client.js'), join(corePath, 'dist/providers/claude.js'),
+for (const path of [entry, join(corePath, 'dist/index.js'), join(corePath, 'dist/agentmux.js'), join(corePath, 'dist/client.js'), join(corePath, 'dist/providers/claude.js'),
   join(corePath, 'vendor/ctxmux', process.platform + '-' + process.arch, 'bin/ctxmuxd'), discordFixture,
   resolve(import.meta.dirname, 'portable-channel-consumer.mjs'), resolve(import.meta.dirname, 'fixtures/portable-channel-native-cli.mjs'), resolve(import.meta.dirname, 'fixtures/portable-channel-network.mjs')]) {
   facts.inputs.push({ path, sha256: createHash('sha256').update(await readFile(path)).digest('hex') })
@@ -83,7 +83,8 @@ async function disconnect() { for (const client of clients.splice(0).reverse()) 
 async function checkpoint(stage, identity) {
   if (!commands) return
   const check = { stage, owner: identity.owner, socketPath: join(runtime, 'control.sock'), agentSessionId: session.agentSessionId,
-    runId: session.run.runId, native: facts.steps[0].nativeHandle, managementClients: clients.length }
+    runId: session.run.runId, native: facts.steps[0].nativeHandle, managementClients: clients.length,
+    artifact: facts.artifact, cli: facts.inputs.find(value => value.path === join(corePath, 'dist/agentmux.js')) }
   process.stdout.write(JSON.stringify({ checkpoint: check }) + '\n')
   const line = await commands.next()
   assert.equal(line.done, false, 'SSH test controller must retain the original checkpoint')
