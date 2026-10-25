@@ -72,7 +72,7 @@ it('loads the first visible original person through Settings and copies their id
   facts.entityCopy = { originalName: 'Ava', originalId: creatorId, avatarFailurePreservedIdentity: true, capabilities: before, writes: applicationWrites().length }
 })
 
-it.each(['subject', 'hosting-owner'] as const)('keeps late entity profile observations inside their original %s and never adds a native lookup', async change => {
+it.each(['subject', 'hosting-owner'] as const)('keeps late entity profile observations inside their original %s and reads only a newly visible missing subject', async change => {
   const original: ChannelMetadataSubject = { kind: 'actor', actor: { application: f.config.application, idType: 'open_id', userId: creatorId } }
   const other: ChannelMetadataSubject = { kind: 'actor', actor: { ...original.actor, userId: 'ou_ben' } }
   await f.forward('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: original }, f.hostingTarget)
@@ -114,11 +114,13 @@ it.each(['subject', 'hosting-owner'] as const)('keeps late entity profile observ
     expect(document.querySelector('[data-entity-kind="person"] img')).toBeNull()
     expect(document.querySelector('[data-identity-field="open_id"]')?.textContent).toContain(change === 'subject' ? 'ou_ben' : creatorId)
     expect(document.querySelector('[aria-label="Copy person name"]')).toBeNull()
-    const before = localReads.length
+    await wait(() => expect(f.platformCalls).toHaveLength(nativeReads + (change === 'subject' ? 1 : 0)))
+    if (change === 'subject') expect(f.platformCalls.at(-1)?.url).toContain('/contact/v3/users/ou_ben')
+    const before = localReads.length, nativeAfterChange = f.platformCalls.length
     await f.dom.render(<People subjects={subjects} owner={owner} active={false} />)
     await act(async () => { for (const staleCallback of released) staleCallback() })
     expect(localReads).toHaveLength(before)
-    expect(f.platformCalls).toHaveLength(nativeReads)
+    expect(f.platformCalls).toHaveLength(nativeAfterChange)
     expect(applicationWrites()).toHaveLength(0)
   } finally { release() }
 })
@@ -229,6 +231,7 @@ it('uses the original effective source, saves an empty local override and explic
   const binding = await bind(); await setApp(['input', 'answer', 'permission'])
   await f.mount(); await f.journey('details')
   await wait(() => expect(groupRow()).toBeDefined())
+  await click(groupRow().querySelector<HTMLElement>('[data-member-edit]')!)
   await wait(() => expect(groupRow().querySelector<HTMLSelectElement>('select')?.value).toBe('application'))
   expect(choices(groupRow()).map(input => input.checked)).toEqual([true, true, true])
   expect(choices(groupRow()).every(input => input.disabled || input.closest('fieldset')?.disabled)).toBe(true)

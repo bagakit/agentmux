@@ -28,7 +28,7 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 
 /** Additional contract consumer: actual Hosted transport, Core journal and common reader.
  * The task's default native ingress producer is verified separately in the native join. */
-async function fixture(partial?: boolean) {
+async function fixture(partial?: boolean, variant?: 'zero' | 'unavailable' | 'legacy') {
   const f = await rpcOwnerFixture(['recipient'], undefined, () => ({ providerId: 'claude', executorId: 'claude' }))
   cleanup.push(f.close)
   vi.spyOn(f.client, 'connect').mockResolvedValue()
@@ -36,16 +36,18 @@ async function fixture(partial?: boolean) {
   f.inner.connected = false; f.inner.kernel.isConnected = () => false
   if (quotedEnvelope.sender.kind !== 'external') throw Error('The fixture requires an original external author')
   const author = quotedEnvelope.sender, run = { runId: 'run-recipient' }
-  const channelQuote = partial === undefined ? quotedEnvelope.channelQuote! : { ...quotedEnvelope.channelQuote!,
+  let channelQuote = partial === undefined ? quotedEnvelope.channelQuote! : { ...quotedEnvelope.channelQuote!,
     coverage: partial ? 'partial' as const : 'complete' as const, gaps: partial ? [{ reason: 'thread-history-unavailable' }] : [],
     records: [{ ...quotedEnvelope.channelQuote!.records[0]!, content: 'The release notes are ready for review.\nPlease check the deployment steps.' },
       { ...quotedEnvelope.channelQuote!.records[1]!, content: 'Attached the original release notes.' }] }
-  const envelope = { ...quotedEnvelope, sender: author, recipientRunId: run.runId, channelQuote,
+  if (variant === 'zero' || variant === 'unavailable') channelQuote = { ...channelQuote, records: [], coverage: variant === 'zero' ? 'complete' : 'unavailable', gaps: variant === 'zero' ? [] : [{ reason: 'thread-history-unavailable' }] }
+  const { channelQuote: _originalQuote, ...baseEnvelope } = quotedEnvelope
+  const envelope = { ...baseEnvelope, sender: author, recipientRunId: run.runId, ...(variant === 'legacy' ? {} : { channelQuote }),
     ...(partial === undefined ? {} : { body: 'Current request: Please summarize the deployment steps and call out any risks.' }),
     channelProfile: { actor: author.actor, state: 'unknown' as const, profile: null, checkedAt: 12, freshness: 'unknown' as const, reason: 'not-observed' as const } }
   const admissionIntent = { kind: 'manual-actor' as const, expectedRun: run }
   const expected: AgentExternalInputIntent = { agentSessionId: 'recipient', expectedRun: run, operationId: envelope.operationId,
-    messageId: envelope.messageId, body: envelope.body, channelQuote: envelope.channelQuote!, admissionIntent }
+    messageId: envelope.messageId, body: envelope.body, ...(envelope.channelQuote ? { channelQuote: envelope.channelQuote } : {}), admissionIntent }
   const assertCurrent = vi.fn(async (actualAuthor: AgentExternalMessageAuthor, intent: AgentExternalInputIntent) => {
     if (!isDeepStrictEqual(author, actualAuthor) || !isDeepStrictEqual(expected, intent)) throw new AgentMuxError('Original fixture input authority mismatch.', 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED')
   })
@@ -72,7 +74,7 @@ async function originalItem(f: Awaited<ReturnType<typeof fixture>>) {
   return entry.item
 }
 
-async function mount(item: AgentInputMailboxItem) {
+async function mount(item: AgentInputMailboxItem, compact = false) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   const container = document.createElement('div'); document.body.append(container)
@@ -80,7 +82,7 @@ async function mount(item: AgentInputMailboxItem) {
   cleanup.push(async () => { await act(async () => root.unmount()); container.remove() })
   const platform: ClientUiPlatform = { copyText: copy, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
     renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null }
-  await act(async () => root.render(<ClientUiProvider platform={platform}><InputMailboxRecord item={item} hostId="local" expanded onCopy={copy} /></ClientUiProvider>))
+  await act(async () => root.render(<ClientUiProvider platform={platform}><InputMailboxRecord item={item} hostId="local" compact={compact} expanded onCopy={copy} /></ClientUiProvider>))
   return { container, root, copy }
 }
 
@@ -149,4 +151,18 @@ it('the original Desktop authority seam rejects edited quotes and admission targ
   await expect(authority.assertCurrent(sender, { ...f.expected, admissionIntent: { kind: 'manual-actor', expectedRun: { runId: 'another-run' } } })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
   await expect(authority.assertCurrent(sender, { ...f.expected, body: 'changed request' })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+
+it.each(['zero', 'unavailable', 'legacy'] as const)('original Hosted input summary distinguishes %s quote evidence without treating absence as zero', async variant => {
+  const f = await fixture(false, variant)
+  await expect(f.hosted.submitAgentMessage(f.input)).resolves.toMatchObject({ persistence: 'confirmed', status: 'waiting' })
+  const item = await originalItem(f), view = await mount(item, true)
+  const toggle = view.container.querySelector<HTMLButtonElement>('.conversation-input-details__toggle')!
+  await act(async () => toggle.click())
+  const summary = view.container.querySelector('[data-input-quote]')
+  expect(summary).not.toBeNull()
+  expect(summary!.textContent).toBe(variant === 'zero' ? '0 quoted messages' : variant === 'unavailable' ? 'Quote unavailable' : 'Quote not recorded')
+  expect(summary!.getAttribute('data-input-quote')).toBe(variant === 'zero' ? 'complete' : variant === 'unavailable' ? 'unavailable' : 'unknown')
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })

@@ -1,11 +1,12 @@
 import { createServer } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { DiscordHttpOptions } from '../../src/adapters/discord/client.js'
+export { DefaultRestOptions } from '@discordjs/rest'
 
 export const discordConfig = { connectionId: 'discord-connection', adapterId: 'discord', application: { domain: 'discord.com', appId: '100' }, label: 'Discord bot', enabled: true, credentialRef: 'discord-credential' }
 export const discordBotId = '200', discordUserId = '400', discordRoomId = '300'
 /** Real pinned REST and Gateway SDKs talk to these controlled HTTP/WebSocket leaves. */
-export async function discordTransport() {
+export async function discordTransport(nativeFetch: typeof fetch = fetch) {
   const calls: Array<{ method: string; path: string; body: string; contentType: string }> = [], messages = new Map<string, Record<string, unknown>>()
   const sessions: Array<{ op: number; data: Record<string, unknown> }> = [], sockets = new Set<WebSocket>()
   const paused = new Set<WebSocket>(); let pauseHello = false
@@ -93,7 +94,7 @@ export async function discordTransport() {
   const http: DiscordHttpOptions = { makeRequest: async (url, init) => {
     const original = new URL(url)
     if (original.origin !== 'https://discord.com') throw Error('Unexpected native Discord API origin')
-    return await fetch(origin + original.pathname + original.search, init as RequestInit)
+    return await nativeFetch(origin + original.pathname + original.search, init as RequestInit)
   } }
   return { origin, http, calls, sessions, messages, emit, uploads,
     get pausedConnections() { return paused.size },
