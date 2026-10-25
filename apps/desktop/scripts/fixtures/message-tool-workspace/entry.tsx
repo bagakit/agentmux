@@ -45,6 +45,12 @@ const observers = new Set<(event: AgentSessionHistoryObservation) => void>()
 const readDispatches = api.sessions.dispatches
 let emptyViews = false
 let automationScene = false
+let automationUpdated: import('@agentmux/core').ContinuousProgressLoop | undefined
+const originalProgressList = api.continuousProgress.list
+api.continuousProgress.list = async target => {
+  const records = await originalProgressList(target)
+  return automationScene && automationUpdated ? records.map(record => record.loopId === automationUpdated!.loopId ? automationUpdated! : record) : records
+}
 const originalScheduleList = api.schedule.list
 api.schedule.list = async query => {
   if (!automationScene || !original || original.kind !== 'agent') return originalScheduleList(query)
@@ -80,9 +86,19 @@ api.sessions.observeHistory = async (_control, listener) => {
 api.sessions.submitPrompt = async () => { calls.push({ action: 'dispatch' }); throw new Error('The private reading scene cannot submit input') }
 api.continuousProgress.create = async () => { calls.push({ action: 'automation-create' }); throw new Error('Reading cannot create automation') }
 api.continuousProgress.action = async () => { calls.push({ action: 'automation-action' }); throw new Error('Reading cannot operate automation') }
+api.continuousProgress.update = async request => {
+  if (!automationScene) throw new Error('This private reading scene cannot update automation.')
+  const [held] = await api.continuousProgress.list(request.target)
+  if (!held || held.loopId !== request.loopId || held.status !== 'paused' || JSON.stringify(held) !== JSON.stringify(request.expectedLoop))
+    throw new Error('The private update must retain the exact original paused loop.')
+  calls.push({ action: 'fixture-progress-update', reference: request.target, query: { loopId: request.loopId, operationId: request.operationId, intervalMs: request.intervalMs, prompt: request.prompt } })
+  automationUpdated = { ...held, intervalMs: request.intervalMs, prompt: request.prompt }
+  return structuredClone(automationUpdated)
+}
 Object.assign(window, { messageWorkspace: {
   seed(theme: 'dark' | 'light', tag: string, empty = false, retainNotificationIntents = false) {
     automationScene = false
+    automationUpdated = undefined
     emptyViews = empty
     base.appearance(theme)
     const generation = base.mode('terminal')

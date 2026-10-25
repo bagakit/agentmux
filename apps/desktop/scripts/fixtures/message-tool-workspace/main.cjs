@@ -200,7 +200,29 @@ async function automationScene(width, theme, short, original, before) {
   const control = await evaluate(`(()=>{const n=${resume},p=${panel},r=n.getBoundingClientRect(),b=p.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {enabled:!n.disabled,inside:r.top>=b.top&&r.bottom<=b.bottom&&r.left>=b.left&&r.right<=b.right,hit:n===hit||n.contains(hit)}})()`)
   assert.deepEqual(control, { enabled: true, inside: true, hit: true }, 'The original paused-loop action is visible and hit-testable without activating it')
   await frame(width, theme, 'automation-controls' + suffix)
-  await click(`${automation}.querySelector('.automation-create > summary')`)
+  await click(buttons('Edit continuous progress', automation))
+  const progressForm = `${automation}.querySelector('form[aria-label="Continuous progress setup"]')`
+  const progressInterval = `${progressForm}.querySelector('input[type="number"]')`
+  const progressPrompt = `${progressForm}.querySelector('textarea')`
+  await waitFor(visible(progressInterval))
+  const sourceVisibility = await evaluate(`(()=>{const n=${progressForm}.querySelector('[aria-label="Optional task source"]');return {hidden:n.hidden,display:getComputedStyle(n).display}})()`)
+  assert.deepEqual(sourceVisibility, { hidden: true, display: 'none' }, 'Editing the original loop does not falsely show an unbound task source')
+  assert.equal(await evaluate(`${progressInterval}.value`), '30', 'The exact saved interval is prefilled')
+  assert.equal(await evaluate(`${progressPrompt}.value`), Array.from({ length: 12 }, (_, index) => `Saved continuation line ${index + 1}: keep the original user input and finish the assigned task.`).join('\n'), 'The original complete saved prompt is prefilled')
+  await evaluate(`${progressInterval}.scrollIntoView({block:'nearest'})`); await frame(width, theme, 'automation-progress-edit' + suffix)
+  await replace(progressInterval, '60'); await replace(progressPrompt, '检查新版本并报告真实进展。')
+  const saveProgress = `${progressForm}.querySelector('button[type="submit"]')`
+  await waitFor(`${saveProgress}?.textContent==='Save changes' && !${saveProgress}.disabled`)
+  await click(saveProgress)
+  await waitFor(`${progressForm}.textContent.includes('Changes saved.')`)
+  const progressResult = await evaluate(`(()=>{const d=${automation}.querySelector('[data-progress-details="interval"]');return {text:d.textContent, calls:messageWorkspace.facts().calls.filter(item=>item.action==='fixture-progress-update')}})()`)
+  assert.equal(progressResult.calls.length, 1, 'Exactly one private update is issued')
+  assert.equal(progressResult.calls[0].query.intervalMs, 3600000); assert.equal(progressResult.calls[0].query.prompt, '检查新版本并报告真实进展。')
+  assert.equal(progressResult.calls[0].query.loopId, 'visual-progress'); assert.equal(progressResult.calls[0].reference.agentSessionId, original.agentSessionId)
+  assert.match(progressResult.text, /Paused/); assert.match(progressResult.text, /every 60 min/)
+  await frame(width, theme, 'automation-progress-saved' + suffix)
+  const kind = `${automation}.querySelector('[aria-label="Automation type"]')`
+  await evaluate(`(()=>{const n=${kind};n.value='schedule';n.dispatchEvent(new Event('change',{bubbles:true}))})()`); await painted()
   const interval = `${automation}.querySelector('[aria-label="Repeat interval in minutes"]' )`
   const message = `${automation}.querySelector('[aria-label="Arranged message"]')`
   await waitFor(visible(interval)); await replace(interval, '7'); await replace(message, '请检查当前任务，保留原会话。')

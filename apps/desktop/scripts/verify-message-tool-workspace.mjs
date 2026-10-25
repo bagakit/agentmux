@@ -20,6 +20,11 @@ const coreAliases = Object.entries(coreExports).map(([key, target]) => ({
   find: new RegExp('^@agentmux/core' + (key === '.' ? '' : key.slice(1)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
   replacement: join(root, 'packages/core', target.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
 }))
+const hostExports = JSON.parse(await readFile(join(root, 'apps/host/package.json'), 'utf8')).exports
+const hostAliases = Object.entries(hostExports).map(([key, target]) => ({
+  find: new RegExp('^@agentmux/host' + key.slice(1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
+  replacement: join(root, 'apps/host', target.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
+}))
 const hash = value => createHash('sha256').update(value).digest('hex')
 const densityMutation = process.argv.includes('--density-mutation')
 const interactionStates = process.argv.includes('--interaction-states'), recovery = process.argv.includes('--notification-recovery'), resumed = process.argv.includes('--notification-resumed'), manualNotify = process.argv.includes('--manual-notify') || recovery || resumed
@@ -84,7 +89,7 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
     declaration.value = mutatedValue
   } }
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' },
-    resolve: { dedupe: ['react', 'react-dom'], alias: [{ find: /^@xterm\/xterm$/, replacement: wrapper }, ...coreAliases] },
+    resolve: { dedupe: ['react', 'react-dom'], alias: [{ find: /^@xterm\/xterm$/, replacement: wrapper }, { find: /^@agentmux\/identity$/, replacement: join(root, 'packages/identity/src/index.ts') }, ...coreAliases, ...hostAliases] },
     css: { postcss: { plugins: [cssMutation] } },
     plugins: [{ name: 'record-message-workspace-inputs', enforce: 'pre', transform(source, id) {
       if ((id.startsWith(join(desktop, 'src') + '/') || id.startsWith(join(root, 'packages/client-ui/src') + '/') || id.startsWith(join(root, 'packages/core/src') + '/') || id.startsWith(fixture + '/')) && !id.includes('?')) loaded[relative(root, id)] = hash(source)
@@ -132,7 +137,7 @@ async function renderer({ label = 'full', density = false, mutate = false, inter
   assert.ok(result.render.frames.length > 0)
   if (automation) {
     assert.ok(result.render.scenes.every(scene => scene.originalSurfacePreserved && scene.retainedAutomation && scene.controlsReachable))
-    assert.equal(result.render.frames.length, 12, 'Each actual workface provides list, controls, minute-form and save captures')
+    assert.equal(result.render.frames.length, 18, 'Each actual workface provides list, controls, progress edit/save and minute-form/save captures')
   } else if (manualNotify) {
     assert.equal(result.render.frames.length, recovery ? 15 : 9)
     if (recovery) assert.equal(result.render.scenes.find(scene => scene.width === 640)?.reloadedIdentity, true)
