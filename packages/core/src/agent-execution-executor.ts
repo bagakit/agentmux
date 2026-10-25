@@ -7,7 +7,7 @@ import type { AgentExecutionIntent, AgentExecutionMessage, AgentExecutionProtoco
 
 type Request = Extract<AgentExecutionMessage, { kind: 'request' }>
 type Channel = ReturnType<typeof createExecutionFrameChannel>
-type Pending = { key: AgentExecutionOperationKey; digest: string; request: Request; response?: Uint8Array }
+type Pending = { key: AgentExecutionOperationKey; digest: string; request: Request; response?: Uint8Array; nativeDispatch?: true }
 type Generation = {
   id: string; child: ChildProcessWithoutNullStreams; channel: Channel; alive: boolean; initialized: boolean; initializing: boolean
   pending: Map<string, Pending>; handles: Set<string>; creating: Set<string>; notifications: Set<string>
@@ -39,10 +39,11 @@ export function createAgentExecutionExecutor(options: {
 }): { closeObservation(): void; dispose(): Promise<void> } {
   if (!options.bindingId || typeof options.authorize !== 'function') throw new TypeError('A fixed execution binding and its permission owner are required')
   const bindingId = options.bindingId
-  let active: Generation | null = null, disposed = false
+  let disposed = false
   const closed = new Set<string>()
   const children = new Map<string, Generation>()
   const retained = new Map<string, Map<string, Pending>>()
+  const executions = new Set<Promise<void>>()
   const report = async (generation: string, code: string, operation?: AgentExecutionOperationKey, scope: 'helper' | 'request' | 'generation' = 'generation') => {
     if (disposed) return
     await channel.send({ type: 'diagnostic', scope: operation ? 'operation' : scope, generation, code, ...(operation ? { operation } : {}) }).catch(() => {
@@ -53,7 +54,10 @@ export function createAgentExecutionExecutor(options: {
     if (requestId === undefined) { await report(generation, 'INVALID_NATIVE_MESSAGE', undefined, 'request'); return }
     await channel.send({ type: 'response', generation, payload: { jsonrpc: '2.0', id: requestId, error: { code, message } } })
   }
-  const respond = (generation: string, bytes: Uint8Array) => channel.send({ type: 'response', generation, payload: JSON.parse(Buffer.from(bytes).toString('utf8')) as unknown })
+  const respond = (generation: string, bytes: Uint8Array, request: Request) => {
+    const response = JSON.parse(Buffer.from(bytes).toString('utf8')) as Record<string, unknown>
+    return channel.send({ type: 'response', generation, payload: options.protocol.projectResponse?.(request, response) ?? response })
+  }
   const completed = (key: AgentExecutionOperationKey) => channel.send({ type: 'operation-completed', generation: key.streamGeneration, operation: key })
   const settle = async (state: Generation, pending: Pending): Promise<void> => {
     if (!pending.response) return
@@ -74,7 +78,7 @@ export function createAgentExecutionExecutor(options: {
     state.pending.delete(requestKey(pending.key.nativeRequestId))
     if (!state.pending.size) retained.delete(state.id)
     await completed(pending.key)
-    await respond(state.id, pending.response)
+    await respond(state.id, pending.response, pending.request)
   }
   const start = (generation: string): Generation => {
     const spec = options.protocol.executor
@@ -94,7 +98,7 @@ export function createAgentExecutionExecutor(options: {
         }
         if (message.kind !== 'response') { await report(generation, 'UNEXPECTED_NATIVE_MESSAGE'); return }
         const pending = state.pending.get(requestKey(message.requestId))
-        if (!pending) { await report(generation, 'UNMATCHED_NATIVE_RESPONSE'); return }
+        if (!pending || !pending.nativeDispatch) { await report(generation, 'UNMATCHED_NATIVE_RESPONSE'); return }
         if (pending.response && !Buffer.from(pending.response).equals(rawLine)) {
           await report(generation, 'CONFLICTING_NATIVE_RESPONSE', pending.key); return
         }
@@ -104,15 +108,14 @@ export function createAgentExecutionExecutor(options: {
       } })
     const ended = () => {
       if (!state.alive) return
+      const wasConnected = !closed.has(generation)
       state.alive = false; closed.add(generation); state.handles.clear(); state.creating.clear(); children.delete(generation)
-      const wasActive = active === state
-      if (wasActive) active = null
       void (async () => {
         for (const pending of state.pending.values()) {
           try { await options.journal.markUnknown(pending.key, pending.digest) } catch { /* The original journal receipt remains authoritative. */ }
           await report(generation, 'NATIVE_CONNECTION_ENDED_OUTCOME_UNKNOWN', pending.key)
         }
-        if (wasActive) await report(generation, 'NATIVE_CONNECTION_ENDED')
+        if (wasConnected) await report(generation, 'NATIVE_CONNECTION_ENDED')
         else await channel.send({ type: 'generation', generation, state: 'exited' })
       })().catch(() => options.onError(new Error('Native connection-end observation is unconfirmed')))
     }
@@ -126,7 +129,6 @@ export function createAgentExecutionExecutor(options: {
     child.stdin.on('error', () => { void report(generation, 'NATIVE_INPUT_UNCONFIRMED') })
     child.stderr.on('error', () => { void report(generation, 'NATIVE_STDERR_OBSERVATION_UNCONFIRMED') })
     children.set(generation, state)
-    active = state
     return state
   }
   const channel = createExecutionFrameChannel({ input: options.input, output: options.output, onError: options.onError,
@@ -142,7 +144,6 @@ export function createAgentExecutionExecutor(options: {
         // Core reader detach is not this fact and cannot terminate its child.
         if (!closed.has(frame.generation)) {
           closed.add(frame.generation)
-          if (active?.id === frame.generation) active = null
           await channel.send({ type: 'generation', generation: frame.generation, state: 'detached' })
         }
         return
@@ -154,11 +155,12 @@ export function createAgentExecutionExecutor(options: {
       if (message.kind === 'rejected') { await reject(generation, message.requestId, message.code, message.reason); return }
       if (message.kind === 'response') { await report(generation, 'UNEXPECTED_CLIENT_RESPONSE'); return }
       if (message.kind === 'notification') {
-        if (!active?.alive || active.id !== generation || !active.initialized) { await report(generation, 'NATIVE_CONNECTION_NOT_INITIALIZED'); return }
+        const state = children.get(generation)
+        if (!state?.alive || closed.has(generation) || !state.initialized) { await report(generation, 'NATIVE_CONNECTION_NOT_INITIALIZED'); return }
         const hash = createHash('sha256').update(JSON.stringify(message.payload)).digest('hex')
-        if (!active.notifications.has(hash)) {
-          active.notifications.add(hash)
-          try { await active.channel.send(message.payload) } catch { await report(generation, 'NATIVE_NOTIFICATION_DELIVERY_UNCONFIRMED') }
+        if (!state.notifications.has(hash)) {
+          state.notifications.add(hash)
+          try { await state.channel.send(message.payload) } catch { await report(generation, 'NATIVE_NOTIFICATION_DELIVERY_UNCONFIRMED') }
         }
         return
       }
@@ -174,7 +176,7 @@ export function createAgentExecutionExecutor(options: {
         if (operation.phase === 'completed') {
           const result = await options.journal.readResult(key, operation.payloadDigest)
           await completed(key)
-          if (result) await respond(generation, result)
+          if (result) await respond(generation, result, message)
           return
         }
         if (operation.phase !== 'prepared') {
@@ -186,28 +188,30 @@ export function createAgentExecutionExecutor(options: {
               await options.journal.complete(key, pending.digest, pending.response)
               retained.get(generation)?.delete(requestKey(message.requestId))
               await completed(key)
-              await respond(generation, pending.response)
+              await respond(generation, pending.response, pending.request)
             }
           } else if (!pending || closed.has(generation)) await report(generation, 'ORIGINAL_OPERATION_OUTCOME_UNKNOWN', key)
           // A live pending request waits for its original native response.
           return
         }
       }
-      if (active?.id !== generation) {
-        if (active?.alive || closed.has(generation) || !message.intent.initialize || message.intent.resumeSessionId != null) {
+      const current = children.get(generation)
+      if (!current) {
+        const anotherConnected = !options.protocol.concurrentConnections && [...children.values()].some(value => value.alive && !closed.has(value.id))
+        if (anotherConnected || closed.has(generation) || !message.intent.initialize || message.intent.resumeSessionId != null) {
           await reject(generation, message.requestId, -32002, 'The exact original native connection is unavailable for this request'); return
         }
-      } else if (message.intent.initialize ? active.initialized || active.initializing : !active.initialized) {
+      } else if (closed.has(generation) || (message.intent.initialize ? current.initialized || current.initializing : !current.initialized)) {
         await reject(generation, message.requestId, -32002, 'The original native connection has not accepted this initialization state'); return
       }
       const handle = message.intent.handle
-      if (handle && (handle.action === 'create' ? active?.handles.has(handleKey(handle)) || active?.creating.has(handleKey(handle)) : !active?.handles.has(handleKey(handle)))) {
+      if (handle && (handle.action === 'create' ? current?.handles.has(handleKey(handle)) || current?.creating.has(handleKey(handle)) : !current?.handles.has(handleKey(handle)))) {
         await reject(generation, message.requestId, -32003, 'The native handle is not owned by this execution generation'); return
       }
       let prepared
       try { prepared = await options.journal.prepare(key, bytes) }
       catch { await report(generation, 'ORIGINAL_REQUEST_STORAGE_UNCONFIRMED', key); return }
-      const state = active ?? start(generation)
+      const state = current ?? start(generation)
       let dispatch
       try { dispatch = await options.journal.dispatch(key, prepared.payloadDigest) }
       catch { await report(generation, 'ORIGINAL_DISPATCH_STORAGE_UNCONFIRMED', key); return }
@@ -216,11 +220,28 @@ export function createAgentExecutionExecutor(options: {
       state.pending.set(requestKey(message.requestId), pending); retained.set(generation, state.pending)
       if (message.intent.initialize) state.initializing = true
       if (handle?.action === 'create') state.creating.add(handleKey(handle))
-      try { await state.channel.send(message.payload) }
-      catch {
-        try { await options.journal.markUnknown(key, prepared.payloadDigest) } catch { /* Never infer a second dispatch from a failed receipt. */ }
-        await report(generation, 'NATIVE_REQUEST_DELIVERY_UNCONFIRMED', key)
+      const deliver = async () => {
+        try {
+          const response = await options.protocol.execute?.(message, generation, { ...options.protocol.executor.env, ...options.control?.environment(generation) })
+          if (response !== undefined) {
+            const parsed = options.protocol.parseServer(response)
+            if (parsed.kind !== 'response' || parsed.requestId !== message.requestId) throw new Error('Provider response does not identify its original operation')
+            pending.response = Buffer.from(JSON.stringify(parsed.payload))
+            await settle(state, pending)
+          } else {
+            pending.nativeDispatch = true
+            await state.channel.send(message.payload)
+          }
+        } catch {
+          try { await options.journal.markUnknown(key, prepared.payloadDigest) } catch { /* Never infer a second dispatch from a failed receipt. */ }
+          await report(generation, 'NATIVE_REQUEST_DELIVERY_UNCONFIRMED', key)
+        }
       }
+      // A foreground Provider operation must not block delivery of a later
+      // TaskStop or another connection's request on the shared machine channel.
+      const execution = deliver()
+      executions.add(execution)
+      void execution.finally(() => executions.delete(execution)).catch(() => {})
       } catch { await report(object(frame) && typeof frame.generation === 'string' ? frame.generation : '', 'REQUEST_OBSERVATION_UNCONFIRMED') }
     } })
   return {
@@ -228,6 +249,8 @@ export function createAgentExecutionExecutor(options: {
     closeObservation() { channel.close() },
     async dispose() {
       disposed = true; channel.close()
+      await options.protocol.dispose?.()
+      await Promise.all([...executions])
       await options.control?.close()
       // Explicit whole-helper owner shutdown only. Closed frontend sockets do
       // not authorize this; every retained native child remains owned until now.
