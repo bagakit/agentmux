@@ -1,3 +1,4 @@
+import { AGENT_EXECUTION_CREATE_FIELDS, parseAgentExecutionCreate, parseAgentExecutionBinding } from './public-rpc-agent-execution.js'
 import { parseAgentInputResourceRead } from './agent-input-resource.js'
 import { isConnectionApiMethod, parseConnectionApiParams } from './connection-api-codec.js'
 import { isBackgroundLocalAgentOpen } from './spatial-agent-open-contract.js'
@@ -134,10 +135,10 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
   type AgentMuxRpcStreamInitial, type AgentMuxRpcStreamEvent, type AgentMuxRpcUnavailable, type AgentMuxRpcPrincipal } from './public-rpc.js'
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
-export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
+export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
-  'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
+  'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
@@ -155,6 +156,9 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   /** Borrow the original UI-free Capsule owner; no content or configuration is stored here. */
   capsules?: { call<M extends CapsuleMethod>(method: M, params: CapsuleParamsMap[M], context?: CapsuleCallContext,
     originalContext?: AgentMuxRpcCallContext): Promise<CapsuleResultMap[M]> }
+  executionBindings?: Pick<import('./agent-execution-coordinator.js').AgentExecutionCoordinator, 'create' | 'rejoin'> & {
+    inspect(bindingId: string): import('./agent-execution-coordinator.js').AgentExecutionInspection | null | Promise<import('./agent-execution-coordinator.js').AgentExecutionInspection | null>
+  }
   capsuleInput?: CapsuleInputPort
   capsuleRuntime?: CapsuleRuntimePort
   inputContextCaptures?: AgentInputContextCaptureReader
@@ -319,6 +323,10 @@ const NATIVE_FIELDS = {
   'name.confirm': ['operationId'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'providerId', 'status', 'semantic', 'readiness', 'since', 'activitySince', 'cursor', 'limit'],
   'agent.inspect': ['target'],
+  'agent.execution.inspect': ['hostId', 'bindingId', 'streamGeneration', 'nativeRequestId'],
+  'agent.execution.create': AGENT_EXECUTION_CREATE_FIELDS,
+  'agent.execution.binding': ['bindingId'],
+  'agent.execution.rejoin': ['bindingId'],
   'terminal.recover': ['hostId', 'expectedRun', 'runtimeId', 'workspacePath', 'operationId', 'action'],
   'skill.ls': ['hostId', 'agentSessionId'],
   'agent.continuity.control': ['agentSessionId', 'intentOperationId', 'expectedRun', 'operationId', 'action', 'additionalAttempts'],
@@ -1100,6 +1108,43 @@ export class AgentMuxRpcService {
           : await client.trustCreationSource((input as import('./public-rpc-host-settings.js').HostSettingsParameterMap['settings.hosts.trust-source']).input,
               { kind: 'user', id: rpcString(context.principal!.id, 'Transport principal') }) }
       return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.execution.create' || method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
+      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
+          typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0')) {
+        throw new AgentMuxError('Execution binding operations require a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+      }
+      const input = method === 'agent.execution.create' ? parseAgentExecutionCreate(params) : parseAgentExecutionBinding(params)
+      const owner = this.ports.executionBindings
+      if (!owner) throw new AgentMuxError('The original execution binding owner is unavailable. No helper or Agent was replaced.', 'CONTROL_UNAVAILABLE')
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      const result = method === 'agent.execution.create' ? await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput)
+        : method === 'agent.execution.rejoin' ? await owner.rejoin(input.bindingId) : await owner.inspect(input.bindingId)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      return parseRpcNativeResult(method, result, input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.execution.inspect') {
+      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
+          typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0')) {
+        throw new AgentMuxError('Tool operation inspection requires a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+      }
+      const input = rpcRecord(params, NATIVE_FIELDS['agent.execution.inspect'])
+      const hostId = rpcString(input.hostId, 'Original execution Host')
+      const key = { bindingId: rpcString(input.bindingId, 'Original execution binding'),
+        streamGeneration: rpcString(input.streamGeneration, 'Original stream generation'), nativeRequestId: input.nativeRequestId }
+      if (!(typeof key.nativeRequestId === 'string' || typeof key.nativeRequestId === 'number' && Number.isSafeInteger(key.nativeRequestId))) {
+        throw new AgentMuxError('Native request identity must be its original JSON string or safe integer.', 'INVALID_CONTROL_REQUEST')
+      }
+      const exactKey = { ...key, nativeRequestId: key.nativeRequestId as string | number }
+      const scopes = (await this.clients()).filter(scope => scope.hostId === hostId)
+      if (scopes.length !== 1) throw new AgentMuxError('Tool operation inspection requires one exact configured Host route.', 'UNKNOWN_HOST')
+      const { client } = scopes[0]!
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const result = client.forwardRpc
+        ? await client.forwardRpc('agent.execution.inspect', { hostId: 'local', ...exactKey }, context)
+        : await client.inspectAgentExecutionOperation(exactKey)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      return parseRpcNativeResult(method, result, { hostId, ...exactKey }) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.native.confirm') {
       if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id) {

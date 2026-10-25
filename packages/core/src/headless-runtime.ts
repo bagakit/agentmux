@@ -1,3 +1,4 @@
+import { AgentExecutionBindingService } from './agent-execution-coordinator.js'
 import { mintObjectId } from './object-id.js'
 import { createHash } from 'node:crypto'
 import { chmod, mkdir, open, readFile, type FileHandle } from 'node:fs/promises'
@@ -63,6 +64,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
   let endpointLease: FileHandle | undefined, client: AgentMuxClient | undefined, server: AgentMuxControlServer | undefined
   let hosted: AgentMuxHostedRuntimeService | undefined, stopping: Promise<void> | undefined
   let capsules: CapsuleRunManager | undefined
+  let executionBindings: AgentExecutionBindingService | undefined
   try {
     endpointLease = await acquireOwner(socketPath + '.owner.lock')
     const identityPath = join(stateDirectory, 'semantic-runtime.json')
@@ -88,7 +90,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     }
     const stop = (): Promise<void> => stopping ??= (async () => {
       try { await server?.stop() }
-      finally { try { try { await capsules?.dispose(); await hosted?.dispose() } finally { await client?.dispose() } }
+      finally { try { try { await executionBindings?.dispose(); await capsules?.dispose(); await hosted?.dispose() } finally { await client?.dispose() } }
         finally { await endpointLease?.close(); await semanticLease.close() } }
     })()
     // Both namespace leases are already held. One Client owns metadata and Native observation;
@@ -102,9 +104,20 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       creationAuthority: options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId }) })
     hosted = new AgentMuxHostedRuntimeService(client, storePath, ownerIdentity, options.shutdown ?? stop, options.externalInputAuthority, options.inputContextCaptureReader)
     capsules = new CapsuleRunManager(client, stateDirectory, options.capsuleAdapters)
+    executionBindings = options.service?.executionBindings ? undefined : new AgentExecutionBindingService(join(stateDirectory, 'execution-bindings'), {
+      resolveHost: async hostId => {
+        const scopes = [{ hostId: 'local', client: client! }, ...(options.coreClients?.() ?? [])].filter(scope => scope.hostId === hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('Execution requires one exact configured Host route.', 'UNKNOWN_HOST')
+        const original = scopes[0]!.client
+        await original.connect()
+        const identity = await original.agentCreationAuthority()
+        return { runtimeId: identity.runtimeId, client: original }
+      }
+    })
     server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
       ...(options.forwardingPeer ? { forwardingPeer: options.forwardingPeer } : {}),
       capsules: options.service?.capsules ?? capsules,
+      executionBindings: options.service?.executionBindings ?? executionBindings!,
       capsuleRuntime: options.service?.capsuleRuntime ?? capsules.runtime,
       deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
       diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
@@ -116,10 +129,13 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     hosted.publishControlEndpointState(server.controlEndpointState())
     // The Client publishes scoped failures and continues its original observation. Metadata
     // and the public semantic owner are available before this independent Native work settles.
-    void client.connect().catch(() => {})
+    void client.connect().then(() => executionBindings?.restoreReaders()).catch(() => {
+      // The original binding remains inspectable as unavailable. A reader
+      // failure does not close the public owner or another healthy capability.
+    })
     return { client, hosted, server, socketPath, ownerIdentity, stop }
   } catch (error) {
-    await server?.stop().catch(() => {}); await capsules?.dispose().catch(() => {}); await hosted?.dispose().catch(() => {}); await client?.dispose().catch(() => {})
+    await server?.stop().catch(() => {}); await executionBindings?.dispose().catch(() => {}); await capsules?.dispose().catch(() => {}); await hosted?.dispose().catch(() => {}); await client?.dispose().catch(() => {})
     await endpointLease?.close().catch(() => {}); await semanticLease.close().catch(() => {})
     throw error
   }

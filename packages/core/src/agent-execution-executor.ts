@@ -98,13 +98,15 @@ export function createAgentExecutionExecutor(options: {
     const ended = () => {
       if (!state.alive) return
       state.alive = false; closed.add(generation); state.handles.clear(); state.creating.clear(); children.delete(generation)
-      if (active === state) active = null
+      const wasActive = active === state
+      if (wasActive) active = null
       void (async () => {
         for (const pending of state.pending.values()) {
           try { await options.journal.markUnknown(pending.key, pending.digest) } catch { /* The original journal receipt remains authoritative. */ }
           await report(generation, 'NATIVE_CONNECTION_ENDED_OUTCOME_UNKNOWN', pending.key)
         }
-        await report(generation, 'NATIVE_CONNECTION_ENDED')
+        if (wasActive) await report(generation, 'NATIVE_CONNECTION_ENDED')
+        else await channel.send({ type: 'generation', generation, state: 'exited' })
       })().catch(() => options.onError(new Error('Native connection-end observation is unconfirmed')))
     }
     child.once('exit', ended)
@@ -128,7 +130,7 @@ export function createAgentExecutionExecutor(options: {
         if (!closed.has(frame.generation)) {
           closed.add(frame.generation)
           if (active?.id === frame.generation) active = null
-          await report(frame.generation, 'NATIVE_FRONTEND_CONNECTION_CLOSED')
+          await channel.send({ type: 'generation', generation: frame.generation, state: 'detached' })
         }
         return
       }

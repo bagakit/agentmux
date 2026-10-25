@@ -199,6 +199,12 @@ export { parseAgentInputResourceRead, parseAgentInputResourceResult, inputImageM
 export * from './v8-profile.js'
 export * from './runtime-v8-profile.js'
 
+export { AgentExecutionBridge } from './agent-execution-bridge.js'
+export type { AgentExecutionBridgePort, AgentExecutionBridgeState, AgentExecutionBridgePosition } from './agent-execution-bridge.js'
 export type { AgentExecutionHelperInput, AgentExecutionHelperPreparation, AgentExecutionResourceGrant } from './agent-execution-helper.js'
+
 export type { AgentToolExecutionBinding } from './agent-tool-execution.js'
 export type { AgentExecutionOperationKey, AgentExecutionOperation } from './agent-execution-journal.js'
+
+export { AgentExecutionCoordinator, AgentExecutionBindingService } from './agent-execution-coordinator.js'
+export type { AgentExecutionOpenInput, AgentExecutionInspection, AgentExecutionHostPort, AgentExecutionCoordinatorOptions } from './agent-execution-coordinator.js'

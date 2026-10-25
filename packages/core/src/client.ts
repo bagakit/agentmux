@@ -4139,28 +4139,45 @@ export class AgentMuxClient {
     const endpoint = await this.executionHelperStore().pinFrontend(binding.bindingId, async record => {
       const run = await this.inspectPreparedTerminal(record.preparation.prepared)
       if (!run || run.state !== 'running') throw new AgentMuxError('The original frontend helper is not confirmed running; no replacement was started.', 'EXECUTION_HELPER_UNAVAILABLE')
-      const replay = await this.readRunReplay({ runId: run.runId }, 0, 'raw')
-      if (replay.gap) throw new AgentMuxError('The original frontend endpoint receipt is unavailable; its Run was preserved.', 'EXECUTION_PROTOCOL_GAP')
-      const parts: Uint8Array[] = []
-      let bytes = 0, cursor = 0
-      for (const chunk of replay.replay) {
-        if (chunk.startByte !== cursor) throw new AgentMuxError('The original helper endpoint receipt is not contiguous.', 'EXECUTION_PROTOCOL_GAP')
-        const data = Buffer.from(chunk.dataBytes)
-        const newline = data.indexOf(10)
-        const part = newline < 0 ? data : data.subarray(0, newline)
-        parts.push(part); bytes += part.length; cursor = chunk.endByte
-        if (bytes > 4096) throw new AgentMuxError('The original helper has no bounded endpoint receipt.', 'EXECUTION_HELPER_UNAVAILABLE')
-        if (newline < 0) continue
-        const frame = JSON.parse(Buffer.concat(parts, bytes).toString('utf8')) as { type?: unknown; url?: unknown }
-        if (frame.type !== 'ready' || typeof frame.url !== 'string') throw new AgentMuxError('The original helper has not confirmed its endpoint.', 'EXECUTION_HELPER_UNAVAILABLE')
-        return { runId: run.runId, ownerInstanceId: this.runtimeIdentity().instanceId, url: frame.url }
-      }
-      throw new AgentMuxError('The original helper endpoint is not yet observed. Recheck this binding; no replacement was started.', 'EXECUTION_HELPER_UNAVAILABLE')
+      return { runId: run.runId, ownerInstanceId: this.runtimeIdentity().instanceId,
+        url: await this.readExecutionFrontendEndpoint(run.runId) }
     })
     if (this.runtimeIdentity().instanceId !== endpoint.ownerInstanceId) throw new AgentMuxError('The original execution helper Runtime is unavailable.', 'EXECUTION_RUNTIME_CHANGED')
     const run = await this.inspectPreparedTerminal(original.preparation.prepared, { runId: endpoint.runId })
     if (!run || run.state !== 'running') throw new AgentMuxError('The original execution helper is unavailable; the original Session remains retained.', 'EXECUTION_HELPER_UNAVAILABLE')
     return await provider.prepareToolExecutionLaunch(plan, { binding, url: endpoint.url, launchWorkspacePath })
+  }
+
+  private async readExecutionFrontendEndpoint(runId: string): Promise<string> {
+    let revision = 0, wake: (() => void) | undefined
+    const release = this.onRunEvent(runId, () => { revision++; wake?.() }, { observeMessages: false })
+    let timer: ReturnType<typeof setTimeout>
+    const deadline = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new AgentMuxError(
+      'The original helper endpoint is not yet observed. Inspect the retained binding; no replacement was started.', 'EXECUTION_HELPER_UNAVAILABLE')), 5_000) })
+    try {
+      while (true) {
+        const observed = revision
+        const replay = await Promise.race([this.readRunReplay({ runId }, 0, 'raw'), deadline])
+        if (replay.gap) throw new AgentMuxError('The original frontend endpoint receipt is unavailable; its Run was preserved.', 'EXECUTION_PROTOCOL_GAP')
+        if (replay.run.runId !== runId || replay.run.state !== 'running') throw new AgentMuxError('The original frontend helper is not confirmed running.', 'EXECUTION_HELPER_UNAVAILABLE')
+        const parts: Uint8Array[] = []
+        let bytes = 0, cursor = 0
+        for (const chunk of replay.replay) {
+          if (chunk.startByte !== cursor) throw new AgentMuxError('The original helper endpoint receipt is not contiguous.', 'EXECUTION_PROTOCOL_GAP')
+          const data = Buffer.from(chunk.dataBytes), newline = data.indexOf(10)
+          const part = newline < 0 ? data : data.subarray(0, newline)
+          parts.push(part); bytes += part.length; cursor = chunk.endByte
+          if (bytes > 4096) throw new AgentMuxError('The original helper has no bounded endpoint receipt.', 'EXECUTION_HELPER_UNAVAILABLE')
+          if (newline < 0) continue
+          const frame = JSON.parse(Buffer.concat(parts, bytes).toString('utf8')) as { type?: unknown; url?: unknown }
+          if (frame.type !== 'ready' || typeof frame.url !== 'string') throw new AgentMuxError('The original helper has not confirmed its endpoint.', 'EXECUTION_HELPER_UNAVAILABLE')
+          return frame.url
+        }
+        if (observed !== revision) continue
+        await Promise.race([new Promise<void>(resolve => { wake = resolve; if (observed !== revision) resolve() }), deadline])
+        wake = undefined
+      }
+    } finally { clearTimeout(timer!); release() }
   }
 
   /** Inspect the exact resource owner's retained operation; no native action or replay. */

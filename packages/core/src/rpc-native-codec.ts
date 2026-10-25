@@ -1,3 +1,4 @@
+import { parseAgentExecutionCreate, parseAgentExecutionBinding, parseAgentExecutionInspection } from './public-rpc-agent-execution.js'
 import { parseAgentInputResourceRead, parseAgentInputResourceResult } from './agent-input-resource.js'
 import { parseAgentInputJournalCut } from './agent-input-conversation.js'
 import { parseGoalParticipationConfirm } from './goal-participation.js'
@@ -341,6 +342,37 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
+      const input = parseAgentExecutionBinding(params)
+      if (method === 'agent.execution.binding' && value === null) return value as unknown as Record<string, unknown>
+      return parseAgentExecutionInspection(value, input) as unknown as Record<string, unknown>
+    }
+    if (method === 'agent.execution.create') {
+      const input = parseAgentExecutionCreate(params), result = record(value, ['session', 'execution'])
+      const session = parseRpcAgentSession(result.session)
+      const execution = parseAgentExecutionInspection(result.execution, { bindingId: input.bindingId, agentHostId: input.agentHostId,
+        resourceHostId: input.resourceHostId, agentSessionId: input.agent.agentSessionId, resourceWorkspacePath: input.resourceWorkspacePath })
+      if (session.agentSessionId !== input.agent.agentSessionId || session.creation?.createOperationId !== input.agent.createOperationId ||
+          session.executorId !== input.agent.executorId || session.workspacePath !== input.agent.workspacePath ||
+          !isDeepStrictEqual(session.toolExecution, { bindingId: input.bindingId, resourceHostId: input.resourceHostId,
+            resourceRuntimeId: input.resourceRuntimeId, workspacePath: input.resourceWorkspacePath })) fail()
+      return { session, execution }
+    }
+    if (method === 'agent.execution.inspect') {
+      if (value === null) return value as unknown as Record<string, unknown>
+      const input = record(params), p = record(value, ['bindingId', 'streamGeneration', 'nativeRequestId', 'payloadDigest', 'payloadBytes', 'phase', 'revision', 'outcome', 'resultDigest', 'resultBytes'])
+      string(p.bindingId); string(p.streamGeneration)
+      if (!(typeof p.nativeRequestId === 'string' || typeof p.nativeRequestId === 'number' && Number.isSafeInteger(p.nativeRequestId)) ||
+          p.bindingId !== input.bindingId || p.streamGeneration !== input.streamGeneration || p.nativeRequestId !== input.nativeRequestId) fail()
+      const digest = (item: unknown) => { if (typeof item !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(item)) fail() }
+      digest(p.payloadDigest); count(p.payloadBytes); count(p.revision)
+      if (p.revision === 0) fail()
+      member(p.phase, ['prepared', 'dispatched', 'completed', 'unknown'])
+      if (p.outcome !== (p.phase === 'prepared' ? 'not-dispatched' : p.phase === 'completed' ? 'response-recorded' : 'unknown')) fail()
+      if (p.phase === 'completed') { digest(p.resultDigest); count(p.resultBytes) }
+      else if (p.resultDigest !== null || p.resultBytes !== null) fail()
+      return p
+    }
     if (isMobileAssetsMethod(method)) return parseMobileAssetsResult(method, value, parseMobileAssetsParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'app.mobile.report') return parseMobileWebReportReceipt(value, parseMobileWebReportParams(params)) as unknown as Record<string, unknown>
     if (method === 'capsule.input') return parseCapsuleInputResult(value, parseCapsuleInputRequest(params)) as unknown as Record<string, unknown>

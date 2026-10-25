@@ -1,3 +1,4 @@
+import { parseAgentExecutionCreate, parseAgentExecutionBinding } from './public-rpc-agent-execution.js'
 import { parseGoalParticipationConfirm } from './goal-participation.js'
 import { parseAgentProgressParams, type AgentProgressMethod } from './agent-progress.js'
 import { parseMobileAssetsParams } from './mobile-web-codec.js'
@@ -322,6 +323,19 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.refresh', '--session ID', 'Re-read the canonical original Session using its complete Session ID.',
     { '--session': 'data' }, f => ({ agentSessionId: id(f, '--session', true) }),
     'No Run is started, resumed or stopped and no input is sent. Passive native identity observation may confirm and persist metadata asynchronously; this reply does not promise identity recovery or reopen a retired Session. Use agent inspect for diagnostic inspection.'),
+  ...(['agent.execution.create', 'agent.execution.binding', 'agent.execution.rejoin'] as const).map(method => command(method, '--input FILE|-',
+    method === 'agent.execution.create' ? 'Create one fixed Agent/resource Host binding through the original Core owner.'
+      : method === 'agent.execution.rejoin' ? 'Reattach readers to the retained helper pair without starting an Agent.' : 'Read one original execution binding and its service diagnostic.',
+    { '--input': 'data' }, async f => {
+      const input = await readControlJsonInput(value(f, '--input', true)!, 'Execution binding')
+      return method === 'agent.execution.create' ? { ...parseAgentExecutionCreate(input) } : parseAgentExecutionBinding(input)
+    }, 'Requires a transport-authenticated user or device. create JSON names bindingId, agentHostId, agentRuntimeId, resourceHostId, resourceRuntimeId, resourceWorkspacePath, resourceGrant {scope:"host-user",bindingId}, and agent with original agentSessionId/createOperationId, Executor ID/revision and launch workspacePath. Other Host creation options remain with that Core; command/env/toolExecution overrides are forbidden. binding and rejoin take {bindingId} on the receiving coordinator endpoint. Keep the complete original packet after an unknown creation reply. rejoin attaches only retained helpers; it never recreates a lost helper, resumes the Agent CLI or replays a tool operation. binding can return null; an unavailable owner is an error. Use execution inspect with the original diagnostic operation key to query tool metadata.')),
+  command('agent.execution.inspect', '--host ID --binding ID --generation ID --request-json JSON', 'Inspect metadata for one original tool operation without replaying it.',
+    { '--host': 'data', '--binding': 'data', '--generation': 'data', '--request-json': 'data' }, f => {
+      const nativeRequestId = jsonValue(value(f, '--request-json', true)!, '--request-json')
+      if (!(typeof nativeRequestId === 'string' || typeof nativeRequestId === 'number' && Number.isSafeInteger(nativeRequestId))) invalid('--request-json requires the original JSON string or safe integer.')
+      return { hostId: id(f, '--host', true), bindingId: id(f, '--binding', true), streamGeneration: id(f, '--generation', true), nativeRequestId }
+    }, 'Requires a transport-authenticated user or device. Use the exact original machine-protocol Host, binding, generation and request ID; JSON 0 and JSON "0" identify different operations. Returns metadata or null, never request or response bytes. Unknown outcome does not authorize replay, a new request ID or a new generation. local means the receiving Core Host; no other Host is searched.'),
   command('agent.inspect', '(--session ID|--run ID|--provider-native ID --provider ID|--acp-native ID --adapter ID)', 'Inspect the service routeHostId, original Core identity and Desktop display facts separately.',
     { '--session': 'data', '--run': 'data', '--provider-native': 'data', '--provider': 'data', '--acp-native': 'data', '--adapter': 'data' }, f => ({ target: inspectTarget(f) }),
     'status.session.semanticStatus.failure carries code, message, recovery, nativeTurnId and available nativeCode/httpStatusCode. Failed turns retain their original healthy Run; observation errors are reported separately.'),
