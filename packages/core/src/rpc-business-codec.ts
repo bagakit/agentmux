@@ -2,6 +2,7 @@ import { mintObjectId } from './object-id.js'
 import { parseRendererAllocationsResult } from './renderer-allocations.js'
 import { parseRendererSceneCaptureResult, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
+import { parseRendererCacheResult } from './renderer-cache.js'
 import { parseRendererMemoryResult } from './renderer-memory.js'
 import { parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 import { parseRendererAnimationsResult } from './renderer-animations.js'
@@ -366,6 +367,10 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       break
     case 'metrics.animations.inspect':
       parseRendererAnimationsResult(actual.observation, request)
+      break
+    case 'metrics.cache.inspect':
+    case 'metrics.cache.reclaim':
+      parseRendererCacheResult(actual.observation, request, request.operation === 'metrics.cache.inspect' ? 'inspect' : 'reclaim')
       break
     case 'metrics.memory.inspect':
       parseRendererMemoryResult(actual.observation, request)
