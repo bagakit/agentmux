@@ -53,6 +53,7 @@ import { validateBrowserOperatorAvatarPng } from './browser-operator-avatar.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
+import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { cancelBrowserWebAuthnAccess, registerBrowserWebAuthnAccess } from './browser-webauthn-access.js'
@@ -170,6 +171,7 @@ type BrowserEntry = {
   /** 这一页上待答的那个应用链接提问。回答掉或换页就清。 */
   appLinkPrompt: { url: string; scheme: string } | null
   appLinkRequest: symbol | null
+  certificateDecision: BrowserCertificateDecision | null
   activity: BrowserActivityState
   humanControl: boolean
   activeRun: { operationId: string; signal: AbortSignal; stop: () => void } | undefined
@@ -451,6 +453,7 @@ export class BrowserViewManager {
     return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, status: available ? 'ready' : 'unavailable',
       ...(entry.source ? { openedFrom: entry.source } : {}),
       control: this.controlState(entry),
+      certificateRequest: entry.certificateDecision?.request ?? null,
       url: available ? contents.getURL() : '', title: available ? contents.getTitle().slice(0, 512) : '',
       navigationId: entry.navigationId,
       capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
@@ -1406,7 +1409,7 @@ export class BrowserViewManager {
     if (entry.captureId || contents.isBeingCaptured?.()) reasons.add('presentation')
     if (entry.runInFlight || entry.activeRun || entry.driving || entry.resourceReads || entry.humanControl || this.agentOwnsInput(entry) ||
       this.taskExecutions.get(entry.id)?.entry === entry || this.taskAssets?.isBrowserExecuting?.(entry.id) ||
-      this.demonstrationCapture?.entry === entry) reasons.add('operation')
+      this.demonstrationCapture?.entry === entry || entry.certificateDecision) reasons.add('operation')
     if (entry.pendingSwitch) reasons.add('profile-switch')
     if (entry.selectionOperation !== null || entry.firstPress) reasons.add('selection')
     if (contents.isLoading()) reasons.add('loading')
@@ -1676,6 +1679,7 @@ export class BrowserViewManager {
       driving: false,
       appLinkPrompt: null,
       appLinkRequest: null,
+      certificateDecision: null,
       activity: { operation: null, control: 'human', ...(retiredInputShield ? { warning: 'An earlier native Browser input surface could not be fully released. The original Browser has reopened; explicitly hand it to its Agent to retry cleanup before starting a fresh isolated program.' } : {}) },
       humanControl: false,
       activeRun: undefined,
@@ -1907,6 +1911,7 @@ export class BrowserViewManager {
     const partition = this.resolvePartition(profileId)
     this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded'))
     if (entry.storage.profileId === profileId) return this.snapshot(entry)
+    entry.certificateDecision?.settle(false)
 
     const authoritativeView = entry.view
     // Keep profile switching consistent with release: the committed URL may lag the latest
@@ -3427,6 +3432,14 @@ export class BrowserViewManager {
     return this.snapshot(entry)
   }
 
+  /** Only the trusted App IPC exposes this decision; public Agent control has no answer method. */
+  answerCertificate(id: string, input: BrowserCertificateAnswer): BrowserSnapshot {
+    const entry = this.require(id)
+    if (!entry.certificateDecision) throw new Error('No certificate request is waiting on this Browser. Its page and address are retained.')
+    entry.certificateDecision.answer(input)
+    return this.snapshot(entry)
+  }
+
   async selectElement(id: string, inspectTarget?: (revision: number, inspectionToken: string) => Promise<void>): Promise<BrowserElementSelection | null> {
     if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     const entry = this.require(id)
@@ -3758,6 +3771,7 @@ export class BrowserViewManager {
   /** Native teardown has no authority to retire the Renderer Region. */
   private destroyOwner(id: string): boolean {
     const entry = this.entries.get(id)
+    entry?.certificateDecision?.settle(false)
     if (entry) this.cancelRecoveryPreview(entry)
     if (!entry) {
       const released = this.releasedEntries.get(id)
@@ -3855,6 +3869,29 @@ export class BrowserViewManager {
     this.entriesByContents.set(view.webContents, entry)
     this.browserIdsByView.set(view, entry.id)
     const contents = view.webContents
+    contents.on('certificate-error', (event, url, error, certificate, callback, isMainFrame) => {
+      if (!isMainFrame || !this.owns(entry, view)) return
+      event.preventDefault()
+      entry.certificateDecision?.settle(false)
+      const navigationId = entry.navigationId, storage = entry.storage
+      let decision: BrowserCertificateDecision
+      try {
+        decision = new BrowserCertificateDecision({ url, error, certificate: certificate.data, navigationId },
+          () => this.owns(entry, view) && entry.storage === storage && entry.navigationId === navigationId && entry.certificateDecision === decision,
+          allow => {
+            if (entry.certificateDecision === decision) entry.certificateDecision = null
+            if (allow) entry.error = null
+            try { this.emit(entry) } finally { callback(allow) }
+          })
+      } catch {
+        entry.error = 'The original server certificate could not be inspected. The connection was refused; the Browser and address are kept.'
+        try { this.emit(entry) } finally { callback(false) }
+        return
+      }
+      entry.requestedUrl = decision.request.url
+      entry.certificateDecision = decision
+      this.emit(entry)
+    })
     contents.on('will-prevent-unload', () => {
       // The same event can veto reload/navigation. Only a recorded Close intent
       // may ask to close this page; ordinary navigation never becomes Close.
@@ -3979,6 +4016,7 @@ export class BrowserViewManager {
     contents.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument && this.faviconUrls.get(view)?.documentUrl !== details.url) this.faviconUrls.delete(view)
       if (!details.isMainFrame || !this.owns(entry, view)) return
+      entry.certificateDecision?.settle(false)
       this.cancelRecoveryPreview(entry)
       let requestedUrl: string
       try {
@@ -4042,6 +4080,7 @@ export class BrowserViewManager {
     })
     contents.on('did-stop-loading', () => {
       if (!this.owns(entry, view)) return
+      entry.certificateDecision?.settle(false)
       // did-finish-load can still report isLoading() === true; synchronize only once
       // Electron's public loading state has settled, retaining the current page policy.
       this.synchronizeVisiblePage(entry, view)
@@ -4091,6 +4130,7 @@ export class BrowserViewManager {
     })
     contents.on('render-process-gone', (_event, details) => {
       if (!this.owns(entry, view)) return
+      entry.certificateDecision?.settle(false)
       entry.committedNavigationId = null
       entry.appLinkRequest = null
       entry.appLinkPrompt = null
@@ -4100,6 +4140,7 @@ export class BrowserViewManager {
       this.emit(entry)
     })
     contents.once('destroyed', () => {
+      if (entry.view === view) entry.certificateDecision?.settle(false)
       this.entriesByContents.delete(contents)
       if (entry.view === view) entry.nativeChild?.closing?.settle(true)
       if (entry.view === view) this.cancelRecoveryPreview(entry)
@@ -4466,6 +4507,7 @@ export class BrowserViewManager {
       ...(entry.demonstration ? { demonstration: entry.demonstration } : {}),
       ...(entry.taskAssets ? { taskAssets: entry.taskAssets } : {}),
       appLinkPrompt: entry.appLinkPrompt,
+      certificateRequest: entry.certificateDecision?.request ?? null,
       activity: warning
         ? { ...entry.activity, warning }
         : entry.activity

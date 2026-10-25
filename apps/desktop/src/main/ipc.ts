@@ -2188,6 +2188,10 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:answerAppLink', event)
     return await browsers.answerAppLink(id, allow, remember)
   })
+  handleWithEvent('browser:answerCertificate', (event, id: string, input: Parameters<BrowserViewManager['answerCertificate']>[1]) => {
+    requireTrustedSender('browser:answerCertificate', event)
+    return browsers.answerCertificate(id, input)
+  })
   handleWithEvent('browser:cancelElementSelection', async (event, id: string) => {
     requireTrustedSender('browser:cancelElementSelection', event)
     await browsers.cancelElementSelection(id)

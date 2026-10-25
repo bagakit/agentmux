@@ -1474,6 +1474,7 @@ const mockApi: AgentMuxDesktopApi = {
     // Web 预览里没有主进程，也就没有真的 shell.openExternal 可走。抛而不是默默返回：
     // 悄悄什么都不做，看起来和「点了 Open 但那个 app 没装」一模一样。
     answerAppLink: async () => { throw new Error('App links are not available in Web Preview') },
+    answerCertificate: async () => { throw new Error('Certificate decisions require the original Desktop Browser.') },
     cancelElementSelection: async () => {},
     setAnnotationMarkers: async () => {},
     registerPresentation: async () => { throw new Error('Native Browser presentation requires the desktop app.') },

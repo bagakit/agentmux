@@ -34,6 +34,7 @@ import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { BrowserOperationHistory, BrowserOperatorPresence, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
 import { BrowserStartPage } from './BrowserStartPage'
 import { BrowserRecoverySurface } from './BrowserRecoverySurface'
+import { BrowserCertificateSurface } from './BrowserCertificateSurface'
 import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
 import type { BrowserRecoveryPreviewReadResult } from '../../../shared/browser-recovery-preview'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
@@ -546,6 +547,7 @@ function BrowserPaneContent({
           navigatorCoversBrowser ||
           __AGENTMUX_WEB_PREVIEW__ ||
           tab.error ||
+          tab.certificateRequest ||
           // 原生视图是**窗口级**层，画在页面之上。不把它藏起来，那个提问就渲染在它背后——看不见，
           // 也点不到，于是这一问永远没人能回答，而页面看起来只是什么都没发生。和 `tab.error` 同理。
           tab.appLinkPrompt !== null ||
@@ -602,7 +604,7 @@ function BrowserPaneContent({
     // yieldToFocusRing **故意不在**这里（#545）：它在焦点切换时变化，若列进来，整条 effect 会拆了
     // 重建——cleanup 那句 `setBounds(null)` 先把原生视图藏起来，重建那次 rAF 下一帧才重新显示，中间
     // 空一帧就是那道闪烁。它改由 ref 读、由下面那条独立 effect 触发重算。其余被 update 读到的值都在。
-  }, [screenshot, elementSelection, released, restoring, restoreError, toolsOpen, controlPanelOpen, reportError, tab.appLinkPrompt, tab.browserId, tab.error, tab.url, visible, presentations.length])
+  }, [screenshot, elementSelection, released, restoring, restoreError, toolsOpen, controlPanelOpen, reportError, tab.appLinkPrompt, tab.certificateRequest, tab.browserId, tab.error, tab.url, visible, presentations.length])
 
   useLayoutEffect(() => {
     // Portal children run before their host moves. Rebind against connected ancestors after that
@@ -1039,7 +1041,7 @@ function BrowserPaneContent({
         onSelect: () => onRegionSplit(action.direction) }))}
       Item={DropdownMenu.Item} Group={DropdownMenu.Group} Label={DropdownMenu.Label} /> : null
     const connectionUnavailable = released || restoring || tab.nativeOwnerDeferred || tab.nativeOwnerUnavailable || restoreError !== null
-    const blocked = connectionUnavailable || screenshot !== null || elementSelection !== null || Boolean(tab.error) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
+    const blocked = connectionUnavailable || screenshot !== null || elementSelection !== null || Boolean(tab.error) || Boolean(tab.certificateRequest) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
       Boolean((presentation?.target.controlsOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900))
     const stageContent = <>
 
@@ -1069,7 +1071,14 @@ function BrowserPaneContent({
           onRetry={restoreError ? retryConnection : undefined}
           onEditAddress={() => addressInput.current?.focus()}
           onCopy={text => copyTextToClipboard(text, reportError)}
-        /> : elementSelection ? (
+        /> : tab.certificateRequest ? <BrowserCertificateSurface key={tab.certificateRequest.requestId}
+          request={tab.certificateRequest} privateMode={tab.mode === 'private'} containerMode={Boolean(tab.capsuleId)} onAnswer={async allow => {
+            const request = tab.certificateRequest!
+            const browser = await api.browser.answerCertificate(tab.browserId, {
+              requestId: request.requestId, navigationId: request.navigationId, fingerprint: request.fingerprint, allow
+            })
+            applyBrowserEvent({ type: 'updated', browser })
+          }} /> : elementSelection ? (
           <section className="browser-selection-result" aria-label="Selected element context">
             <header><ThemeActionInspectIcon size={17} /><span><strong>{elementSelection.accessibleName || `<${elementSelection.tagName}>`}</strong><small>{elementSelection.pageTitle || elementSelection.pageUrl}</small></span></header>
             <dl>

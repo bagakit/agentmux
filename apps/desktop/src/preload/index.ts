@@ -753,6 +753,7 @@ const api: AgentMuxPreloadApi = {
     selectElement: (id: string) => ipcRenderer.invoke('browser:selectElement', id),
     answerAppLink: (id: string, allow: boolean, remember: boolean) =>
       ipcRenderer.invoke('browser:answerAppLink', id, allow, remember),
+    answerCertificate: (id, input) => ipcRenderer.invoke('browser:answerCertificate', id, input),
     cancelElementSelection: (id: string) => ipcRenderer.invoke('browser:cancelElementSelection', id),
     setAnnotationMarkers: (id, navigationId, markers) =>
       ipcRenderer.invoke('browser:setAnnotationMarkers', id, navigationId, markers),
