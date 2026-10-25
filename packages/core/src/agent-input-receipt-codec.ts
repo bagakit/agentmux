@@ -1,7 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { dequal } from 'dequal'
 import { parseDeliveryFailure } from './delivery-attempt.js'
-import { agentInputDeliveryKey, agentInputSubmissionStatus, validateAgentInputDeliveryKey, validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
+import { agentInputDeliveryKey, agentInputSubmissionStatus, validateAgentInputDeliveryKey, validateAgentInputRetry, validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
 import { agentPromptInputId, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
 import { rpcRecord } from './rpc-data.js'
@@ -16,15 +16,17 @@ export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubm
   if (!dequal(key, ref.key) || p.persistence !== 'confirmed') wireFail()
   wireMember(p.observation, ['owned', 'rejoin-needed', 'closed'])
   if (p.originalControlOperationId !== undefined) wireString(p.originalControlOperationId)
-  const control = wireRecord(p.control, ['ref', 'state', 'at', 'waiting', 'gateId', 'deliveryKey'])
+  const control = wireRecord(p.control, ['ref', 'state', 'at', 'waiting', 'gateId', 'deliveryKey', 'retry'])
   if (!dequal(validateAgentInputWaitRef(control.ref), ref)) wireFail()
   wireMember(control.state, ['enabled', 'stopped-before-dispatch', 'dispatch-authorized']); wireTimestamp(control.at)
   if (control.state === 'dispatch-authorized') wireString(control.gateId)
   else if (control.gateId !== undefined) wireFail()
   if (control.deliveryKey !== undefined) {
     if (control.state !== 'dispatch-authorized') wireFail()
-    validateAgentInputDeliveryKey(key, control.deliveryKey)
+    const delivery = validateAgentInputDeliveryKey(key, control.deliveryKey)
+    if (delivery.attemptId !== (control.retry as import('./agent-input-wait.js').AgentInputRetry | undefined)?.attemptId) wireFail()
   }
+  if (control.retry !== undefined && validateAgentInputRetry(key, control.retry).previousWaitGeneration >= ref.waitGeneration) wireFail()
   if (control.waiting !== undefined) {
     const waiting = wireRecord(control.waiting, ['phase', 'reason', 'wake', 'failure', 'mechanism', 'observation'])
     if (waiting.phase === 'runtime') { if (waiting.reason !== 'runtime-unavailable' || waiting.wake !== 'runtime-restored') wireFail() }
@@ -46,7 +48,7 @@ export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubm
   const deliveryKey = agentInputDeliveryKey(control as AgentInputSubmissionReceipt['control'])
   if (admission && (admission.agentSessionId !== key.agentSessionId || admission.run.runId !== deliveryKey.expectedRun.runId ||
       admission.admission?.inputKey && !dequal(admission.admission.inputKey, deliveryKey) ||
-      (admission.admission?.submissionId ?? admission.terminalPromptSubmission?.submissionId ?? admission.admission?.operationId) !== agentPromptInputId(key))) wireFail()
+      (admission.admission?.submissionId ?? admission.terminalPromptSubmission?.submissionId ?? admission.admission?.operationId) !== agentPromptInputId(deliveryKey))) wireFail()
   const status = agentInputSubmissionStatus(control as AgentInputSubmissionReceipt['control'], admission)
   if (p.status !== status) wireFail()
   return value as AgentInputSubmissionReceipt

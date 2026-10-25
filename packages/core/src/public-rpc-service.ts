@@ -112,7 +112,7 @@ import { agentPromptCondition, validateAgentPromptCondition, validateAgentPrompt
 import { AGENT_INPUT_SUBMIT_FIELDS, parseAgentInputSubmit } from './agent-input-submit.js'
 import { parseAgentInputChangesRead, parseAgentInputChangesPage } from './agent-input-changes.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
-import { validateAgentInputControlId, validateAgentInputWaitRef, type AgentInputSubmissionReceipt, type AgentInputCallContext } from './agent-input-wait.js'
+import { agentInputDeliveryKey, validateAgentInputControlId, validateAgentInputWaitRef, type AgentInputSubmissionReceipt, type AgentInputCallContext } from './agent-input-wait.js'
 import { diagnoseAgentMux } from './doctor.js'
 import { OrderedSessionOutputFollow, type FollowOutput } from './session-output-follow.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
@@ -2475,7 +2475,10 @@ export class AgentMuxRpcService {
         })()
         if (caller && caller.client !== client) throw new AgentMuxError('Input inspection cannot cross semantic owners.', 'CONTROL_PERMISSION_DENIED')
         if (client.forwardRpc) return await client.forwardRpc('agent.input.inspect', { key }, context) as AgentMuxRpcResult<M>
-        const input = await client.inspectAgentInput({ key }, caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined)
+        const observed = await client.inspectAgentInput({ key }, caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined)
+        // A physical predecessor remains independently readable after its logical
+        // input advances. Do not pair that immutable claim with today's receipt.
+        const input = key.attemptId && observed && !isDeepStrictEqual(agentInputDeliveryKey(observed.control), key) ? null : observed
         const original = input ? input.admission : await client.inspectAgentPromptSubmission(key)
         if (!input && caller && caller.agentSessionId !== key.agentSessionId && original?.admission?.intent?.message?.authorAgentSessionId !== caller.agentSessionId) throw new AgentMuxError('Only an original input participant can inspect its claim.', 'CONTROL_PERMISSION_DENIED')
         result = { record: original, ...(input ? { input } : {}) }; break
