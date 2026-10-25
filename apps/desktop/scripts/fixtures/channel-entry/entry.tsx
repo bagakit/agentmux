@@ -45,9 +45,10 @@ const composerNames = ['Research and Engineering - customer investigation and re
 const popoverClarity = new URLSearchParams(location.search).has('popover-clarity')
 const refusalClarity = new URLSearchParams(location.search).has('refusal-clarity')
 const questionValidation = new URLSearchParams(location.search).has('question-validation')
+const connectorDetails = new URLSearchParams(location.search).has('connector-details-modern')
 const inputRecovery = new URLSearchParams(location.search).has('input-recovery')
 const statusPriority = new URLSearchParams(location.search).has('status-priority')
-const groupActivityActions = inputRecovery || statusPriority || new URLSearchParams(location.search).has('group-activity-actions')
+const groupActivityActions = connectorDetails || inputRecovery || statusPriority || new URLSearchParams(location.search).has('group-activity-actions')
 const memberAccess = new URLSearchParams(location.search).has('member-access')
 const applicationAccess = new URLSearchParams(location.search).has('application-access'), memberScenario = memberAccess || applicationAccess
 const feishuScenario = memberScenario || sharedAudiences || popoverClarity || refusalClarity || groupActivityActions
@@ -98,7 +99,7 @@ function originalWaitingReceipt(): AgentInputSubmissionReceipt {
 const room = { externalConversationId: '345678901234567890', name: 'research-and-engineering', state: 'active' as const, mode: 'group' as const, membershipApproval: 'not-required' as const }
 const members: RoomMembersResult['members'] = [
   { idType: 'user_id', userId: '567890123456789012', name: 'Ava Chen' },
-  { idType: 'user_id', userId: '678901234567890123', name: 'Ben Ortiz' },
+  { idType: 'user_id', userId: '678901234567890123', name: connectorDetails ? 'Ben Ortiz · Product Research and Cross-platform Collaboration' : 'Ben Ortiz' },
   ...(memberScenario || groupActivityActions ? [{ idType: 'user_id', userId: '789012345678901234', name: 'Casey Iqbal' }] : [])
 ]
 let memberGrants: ConnectionGrant[] = []
@@ -177,6 +178,18 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
       group.outgoing.value!.deliveries = (proof.scenario === 'mixed' ? ['conversation', 'query-feedback', 'query-feedback'] : ['query-feedback', 'query-feedback']).map((kind, i) => ({ kind: kind as 'conversation' | 'query-feedback', association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-original-feedback-' + i, state: 'confirmed', receipt: 'confirmed', platformMessageId: 'preview-platform-result-' + i, reason: null, resourceUpload: null }))
       group.outgoing.value!.observation = { state: 'ready' }; group.outgoing.value!.effectObservation = null
       group.incoming.value!.rows = [{ ingressId: 'preview-original-intake-' + binding.bindingId, sourceConnectionId: binding.connectionId, kind: 'message', state: 'claimed', code: null, codeRecorded: false, bindingId: binding.bindingId, bindingRevision: binding.revision, targetConnectionId: binding.connectionId, scope: 'current-binding', inputOperationId: 'preview-original-agent-input', recording: { state: 'recorded' }, coreStatus: 'waiting', coreObservation: 'observed', nativeAdoption: null, waiting: originalWaitingReceipt().control.waiting! }]
+    }
+    if (connectorDetails && binding) {
+      const diagnosis: ConnectionDiagnosis = report, group = diagnosis.groups.value!.items[0]!, outgoing = group.outgoing.value!
+      if (proof.scenario === 'mixed') {
+        outgoing.sourceObservation = { state: 'unavailable', reason: 'source-gap', code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED', codeRecorded: true, checkpointKey: 'a'.repeat(64) }
+        outgoing.deliveries = outgoing.deliveries.slice(0, 2)
+        outgoing.deliveries[1] = { ...outgoing.deliveries[1]!, state: 'unknown', receipt: 'unknown', platformMessageId: null, reason: 'effect-unconfirmed' }
+        group.incoming.value!.rows = [{ ...group.incoming.value!.rows[0]!, kind: 'message', state: 'claimed', code: null, codeRecorded: false, bindingId: binding.bindingId, bindingRevision: binding.revision, targetConnectionId: binding.connectionId, scope: 'current-binding', inputOperationId: 'preview-original-agent-input', recording: { state: 'recorded' }, coreStatus: 'waiting', coreObservation: 'observed', nativeAdoption: null, waiting: originalWaitingReceipt().control.waiting! }]
+      } else {
+        outgoing.observation = { state: 'ready' }; outgoing.sourceObservation = { state: 'ready', code: null, codeRecorded: false, checkpointKey: null }; outgoing.effectObservation = { state: 'ready' }
+        outgoing.deliveries = []; outgoing.coverage = { state: 'complete', nextContent: null, originCount: 0, omittedGapCount: 0, gaps: [] }; group.incoming.value!.rows = []
+      }
     }
     if (popoverClarity || refusalClarity || groupActivityActions) proof.lastDiagnosis = structuredClone(report)
     return report

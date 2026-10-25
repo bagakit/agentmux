@@ -8,6 +8,7 @@ const popoverClarity = process.argv.includes('--popover-clarity')
 const questionValidation = process.argv.includes('--question-validation')
 const refusalClarity = process.argv.includes('--refusal-clarity')
 const groupActivityActions = process.argv.includes('--group-activity-actions')
+const connectorDetails = process.argv.includes('--connector-details-modern')
 const inputRecovery = process.argv.includes('--input-recovery')
 const statusPriority = process.argv.includes('--status-priority')
 const statusPriorityDetails = process.argv.includes('--status-priority-details')
@@ -17,7 +18,7 @@ let win
 app.whenReady().then(async () => {
   try {
     win = new BrowserWindow({ width: 1380, height: 980, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
-    await win.loadFile(html, { query: { 'header-status': '1', ...(inputRecovery ? { 'input-recovery': '1' } : {}), ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(questionValidation ? { 'question-validation': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}), ...(statusPriority ? { 'status-priority': '1' } : {}) } })
+    await win.loadFile(html, { query: { 'header-status': '1', ...(connectorDetails ? { 'connector-details-modern': '1' } : {}), ...(inputRecovery ? { 'input-recovery': '1' } : {}), ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(questionValidation ? { 'question-validation': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}), ...(statusPriority ? { 'status-priority': '1' } : {}) } })
     const { read, until, settle, click, press } = nativeRendererInput(win, result.interactions, '')
     const region = '[data-workbench-region-id="channel-preview-region"]'
     const entry = adapter => region + ' [data-channel-entry="' + adapter + '"]'
@@ -81,6 +82,56 @@ app.whenReady().then(async () => {
     await until('window.channelEntryProof?.ready && document.querySelector(' + JSON.stringify(entry('discord')) + ')')
     await read('window.__connectionsTrustedEvents=[];for(const type of ["click","keydown","input","mousemove"])document.addEventListener(type,event=>window.__connectionsTrustedEvents.push({type,trusted:event.isTrusted,key:event.key}),true)')
     win.showInactive(); win.focus(); win.webContents.focus(); await until('document.hasFocus()')
+    if (connectorDetails) {
+      const dialog = '.agent-connector-dialog', membersPanel = '[data-connection-panel="members"]', member = '[data-member-row=\'["user_id","678901234567890123"]\']'
+      async function openDetails() {
+        await open('feishu')
+        await click('js:[...document.querySelectorAll(".connector-header-menu__item")].find(node=>node.getAttribute("aria-label")?.includes("345678901234567890"))')
+        await until(exists(dialog))
+        await until('document.querySelector(' + JSON.stringify(dialog + ' .connector-traffic-summary') + ')?.textContent.includes("Source reading unconfirmed")')
+      }
+      for (const narrow of [false, true]) {
+        win.setContentSize(1380, 980); await until('innerWidth===1380'); await layout(narrow)
+        await read('window.channelEntryProof.setTheme(' + JSON.stringify(narrow ? 'light' : 'dark') + ')')
+        await read('window.channelEntryProof.setScenario("mixed")'); await openDetails()
+        if (narrow) { win.setContentSize(520, 980); await until('innerWidth===520') }
+        await capture('connector-details-activity-' + (narrow ? 'narrow-light' : 'wide-dark'))
+        await click(membersPanel + ' > summary'); await until('document.querySelector(' + JSON.stringify(membersPanel) + ').open')
+        await read('document.querySelector(' + JSON.stringify(membersPanel) + ').scrollIntoView({block:"start"})')
+        assert.equal(await read('document.querySelectorAll(' + JSON.stringify(membersPanel + ' [data-member-editor]') + ').length'), narrow ? 1 : 0)
+        if (!narrow) await capture('connector-details-members-wide-dark')
+        if (!narrow) await click(member + ' [data-member-edit]')
+        await until(exists(member + ' [data-member-editor]'))
+        if (!narrow) await click(member + ' input[type="checkbox"]')
+        await read('document.querySelector(' + JSON.stringify(member) + ').scrollIntoView({block:"start"})')
+        await until('document.querySelector(' + JSON.stringify(member) + ').textContent.includes("Unsaved changes")')
+        await capture('connector-details-edit-' + (narrow ? 'narrow-light' : 'wide-dark'))
+        if (narrow) {
+          await click(action('Discard changes', member + ' button'))
+          await until('!document.querySelector(' + JSON.stringify(member) + ').textContent.includes("Unsaved changes")')
+          if (await read('!!document.querySelector(' + JSON.stringify(member + ' [data-member-editor]') + ')')) await click(member + ' [data-member-edit]')
+          await until('!document.querySelector(' + JSON.stringify(member + ' [data-member-editor]') + ')')
+          await read('document.querySelector(' + JSON.stringify(membersPanel) + ').scrollIntoView({block:"start"})')
+          assert.equal(await read('document.querySelectorAll(' + JSON.stringify(membersPanel + ' [data-member-editor]') + ').length'), 0)
+          await capture('connector-details-members-narrow-light')
+        }
+        await click('[aria-label="Close group setup"]'); await until('!document.querySelector(' + JSON.stringify(dialog) + ')')
+      }
+      win.setContentSize(1380, 980); await until('innerWidth===1380'); await layout(false)
+      await read('window.channelEntryProof.setTheme("light"); window.channelEntryProof.setScenario("healthy")')
+      await open('feishu'); await click('js:[...document.querySelectorAll(".connector-header-menu__item")].find(node=>node.getAttribute("aria-label")?.includes("345678901234567890"))')
+      await until('document.querySelector(' + JSON.stringify(dialog) + ')?.textContent.includes("No recent requests")')
+      await capture('connector-details-empty-wide-light')
+      win.setContentSize(520, 980); await until('innerWidth===520')
+      await read('window.channelEntryProof.setTheme("dark"); window.channelEntryProof.status="unavailable"')
+      await click(action('Check group activity', dialog + ' button'))
+      await until('document.querySelector(' + JSON.stringify(dialog) + ')?.textContent.includes("Agent inputs could not be checked")')
+      await capture('connector-details-failed-narrow-dark')
+      result.requests = await read('window.channelEntryProof.requests')
+      assert.ok(!result.requests.some(row => /rejoin|retry|configure|respond|\.grant$|\.create$/.test(row.method)), 'Viewing and local drafts make no external changes')
+      assert.deepEqual(await read('window.channelEntryProof.errors'), [])
+      result.passed = true; return
+    }
     if (inputRecovery) {
       const group = '.agent-connector-dialog [aria-label="Group delivery"]'
       for (const narrow of [false, true]) {
