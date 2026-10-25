@@ -993,6 +993,8 @@ const mockApi: AgentMuxDesktopApi = {
     resolveCreationSessionId: async () => { throw new Error('A Core creation binding requires the Desktop host.') },
     snapshot: async () => structuredClone(mockSnapshot),
     endpointWarnings: async () => structuredClone(mockSnapshot.runtimeEndpointWarnings ?? []),
+    executionBinding: async () => null,
+    observeExecutionBinding: (_bindingId, listener) => { queueMicrotask(() => listener(null)); return () => {} },
     launchAgent: async (input) => {
       const executor = mockConfig.executors[input.executorId]
       if (!executor) throw new Error(`Unknown Agent Executor: ${input.executorId}`)

@@ -1,3 +1,4 @@
+import { createExecutionBindingApi } from './execution-binding'
 import { unwrapSessionInputOperationResult } from '../shared/session-input-result.js'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createPreloadConversationRead } from './conversation-read'
@@ -545,6 +546,7 @@ const api: AgentMuxPreloadApi = {
     resolveCreationSessionId: (hostId, createOperationId) => ipcRenderer.invoke('sessions:resolveCreationSessionId', hostId, createOperationId),
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
     endpointWarnings: () => ipcRenderer.invoke('sessions:endpointWarnings'),
+    ...createExecutionBindingApi(ipcRenderer),
     notifyInputOccupation: control => ipcRenderer.invoke('sessions:inputOccupation', control),
     nativeSessions: input => ipcRenderer.invoke('sessions:nativeSessions', input),
     nativeHistoryPage: input => ipcRenderer.invoke('sessions:nativeHistoryPage', input),

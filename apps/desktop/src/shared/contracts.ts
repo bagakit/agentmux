@@ -1869,6 +1869,8 @@ export type AgentMuxDesktopApi = {
     snapshot(): Promise<RuntimeSnapshot>
     /** Current Desktop connection observations; never waits for Session membership. */
     endpointWarnings(): Promise<RuntimeEndpointWarning[]>
+    executionBinding(bindingId: string): Promise<import('@agentmux/core').AgentExecutionInspection | null>
+    observeExecutionBinding(bindingId: string, listener: (value: import('@agentmux/core').AgentExecutionInspection | null) => void, onError: (message: string) => void): () => void
     notifyInputOccupation(control: AgentSessionControl): Promise<void>
     nativeSessions(input: NativeAgentSessionsInput): Promise<NativeAgentSessionsResult>
     nativeHistoryPage(input: NativeAgentHistoryInput): Promise<NativeAgentHistoryResult>

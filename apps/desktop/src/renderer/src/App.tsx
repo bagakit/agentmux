@@ -115,6 +115,7 @@ function DesktopApp() {
   const openSettings = useCallback((section: SettingsPageId, executorId?: string, field?: string): void => navigateSettings({ section, executorId, field }), [navigateSettings])
   const closeSettings = useCallback((): void => setSettingsOpen(false), [])
   const openToolkit = useCallback((toolId: string): void => navigateSettings({ section: 'toolkit', toolId }), [navigateSettings])
+  const openHostExecutors = useCallback((hostId: string): void => navigateSettings({ section: 'agents', field: 'host-executors', hostId }), [navigateSettings])
   const openHostSettings = useCallback((hostId: string): void => navigateSettings({ section: 'hosts', hostId }), [navigateSettings])
   const openChannel = useCallback((channelOrigin: ChannelSettingsOrigin): void => {
     const { connection } = channelOrigin
@@ -125,7 +126,7 @@ function DesktopApp() {
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const chooseAgent = useCallback(() => { setSettingsOpen(false); setQuickSwitchOpen(true) }, [])
-  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings, openChannel, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries, openMoteLark, chooseAgent }), [openSettings, openToolkit, openHostSettings, openChannel, openMoteLark, chooseAgent])
+  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings, openHostExecutors, openChannel, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries, openMoteLark, chooseAgent }), [openSettings, openToolkit, openHostSettings, openHostExecutors, openChannel, openMoteLark, chooseAgent])
   const quickSwitchOrigin = useRef<{ element: HTMLElement | null; navigation: string } | null>(null)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)

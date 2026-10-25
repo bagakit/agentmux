@@ -79,6 +79,9 @@ export type LauncherWorkbenchSurface = {
   regionId: string
   kind: 'launcher'
   workspaceId: string
+  /** Explicit split execution; workspaceId remains the project/tools resource. */
+  agentWorkspaceId?: string
+  agentExecutor?: { hostId: string; executorId: string; executorRevision: string }
   /** Explicit future Executor stays with this durable Launcher when its target changes. */
   executorId?: string
 }

@@ -15,10 +15,10 @@ export function hostExecutorInventoryMatches(inventory: HostExecutorInventorySta
 
 /** One choice projection. Remote launch metadata always belongs to that target Host. */
 export function executorsForHost(config: AppConfig | null | undefined, hostId: string | undefined,
-  detections: Record<string, ExecutorDetectionState>, inventory: HostExecutorInventoryState | undefined): ExecutorChoice[] {
+  detections: Record<string, ExecutorDetectionState>, inventory: HostExecutorInventoryState | undefined, source?: 'host'): ExecutorChoice[] {
   const host = config?.hosts.find(item => item.id === hostId)
   if (!host) return []
-  if (host.kind === 'local') return configuredExecutors(config).map(({ id, label, providerId, command, env }) => ({ id, label, providerId, command,
+  if (host.kind === 'local' && source !== 'host') return configuredExecutors(config).map(({ id, label, providerId, command, env }) => ({ id, label, providerId, command,
     detection: currentExecutorDetection(detections[executorDetectionKey(host.id, id)], id, { providerId, command, env }, host) }))
   if (!hostExecutorInventoryMatches(inventory, host)) return []
   return (inventory.result?.executors ?? []).map(item => ({ id: item.executorId, label: item.label, providerId: item.providerId,

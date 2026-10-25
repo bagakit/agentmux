@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import type { HostConfig, WorkspaceRecord } from '../../../shared/contracts'
@@ -15,7 +15,11 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
 /** Select a future execution resource without checking or changing any existing Run. */
-export function LauncherEnvironment({ workspace, host, check, displayPath, active, contextName, hosts, workspaces, onSelectWorkspace, selectionDisabled = false, onManageProjects }: {
+export function LauncherEnvironment({ workspace, host, check, displayPath, active, contextName, hosts, workspaces, onSelectWorkspace, selectionDisabled = false, onManageProjects, roleLabel, selectionLabel = 'Runtime environment', chooseTitle = 'Choose where to start', children }: {
+  roleLabel?: string | undefined
+  selectionLabel?: string
+  chooseTitle?: string
+  children?: ReactNode
   workspace: WorkspaceRecord | undefined
   host: HostConfig | undefined
   check: HostCheckState | undefined
@@ -48,24 +52,25 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, activ
     return () => { disposed = true; stop() }
   }, [active, open, panel])
 
-  return <header className="launcher-environment">
-    <div className="launcher-environment__project"><div className="launcher-environment__title">
+  return <header className="launcher-environment" data-role={roleLabel ? 'separate' : undefined}>
+    <div className="launcher-environment__project">{roleLabel ? <span className="launcher-environment__role">{roleLabel}</span> : null}<div className="launcher-environment__title">
       <ThemeObjectFolderIcon size={20} /><h2 title={name}>{name}</h2>
     </div>
       <span className="launcher-environment__path" title={displayPath || undefined}>{displayPath || 'No working directory selected'}</span>
     </div>
     <Dialog.Root modal={false} open={open && active} onOpenChange={setOpen}>
-      <Dialog.Trigger asChild><button type="button" className="launcher-environment__host" ref={trigger} disabled={!active} aria-label="Runtime environment" title={`${kind} · ${label}`}>
+      <Dialog.Trigger asChild><button type="button" className="launcher-environment__host" ref={trigger} disabled={!active} aria-label={selectionLabel} title={`${kind} · ${label}`}>
         <ThemeObjectHostIcon size={16} /><span>{label}</span><ThemeNavigationDownIcon size={12} />
       </button></Dialog.Trigger>
       {active ? <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Content ref={setPanel} className="launcher-environment__panel" inert={!open} style={{ visibility: 'hidden' }}
           onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
-          <header><div className="launcher-environment__identity"><ThemeObjectHostIcon size={18} /><div><Dialog.Title>Choose where to start</Dialog.Title><Dialog.Description>Current target · {label} · {kind}</Dialog.Description></div></div>
+          <header><div className="launcher-environment__identity"><ThemeObjectHostIcon size={18} /><div><Dialog.Title>{chooseTitle}</Dialog.Title><Dialog.Description>Current target · {label} · {kind}</Dialog.Description></div></div>
             <Dialog.Close className="icon-button" aria-label="Close runtime environment" onClick={() => trigger.current?.focus()}><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
           {open ? <LauncherExecutionPicker hosts={hosts} workspaces={workspaces} selected={workspace} disabled={selectionDisabled}
             onSelect={workspaceId => { onSelectWorkspace(workspaceId); setOpen(false); trigger.current?.focus() }}
             onManageProjects={() => { setOpen(false); onManageProjects() }} /> : null}
+          {children}
           <details className="launcher-environment__details"><summary>Environment details</summary><dl>
             <div><dt>Working directory</dt><dd className="launcher-environment__directory" title={displayPath || undefined}>{displayPath || 'Not selected'}</dd></div>
             {workspace?.path && workspace.path !== displayPath ? <div><dt>Full path</dt><dd className="launcher-environment__directory">{workspace.path}</dd></div> : null}

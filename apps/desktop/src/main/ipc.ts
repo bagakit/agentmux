@@ -1,3 +1,5 @@
+import { registerExecutionBindingIpc } from './execution-binding-ipc.js'
+import { ExecutionBindingReaders } from './execution-binding-readers.js'
 import { AgentExecutionBindingService } from '@agentmux/core'
 import { preparePublicUserProfile } from '@agentmux/host/author-profile'
 import { fileUploadRevision, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
@@ -2303,7 +2305,9 @@ export async function registerIpc(args: {
   registerMoteChatIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
   registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
   registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), runtime: args.runtime })
+  const executionBindingReaders = new ExecutionBindingReaders(bindingId => executionBindings.inspect(bindingId))
   const executionBindings = new AgentExecutionBindingService(join(app.getPath('userData'), 'execution-bindings'), {
+    onObservation: inspection => executionBindingReaders.publish(inspection),
     resolveHost: async hostId => {
       const scopes = args.runtime.rpcClients().filter(scope => scope.hostId === hostId)
       if (scopes.length !== 1) throw new AgentMuxError('Execution requires one exact configured Host route.', 'UNKNOWN_HOST')
@@ -2313,6 +2317,7 @@ export async function registerIpc(args: {
       return { runtimeId: identity.runtimeId, client }
     }
   })
+  registerExecutionBindingIpc({ handle: handleWithEvent, assertTrusted: requireTrustedSender, bindings: executionBindings, readers: executionBindingReaders })
   // Rejoin only retained tool readers. Startup never creates or restores an Agent.
   void executionBindings.restoreReaders().catch(error => console.warn('Original tool execution observation is unavailable:', error))
   const control = new AgentMuxControlServer({
@@ -2428,7 +2433,7 @@ export async function registerIpc(args: {
       { owner: 'control-listener', dispose: () => { ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl) } },
       { owner: 'control-bridge', dispose: () => controlBridge.dispose() },
       { owner: 'control-server', dispose: () => control.stop() },
-      { owner: 'execution-binding-reader', dispose: () => executionBindings.dispose() },
+      { owner: 'execution-binding-reader', dispose: () => { executionBindingReaders.dispose(); return executionBindings.dispose() } },
       { owner: 'channel-metadata', dispose: () => channelMetadata?.dispose() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },

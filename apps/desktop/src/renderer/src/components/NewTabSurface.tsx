@@ -7,7 +7,7 @@ import { AgentAvatar } from './AgentAvatar'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
+import { TERMINAL_FONT_SIZE_DEFAULT, isScratchWorkspaceId } from '../../../shared/contracts'
 import { lifecycleNotification, notificationEventIdentity, useAppStore, warmTerminalKey } from '../store'
 import { useWorkbenchBrowserPresentation, useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { mainRegionReference } from '../lib/desktop-focus-navigation'
@@ -132,11 +132,15 @@ export function NewTabSurface({
     const surface = tabId && regionId ? state.tabs[tabId]?.regions[regionId] : undefined
     return surface?.kind === 'launcher' ? surface.workspaceId : undefined
   })
+  const agentTarget = useAppStore(state => {
+    const surface = tabId && regionId ? state.tabs[tabId]?.regions[regionId] : undefined
+    return surface?.kind === 'launcher' ? surface : undefined
+  })
   const topicPreparation = useAppStore(state => tabId ? state.tabs[tabId]?.topicPreparation : undefined)
   const primaryBotUnconfirmed = useAppStore(state => Boolean(tabId && prompt && state.tabs[tabId]?.topicId === PMO_TEAMS_TOPIC_ID &&
     primaryMoteHasBot(state) && !primaryMoteExecutorId(state)))
   const explicitExecutorChoice = Boolean(moteExecutor || manualChoice?.regionId === regionId && manualChoice?.moteId === moteId && manualChoice?.executorId === executorId)
-  const displayedExecutorId = primaryBotUnconfirmed && !explicitExecutorChoice ? '' : executorId
+  const ordinaryExecutorId = primaryBotUnconfirmed && !explicitExecutorChoice ? '' : executorId
   const detections = useAppStore((state) => state.executorDetections)
   const detectExecutors = useAppStore((state) => state.detectExecutors)
   const launchAgent = useAppStore((state) => state.launchAgent)
@@ -165,7 +169,13 @@ export function NewTabSurface({
     activeWorkspaceId
   }))
   const host = workspace ? config?.hosts.find((candidate) => candidate.id === workspace.hostId) : undefined
-  const inventory = useAppStore(state => workspace ? state.hostExecutorInventories[workspace.hostId] : undefined)
+  const splitExecution = agentTarget?.agentWorkspaceId !== undefined
+  const agentWorkspace = splitExecution ? config?.workspaces.find(item => item.id === agentTarget.agentWorkspaceId) : workspace
+  const splitWorkspaceSupported = Boolean(workspace && agentWorkspace && !isScratchWorkspaceId(workspace.id) && !isScratchWorkspaceId(agentWorkspace.id))
+  const agentHost = agentWorkspace ? config?.hosts.find(candidate => candidate.id === agentWorkspace.hostId) : undefined
+  const inventory = useAppStore(state => agentWorkspace ? state.hostExecutorInventories[agentWorkspace.hostId] : undefined)
+  const displayedExecutorId = splitExecution ? agentTarget?.agentExecutor?.executorId ?? '' : ordinaryExecutorId
+  const checkAgents = (hostId: string, options?: { onlyUnconfirmed?: boolean }) => detectExecutors(hostId, { ...options, ...(splitExecution ? { source: 'host' as const } : {}) })
   const localHome = useAppStore(state => state.localHome)
   const displayPath = workspace ? formatPathForDisplay(workspace.path, {
     home: host?.kind === 'local' ? localHome : '', copyPathsAsAbsolute: config?.copyPathsAsAbsolute
@@ -190,8 +200,8 @@ export function NewTabSurface({
   })
   const { slotHeld: warmSlotHeld } = warmPreview
   const executors = useMemo(
-    () => executorsForHost(config, workspace?.hostId, detections, inventory),
-    [config?.executors, config?.hosts, detections, workspace, inventory]
+    () => executorsForHost(config, agentWorkspace?.hostId, detections, inventory, splitExecution ? 'host' : undefined),
+    [config?.executors, config?.hosts, detections, agentWorkspace, inventory, splitExecution]
   )
   // An unconfirmed discovery check is not evidence that the configured Agent cannot work.
   const installedExecutors = executors.filter(executor => executor.detection?.state !== 'missing').sort((a, b) => Number(b.detection?.state === 'ready') - Number(a.detection?.state === 'ready'))
@@ -204,11 +214,11 @@ export function NewTabSurface({
   const saveSection = useLauncherState(state => state.setSection)
   const saveExecutor = useLauncherState(state => state.selectExecutor)
   const savedExecutor = useLauncherState(state => workspace ? state.executors[workspace.id] : undefined)
-  const selectedExecutor = executors.find(executor => executor.id === displayedExecutorId)
-  const unconfirmedAvailability = host?.kind === 'ssh' && (!hostExecutorInventoryMatches(inventory, host) || inventory.state !== 'ready') ||
+  const selectedExecutor = executors.find(executor => executor.id === displayedExecutorId && (!splitExecution || agentTarget?.agentExecutor?.hostId === agentWorkspace?.hostId && agentTarget?.agentExecutor?.executorRevision === executor.executorRevision))
+  const unconfirmedAvailability = (splitExecution || agentHost?.kind === 'ssh') && (!hostExecutorInventoryMatches(inventory, agentHost) || inventory.state !== 'ready') ||
     executors.some(executor => executor.detection?.state !== 'ready' && executor.detection?.state !== 'missing')
-  const retryingAvailability = useLauncherExecutorRecovery(host,
-    motionActive && inputRegionActive && !controlNavigation && sections.agents !== 'hidden', unconfirmedAvailability)
+  const retryingAvailability = useLauncherExecutorRecovery(agentHost,
+    motionActive && inputRegionActive && !controlNavigation && sections.agents !== 'hidden', unconfirmedAvailability, splitExecution ? 'host' : undefined)
   function setSection(section: LauncherSection, mode: LauncherSectionMode) {
     if (section === 'agents' && mode !== 'expanded' && surfaceRef.current?.contains(document.activeElement)) restoreAgentsFocus.current = mode
     if (workspace) saveSection(workspace.id, section, mode)
@@ -221,6 +231,11 @@ export function NewTabSurface({
     surfaceRef.current.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)?.focus({ preventScroll: true })
   }, [sections.agents, motionActive])
   function chooseExecutor(id: string) {
+    if (splitExecution) {
+      const target = materializeLauncher()
+      if (target) useAppStore.getState().setLauncherAgentExecutor(target, id)
+      return
+    }
     if (launcherRef && workspace) useAppStore.getState().setLauncherExecutionWorkspace(launcherRef, workspace.id, id)
     setManualChoice({ regionId, executorId: id, moteId })
     setExecutorId(id)
@@ -274,17 +289,21 @@ export function NewTabSurface({
 
   useEffect(() => {
     if (sections.agents === 'hidden') return
-    if (!workspace || (host?.kind === 'ssh' ? hostExecutorInventoryMatches(inventory, host) : executors.every((executor) => executor.detection))) return
+    if (!agentWorkspace || (splitExecution || agentHost?.kind === 'ssh' ? hostExecutorInventoryMatches(inventory, agentHost) : executors.every((executor) => executor.detection))) return
     if (!visible || !presentationActive || !inputRegionActive || controlNavigation) return
-    void detectExecutors(workspace.hostId)
-  }, [executors, inventory, host, detectExecutors, visible, presentationActive, inputRegionActive, controlNavigation, workspace, sections.agents])
+    void checkAgents(agentWorkspace.hostId)
+  }, [executors, inventory, agentHost, detectExecutors, visible, presentationActive, inputRegionActive, controlNavigation, agentWorkspace, splitExecution, sections.agents])
 
   useEffect(() => {
+    if (splitExecution) {
+      if (!agentTarget?.agentExecutor && installedExecutors[0] && launcherRef) chooseExecutor(installedExecutors[0].id)
+      return
+    }
     if (moteId && (explicitSavedExecutor || moteExecutor || manualChoice?.moteId === moteId)) return
     if (installedExecutors.some((executor) => executor.id === executorId)) return
     const first = installedExecutors[0]
     if (first) setExecutorId(first.id)
-  }, [executorId, installedExecutors, moteId, explicitSavedExecutor, moteExecutor, manualChoice])
+  }, [executorId, installedExecutors, moteId, explicitSavedExecutor, moteExecutor, manualChoice, splitExecution, agentTarget?.agentExecutor])
 
   async function run<T>(kind: 'agent' | 'terminal' | 'browser' | 'note', action: () => Promise<T>): Promise<void> {
     if (busy) return
@@ -309,9 +328,9 @@ export function NewTabSurface({
   // 「现在能不能启动」判一次，主按钮的 disabled 与 Cmd/Ctrl+Enter 那条路共用它。手抄两份时两条路会对
   // 同一概念判得不一样，症状是按钮灰着而键盘照旧发车（或反过来）。
   const readiness = {
-    hasWorkspace: Boolean(workspace),
+    hasWorkspace: Boolean(workspace && agentWorkspace && (!splitExecution || splitWorkspaceSupported)),
     busy: busy !== null,
-    installedExecutorCount: primaryBotUnconfirmed && !explicitExecutorChoice ? 0 : installedExecutors.length
+    installedExecutorCount: splitExecution ? selectedExecutor ? 1 : 0 : primaryBotUnconfirmed && !explicitExecutorChoice ? 0 : installedExecutors.length
   }
   // 启动这一件事也只写一次：按钮的 onClick 与键盘那条路调的是同一个函数。抄两遍时任何一处漏掉
   // launchOptionSelection 或那两个名字，就变成「用鼠标点带着精调启动、用键盘发就丢掉精调」。
@@ -321,7 +340,7 @@ export function NewTabSurface({
       const target = materializeLauncher()
       if (!target) return Promise.resolve()
       return launchAgent(
-        executorId,
+        displayedExecutorId,
         expandSemanticReferences(prompt),
         tabGroupId,
         target,
@@ -356,6 +375,14 @@ export function NewTabSurface({
     } catch (cause) { setError(presentError(cause)) }
   }
 
+  function chooseAgentWorkspace(workspaceId: string | null): void {
+    if (busy) return
+    try {
+      const target = materializeLauncher()
+      if (target) useAppStore.getState().setLauncherAgentWorkspace(target, workspaceId)
+    } catch (cause) { setError(presentError(cause)) }
+  }
+
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   const attachments = useComposerAttachments({ scope: toolsScope, hostId: workspace?.hostId, workspacePath: workspace?.path,
     disabled: false, insertion: insertionRef, feedback, document: dialogDocument, shortcutActive: visible && presentationActive && sections.agents === 'expanded',
@@ -367,8 +394,27 @@ export function NewTabSurface({
       style={regionHeight === null ? undefined : { '--launcher-region-height': `${regionHeight}px` } as CSSProperties} body={<>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive}
         hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} onSelectWorkspace={chooseExecutionWorkspace}
-        selectionDisabled={busy !== null} onManageProjects={() => settings?.open('hosts')} />
+        selectionDisabled={busy !== null} onManageProjects={() => settings?.open('hosts')}
+        roleLabel={splitExecution ? 'Project & tools' : undefined}>
+        <label className="launcher-execution-mode"><input type="checkbox" checked={splitExecution} disabled={busy !== null || !workspace || !splitExecution && isScratchWorkspaceId(workspace.id)}
+          onChange={event => chooseAgentWorkspace(event.target.checked ? workspace!.id : null)} />
+          <span>Run the Agent on a separate host</span></label>
+        {workspace && isScratchWorkspaceId(workspace.id) ? <p className="launcher-environment__hint">Separate execution supports registered projects. Mote keeps its original runtime and context.</p> : null}
+      </LauncherEnvironment>
+      {splitExecution ? <LauncherEnvironment workspace={agentWorkspace} host={agentHost} check={undefined}
+        displayPath={agentWorkspace ? formatPathForDisplay(agentWorkspace.path, { home: agentHost?.kind === 'local' ? localHome : '', copyPathsAsAbsolute: config?.copyPathsAsAbsolute }) : ''}
+        roleLabel="Agent runtime" selectionLabel="Agent runtime environment" chooseTitle="Choose where the Agent runs" active={motionActive}
+        hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} onSelectWorkspace={chooseAgentWorkspace}
+        selectionDisabled={busy !== null} onManageProjects={() => settings?.open('hosts')} /> : null}
 
+      {splitExecution && !splitWorkspaceSupported ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+        step: 'Separate execution needs two registered projects', mode: 'Mote context is not configured for this mode. Your selection and draft are retained.',
+        restore: 'Choose a registered project for both ends, or turn off separate execution to launch in the original workspace.'
+      } }} /> : null}
+      {splitExecution && agentTarget?.agentExecutor && !selectedExecutor && inventory?.state === 'ready' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+        step: 'Choose the current Agent configuration', mode: 'The saved Agent configuration does not match this Host revision. Your original selection and draft are retained.',
+        restore: 'Select an Agent from this Host before launching.'
+      } }} /> : null}
       {primaryBotUnconfirmed ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: 'Primary Mote Agent is unconfirmed',
         mode: 'Your request has not been sent. The same Mote, Region and complete draft are kept.',
@@ -388,8 +434,8 @@ export function NewTabSurface({
           <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={prompt}>{prompt ? prompt.split('\n')[0] : 'Start a task'}</small></span><ThemeNavigationDisclosureIcon size={14} />
         </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong></span>}
         <span className="launcher-section-actions">
-          {sections.agents === 'collapsed' ? <LauncherResumePicker workspace={workspace} disabled={busy !== null} /> : null}
-          <button type="button" className="icon-button" aria-label="Refresh agents on this host" title="Refresh agents on this host" disabled={!workspace || detecting} onClick={() => workspace && void detectExecutors(workspace.hostId)}>{detecting ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionRefreshIcon size={13} />}</button>
+          {sections.agents === 'collapsed' ? <LauncherResumePicker workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} /> : null}
+          <button type="button" className="icon-button" aria-label="Refresh agents on this host" title="Refresh agents on this host" disabled={!agentWorkspace || detecting} onClick={() => agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionRefreshIcon size={13} />}</button>
           {sections.agents === 'expanded' ? <button type="button" className="icon-button" aria-label="Collapse Agents" title="Collapse" onClick={() => setSection('agents', 'collapsed')}><ThemeActionCollapseIcon size={13} /></button> : null}
           <button type="button" className="icon-button" aria-label="Close Agents" title="Close Agents" onClick={() => setSection('agents', 'hidden')}><ThemeActionCloseIcon size={13} /></button>
         </span>
@@ -397,8 +443,9 @@ export function NewTabSurface({
 
       {sections.agents === 'expanded' ? <>
         {moteId && displayedExecutorId && !executors.some(item => item.id === displayedExecutorId) ? <div className="launcher-error" role="status">Saved Agent {displayedExecutorId} is unavailable. Choose another Agent or edit this Mote’s quick mode.</div> : null}
-        <AgentExecutorPicker executors={executors} selected={displayedExecutorId || null}
-          active={visible && presentationActive} onSelect={chooseExecutor} />
+        <AgentExecutorPicker executors={executors} selected={selectedExecutor?.id ?? null}
+          active={visible && presentationActive} onSelect={chooseExecutor}
+          onConfigure={splitExecution && agentWorkspace ? () => settings?.openHostExecutors?.(agentWorkspace.hostId) : undefined} />
         <div className="launcher-composer composer" onFocusCapture={attachments.claimScreenshotTarget}><ComposerCompletionEditor completionConfig={completion.completionConfig} commands={completion.commands} skills={completion.skills}
           references={completion.references} promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
           completionFeedback={completion.completionFeedback} active={visible && presentationActive} aria-label="Agent prompt" disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
@@ -421,18 +468,18 @@ export function NewTabSurface({
       </> : null}
       {sections.agents === 'expanded' ? <div className="launch-surface__footer">
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
-        <div className="launcher-primary-actions"><LauncherResumePicker workspace={workspace} disabled={busy !== null} />
+        <div className="launcher-primary-actions"><LauncherResumePicker workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} />
           <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busy === 'agent' ? 'Launching…' : 'Launch'}</button>
         </div>
       </div> : null}
-      {host?.kind === 'ssh' && inventory && inventory.state !== 'ready' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
-        step: inventory.state === 'checking' ? 'Checking agents on this host' : 'Host Executor discovery failed', mode: `${host?.label ?? workspace?.hostId}: ${inventory.detail ?? 'Current inventory is unknown.'} Previously read configurations remain selectable.`,
+      {(splitExecution || agentHost?.kind === 'ssh') && inventory && inventory.state !== 'ready' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+        step: inventory.state === 'checking' ? 'Checking agents on this host' : 'Host Executor discovery failed', mode: `${agentHost?.label ?? agentWorkspace?.hostId}: ${inventory.detail ?? 'Current inventory is unknown.'} Previously read configurations remain selectable.`,
         restore: inventory.state === 'checking' ? 'Checking this host. Existing configurations remain selectable.'
           : retryingAvailability ? 'Rechecking automatically. You can keep writing or check again now.'
             : 'Check again to refresh this host. Existing configurations and your draft are kept.'
       } }} actions={<button type="button" className="small-button" disabled={inventory.state === 'checking'}
-        onClick={() => { if (workspace) void detectExecutors(workspace.hostId) }}>{inventory.state === 'checking' ? 'Checking…' : 'Check again'}</button>} /> : sections.agents !== 'hidden' ? <LauncherAvailabilityNotice executor={selectedExecutor}
-        checking={selectedExecutor?.detection?.state === 'checking'} retrying={retryingAvailability} onCheck={() => { if (workspace) void detectExecutors(workspace.hostId) }} /> : null}
+        onClick={() => { if (agentWorkspace) void checkAgents(agentWorkspace.hostId) }}>{inventory.state === 'checking' ? 'Checking…' : 'Check again'}</button>} /> : sections.agents !== 'hidden' ? <LauncherAvailabilityNotice executor={selectedExecutor}
+        checking={selectedExecutor?.detection?.state === 'checking'} retrying={retryingAvailability} onCheck={() => { if (agentWorkspace) void checkAgents(agentWorkspace.hostId) }} /> : null}
       {fileReferencesOpen && workspace && motionActive ? <ComposerFileReferences key={toolsScope} workspace={workspace} hostLabel={host?.label}
         onSelect={path => { void attachments.referencePaths([path]) }} onClose={() => setFileReferencesOpen(false)} /> : null}
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}

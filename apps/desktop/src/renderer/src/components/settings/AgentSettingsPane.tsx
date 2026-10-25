@@ -118,7 +118,8 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   const editor = useRef<HTMLDivElement>(null)
   const consumedNavigation = useRef<SettingsNavigationRequest | string | undefined>(undefined)
   const [hostId] = useState(initialHost)
-  const [scope, setScope] = useState<'templates' | 'host'>('templates')
+  const [scope, setScope] = useState<'templates' | 'host'>(navigationRequest?.field === 'host-executors' ? 'host' : 'templates')
+  useEffect(() => { if (navigationRequest?.field === 'host-executors') setScope('host') }, [navigationRequest])
   const resource = useResourceDrafts(Object.fromEntries(Object.entries(config.executors).map(([id, executor]) =>
     [id, toDraft(executor)])))
   const drafts = resource.value, setDrafts = resource.setValue
@@ -371,7 +372,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
         {scopeControl}
         <span className="settings-resource-count">{scope === 'templates' ? `${executors.length} global templates` : null}</span>
       </div>
-      <div className="settings-agent-body" hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} /></div>
+      <div className="settings-agent-body" hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} requestedHostId={navigationRequest?.field === 'host-executors' ? navigationRequest.hostId : undefined} /></div>
       <div hidden={scope !== 'templates'} className="settings-agent-templates">
         <ProviderCatalogPane entries={providerCatalog} read={catalogRead} executorCounts={executorCounts}
           selectedId={providerId} onSelect={selectProvider} onRefresh={() => void refreshProviders()} />

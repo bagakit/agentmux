@@ -65,7 +65,7 @@ type AgentTimelineRuntimeEvent = RuntimeEvent & {
 
 export type PendingAgentLaunch = {
   /** Exact submitted request, captured before launch; never reconstructed from an editable draft. */
-  request?: { executorId: string; hostId?: string; workspacePath?: string; createOperationId?: string; prompt?: string; agentMuxNote?: string; goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent }
+  request?: { toolWorkspace?: import('../../../shared/contracts').AgentLaunchInput['toolWorkspace']; executionWorkspaceId?: string; executorRevision?: string; executorId: string; hostId?: string; workspacePath?: string; createOperationId?: string; prompt?: string; agentMuxNote?: string; goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent }
   events: RuntimeEvent[]
   overflowed: boolean
   /** Accepted Core identity while optional display reads are unavailable. */
@@ -663,8 +663,8 @@ export function reduceSessionLaunchFailed(
         ...launcher,
         regionId,
         kind: 'launcher',
-        workspaceId: owner.surface.workspaceId,
-        ...(executorId ? { executorId } : {})
+        workspaceId: launcher?.workspaceId ?? owner.surface.workspaceId,
+        ...(executorId && !launcher?.agentWorkspaceId ? { executorId } : {})
       })
     }
   }

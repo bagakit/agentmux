@@ -39,8 +39,9 @@ type Registration = {
 }
 
 /** Read the executing Host's registry. Registration is an explicit complete configuration. */
-export function HostExecutorSettings({ config, active }: { config: AppConfig; active: boolean }) {
+export function HostExecutorSettings({ config, active, requestedHostId }: { config: AppConfig; active: boolean; requestedHostId?: string | undefined }) {
   const [hostId, setHostId] = useState(() => config.workspaces.find(workspace => workspace.id === useAppStore.getState().activeWorkspaceId)?.hostId ?? config.hosts[0]?.id ?? '')
+  useEffect(() => { if (requestedHostId) setHostId(requestedHostId) }, [requestedHostId])
   const inventory = useAppStore(state => state.hostExecutorInventories[hostId])
   const detect = useAppStore(state => state.discoverHostExecutors)
   const providers = useAppStore(state => state.providerCatalog)
