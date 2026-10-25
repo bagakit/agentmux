@@ -102,7 +102,9 @@ export async function createConnectionServices(options: { directory: string | un
         if (rooms) connections.rooms = { ...connections.rooms, create: (input, context) => rooms.create(input, context), inspect: input => rooms.inspect(input) }
         ingress = routing && options.ingress ? new DurableIngressHost({ connections, bindings: routing, authenticators: connections.ingressAuthenticators(), core: options.ingress.core, ...(options.ingress.authoritySource ? { authoritySource: options.ingress.authoritySource } : {}),
           ...(publicationStore ? { contextPublications: publicationStore, queryReceived: (binding, record) => publication?.receiveQuery(binding, record) } : {}),
-          ...(moteChat ? { prepareInput: async (record: import('@agentmux/core/connections').ConnectionIngressMessage) => {
+          ...(moteChat ? { inputTarget: (record, binding) => record.conversationKind === 'direct' && moteChat.hasAdmission(record.ingressId, binding.bindingId, record.actor)
+            ? { kind: 'session-conversation' as const } : undefined,
+          prepareInput: async (record: import('@agentmux/core/connections').ConnectionIngressMessage) => {
             if (record.conversationKind === 'direct') {
               try {
                 const binding = await moteChat.prepareIncoming({ ...record, conversationKind: 'direct' })

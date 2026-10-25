@@ -51,6 +51,8 @@ export type DurableIngressOptions = {
   authenticators: readonly IngressAuthenticator[]
   /** Resolve only an authenticated, retained, unclaimed input before borrowing Core. */
   prepareInput?(record: ConnectionIngressMessage): Promise<{ state: 'ready' } | { state: 'refused'; code: string }>
+  /** Original admission owner may address its durable conversation for future input. */
+  inputTarget?(record: ConnectionIngressMessage, binding: RoomBinding): import('@agentmux/core').AgentDirectedPromptTarget | undefined
   /** Optional publication feedback follows authorized intake, never owns Agent input. */
   queryReceived?(binding: RoomBinding, record: ConnectionIngressMessage): void
   /** Borrow original confirmed publication identities; never a second history or authority owner. */
@@ -297,7 +299,14 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     if (this.options.authoritySource && binding.executionHostId !== 'local' && !source) fail('INGRESS_TARGET_UNCONFIRMED')
     if (source && !isDeepStrictEqual(source, this.options.authoritySource?.(binding.executionHostId, binding.executionRuntimeId))) fail('INGRESS_TARGET_UNCONFIRMED')
     const author = parseAgentExternalMessageAuthor({ kind: 'external', connectionId: binding.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: binding.bindingId, bindingRevision: binding.revision, ...grantAuthorReference(grant), ...(source ? { authoritySource: source } : {}) })
-    if (expected?.admissionIntent) { const { expectedRun: _run, ...target } = expected.admissionIntent; if (!isDeepStrictEqual(target, binding.inputTarget ?? { kind: 'manual-actor' })) fail('INGRESS_AUTHORITY_REVISED') }
+    if (expected?.admissionIntent) {
+      const { expectedRun: _run, ...target } = expected.admissionIntent
+      // Retained inputs keep the original Binding target; new semantic inputs
+      // also require the exact admission owner to confirm this original query.
+      const authorized = target.kind === 'session-conversation'
+        ? this.options.inputTarget?.(record, binding) : binding.inputTarget ?? { kind: 'manual-actor' }
+      if (!isDeepStrictEqual(target, authorized)) fail('INGRESS_AUTHORITY_REVISED')
+    }
     if (expected && (expected.hostId !== binding.executionHostId || expected.agentSessionId !== binding.agentSessionId || !equal(expected.author, author))) fail('INGRESS_AUTHORITY_REVISED')
     return { binding, author, event }
   }
@@ -489,7 +498,8 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       if (current.kind === 'action') fail('INGRESS_EVENT_CONFLICT')
       if (current.state !== 'received') return { record: current, own: false as const }
       const channelProfile = this.options.connections.readChannelActor(current.connectionId, current.actor)
-      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: mintObjectId(), messageId: mintObjectId(), author: original.author, channelProfile, ...(channelQuote ? { channelQuote, ...(contextSource ? { contextSource } : {}), ...(contextObservation ? { contextObservation } : {}) } : {}), admissionIntent: { ...(original.binding.inputTarget ?? { kind: 'manual-actor' as const }), expectedRun } }
+      const target = this.options.inputTarget?.(current, original.binding) ?? original.binding.inputTarget ?? { kind: 'manual-actor' as const }
+      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: mintObjectId(), messageId: mintObjectId(), author: original.author, channelProfile, ...(channelQuote ? { channelQuote, ...(contextSource ? { contextSource } : {}), ...(contextObservation ? { contextObservation } : {}) } : {}), admissionIntent: { ...target, expectedRun } }
       this.authorize(current, frozen)
       const next = this.write({ ...current, state: 'claimed', input: frozen })
       this.contextPositions?.claimed(next)

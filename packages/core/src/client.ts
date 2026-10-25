@@ -6589,7 +6589,7 @@ export class AgentMuxClient {
       }
     }
     const ordinaryPlan = provider.planPromptInput(outbound,
-      admissionIntent.kind === 'manual-actor' || input.execution === undefined ? undefined : { execution: input.execution })
+      admissionIntent.kind === 'manual-actor' || admissionIntent.kind === 'session-conversation' || input.execution === undefined ? undefined : { execution: input.execution })
     const protocolInput: AgentPromptProtocolInputBoundary = { invalid: false }
     let releasePreparationObservation: ((next?: AbortController) => void) | undefined
     let preparationStarted = false

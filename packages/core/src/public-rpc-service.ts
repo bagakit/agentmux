@@ -108,8 +108,8 @@ import { DurableAgentMuxMessageQueue, readRoutedInputMailbox, appendGlobalMessag
 import { assertAgentMessageRouteIntent, type AgentMessageRoute } from './agent-message-route.js'
 import { agentPromptCondition, validateAgentPromptCondition, validateAgentPromptInputKey, validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
 import { AGENT_INPUT_SUBMIT_FIELDS, parseAgentInputSubmit } from './agent-input-submit.js'
-import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { parseAgentInputChangesRead, parseAgentInputChangesPage } from './agent-input-changes.js'
+import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef, type AgentInputSubmissionReceipt, type AgentInputCallContext } from './agent-input-wait.js'
 import { diagnoseAgentMux } from './doctor.js'
 import { OrderedSessionOutputFollow, type FollowOutput } from './session-output-follow.js'
@@ -345,9 +345,9 @@ const NATIVE_FIELDS = {
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes', 'kind', 'query', 'scanLimit'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
+  'agent.input.changes': ['hostId', 'agentSessionId', 'limit', 'cursor', 'after'],
   'agent.input.ls': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes'],
   'agent.input.submit': AGENT_INPUT_SUBMIT_FIELDS,
-  'agent.input.changes': ['hostId', 'agentSessionId', 'limit', 'cursor', 'after'],
   'agent.progress.list': ['target'],
   'agent.progress.create': ['target','intervalMs','prompt','taskSource','operationId'],
   'agent.progress.action': ['target','loopId','action','expectedLoop','operationId'],
@@ -2630,7 +2630,7 @@ export class AgentMuxRpcService {
     const sourceDevice = observedDevice === undefined ? undefined : normalizeOperationDevice(observedDevice)
     const operationId = rpcString(p.operationId, 'Operation ID'), text = rpcText(p.text, 'Message text')
     const addressed = p.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(p.admissionIntent)
-    if (addressed && (addressed.kind !== 'native-conversation' || p.execution !== 'immediate')) throw new AgentMuxError('Explicit native source input requires its original native-conversation intent and immediate execution.', 'INVALID_CONTROL_REQUEST')
+    if (addressed && (addressed.kind !== 'native-conversation' && addressed.kind !== 'session-conversation' || p.execution !== 'immediate')) throw new AgentMuxError('Conversation input requires its original directed intent and immediate execution.', 'INVALID_CONTROL_REQUEST')
     const expectedRun = p.expectedRun === undefined ? addressed?.expectedRun : {
       runId: rpcString(rpcRecord(p.expectedRun, ['runId']).runId, 'Expected recipient Run ID') }
     if (addressed && expectedRun?.runId !== addressed.expectedRun.runId) throw new AgentMuxError('The explicit source input Run conflicts with its caller fence.', 'MESSAGE_RECIPIENT_MISMATCH')

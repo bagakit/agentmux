@@ -521,7 +521,7 @@ export class AgentPromptSubmissionCoordinator {
     // A new manual intent grants ordinary terminal input, regardless of catalog.
     // A saved exact plan retains its original authorization and frozen progress.
     const frozenPreparation = rejoiningFrozenPlan && plan.kind === 'render-then-submit' && plan.prepare !== undefined
-    const currentTerminal = manual || execution === 'immediate' &&
+    const currentTerminal = manual || admissionIntent?.kind === 'session-conversation' || execution === 'immediate' &&
       provider.catalog.capabilities.promptExecution?.immediate === 'terminal-submit' && !frozenPreparation
     if (currentTerminal && plan.kind === 'render-then-submit' && plan.prepare) throw new AgentMuxError(
       'Current-terminal input cannot prepare, interrupt or refresh the original TUI.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -688,7 +688,8 @@ export class AgentPromptSubmissionCoordinator {
     // Default semantic messages address the original durable Core conversation.
     // A manual terminal intent and any previously frozen byte plan stay terminal.
     const defaultMessageInput = control?.requiredNativeSource || control?.idleOnly || inputKey.kind === 'message'
-    const defaultSemanticInput = execution === 'default' && admissionIntent?.kind === 'exact-condition' && !rejoiningFrozenPlan
+    const sessionConversation = admissionIntent?.kind === 'session-conversation'
+    const defaultSemanticInput = (sessionConversation || execution === 'default' && admissionIntent?.kind === 'exact-condition') && !rejoiningFrozenPlan
     const nativeIdleOnly = Boolean(control?.idleOnly || control?.nativeIdleOnly || expectedCompletionId !== undefined || expectedFutureIntent !== undefined)
     // An original Core initialization input already names its Provider-confirmed
     // native object. An unknown transcript locator cannot revoke that input:
@@ -697,7 +698,7 @@ export class AgentPromptSubmissionCoordinator {
     const defaultNativeSource = (current: AgentMuxStoredAgentSession) => {
       const handle = current.nativeHandle
       const selected = hasSelectedNativeTarget(current)
-      if (!defaultSemanticInput || !defaultMessageInput && !selected || current.hostId !== 'local' || run.pid === null || !provider.prepareNativeInput ||
+      if (!defaultSemanticInput || !sessionConversation && !defaultMessageInput && !selected || current.hostId !== 'local' || run.pid === null || !provider.prepareNativeInput ||
           this.deps.registry.isDurabilityUnconfirmed(current.agentSessionId) ||
           handle?.kind !== 'provider' || handle.providerId !== current.providerId ||
           current.nativeBinding && !sameRun(current.nativeBinding.run, current.run) ||
@@ -730,7 +731,9 @@ export class AgentPromptSubmissionCoordinator {
     const source = nativeOriginal && defaultNativeSource(nativeOriginal)
     // Selecting a target does not prove transport availability or the TUI's current
     // conversation. Its semantic message must keep that target even when unavailable.
-    if ((control?.requiredNativeSource || control?.idleOnly || defaultSemanticInput && nativeOriginal && hasSelectedNativeTarget(nativeOriginal)) && !source) throw new AgentMuxError(
+    if ((control?.requiredNativeSource || control?.idleOnly || defaultSemanticInput && nativeOriginal &&
+        (hasSelectedNativeTarget(nativeOriginal) && (!sessionConversation || provider.prepareNativeInput !== undefined) ||
+          sessionConversation && provider.prepareNativeInput !== undefined && nativeOriginal.nativeHandle?.kind === 'provider')) && !source) throw new AgentMuxError(
       'The original native input source is unconfirmed. No input was sent; the Agent and terminal remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
     const target: { source: { providerId: string; nativeSessionId: string }; expectedTurnId?: string } | undefined =
       admissionIntent?.kind === 'native-conversation' ? admissionIntent : source ? { source } : undefined
@@ -754,8 +757,8 @@ export class AgentPromptSubmissionCoordinator {
         const frozenPlan = { ...prepared.plan, clientCorrelation: createNativeInputCorrelation(inputKey) }
         const claimed = await claimSession(session.agentSessionId, session.run, stored => {
           assertAdmission(stored)
-          if (source && (!isDeepStrictEqual(defaultNativeSource(stored), source) || admissionIntent?.kind !== 'exact-condition' ||
-              (stored.promptCompletionAdmission === undefined ? null : stored.promptCompletionAdmission.submissionId) !== admissionIntent.condition.afterSubmissionId)) throw new AgentMuxError(
+          if (source && (!isDeepStrictEqual(defaultNativeSource(stored), source) || !sessionConversation && (admissionIntent?.kind !== 'exact-condition' ||
+              (stored.promptCompletionAdmission === undefined ? null : stored.promptCompletionAdmission.submissionId) !== admissionIntent.condition.afterSubmissionId))) throw new AgentMuxError(
             'The original message source or predecessor changed before native admission. No input was sent.', 'AGENT_PROMPT_CONDITION_CHANGED')
           if (!isDeepStrictEqual(stored.nativeActor, original.nativeActor) || stored.promptCompletionAdmission?.submissionId === submissionId) throw new AgentMuxError('The original native claim changed before dispatch.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
           const next: AgentMuxStoredAgentSession = { ...invalidateAgentIdleEvidence(stored), updatedAt: Math.max(stored.updatedAt, Date.now()),
