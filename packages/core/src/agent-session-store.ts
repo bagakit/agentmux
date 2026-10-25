@@ -702,6 +702,21 @@ export function sessionHistoryMetadata(session: AgentMuxStoredAgentSession): Age
     ...(session.nativeConfirmation ? { previousNativeHandle: session.nativeConfirmation.previousNativeHandle } : {}) })
 }
 
+// Keep cumulative input/recovery bodies in SQLite, rather than materializing them
+// in JS for an exact source read. Raw JSON tokens preserve all original string
+// escapes and types. A duplicate selected key needs the original JSON.parse
+// last-value semantics: SQLite's path lookup would otherwise select its first.
+// The outer query preserves a missing row.
+const activeHistorySourceSql = `SELECT (
+  SELECT CASE WHEN COUNT(*)=COUNT(DISTINCT key)
+    THEN json_group_object(key, json(sessions.json -> fullkey))
+    ELSE sessions.json END
+  FROM json_each(sessions.json)
+  WHERE key IN ('kind','agentSessionId','hostId','providerId','executorId','workspacePath',
+    'toolExecution','createdAt','updatedAt','creation','forkedFrom','nativeHandle',
+    'observedNativeHandle','nativeConfirmation')
+) AS json FROM sessions WHERE id=?`
+
 /** Exact read identity does not consume the Session's cumulative recovery bodies. */
 function activeSessionHistorySource(value: unknown, id: string): AgentSessionHistoryDescriptor {
   const source = record(value, 'Agent Session')
@@ -3105,7 +3120,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   async readHistorySource(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor | null> {
     await observeRead(this.tail, signal)
     return await this.withReadDatabase(db => {
-      const activeRow = db.prepare('SELECT json FROM sessions WHERE id=?').get(agentSessionId)
+      const activeRow = db.prepare(activeHistorySourceSql).get(agentSessionId)
       if (activeRow) return activeSessionHistorySource(JSON.parse(String(activeRow.json)), agentSessionId)
       const row = db.prepare('SELECT json FROM retired_sessions WHERE id=?').get(agentSessionId)
       if (!row) return null
