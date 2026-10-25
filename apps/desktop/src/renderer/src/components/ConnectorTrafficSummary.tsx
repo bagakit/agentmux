@@ -25,9 +25,9 @@ export function ConnectorTrafficSummary({ summary, compact = false, onInspect, a
       {[summary.outgoing, summary.incoming].map(direction => {
         const problem = summary.problems.find(problem => problem.kind === direction.problem)
         return <section className="connector-traffic-summary__tile" key={direction.direction} data-direction={direction.direction} data-tone={direction.tone} aria-label={direction.title}>
-          {compact ? <><span className="connector-traffic-summary__direction">{direction.direction === 'outgoing' ? <OutgoingIcon size={14} /> : <IncomingIcon size={14} />}{direction.direction === 'outgoing' ? 'To group' : 'To Agent'}</span><strong>{direction.value}</strong></>
+          {compact ? <><span className="connector-traffic-summary__direction">{direction.direction === 'outgoing' ? <OutgoingIcon size={14} /> : <IncomingIcon size={14} />}{direction.direction === 'outgoing' ? 'To group' : 'To Agent'}</span><div className="connector-traffic-summary__copy"><strong>{direction.value}</strong>{direction.secondary ? <small>{direction.secondary}</small> : null}</div></>
             : <><span className="connector-traffic-summary__leading" aria-hidden="true">{direction.direction === 'outgoing' ? <OutgoingIcon size={16} /> : <IncomingIcon size={16} />}</span>
-              <div className="connector-traffic-summary__copy"><span className="connector-traffic-summary__direction">{direction.title}</span><strong>{direction.value}</strong><small>{direction.detail}</small></div>{action(problem)}</>}
+              <div className="connector-traffic-summary__copy"><span className="connector-traffic-summary__direction">{direction.title}</span><strong>{direction.value}</strong>{direction.secondary ? <small>{direction.secondary}</small> : null}<small>{direction.detail}</small></div>{action(problem)}</>}
         </section>
       })}
     </div>
