@@ -12,7 +12,8 @@ it('reads through actual Hosted client/service without reconnect, forwards cance
   const read = vi.fn(async (options?: { signal?: AbortSignal }) => { options?.signal?.throwIfAborted(); return facts })
   const core = { connect: vi.fn(async () => {}), connectRuntime: vi.fn(async () => {}), onEvent: () => () => {},
     runtimeIdentity: () => ({ hostId: 'local', instanceId: 'original-daemon', buildIdentity: 'synthetic', protocolVersion: 1, processId: 123, ownership: 'owned' as const }),
-    catalog: () => [], agentSessions: () => [], agentMessageQueuePath: () => fixturePath("synthetic/messages.ndjson"), clientPerformanceDiagnostics: read }
+    catalog: () => [], agentSessions: () => [], readAgentSessions: async () => [], metadata: { pendingIds: () => [] },
+    agentMessageQueuePath: () => fixturePath("synthetic/messages.ndjson"), clientPerformanceDiagnostics: read }
   const service = new AgentMuxHostedRuntimeService(core as unknown as AgentMuxClient, fixturePath("synthetic/sessions.json"), () => hostedTestOwner(core as unknown as AgentMuxClient))
   let end!: () => void
   const subscribe = vi.fn(async (method, params, handlers) => {
@@ -29,9 +30,12 @@ it('reads through actual Hosted client/service without reconnect, forwards cance
     expect(core.connect).not.toHaveBeenCalled(); expect(core.connectRuntime).not.toHaveBeenCalled()
     const controller = new AbortController()
     await client.clientPerformanceDiagnostics({ signal: controller.signal })
-    expect(read.mock.calls.at(-1)?.[0]?.signal).toBe(controller.signal)
-    expect(call.mock.calls.at(-1)?.[2]?.signal).toBe(controller.signal)
+    const coreSignal = read.mock.calls.at(-1)?.[0]?.signal
+    const rpcSignal = call.mock.calls.at(-1)?.[2]?.signal
+    expect(coreSignal?.aborted).toBe(false); expect(rpcSignal?.aborted).toBe(false)
     controller.abort(new Error('cancelled readonly query'))
+    expect(coreSignal?.aborted).toBe(true); expect(coreSignal?.reason).toBe(controller.signal.reason)
+    expect(rpcSignal?.aborted).toBe(true); expect(rpcSignal?.reason).toBe(controller.signal.reason)
     await expect(client.clientPerformanceDiagnostics({ signal: controller.signal })).rejects.toThrow('cancelled readonly query')
     expect(read).toHaveBeenCalledTimes(2)
     const subscriptions = subscribe.mock.calls.length, calls = call.mock.calls.length

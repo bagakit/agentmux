@@ -1,4 +1,6 @@
 import { fixturePath } from './helpers/fixture-values.js'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '../src/errors.js'
@@ -28,10 +30,15 @@ type Inner = {
   agentInputTails: Map<string, { renderObservations: Set<{ controller: AbortController }> }>
 }
 const clients: AgentMuxClient[] = []
+const directories: string[] = []
 afterEach(async () => {
   vi.useRealTimers()
   vi.restoreAllMocks()
-  await Promise.all(clients.splice(0).map(client => client.dispose()))
+  try { await Promise.all(clients.splice(0).map(client => client.dispose())) }
+  finally {
+    vi.unstubAllEnvs()
+    await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true })))
+  }
 })
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -39,6 +46,13 @@ function deferred<T>() {
   return { promise, resolve }
 }
 async function fixture(providerId: 'codex' | 'claude') {
+  const directory = await mkdtemp(fixturePath('tmp/amux-render-preemption-'))
+  directories.push(directory)
+  // The memory Session store still consumes the real durable input journal.
+  // Every fixture owns that journal and its diagnostics, never the user's records.
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'state'))
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', directory)
   const store = new AgentMuxMemoryAgentSessionStore()
   const stored: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'synthetic-input-agent', providerId, executorId: providerId,
