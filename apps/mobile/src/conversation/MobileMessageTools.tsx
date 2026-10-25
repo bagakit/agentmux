@@ -72,7 +72,7 @@ export function MobileCommandPicker({ commands, disabled, onSelect, onOpenChange
 }
 
 /** The same input layout control as Desktop; communication records have their own mailbox. */
-export function MobileMessageTools({ refresh, onInterrupt, commands = [], onCommand, skills, disabled, onCommandsOpenChange, commandsLoading, commandsIssue, retryCommands }: {
+export function MobileMessageTools({ refresh, onInterrupt, commands = [], onCommand, skills, referenceTools, disabled, onCommandsOpenChange, commandsLoading, commandsIssue, retryCommands }: {
   refresh(): void
   onInterrupt?: (() => void) | undefined
   commands?: readonly ComposerSuggestion[]
@@ -80,15 +80,18 @@ export function MobileMessageTools({ refresh, onInterrupt, commands = [], onComm
   onCommandsOpenChange?: ((open: boolean) => void) | undefined
   commandsLoading?: boolean | undefined; commandsIssue?: string | undefined; retryCommands?: (() => void) | undefined
   skills?: ReactNode
+  referenceTools?: ReactNode
   disabled?: boolean | undefined
 }) {
   const [phase, setPhase] = useState<ComposerToolPhase>('collapsed')
-  return <span className="composer-tools" data-mode={phase}><ComposerLayoutToggle phase={phase} onChange={setPhase} />
-    {onInterrupt && <button type="button" className="composer-tool" aria-label="Interrupt the current turn" title="Interrupt the current reply" onClick={onInterrupt}><SemanticIcon name="action.stop" size={14} /></button>}
-    {onCommand ? <MobileCommandPicker commands={commands} {...(disabled !== undefined ? { disabled } : {})} onSelect={onCommand} onOpenChange={onCommandsOpenChange} loading={commandsLoading} issue={commandsIssue} retry={retryCommands} /> : null}
-    {phase !== 'collapsed' && <>
-      {skills}
-      <button type="button" className="composer-tool" aria-label="刷新原对话" onClick={refresh}><SemanticIcon name="action.refresh" size={16} /></button>
-    </>}
+  return <span className="composer-tools" data-mode={phase}>
+    <span className="composer-tool-group" role="group" aria-label="Input layout"><ComposerLayoutToggle phase={phase} onChange={setPhase} /></span>
+    {onInterrupt ? <span className="composer-tool-group" role="group" aria-label="Current turn"><button type="button" className="composer-tool" aria-label="Interrupt the current turn" title="Interrupt the current reply" onClick={onInterrupt}><SemanticIcon name="action.stop" size={14} /></button></span> : null}
+    {onCommand || referenceTools || phase !== 'collapsed' && skills ? <span className="composer-tool-group" role="group" aria-label="Skills, commands and references">
+      {phase !== 'collapsed' ? skills : null}
+      {onCommand ? <MobileCommandPicker commands={commands} {...(disabled !== undefined ? { disabled } : {})} onSelect={onCommand} onOpenChange={onCommandsOpenChange} loading={commandsLoading} issue={commandsIssue} retry={retryCommands} /> : null}
+      {referenceTools}
+    </span> : null}
+    {phase !== 'collapsed' ? <span className="composer-tool-group" role="group" aria-label="Conversation refresh"><button type="button" className="composer-tool" aria-label="刷新原对话" onClick={refresh}><SemanticIcon name="action.refresh" size={16} /></button></span> : null}
   </span>
 }

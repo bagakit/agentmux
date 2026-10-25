@@ -479,7 +479,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           active={visible} onCompletionQuery={onCompletionQuery}
           commands={commandSuggestions} promptKeywords={mobileCommands.promptKeywords} references={agentReferences.references}
           {...(agentReferences.issue ? { completionFeedback: agentReferences.issue } : {})}
-          tools={<MobileMessageTools refresh={() => { void reading.refresh() }}
+          tools={referenceTools => <MobileMessageTools referenceTools={referenceTools} refresh={() => { void reading.refresh() }}
             key={JSON.stringify([historyScope, session?.providerId])}
             commands={commandSuggestions} onCommand={item => { void insertSuggestion(item) }}
             onCommandsOpenChange={setCommandMenuOpen} commandsLoading={mobileCommands.loading}
