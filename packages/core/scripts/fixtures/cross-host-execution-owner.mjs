@@ -81,16 +81,18 @@ async function sampleProcesses(pids) {
     assert(pids.every(pid=>processes.some(row=>row.pid===pid)), 'A sampled original process is missing');
     let sockets;
     if(process.platform==='linux') {
-        const inodeOwners=new Map();
-        for(const proc of processes) for(const fd of await fs.readdir('/proc/'+proc.pid+'/fd')) {
-            const link=await fs.readlink('/proc/'+proc.pid+'/fd/'+fd).catch(()=>null),m=/^socket:\[(\d+)\]$/.exec(link??'');
-            if(m) { const owners=inodeOwners.get(m[1])??[];owners.push(proc.pid);inodeOwners.set(m[1],owners); }
-        }
-        const tcp=[];
-        for(const family of ['tcp','tcp6']) { const data=await fs.readFile('/proc/net/'+family,'utf8');
-            for(const line of data.trim().split('\n').slice(1)){const fields=line.trim().split(/\s+/);if(inodeOwners.has(fields[9]))tcp.push({family,state:fields[3],inode:fields[9],pids:inodeOwners.get(fields[9])});}
-        }
-        sockets={kind:'linux-proc-owned-socket-inodes',socketInodes:inodeOwners.size,establishedTcp:tcp.filter(row=>row.state==='01').length,tcp};
+        try {
+            const inodeOwners=new Map();
+            for(const proc of processes) for(const fd of await fs.readdir('/proc/'+proc.pid+'/fd')) {
+                const link=await fs.readlink('/proc/'+proc.pid+'/fd/'+fd),m=/^socket:\[(\d+)\]$/.exec(link??'');
+                if(m) { const owners=inodeOwners.get(m[1])??[];owners.push(proc.pid);inodeOwners.set(m[1],owners); }
+            }
+            const tcp=[];
+            for(const family of ['tcp','tcp6']) { const data=await fs.readFile('/proc/net/'+family,'utf8');
+                for(const line of data.trim().split('\n').slice(1)){const fields=line.trim().split(/\s+/);if(inodeOwners.has(fields[9]))tcp.push({family,state:fields[3],inode:fields[9],pids:inodeOwners.get(fields[9])});}
+            }
+            sockets={kind:'linux-proc-owned-socket-inodes',socketInodes:inodeOwners.size,establishedTcp:tcp.filter(row=>row.state==='01').length,tcp};
+        } catch(error) { sockets={kind:'unknown',reason:String(error),code:error.code,pids:processes.map(proc=>proc.pid)}; }
     } else {
         try { const result=await promisify(execFile)('/usr/sbin/lsof',['-nP','-a','-p',processes.map(row=>row.pid).join(','),'-iTCP','-FpnT']);
             if(result.stderr) throw Error(result.stderr);
