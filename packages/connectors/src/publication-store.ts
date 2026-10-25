@@ -43,8 +43,10 @@ export type BindingLifecyclePayload = {
   synchronization: boolean | null
 }
 export type PublicationTextFragment = { text: string; presentationContext?: { before: string; after: string; literal?: true } }
-export type QueryFeedbackPayload = { kind: 'query-feedback'; stage: 'received' | 'queued' | 'dispatched' | 'started' | 'completed'; messageId: string }
-export type PublicationPayload = QueryFeedbackPayload | PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | ImagePublicationPayload | FilePublicationPayload | {
+export type QueryFeedbackPayload = { kind: 'query-feedback'; stage: NonNullable<ConnectionDelivery['queryFeedback']>['stage']; messageId: string }
+/** Only Provider-qualified public fields; native message and nativeCode stay in Core history. */
+export type FailurePublicationPayload = { kind: 'failure'; turnId: string; code: string; message?: string; recovery: string; httpStatusCode?: number }
+export type PublicationPayload = FailurePublicationPayload | QueryFeedbackPayload | PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | ImagePublicationPayload | FilePublicationPayload | {
   kind: 'speech'
   text: string
   presentationContext?: PublicationTextFragment['presentationContext']
@@ -158,8 +160,8 @@ function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byt
 }
 
 type RepresentationPart = { text: string; part?: ConversationContentRef; image?: PublicationImage; file?: PublicationFile; segments?: Array<{ text: string; image?: PublicationImage }> }
-type ContentPayload = Exclude<PublicationPayload, PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | QueryFeedbackPayload>
-type RepresentationPayload = Extract<PublicationPayload, { kind: 'speech' }> | { kind: 'sequence'; parts: ContentPayload[] }
+type ContentPayload = Exclude<PublicationPayload, FailurePublicationPayload | PermissionPublicationPayload | QuestionPublicationPayload | BindingLifecyclePayload | QueryFeedbackPayload>
+type RepresentationPayload = FailurePublicationPayload | Extract<PublicationPayload, { kind: 'speech' }> | { kind: 'sequence'; parts: ContentPayload[] }
 type MaterializedPlan = PublicationContentPlan & { resourceParts?: RepresentationPart[] }
 function representation(parts: readonly RepresentationPart[], phase?: 'progress' | 'final', relay?: ConnectionDelivery['relay'], separator = '\n\n', inputSubmission?: import('@agentmux/core').AgentInputSubmissionObservation): RepresentationPayload {
   parts = parts.flatMap<RepresentationPart>(part => part.segments ? part.segments.map(segment => ({ ...segment, ...(part.part ? { part: part.part } : {}) })) : [part])
@@ -176,14 +178,14 @@ function representation(parts: readonly RepresentationPart[], phase?: 'progress'
   flush(); return { kind: 'sequence', parts: result }
 }
 type QuestionRepresentation = QuestionPublicationPayload | { kind: 'sequence'; parts: Array<ContentPayload | QuestionPublicationPayload> }
-const questionText = (value: RepresentationPayload): string => value.kind === 'speech' ? value.text : value.parts.flatMap(part => part.kind === 'speech' ? [part.text] : []).join('\n\n')
+const questionText = (value: RepresentationPayload): string => value.kind === 'failure' ? '' : value.kind === 'speech' ? value.text : value.parts.flatMap(part => part.kind === 'speech' ? [part.text] : []).join('\n\n')
 /** The original form follows its media, with text from the converted representation, never raw image paths. */
 function questionRepresentation(value: RepresentationPayload, original: QuestionPublicationPayload): QuestionRepresentation {
   const question = { ...original, text: questionText(value) }
-  return value.kind === 'speech' ? question : { kind: 'sequence', parts: [...value.parts, question] }
+  return value.kind === 'speech' || value.kind === 'failure' ? question : { kind: 'sequence', parts: [...value.parts, question] }
 }
 function representationFragments(value: RepresentationPayload | QuestionRepresentation, bytes: number, fragmentText?: PublicationPageOptions['fragmentText']): PublicationPayload[] {
-  return value.kind === 'question' ? [value] : value.kind === 'speech' ? value.text ? fragments(value, bytes, fragmentText) : []
+  return value.kind === 'question' || value.kind === 'failure' ? [value] : value.kind === 'speech' ? value.text ? fragments(value, bytes, fragmentText) : []
     : value.parts.flatMap<PublicationPayload>(part => part.kind === 'speech' ? fragments(part, bytes, fragmentText) : [part])
 }
 /** Connector-owned publication facts, not another Agent history or lifecycle. Borrows the Host database. */
@@ -384,6 +386,7 @@ export class PublicationStore {
   checkpoint(boundary: PublicationBoundary, sourceHostId: string, origin?: ConversationCheckpoint): ConversationCheckpoint {
     return this.transaction(() => {
       const query = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?')
+      this.retainMissingCapturedStart(boundary)
       const saved = this.retainedCheckpoint(boundary)
       if (saved) {
         const checkpoint = saved
@@ -402,13 +405,14 @@ export class PublicationStore {
       }
       const checkpoint = parseConversationCheckpoint(initial, ref(boundary))
       if (checkpoint.sourceHostId !== sourceHostId) throw new AgentMuxError('The original Binding belongs to another source namespace.', 'PUBLICATION_SOURCE_CONFLICT')
-      if (!boundary.sourceFrontier && boundary.scope.publication === 'future-shared-conversation') {
-        const gap: ConnectionDeliveryGap = { gapId: 'gap-' + digest([...scopeKey(boundary), 'captured-start']), reason: 'start-cut-unconfirmed' }
-        this.saveDecision(boundary, gap.gapId, digest(gap), { kind: 'gap', gap, state: 'unresolved' })
-      }
       this.database.prepare('INSERT INTO connector_publication_frontier VALUES (?, ?, ?, ?)').run(...scopeKey(boundary), 'unified', encode(checkpoint))
       return checkpoint
     })
+  }
+  private retainMissingCapturedStart(boundary: PublicationBoundary): void {
+    if (boundary.sourceFrontier?.frontier.cuts.some(cut => cut.kind === 'captured')) return
+    const gap: ConnectionDeliveryGap = { gapId: 'gap-' + digest([...scopeKey(boundary), 'captured-start']), reason: 'start-cut-unconfirmed', code: 'PUBLICATION_CAPTURED_START_UNCONFIRMED' }
+    this.saveDecision(boundary, gap.gapId, digest(gap), { kind: 'gap', gap, state: 'unresolved' })
   }
   private saveDecision(boundary: PublicationBoundary, id: string, revision: string, value: unknown): void {
     this.database.prepare('INSERT INTO connector_publication_decision (binding_id,binding_revision,source_key,record_id,source_revision,reason,decision_json) VALUES (?,?,?,?,?,?,?) ON CONFLICT(binding_id,binding_revision,source_key,record_id,source_revision) DO UPDATE SET reason=excluded.reason,decision_json=excluded.decision_json')
@@ -558,6 +562,7 @@ export class PublicationStore {
       if (!authorized()) throw new AgentMuxError('This exact Binding no longer authorizes publication.', 'PUBLICATION_NOT_AUTHORIZED')
       const row = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), 'unified')
       if (!row || !same(JSON.parse(String(row.checkpoint_json)), after)) throw new AgentMuxError('The retained publication frontier changed.', 'PUBLICATION_CHECKPOINT_CONFLICT')
+      this.retainMissingCapturedStart(boundary)
       if (options.queryFeedback) projectQueryFeedback(this, boundary, units, options.queryAuthorized)
       for (const original of questionRecords) this.saveDecision(boundary, 'question-read-' + digest(original.question), 'current', { kind: 'question-read', ...original })
       for (const coverage of page.coverage) {
@@ -622,7 +627,7 @@ export class PublicationStore {
         const allowedEvents = new Set(eventIds), qualification = new Map<string, boolean>()
         const qualified = (projectionId: string) => {
           if (qualification.has(projectionId)) return qualification.get(projectionId)!
-          const original = this.latestProjection(projectionId)
+          const original = this.latestProjection(projectionId) ?? this.latestProjection(projectionId + '-failure')
           const accepted = !original || (original.event ? allowedEvents.has(original.event.id) : (original.reference.source.kind === 'native' || original.reference.source.kind === 'captured') && references.some(reference => conversationRecordId(reference) === conversationRecordId(original.reference as ConversationItemRef)))
           qualification.set(projectionId, accepted); return accepted
         }
@@ -630,6 +635,8 @@ export class PublicationStore {
         for (const record of unit.records) {
           const prior = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND json_extract(decision_json,'$.kind')='representation' AND json_extract(decision_json,'$.part.record')=?")
             .all(...scopeKey(boundary), encode(record.reference))
+          const retainedFailure = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND record_id=? AND source_revision='current' AND json_extract(decision_json,'$.kind')='failure-record'").get(...scopeKey(boundary), 'failure-record-' + digest(record.reference))
+          if (retainedFailure && !qualified(JSON.parse(String(retainedFailure.decision_json)).projectionId)) ambiguous.add(record.id)
           if (prior.some(row => { const intent = JSON.parse(String(row.decision_json)) as RepresentationIntent; return intent.text && !qualified(intent.projectionId) })) ambiguous.add(record.id)
         }
         if (ambiguous.size) {
@@ -638,10 +645,11 @@ export class PublicationStore {
             return { gapId: record.id, reason: 'source-gap' as const, code: 'PUBLICATION_REPRESENTATION_RELATION_UNCONFIRMED', record: record.reference!, event: { id: unit.event.id, revision: unit.event.revision },
               ...(slot ? { part: { record: record.reference!, recordRevision: record.revision, selector: slot.selector } } : {}), anchor: { record: record.reference!, revision: record.revision, frontier: page.checkpoint } }
           })
-          plan = { ...plan, pieces: plan.pieces.filter(piece => !ambiguous.has(conversationRecordId(piece.part.record))),
+          const { failure: _unconfirmedFailure, ...acceptedPlan } = plan
+          plan = { ...acceptedPlan, pieces: plan.pieces.filter(piece => !ambiguous.has(conversationRecordId(piece.part.record))),
             origins: plan.origins.filter(origin => !ambiguous.has(conversationRecordId(origin.part.record))), gaps: [...plan.gaps, ...gaps], complete: false }
         }
-        const existing = [...new Set([...keys.filter(key => this.latestProjection(key)), ...represented])].filter(qualified)
+        const existing = [...new Set([...keys.filter(key => this.latestProjection(key) || this.latestProjection(key + '-failure')), ...represented])].filter(qualified)
         const projectionId = existing[0] ?? keys[0]!, coalesced = existing.filter(id => id !== projectionId)
         const mappingConflict = !qualified(projectionId)
         // A later Core coalescence can be a payload no-op. Retain its exact
@@ -661,17 +669,24 @@ export class PublicationStore {
         }
         for (const representation of plan.origins) this.saveDecision(boundary, 'origin-' + digest(representation.part), representation.part.recordRevision, { kind: 'origin', representation })
         if (mappingConflict) continue
-        const materialized = this.materialize(boundary, projectionId, unit, plan, coalesced)
+        const { failure: _failure, ...materialized } = this.materialize(boundary, projectionId, unit, plan, coalesced)
         // An input's transport-only observation has no new public body or receipt.
         // Keep its original captured representation instead of dropping that receipt.
         const inputWireOnly = !plan.pieces.length && unit.records.length > 0 && unit.records.every(record => isCompleteConversationRecord(record) && record.original.kind === 'native' && record.original.item.kind === 'user-message' && conversationNativeInputWitness(record)?.key !== undefined)
         if (!inputWireOnly) this.queueRepresentation(boundary, projectionId, unit, materialized, options.fragmentBytes ?? 4096, undefined, undefined,
           plan.pieces.map(piece => options.questions?.get(conversationRecordId(piece.part.record))).find(value => value !== undefined), options.fragmentText, options.speakers?.get(unit.event.id))
+        // A turn result supplements ordinary content. Its own fragment cannot replace
+        // or withdraw a public answer that shares the accepted original event.
+        if (plan.failure || this.latestProjection(projectionId + '-failure')) this.queueRepresentation(boundary, projectionId + '-failure', unit,
+          { ...plan, text: '', pieces: [] }, options.fragmentBytes ?? 4096)
         this.projectOriginalMessages(boundary, unit, options.originals?.get(unit.event.id) ?? [], page.checkpoint, options.fragmentBytes ?? 4096, options.fragmentText)
         // Explicit Core coalescence moves only representation intent. Original
         // platform mappings retire through their normal ordered effects; an
         // unknown predecessor remains inspect-only and keeps its request bytes.
-        for (const original of coalesced) this.queueRepresentation(boundary, original, unit, { ...plan, text: '', complete: true }, options.fragmentBytes ?? 4096)
+        for (const original of coalesced) {
+          this.queueRepresentation(boundary, original, unit, { text: '', pieces: [], gaps: [], origins: [], excluded: [], complete: true }, options.fragmentBytes ?? 4096)
+          this.queueRepresentation(boundary, original + '-failure', unit, { text: '', pieces: [], gaps: [], origins: [], excluded: [], complete: true }, options.fragmentBytes ?? 4096)
+        }
       }
       this.accountInputAliases(boundary, units)
       this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?').run(encode(page.checkpoint), ...scopeKey(boundary), 'unified')
@@ -721,10 +736,15 @@ export class PublicationStore {
   private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }, references: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)], question?: QuestionPublicationPayload, fragmentText?: PublicationPageOptions['fragmentText'], speaker?: PublicationSpeaker, originalMessage?: PublicationOriginalMessage): void {
     const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal').all(projectionId).map(row => this.read(row)!)
     // An unresolved part never withdraws a prior complete platform representation.
-    if (!plan.text && !plan.resourceParts?.some(part => part.image || part.file) && !plan.complete) return
-    const payload = representation(plan.resourceParts ?? [{ text: plan.text }], plan.phase, plan.relay, '\n\n', plan.inputSubmission)
+    if (!plan.failure && !plan.text && !plan.resourceParts?.some(part => part.image || part.file) && !plan.complete) return
+    const payload = plan.failure ?? representation(plan.resourceParts ?? [{ text: plan.text }], plan.phase, plan.relay, '\n\n', plan.inputSubmission)
     const represented = question && plan.text && (plan.complete || plan.gaps.every(gap => gap.reason === 'resource-unavailable'))
       ? questionRepresentation(payload, { ...question, ...(plan.phase ? { phase: plan.phase } : {}) }) : payload
+    if (plan.failure) {
+      this.saveDecision(boundary, 'failure-' + digest(projectionId), 'current', { kind: 'failure-representation', projectionId, payload: plan.failure, records: references, event })
+      for (const record of unit.records) if (isCompleteConversationRecord(record) && record.original.item.turnOutcome?.status === 'failed')
+        this.saveDecision(boundary, 'failure-record-' + digest(record.reference), 'current', { kind: 'failure-record', projectionId })
+    }
     const revision = digest(represented), parts = representationFragments(represented, fragmentBytes, fragmentText ? payload => fragmentText(payload, speaker, originalMessage) : undefined)
     if (parts.length && latest.length && latest.every(o => o.sourceRevision === revision && o.state !== 'cancelled')) return
     // A form status update has its own original receipt; unchanged media must not be sent again.
@@ -945,7 +965,14 @@ export class PublicationStore {
     originals: ReadonlyMap<string, { unit: ConversationUnit; frontier: ConversationCheckpoint; resolved: ReadonlyMap<string, ResolvedPublicationPart> }>, frontier: ConversationCheckpoint): 'qualified' | 'cancelled' | 'unavailable' {
     return this.transaction(() => {
       const current = this.inspect(operation.operationId)
-      if (!current || current.state !== 'pending' || !same(current, operation) || !['speech', 'image', 'file', 'question'].includes(operation.payload.kind)) return 'unavailable'
+      if (!current || current.state !== 'pending' || !same(current, operation)) return 'unavailable'
+      if (operation.payload.kind === 'failure') {
+        const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND record_id=? AND source_revision='current' AND json_extract(decision_json,'$.kind')='failure-representation'").get(...scopeKey(boundary), 'failure-' + digest(operation.projectionId))
+        // The original transaction qualified this exact public summary. Reopen must not
+        // reclassify a later raw record or grant sharing to an unqualified old operation.
+        return row && same(JSON.parse(String(row.decision_json)).payload, operation.payload) ? 'qualified' : 'unavailable'
+      }
+      if (!['speech', 'image', 'file', 'question'].includes(operation.payload.kind)) return 'unavailable'
       const content = operation.payload as ContentPayload
       const rows = this.representationRows(boundary, operation.projectionId, operation.sourceRecords)
       const failures: Array<{ reason: 'outside-conversation-scope' | 'private-content' | 'public-content-unconfirmed' | 'version-unavailable'; part?: ConversationContentRef; record?: ConversationItemRef; frontier?: ConversationCheckpoint }> = []

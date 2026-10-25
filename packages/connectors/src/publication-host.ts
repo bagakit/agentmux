@@ -644,7 +644,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (signal.aborted || !authorized()) return
       const frozen = JSON.stringify([original.projectionId, original.sourceRevision])
       const relevant = qualified.has(frozen) ? [] : this.store.pendingRecords(original)
-      if (!qualified.has(frozen) && !original.originalMessage && ['speech', 'image', 'file', 'question'].includes(original.payload.kind) && original.effect === 'upsert' && ['native', 'captured'].includes(original.reference.source.kind)) {
+      if (!qualified.has(frozen) && !original.originalMessage && ['speech', 'image', 'file', 'question', 'failure'].includes(original.payload.kind) && original.effect === 'upsert' && ['native', 'captured'].includes(original.reference.source.kind)) {
         const reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
         try {
           for (const record of relevant) {
@@ -670,7 +670,10 @@ export class PublicationHost implements ConnectionDeliveryPort {
         } catch { signal.throwIfAborted() /* The exact missing observation becomes a durable gap below. */ }
         const qualification = this.store.qualifyPending(binding, original, accepted, this.store.checkpoint(binding, binding.sourceFrontier?.sourceHostId ?? original.reference.hostId))
         if (qualification === 'cancelled') continue
-        if (qualification !== 'qualified') return { state: 'unavailable', reason: 'source-unconfirmed' }
+        if (qualification !== 'qualified') {
+          if (original.payload.kind === 'failure') { authorityObservation = { state: 'unavailable', reason: 'source-unconfirmed' }; after = original.operationId; continue }
+          return { state: 'unavailable', reason: 'source-unconfirmed' }
+        }
         qualified.add(frozen)
       }
       if (original.effect === 'upsert' && original.speaker?.avatar?.image && !original.prepared && original.attempt === undefined) {

@@ -339,6 +339,14 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         ...(!ended && !paused ? [{ tag: 'div', text: { tag: 'plain_text', content: `${publication}\n${input}\nEarlier history is not backfilled. Internal reasoning, raw tool details and system context are not shared.` } }] : []),
         { tag: 'action', actions: [{ tag: 'button', type: 'default', text: { tag: 'plain_text', content: 'Open conversation' }, url: `amux://agent/${encodeURIComponent(payload.agentSessionId)}` }] }
       ] }
+    } else if (operation.payload.kind === 'failure') {
+      const payload = operation.payload
+      card = { config: { update_multi: true }, header: { template: 'red', title: { tag: 'plain_text', content: 'Request failed' } }, elements: [
+        { tag: 'div', text: { tag: 'plain_text', content: payload.message ?? 'The Agent could not complete this request.' } },
+        { tag: 'div', text: { tag: 'plain_text', content: payload.recovery } },
+        { tag: 'div', text: { tag: 'plain_text', content: payload.code + (payload.httpStatusCode === undefined ? '' : ` · HTTP ${payload.httpStatusCode}`) } },
+        { tag: 'action', actions: [{ tag: 'button', type: 'default', text: { tag: 'plain_text', content: 'Open conversation' }, url: `amux://agent/${encodeURIComponent(operation.reference.agentSessionId)}` }] }
+      ] }
     } else if (operation.payload.kind === 'question') {
       card = feishuQuestionCard(operation.payload, feishuIdentity(operation.reference.agentSessionId), roleSpeaker(operation, identity))
     } else if (operation.payload.kind === 'permission') {

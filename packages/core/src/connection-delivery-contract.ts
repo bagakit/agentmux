@@ -64,7 +64,7 @@ export type ConnectionDelivery = {
   receipt?: ConnectionDeliveryReceipt
   event?: ConnectionDeliveryEvent
   /** Milestone on the original external query, not another authored message. */
-  queryFeedback?: { stage: 'received' | 'queued' | 'dispatched' | 'started' | 'completed'; ingressId: string; messageId: string }
+  queryFeedback?: { stage: 'received' | 'queued' | 'dispatched' | 'started' | 'completed' | 'failed' | 'interrupted'; ingressId: string; messageId: string }
   relay?: ConnectionDeliveryRelay
   /** Resource upload is distinct from the original chat-message effect. No bytes or platform asset key are exposed. */
   resourceUpload?: { kind: 'image' | 'file'; part: ConversationContentRef; attempt: number; state: 'pending' | 'dispatching' | 'unknown' | 'confirmed' }

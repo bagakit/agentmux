@@ -20,12 +20,12 @@ export function prepareDiscordPublication(operation: Readonly<PublicationOperati
     const payloadJson = JSON.stringify({ flags: 32768, components, attachments: [{ id: 0, filename: file.name }], allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
     return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, multipart: { payloadJson, files: [file] } } }
   }
-  let text = p.kind === 'question' ? p.text : p.kind === 'permission' ? [p.title, p.context, ...p.options.map((option, index) => `${index + 1}. ${option.label}`)].filter(Boolean).join('\n\n') : p.kind === 'speech' ? publicationSpeechText(p) : p.kind === 'binding-lifecycle'
+  let text = p.kind === 'failure' ? ['Request failed', p.message ?? 'The Agent could not complete this request.', p.recovery, p.code + (p.httpStatusCode === undefined ? '' : ` · HTTP ${p.httpStatusCode}`)].join('\n\n') : p.kind === 'question' ? p.text : p.kind === 'permission' ? [p.title, p.context, ...p.options.map((option, index) => `${index + 1}. ${option.label}`)].filter(Boolean).join('\n\n') : p.kind === 'speech' ? publicationSpeechText(p) : p.kind === 'binding-lifecycle'
     ? `${p.event === 'disconnected' ? 'Conversation sharing ended' : 'Conversation sharing ' + p.event}\nAgent ${p.agentSessionId}\n${p.scope.publication === 'future-shared-conversation' ? 'New conversation messages' : 'Agent replies'} · ${p.scope.input}\n${p.synchronization === true ? 'Synchronization enabled' : p.synchronization === false ? 'Synchronization disabled' : 'Synchronization state unconfirmed'}${p.event === 'disconnected' ? '\nThe Agent remains available.' : ''}`
     : discordFailure('DISCORD_REPRESENTATION_UNSUPPORTED')
   const localAgent = 'amux://agent/' + encodeURIComponent(operation.reference.agentSessionId)
   const buttons: Array<{ type: number; components: Array<{ type: number; style: number; label: string; custom_id: string }> }> = []
-  let statusText = '', includeAgent = false
+  let statusText = '', includeAgent = p.kind === 'failure'
   if (p.kind === 'permission') {
     statusText = p.status === 'pending' ? 'Awaiting an authorized decision' : p.status === 'response-sent' ? 'Response sent to the original Agent' : 'Original response ' + p.status
     if (p.status === 'pending' && p.options.length <= 25) for (let index = 0; index < p.options.length; index += 5) buttons.push({ type: 1, components: p.options.slice(index, index + 5).map((option, offset) => ({ type: 2, style: 2, label: option.label.length <= 80 ? option.label : `Option ${index + offset + 1}`, custom_id: 'p:' + option.actionRef })) })

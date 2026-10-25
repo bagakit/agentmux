@@ -1,11 +1,13 @@
 import { AgentMuxError, type AgentPromptInputKey } from '@agentmux/core'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { conversationRecordAuthor, conversationRecordRole, conversationRecordId, conversationInputKey, type ConversationSourceRecord, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
+import type { FailurePublicationPayload } from './publication-store.js'
 import type { PublicationImage, PublicationFile, PublicationMarkdown, ResolvedPublicationPart } from './publication-resource.js'
 import type { ConnectionDeliveryGap, ConnectionDeliveryRelay, ConnectionOriginRepresentation, RoomBinding } from '@agentmux/core/connections'
 
 export type PublicationContentPlan = {
   text: string
+  failure?: FailurePublicationPayload
   pieces: Array<{ part: ConversationContentRef; text: string; image?: PublicationImage; file?: PublicationFile; segments?: PublicationMarkdown['segments']; contentEligibility?: 'public'; purpose?: 'conversation'; relay?: ConnectionDeliveryRelay['sources'][number]; publicInputKey?: AgentPromptInputKey }>
   relay?: ConnectionDeliveryRelay
   phase?: 'progress' | 'final'
@@ -59,6 +61,23 @@ export function publicationContent(unit: ConversationUnit, binding: Pick<RoomBin
   const event = { id: unit.event.id, revision: unit.event.revision }, sections: string[] = [], pieces: PublicationContentPlan['pieces'] = [], questions = new Set<string>()
   const narrow = binding.scope.publication === 'future-native-user-facing'
   let phase: 'progress' | 'final' | undefined
+  // Outcome qualification is independent of raw process content eligibility. Native
+  // and captured witnesses in one accepted Core event produce one public summary.
+  const failures = unit.records.filter(isCompleteConversationRecord).filter(record => record.original.item.turnOutcome?.status === 'failed')
+  const failed = failures.find(record => record.original.kind === 'native') ?? failures[0]
+  let failure: FailurePublicationPayload | undefined
+  if (failed && !options.selected) {
+    const outcome = failed.original.item.turnOutcome!
+    const start = binding.sourceFrontier?.frontier.cuts.find(c => c.kind === 'captured')
+    if (failed.original.kind === 'captured' && (!start || start.kind !== 'captured' || failed.order.kind !== 'captured-stream' || failed.order.epoch !== start.epoch || failed.order.firstSequence <= start.sequence)) {
+      gaps.push({ gapId: failed.id, event, record: failed.reference!, anchor: { record: failed.reference!, revision: failed.revision, frontier }, reason: 'start-cut-unconfirmed' })
+    } else if (outcome.status === 'failed') {
+      const original = outcome.failure
+      failure = { kind: 'failure', turnId: original.nativeTurnId, code: original.code,
+        ...(original.publicMessage ? { message: original.publicMessage } : {}), recovery: original.recovery,
+        ...(original.httpStatusCode === undefined ? {} : { httpStatusCode: original.httpStatusCode }) }
+    }
+  }
   for (const slot of unit.event.content) {
     const record = records.get(slot.recordId)!
     const part: ConversationContentRef = { record: record.reference!, recordRevision: record.revision, selector: slot.selector }
@@ -151,5 +170,5 @@ export function publicationContent(unit: ConversationUnit, binding: Pick<RoomBin
   const inputs = unit.records.flatMap(record => record.original.kind === 'captured' && record.original.item.inputOrigin && record.original.item.inputSubmission && record.original.item.authorHuman === true
     ? [{ key: record.original.item.inputRef, observation: record.original.item.inputSubmission }] : [])
   const inputSubmission = inputs.length && new Set(inputs.map(value => JSON.stringify(value.key))).size === 1 ? inputs[0]!.observation : undefined
-  return { text: sections.join('\n\n'), pieces, ...(phase ? { phase } : {}), ...(inputSubmission ? { inputSubmission } : {}), gaps, origins, excluded, complete: gaps.length === 0 }
+  return { text: sections.join('\n\n'), ...(failure ? { failure } : {}), pieces, ...(phase ? { phase } : {}), ...(inputSubmission ? { inputSubmission } : {}), gaps, origins, excluded, complete: gaps.length === 0 }
 }

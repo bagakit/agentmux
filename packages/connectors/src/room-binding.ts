@@ -259,10 +259,8 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     const native = page.checkpoint.frontier.cuts.filter(c => c.kind === 'native')
     if (!native.length) refuse('ROOM_BINDING_SOURCE_UNAVAILABLE')
     if (native.length !== 1 || !equal(native[0]!.checkpoint.source, input.expectedSource)) refuse('ROOM_BINDING_SOURCE_CHANGED')
-    const sourceFrontier = input.scope.publication === 'future-shared-conversation' ? page.checkpoint : {
-      ...page.checkpoint, frontier: { ...page.checkpoint.frontier,
-        scope: { sources: page.scope.sources.filter(s => s.kind === 'native') }, cuts: native }
-    }
+    // Public bind/relink accepts shared scope only and retains both exact source cuts.
+    const sourceFrontier = page.checkpoint
     return { sourceCheckpoints: native.map(c => c.checkpoint), sourceFrontier }
   }
   private conflicts(input: RoomBindingBindInput, bindingId: string): void {
