@@ -10,14 +10,15 @@ import { feishuFailure, feishuIdentity, FEISHU_MESSAGE_BODY_BYTES } from './mess
 import { feishuQuestionCard } from './question-card.js'
 import { fragmentFeishuReply } from './reply-card.js'
 import { feishuRoleCard, type FeishuRoleSpeaker } from './role-card.js'
+import { feishuReplyFooterBudget } from './reply-footer.js'
 import type { PublicationSpeaker } from '../../publication-speaker.js'
 import type { PublicationCardAdapter } from '../../publication-card.js'
 import { feishuQueryReaction, readFeishuQueryReaction, feishuReactionMapping, feishuReactionReceipt } from './reaction.js'
 
 const path = '/open-apis/im/v1/messages'
-const currentCardRenderVersion = 'feishu-conversation-v11'
+const currentCardRenderVersion = 'feishu-conversation-v12'
 // Retained frozen cards use their original wire; this never prepares or replays an older effect.
-const nativeCardRenderVersions = ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', 'feishu-conversation-v6', 'feishu-conversation-v7', 'feishu-conversation-v8', 'feishu-conversation-v9', 'feishu-conversation-v10', currentCardRenderVersion]
+const nativeCardRenderVersions = ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', 'feishu-conversation-v6', 'feishu-conversation-v7', 'feishu-conversation-v8', 'feishu-conversation-v9', 'feishu-conversation-v10', 'feishu-conversation-v11', currentCardRenderVersion]
 const cardsPath = '/open-apis/cardkit/v1/cards'
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 const unknown = (): PublicationReceipt => ({ state: 'unknown', reason: 'effect-unconfirmed' })
@@ -33,7 +34,8 @@ function speechCard(payload: Extract<PublicationPayload, { kind: 'speech' }>, sp
   const status = inputStatus(payload)
   return feishuRoleCard(publicationSpeechText({ ...payload, text: (payload.presentationContext?.before ?? '') + payload.text + (payload.presentationContext?.after ?? '') }), speaker,
     { ...(payload.phase ? { phase: payload.phase } : {}), ...(fragment ? { fragment } : {}),
-      ...(payload.presentationContext?.literal ? { literal: true } : {}), incoming: originalMessage !== undefined, ...(status ? { status } : {}) })
+      ...(payload.presentationContext?.literal ? { literal: true } : {}), incoming: originalMessage !== undefined, ...(status ? { status } : {}),
+      ...(payload.replyMetadata ? { replyMetadata: payload.replyMetadata } : {}) })
 }
 function identityElementId(operation: Readonly<PublicationOperation>): string {
   const speaker = operation.speaker, avatar = speaker?.avatar
@@ -204,6 +206,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   readonly permissionActions = true as const
   readonly questionActions = true as const
   readonly queryFeedback = true as const
+  readonly replyMetadata = true as const
   readonly cards: PublicationCardAdapter = {
     prepareCreate: operation => {
       const card = requestCard(this.prepare(operation, true))
@@ -290,7 +293,9 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     // reserve the largest possible continuation label for this source text.
     const count = Math.max(2, payload.text.length)
     const fits = (part: PublicationTextFragment, fragment: { ordinal: number; count: number }) => {
-      const displayed = { ...payload, text: part.text, ...(part.presentationContext ? { presentationContext: part.presentationContext } : {}) }
+      // A late native outcome/usage snapshot must fit the original last text slice.
+      const displayed = { ...payload, ...(payload.replyMetadata ? { replyMetadata: feishuReplyFooterBudget(payload.replyMetadata) } : {}),
+        text: part.text, ...(part.presentationContext ? { presentationContext: part.presentationContext } : {}) }
       const role: FeishuRoleSpeaker = { kind: speaker?.kind ?? 'unknown', ...(speaker?.name ? { name: speaker.name } : {}), elementId: 'author_' + 'x'.repeat(13) }
       const card = speechCard(displayed, role, originalMessage, fragment)
       card.config = { ...object(card.config), summary: { content: cardSummary(card, { payload: displayed, presentationTime: 0, ...(speaker ? { speaker } : {}), ...(originalMessage ? { originalMessage } : {}) }) } }
