@@ -384,3 +384,35 @@ it('the actual header explains an unsupported message without blaming member acc
   const before = writes(); await check(); await wait(() => expect(menu().textContent).toContain('Message type not supported'))
   expect(writes()).toBe(before)
 }, 30_000)
+
+it('the actual header explains invalid Question answers without claiming authorization or input submission', async () => {
+  const binding = await bind(), forward = api.connections.call
+  await f.forward('connection.grant', { operationId: 'question-validation-member', bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: 'question-answerer', expectedRevision: null,
+    actor: { application: f.config.application, idType: 'open_id', userId: 'original-external-user' }, capabilities: ['input', 'answer', 'permission'], state: 'active' })
+  // The default Host/SDK/CLI consumer separately produces this exact public result.
+  // Here only the safe incoming row is controlled to exercise the actual header consumer.
+  api.connections.call = vi.fn(async (...args: Parameters<typeof api.connections.call>) => {
+    const result = await forward(...args)
+    if (args[0] !== 'connection.diagnose') return result
+    const report = structuredClone(result as import('@agentmux/core/connections').ConnectionDiagnosis)
+    const group = report.groups.value!.items[0]!
+    group.incoming = { issue: null, value: { beforeIngressId: null, next: null, rows: [{
+      ingressId: 'original-invalid-question', sourceConnectionId: binding.connectionId, targetConnectionId: null,
+      kind: 'action', state: 'refused', code: 'INGRESS_QUESTION_ANSWER_INVALID', codeRecorded: true,
+      bindingId: null, bindingRevision: null, scope: 'group-event', inputOperationId: null,
+      recording: null, coreStatus: null, coreObservation: 'not-started', nativeAdoption: null, waiting: null
+    }] } }
+    return report
+  }) as typeof api.connections.call
+  const before = writes()
+  await renderHeader([binding], true, 1); await open()
+  await wait(() => expect(menu().textContent).toContain('Check the question answers'))
+  const incoming = menu().querySelector('[data-direction="incoming"]')!
+  expect(incoming.textContent).toContain('Check the question answers')
+  expect(menu().textContent).toContain('Complete each question in the original card')
+  expect(menu().querySelector('[data-problem-kind="member-access"]')).toBeNull()
+  expect(menu().textContent).not.toContain('Action not supported')
+  expect(menu().textContent).not.toContain('Accepted by Agent')
+  await check(); await wait(() => expect(menu().textContent).toContain('Check the question answers'))
+  expect(writes()).toBe(before)
+})

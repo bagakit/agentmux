@@ -68,7 +68,7 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted') {
   }
   const submit = () => feishuCardElements(card()!).find(value => value.name === 'submit_original_answer') as { value: Record<string, unknown> }
   const answer = (eventId = 'original-answer-action', fields: Record<string, unknown> = { question_0_option: '0', question_1_text: 'Continue with the original plan' }) => {
-    const value = submit().value
+    const value = structuredClone(submit().value)
     const mapping = f.services.publication!.store.list(f.binding).filter(value => value.payload.kind === 'question' && value.state === 'confirmed').at(-1)!.mapping!
     return f.action(String(value.actionRef), eventId, { context: { open_chat_id: 'original-room', open_message_id: mapping.messageId }, action: { tag: 'button', value, form_value: fields } })
   }
@@ -157,11 +157,15 @@ it('unknown native answer delivery preserves the original action and refuses a c
   const wire = f.answer(); await f.sdk.receive(wire)
   await vi.waitFor(() => expect(f.send).toHaveBeenCalledOnce(), { timeout: 8_000 })
   const first = (await f.services.ingress!.list({ connectionId: 'feishu-connection' })).ingresses[0]!
+  await f.sdk.receive({ ...wire, header: { ...wire.header, event_id: 'invalid-after-unknown' }, event: { ...wire.event, action: { ...wire.event.action, form_value: {} } } })
+  expect(nativeActionResponse(f)).toEqual({})
+  expect((await f.services.ingress!.list({ connectionId: 'feishu-connection' })).ingresses[1]).toMatchObject({ state: 'refused', code: 'INGRESS_AUTHORITY_REVISED' })
+  expect((await f.services.ingress!.inspect({ ingressId: first.ingressId })).ingress!.input?.operationId).toBe(first.input!.operationId)
   const inspection = vi.spyOn(f.hosted, 'inspectAgentPromptSubmission').mockRejectedValue(Error('Original receipt observation unavailable'))
   expect(await f.cli(['connection', 'ingress', 'inspect', '--ingress', first.ingressId])).toMatchObject({ observation: 'unavailable', questionReceipt: null, inputReceipt: null })
   inspection.mockRestore()
   await f.sdk.receive({ ...wire, header: { ...wire.header, event_id: 'changed-repeat' }, event: { ...wire.event, action: { ...wire.event.action, form_value: { question_0_text: 'Changed answer', question_1_text: 'Changed next step' } } } })
-  await vi.waitFor(async () => expect((await f.services.ingress!.list({ connectionId: 'feishu-connection' })).ingresses[1]).toMatchObject({ state: 'refused', code: 'INGRESS_AUTHORITY_REVISED' }))
+  await vi.waitFor(async () => expect((await f.services.ingress!.list({ connectionId: 'feishu-connection' })).ingresses.find(r => r.eventId === 'changed-repeat')).toMatchObject({ state: 'refused', code: 'INGRESS_AUTHORITY_REVISED' }))
   await f.services.ingress!.dispatch(first.ingressId); await f.services.ingress!.rejoin(first.ingressId)
   expect(f.send).toHaveBeenCalledOnce(); expect(f.original.inner.kernel.input).not.toHaveBeenCalled()
   f.services.publication!.refresh()
@@ -211,3 +215,99 @@ it('application access answers original questions through the same native owner 
   expect(f.send).toHaveBeenCalledOnce()
   expect(f.original.inner.kernel.input).not.toHaveBeenCalled()
 }, 25_000)
+
+const nativeActionResponse = (f: Awaited<ReturnType<typeof fixture>>) => {
+  const ack = f.sdk.ack().at(-1)
+  expect(ack.code).toBe(200)
+  return JSON.parse(Buffer.from(ack.data, 'base64').toString())
+}
+const originalQuestionForm = (f: Awaited<ReturnType<typeof fixture>>, wire: ReturnType<Awaited<ReturnType<typeof fixture>>['answer']>) => ({
+  connectionId: 'feishu-connection', application: f.actor.application, actor: f.actor,
+  externalConversationId: wire.event.context.open_chat_id, sourceMessageId: wire.event.context.open_message_id,
+  actionRef: String(wire.event.action.value.actionRef)
+})
+
+it.each(['partial', 'empty', 'invalid-select', 'unknown-option'] as const)('correctable original Question %s form keeps native controls and accepts one corrected full submission', async shape => {
+  const f = await fixture(); await f.grant(['answer']); await f.publish()
+  // Independently apply the documented form callback contract: field values are keyed by
+  // component name, while the clicked button contributes its opaque callback value.
+  const elements = feishuCardElements(f.card()!), select = elements.find(e => e.tag === 'select_static')!, inputs = elements.filter(e => e.tag === 'input')
+  const fields: Record<string, unknown> = shape === 'empty' ? {} : { [String(select.name)]: shape === 'invalid-select' ? ['0'] : '0' }
+  if (shape === 'unknown-option') fields[String(inputs[1]!.name)] = 'Original next step'
+  const wire = f.answer('invalid-form-' + shape, fields)
+  if (shape === 'unknown-option') {
+    const descriptions = (wire.event.action.value as Record<string, unknown>).questionFields as Array<{ optionIds: string[] }>
+    descriptions[0]!.optionIds[0] = 'not-an-original-option'
+  }
+  const form = originalQuestionForm(f, wire), before = structuredClone(f.card()), beforeEffects = f.effects.length
+  const database = f.services.database!, prepare = database.prepare.bind(database), mappingQueries: string[] = []
+  const prepared = vi.spyOn(database, 'prepare').mockImplementation(sql => {
+    if (sql.startsWith('SELECT operation_json FROM connector_publication_operation') && sql.includes('payload.actionRef')) mappingQueries.push(sql)
+    return prepare(sql)
+  })
+  await f.sdk.receive(wire)
+  const response = nativeActionResponse(f)
+  prepared.mockRestore()
+  expect(response).toMatchObject({ toast: { type: 'warning', content: expect.stringContaining('every question') } })
+  expect(mappingQueries).toHaveLength(1)
+  const queryPlan = database.prepare('EXPLAIN QUERY PLAN ' + mappingQueries[0]!).all(f.binding.bindingId, f.binding.revision, form.actionRef)
+  expect(queryPlan.some(row => String(row.detail).includes('(binding_id=? AND binding_revision=?)'))).toBe(true)
+  if (process.env.QUESTION_FORM_PROOF && shape === 'partial') await writeFile(join(process.env.QUESTION_FORM_PROOF, 'question-mapping-query.json'), JSON.stringify({ sql: mappingQueries[0], plan: queryPlan, scope: 'original Binding only, exact Question actionRef retained; actual intake query captured' }, null, 2) + '\n')
+  expect(response.card).toBeUndefined()
+  const list = await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection']), rejected = list.ingresses[0]
+  expect(rejected).toMatchObject({ kind: 'action', state: 'refused', code: 'INGRESS_QUESTION_ANSWER_INVALID' })
+  expect(rejected.input).toBeUndefined()
+  const rejectedInspection = await f.cli(['connection', 'ingress', 'inspect', '--ingress', rejected.ingressId])
+  expect(rejectedInspection.inputReceipt).toBeNull(); expect(rejectedInspection.questionReceipt ?? null).toBeNull()
+  const diagnosis = await f.cli(['connection', 'diagnose', '--host', 'local', '--session', 'original-agent'])
+  expect(diagnosis.groups.value.items[0].incoming.value.rows[0]).toMatchObject({ kind: 'action', scope: 'group-event', code: 'INGRESS_QUESTION_ANSWER_INVALID', inputOperationId: null })
+  expect(f.services.ingress!.questionForm(form)).toMatchObject({ status: 'pending' })
+  expect(f.card()).toEqual(before); expect(f.effects).toHaveLength(beforeEffects); expect(f.send).not.toHaveBeenCalled()
+  await f.sdk.receive(wire)
+  expect((await f.services.ingress!.list({ connectionId: 'feishu-connection' })).ingresses).toHaveLength(1)
+  expect(f.send).not.toHaveBeenCalled()
+  const corrected = f.answer('corrected-form-' + shape, { [String(inputs[0]!.name)]: 'Keep the original work', [String(inputs[1]!.name)]: 'Original next step' })
+  await f.sdk.receive(corrected)
+  expect(nativeActionResponse(f)).toEqual({})
+  await vi.waitFor(() => expect(f.send).toHaveBeenCalledOnce(), { timeout: 8_000 })
+  const accepted = (await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])).ingresses.find((r: { eventId: string }) => r.eventId === corrected.header.event_id)
+  expect(await f.cli(['connection', 'ingress', 'inspect', '--ingress', accepted.ingressId])).toMatchObject({ questionReceipt: { outcome: 'submitted', questionIds: [savedQuestionId, f.questionId2] } })
+  expect(codexQuestionAnswers([{ type: 'text', text: f.send.mock.calls[0]![0] }])?.map(a => a.answer)).toEqual(['Keep the original work', 'Original next step'])
+  await f.sdk.receive(corrected); await f.sdk.receive(wire)
+  expect(f.send).toHaveBeenCalledOnce(); expect(f.services.ingress!.questionForm(form)).toBeNull()
+  expect((await f.services.ingress!.inspect({ ingressId: rejected.ingressId })).ingress).toMatchObject({ state: 'refused', code: 'INGRESS_QUESTION_ANSWER_INVALID' })
+}, 40_000)
+
+it('invalid Question feedback preserves missing reference, exact message and revoked answer authority boundaries', async () => {
+  const f = await fixture(); await f.grant(['answer']); await f.publish()
+  const missing = f.answer('missing-original-reference', {})
+  delete (missing.event.action.value as Record<string, unknown>).actionRef
+  await f.sdk.receive(missing)
+  expect(nativeActionResponse(f)).toEqual({})
+  const wrong = f.answer('wrong-original-message', {}); wrong.event.context.open_message_id = 'another-original-card'
+  await f.sdk.receive(wrong)
+  expect(nativeActionResponse(f)).toEqual({})
+  const revoked = f.answer('revoked-invalid-form', {})
+  await f.grant([], 1); await f.sdk.receive(revoked)
+  expect(nativeActionResponse(f)).toEqual({})
+  const rows = (await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])).ingresses
+  expect(rows.map((r: { code: string }) => r.code)).toEqual(['INGRESS_ACTION_UNSUPPORTED', 'INGRESS_AUTHORITY_REVISED', 'INGRESS_ACTOR_NOT_AUTHORIZED'])
+  expect(rows.every((r: { input?: unknown }) => r.input === undefined)).toBe(true)
+  expect(f.send).not.toHaveBeenCalled()
+  await f.original.client.writeAgent({ agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' }, source: 'user', data: 'Healthy original terminal input' })
+  expect(f.original.inner.kernel.input).toHaveBeenCalledOnce()
+}, 30_000)
+
+it('invalid Question during an original authority observation gap recovers to validation without claiming input', async () => {
+  const f = await fixture(); await f.grant(['answer']); await f.publish()
+  const wire = f.answer('authority-gap-invalid-form', {}), form = originalQuestionForm(f, wire)
+  const read = vi.spyOn(f.services.bindings!, 'effectiveGrant').mockImplementation(() => { throw Error('Controlled original grant observation gap') })
+  await f.sdk.receive(wire)
+  expect(nativeActionResponse(f)).toEqual({})
+  const received = (await f.services.ingress!.list({ connectionId: 'feishu-connection' })).ingresses[0]!
+  expect(received).toMatchObject({ state: 'received' }); expect(f.send).not.toHaveBeenCalled()
+  read.mockRestore()
+  await f.services.ingress!.dispatch(received.ingressId)
+  expect((await f.cli(['connection', 'ingress', 'inspect', '--ingress', received.ingressId])).ingress).toMatchObject({ state: 'refused', code: 'INGRESS_QUESTION_ANSWER_INVALID' })
+  expect(f.services.ingress!.questionForm(form)).toMatchObject({ status: 'pending' }); expect(f.send).not.toHaveBeenCalled()
+}, 30_000)

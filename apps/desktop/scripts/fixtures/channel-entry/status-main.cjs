@@ -5,6 +5,7 @@ const { app, BrowserWindow } = require('electron')
 const { nativeRendererInput } = require('../settings-connections/native-input.cjs')
 const [html, privateRoot, evidence] = process.argv.slice(2)
 const popoverClarity = process.argv.includes('--popover-clarity')
+const questionValidation = process.argv.includes('--question-validation')
 const refusalClarity = process.argv.includes('--refusal-clarity')
 const groupActivityActions = process.argv.includes('--group-activity-actions')
 const statusPriority = process.argv.includes('--status-priority')
@@ -15,7 +16,7 @@ let win
 app.whenReady().then(async () => {
   try {
     win = new BrowserWindow({ width: 1380, height: 980, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
-    await win.loadFile(html, { query: { 'header-status': '1', ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}), ...(statusPriority ? { 'status-priority': '1' } : {}) } })
+    await win.loadFile(html, { query: { 'header-status': '1', ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(questionValidation ? { 'question-validation': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}), ...(statusPriority ? { 'status-priority': '1' } : {}) } })
     const { read, until, settle, click, press } = nativeRendererInput(win, result.interactions, '')
     const region = '[data-workbench-region-id="channel-preview-region"]'
     const entry = adapter => region + ' [data-channel-entry="' + adapter + '"]'
@@ -159,12 +160,13 @@ app.whenReady().then(async () => {
       await read('window.channelEntryProof.setScenario("unsupported")')
       for (const narrow of [false, true]) {
         await layout(narrow); await open('feishu')
-        await until('document.querySelector(' + JSON.stringify(menu) + ')?.textContent.includes("Message type not supported")')
+        await until('document.querySelector(' + JSON.stringify(menu) + ')?.textContent.includes(' + JSON.stringify(questionValidation ? 'Check the question answers' : 'Message type not supported') + ')')
         const report = await read('window.channelEntryProof.lastDiagnosis'), group = report.groups.value.items[0]
-        assert.equal(group.incoming.value.rows[0].code, 'INGRESS_CONTENT_UNSUPPORTED')
+        assert.equal(group.incoming.value.rows[0].code, questionValidation ? 'INGRESS_QUESTION_ANSWER_INVALID' : 'INGRESS_CONTENT_UNSUPPORTED')
+        if (questionValidation) { assert.equal(group.incoming.value.rows[0].scope, 'group-event'); assert.equal(group.incoming.value.rows[0].inputOperationId, null) }
         assert.equal(group.outgoing.value.deliveries[0].receipt, 'confirmed')
         assert.equal(group.binding.value.activeInputGrants > 0, true)
-        await capture(narrow ? 'unsupported-narrow' : 'unsupported-wide')
+        await capture(questionValidation ? narrow ? 'question-validation-narrow' : 'question-validation-wide' : narrow ? 'unsupported-narrow' : 'unsupported-wide')
       }
       result.passed = true
       return
