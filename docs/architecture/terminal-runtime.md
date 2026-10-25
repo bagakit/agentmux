@@ -82,6 +82,8 @@ Desktop Main 组合跨进程控制，通过公开 Core API 执行 Agent lifecycl
 
 这张表解释前提，完整方法与例外以源码为准；它不建立第二份方法白名单。有限 SDK 的每个方法均须在唯一准备声明中分类，新增方法不能隐式落入全局恢复；分派穷尽各类，原目标、权限、fence、持久事务与回执仍归业务 owner。默认 Desktop connector 使用 [Hosted client](../../packages/core/src/hosted-client.ts)，不在 Desktop 内另建语义 Core。Main Stop 选择已有 Runtime scope，冷 Stop 仅沿 Core 原 metadata owner 采用准确持久 Session，不加载无关 Session。
 
+同一 Hosted consumer 中，重叠的显式 `connectRuntime()` 共享尚未完成的原准备，包括前后 owner discovery 和 Host 准备。成功或失败后立即释放共享 Promise，后续调用重新准备；disconnect／dispose 清除该 consumer 的共享引用，旧调用收尾不能清掉新的准备。此处不缓存 readiness，不合并输入，不让独立 metadata reader 等待 Native 准备；每次输入仍保留自己的顺序、目标、byte cursor 与回执。
+
 一次 GUI 原终端附着的实际链路是：
 
 1. `TerminalView` 经 [preload](../../apps/desktop/src/preload/index.ts) 的 `api.sessions.attach` 或 `refreshAttachment`，进入 [Main IPC](../../apps/desktop/src/main/ipc.ts) 与 `RuntimeController.attachSession`。
