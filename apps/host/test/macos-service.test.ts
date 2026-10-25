@@ -31,11 +31,15 @@ describe('the macOS Host has one platform service per original endpoint', () => 
           .not.toEqual(normalizeMacosHostServiceDefinition(original, input.storePath))
       }
       for (const changed of [{ ...original, UnknownKey: true }, { ...original, KeepAlive: false },
+        { ...original, ProcessType: 'Background' },
         { ...original, ProgramArguments: [...original.ProgramArguments].reverse() },
         { ...original, EnvironmentVariables: { ELECTRON_RUN_AS_NODE: 1 } }]) {
         expect(normalizeMacosHostServiceDefinition(changed, input.storePath))
           .not.toEqual(normalizeMacosHostServiceDefinition(original, input.storePath))
       }
+      // A definition written before its scheduling class was declared is the same namespace.
+      expect(normalizeMacosHostServiceDefinition({ ...original, ProcessType: 'Interactive' }, input.storePath))
+        .toEqual(normalizeMacosHostServiceDefinition(original, input.storePath))
     } finally { vi.unstubAllEnvs() }
   })
 
