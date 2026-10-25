@@ -147,6 +147,7 @@
 .focus-context--card .focus-context__identity { align-items: center; gap: 5px; min-height: 18px; }
 .focus-context--card .focus-context__copy { gap: 5px; }
 .focus-context--card .focus-context__recap { display: block; }
+.focus-context--card .focus-context__activity { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; white-space: normal; }
 .focus-context__position { display: inline-flex; flex: none; min-width: 0; max-width: 72px; }
 .focus-context__position .workbench-topology { min-height: 18px; max-width: 100%; }
 .focus-context__position .workbench-topology__tab-rail { max-width: 100%; }
