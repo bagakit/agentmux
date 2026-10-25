@@ -46,6 +46,7 @@ export type AgentSessionRecoveryPorts = {
     providerLaunch(session: AgentMuxAgentSession, run: CtxmuxAdapterRun): { command: string; args: readonly string[] };
   };
   executors: {
+    prepareToolExecutionLaunch?(provider: AgentProvider, plan: import('../types.js').AgentLaunchPlan, binding: import('../agent-tool-execution.js').AgentToolExecutionBinding, workspacePath: string, agentSessionId: string): Promise<import('../types.js').AgentLaunchPlan>;
     readonly hostExecutorOwner: AgentMuxHostExecutorOwner | undefined;
     readonly sessionExecutorConfiguration: ((executorId: string) => Promise<AgentExecutorConfig>) | undefined;
     sessionExecutorOptions<T extends Pick<AgentSessionHistoryPageOptions, 'commandOverride' | 'args' | 'env'>>(
