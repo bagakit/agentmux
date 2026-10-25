@@ -152,7 +152,7 @@ describe('execution coordinator retained original pair', () => {
     const f = await fixture(), first = await f.open()
     f.executor.addOutput({ type: 'diagnostic', generation: 'original-generation', code: 'EXECUTION_OPERATION_UNKNOWN' })
     await first.coordinator.create(f.input)
-    expect(first.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXECUTION_OPERATION_UNKNOWN' } })
+    expect(first.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'connected', diagnostics: [{ scope: 'unclassified', code: 'EXECUTION_OPERATION_UNKNOWN' }] })
     expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledTimes(1)
   })
 
@@ -162,7 +162,7 @@ describe('execution coordinator retained original pair', () => {
     await first.coordinator.create(f.input); await first.close()
     expect(f.read().bridge.executor.outputByte).toBeGreaterThan(0)
     const second = await f.open(); await second.coordinator.restoreReaders()
-    expect(second.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXECUTION_OPERATION_UNKNOWN' } })
+    expect(second.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'connected', diagnostics: [{ scope: 'unclassified', code: 'EXECUTION_OPERATION_UNKNOWN' }] })
     expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledTimes(1)
   })
 
@@ -212,7 +212,7 @@ describe('execution coordinator retained original pair', () => {
     expect(result.session.agentSessionId).toBe(f.input.agent.agentSessionId)
     const through = f.executor.addOutput({ type: 'diagnostic', generation: 'original-generation', code: 'EXECUTION_OPERATION_UNKNOWN' })
     await vi.waitFor(() => expect(f.read().bridge.executor.outputByte).toBe(through))
-    expect(first.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXECUTION_OPERATION_UNKNOWN' } })
+    expect(first.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'connected', diagnostics: [{ scope: 'unclassified', code: 'EXECUTION_OPERATION_UNKNOWN' }] })
     expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
   })
 
@@ -352,4 +352,113 @@ it('qualifies Agent control only from the current frontend generation without hi
   expect(restored.coordinator.inspect(f.input.bindingId)?.notices?.find(value => value.capability === 'agent-control')?.state).toBe('unverified')
   expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledTimes(1)
   expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+})
+
+
+describe('exact helper connection and local diagnostic truth', () => {
+  const emit = (h: ReturnType<typeof host>, event: Record<string, unknown>) => {
+    for (const listener of h.listeners) listener({ run: { runId: h.runId }, evidence: { source: 'run-process', observedAt: 0 }, ...event } as AgentMuxClientEvent)
+  }
+  it.each(['exited', 'interrupted', 'removed'] as const)('observes original helper %s without new output and never revives it from reader restoration', async state => {
+    const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
+    emit(f.executor, state === 'removed' ? { type: 'run-removed' } : { type: 'process-state', state, pid: null })
+    expect(first.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXECUTION_HELPER_UNAVAILABLE' } })
+    emit(f.executor, { type: 'attachment-state', state: 'restored', afterByte: 0 })
+    emit(f.executor, { type: 'process-state', state: 'running', pid: 1 })
+    expect(first.coordinator.inspect(f.input.bindingId)?.state).toBe('unavailable')
+    expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledTimes(1)
+    expect(f.executor.api.releaseRunAttachment).not.toHaveBeenCalled()
+  })
+  it('separates the exact reader restoration from other Run and other helper failures', async () => {
+    const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
+    emit(f.executor, { type: 'process-state', run: { runId: 'unrelated' }, state: 'exited', pid: null })
+    expect(first.coordinator.inspect(f.input.bindingId)?.state).toBe('connected')
+    const unavailable = { type: 'attachment-state', state: 'unavailable', afterByte: 0, diagnostic: { code: 'EXACT_READER', message: 'Its observation is unavailable' } }
+    emit(f.executor, unavailable)
+    expect(first.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXACT_READER' } })
+    emit(f.frontend, { type: 'attachment-state', state: 'restored', afterByte: 0 })
+    expect(first.coordinator.inspect(f.input.bindingId)?.state).toBe('unavailable')
+    emit(f.executor, { type: 'attachment-state', state: 'restored', afterByte: 0, run: { runId: 'wrong' } })
+    expect(first.coordinator.inspect(f.input.bindingId)?.state).toBe('unavailable')
+    emit(f.executor, { type: 'attachment-state', state: 'restored', afterByte: 0 })
+    expect(first.coordinator.inspect(f.input.bindingId)?.state).toBe('connected')
+    expect(f.executor.api.attachTerminal).toHaveBeenCalledTimes(1)
+  })
+  it('uses native service revisions independently from running process and reader availability', async () => {
+    const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
+    const nativeService = { revision: 5, owner: { type: 'serving' }, output: { type: 'serving' }, input: { phase: { type: 'unavailable', reason: 'write_failed' } } }
+    emit(f.executor, { type: 'run-service', nativeService })
+    expect(first.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXECUTION_HELPER_SERVICE_UNAVAILABLE' } })
+    emit(f.executor, { type: 'process-state', state: 'running', pid: 1 })
+    emit(f.executor, { type: 'attachment-state', state: 'restored', afterByte: 0 })
+    const restored = { ...nativeService, input: { phase: { type: 'open' } } }
+    emit(f.executor, { type: 'run-service', nativeService: { ...restored, revision: 4 } })
+    expect(first.coordinator.inspect(f.input.bindingId)?.state).toBe('unavailable')
+    emit(f.executor, { type: 'run-service', nativeService: { ...restored, revision: 6 } })
+    expect(first.coordinator.inspect(f.input.bindingId)?.state).toBe('connected')
+  })
+  it('retains distinct operation issues across unrelated success, rejoin and Core reopen; only exact executor completion settles one', async () => {
+    const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
+    const operation = { bindingId: f.input.bindingId, streamGeneration: 'original', nativeRequestId: 1 as string | number }
+    const send = async (h: ReturnType<typeof host>, value: unknown) => {
+      const through = h.addOutput(value)
+      await vi.waitFor(() => expect(f.read().bridge[h === f.executor ? 'executor' : 'frontend'].outputByte).toBe(through))
+    }
+    const problem = { type: 'diagnostic', scope: 'operation', generation: 'original', code: 'RESPONSE_STORAGE_UNCONFIRMED', operation }
+    await send(f.executor, problem)
+    await send(f.executor, { ...problem, operation: { ...operation, nativeRequestId: '1' } })
+    await send(f.executor, { type: 'diagnostic', scope: 'request', generation: 'original', code: 'INVALID_NATIVE_MESSAGE' })
+    await send(f.executor, { type: 'response', generation: 'original', payload: { id: 1, result: {} } })
+    await first.coordinator.rejoin(f.input.bindingId)
+    expect(first.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'connected', diagnostics: [{ scope: 'operation', operation }, { scope: 'operation', operation: { ...operation, nativeRequestId: '1' } }, { scope: 'request' }] })
+    await first.close(); const next = await f.open(); await next.coordinator.rejoin(f.input.bindingId)
+    await send(f.frontend, { type: 'operation-completed', generation: 'original', operation })
+    await send(f.executor, { type: 'operation-completed', generation: 'wrong', operation })
+    await send(f.executor, { type: 'operation-completed', generation: 'original', operation: { ...operation, bindingId: 'other' } })
+    expect(next.coordinator.inspect(f.input.bindingId)?.diagnostics).toHaveLength(3)
+    await send(f.executor, { type: 'operation-completed', generation: 'original', operation })
+    expect(next.coordinator.inspect(f.input.bindingId)?.diagnostics).toEqual([expect.objectContaining({ scope: 'operation', operation: { ...operation, nativeRequestId: '1' } }), expect.objectContaining({ scope: 'request' })])
+    expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+  })
+  it('preserves an old durable unscoped diagnostic without inventing its helper subject', async () => {
+    const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input); await first.close()
+    const original = { code: 'OLD_UNSCOPED', message: 'Original retained message', generation: 'original' }
+    const db = new DatabaseSync(join(f.root, 'bindings.sqlite'))
+    const row = db.prepare('SELECT record FROM bindings WHERE id=?').get(f.input.bindingId)!
+    db.prepare('UPDATE bindings SET record=? WHERE id=?').run(JSON.stringify({ ...JSON.parse(String(row.record)), diagnostic: original }), f.input.bindingId); db.close()
+    const next = await f.open(); await next.coordinator.rejoin(f.input.bindingId)
+    expect(next.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'connected', diagnostics: [{ ...original, scope: 'unclassified' }] })
+    expect(next.coordinator.inspect(f.input.bindingId)?.diagnostics?.[0]).not.toHaveProperty('runId')
+    expect(f.read().diagnostic).toEqual(original)
+  })
+})
+
+
+it('does not publish a binding change for an ordinary completed operation without a retained issue', async () => {
+  const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
+  const count = f.observations.length
+  const through = f.executor.addOutput({ type: 'operation-completed', generation: 'original', operation: { bindingId: f.input.bindingId, streamGeneration: 'original', nativeRequestId: 1 } })
+  await vi.waitFor(() => expect(f.read().bridge.executor.outputByte).toBe(through))
+  expect(f.observations).toHaveLength(count)
+  expect(f.read()).not.toHaveProperty('diagnostics')
+})
+
+
+it('retains 10k native counter revisions without durable intent reads or unchanged public observations', async () => {
+  const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
+  const reads = vi.spyOn(first.coordinator as unknown as { read(id: string): unknown }, 'read')
+  const count = f.observations.length
+  for (let revision = 1; revision <= 10_000; revision++) {
+    for (const listener of f.executor.listeners) listener({ type: 'run-service', run: { runId: f.executor.runId },
+      nativeService: { revision, owner: { type: 'serving' }, output: { type: 'serving' }, input: { phase: { type: 'open' }, completedInputBytes: revision } },
+      evidence: { source: 'run-process', observedAt: revision } } as AgentMuxClientEvent)
+  }
+  expect(reads).not.toHaveBeenCalled()
+  expect(f.observations).toHaveLength(count)
+  for (const listener of f.executor.listeners) listener({ type: 'run-service', run: { runId: f.executor.runId },
+    nativeService: { revision: 9_999, owner: { type: 'stopped', reason: 'owner_stopped' }, output: { type: 'closed' }, input: { phase: { type: 'closed' } } },
+    evidence: { source: 'run-process', observedAt: 10_001 } } as AgentMuxClientEvent)
+  expect(reads).not.toHaveBeenCalled()
+  expect(f.observations).toHaveLength(count)
+  expect(first.coordinator.inspect(f.input.bindingId)?.state).toBe('connected')
 })

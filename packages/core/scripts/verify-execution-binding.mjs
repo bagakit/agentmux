@@ -7,7 +7,8 @@ import { mkdtemp, mkdir, writeFile, readFile, realpath, readdir } from 'node:fs/
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import WebSocket from 'ws'
 import { DatabaseSync } from 'node:sqlite'
 import xterm from '@xterm/headless'
 import { connectAgentMuxRpc } from '../dist/public-rpc-client.js'
@@ -15,11 +16,19 @@ import { connectHostedAgentMux } from '../dist/hosted-client.js'
 
 // Single machine, controlled Responses model; real CLI, Core and native tool processes.
 // This is not the real two-machine/bidirectional Feature acceptance gate.
-assert.equal(process.argv.length, 2, 'This bounded public binding proof accepts no flags.')
+const observation = process.argv.length === 3 && process.argv[2] === '--observation'
+assert(process.argv.length === 2 || observation, 'This bounded public binding proof accepts only --observation.')
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 // macOS Unix socket paths need a short temporary root; no user paths or credentials are reused.
 const root = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'amx-binding-')))
 const owners = [], diagnostics = []
+const observationEvidence = {}
+const confirmedEndedHelpers = new Set()
+const sourcePaths = ['src/agent-execution-bridge.ts', 'src/agent-execution-coordinator.ts', 'src/agent-execution-executor.ts', 'src/public-rpc-agent-execution.ts', 'src/providers/codex-execution-run.ts']
+const fingerprint = async paths => Object.fromEntries(await Promise.all(paths.map(async path => [path, createHash('sha256').update(await readFile(join(packageRoot, path))).digest('hex')])))
+const driver = { path: fileURLToPath(import.meta.url), sha256: createHash('sha256').update(await readFile(fileURLToPath(import.meta.url))).digest('hex') }
+const sourceHashes = await fingerprint(sourcePaths), compiledHashes = await fingerprint(sourcePaths.map(path => path.replace(/^src\//u, 'dist/').replace(/\.ts$/u, '.js')))
+await writeFile(join(root, 'observation-inputs.json'), JSON.stringify({ sourceHashes, compiledHashes, driver, observation }, null, 2))
 const cleanup = createExecutionProofCleanup(root)
 let success, primaryFailure, failed = false
 let ownerTerminal, releaseTerminalObserver, bindingId
@@ -235,6 +244,24 @@ try {
   }
   assert.equal(current.nativeHandle?.sessionId,originalId,'Core native identity capture must confirm actual rollout before native resume');
   assert.deepEqual(current.toolExecution,toolExecution);
+  if (observation) {
+    const ready = (await privateFrames(agent, frontend.runId)).find(frame => frame.type === 'ready' && typeof frame.url === 'string')
+    assert(ready, 'The exact original frontend publishes its private loopback capability')
+    const socket = new WebSocket(ready.url)
+    try {
+      await deadline(once(socket, 'open'), 'Original native frontend local connection')
+      socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'privateUnsupportedNotification', params: {} }))
+      await until(async () => {
+        const value = await resource.rpc.call('agent.execution.binding', { bindingId })
+        if (!value?.diagnostics?.some(issue => issue.scope === 'request' && issue.code === 'INVALID_NATIVE_MESSAGE')) return false
+        assert.equal(value.state, 'connected', 'One native rejection cannot take down the original helper connection')
+        observationEvidence.localRejection = value
+        return true
+      }, 'Public scoped native rejection')
+    } finally {
+      if (socket.readyState !== WebSocket.CLOSED) { const closed = once(socket, 'close'); socket.close(); await deadline(closed, 'Private diagnostic probe socket close') }
+    }
+  }
   const rejoined = await cli(resource, ['agent', 'execution', 'rejoin', '--input', bindingPath])
   assert.equal(rejoined.code, 0, JSON.stringify(rejoined.packet))
   assert.equal(rejoined.packet.result.bindingId, bindingId)
@@ -274,6 +301,7 @@ try {
     afterRestartInspection = await resource.rpc.call('agent.execution.binding', { bindingId })
     return afterRestartInspection?.state === 'connected'
   }, 'Automatic original BindingService reader restore')
+  if (observation) { assert.deepEqual(afterRestartInspection.diagnostics, observationEvidence.localRejection.diagnostics); observationEvidence.afterCoreRestart = afterRestartInspection }
   const afterRestart = {
     core: resource.client.runtimeOwnerIdentity(), ctxmux: resource.client.runtimeIdentity(), inspection: afterRestartInspection,
     frontend: (await agent.client.readRunReplay({ runId: frontend.runId }, 0, 'raw')).run,
@@ -337,10 +365,42 @@ try {
   const bindingAfterResume = await cli(resource, ['agent', 'execution', 'binding', '--input', bindingPath])
   assert.equal(bindingAfterResume.code, 0, JSON.stringify(bindingAfterResume.packet))
   assert.equal(bindingAfterResume.packet.result.state, 'connected', `Tool service remains unavailable after successful original-session recovery: ${JSON.stringify(bindingAfterResume.packet.result.diagnostic)}`)
+  if (observation) {
+    assert.deepEqual(bindingAfterResume.packet.result.diagnostics, observationEvidence.localRejection.diagnostics)
+    const originalAgent = await agent.client.readAgentSession(agentSessionId)
+    const originalExecutor = (await resource.client.runtimeSubject({ runId: executor.runId })).run
+    assert.equal(originalExecutor.state, 'running')
+    await cleanup.step({ owner: resource.name, action: 'stop-original-helper-for-observation', run: { runId: executor.runId } }, () => resource.client.stopTerminal({ runId: executor.runId }))
+    let afterHelperExit
+    await until(async () => {
+      afterHelperExit = await resource.rpc.call('agent.execution.binding', { bindingId })
+      return afterHelperExit?.state === 'unavailable'
+    }, 'Public observation of exact helper exit without new protocol frame')
+    const stoppedExecutor = (await resource.client.runtimeSubject({ runId: executor.runId })).run
+    assert.equal(stoppedExecutor.state, 'exited')
+    confirmedEndedHelpers.add(executor.runId)
+    resource.runs.splice(resource.runs.indexOf(executor.runId), 1)
+    await cleanup.step({ owner: resource.name, action: 'confirm-original-helper-exited', run: { runId: executor.runId } }, async () => stoppedExecutor)
+    const retainedAgent = await agent.client.readAgentSession(agentSessionId)
+    assert.equal(retainedAgent.agentSessionId, originalAgent.agentSessionId)
+    assert.deepEqual(retainedAgent.run, originalAgent.run)
+    assert.equal((await agent.client.runtimeSubject({ runId: originalAgent.run.runId })).run.state, 'running')
+    assert.equal((await agent.client.runtimeSubject({ runId: frontend.runId })).run.state, 'running')
+    const retainedPair = readPair(resource, bindingId)
+    assert.equal(retainedPair.bridge.frontend.runId, frontend.runId); assert.equal(retainedPair.bridge.executor.runId, executor.runId)
+    const failedRejoin = await cli(resource, ['agent', 'execution', 'rejoin', '--input', bindingPath])
+    assert.notEqual(failedRejoin.code, 0, 'An ended original helper cannot be silently replaced by rejoin')
+    assert.equal(readPair(resource, bindingId).bridge.executor.runId, executor.runId)
+    assert.equal(await readFile(join(resource.base, 'workspace', 'effect-count.txt'), 'utf8'), 'once\n')
+    observationEvidence.afterHelperExit = { inspection: afterHelperExit, stoppedExecutor, retainedAgentRun: retainedAgent.run, frontendRun: frontend.runId, failedRejoin: failedRejoin.packet, effectCount: 1 }
+  }
+  assert.equal(createHash('sha256').update(await readFile(driver.path)).digest('hex'), driver.sha256, 'Original proof driver remains exact')
+  assert.deepEqual(await fingerprint(sourcePaths), sourceHashes, 'Observed product source inputs remain exact')
+  assert.deepEqual(await fingerprint(Object.keys(compiledHashes)), compiledHashes, 'Observed compiled inputs remain exact')
   assert.deepEqual(errors, [], 'Unexpected native terminal/protocol errors remain')
   await writeFile(join(root,'native-frames.json'),JSON.stringify(frames,null,2),{mode:0o600});
   await writeFile(join(root,'diagnostics.json'),JSON.stringify(diagnostics,null,2),{mode:0o600});
-  await writeFile(join(root,'summary.json'),JSON.stringify({actualMachines:1,controlledOfflineModel:true,nativeConversationId:originalId,originalPath,originalCoreSession:agentSessionId,firstRun:created.session.run,resumedRun:restored.runId,helperRuns:[frontend.runId,executor.runId],toolWorkspace:join(resource.base,'workspace'),launchWorkspace:join(agent.base,'workspace'),originalContextRetained:true,originalEffectCount:1,nativeInitializations:frames.filter(f=>f.payload?.method==='initialize').map(f=>({generation:f.generation,params:f.payload.params})),errors,publicCreation:true,resourceCoreRestarted:true,automaticReadersRestored:true,originalHelperPidsRetained:true,bindingAfterResume:bindingAfterResume.packet.result,cliActions:cliReceipts.map(receipt=>receipt.args.slice(0,3).join(' ')),scope:'Single-machine controlled model: compiled CLI public creation/rejoin/inspection, real resource Core restart with automatic original readers, and original Agent Session/native conversation resume; not full remote acceptance'},null,2),{mode:0o600});
+  await writeFile(join(root,'summary.json'),JSON.stringify({observationEvidence,sourceHashes,compiledHashes,driver,actualMachines:1,controlledOfflineModel:true,nativeConversationId:originalId,originalPath,originalCoreSession:agentSessionId,firstRun:created.session.run,resumedRun:restored.runId,helperRuns:[frontend.runId,executor.runId],toolWorkspace:join(resource.base,'workspace'),launchWorkspace:join(agent.base,'workspace'),originalContextRetained:true,originalEffectCount:1,nativeInitializations:frames.filter(f=>f.payload?.method==='initialize').map(f=>({generation:f.generation,params:f.payload.params})),errors,publicCreation:true,resourceCoreRestarted:true,automaticReadersRestored:true,originalHelperPidsRetained:true,bindingAfterResume:bindingAfterResume.packet.result,cliActions:cliReceipts.map(receipt=>receipt.args.slice(0,3).join(' ')),scope:'Single-machine controlled model: compiled CLI public creation/rejoin/inspection, real resource Core restart with automatic original readers, and original Agent Session/native conversation resume; not full remote acceptance'},null,2),{mode:0o600});
   success = {passed:true,evidence:root,nativeConversationId:originalId,modelRequests:requests.length,errors};
 } catch (error) {
   failed = true; primaryFailure = error
@@ -364,7 +424,7 @@ try {
   if (bindingId && resource && agent) await cleanup.step({ owner: resource.name, ownerRoot: resource.base, action: 'observe-exact-binding', bindingId }, async () => {
     const retained = readPair(resource, bindingId)
     if (retained.frontend && !agent.runs.includes(retained.frontend.runId)) agent.runs.push(retained.frontend.runId)
-    if (retained.executor && !resource.runs.includes(retained.executor.runId)) resource.runs.push(retained.executor.runId)
+    if (retained.executor && !confirmedEndedHelpers.has(retained.executor.runId) && !resource.runs.includes(retained.executor.runId)) resource.runs.push(retained.executor.runId)
     const originalSession = await agent.client.readAgentSession(retained.input.agent.agentSessionId)
     if (originalSession) agent.sessions.push(originalSession)
   })
