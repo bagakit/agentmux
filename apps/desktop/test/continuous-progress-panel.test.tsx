@@ -53,6 +53,141 @@ describe('continuous progress panel', () => {
     expect(document.activeElement).toBe(field)
     expect(field.value).toBe('候选输入')
     expect(dom.container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!.disabled).toBe(true)
+    await act(async () => field.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '确认后的续行提示' })))
+    expect(dom.container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!.disabled).toBe(false)
+  })
+
+  async function edit(selector: string, value: string) {
+    const element = dom.container.querySelector<HTMLInputElement | HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] ' + selector)!
+    await act(async () => {
+      const prototype = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+      Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(element, value)
+      element.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+  const submit = () => dom.click('form[aria-label="Continuous progress setup"] button[type="submit"]')
+
+  it.each(['active', 'paused'] as const)('edits and saves the original %s loop without a second creation or state action', async status => {
+    const original = saved(status), updated = { ...original, intervalMs: 3_600_000, prompt: '检查最新成果', revision: 1 }
+    const update = vi.spyOn(api.continuousProgress, 'update').mockResolvedValue(updated)
+    const create = vi.spyOn(api.continuousProgress, 'create'), action = vi.spyOn(api.continuousProgress, 'action')
+    await mount(original)
+    const open = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Edit continuous progress')!
+    await act(async () => open.click())
+    expect(dom.container.querySelector<HTMLDetailsElement>('.automation-create')!.open).toBe(true)
+    expect(dom.container.querySelector<HTMLSelectElement>('[aria-label="Automation type"]')!.value).toBe('progress')
+    expect(dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe(savedPrompt)
+    expect(dom.container.querySelector<HTMLInputElement>('form[aria-label="Continuous progress setup"] input[type="number"]')!.value).toBe('17')
+    await edit('input[type="number"]', '60'); await edit('textarea', '检查最新成果')
+    await submit()
+    expect(update).toHaveBeenCalledExactlyOnceWith({ target, loopId: original.loopId, expectedLoop: original, intervalMs: 3_600_000, prompt: '检查最新成果', operationId: expect.any(String) })
+    expect(create).not.toHaveBeenCalled(); expect(action).not.toHaveBeenCalled()
+    expect(dom.container.textContent).toContain('Changes saved.')
+    if (status === 'paused') expect(dom.container.textContent).toContain('remains paused')
+    expect(useLauncherState.getState().drafts['progress-update:' + JSON.stringify(Object.values(target))]?.progressUpdate).toBeUndefined()
+  })
+
+  it('keeps the exact failed save through observations and retries without sending a newer draft', async () => {
+    await mount(saved())
+    const update = vi.spyOn(api.continuousProgress, 'update').mockRejectedValueOnce(new Error('Save reply lost'))
+    await edit('textarea', 'Original requested update'); await submit()
+    const request = structuredClone(update.mock.calls[0]![0])
+    await edit('textarea', 'A newer unsaved draft')
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    expect(update).toHaveBeenCalledTimes(1)
+    expect(dom.container.textContent).toContain('Previous save is unconfirmed')
+    expect(dom.container.textContent).toContain('Save reply lost')
+    update.mockResolvedValueOnce({ ...saved(), prompt: request.prompt, revision: 1 })
+    await submit()
+    expect(update).toHaveBeenLastCalledWith(request)
+    expect(dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe('A newer unsaved draft')
+    expect(dom.container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!.textContent).toBe('Save changes')
+  })
+
+  it('keeps a draft after a configuration conflict and only adopts a fresh baseline on explicit review', async () => {
+    await mount(saved())
+    const update = vi.spyOn(api.continuousProgress, 'update').mockRejectedValueOnce(Object.assign(new Error('Original configuration changed'), { code: 'CONTROL_REQUEST_CONFLICT' }))
+    await edit('textarea', 'My retained update'); await submit()
+    const latest = { ...saved(), prompt: 'Someone else changed it', revision: 2 }
+    vi.mocked(api.continuousProgress.list).mockResolvedValue([latest])
+    const review = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Review latest settings')!
+    await act(async () => review.click())
+    expect(dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe('My retained update')
+    expect(dom.container.querySelector('.continuous-progress-control__prompt')!.textContent).toBe(latest.prompt)
+    update.mockResolvedValueOnce({ ...latest, prompt: 'My retained update', revision: 3 })
+    await submit()
+    expect(update.mock.calls[1]![0].expectedLoop).toEqual(latest)
+    expect(update.mock.calls[1]![0].operationId).not.toBe(update.mock.calls[0]![0].operationId)
+  })
+
+  it('retains an unknown original request when a newer configuration supersedes its receipt and lets the user explicitly save again', async () => {
+    await mount(saved())
+    const update = vi.spyOn(api.continuousProgress, 'update').mockRejectedValueOnce(new Error('Lost original reply'))
+    await edit('textarea', 'Original unknown change'); await submit()
+    const original = structuredClone(update.mock.calls[0]![0])
+    update.mockRejectedValueOnce(Object.assign(new Error('The original update was superseded'), { code: 'CONTROL_REQUEST_CONFLICT' }))
+    await submit()
+    await edit('textarea', 'My next explicit change')
+    const latest = { ...saved(), prompt: 'Another client updated', revision: 4 }
+    vi.mocked(api.continuousProgress.list).mockResolvedValue([latest])
+    await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Review latest settings')!.click())
+    expect(dom.container.textContent).toContain(original.operationId)
+    expect(dom.container.textContent).toContain('The previous save remains unconfirmed below.')
+    expect(dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe('My next explicit change')
+    update.mockResolvedValueOnce({ ...latest, prompt: 'My next explicit change', revision: 5 })
+    await submit()
+    expect(update.mock.calls[2]![0].expectedLoop).toEqual(latest)
+    expect(update.mock.calls[2]![0].operationId).not.toBe(original.operationId)
+    expect(Object.values(useLauncherState.getState().drafts).flatMap(draft => draft.unconfirmedProgressUpdates ?? [])).toEqual([original])
+  })
+
+  it('keeps a newer draft separately from its pending request across a different target and remount', async () => {
+    await mount(saved())
+    const update = vi.spyOn(api.continuousProgress, 'update').mockRejectedValueOnce(new Error('Save reply lost'))
+    await edit('textarea', 'Original request'); await submit()
+    const request = structuredClone(update.mock.calls[0]![0])
+    await edit('textarea', 'New unsaved draft'); await edit('input[type="number"]', '60')
+    await dom.render(<div />)
+    vi.mocked(api.continuousProgress.list).mockResolvedValue([])
+    const other = composerSession(); other.control = { ...other.control, agentSessionId: 'another-agent' }
+    await dom.render(<ContinuousProgressControl session={other} />)
+    expect(dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).not.toBe('New unsaved draft')
+    await mount(saved())
+    expect(dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe('New unsaved draft')
+    expect(dom.container.querySelector<HTMLInputElement>('form[aria-label="Continuous progress setup"] input[type="number"]')!.value).toBe('60')
+    update.mockResolvedValueOnce({ ...saved(), prompt: request.prompt, revision: 1 })
+    await submit()
+    expect(update).toHaveBeenLastCalledWith(request)
+    expect(dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe('New unsaved draft')
+  })
+
+  it('keeps the draft and an explicit retry when the original save request cannot be retained locally', async () => {
+    await mount(saved())
+    await edit('textarea', 'Retained in the editor')
+    const update = vi.spyOn(api.continuousProgress, 'update')
+    const remember = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => { throw new Error('Storage is unavailable') })
+    await submit()
+    expect(remember).toHaveBeenCalled(); expect(update).not.toHaveBeenCalled()
+    expect(dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe('Retained in the editor')
+    expect(dom.container.textContent).toContain('save request could not be retained')
+    expect(dom.container.textContent).not.toContain('Previous save is unconfirmed')
+    expect(Object.values(useLauncherState.getState().drafts).some(draft => !!draft.progressUpdate)).toBe(false)
+    expect(dom.container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!.disabled).toBe(false)
+    remember.mockRestore()
+    await edit('textarea', 'The next explicit value')
+    update.mockResolvedValueOnce({ ...saved(), prompt: 'The next explicit value', revision: 1 })
+    await submit()
+    expect(update.mock.calls[0]![0].prompt).toBe('The next explicit value')
+  })
+
+  it('retains untouched saved values when reviewing an unknown save and reopening the editor', async () => {
+    await mount(saved())
+    vi.spyOn(api.continuousProgress, 'update').mockRejectedValueOnce(new Error('Reply lost'))
+    await submit()
+    await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Review latest settings')!.click())
+    await dom.render(<div />); await mount(saved())
+    expect(dom.container.querySelector<HTMLTextAreaElement>('form[aria-label="Continuous progress setup"] textarea')!.value).toBe(savedPrompt)
+    expect(dom.container.querySelector<HTMLInputElement>('form[aria-label="Continuous progress setup"] input[type="number"]')!.value).toBe('17')
   })
 
   it('creates a minute schedule for this Agent and keeps its draft while changing the automation type', async () => {
@@ -116,7 +251,7 @@ describe('continuous progress panel', () => {
     await mount(saved(status))
     const config = dom.container.querySelector<HTMLDetailsElement>('[data-progress-details="configuration"]')!
     expect(config).not.toBeNull()
-    expect(config.querySelector('summary')!.textContent).toBe('Saved configuration Read only')
+    expect(config.querySelector('summary')!.textContent).toBe('Saved configuration')
     await act(async () => { config.open = true })
     expect(config.textContent).toContain('17 minutes')
     expect(config.querySelector('.continuous-progress-control__prompt')!.textContent).toBe(savedPrompt)
@@ -126,7 +261,10 @@ describe('continuous progress panel', () => {
     expect([...details.querySelectorAll('dd')].map(el => el.textContent)).toEqual(['Codex (codex)', 'local', 'agent-1', _hygiene_fixturePath("repo")])
     expect(dom.container.querySelector('.continuous-progress-panel__decision p')!.textContent).toBe('Original decision\nwith its full reason.')
     expect(dom.container.querySelector('[aria-label="Continuation settings"]')).not.toBeNull()
-    if (status !== 'stopped') expect(dom.container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!.disabled).toBe(true)
+    if (status !== 'stopped') {
+      expect(dom.container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!.disabled).toBe(false)
+      expect(dom.container.querySelector<HTMLButtonElement>('form[aria-label="Continuous progress setup"] button[type="submit"]')!.textContent).toBe('Save changes')
+    }
     expect(dom.container.querySelector('[aria-label="Check continuous progress now"]')?.hasAttribute('disabled') ?? true).toBe(status !== 'active')
     expect([...dom.container.querySelectorAll('.continuous-progress-panel__summary dt')].map(el => el.textContent)).toEqual(status === 'active'
       ? ['Loop', 'Agent execution', 'Next check', 'Last check'] : ['Loop', 'Agent execution', 'Last check'])
