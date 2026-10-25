@@ -3,7 +3,7 @@ import { publicationInputImages } from './publication-input-images.js'
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { publicationMarkdown } from './publication-markdown.js'
 import { AgentMuxError, parseAgentInputResourceResult, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
-import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPageForWindow, parseConversationCheckpointPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationSourceRef, type ConversationCheckpointInput, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationContentRef, type ConversationRef } from '@agentmux/core/conversation'
+import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPageForWindow, parseConversationCheckpointPage, parseConversationReadPageForWindow, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationSourceRef, type ConversationCheckpointInput, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationContentRef, type ConversationRef } from '@agentmux/core/conversation'
 import { readRoomPublicationBinding, roomPublicationReference, connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { credentialLookupFailure } from './credential-observation.js'
@@ -476,7 +476,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     for (let reads = 0; reads < 1024; reads++) {
       signal.throwIfAborted()
       const input = { ...reference, anchor: gap.anchor!, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
-      const page = parseConversationReadPage(await this.until(this.options.conversation.inspect(input, signal), signal), input)
+      const page = parseConversationReadPageForWindow(await this.until(this.options.conversation.inspect(input, signal), signal), input)
       for (const entry of page.items) {
         const value = consumeJsonReadEntry({ entry, scopeKey: JSON.stringify(gap.anchor), ...(pending ? { pending } : {}), maxTotalBytes: CONVERSATION_MAX_UNIT_BYTES })
         if (value.kind === 'pending') { pending = value.pending; continue }
@@ -725,7 +725,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
             while (!complete) {
               signal.throwIfAborted()
               const input = { ...reference, record, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
-              const page = parseConversationReadPage(await this.options.conversation.inspect(input, signal), input)
+              const page = parseConversationReadPageForWindow(await this.options.conversation.inspect(input, signal), input)
               const before = (pending?.bytes ?? 0) + (pending?.fragment?.receivedBytes ?? 0)
               const consumed = consumeConversationWindowPage(page, pending)
               if (consumed.kind === 'complete') {

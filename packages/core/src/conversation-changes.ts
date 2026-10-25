@@ -57,25 +57,12 @@ export type ConversationWindowSnapshot = Omit<AgentConversationReadPage, 'items'
 export type ConversationWindowAssembly = { scopeKey: string; windowId: string; revision: number; itemCount: number;
   units: readonly ConversationUnit[]; bytes: number; eventIds: ReadonlySet<string>; recordIds: ReadonlySet<string>; fragment?: JsonReadAssembly }
 
-// One immutable response owns its complete-unit validation. This never crosses the
-// wire: copied/raw pages and completed fragments still enter the strict parser.
-const parsedPageOwner = Symbol('conversation-page-owner'), pageOwnerToken = {}
-class ConversationPageOwner {
-  #page: AgentConversationReadPage
-  constructor(token: object, page: AgentConversationReadPage) {
-    if (token !== pageOwnerToken) bad('A conversation page needs its original parser owner.')
-    this.#page = page
-  }
-  static owns(page: unknown): page is AgentConversationReadPage {
-    if (page === null || typeof page !== 'object') return false
-    const owner: unknown = Object.getOwnPropertyDescriptor(page, parsedPageOwner)?.value
-    return typeof owner === 'object' && owner !== null && #page in owner && owner.#page === page
-  }
+// Exact immutable responses own their validation without retaining pages or
+// adding wire-visible properties. Copies and completed fragments remain strict.
+const parsedPages = new WeakSet<object>()
+function ownsParsedPage(page: unknown): page is AgentConversationReadPage {
+  return page !== null && typeof page === 'object' && parsedPages.has(page)
 }
-// The nonenumerable owner can be inspected by local JavaScript. Reflection must
-// not let that caller replace the module's private-field validation method.
-Object.freeze(ConversationPageOwner)
-Object.freeze(ConversationPageOwner.prototype)
 function immutablePageValue<T>(value: T): T {
   // Copy before freezing: strict DTO normalization may retain nested source values.
   // A parser must not freeze its caller's original input as a side effect.
@@ -84,16 +71,18 @@ function immutablePageValue<T>(value: T): T {
     Object.entries(value).map(([key, item]) => [key, immutablePageValue(item)]))) as T
   return value
 }
-function ownParsedPage<T extends AgentConversationReadPage>(page: T): T {
-  const owned = Object.fromEntries(Object.entries(page).map(([key, value]) => [key, immutablePageValue(value)])) as T
-  Object.defineProperty(owned, parsedPageOwner, { value: Object.freeze(new ConversationPageOwner(pageOwnerToken, owned)) })
+function ownParsedPage<T extends AgentConversationReadPage>(page: T, original?: AgentConversationReadPage): T {
+  const retainItems = ownsParsedPage(original) && page.items === original.items
+  const owned = Object.fromEntries(Object.entries(page).map(([key, value]) =>
+    [key, key === 'items' && retainItems ? value : immutablePageValue(value)])) as T
+  parsedPages.add(owned)
   return Object.freeze(owned)
 }
 
 /** Wire assembly only. Semantic accumulation and replacement belong to the backend Reader. */
 export function consumeConversationWindowPage(page: AgentConversationReadPage, pending?: ConversationWindowAssembly):
   { kind: 'pending'; pending: ConversationWindowAssembly } | { kind: 'complete'; snapshot: ConversationWindowSnapshot } {
-  const validated = ConversationPageOwner.owns(page)
+  const validated = ownsParsedPage(page)
   const scopeKey = JSON.stringify([page.hostId, page.sourceHostId, page.agentSessionId, page.scope, page.window.anchor, page.processDetails])
   if (pending && (pending.scopeKey !== scopeKey || pending.windowId !== page.window.id || pending.revision !== page.window.revision || pending.itemCount !== page.window.itemCount)) return bad('A window fragment belongs to another original scope or revision.')
   const units = [...(pending?.units ?? [])]
@@ -440,7 +429,7 @@ function parseCompleteConversationUnit(value: unknown, ref: ConversationRef, acc
   if (conversationRevision({ policy: 1, versions: records.map(record => [record.id, record.revision]), event }) !== version) return bad('Conversation event version changed.')
   return { event: { ...event, revision: version }, records }
 }
-function basePage(value: unknown, input: ConversationTimelineReadInput, changes = false, ownedItems?: readonly ConversationUnitEntry[]): AgentConversationReadPage {
+function basePage(value: unknown, input: ConversationTimelineReadInput, changes = false, original?: AgentConversationReadPage): AgentConversationReadPage {
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'coverage', 'order', 'items', 'nextCursor', 'budgetBytes', 'window', 'processDetails', ...(changes ? ['checkpoint', 'more'] : [])], 'CONTROL_PROTOCOL_ERROR')
   if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || p.budgetBytes !== (input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES) || bytes(value) > Number(p.budgetBytes) || !Array.isArray(p.items) || p.items.length > (input.limit ?? 30)) return bad()
   if (p.processDetails !== input.processDetails) return bad('The process detail representation changed during reading.')
@@ -448,7 +437,10 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
   if (input.record && input.record.hostId !== source.hostId || input.nativeSource && !accepted.sources.some(source => source.kind === 'native' && source.providerId === input.nativeSource!.providerId && source.nativeSessionId === input.nativeSource!.nativeSessionId) ||
       input.anchor && (input.anchor.frontier.sourceHostId !== source.hostId || !same(input.anchor.frontier.frontier.scope, accepted))) return bad('The read returned another explicitly selected original source.')
   if (order.direction !== 'newest-first' || order.basis !== 'source-and-relations' || !['partial', 'confirmed'].includes(String(order.crossSource))) return bad()
-  const items = ownedItems ?? p.items.map(value => {
+  const reusable = ownsParsedPage(original) && p.items === original.items &&
+    source.hostId === original.sourceHostId && input.agentSessionId === original.agentSessionId &&
+    p.processDetails === original.processDetails && Object.hasOwn(original, 'checkpoint') === changes && same(accepted, original.scope)
+  const items = reusable ? original.items : p.items.map(value => {
     const entry = rpcRecord(value, ['kind', 'item', 'itemId', 'encoding', 'sha256', 'offsetBytes', 'totalBytes', 'dataBase64'], 'CONTROL_PROTOCOL_ERROR')
     if (entry.kind === 'item') { rpcRecord(value, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR'); return { kind: 'item' as const, item: parseConversationUnit(entry.item, source, accepted) } }
     rpcRecord(value, ['kind', 'itemId', 'encoding', 'sha256', 'offsetBytes', 'totalBytes', 'dataBase64'], 'CONTROL_PROTOCOL_ERROR')
@@ -481,8 +473,8 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
   return { hostId: input.hostId, agentSessionId: input.agentSessionId, ...(input.processDetails ? { processDetails: input.processDetails } : {}), sourceHostId: source.hostId, scope: accepted, coverage: coverage(p.coverage, source, accepted), order: order as AgentConversationReadPage['order'], items, nextCursor: p.nextCursor === null ? null : text(p.nextCursor, 131_072), budgetBytes: Number(p.budgetBytes), window }
 }
 export function parseConversationReadPage(value: unknown, input: ConversationTimelineReadInput): AgentConversationReadPage { return basePage(value, input) }
-function changesPage(value: unknown, input: ConversationChangesInput, ownedItems?: readonly ConversationUnitEntry[]): ConversationChangesPage {
-  const result = basePage(value, input, true, ownedItems), p = rpcRecord(value), checkpoint = parseConversationCheckpoint(p.checkpoint, input)
+function changesPage(value: unknown, input: ConversationChangesInput, original?: AgentConversationReadPage): ConversationChangesPage {
+  const result = basePage(value, input, true, original), p = rpcRecord(value), checkpoint = parseConversationCheckpoint(p.checkpoint, input)
   if (input.checkpoint.sourceHostId !== result.sourceHostId || checkpoint.sourceHostId !== result.sourceHostId || !same(result.scope, input.checkpoint.frontier.scope) || !same(result.scope, checkpoint.frontier.scope) || !same(result.window.checkpoint, checkpoint) || typeof p.more !== 'boolean') return bad()
   return { ...result, checkpoint, more: p.more }
 }
@@ -491,16 +483,24 @@ export function parseConversationChangesPage(value: unknown, input: Conversation
 }
 /** Retain complete-unit validation on the exact immutable response. Each consumer
  * still validates its own request envelope; ordinary DTO parsers remain strict.
- * Only an original owner may omit its private non-wire marker from that check. */
+ * Ownership never changes the ordinary public DTO shape. */
 export function parseConversationReadPageForWindow(value: unknown, input: ConversationTimelineReadInput): AgentConversationReadPage {
-  if (!ConversationPageOwner.owns(value)) return ownParsedPage(parseConversationReadPage(value, input))
-  basePage({ ...value }, input, false, value.items)
+  if (!ownsParsedPage(value)) return ownParsedPage(parseConversationReadPage(value, input))
+  basePage(value, input, false, value)
   return value
 }
 export function parseConversationChangesPageForWindow(value: unknown, input: ConversationChangesInput): ConversationChangesPage {
-  if (!ConversationPageOwner.owns(value)) return ownParsedPage(parseConversationChangesPage(value, input))
-  changesPage({ ...value }, input, value.items)
+  if (!ownsParsedPage(value)) return ownParsedPage(parseConversationChangesPage(value, input))
+  changesPage(value, input, value)
   return value as ConversationChangesPage
+}
+/** An accepted route may retain original immutable items; its envelope is always checked anew. */
+export function parseRoutedConversationPage(original: AgentConversationReadPage, value: unknown, input: ConversationChangesInput): ConversationChangesPage
+export function parseRoutedConversationPage(original: AgentConversationReadPage, value: unknown, input: ConversationTimelineReadInput): AgentConversationReadPage
+export function parseRoutedConversationPage(original: AgentConversationReadPage, value: unknown,
+  input: ConversationTimelineReadInput | ConversationChangesInput): AgentConversationReadPage {
+  const page = 'checkpoint' in input ? changesPage(value, input, original) : basePage(value, input, false, original)
+  return ownParsedPage(page, original)
 }
 export function parseConversationCheckpointPage(value: unknown, input: ConversationRef): ConversationCheckpointPage {
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'checkpoint', 'coverage'], 'CONTROL_PROTOCOL_ERROR'), source = { hostId: text(p.sourceHostId), agentSessionId: input.agentSessionId }, checkpoint = parseConversationCheckpoint(p.checkpoint, input), accepted = scope(p.scope)

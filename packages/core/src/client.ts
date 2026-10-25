@@ -2680,7 +2680,7 @@ export class AgentMuxClient {
       if (input.anchor) { parseConversationCheckpoint(input.anchor.frontier, input); parseConversationFrontier(input.anchor.frontier.frontier, owner.reference) }
       const anchor = input.anchor ? { ...input.anchor, frontier: { ...input.anchor.frontier, ...owner.reference } } : undefined
       const page = await readUnifiedConversation({ ...input, ...owner.reference, ...(anchor ? { anchor } : {}) }, owner.port)
-      return { ...page, hostId: input.hostId }
+      return page
     })
   }
 
@@ -2697,7 +2697,7 @@ export class AgentMuxClient {
       parseConversationCheckpoint(input.checkpoint, input)
       parseConversationFrontier(input.checkpoint.frontier, owner.reference)
       const page = await readUnifiedChanges({ ...input, ...owner.reference, checkpoint: { ...input.checkpoint, ...owner.reference } }, owner.port)
-      return { ...page, hostId: input.hostId, checkpoint: { ...page.checkpoint, hostId: input.hostId } }
+      return page
     })
   }
 
