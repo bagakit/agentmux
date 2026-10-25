@@ -1,3 +1,4 @@
+import { createServer } from 'node:http'
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -99,4 +100,21 @@ it('qualifies the actual Agent command with its environment and backend cwd, the
   expect(result.command).toBe('/agent/path/different-codex')
   vi.mocked(qualifyCodexExecutionExecutable).mockRejectedValue(new Error('actual Agent CLI is not qualified'))
   await expect(prepareCodexToolExecutionLaunch(f.plan, f.execution, f.options)).rejects.toThrow('actual Agent CLI is not qualified')
+})
+
+
+it('keeps native launch available and carries only the typed registration failure on its private URL', async () => {
+  const f = await fixture()
+  const server = createServer((_request, response) => { response.writeHead(403, { 'content-type': 'application/json' }); response.end(JSON.stringify({ code: 'RUNTIME_OWNER_MISMATCH', message: 'private details must not be copied' })) })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing private endpoint')
+    const url = `ws://127.0.0.1:${address.port}/private-capability`
+    const result = await prepareCodexToolExecutionLaunch(f.plan, { ...f.execution, url }, { ...f.options, invocation: {
+      agentSessionId: 'original-agent', lifecycleOperationId: 'original-lifecycle', capability: 'private-capability', endpointPath: '/original/core.sock', runtimeId: 'original-core', ctxmuxInstanceId: 'original-native'
+    } })
+    expect(result.env.CODEX_EXEC_SERVER_URL).toBe(url + '/unverified/RUNTIME_OWNER_MISMATCH')
+    expect(result.args).toEqual(['--no-daemon', '-C', f.execution.workspacePath, ...f.plan.args])
+    expect(JSON.stringify(result)).not.toContain('private details')
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())) }
 })
