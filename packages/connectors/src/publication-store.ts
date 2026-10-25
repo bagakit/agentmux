@@ -963,7 +963,9 @@ export class PublicationStore {
     })
   }
   recoverableGaps(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, after = 0): Array<{ ordinal: number; gap: ConnectionDeliveryGap }> {
-    return this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND rowid>? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.gap.reason') IN ('resource-unavailable','version-unavailable') ORDER BY rowid LIMIT 4")
+    // Qualification can retain a diagnostic gap without a readable original. Such
+    // gaps remain in coverage, but must not occupy every slot before later media.
+    return this.database.prepare("SELECT rowid,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND rowid>? AND json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved' AND json_extract(decision_json,'$.gap.reason') IN ('resource-unavailable','version-unavailable') AND json_type(decision_json,'$.gap.anchor')='object' AND (json_extract(decision_json,'$.gap.code')='PUBLICATION_A2A_ORIGINAL_UNAVAILABLE' OR (json_type(decision_json,'$.gap.part')='object' AND json_type(decision_json,'$.gap.event')='object')) ORDER BY rowid LIMIT 4")
       .all(...scopeKey(boundary), after).map(row => ({ ordinal: Number(row.rowid), gap: JSON.parse(String(row.decision_json)).gap }))
   }
   /** Recovery admits only the missing exact part, with no read-cut movement or replay of represented bytes. */
