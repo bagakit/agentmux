@@ -67,6 +67,8 @@ Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、H
 
 Remote execution 的页面目的，是让用户明确“Agent 在哪里运行、项目与工具在哪里、怎样开始或继续这项工作”。它与 Hosts 同层参与 Settings 导航、Overview 和搜索；详情复用原 Host 的准确对象深链，不要求先进入某台 Host 才能找到执行入口。本节持有行为合同；设置、创建与观察的源码入口见[实现基线](#公共能力与当前实现基线)，源码入口不代签特定运行实例或 Provider 资格。
 
+日常项目工作沿 Space 中的[原 Launcher](workface-launcher.md#agent-运行端与项目工具端)开始，Settings 同时保留准备原 Launcher 与管理已有绑定的入口。操作正文唯一在[Core 使用指南](../../../packages/core/guides/actions/remote-execution.md)，由设置页和原 CLI 帮助同源消费。指南覆盖登记环境与目录、选择准确两端、显式启动和继续原工作，说明浏览一台机器与选定其项目是两个动作；不在本页或 UI 另写一套步骤及能力清单。
+
 页面以原 AgentSession 的双端执行绑定为主要对象；同一 Host 可以承载多个绑定，绑定不等于 Host 连接、全局执行模板或新的常驻服务开关。列表沿当前管理入口可确认的 Session 与绑定引用组织，并标明观察范围；没有全域发现事实时不声称列出所有机器或全部工作。名称帮助阅读，准确 Agent Host、资源 Host／Workspace、Session 与 binding 身份负责定位。工具桥接状态、Agent 运行状态与 Provider 分项能力分别呈现，`connected` 不能代签 Hooks、Skills、MCP 或 Agent control 全部可用。
 
 | 用户任务 | 页面动作与完成信号 | 复用与边界 |

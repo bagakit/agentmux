@@ -17,6 +17,8 @@
 
 普通模式沿当前项目启动。用户显式分开时，原项目仍持有文件引用、辅助 Terminal、Browser、Note、Mote 入口和未发送稿；另选已登记 Workspace 作为 Agent 运行端。两端可互换本机与远端，展示位置不随选择移动。新 Session 绑定准确的两端，已有 Session 的 Resume 保持原身份与原绑定，不按新建选择迁移。
 
+分端选择在项目 Launcher 中可直接发现，不以用户预先知道环境弹层中的开关为前提。设置页保留准备入口，仍进入这一个 Launcher；两处均可找到[同一操作指南](../../../packages/core/guides/actions/remote-execution.md)，不新建远程专用的创建或草稿 owner。
+
 分开模式的 Agent 候选来自准确运行 Host 的 Core inventory，包括本机；选择保存 Host、Executor 和配置 revision，不以同名 App 模板代替。读取失败保留已确认配置与全部输入，显示原观察缺口；已知 revision 改变须明确重新选择，本次请求不能借用旧资格。首次支持两个已登记普通项目；Scratch／Mote 上下文尚未取得跨端资格时说明限制，保留普通启动与原草稿，不伪造远端主题归属。
 
 ## Agent 选择、选项与草稿
