@@ -1,5 +1,6 @@
 // Private verifier supervisor. Product operations use the installed public Core/CLI.
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import { createWriteStream } from 'node:fs';
 import { join } from 'node:path';
@@ -58,8 +59,48 @@ catch (error) {
 const { connectAgentMuxRpc } = await import(pathToFileURL(join(packageRoot, 'dist/public-rpc-client.js')));
 const { connectHostedAgentMux } = await import(pathToFileURL(join(packageRoot, 'dist/hosted-client.js')));
 let stopped = false, pausedTransport;
+const slowReaders = new Map();
+async function stopReader(reader) {
+    if (reader.exitCode !== null || reader.signalCode !== null) return;
+    const ended = once(reader, 'exit');
+    reader.kill('SIGCONT'); reader.kill('SIGTERM'); await ended;
+}
+async function sampleProcesses(pids) {
+    assert(Array.isArray(pids) && pids.length && pids.every(pid => Number.isSafeInteger(pid) && pid > 0));
+    const observedAt = Date.now();
+    const {stdout} = await promisify(execFile)('ps', ['-axo', 'pid=,ppid=,time=,rss=,comm=']);
+    const rows = stdout.split('\n').flatMap(line => {
+        const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\d+)\s+(.*)$/.exec(line);
+        if (!m) return [];
+        const parts=m[3].split(':').map(Number); let cpuSeconds=0; for(const n of parts) cpuSeconds=cpuSeconds*60+n;
+        return [{pid:Number(m[1]),ppid:Number(m[2]),cpuSeconds,rssKiB:Number(m[4]),command:m[5]}];
+    });
+    const owned = new Set(pids); let changed=true;
+    while(changed) { changed=false; for(const row of rows) if(owned.has(row.ppid)&&!owned.has(row.pid)){owned.add(row.pid);changed=true;} }
+    const processes=rows.filter(row=>owned.has(row.pid));
+    assert(pids.every(pid=>processes.some(row=>row.pid===pid)), 'A sampled original process is missing');
+    let sockets;
+    if(process.platform==='linux') {
+        const inodeOwners=new Map();
+        for(const proc of processes) for(const fd of await fs.readdir('/proc/'+proc.pid+'/fd')) {
+            const link=await fs.readlink('/proc/'+proc.pid+'/fd/'+fd).catch(()=>null),m=/^socket:\[(\d+)\]$/.exec(link??'');
+            if(m) { const owners=inodeOwners.get(m[1])??[];owners.push(proc.pid);inodeOwners.set(m[1],owners); }
+        }
+        const tcp=[];
+        for(const family of ['tcp','tcp6']) { const data=await fs.readFile('/proc/net/'+family,'utf8');
+            for(const line of data.trim().split('\n').slice(1)){const fields=line.trim().split(/\s+/);if(inodeOwners.has(fields[9]))tcp.push({family,state:fields[3],inode:fields[9],pids:inodeOwners.get(fields[9])});}
+        }
+        sockets={kind:'linux-proc-owned-socket-inodes',socketInodes:inodeOwners.size,establishedTcp:tcp.filter(row=>row.state==='01').length,tcp};
+    } else {
+        try { const result=await promisify(execFile)('/usr/sbin/lsof',['-nP','-a','-p',processes.map(row=>row.pid).join(','),'-iTCP','-FpnT']);
+            if(result.stderr) throw Error(result.stderr);
+            sockets={kind:'lsof-exact-owned-pids',establishedTcp:(result.stdout.match(/TST=ESTABLISHED/g)??[]).length,raw:result.stdout};
+        } catch(error) { sockets={kind:'unknown',reason:String(error)}; }
+    }
+    return {observedAt,processes,sockets,host:{platform:process.platform,architecture:process.arch,cpuModel:os.cpus()[0]?.model,cpuCount:os.cpus().length,totalMemoryBytes:os.totalmem(),freeMemoryBytes:os.freemem(),uptimeSeconds:os.uptime(),loadAverage:os.loadavg()}};
+}
 const stop = async () => { if (stopped)
-    return; stopped = true; const errors = []; if (pausedTransport) {
+    return; stopped = true; const errors = []; for(const reader of slowReaders.values()) await stopReader(reader).catch(error=>errors.push(String(error))); if (pausedTransport) {
     try {
         process.kill(pausedTransport.pid, 'SIGKILL');
     }
@@ -110,6 +151,25 @@ control.on('line', line => {
             if (code !== 0 || signal !== null)
                 throw Error('Original test Core exit was not clean');
             result = { oldPid, exitCode: code, exitSignal: signal, receipt: await startCore() };
+        }
+        else if (request.action === 'sample-processes') {
+            result = await sampleProcesses(request.pids);
+        }
+        else if (request.action === 'start-slow-reader') {
+            assert(typeof request.runId === 'string' && request.runId.length>0);
+            const readerCode = `import {connectAgentMuxRpc} from ${JSON.stringify(pathToFileURL(join(packageRoot,'dist/public-rpc-client.js')).href)};import {connectHostedAgentMux} from ${JSON.stringify(pathToFileURL(join(packageRoot,'dist/hosted-client.js')).href)};const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:${JSON.stringify(receipt.socketPath)}}});const client=await connectHostedAgentMux({rpc});await client.connectRuntime();client.onRunEvent(${JSON.stringify(request.runId)},()=>{}, {observeMessages:false});const attached=await client.attachTerminal(${JSON.stringify(request.runId)},0,'raw');console.log(JSON.stringify({runId:attached.run.runId}));process.once('SIGTERM',()=>void client.dispose().then(()=>rpc.dispose()).then(()=>process.exit(0)));`;
+            const reader=spawn(nodePath,['--input-type=module','-e',readerCode],{env,stdio:['ignore','pipe','pipe']});
+            slowReaders.set(reader.pid,reader); reader.stderr.pipe(createWriteStream(join(base,'reader-'+reader.pid+'.stderr')));
+            const lines=createInterface({input:reader.stdout});
+            const [line]=await Promise.race([once(lines,'line'),once(reader,'exit').then(()=>{throw Error('Private reader exited before ready')})]);
+            assert.equal(JSON.parse(line).runId,request.runId);reader.kill('SIGSTOP');
+            const state=await promisify(execFile)('ps',['-p',String(reader.pid),'-o','stat=']);
+            assert(state.stdout.includes('T'),'Exact private reader is not stopped');
+            result={pid:reader.pid,runId:request.runId,state:state.stdout.trim(),startedAt:Date.now()};
+        }
+        else if(request.action==='stop-slow-reader') {
+            const reader=slowReaders.get(request.pid);assert(reader,'Unknown original private reader');
+            await stopReader(reader);slowReaders.delete(request.pid);result={pid:request.pid,exitCode:reader.exitCode,signal:reader.signalCode};
         }
         else if (request.action === 'drop-transport' || request.action === 'pause-transport') {
             if (!remote)
