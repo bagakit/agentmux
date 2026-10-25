@@ -72,12 +72,12 @@ it.each(['id', 'updates'] as const)('Grok %s locator observes durable native use
     ['user-message', 'Equal native input.'], ['assistant-message', 'Native answer.'],
     ['user-message', 'Equal native input.'], ['assistant-message', 'Second answer.']
   ])
-  expect(new Set(fresh.items.map(item => item.id)).size).toBe(6)
+  expect(new Set(fresh.items.map(item => item.id)).size).toBe(4)
   expect(inputs.map(input => input.content)).toEqual(['Equal native input.', 'Equal native input.'])
   expect(inputs[0]!.author).toEqual({ kind: 'unknown' })
   expect(fresh.items.at(-1)!.messagePhase).toBe('final')
   const older = await f.client.sessionHistoryPage('grok-original', { ...f.options, cursor: before.nextCursor!, limit: 1 })
-  expect(older.items.map(item => item.kind)).toEqual(['activity'])
+  expect(older.items.map(item => item.kind)).toEqual(['user-message'])
   handle.dispose()
   const received = events.length
   await appendFile(f.path, jsonl([user('Hidden late change.')]))
@@ -87,7 +87,7 @@ it.each(['id', 'updates'] as const)('Grok %s locator observes durable native use
   const restored = f.newClient()
   const restoredPage = await restored.client.sessionHistoryPage('grok-original', f.options)
   expect(restoredPage.source).toEqual({ providerId: 'grok', nativeSessionId: 'native-grok' })
-  expect(restoredPage.items).toHaveLength(7)
+  expect(restoredPage.items).toHaveLength(5)
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
   expect(restored.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
 })
@@ -105,7 +105,7 @@ it('Grok id-only source watches the exact file before its first durable conversa
   const handle = await f.client.observeSessionHistory('grok-original', event => events.push(event), f.options)
   await writeFile(f.path, jsonl([user(), ...assistant()]))
   await vi.waitFor(() => expect(events.some(event => event.kind === 'invalidated')).toBe(true))
-  expect((await f.client.sessionHistoryPage('grok-original', f.options)).items.map(item => item.kind)).toEqual(['user-message', 'activity', 'assistant-message'])
+  expect((await f.client.sessionHistoryPage('grok-original', f.options)).items.map(item => item.kind)).toEqual(['user-message', 'assistant-message'])
   handle.dispose()
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
 })
