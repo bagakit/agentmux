@@ -3625,7 +3625,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     if (pending)
       return await pending;
     const work = (async () => {
-      await observeRead(this.tail, signal);
+      await this.sessionWrites(id, signal);
       // Schema creation and initial source ownership use the original writer, once.
       const committed = await readCurrentSessionDatabase(this.path);
       let existing: ReturnType<typeof capturedStream>;
@@ -3657,7 +3657,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         if (stream.source_witness !== witness)
           throw new AgentMuxError('Original captured source changed before handover confirmation; retain its original file and retry repair.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED');
         this.dirty = true;
-      }, signal);
+      }, signal, id);
       let index = 0, gaps: Array<{
         code: string;
         message: string;
@@ -3684,7 +3684,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
               this.db.prepare('UPDATE captured_streams SET import_index=? WHERE session_id=?').run(ordinal, id);
               this.dirty = true;
             }
-          }, signal);
+          }, signal, id);
         }, signal);
         gaps = imported.gaps;
         if (await capturedFileWitness(path) !== witness)
@@ -3701,7 +3701,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         const row = capturedStream(this.db, id)!;
         readyCapturedStream(this.db, id, witness, row.revision, gaps);
         this.dirty = true;
-      }, signal);
+      }, signal, id);
       return [];
     })();
     this.capturedPreparations.set(id, work);
@@ -3715,18 +3715,18 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async readInputConversationProjection(id: string, after = ''): Promise<ReturnType<typeof readCapturedInputProjection>> {
-    await this.timelineTails.get(id); await this.tail
+    await this.timelineTails.get(id); await this.sessionWrites(id)
     await this.prepareCapturedHistory(id)
     return this.withCapturedRead(db => readCapturedInputProjection(db, id, after))
   }
   async recordInputConversationProjection(id: string, cut: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<void> {
     await this.prepareCapturedHistory(id)
-    await this.enqueue(async () => { writeCapturedInputProjection(this.db, id, cut); this.dirty = true })
+    await this.enqueue(async () => { writeCapturedInputProjection(this.db, id, cut); this.dirty = true }, undefined, id)
   }
 
   async readCapturedHistory(agentSessionId: string, input: AgentCapturedTimelineRead = {}): Promise<AgentCapturedTimelinePage> {
     await this.timelineTails.get(agentSessionId);
-    await this.tail;
+    await this.sessionWrites(agentSessionId);
     const observedGaps = await this.prepareCapturedHistory(agentSessionId);
     const page = await this.withCapturedRead(db => readCapturedPage(db, agentSessionId, input));
     page.stream.gaps.push(...observedGaps);
@@ -3735,7 +3735,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
 
   async loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
     await this.timelineTails.get(agentSessionId);
-    await this.tail;
+    await this.sessionWrites(agentSessionId);
     let observedGaps: AgentCapturedTimelinePage['stream']['gaps'];
     try { observedGaps = await this.prepareCapturedHistory(agentSessionId); }
     catch (error) {
@@ -3759,7 +3759,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         // Replaying the same original record also confirms a previous lost sync ACK.
         // This does not add a version, move its position or publish a new event.
         this.dirty = true;
-      }, signal);
+      }, signal, id);
       return structuredClone(result);
     });
     const settled = current.then(() => { }, () => { });
