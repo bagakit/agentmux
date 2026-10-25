@@ -71,6 +71,62 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
   return { ...original, services, dispatched, adapter, conversation, binding: binding.binding, cli, speech, sdk, diagnose }
 }
 
+it('publication reuses decision preparation across pages, rollback and a new database owner', async () => {
+  const prepare = DatabaseSync.prototype.prepare
+  const writes = new Map<DatabaseSync, { prepares: number; runs: number }>()
+  let rejectAfterWrite: DatabaseSync | undefined
+  vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
+    const statement = prepare.call(this, sql)
+    if (!sql.startsWith('INSERT INTO connector_publication_decision (')) return statement
+    const count = writes.get(this) ?? { prepares: 0, runs: 0 }
+    writes.set(this, count); count.prepares++
+    const database = this, run = statement.run.bind(statement)
+    statement.run = (...parameters) => {
+      const result = run(...parameters); count.runs++
+      if (rejectAfterWrite === database) { rejectAfterWrite = undefined; throw Error('Original decision write interrupted before commit') }
+      return result
+    }
+    return statement
+  })
+  const f = await fixture(), database = f.services.database!, store = f.services.publication!.store
+  await appendFile(f.transcript, row('decision-prepare-first', 'First original reply') + row('decision-prepare-second', 'Second original reply'))
+  await vi.waitFor(() => expect(f.speech().filter(operation => operation.state === 'confirmed')).toHaveLength(2))
+  const firstPageWrites = writes.get(database)!.runs
+  await appendFile(f.transcript, row('decision-prepare-third', 'Third original reply'))
+  await vi.waitFor(() => expect(f.speech().filter(operation => operation.state === 'confirmed')).toHaveLength(3))
+  const originals = structuredClone(f.speech())
+  expect(originals.map(operation => operation.payload.text)).toEqual(['First original reply', 'Second original reply', 'Third original reply'])
+  expect(f.dispatched).toHaveLength(3)
+  expect(writes.get(database)!.runs).toBeGreaterThan(firstPageWrites)
+  expect(writes.get(database)!.prepares, 'Original decision writes reuse one compilation across actual publication pages').toBe(1)
+  for (const operation of originals) {
+    const receipt = await f.sdk.call('connection.delivery.inspect', { operationId: operation.operationId })
+    expect(receipt.delivery).toMatchObject({ operationId: operation.operationId, state: 'confirmed', mapping: operation.mapping })
+  }
+
+  const boundary = { ...f.binding, bindingId: 'decision-rollback', sourceFrontier: undefined, publicationOrigin: undefined }
+  rejectAfterWrite = database
+  expect(() => store.checkpoint(boundary, 'local')).toThrowError('Publication storage could not confirm')
+  expect(rejectAfterWrite, 'The original SQLite write ran before the transaction was interrupted').toBeUndefined()
+  expect(database.prepare('SELECT count(*) AS n FROM connector_publication_decision WHERE binding_id=?').get(boundary.bindingId)!.n).toBe(0)
+  expect(store.retainedCheckpoint(boundary)).toBeNull()
+  const checkpoint = store.checkpoint(boundary, 'local')
+  expect(store.retainedCheckpoint(boundary)).toEqual(checkpoint)
+  expect(database.prepare('SELECT count(*) AS n FROM connector_publication_decision WHERE binding_id=?').get(boundary.bindingId)!.n).toBe(1)
+  expect(writes.get(database)!.prepares).toBe(1)
+
+  const path = database.location()!
+  await f.services.close()
+  expect(database.isOpen).toBe(false)
+  const reopened = new DatabaseSync(path); cleanup.push(() => reopened.close())
+  const restored = new PublicationStore(reopened)
+  expect(restored.checkpoint(boundary, 'local')).toEqual(checkpoint)
+  for (const operation of originals) expect(restored.inspect(operation.operationId)).toEqual(operation)
+  expect(writes.get(reopened)).toEqual({ prepares: 1, runs: 1 })
+  if (process.env.PUBLICATION_DECISION_PREPARATION_FACTS) await writeFile(process.env.PUBLICATION_DECISION_PREPARATION_FACTS,
+    JSON.stringify({ firstPageWrites, original: writes.get(database), reopened: writes.get(reopened), confirmedDeliveries: f.dispatched.length, rollbackPreserved: true, originalsPreserved: true }, null, 2) + '\n')
+})
+
 it('publication reuses original page validation through the port, worker and durable receipt', async () => {
   const f = await fixture(), digest = conversationStream.conversationRevision
   const counts = { port: 0, workerPage: 0, assembly: 0, storePage: 0, storeUnits: 0 }
