@@ -1,10 +1,12 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { FeishuAdapter } from '../src/adapters/feishu/index.js'
+import { feishuConfig } from './fixtures/feishu.js'
 import { FeishuPublicationAdapter } from '../src/adapters/feishu/publication.js'
 import { FEISHU_MESSAGE_BODY_BYTES } from '../src/adapters/feishu/message.js'
 import type { PublicationOperation, ReplyPublicationMetadata } from '../src/publication-store.js'
-import { feishuCardElements } from './fixtures/feishu-publication.js'
+import { feishuCardElements, feishuPublicationHttp } from './fixtures/feishu-publication.js'
 
 const publisher = new FeishuPublicationAdapter({ withClient: async () => { throw Error('Rendering must not call the platform') } })
 const target = { connectionId: 'bound-connection', application: { domain: 'open.feishu.cn', appId: 'bound-app' }, externalConversationId: 'bound-room' }
@@ -20,16 +22,26 @@ function card(original: PublicationOperation) {
   return JSON.parse(envelope.content ?? envelope.card.data) as Record<string, any>
 }
 
-it('publishes native turn facts below the unchanged answer, with a quiet divider and the exact conversation action', async () => {
+function footerRow(rendered: Record<string, any>) {
+  return rendered.body.elements.at(-1).columns[0].elements.at(-1)
+}
+
+it('keeps the original conversation button and native facts on one non-wrapping footer row', () => {
   const original = operation({ agentSessionId: 'original/session', outcome: 'completed', metrics: { scope: 'turn', durationMs: 234_000, usage: { outputTokens: 1234 } } })
-  const rendered = card(original), elements = feishuCardElements(rendered)
+  const rendered = card(original), elements = feishuCardElements(rendered), row = footerRow(rendered)
   expect(elements.slice(1, 2)).toEqual(feishuCardElements(card(operation())).slice(1))
-  expect(elements.slice(-3)).toEqual([
-    { tag: 'hr', margin: '4px 0px' },
-    { tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: '本轮已结束 · 本轮耗时 3m54s · 本轮输出 1,234 tokens', text_size: 'notation', text_color: 'grey' } },
+  expect(row).toMatchObject({ tag: 'column_set', flex_mode: 'none', columns: [
+    { tag: 'column', width: 'auto', vertical_align: 'center' },
+    { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center' }
+  ] })
+  expect(row.columns[0].elements).toEqual([
     { tag: 'button', type: 'text', size: 'small', margin: '0px', text: { tag: 'plain_text', content: '打开原对话' },
       icon: { tag: 'standard_icon', token: 'chat_outlined' }, url: 'amux://agent/original%2Fsession' }
   ])
+  expect(row.columns[1].elements).toEqual([
+    { tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: '本轮已结束 · 本轮耗时 3m54s · 本轮输出 1,234 tokens', text_size: 'notation', text_color: 'grey', lines: 1 } }
+  ])
+  expect(elements.some(element => element.tag === 'hr')).toBe(false)
   expect(rendered.header).toBeUndefined()
   expect(rendered.config.summary.content).not.toMatch(/耗时|tokens/u)
 })
@@ -45,7 +57,8 @@ it('preserves real zero and response scope while omitting unsupported latency an
   expect(json).toContain('本次响应耗时 0ms · 本次响应输出 0 tokens')
   expect(json).not.toMatch(/本轮|首字|tok\/s|已完成/u)
   const linkOnly = feishuCardElements(card(operation({ agentSessionId: 'original-session' })))
-  expect(linkOnly.filter(element => element.tag === 'hr')).toHaveLength(1)
+  expect(linkOnly.filter(element => element.tag === 'hr')).toHaveLength(0)
+  expect(footerRow(card(operation({ agentSessionId: 'original-session' }))).columns).toHaveLength(1)
   expect(linkOnly.at(-1).url).toBe('amux://agent/original-session')
   expect(linkOnly.filter(element => element.tag === 'div')).toHaveLength(1)
 })
@@ -108,13 +121,53 @@ it('renders table answers with native rows intact and produces exact production 
     completed: { agentSessionId, outcome: 'completed', metrics: { scope: 'turn', durationMs: 234_000, usage: { outputTokens: 1234 } } },
     response: { agentSessionId, metrics: { scope: 'response', durationMs: 6100, usage: { outputTokens: 0 } } },
     interrupted: { agentSessionId, outcome: 'interrupted' },
-    unavailable: { agentSessionId }
+    unavailable: { agentSessionId },
+    long: { agentSessionId, outcome: 'completed', metrics: { scope: 'turn', durationMs: 987_654_321, usage: { outputTokens: 999_999_999_999 } } }
   }
   for (const [name, metadata] of Object.entries(samples)) {
     const rendered = card(operation(metadata, text))
     expect(rendered.body.elements.map((element: { tag: string }) => element.tag)).toEqual(['column_set', 'table', 'column_set'])
     expect(rendered.body.elements[1].rows).toHaveLength(2)
-    expect(feishuCardElements(rendered).at(-1).url).toBe(`amux://agent/${encodeURIComponent(agentSessionId)}`)
+    expect(feishuCardElements(rendered).find(element => element.tag === 'button').url).toBe(`amux://agent/${encodeURIComponent(agentSessionId)}`)
     if (process.env.REPLY_FOOTER_PREVIEW) await writeFile(join(process.env.REPLY_FOOTER_PREVIEW, `${name}.json`), JSON.stringify(rendered, null, 2) + '\n')
   }
+})
+
+it('sends the new footer through the actual SDK and inspects retained v12 bytes without preparing them again', async () => {
+  const remote = await feishuPublicationHttp(), adapter = new FeishuAdapter({ http: remote.http }), publisher = adapter.publication
+  const original = operation({ agentSessionId: 'original/session', metrics: { scope: 'response', durationMs: 0, usage: { outputTokens: 0 } } })
+  original.target = { ...original.target, application: feishuConfig.application, connectionId: feishuConfig.connectionId }
+  const signal = new AbortController().signal
+  try {
+    const prepared = publisher.prepare(original), frozen = JSON.stringify(prepared)
+    expect(prepared.renderVersion).toBe('feishu-conversation-v13')
+    const created = await publisher.dispatch(prepared, original.target, 'fixture-credential', signal)
+    expect(created.state).toBe('confirmed'); if (created.state !== 'confirmed') throw Error('Native create was not confirmed')
+    expect(await publisher.inspect(prepared, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
+    expect(remote.messageCalls()[0]!.body).toBe(prepared.request.body)
+    const replacement = publisher.prepare({ ...original, operationId: 'updated-footer', mapping: created.mapping,
+      payload: { kind: 'speech', phase: 'final', text: '**完整回答**', replyMetadata: { agentSessionId: 'original/session', outcome: 'completed' } } })
+    expect(await publisher.dispatch(replacement, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
+    expect(await publisher.inspect(replacement, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
+    expect(remote.messageCalls().find(call => call.method === 'PATCH')!.body).toBe(replacement.request.body)
+    expect(JSON.stringify(prepared)).toBe(frozen)
+
+    // An already prepared v12 card keeps its exact old layout and wire, even with a new renderer available.
+    const legacy = publisher.prepare({ ...original, operationId: 'retained-v12-footer' })
+    const envelope = JSON.parse(legacy.request.body!)
+    envelope.content = JSON.stringify({ schema: '2.0', config: { update_multi: true }, body: { elements: [
+      { tag: 'markdown', content: '原已准备正文' }, { tag: 'hr', margin: '4px 0px' },
+      { tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: '本轮已结束', text_size: 'notation', text_color: 'grey' } },
+      { tag: 'button', type: 'text', size: 'small', margin: '0px', text: { tag: 'plain_text', content: '打开原对话' },
+        icon: { tag: 'standard_icon', token: 'chat_outlined' }, url: 'amux://agent/original%2Fsession' }
+    ] } })
+    legacy.renderVersion = 'feishu-conversation-v12'; legacy.request.body = JSON.stringify(envelope)
+    const oldBytes = JSON.stringify(legacy), receipt = await publisher.dispatch(legacy, original.target, 'fixture-credential', signal)
+    expect(receipt.state).toBe('confirmed'); if (receipt.state !== 'confirmed') throw Error('Retained wire was not supported')
+    const prepare = vi.spyOn(publisher, 'prepare'), before = remote.messageCalls().length
+    expect(await publisher.inspect(legacy, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+    expect(remote.messageCalls().slice(before).map(call => call.method)).toEqual(['GET'])
+    expect(prepare).not.toHaveBeenCalled(); expect(JSON.stringify(legacy)).toBe(oldBytes)
+    prepare.mockRestore()
+  } finally { await remote.close() }
 })
