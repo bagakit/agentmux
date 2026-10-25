@@ -5,6 +5,7 @@ import { ToolkitActions } from '../toolkit/ToolkitActions'
 import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 import { cpuCoreLabel } from './PerformanceAttribution'
 import { PerformanceResourceDetails } from './PerformanceResourceDetails'
+import { PerformanceReclaim } from './PerformanceReclaim'
 import { PerformanceHostResources } from './PerformanceHostResources'
 import { ToolkitPopoverSurface } from './PerformancePopover'
 import { performanceCPU as cpu, performanceMemory as memory, performanceReadingTime as readingTime } from './performance-format'
@@ -25,7 +26,7 @@ const ThemeActionPauseIcon = semanticIconComponent('action.pause')
 const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
 const ExpandIcon = semanticIconComponent('layout.expand')
 const CompactIcon = semanticIconComponent('layout.collapse')
-const sections = [['overview', 'Overview', 'Environment and load'], ['resources', 'Resources', 'Processes and owners'], ['diagnostics', 'Diagnose', 'CPU and memory'], ['artifacts', 'Artifacts', 'Scenes and saved files']] as const
+const sections = [['overview', 'Overview', 'Environment and load'], ['resources', 'Resources', 'Processes and owners'], ['reclaim', 'Reclaim', 'Release with care'], ['diagnostics', 'Diagnose', 'CPU and memory'], ['artifacts', 'Artifacts', 'Scenes and saved files']] as const
 type Section = typeof sections[number][0]
 
 
@@ -95,6 +96,9 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
       </section>
       <section role="tabpanel" id={navigationId + '-panel-resources'} aria-labelledby={navigationId + '-resources'} hidden={section !== 'resources'} data-performance-section="resources">
         <PerformanceResourceDetails snapshot={snapshot} paused={paused} active={section === 'resources'} onNavigate={close} />
+      </section>
+      <section role="tabpanel" id={navigationId + '-panel-reclaim'} aria-labelledby={navigationId + '-reclaim'} hidden={section !== 'reclaim'} data-performance-section="reclaim">
+        <PerformanceReclaim snapshot={snapshot} active={section === 'reclaim'} onInspectResources={() => setSection('resources')} />
       </section>
       <section role="tabpanel" id={navigationId + '-panel-diagnostics'} aria-labelledby={navigationId + '-diagnostics'} hidden={section !== 'diagnostics'} data-performance-section="diagnostics">
         <div className="performance-page-heading"><h3>Diagnose this window</h3><p>Explicit, short investigations of the original Renderer. Opening this view does not start a capture.</p></div>

@@ -187,7 +187,7 @@
 .performance-popover:has(.performance-workbench) { container-type:inline-size; }
 .performance-workbench { display:flex; flex-direction:column; min-height:0; flex:1; }
 .performance-workbench [role=tabpanel][hidden] { display:none; }
-.performance-navigation { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); flex:none; gap:var(--sp-1); padding:var(--sp-2) var(--sp-4) var(--sp-3); border-bottom:1px solid var(--line-soft); }
+.performance-navigation { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); flex:none; gap:var(--sp-1); padding:var(--sp-2) var(--sp-4) var(--sp-3); border-bottom:1px solid var(--line-soft); }
 .performance-navigation > button { min-width:0; border:0; border-radius:var(--radius-sm); padding:var(--sp-3) var(--sp-2); color:var(--text-3); background:transparent; text-align:center; cursor:pointer; }
 .performance-navigation strong { font-size:var(--fs-meta); font-weight:550; }
 .performance-navigation small { display:none; }
@@ -242,3 +242,31 @@
 .performance-run-card > .toolkit-agent-card { width:100%; min-width:0; }
 .performance-run-open { padding:0; border:0; background:none; color:var(--text-2); font:inherit; font-size:var(--fs-meta); cursor:pointer; }
 .performance-run-open:hover { color:var(--text-1); }
+
+.performance-reclaim h4 { margin:0; color:var(--text); font-size:var(--fs-body); font-weight:550; }
+.performance-reclaim p { font-size:var(--fs-meta); line-height:1.55; color:var(--text-2); margin:var(--sp-3) 0; }
+.performance-reclaim .performance-note { color:var(--text-3); font-size:var(--fs-micro); }
+.performance-reclaim-heading { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3); flex-wrap:wrap; }
+.performance-reclaim-eyebrow { display:block; color:var(--green); font-size:var(--fs-micro); margin-bottom:var(--sp-2); }
+.performance-reclaim-eyebrow[data-risk] { color:var(--amber); }
+.performance-reclaim-cache { border:1px solid var(--line); border-radius:var(--radius-md); padding:var(--sp-4); background:var(--surface-1); }
+.performance-reclaim-cache [data-clean-cache] { padding:var(--sp-2) var(--sp-3); border:1px solid var(--line); border-radius:var(--radius-sm); color:var(--text); background:var(--wash-3); }
+.performance-reclaim-inspect { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--sp-2); color:var(--text-3); font-size:var(--fs-micro); }
+.performance-reclaim-result { margin-top:var(--sp-3); border-top:1px solid var(--line-soft); padding-top:var(--sp-3); color:var(--text-2); }
+.performance-reclaim-result > strong { font-size:var(--fs-meta); font-weight:500; }
+.performance-reclaim-result > small { display:block; font-size:var(--fs-micro); color:var(--text-3); }
+.performance-reclaim-result[data-cache-result=unknown] > strong { color:var(--amber); }
+.performance-reclaim-counters { display:flex; align-items:center; gap:var(--sp-5); margin:var(--sp-3) 0; color:var(--text-3); font-size:var(--fs-micro); }
+.performance-reclaim-counters b { display:block; margin-top:var(--sp-1); font-size:var(--fs-body); font-weight:550; font-variant-numeric:tabular-nums; color:var(--text); }
+.performance-reclaim-pages { padding-top:var(--sp-6); }
+.performance-reclaim-pages .browser-resources { border:0; padding:0; background:none; }
+.performance-reclaim-pages .browser-resources > header { display:none; }
+.performance-reclaim-pages .browser-resources__overview { gap:var(--sp-2) var(--sp-4); }
+.performance-reclaim-pages .browser-resources__overview > div { flex-wrap:wrap; }
+.performance-reclaim-pages .browser-resources__overview small { color:var(--text-3); font-size:var(--fs-micro); }
+.performance-reclaim-pages .browser-resources__measurement { color:var(--text-3); font-size:var(--fs-micro); margin-bottom:var(--sp-3); }
+.performance-reclaim-agents { display:flex; gap:var(--sp-3); align-items:center; flex-wrap:wrap; border-top:1px solid var(--line-soft); margin-top:var(--sp-5); padding-top:var(--sp-4); }
+.performance-reclaim-agents > div { flex:1; min-width:180px; }
+.performance-reclaim-agents strong { font-size:var(--fs-meta); font-weight:550; }
+.performance-reclaim-agents p { color:var(--text-3); font-size:var(--fs-micro); }
+.performance-reclaim :is(button,summary):focus-visible { outline:2px solid var(--focus-line); outline-offset:2px; }
