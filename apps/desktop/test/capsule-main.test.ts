@@ -11,10 +11,11 @@ import type { AgentMuxRpcServiceOptions } from '../../../packages/core/src/publi
 
 const bridge = vi.hoisted(() => ({ root: '', handlers: new Map<string, (...args: any[]) => any>(), options: [] as any[],
   nativeDocument: null as null | { sender: any; frame: any; record: any; browserId: string; navigationId: string; instanceId?: string }, failDispatchSave: false }))
-vi.mock('electron', () => ({ app: { getPath: () => bridge.root, getAppPath: () => process.cwd() + '/apps/desktop', isPackaged: false },
+vi.mock('electron', () => ({ app: { getPath: () => bridge.root, getAppPath: () => process.cwd() + '/apps/desktop', isPackaged: false, once: vi.fn() },
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => any) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
-  nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: true }), clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}, safeStorage: {} }))
+  nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: true }), clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}, safeStorage: {},
+  globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() } }))
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(), AgentMuxControlServer: class {
   constructor(options: unknown) { bridge.options.push(options) }
   async start() {} async stop() {}
@@ -182,6 +183,38 @@ it('does not resubmit an unknown original reply after actual Core firstsave or o
   expect(phases.mock.calls.some(([input]) => input.phase === 'inspect')).toBe(true)
   expect(h.submit).toHaveBeenCalledOnce(); expect(h.inner.kernel.input).toHaveBeenCalledTimes(2)
   expect((await h.queue.readJournal()).filter(value => value.kind === 'input-intent')).toHaveLength(1)
+})
+
+it.each(['absent', 'confirmed'] as const)('inspects the original Capsule input when submission returns only a Mote reference and its receipt is %s', async state => {
+  const h = await fixture(), original = RuntimeController.prototype.submitPrompt.bind(h.runtime)
+  h.submit.mockImplementation(async (...args) => {
+    if (state === 'confirmed') {
+      await original(...args)
+      await terminalReceipt(h, args[2])
+    }
+    return { moteObservationId: 'supplementary-observation', inputKey: { kind: 'prompt',
+      agentSessionId: args[0].agentSessionId, expectedRun: args[3].expectedRun, submissionId: args[2] } }
+  })
+  const result = await h.invoke('capsules:reply', [h.params]) as import('@agentmux/core/capsule').CapsuleReplyResult
+  const expected = state === 'confirmed' ? { status: 'submitted', inputStatus: 'terminal-confirmed' } : { status: 'unknown' }
+  expect(result.delivery).toMatchObject(expected)
+  if (state === 'absent') expect(result.delivery).not.toHaveProperty('inputStatus')
+  const key = { kind: 'prompt', agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' },
+    submissionId: result.delivery.inputOperationId }
+  const reads = () => h.original.mock.calls.filter(([, method]) => method === 'agent.input.inspect')
+  expect(reads().length, 'A lightweight observation reference must query the original input owner').toBeGreaterThan(0)
+  for (const [hostId, , params] of reads()) { expect(hostId).toBe('local'); expect(params).toEqual({ key }) }
+  if (state === 'absent') {
+    await expect(h.invoke('capsules:reply', [h.params])).rejects.toMatchObject({ code: 'CAPSULE_OPERATION_UNKNOWN' })
+  } else {
+    const repeated = await h.invoke('capsules:reply', [h.params]) as import('@agentmux/core/capsule').CapsuleReplyResult
+    expect(repeated.delivery).toMatchObject({ ...expected, inputOperationId: key.submissionId, expectedRun: key.expectedRun })
+  }
+  expect((await h.rpc.call('capsule.operation.inspect', { operationId: h.params.operationId })).operation)
+    .toMatchObject({ inputOperationId: key.submissionId })
+  for (const [hostId, , params] of reads()) { expect(hostId).toBe('local'); expect(params).toEqual({ key }) }
+  expect(h.submit).toHaveBeenCalledOnce()
+  expect(h.inner.kernel.input).toHaveBeenCalledTimes(state === 'confirmed' ? 2 : 0)
 })
 
 it('reports failed confirmation prerequisites as not applied and keeps the original request writable', async () => {
