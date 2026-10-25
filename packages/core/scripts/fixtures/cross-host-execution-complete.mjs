@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
+import { mutations as coreMutations } from './cross-host-execution-checks.mjs'
 
 const directions = ['local-agent', 'remote-agent']
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -143,7 +144,8 @@ async function coreEvidence(candidate, buildReceipt) {
     const file = baseline.testResults.find(value => value.name.endsWith('/packages/core/test/' + name + '.test.ts'))
     assert(file?.assertionResults?.length > 0 && file.assertionResults.every(value => value.status === 'passed'), 'Required local semantic consumer was not executed: ' + name)
   }
-  assert(report.mutations?.length === 7 && report.mutations.every(value => value.killed === true) && report.inputMutations?.passed === true && report.relayMutations?.passed === true, 'Core mutations are incomplete')
+  assert.deepEqual(report.mutations?.map(value => value.id), coreMutations.map(value => value.id), 'The complete owning Core mutation set is required')
+  assert(report.mutations.every(value => value.killed === true) && report.inputMutations?.passed === true && report.relayMutations?.passed === true, 'Core mutations are incomplete')
   assert(report.native?.length === 3 && report.native.every(value => value.receipt && value.cleanup), 'Core native consumers are incomplete')
   return { expectedDist, expectedInputs: { ...provenance.sourceHashes, ...provenance.compiledHashes, ...uiDependencies.compiledHashes },
     references: { report: gate.report, sha256: gate.reportSha256, candidate: gate.candidate, candidateSha256: gate.candidateSha256,
