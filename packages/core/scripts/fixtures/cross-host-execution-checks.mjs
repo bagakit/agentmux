@@ -6,10 +6,15 @@ export const tests = [
   'codex-execution-protocol', 'codex-execution-frontend', 'codex-execution-helper',
   'codex-tool-execution-launch', 'public-rpc-agent-execution', 'public-rpc-execution-bindings',
   'client-event-publisher', 'hosted-run-event.integration', 'agent-open-tool-workspace', 'remote-execution-workspace',
-  'agent-execution-rpc-relay', 'agent-native-process-linux',
+  'agent-execution-rpc-relay', 'agent-native-process-linux', 'hosted-attachment-progress', 'hosted-reading-intent',
 ].map(name => `packages/core/test/${name}.test.ts`)
 
 export const mutations = [
+  { id: 'attachment-total-deadline', file: 'hosted-client.ts', test: 'hosted-attachment-progress',
+    before: 'if (!initialSeen && value.data.dataBase64.length > 0) transferProgressAt = performance.now()', after: 'void 0' },
+  { id: 'attachment-empty-progress', file: 'hosted-client.ts', test: 'hosted-attachment-progress',
+    before: 'if (!initialSeen && value.data.dataBase64.length > 0) transferProgressAt = performance.now()',
+    after: 'if (!initialSeen) transferProgressAt = performance.now()' },
   { id: 'journal-repeat-dispatch', file: 'agent-execution-journal.ts', test: 'agent-execution-journal',
     before: "if (previous.phase !== 'prepared') return { value: { dispatch: false, operation: previous }, changed: false }",
     after: "if (previous.phase !== 'prepared') return { value: { dispatch: true, operation: previous }, changed: false }" },
