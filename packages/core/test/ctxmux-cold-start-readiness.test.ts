@@ -20,7 +20,7 @@ vi.mock('node:fs/promises', async original => {
       return await Reflect.apply(actual.readFile, actual, args)
     },
     rename: async (...args: Parameters<typeof actual.rename>) => {
-      if (String(args[1]).endsWith('/owner.json')) {
+      if (String(args[1]).includes('/owner-') && String(args[1]).endsWith('.json')) {
         boundary.receiptWrites++
         await boundary.holdReceipt?.()
         if (boundary.receiptDenied) throw Object.assign(new Error('owner receipt temporarily unavailable'), { code: 'EACCES' })
@@ -30,6 +30,8 @@ vi.mock('node:fs/promises', async original => {
   }
 })
 import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
+import { CTXMUX_MANIFEST_SHA256, ctxmuxOwnerReceiptPath } from '../src/runtime-paths.js'
+import { AgentMuxClient } from '../src/client.js'
 
 const cleanup: (() => Promise<void>)[] = []
 afterEach(async () => {
@@ -79,7 +81,9 @@ exec "$@"
     await vi.waitFor(() => expect(children).toHaveLength(1))
     children[0]!.stdin!.write(command + '\n')
   }
-  return { directory, adapter, native, children, signals, launch }
+  const receiptPath = (identity: { runtimeId: string; daemonInstanceId: string }) =>
+    ctxmuxOwnerReceiptPath(adapter.socketPath, identity, CTXMUX_MANIFEST_SHA256)
+  return { directory, adapter, native, children, signals, launch, receiptPath }
 }
 
 describe('SDK owns the original durable activation', () => {
@@ -107,7 +111,7 @@ describe('SDK owns the original durable activation', () => {
     await h.adapter.connect()
     expect(h.adapter.runtimeOwnership).toBe('owned')
     expect(h.adapter.identity().daemonInstanceId).toBe(original.daemonInstanceId)
-    expect(JSON.parse(await readFile(join(h.directory, 'owner.json'), 'utf8'))).toMatchObject({ daemonInstanceId: original.daemonInstanceId, runtimeId: original.runtimeId })
+    expect(JSON.parse(await readFile(h.receiptPath(await h.native.runtimeInfo()), 'utf8'))).toMatchObject({ daemonInstanceId: original.daemonInstanceId, runtimeId: original.runtimeId })
     expect(h.children).toHaveLength(1); expect(h.signals).toEqual([])
   }, 15_000)
 
@@ -120,7 +124,7 @@ describe('SDK owns the original durable activation', () => {
     await h.adapter.connect()
     expect(h.adapter.isConnected()).toBe(true)
     expect(h.adapter.runtimeOwnership).toBe('unverified')
-    await expect(readFile(join(h.directory, 'owner.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(h.receiptPath(await h.native.runtimeInfo()))).rejects.toMatchObject({ code: 'ENOENT' })
     const run = await h.native.start(defineRun('/bin/cat', { cwd: h.directory }), createOperationKey(`ready-${command}`))
     expect((await h.adapter.status(run.id)).pid).toBe(run.pid)
     expect(h.signals).toEqual([]); expect(h.children).toHaveLength(1)
@@ -159,7 +163,7 @@ describe('SDK owns the original durable activation', () => {
     await vi.waitFor(() => expect(h.adapter.runtimeOwnership).toBe('owned'))
     const late = vi.fn(); h.adapter.onError(late)
     expect(late).not.toHaveBeenCalled()
-    expect(JSON.parse(await readFile(join(h.directory, 'owner.json'), 'utf8')).daemonInstanceId).toBe((await h.native.runtimeInfo()).daemonInstanceId)
+    expect(JSON.parse(await readFile(h.receiptPath(await h.native.runtimeInfo()), 'utf8')).daemonInstanceId).toBe((await h.native.runtimeInfo()).daemonInstanceId)
   })
 
   it('retries the original published readiness proof after a failed Hello observation while keeping the listener usable', async () => {
@@ -211,7 +215,7 @@ describe('SDK owns the original durable activation', () => {
     expect(late).not.toHaveBeenCalled()
   })
 
-  it('orders product receipt publication across exited child generations without delaying compatible work', async () => {
+  it('addresses product receipts by exact child generation while another publisher is delayed', async () => {
     const h = await fixture()
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
@@ -219,23 +223,39 @@ describe('SDK owns the original durable activation', () => {
     boundary.holdReceipt = () => boundary.receiptWrites === 1 ? held : Promise.resolve()
     const first = h.adapter.connect(); await h.launch(); await first
     await vi.waitFor(() => expect(boundary.receiptWrites).toBe(1))
-    const original = h.adapter.identity().daemonInstanceId, child = h.children[0]!, exited = once(child, 'exit')
+    const original = await h.native.runtimeInfo(), child = h.children[0]!, exited = once(child, 'exit')
     child.kill('SIGTERM'); await exited
     const second = h.adapter.connect()
     await vi.waitFor(() => expect(h.children).toHaveLength(2))
     h.children[1]!.stdin!.write('ready\n'); await second
-    const current = h.adapter.identity().daemonInstanceId
-    expect(current).not.toBe(original)
+    const current = await h.native.runtimeInfo()
+    expect(current.daemonInstanceId).not.toBe(original.daemonInstanceId)
     expect(h.adapter.isConnected()).toBe(true)
-    expect(h.adapter.runtimeOwnership).toBe('unverified')
-    expect(boundary.receiptWrites).toBe(1)
-    release()
     await vi.waitFor(() => expect(h.adapter.runtimeOwnership).toBe('owned'))
     expect(boundary.receiptWrites).toBe(2)
-    expect(JSON.parse(await readFile(join(h.directory, 'owner.json'), 'utf8')).daemonInstanceId).toBe(current)
+    expect(JSON.parse(await readFile(h.receiptPath(current), 'utf8')).daemonInstanceId).toBe(current.daemonInstanceId)
+    release()
+    await vi.waitFor(async () => expect(JSON.parse(await readFile(h.receiptPath(original), 'utf8')).daemonInstanceId).toBe(original.daemonInstanceId))
+    expect(JSON.parse(await readFile(h.receiptPath(current), 'utf8')).daemonInstanceId).toBe(current.daemonInstanceId)
     const reopened = new CtxmuxRunAdapter(); cleanup.push(async () => reopened.disconnect())
     await reopened.connect()
     expect(reopened.runtimeOwnership).toBe('owned')
+  })
+
+  it('public Core explicit connect retries a failed receipt without restarting healthy Runtime work', async () => {
+    const h = await fixture(), client = new AgentMuxClient()
+    cleanup.push(() => client.dispose())
+    boundary.receiptDenied = true
+    const connecting = client.connectRuntime(); await h.launch(); await connecting
+    const original = await h.native.runtimeInfo()
+    await vi.waitFor(() => expect(boundary.receiptWrites).toBeGreaterThan(0))
+    expect(client.runtimeIdentity()).toMatchObject({ instanceId: original.daemonInstanceId, ownership: 'unverified' })
+    // This is the stable connected public Core path, not a private adapter retry.
+    await client.connect()
+    boundary.receiptDenied = false
+    await client.connect()
+    await vi.waitFor(() => expect(client.runtimeIdentity()).toMatchObject({ instanceId: original.daemonInstanceId, ownership: 'owned' }))
+    expect(h.children).toHaveLength(1); expect(h.signals).toEqual([])
   })
 
   it('observes real child exit before disconnecting and permits a new activation only after that exit', async () => {

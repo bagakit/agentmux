@@ -89,3 +89,32 @@ it('compiled Core owns SDK activation and public client/CLI reconnect to two ori
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
   }
 }, 60_000)
+
+it('compiled public Core keeps a real listener usable when its exact receipt publication fails', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'amx-receipt-public-')), nativePids = join(root, 'native-pids')
+  const observe = join(root, 'observe-spawn.cjs')
+  await writeFile(nativePids, '')
+  await writeFile(observe, `const cp=require('node:child_process'),fs=require('node:fs'),original=cp.spawn;cp.spawn=function(...args){const child=original.apply(this,args);if(String(args[0]).endsWith('/ctxmuxd'))fs.appendFileSync(${JSON.stringify(nativePids)},String(child.pid)+'\\n');return child};require('node:module').syncBuiltinESMExports();`)
+  const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))),
+    AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'state') }
+  const program = `import {stat} from 'node:fs/promises';
+    const core=await import(${JSON.stringify(resolve(import.meta.dirname, '../dist/index.js'))});
+    const sdk=await import(${JSON.stringify(resolve(import.meta.dirname, '../node_modules/@ctxmux/sdk/dist/index.js'))});
+    const client=await core.connectLocalAgentMux();
+    try {
+      const runtime=await new sdk.CtxmuxClient({socketPath:core.defaultCtxmuxSocketPath()}).runtimeInfo();
+      const receipt=core.ctxmuxOwnerReceiptPath(core.defaultCtxmuxSocketPath(),runtime,core.CTXMUX_MANIFEST_SHA256);
+      console.log(JSON.stringify({identity:client.runtimeIdentity(),runs:await client.listRuns(),blocked:(await stat(receipt)).isDirectory()}));
+    } finally {await client.dispose()}`
+  try {
+    const result = await exec(process.execPath, ['--require', observe, '--import',
+      resolve(import.meta.dirname, 'fixtures/ctxmux-owner-receipt-failure.mjs'), '--input-type=module', '-e', program], { env, timeout: 20_000 })
+    expect(JSON.parse(result.stdout)).toMatchObject({ identity: { ownership: 'unverified' }, runs: [], blocked: true })
+    expect((await readFile(nativePids, 'utf8')).trim().split('\n')).toHaveLength(1)
+  } finally {
+    for (const pid of (await readFile(nativePids, 'utf8')).trim().split('\n').filter(Boolean).map(Number)) {
+      try { process.kill(pid, 'SIGTERM') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
+    }
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+  }
+}, 30_000)

@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { cp, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -13,7 +13,8 @@ import { promisify } from 'node:util'
 import { execFile } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { CTXMUX_MANIFEST_SHA256 } from '../src/runtime-paths.js'
+import { CtxmuxClient } from '@ctxmux/sdk'
+import { CTXMUX_MANIFEST_SHA256, ctxmuxOwnerReceiptPath } from '../src/runtime-paths.js'
 
 const execFileAsync = promisify(execFile)
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
@@ -25,7 +26,7 @@ const fakeCodexFixture = fileURLToPath(new URL('./fixtures/fake-codex-cli.mjs', 
 const lifecycleCrashFixture = fileURLToPath(new URL('./fixtures/lifecycle-crash-worker.mjs', import.meta.url))
 const promptCrashFixture = fileURLToPath(new URL('./fixtures/prompt-submit-crash-worker.mjs', import.meta.url))
 const interactionCrashFixture = fileURLToPath(new URL('./fixtures/interaction-response-crash-worker.mjs', import.meta.url))
-const runtimeScopePreloadFixture = fileURLToPath(new URL('./fixtures/runtime-scope-preload.mjs', import.meta.url))
+const ownerReceiptFailurePreloadFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-receipt-failure.mjs', import.meta.url))
 const ownerRelocationFixture = fileURLToPath(new URL('./fixtures/ctxmux-owner-relocation.mjs', import.meta.url))
 const liveRuntimeFenceFixture = fileURLToPath(new URL('./fixtures/ctxmux-live-runtime-fence.mjs', import.meta.url))
 const stopResponseLossFixture = fileURLToPath(new URL('./fixtures/ctxmux-stop-response-loss-worker.mjs', import.meta.url))
@@ -473,7 +474,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         cp(lifecycleCrashFixture, join(consumerDirectory, 'lifecycle-crash-worker.mjs')),
         cp(promptCrashFixture, join(consumerDirectory, 'prompt-submit-crash-worker.mjs')),
         cp(interactionCrashFixture, join(consumerDirectory, 'interaction-response-crash-worker.mjs')),
-        cp(runtimeScopePreloadFixture, join(consumerDirectory, 'runtime-scope-preload.mjs')),
+        cp(ownerReceiptFailurePreloadFixture, join(consumerDirectory, 'ctxmux-owner-receipt-failure.mjs')),
         cp(ownerRelocationFixture, join(consumerDirectory, 'ctxmux-owner-relocation.mjs')),
         cp(liveRuntimeFenceFixture, join(consumerDirectory, 'ctxmux-live-runtime-fence.mjs')),
         cp(stopResponseLossFixture, join(consumerDirectory, 'ctxmux-stop-response-loss-worker.mjs')),
@@ -577,18 +578,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
 
       const daemonPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmuxd')
       const cliPath = join(packageRoot, 'vendor', 'ctxmux', 'darwin-arm64', 'bin', 'ctxmux')
-      // 这个测试靠合成 uid 把 runtime 目录（socket/state/hook-port）与真机隔离开。但隔离只管
-      // **派生**的那些路径：`AGENTMUX_AGENT_SESSION_STORE` 等 env 是**覆盖**，会直接盖过派生值。
-      // 当这条测试跑在一个已安装的 AgentMux.app 开出的终端里时，`...process.env` 会把 app 注入的
-      // `AGENTMUX_AGENT_SESSION_STORE`（指向 Desktop 在 `~/Library/Application Support/` 下的 userData 目录）
-      // 一路带进消费者，于是消费者读到的是**真机上那些活着的 Agent Session**。registry 非空 →
-      // 每个 Client 在 open() 里都去 `tryRestoreHookIngress()` 抢 Hook 端口 → 先建的那个 Client
-      // 一直占着，后面 `createAgent` 撞 EADDRINUSE，报成
-      // `Another AgentMux client owns the Hook ingress`。报错句式指向"另一个 App"，真凶却是本进程
-      // 自己先前那个 Client； 实测抓到五次 bind 全在同一个 pid 上。
-      //
-      // 这个测试本身从不读取环境里的 `AGENTMUX_*`——它要的每一个都在下面显式赋值。所以整族直接剥掉，
-      // 别逐个点名：漏掉一个就是又一次静默串台，而新增的覆盖项会自动落在这条规则里。
+      // Every namespace is an explicit private override. Keep the actual OS uid
+      // so production namespace ownership checks remain meaningful.
       const ambientFreeEnvironment = Object.fromEntries(
         Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_'))
       )
@@ -596,12 +587,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         ...ambientFreeEnvironment,
         NO_COLOR: '1',
         AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
-        AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'private-durable'),
-        AGENTMUX_TEST_UID: testUid,
-        NODE_OPTIONS: [
-          process.env.NODE_OPTIONS,
-          `--import=${join(consumerDirectory, 'runtime-scope-preload.mjs')}`
-        ].filter(Boolean).join(' ')
+        AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'private-durable')
       }
       let activeDaemon: DaemonProcess | null = null
       let replacement: ReturnType<typeof spawn> | null = null
@@ -682,7 +668,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         expect(Number.isInteger(cleanupSentinelPid) && cleanupSentinelPid > 0).toBe(true)
 
         activeDaemon = await waitForDaemonProcess(daemonPath, runtimeDirectory)
-        const ownerReceiptPath = join(runtimeDirectory, 'owner.json')
+        const ownerReceiptPath = ctxmuxOwnerReceiptPath(activeDaemon.socketPath,
+          await new CtxmuxClient({ socketPath: activeDaemon.socketPath }).runtimeInfo(), CTXMUX_MANIFEST_SHA256)
         const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8')) as {
           daemonPath: string
           daemonSha256: string
@@ -845,28 +832,30 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
 
         await stopDaemon(activeDaemon)
         await rm(ownerReceiptPath, { force: true })
-        await mkdir(ownerReceiptPath)
         const receiptFailure = await execFileAsync(
           process.execPath,
           ['ctxmux-compatible-runtime.mjs'],
           {
             cwd: consumerDirectory,
             maxBuffer: 2 * 1024 * 1024,
-            env: runtimeEnvironment
+            env: { ...runtimeEnvironment, NODE_OPTIONS: [process.env.NODE_OPTIONS,
+              `--import=${join(consumerDirectory, 'ctxmux-owner-receipt-failure.mjs')}`].filter(Boolean).join(' ') }
           }
         )
         expect(JSON.parse(receiptFailure.stdout.trim())).toMatchObject({ ownership: 'unverified' })
         // Failure to persist provenance must not kill the new, otherwise healthy daemon.
         const receiptlessDaemon = await waitForDaemonProcess(daemonPath, runtimeDirectory)
+        const blockedReceiptPath = ctxmuxOwnerReceiptPath(receiptlessDaemon.socketPath,
+          await new CtxmuxClient({ socketPath: receiptlessDaemon.socketPath }).runtimeInfo(), CTXMUX_MANIFEST_SHA256)
         await stopDaemon(receiptlessDaemon)
         await waitForNoDaemon(daemonPath, runtimeDirectory)
         // 目录整个空了的话，下面那条 `some(...)===false` 照样绿——而 runtime 目录被清空
-        // 比「留下一个 .owner- 临时文件」严重得多。`owner.json` 在上面第 792 行刚被 mkdir 成一个
-        // 目录、其后没有任何一处删过它，所以它必然在这份清单里：拿它当非空证明，不需要知道别的条目。
+        // 比「留下一个 .owner- 临时文件」严重得多。preload 刚把准确新实例 receipt 路径建成
+        // 目录、其后没有删过它；以该已知条目证明没有清空原 Runtime 目录。
         const runtimeEntries = await readdir(runtimeDirectory)
-        expect(runtimeEntries, 'runtime 目录被清空了').toContain('owner.json')
+        expect(runtimeEntries, 'runtime 目录被清空了').toContain(basename(blockedReceiptPath))
         expect(runtimeEntries.some((entry) => entry.startsWith('.owner-'))).toBe(false)
-        await rm(ownerReceiptPath, { recursive: true, force: true })
+        await rm(blockedReceiptPath, { recursive: true, force: true })
 
         const replacementStateDirectory = join(runtimeDirectory, 'replacement-state')
         await mkdir(replacementStateDirectory, { mode: 0o700 })
