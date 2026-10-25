@@ -47,7 +47,7 @@ function fullQuote(repetitions = 2500): string {
   return wire
 }
 
-async function fixture(mode: 'managed' | 'queue') {
+async function fixture(mode: 'ordinary' | 'queue') {
   const native = true, queue = mode === 'queue'
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-current-codex-')))
   cleanups.push(() => rm(root, { recursive: true }))
@@ -87,7 +87,11 @@ async function fixture(mode: 'managed' | 'queue') {
     ...(queue ? { buildLaunch: (context: Parameters<typeof provider.buildLaunch>[0]) => ({ command: process.execPath, args: [fileURLToPath(new URL('./fixtures/codex-current-queue-worker.mjs', import.meta.url)), root, 'original', join(root, 'native-home')], env: { ...context.env } }) } : {}),
     prepareManagedLaunch: async (...args: Parameters<NonNullable<typeof provider.prepareManagedLaunch>>) => {
       const prepared = await provider.prepareManagedLaunch!(...args)
-      if (queue) { expect(prepared.nativeActor).toBeUndefined(); return prepared }
+      if (queue || args[2].kind === 'create') {
+        expect(prepared.nativeActor).toBeUndefined(); expect(prepared).toEqual({ plan: args[0] })
+        fact('ordinary-plan', { command: prepared.plan.command, args: prepared.plan.args, kind: args[2].kind })
+        return prepared
+      }
       expect(prepared.nativeActor).toBeDefined()
       return { ...prepared, plan: { ...prepared.plan, args: [entry, ...prepared.plan.args.slice(1)] } }
     } }]
@@ -112,12 +116,13 @@ async function fixture(mode: 'managed' | 'queue') {
   const initial = await vi.waitFor(async () => {
     await client.refreshAgentSession('original', session.run)
     const status = await client.statusAgent('original')
-    if (native) { expect(status.session.nativeHandle?.sessionId).toEqual(expect.any(String)); if (queue) expect((await store().readMetadata('original'))?.nativeActor).toBeUndefined(); else expect((await store().readMetadata('original'))?.nativeActor).toBeDefined(); expect(status.session.semanticStatus?.state).toBe('done') }
+    if (native) { expect(status.session.nativeHandle?.sessionId).toEqual(expect.any(String)); expect((await store().readMetadata('original'))?.nativeActor).toBeUndefined(); expect(status.session.semanticStatus?.state).toBe('done') }
     else expect(status.run.pid).toBe(JSON.parse(await readFile(output + '.ready', 'utf8')).pid)
     return status
   }, { timeout: 20_000, interval: 100 })
-  const key = (id: string) => ({ kind: 'prompt' as const, agentSessionId: 'original', expectedRun: session.run, submissionId: id })
-  const input = (id: string, prompt: string) => ({ agentSessionId: 'original', expectedRun: session.run, operationId: id, prompt,
+  let currentRun = session.run, currentStatus = initial
+  const key = (id: string) => ({ kind: 'prompt' as const, agentSessionId: 'original', expectedRun: currentRun, submissionId: id })
+  const input = (id: string, prompt: string) => ({ agentSessionId: 'original', expectedRun: currentRun, operationId: id, prompt,
     execution: 'immediate' as const, authorHuman: true, admissionIntent: native ? { kind: 'session-conversation' as const } : { kind: 'manual-actor' as const } })
   let releaseResponse: (() => void) | undefined
   let responseGate: Promise<void> | undefined
@@ -128,6 +133,25 @@ async function fixture(mode: 'managed' | 'queue') {
   const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [{ hostId: 'local', client }] }); await server.start(); cleanups.push(() => server.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanups.push(() => rpc.dispose())
   return { root, inputs, session, initial, key, input, store, rpc, server,
+    resumeOriginal: async () => {
+      await activation.client.stop(await activation.client.prepareStop(currentRun.runId))
+      await vi.waitFor(async () => expect((await client.statusAgent('original')).run.state).not.toBe('running'))
+      const resumed = await client.resumeAgent({ agentSessionId: 'original', operationId: 'current-resume', prompt: 'PRIVATE_QUEUE_RESUMED_ORIGINAL',
+        args: ['--sandbox', 'read-only', '--ask-for-approval', 'never', '--model', 'private-queue'],
+        env: { CODEX_HOME: join(root, 'native-home'), HOME: root } })
+      currentRun = resumed.run
+      currentStatus = await vi.waitFor(async () => {
+        await client.refreshAgentSession('original', resumed.run)
+        const status = await client.statusAgent('original')
+        expect(status.session.nativeHandle?.sessionId).toBe(initial.session.nativeHandle!.sessionId)
+        expect(status.session.semanticStatus?.state, JSON.stringify(status.session.terminalFrontend)).toBe('done')
+        expect(status.session.terminalFrontend).toMatchObject({ state: 'attached', backendState: 'running' })
+        expect(status.session.terminalFrontend?.initialization?.native).toMatchObject({ state: 'confirmed', sessionId: initial.session.nativeHandle!.sessionId })
+        return status
+      }, { timeout: 20_000, interval: 100 })
+      return currentStatus
+    },
+    get currentStatus() { return currentStatus },
     finishOriginalRun: async () => { await activation.client.stop(await activation.client.prepareStop(session.run.runId)) },
     hold: () => { responseGate = new Promise<void>(resolve => { releaseResponse = resolve }); return () => { releaseResponse?.(); responseGate = undefined } }, get client() { return client },
     receipt: async (id: string, status: string, explicit = false) => vi.waitFor(async () => {
@@ -139,7 +163,7 @@ async function fixture(mode: 'managed' | 'queue') {
     }, { timeout: 15_000, interval: 100 }),
     terminalInputs: async () => (await readFile(output, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })).trim().split('\n').filter(Boolean).map(line => JSON.parse(line).text as string),
     reopen: async () => { await client.dispose(); client = new AgentMuxClient({ store: store(), ...(providers ? { providers } : {}) }); await client.connect();
-      const current = await client.statusAgent('original'); expect(current.run).toMatchObject({ runId: initial.run.runId, pid: initial.run.pid, state: 'running' });
+      const current = await client.statusAgent('original'); expect(current.run).toMatchObject({ runId: currentStatus.run.runId, pid: currentStatus.run.pid, state: 'running' });
       expect(current.session.nativeHandle).toEqual(initial.session.nativeHandle) },
     close: cleanupOwned }
 }
@@ -160,8 +184,10 @@ function publicInput(h: Awaited<ReturnType<typeof fixture>>, id: string, prompt:
 }
 
 it.runIf(process.platform === 'darwin')('current native actor starts and steers the exact original turn, retains adoption and refuses a foreign source', async () => {
-  const h = await fixture('managed')
+  const h = await fixture('ordinary')
   try {
+    const resumed = await h.resumeOriginal()
+    fact('frontend', { point: 'qualified-resume', frontend: resumed.session.terminalFrontend })
     const wire = fullQuote(), release = h.hold()
     const intake = await h.rpc.call('agent.input.submit', publicInput(h, 'current-start', wire))
     expect(intake.key).toEqual(h.key('current-start'))
@@ -178,7 +204,11 @@ it.runIf(process.platform === 'darwin')('current native actor starts and steers 
     const native = await adopted(h, h.key('current-start'), original!.admission!.native!.plan.clientCorrelation!)
     expect(native.turnId).toBe(turn)
     await adopted(h, h.key('current-steer'), record!.admission!.native!.plan.clientCorrelation!)
+    fact('frontend', { point: 'before-Core-reopen', frontend: (await h.client.statusAgent('original')).session.terminalFrontend })
     await h.reopen()
+    fact('frontend', { point: 'after-Core-reopen', frontend: (await h.client.statusAgent('original')).session.terminalFrontend })
+    await h.client.refreshAgentSession('original', h.currentStatus.session.run)
+    fact('frontend', { point: 'after-original-refresh', frontend: (await h.client.statusAgent('original')).session.terminalFrontend })
     expect(await h.client.inspectAgentPromptSubmission(h.key('current-steer'))).toEqual(record)
     const cli = process.env.AGENTMUX_CURRENT_CODEX_CLI
     if (!cli) throw new Error('Qualified current carrier requires its compiled CLI')
@@ -201,35 +231,46 @@ it.runIf(process.platform === 'darwin')('current native actor starts and steers 
     expect((await h.client.sessionHistoryPage('original', { limit: 100 })).items.some(item =>
       item.conversation?.adoptedInput?.key.kind === 'prompt' && item.conversation.adoptedInput.key.submissionId === 'foreign-source')).toBe(false)
     expect(h.inputs.filter(text => text === wire)).toHaveLength(1)
-    expect((await h.client.statusAgent('original')).run.acceptedInputBytes).toBe(h.initial.run.acceptedInputBytes)
-    fact('managed', { run: h.initial.run, source, start: original!.admission!.native, steer: record!.admission!.native, adopted: native.conversation?.adoptedInput, wireSHA256: createHash('sha256').update(wire).digest('hex'), wireBytes: Buffer.byteLength(wire), modelOccurrences: h.inputs.filter(text => text === wire).length, foreignAdmission: null, cli: JSON.parse(cliResult.stdout).result.record?.admission?.native })
+    expect((await h.client.statusAgent('original')).run.acceptedInputBytes).toBe(h.currentStatus.run.acceptedInputBytes)
+    fact('frontend', { point: 'after-foreign-source', frontend: (await h.client.statusAgent('original')).session.terminalFrontend })
+    const frontend = await vi.waitFor(async () => {
+      const current = (await h.client.statusAgent('original')).session.terminalFrontend
+      expect(current, JSON.stringify(current)).toMatchObject({ state: 'attached', backendState: 'running' })
+      return current
+    }, { timeout: 5000, interval: 100 })
+    fact('managed', { frontend, run: h.currentStatus.run, source, start: original!.admission!.native, steer: record!.admission!.native, adopted: native.conversation?.adoptedInput, wireSHA256: createHash('sha256').update(wire).digest('hex'), wireBytes: Buffer.byteLength(wire), modelOccurrences: h.inputs.filter(text => text === wire).length, foreignAdmission: null, cli: JSON.parse(cliResult.stdout).result.record?.admission?.native })
   } finally { await h.close() }
 })
 
-it.runIf(process.platform === 'darwin')('current native resume keeps the exact saved thread and effective original policy', async () => {
-  const h = await fixture('managed')
+it.runIf(process.platform === 'darwin')('current ordinary TUI creation keeps its original Run input and legally resumes the same native thread', async () => {
+  const h = await fixture('ordinary')
   try {
-    await h.finishOriginalRun()
-    await vi.waitFor(async () => expect((await h.client.statusAgent('original')).run.state).not.toBe('running'))
-    const resumed = await h.client.resumeAgent({ agentSessionId: 'original', operationId: 'current-resume', prompt: 'PRIVATE_QUEUE_RESUMED_ORIGINAL',
-      args: ['--sandbox', 'read-only', '--ask-for-approval', 'never', '--model', 'private-queue'],
-      env: { CODEX_HOME: join(h.root, 'native-home'), HOME: h.root } })
-    expect(resumed.run.runId).not.toBe(h.session.run.runId)
-    await vi.waitFor(async () => {
-      await h.client.refreshAgentSession('original', resumed.run)
-      const status = await h.client.statusAgent('original')
-      expect(status.session.nativeHandle?.sessionId).toBe(h.initial.session.nativeHandle!.sessionId)
-      expect(status.session.semanticStatus?.state, JSON.stringify(status.session.terminalFrontend)).toBe('done')
-      expect(status.session.terminalFrontend?.initialization?.native).toMatchObject({ state: 'confirmed', sessionId: h.initial.session.nativeHandle!.sessionId })
-    }, { timeout: 20_000, interval: 100 })
+    expect(h.initial.run).toMatchObject({ state: 'running', pid: expect.any(Number) })
+    expect((await h.store().readMetadata('original'))?.nativeActor).toBeUndefined()
+    expect(h.inputs.filter(text => text === 'PRIVATE_QUEUE_INITIAL_ORIGINAL')).toHaveLength(1)
+    const originalNative = h.initial.session.nativeHandle
+    const prompt = 'PRIVATE_QUEUE_ORDINARY_INPUT 同一终端'
+    await h.rpc.call('agent.input.submit', { ...publicInput(h, 'ordinary-input', prompt), admissionIntent: { kind: 'manual-actor' } })
+    const terminal = await h.receipt('ordinary-input', 'terminal-confirmed')
+    await vi.waitFor(() => expect(h.inputs.filter(text => text === prompt)).toHaveLength(1), { timeout: 20_000, interval: 100 })
+    const savedInput = await h.client.inspectAgentPromptSubmission(terminal.key)
+    expect(savedInput?.admission).toMatchObject({ acknowledged: true, intent: { prompt, admissionIntent: { kind: 'manual-actor' } } })
+    expect(savedInput?.admission?.native).toBeUndefined()
+    await h.reopen()
+    expect((await h.client.statusAgent('original')).session.nativeHandle).toEqual(originalNative)
+    expect(await h.client.inspectAgentPromptSubmission(terminal.key)).toEqual(savedInput)
+    fact('ordinary', { run: h.initial.run, target: originalNative, nativeActor: null, receipt: terminal.status,
+      inputOccurrences: h.inputs.filter(text => text === prompt).length, claim: savedInput?.admission })
+    const resumed = await h.resumeOriginal()
     const saved = await h.store().readMetadata('original')
     const frozen = saved!.promptCompletionAdmission!.intent!
-    expect(frozen.run).toEqual(resumed.run)
+    expect(frozen.run).toEqual(resumed.session.run)
     expect(frozen.prompt).toContain('PRIVATE_QUEUE_RESUMED_ORIGINAL')
     expect(h.inputs.filter(text => text === frozen.prompt)).toHaveLength(1)
     expect(saved?.nativeActor?.protocolId).toBe('codex-app-server-v2-0.163')
-    expect(saved?.nativeHandle).toEqual(h.initial.session.nativeHandle)
-    fact('resume', { originalRun: h.initial.run, resumedRun: resumed.run, target: saved!.nativeHandle, native: saved!.promptCompletionAdmission!.native, wireSHA256: createHash('sha256').update(frozen.prompt).digest('hex'), modelOccurrences: h.inputs.filter(text => text === frozen.prompt).length })
+    expect(saved?.nativeHandle).toEqual(originalNative)
+    fact('resume', { frontend: resumed.session.terminalFrontend, originalRun: h.initial.run, resumedRun: resumed.run, target: saved!.nativeHandle,
+      native: saved!.promptCompletionAdmission!.native, wireSHA256: createHash('sha256').update(frozen.prompt).digest('hex'), modelOccurrences: h.inputs.filter(text => text === frozen.prompt).length })
   } finally { await h.close() }
 })
 
@@ -265,7 +306,7 @@ it.runIf(process.platform === 'darwin')('current existing native queue admits th
     await h.rpc.call('agent.input.submit', immediate)
     expect(await h.receipt('unmanaged-immediate', 'waiting')).toMatchObject({ control: { state: 'enabled' } })
     expect(await h.client.inspectAgentPromptSubmission(h.key('unmanaged-immediate'))).toBeNull()
-    expect((await h.client.statusAgent('original')).run.acceptedInputBytes).toBe(h.initial.run.acceptedInputBytes)
+    expect((await h.client.statusAgent('original')).run.acceptedInputBytes).toBe(h.currentStatus.run.acceptedInputBytes)
     expect(h.inputs.filter(text => text === wire)).toHaveLength(1)
     fact('queue', { run: h.initial.run, target: h.initial.session.nativeHandle, inputKey: record.admission!.inputKey, native: record.admission!.native, adopted: native.conversation?.adoptedInput, wireSHA256: createHash('sha256').update(wire).digest('hex'), modelOccurrences: h.inputs.filter(text => text === wire).length, nativeActor: null, immediateAdmission: null })
   } finally { await h.close() }
