@@ -26,41 +26,43 @@ function footerRow(rendered: Record<string, any>) {
   return rendered.body.elements.at(-1).columns[0].elements.at(-1)
 }
 
-it('keeps the original conversation button and native facts on one non-wrapping footer row', () => {
-  const original = operation({ agentSessionId: 'original/session', outcome: 'completed', metrics: { scope: 'turn', durationMs: 234_000, usage: { outputTokens: 1234 } } })
+it('renders native duration and token facts on one line after a divider without navigation', () => {
+  const original = operation({ agentSessionId: 'original/session', outcome: 'completed', metrics: { scope: 'turn', durationMs: 234_000,
+    usage: { totalTokens: 12_345, outputTokens: 1234, inputTokens: 11_111 } } })
   const rendered = card(original), elements = feishuCardElements(rendered), row = footerRow(rendered)
   expect(elements.slice(1, 2)).toEqual(feishuCardElements(card(operation())).slice(1))
-  expect(row).toMatchObject({ tag: 'column_set', flex_mode: 'none', columns: [
-    { tag: 'column', width: 'auto', vertical_align: 'center' },
-    { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center' }
-  ] })
-  expect(row.columns[0].elements).toEqual([
-    { tag: 'button', type: 'text', size: 'small', margin: '0px', text: { tag: 'plain_text', content: '打开原对话' },
-      icon: { tag: 'standard_icon', token: 'chat_outlined' }, url: 'amux://agent/original%2Fsession' }
-  ])
-  expect(row.columns[1].elements).toEqual([
-    { tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: '本轮已结束 · 本轮耗时 3m54s · 本轮输出 1,234 tokens', text_size: 'notation', text_color: 'grey', lines: 1 } }
-  ])
-  expect(elements.some(element => element.tag === 'hr')).toBe(false)
+  expect(row).toEqual({ tag: 'div', text_size: 'notation', text: { tag: 'plain_text',
+    content: '本轮 · 3m54s · 合计 12,345 tokens · 本轮已结束', text_size: 'notation', text_color: 'grey', lines: 1 } })
+  expect(elements.slice(-2)).toEqual([{ tag: 'hr', margin: '4px 0px' }, row])
+  expect(elements.some(element => element.tag === 'button')).toBe(false)
+  expect(JSON.stringify(rendered)).not.toMatch(/打开原对话|amux:\/\//u)
   expect(rendered.header).toBeUndefined()
   expect(rendered.config.summary.content).not.toMatch(/耗时|tokens/u)
 })
 
+it.each([
+  [{ totalTokens: 0, outputTokens: 99, inputTokens: 88 }, '合计 0 tokens'],
+  [{ outputTokens: 7, inputTokens: 12 }, '输出 7 tokens'],
+  [{ inputTokens: 12 }, '输入 12 tokens'],
+  [{ inputTokens: 0 }, '输入 0 tokens']
+] as const)('uses the original reported token count without inventing a total: %j', (usage, expected) => {
+  const row = footerRow(card(operation({ agentSessionId: 'original-session', metrics: { scope: 'response', usage } })))
+  expect(row.text.content).toBe(`本次响应 · ${expected}`)
+})
+
 it.each(['failed', 'interrupted'] as const)('shows native %s without declaring the task successful', outcome => {
-  const json = JSON.stringify(card(operation({ agentSessionId: 'original-session', outcome })))
+  const rendered = card(operation({ agentSessionId: 'original-session', outcome })), json = JSON.stringify(rendered)
   expect(json).toContain(outcome === 'failed' ? '本轮失败' : '本轮中断')
   expect(json).not.toMatch(/已结束|已完成|耗时|tokens/u)
+  expect(feishuCardElements(rendered).filter(element => element.tag === 'hr')).toHaveLength(1)
 })
 
 it('preserves real zero and response scope while omitting unsupported latency and speed', () => {
   const json = JSON.stringify(card(operation({ agentSessionId: 'original-session', metrics: { scope: 'response', durationMs: 0, usage: { outputTokens: 0 } } })))
-  expect(json).toContain('本次响应耗时 0ms · 本次响应输出 0 tokens')
+  expect(json).toContain('本次响应 · 0ms · 输出 0 tokens')
   expect(json).not.toMatch(/本轮|首字|tok\/s|已完成/u)
-  const linkOnly = feishuCardElements(card(operation({ agentSessionId: 'original-session' })))
-  expect(linkOnly.filter(element => element.tag === 'hr')).toHaveLength(0)
-  expect(footerRow(card(operation({ agentSessionId: 'original-session' }))).columns).toHaveLength(1)
-  expect(linkOnly.at(-1).url).toBe('amux://agent/original-session')
-  expect(linkOnly.filter(element => element.tag === 'div')).toHaveLength(1)
+  expect(card(operation({ agentSessionId: 'original-session' }))).toEqual(card(operation()))
+  expect(card(operation({ agentSessionId: 'original-session', metrics: { scope: 'turn', usage: { cachedInputTokens: 10, reasoningOutputTokens: 2 } } }))).toEqual(card(operation()))
 })
 
 it('does not derive a completion footer from final phase and leaves progress and incoming speech unchanged', () => {
@@ -86,7 +88,8 @@ it('reserves the late footer in exact native create and update budgets without l
       mapping: { messageId: 'original-message', nativeCard: { id: 'original-card', operationId: 'original-create' } } })
     expect(Buffer.byteLength(created.request.body!)).toBeLessThanOrEqual(FEISHU_MESSAGE_BODY_BYTES)
     expect(Buffer.byteLength(updated.request.body!)).toBeLessThanOrEqual(FEISHU_MESSAGE_BODY_BYTES)
-    expect(feishuCardElements(card(next)).filter(element => element.tag === 'button')).toHaveLength(last ? 1 : 0)
+    expect(feishuCardElements(card(next)).filter(element => element.tag === 'hr')).toHaveLength(last ? 1 : 0)
+    expect(feishuCardElements(card(next)).filter(element => element.tag === 'button')).toHaveLength(0)
   }
 })
 
@@ -118,50 +121,58 @@ it('renders table answers with native rows intact and produces exact production 
   const text = '**样式验收样例**\n\n回答正文保持原来的阅读宽度，底部只显示有来源的数据。\n\n| 项目 | 结果 |\n| :--- | :--- |\n| 正文 | 保留完整内容 |\n| 页脚 | 使用原生回合记录 |'
   const agentSessionId = process.env.REPLY_FOOTER_PREVIEW_SESSION ?? 'original-session'
   const samples: Record<string, ReplyPublicationMetadata> = {
-    completed: { agentSessionId, outcome: 'completed', metrics: { scope: 'turn', durationMs: 234_000, usage: { outputTokens: 1234 } } },
+    completed: { agentSessionId, outcome: 'completed', metrics: { scope: 'turn', durationMs: 234_000, usage: { totalTokens: 12_345, outputTokens: 1234, inputTokens: 11_111 } } },
     response: { agentSessionId, metrics: { scope: 'response', durationMs: 6100, usage: { outputTokens: 0 } } },
+    input: { agentSessionId, metrics: { scope: 'response', durationMs: 6100, usage: { inputTokens: 1234 } } },
     interrupted: { agentSessionId, outcome: 'interrupted' },
     unavailable: { agentSessionId },
-    long: { agentSessionId, outcome: 'completed', metrics: { scope: 'turn', durationMs: 987_654_321, usage: { outputTokens: 999_999_999_999 } } }
+    long: { agentSessionId, outcome: 'completed', metrics: { scope: 'turn', durationMs: 987_654_321, usage: { totalTokens: 999_999_999_999 } } }
   }
   for (const [name, metadata] of Object.entries(samples)) {
     const rendered = card(operation(metadata, text))
-    expect(rendered.body.elements.map((element: { tag: string }) => element.tag)).toEqual(['column_set', 'table', 'column_set'])
+    expect(rendered.body.elements.map((element: { tag: string }) => element.tag)).toEqual(name === 'unavailable' ? ['column_set', 'table'] : ['column_set', 'table', 'column_set'])
     expect(rendered.body.elements[1].rows).toHaveLength(2)
-    expect(feishuCardElements(rendered).find(element => element.tag === 'button').url).toBe(`amux://agent/${encodeURIComponent(agentSessionId)}`)
+    expect(feishuCardElements(rendered).some(element => element.tag === 'button')).toBe(false)
     if (process.env.REPLY_FOOTER_PREVIEW) await writeFile(join(process.env.REPLY_FOOTER_PREVIEW, `${name}.json`), JSON.stringify(rendered, null, 2) + '\n')
   }
 })
 
-it('sends the new footer through the actual SDK and inspects retained v12 bytes without preparing them again', async () => {
+it('sends accurate token facts through the actual SDK and inspects retained v13 bytes without preparing them again', async () => {
   const remote = await feishuPublicationHttp(), adapter = new FeishuAdapter({ http: remote.http }), publisher = adapter.publication
-  const original = operation({ agentSessionId: 'original/session', metrics: { scope: 'response', durationMs: 0, usage: { outputTokens: 0 } } })
+  const original = operation({ agentSessionId: 'original/session', metrics: { scope: 'response', durationMs: 0, usage: { totalTokens: 0, outputTokens: 9 } } })
   original.target = { ...original.target, application: feishuConfig.application, connectionId: feishuConfig.connectionId }
   const signal = new AbortController().signal
   try {
     const prepared = publisher.prepare(original), frozen = JSON.stringify(prepared)
-    expect(prepared.renderVersion).toBe('feishu-conversation-v13')
+    expect(prepared.renderVersion).toBe('feishu-conversation-v14')
+    expect(prepared.request.body).toContain('本次响应 · 0ms · 合计 0 tokens')
     const created = await publisher.dispatch(prepared, original.target, 'fixture-credential', signal)
     expect(created.state).toBe('confirmed'); if (created.state !== 'confirmed') throw Error('Native create was not confirmed')
     expect(await publisher.inspect(prepared, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
     expect(remote.messageCalls()[0]!.body).toBe(prepared.request.body)
     const replacement = publisher.prepare({ ...original, operationId: 'updated-footer', mapping: created.mapping,
-      payload: { kind: 'speech', phase: 'final', text: '**完整回答**', replyMetadata: { agentSessionId: 'original/session', outcome: 'completed' } } })
+      payload: { kind: 'speech', phase: 'final', text: '**完整回答**', replyMetadata: { agentSessionId: 'original/session', outcome: 'completed',
+        metrics: { scope: 'turn', durationMs: 234_000, usage: { totalTokens: 12_345, outputTokens: 1234 } } } } })
+    expect(replacement.request.body).toContain('本轮 · 3m54s · 合计 12,345 tokens · 本轮已结束')
     expect(await publisher.dispatch(replacement, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
     expect(await publisher.inspect(replacement, original.target, 'fixture-credential', signal, created.mapping)).toEqual(created)
     expect(remote.messageCalls().find(call => call.method === 'PATCH')!.body).toBe(replacement.request.body)
     expect(JSON.stringify(prepared)).toBe(frozen)
 
-    // An already prepared v12 card keeps its exact old layout and wire, even with a new renderer available.
-    const legacy = publisher.prepare({ ...original, operationId: 'retained-v12-footer' })
+    // An already prepared v13 card keeps its exact old layout and wire, even with a new renderer available.
+    const legacy = publisher.prepare({ ...original, operationId: 'retained-v13-footer' })
     const envelope = JSON.parse(legacy.request.body!)
     envelope.content = JSON.stringify({ schema: '2.0', config: { update_multi: true }, body: { elements: [
-      { tag: 'markdown', content: '原已准备正文' }, { tag: 'hr', margin: '4px 0px' },
-      { tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: '本轮已结束', text_size: 'notation', text_color: 'grey' } },
-      { tag: 'button', type: 'text', size: 'small', margin: '0px', text: { tag: 'plain_text', content: '打开原对话' },
-        icon: { tag: 'standard_icon', token: 'chat_outlined' }, url: 'amux://agent/original%2Fsession' }
+      { tag: 'markdown', content: '原已准备正文' },
+      { tag: 'column_set', flex_mode: 'none', horizontal_spacing: '4px', margin: '4px 0px 0px 0px', columns: [
+        { tag: 'column', width: 'auto', vertical_align: 'center', elements: [
+          { tag: 'button', type: 'text', size: 'small', margin: '0px', text: { tag: 'plain_text', content: '打开原对话' },
+            icon: { tag: 'standard_icon', token: 'chat_outlined' }, url: 'amux://agent/original%2Fsession' } ] },
+        { tag: 'column', width: 'weighted', weight: 1, vertical_align: 'center', elements: [
+          { tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: '本轮已结束', text_size: 'notation', text_color: 'grey', lines: 1 } } ] }
+      ] }
     ] } })
-    legacy.renderVersion = 'feishu-conversation-v12'; legacy.request.body = JSON.stringify(envelope)
+    legacy.renderVersion = 'feishu-conversation-v13'; legacy.request.body = JSON.stringify(envelope)
     const oldBytes = JSON.stringify(legacy), receipt = await publisher.dispatch(legacy, original.target, 'fixture-credential', signal)
     expect(receipt.state).toBe('confirmed'); if (receipt.state !== 'confirmed') throw Error('Retained wire was not supported')
     const prepare = vi.spyOn(publisher, 'prepare'), before = remote.messageCalls().length
