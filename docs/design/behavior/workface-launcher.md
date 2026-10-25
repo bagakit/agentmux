@@ -15,13 +15,15 @@
 
 ## Agent 运行端与项目工具端
 
-普通模式沿当前项目启动。用户显式分开时，原项目仍持有文件引用、辅助 Terminal、Browser、Note、Mote 入口和未发送稿；另选已登记 Workspace 作为 Agent 运行端。两端可互换本机与远端，展示位置不随选择移动。新 Session 绑定准确的两端，已有 Session 的 Resume 保持原身份与原绑定，不按新建选择迁移。
+初始页直接提供三种常用工作意图：**Local development** 在本机项目使用本机 Agent；**Remote development** 在明确选择的远端项目上使用同端 Agent；**Remote Agent** 将项目与工具留在本机，选择远端 Agent 环境与工作目录。预设组合已有的项目端与 Agent 端字段，不新建模式协议或第二份创建状态；**Custom** 可显式组合任意已支持的两端，包括反向、两个远端、同 Host 不同 cwd 及显式同目录 binding。组合事实取自原字段，不能因 Host 相同而取消显式绑定。
 
-分端选择在项目 Launcher 中可直接发现，不以用户预先知道环境弹层中的开关为前提。设置页保留准备入口，仍进入这一个 Launcher；两处均可找到[同一操作指南](../../../packages/core/guides/actions/remote-execution.md)，不新建远程专用的创建或草稿 owner。
+选择预设只安排新工作，不启动 Agent。已有准确目标可立即选择；尚缺 Host、项目或运行目录时就在当前起点补齐，浏览和取消不修改原目标，最后选择才一次提交准确两端。Agent 运行目录复用已登记 Workspace，但表述为运行环境与工作目录，不要求另一份项目副本。Executor 仍从准确运行 Host 的原配置来源和 revision 选择，不能按名称继承另一来源的配置。
 
-分开模式的 Agent 候选来自准确运行 Host 的 Core inventory，包括本机；选择保存 Host、Executor 和配置 revision，不以同名 App 模板代替。读取失败保留已确认配置与全部输入，显示原观察缺口；已知 revision 改变须明确重新选择，本次请求不能借用旧资格。首次支持两个已登记普通项目；Scratch／Mote 上下文尚未取得跨端资格时说明限制，保留普通启动与原草稿，不伪造远端主题归属。
+同一项目中切运行安排，保持原 Region、完整 Prompt、名称、Provider 选项、辅助工具草稿与原操作回执。真正选择另一项目时，进入那个项目的实际工作面，使 Files、Git、Terminal 与 Launcher 使用同一项目；打开或复用目标项目自己的 Launcher 和草稿，明确来源稿保留在原项目。不把旧项目相对文件引用、Browser／Note 稿或已有创建／未知回执复制到新目录，不迁移旧 Tab、Run 或会话。准确目标、Launcher 和必要导航由原 Store 一次提交，不先跳项目再异步补运行端。空 Zone 同资源建立原 Region 仍沿原输入认领链保全。
 
 新 Session 冻结准确的项目端和 Agent 端。项目文件候选、文件选择及正文项目文件链接消费原 `toolExecution` 资源地址；Agent 原生 Skills、配置、输入交付与历史来源各归原 Session 运行端。缺少资源登记只说明本次文件操作的未确认事实，保原 binding 和输入，不回落到运行端的同名目录。图片的本机来源、持久保留及原 Session 输入上传保持各自原 owner，不能机械替换所有 Host。无显式 binding 的普通 Session、Scratch／Mote 与 canonical Goal 项目规则保持原合同。
+
+设置页是准备与观察入口，仍进入同一个项目 Launcher；两处引用[同一操作指南](../../../packages/core/guides/actions/remote-execution.md)。已有 Session 的 Resume 沿原身份与原绑定，不跟新模式改端。读取失败保留已确认配置与全部输入，显示观察缺口；已知 revision 改变则明确重新选择。首次支持两个已登记普通项目；Scratch／Mote 尚无跨端资格时说明该次限制，保留普通启动和原草稿。
 
 ## Agent 选择、选项与草稿
 
