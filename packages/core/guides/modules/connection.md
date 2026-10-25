@@ -90,9 +90,13 @@ changes; original intake authors and receipts retain their own configuration rev
 delivery pages use connection delivery ls --order oldest|newest (default oldest); --after continues
 the same requested order, while --after-content independently pages unresolved content. Managed callers
 can list and inspect body-free receipts on their exact original Host/Session binding and audience,
-including historical revisions, without being the bot creator. This grants no retry or administration.
-A newer
-confirmed operation does not prove complete synchronization. Diagnosis returns no bodies, member identities,
+including historical revisions, without being the bot creator. To explicitly retry your own original
+delivery, use connection delivery retry with the same operationId. The Host rechecks that original
+binding and audience, current publication authority and Runtime, and the original delivery's retry
+eligibility; bot enrollment ownership is not required. An unknown resource upload can retry only
+while its message was not attempted; an unknown message effect cannot replay. Receipt reads alone
+grant no write or administration authority. A newer confirmed operation does not prove complete
+synchronization. Diagnosis returns no bodies, member identities,
 credentials or private setup data. Partial sections stay explicit; an empty page is not an
 absence proof. Follow original cursors for older observations; diagnosis never retries or
 rejoins input, reads the platform, or changes existing administration and grant permissions.
