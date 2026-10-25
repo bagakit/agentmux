@@ -34,8 +34,11 @@ original delivery operations, retaining independent unknown effects and source g
 Diagnosis distinguishes bindingRevision from publicationRevision after trigger-only configuration
 changes; original intake authors and receipts retain their own configuration revision. For explicit
 delivery pages use connection delivery ls --order oldest|newest (default oldest); --after continues
-the same requested order, while --after-content independently pages unresolved content. A newer
-confirmed operation does not prove complete synchronization. It returns no bodies, member identities,
+the same requested order, while --after-content independently pages unresolved content. Managed callers
+can list and inspect body-free receipts on their exact original Host/Session binding and audience,
+including historical revisions, without being the bot creator. This grants no retry or administration.
+A newer
+confirmed operation does not prove complete synchronization. Diagnosis returns no bodies, member identities,
 credentials or private setup data. Partial sections stay explicit; an empty page is not an
 absence proof. Follow original cursors for older observations; diagnosis never retries or
 rejoins input, reads the platform, or changes existing administration and grant permissions.
