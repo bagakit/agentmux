@@ -14,9 +14,9 @@ import type { PublicationSpeaker } from '../../publication-speaker.js'
 import { feishuQueryReaction, readFeishuQueryReaction, feishuReactionMapping, feishuReactionReceipt } from './reaction.js'
 
 const path = '/open-apis/im/v1/messages'
-const currentCardRenderVersion = 'feishu-conversation-v9'
+const currentCardRenderVersion = 'feishu-conversation-v10'
 // Retained frozen cards use their original wire; this never prepares or replays an older effect.
-const nativeCardRenderVersions = ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', 'feishu-conversation-v6', 'feishu-conversation-v7', 'feishu-conversation-v8', currentCardRenderVersion]
+const nativeCardRenderVersions = ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', 'feishu-conversation-v6', 'feishu-conversation-v7', 'feishu-conversation-v8', 'feishu-conversation-v9', currentCardRenderVersion]
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 const unknown = (): PublicationReceipt => ({ state: 'unknown', reason: 'effect-unconfirmed' })
 const key = (operationId: string) => createHash('sha256').update(operationId).digest('base64url')
@@ -32,6 +32,12 @@ function speechCard(payload: Extract<PublicationPayload, { kind: 'speech' }>, sp
   return feishuRoleCard(publicationSpeechText({ ...payload, text: (payload.presentationContext?.before ?? '') + payload.text + (payload.presentationContext?.after ?? '') }), speaker,
     { ...(payload.phase ? { phase: payload.phase } : {}), ...(fragment ? { fragment } : {}),
       ...(payload.presentationContext?.literal ? { literal: true } : {}), incoming: originalMessage !== undefined, ...(status ? { status } : {}) })
+}
+function roleSpeaker(operation: Readonly<PublicationOperation>): FeishuRoleSpeaker {
+  const snapshot = operation.speaker ?? { kind: 'unknown' as const }, uploaded = operation.avatarUploads?.at(-1)
+  return { kind: snapshot.kind, ...(snapshot.name ? { name: snapshot.name } : {}),
+    ...(operation.avatarSource?.imageKey ? { imageKey: feishuIdentity(operation.avatarSource.imageKey) }
+      : uploaded?.state === 'confirmed' ? { imageKey: feishuIdentity(uploaded.imageKey) } : {}) }
 }
 function ownSender(value: unknown, application: ConnectionApplication): boolean {
   const sender = object(value)
@@ -70,7 +76,7 @@ function cardSummary(card: Record<string, unknown>, operation: Pick<PublicationO
   const purpose = operation.payload.kind === 'speech' && operation.originalMessage ? 'Agent · Incoming' : operation.payload.kind === 'speech'
     ? [{ agent: 'Agent', human: 'User', external: 'External message', mixed: 'Mixed authors', unknown: 'Unknown author' }[operation.speaker?.kind ?? 'unknown'],
       operation.payload.phase === 'final' ? 'Reply' : operation.payload.phase === 'progress' ? 'Progress' : undefined].filter(Boolean).join(' · ')
-    : operation.payload.kind === 'permission' ? 'Permission' : typeof title === 'string' ? title : 'Conversation message'
+    : operation.payload.kind === 'question' ? 'Question' : operation.payload.kind === 'permission' ? 'Permission' : typeof title === 'string' ? title : 'Conversation message'
   const text = (elements: unknown): string[] => !Array.isArray(elements) ? [] : elements.flatMap(element => {
     const node = object(element), content = object(node?.text)?.content
     return node?.tag === 'markdown' && typeof node.content === 'string' ? [node.content]
@@ -258,7 +264,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         { tag: 'action', actions: [{ tag: 'button', type: 'default', text: { tag: 'plain_text', content: 'Open conversation' }, url: `amux://agent/${encodeURIComponent(payload.agentSessionId)}` }] }
       ] }
     } else if (operation.payload.kind === 'question') {
-      card = feishuQuestionCard(operation.payload, feishuIdentity(operation.reference.agentSessionId))
+      card = feishuQuestionCard(operation.payload, feishuIdentity(operation.reference.agentSessionId), roleSpeaker(operation))
     } else if (operation.payload.kind === 'permission') {
       const payload = operation.payload
       const status = { pending: 'Choose one original permission option.', 'response-sent': 'Response returned. Native adoption and completion are not confirmed.', unconfirmed: 'The original response is not confirmed. Check it in amux; it will not be resent.', unavailable: 'Continue in the original amux terminal.' }[payload.status]
@@ -269,10 +275,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       ] }
     } else if (operation.payload.kind === 'speech') {
       if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
-      const snapshot = operation.speaker ?? { kind: 'unknown' as const }, uploaded = operation.avatarUploads?.at(-1)
-      const speaker: FeishuRoleSpeaker = { kind: snapshot.kind, ...(snapshot.name ? { name: snapshot.name } : {}),
-        ...(operation.avatarSource?.imageKey ? { imageKey: feishuIdentity(operation.avatarSource.imageKey) }
-          : uploaded?.state === 'confirmed' ? { imageKey: feishuIdentity(uploaded.imageKey) } : {}) }
+      const speaker = roleSpeaker(operation)
       card = speechCard(operation.payload, speaker, operation.originalMessage, operation.fragment)
     } else if (operation.payload.kind === 'image') {
       const uploaded = operation.uploads?.at(-1)
