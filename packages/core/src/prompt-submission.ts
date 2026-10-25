@@ -212,6 +212,7 @@ type PromptSubmissionDeps = {
 export type AgentPromptInputAuthority = Readonly<{
   /** Producer attribution only; it never grants dispatch or Browser control. */
   inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
+  authorProfile?: import('./author-profile.js').AgentPreparedAuthorProfile
   inputImages?: import('./agent-input-resource.js').AgentInputImage[]
   inputContextCaptureProof?: import('./agent-input-context-capture.js').AgentInputContextCaptureProof
   /** Only Core-authenticated Agent authors contribute the atomic metadata binding. */

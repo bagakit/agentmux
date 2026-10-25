@@ -354,7 +354,7 @@ const NATIVE_FIELDS = {
   'agent.automation.pause': ['agentSessionId', 'expectedRun', 'ownerInstanceId', 'operationId'],
   'agent.automation.inspect': ['agentSessionId', 'expectedRun', 'ownerInstanceId', 'operationId'],
   'browser.input.inspect': ['hostId', 'operationId'],
-  'agent.input.resource': ['key', 'index', 'revision', 'maxBytes'],
+  'agent.input.resource': ['key', 'index', 'revision', 'maxBytes', 'purpose'],
   'agent.input.inspect': ['key', 'kind', 'originalControlOperationId'],
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent'],
