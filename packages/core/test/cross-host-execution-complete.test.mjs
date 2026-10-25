@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readEvidence, applyVerificationInputs, validateUi, validateUiInputs, validateRemote } from '../scripts/fixtures/cross-host-execution-complete.mjs'
+import { readEvidence, readRetainedMode, applyVerificationInputs, validateUi, validateUiInputs, validateRemote } from '../scripts/fixtures/cross-host-execution-complete.mjs'
 
 const commit = 'a'.repeat(40), sha = 'b'.repeat(64)
 const candidate = { sourceCommit: commit, remote: { endpoint: { transport: 'ssh', host: 'authorized-host', user: 'owner' }, installedRoot: '/private/test-candidate' } }
@@ -70,7 +70,7 @@ function remoteFixture() {
     samePathIsolation: { requestedAbsolutePath: '/tmp/private-path', agentUnchanged: true, agentOriginal: 'agent', agentFinal: 'agent', resourceOriginal: 'resource', resourceAfter: 'modified\n', resourceAfterCut: 'after-cut\n' },
     qualification: { bothCoreRestarts: ['local', 'remote'].map(host => ({ host, previousPid: 1, currentPid: 2, runtimeId: host, nativePid: 3 })),
       amux: { originalSessionId: name, resumedSessionId: name, originalRun: { runId: 'first' }, resumedRun: { runId: 'second' }, deviceRejected: true, missingCallerRejected: true, ownerUnavailableCode: 'AGENT_TOOL_CONTEXT_UNAVAILABLE', nativeToolsRetained: true },
-      readerGap: { originalRequest: { bindingId: name, streamGeneration: 'original', nativeRequestId: 0 }, originalRange: { startByte: 30, endByte: 60 }, acknowledgedByte: 20, pausedPid: 4, kernelState: 'T', payloadDigest: sha, resultDigest: sha, effectCount: 1, originalStartCount: 1 } } })
+      readerGap: { originalRequest: { bindingId: name, streamGeneration: 'original', nativeRequestId: 0 }, originalRange: { startByte: 30, endByte: 60 }, acknowledgedByte: 20, pausedPid: 4, kernelState: 'T', payloadDigest: 'sha256:' + sha, resultDigest: 'sha256:' + sha, effectCount: 1, originalStartCount: 1 } } })
   return { passed: true, mode: 'reader-gap', actualMachines: 2, bothDirectionsPassed: true, cleanupErrors: [], candidateCommit: commit, results: ['remote-agent', 'local-agent'].map(result) }
 }
 test('two-direction remote proof rejects duplicate directions, repeated effects and an acknowledged fake reader gap', () => {
@@ -78,7 +78,7 @@ test('two-direction remote proof rejects duplicate directions, repeated effects 
   for (const change of [value => { value.results[1] = value.results[0] }, value => { value.candidateCommit = 'c'.repeat(40) },
     value => { value.results[0].qualification.readerGap.effectCount = 2 }, value => { value.results[0].qualification.readerGap.acknowledgedByte = 60 },
     value => { value.results[0].qualification.amux.resumedSessionId = 'replacement' }, value => { value.results[0].samePathIsolation.agentFinal = 'modified' },
-    value => { value.cleanupErrors.push('unknown') }]) {
+    value => { value.results[0].qualification.readerGap.payloadDigest = sha }, value => { value.cleanupErrors.push('unknown') }]) {
     const value = remoteFixture(); change(value); assert.throws(() => validateRemote(value, 'reader-gap', commit))
   }
   assert.throws(() => validateRemote({ passed: true, results: [] }, 'performance', commit))
@@ -113,4 +113,35 @@ test('evidence references require the original bytes, not only a successful-look
     await assert.rejects(readEvidence(reference), /Original evidence changed/)
     await assert.rejects(readEvidence({ path, sha256: '' }))
   } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test('retained mode requires the same original authorization, installed bytes and observed completion', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'execution-retained-contract-'))
+  try {
+    const installedObservation = { marker: { sourceCommit: commit }, consumers: { 'dist/index.js': sha } }
+    const input = { mode: 'reader-gap', candidateCommit: commit, directions: ['remote-agent','local-agent'], authorization: { sha256: sha }, installedObservation, root }
+    const execution = { schema: 'agentmux.remote-mode-execution.v1', mode: 'reader-gap', evidenceRoot: root, completed: true, exitCode: 0, source: { kind: 'exec-tool', sessionId: 1 } }
+    const save = async (file, value) => { const path = join(root, file), bytes = JSON.stringify(value); await writeFile(path, bytes); return { path, sha256: createHash('sha256').update(bytes).digest('hex') } }
+    execution.source.receipt = await save('exec.json', { exit_code: 0, output: '' })
+    const logPath = join(root, 'original.log'), log = JSON.stringify({ passed: true, mode: 'reader-gap', evidence: root })
+    await writeFile(logPath, log); execution.source.log = { path: logPath, sha256: createHash('sha256').update(log).digest('hex') }
+    const ref = { mode: 'reader-gap', summary: await save('summary.json', remoteFixture()), input: await save('input.json', input), execution: await save('execution.json', execution) }
+    await readRetainedMode(ref, 'reader-gap', candidate, sha, { installedObservation })
+    await assert.rejects(readRetainedMode(ref, 'reader-gap', candidate, 'c'.repeat(64), { installedObservation }))
+    await assert.rejects(readRetainedMode(ref, 'reader-gap', candidate, sha, { installedObservation: {} }))
+    for (const result of [{ exit_code: null }, { exit_code: 1 }, { exit_code: 0, session_id: 9 }]) {
+      const bad = structuredClone(execution); bad.source.receipt = await save('bad-exec.json', result)
+      await assert.rejects(readRetainedMode({ ...ref, execution: await save('bad-execution.json', bad) }, 'reader-gap', candidate, sha, { installedObservation }))
+    }
+    const child = { ...execution, signal: null, source: { kind: 'complete-child-close', log: execution.source.log, observation: 'Derived from original accepted child close before aggregation failed', summary: await save('parent.json', { candidateCommit: commit, failure: 'aggregation rejected the digest encoding' }) } }
+    await readRetainedMode({ ...ref, execution: await save('child.json', child) }, 'reader-gap', candidate, sha, { installedObservation })
+    for (const change of [value => { delete value.signal }, value => { value.signal = 'SIGKILL' }, value => { delete value.source.summary }, value => { value.source.summary.sha256 = '0'.repeat(64) }]) {
+      const bad = structuredClone(child); change(bad)
+      await assert.rejects(readRetainedMode({ ...ref, execution: await save('bad-child.json', bad) }, 'reader-gap', candidate, sha, { installedObservation }))
+    }
+    for (const change of [value => { value.completed = false }, value => { value.exitCode = null }, value => { value.exitCode = 1 }, value => { value.signal = 'SIGTERM' }, value => { delete value.source.receipt }, value => { value.source.log.sha256 = '0'.repeat(64) }, value => { value.evidenceRoot += '-replacement' }]) {
+      const bad = structuredClone(execution); change(bad)
+      await assert.rejects(readRetainedMode({ ...ref, execution: await save('execution.json', bad) }, 'reader-gap', candidate, sha, { installedObservation }))
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

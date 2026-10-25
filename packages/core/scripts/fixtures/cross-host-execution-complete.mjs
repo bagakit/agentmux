@@ -9,12 +9,13 @@ const directions = ['local-agent', 'remote-agent']
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const nonempty = value => value && typeof value === 'object' && Object.keys(value).length > 0
 const dist = values => Object.fromEntries(Object.entries(values ?? {}).filter(([file]) => file.startsWith('packages/core/dist/')))
-export async function readEvidence(reference) {
+async function readEvidenceBytes(reference) {
   assert(reference && isAbsolute(reference.path) && /^[a-f0-9]{64}$/.test(reference.sha256), 'Exact original evidence path and digest are required')
   const bytes = await readFile(reference.path)
   assert.equal(hash(bytes), reference.sha256, 'Original evidence changed: ' + reference.path)
-  return JSON.parse(bytes)
+  return bytes
 }
+export async function readEvidence(reference) { return JSON.parse(await readEvidenceBytes(reference)) }
 export function applyVerificationInputs(expected, overlay, commit) {
   assert(overlay?.schema === 'agentmux.verification-inputs.v1' && overlay.sourceCommit === commit && /^[a-f0-9]{40}$/.test(overlay.verificationCommit))
   assert(Array.isArray(overlay.changes) && overlay.changes.length > 0)
@@ -97,7 +98,7 @@ export function validateRemote(summary, mode, commit) {
       assert(gap?.originalRequest?.bindingId === result.bindingId && gap.originalRequest.streamGeneration && gap.originalRequest.nativeRequestId !== undefined &&
         gap.originalRange?.endByte > gap.originalRange?.startByte && gap.acknowledgedByte <= gap.originalRange.startByte &&
         Number.isInteger(gap.pausedPid) && typeof gap.kernelState === 'string' && gap.kernelState.includes('T') &&
-        /^[a-f0-9]{64}$/.test(gap.payloadDigest) && /^[a-f0-9]{64}$/.test(gap.resultDigest) && gap.effectCount === 1 && gap.originalStartCount === 1,
+        /^sha256:[a-f0-9]{64}$/.test(gap.payloadDigest) && /^sha256:[a-f0-9]{64}$/.test(gap.resultDigest) && gap.effectCount === 1 && gap.originalStartCount === 1,
       'The original output range must remain beyond the stopped reader without repeating the operation')
     } else {
       assert.equal(mode, 'performance')
@@ -162,7 +163,38 @@ async function runMode(verifierPath, receiptPath, mode, root) {
   assert(packets.length === 1 && packets[0].passed === true && isAbsolute(packets[0].evidence), 'Remote mode must return its exact original evidence')
   return { ...result, ...packets[0] }
 }
-export async function runComplete({ authorization, receiptPath, candidate, buildReceipt, verifierPath, preflight }) {
+export async function readRetainedMode(ref, mode, candidate, authorizationSha256, preflight) {
+  assert.equal(ref.mode, mode)
+  const proof = await readEvidence(ref.summary), input = await readEvidence(ref.input), execution = await readEvidence(ref.execution)
+  validateRemote(proof, mode, candidate.sourceCommit)
+  assert.equal(input.mode, mode); assert.equal(input.candidateCommit, candidate.sourceCommit)
+  assert.deepEqual([...input.directions].sort(), directions)
+  assert.equal(input.authorization?.sha256, authorizationSha256, 'Retained mode used a different authorization or candidate receipt')
+  assert.deepEqual(input.installedObservation, preflight.installedObservation, 'Retained mode used different installed artifacts')
+  assert.equal(execution.schema, 'agentmux.remote-mode-execution.v1')
+  assert(execution.completed === true && execution.exitCode === 0 && execution.mode === mode)
+  assert(['exec-tool', 'complete-child-close'].includes(execution.source?.kind) && nonempty(execution.source), 'Original process observation is required')
+  assert.equal(execution.evidenceRoot, input.root)
+  assert.equal(ref.summary.path, join(input.root, 'summary.json'))
+  assert.equal(ref.input.path, join(input.root, 'input.json'))
+  const source = execution.source
+  const stdout = (await readEvidenceBytes(source.log)).toString()
+  const packets = stdout.split('\n').flatMap(line => { try { return [JSON.parse(line)] } catch { return [] } })
+  assert(packets.length === 1 && packets[0].passed === true && packets[0].mode === mode && packets[0].evidence === input.root, 'Original mode completion output is absent')
+  if (source.kind === 'complete-child-close') {
+    assert.equal(execution.signal, null, 'The original child close must confirm normal termination')
+    const parent = await readEvidence(source.summary)
+    assert.equal(parent.candidateCommit, candidate.sourceCommit)
+    assert(parent.failure || parent.modes?.some(row => row.mode === mode), 'Original full join did not retain the mode outcome')
+    assert(typeof source.observation === 'string' && source.observation.length > 0, 'Distinguish direct child close from control-flow-derived evidence')
+  } else {
+    const original = await readEvidence(source.receipt)
+    assert(original.exit_code === 0 && original.session_id === undefined, 'The original executor must report completed success')
+    assert(execution.signal === undefined || execution.signal === null, 'A signalled process cannot qualify success')
+  }
+  return { mode, ...ref.summary, process: { kind: 'retained-observation', execution: ref.execution }, retainedInput: ref.input }
+}
+export async function runComplete({ authorization, receiptPath, candidate, buildReceipt, verifierPath, preflight, retainedModesPath }) {
   const root = await mkdtemp(join(tmpdir(), 'amx-complete-'))
   const summary = { schema: 'agentmux.cross-host-complete.v1', passed: false, fullRemoteGatePassed: false,
     candidateCommit: candidate.sourceCommit, actualMachines: 2, modes: [], ui: [], limitations: [
@@ -204,7 +236,11 @@ export async function runComplete({ authorization, receiptPath, candidate, build
       summary.ui.push({ ...ref, originalSessionId: receipt.toolRestart.originalSessionId, evidenceFiles: receipt.evidenceFiles })
     }
     await save()
+    const retained = retainedModesPath ? JSON.parse(await readFile(retainedModesPath, 'utf8')) : []
+    assert(Array.isArray(retained) && retained.every(ref => ['reader-gap', 'performance'].includes(ref.mode)) && new Set(retained.map(ref => ref.mode)).size === retained.length)
     for (const mode of ['reader-gap', 'performance']) {
+      const previous = retained.find(ref => ref.mode === mode)
+      if (previous) { summary.modes.push(await readRetainedMode(previous, mode, candidate, initial, preflight)); await save(); continue }
       const result = await runMode(verifierPath, receiptPath, mode, root)
       const path = join(result.evidence, 'summary.json'), bytes = await readFile(path), proof = JSON.parse(bytes)
       validateRemote(proof, mode, candidate.sourceCommit)

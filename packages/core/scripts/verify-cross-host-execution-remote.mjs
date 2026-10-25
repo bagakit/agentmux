@@ -14,22 +14,23 @@ import { performanceModelItem, runPerformance } from './fixtures/cross-host-exec
 // Two physical Hosts, controlled model, installed public Core/CLI and real native tools.
 // This script never installs/upgrades packages or uses an existing Core service.
 // --receipt is the original target authorization plus one explicitly installed candidate;
-// old execution evidence is not consumed as a current result. Default full qualification
+// exact retained mode evidence may be explicitly revalidated at the full join. Default full qualification
 // consumes exact local/UI evidence and runs both physical directions; explicit modes stay narrow.
 const flags = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
     const flag = process.argv[index];
     if (flag === '--help' && process.argv.length === 3) {
-        console.log('node verify-cross-host-execution-remote.mjs --receipt FILE [--mode full|native|recovery|reader-gap|performance] [--direction both|remote-agent|local-agent]\nThe receipt must retain agentmux.cross-host-target-authorization.v1 and executionCandidate: {schema:"agentmux.cross-host-installed-candidate.v1", sourceCommit, scopeId, candidateReceipt, local:{packageRoot,nodePath,codexDirectory}, remote:{installedRoot,packageRoot,nodePath,codexDirectory,profileRoot,command,endpoint:{transport:"ssh",host,user?}}}. The installed root must contain .agentmux-cross-host-test-root.json with the same scopeId/sourceCommit/hostId/profileRoot/nodePath. No package installation or old success adoption occurs.');
+        console.log('node verify-cross-host-execution-remote.mjs --receipt FILE [--mode full|native|recovery|reader-gap|performance] [--direction both|remote-agent|local-agent] [--retained-modes FILE]\nThe receipt must retain agentmux.cross-host-target-authorization.v1 and executionCandidate: {schema:"agentmux.cross-host-installed-candidate.v1", sourceCommit, scopeId, candidateReceipt, local:{packageRoot,nodePath,codexDirectory}, remote:{installedRoot,packageRoot,nodePath,codexDirectory,profileRoot,command,endpoint:{transport:"ssh",host,user?}}}. The installed root must contain .agentmux-cross-host-test-root.json with the same scopeId/sourceCommit/hostId/profileRoot/nodePath. No package installation occurs. --retained-modes explicitly revalidates original mode receipts against the current exact installed candidate and authorization; it never replays their operations.');
         process.exit(0);
     }
-    assert(['--receipt', '--mode', '--direction'].includes(flag) && !flags.has(flag) && process.argv[index + 1], 'Unknown, duplicate or incomplete verifier argument');
+    assert(['--receipt', '--mode', '--direction', '--retained-modes'].includes(flag) && !flags.has(flag) && process.argv[index + 1], 'Unknown, duplicate or incomplete verifier argument');
     flags.set(flag, process.argv[index + 1]);
 }
 assert(flags.has('--receipt'), 'An original target authorization receipt is required; no service was created');
 const mode = flags.get('--mode') ?? 'full', direction = flags.get('--direction') ?? 'both';
 assert(['full', 'native', 'recovery', 'reader-gap', 'performance'].includes(mode), 'Unknown verification mode');
 assert(['both', 'remote-agent', 'local-agent'].includes(direction), 'Unknown verification direction');
+assert(!flags.has('--retained-modes') || mode === 'full', 'Retained evidence belongs only to the full qualification join');
 const receiptPath = resolve(flags.get('--receipt'));
 const authorizationBytes = await fs.readFile(receiptPath);
 const authorization = JSON.parse(authorizationBytes.toString());
@@ -110,7 +111,7 @@ const input = { packageRoot, remoteRoot, remotePackageRoot, remoteNodePath, sshT
 if(mode==='full') {
     assert.equal(direction,'both','The complete remote gate requires both exact physical directions');
     const {runComplete}=await import('./fixtures/cross-host-execution-complete.mjs');
-    await runComplete({authorization,receiptPath,candidate,buildReceipt,verifierPath:fileURLToPath(import.meta.url),preflight:{installedObservation,consumerHashes,installationQualification}});
+    await runComplete({authorization,receiptPath,candidate,buildReceipt,verifierPath:fileURLToPath(import.meta.url),preflight:{installedObservation,consumerHashes,installationQualification},retainedModesPath:flags.has('--retained-modes')?resolve(flags.get('--retained-modes')):undefined});
     process.exit(0);
 }
 const { connectAgentMuxRpc } = await import(pathToFileURL(join(packageRoot, 'dist/public-rpc-client.js')));
