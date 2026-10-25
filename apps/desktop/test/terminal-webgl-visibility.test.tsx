@@ -121,7 +121,7 @@ vi.mock('../src/renderer/src/store', () => {
     clearRegionCaretFocus: vi.fn(), recoverSession: vi.fn(),
     openHttpLink: vi.fn(), openFile: vi.fn(), reportError: vi.fn()
   }
-  return { useAppStore: Object.assign((select: (value: typeof state) => unknown) => select(state), {
+  return { currentCoreSpatialGraph: () => null, useAppStore: Object.assign((select: (value: typeof state) => unknown) => select(state), {
     getState: () => state, setState: vi.fn()
   }) }
 })
