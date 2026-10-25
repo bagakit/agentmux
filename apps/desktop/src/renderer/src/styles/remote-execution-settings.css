@@ -63,3 +63,15 @@
   .remote-execution-intro__copy p { max-width: none; line-height: 1.5; }
   .remote-execution-diagram, .remote-execution-eyebrow { display: none; }
 }
+
+.remote-execution-settings [hidden] { display: none !important; }
+.remote-execution-library { min-width: 0; }
+.remote-execution-prepare__target { display: flex; flex-direction: column; gap: var(--sp-1); margin-top: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.remote-execution-prepare__target strong { color: var(--text-2); font-weight: 500; }
+.remote-execution-prepare__target code { font-size: inherit; user-select: text; }
+.remote-execution-back { display: inline-flex; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-4); }
+@container (max-width: 720px) {
+  .remote-execution-bindings__body:has(.remote-execution-library[hidden]) .remote-execution-detail { padding-top: 0; border-top: 0; }
+}
+.tool-execution-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.tool-execution-observation .tool-execution-recovery-scope { margin-bottom: 0; line-height: 1.6; overflow-wrap: anywhere; }

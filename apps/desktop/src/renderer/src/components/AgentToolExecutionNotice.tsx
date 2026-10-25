@@ -10,14 +10,16 @@ import type { ServiceNoticeItem } from '../lib/use-service-notices'
 type Agent = Extract<SessionSnapshot, { kind: 'agent' }>
 const capabilityNames = { hooks: 'Hooks', skills: 'Skills', mcp: 'MCP calls', 'agent-control': 'Agent control' }
 
-/** A reader of the original Core binding; never a health, retry or lifecycle owner. */
+/** Observe the original Core binding; explicit recovery stays with that same owner. */
 export function AgentToolExecutionNotice({ session, visible, presentation = 'disclosure' }: { session: Agent; visible: boolean; presentation?: 'disclosure' | 'inline' }) {
   const [observationAttempt, setObservationAttempt] = useState(0)
   const binding = session.toolExecution
   const identity = JSON.stringify([session.control.hostId, session.control.agentSessionId, binding?.bindingId])
-  const latest = useRef({ identity, revision: 0 })
-  if (latest.current.identity !== identity) latest.current = { identity, revision: 0 }
+  const latest = useRef({ identity, revision: 0, readRequest: 0 })
+  if (latest.current.identity !== identity) latest.current = { identity, revision: 0, readRequest: 0 }
   const [read, setRead] = useState<{ identity: string; inspection?: AgentExecutionInspection | null; error?: string }>({ identity })
+  const [rejoinState, setRejoinState] = useState<{ identity: string; pending: boolean; error?: string }>({ identity, pending: false })
+  const rejoining = useRef<string | null>(null)
   const resourceHost = useAppStore(state => state.config?.hosts.find(host => host.id === binding?.resourceHostId)?.label)
   function accept(value: AgentExecutionInspection | null) {
     if (latest.current.identity !== identity) return
@@ -52,24 +54,61 @@ export function AgentToolExecutionNotice({ session, visible, presentation = 'dis
   } })
   for (const notice of inspection?.notices ?? []) items.push({ id: JSON.stringify([notice.providerId, notice.role, notice.capability]), cause: JSON.stringify([notice.code, notice.state]),
     notice: { kind: 'process-degraded', notice: { step: `${capabilityNames[notice.capability]} · ${notice.state}`, mode: notice.message, restore: notice.action } } })
+  for (const diagnostic of inspection?.diagnostics ?? []) {
+    const target = diagnostic.operation ? `Operation ${JSON.stringify(diagnostic.operation.nativeRequestId)} · generation ${diagnostic.operation.streamGeneration}`
+      : `${diagnostic.scope === 'unclassified' ? 'Unclassified tool issue' : `${diagnostic.scope} issue`}${diagnostic.generation ? ` · generation ${diagnostic.generation}` : ''}`
+    items.push({ id: JSON.stringify(['diagnostic', diagnostic.scope, diagnostic.side, diagnostic.runId, diagnostic.generation, diagnostic.operation, diagnostic.code]),
+      cause: diagnostic.message, notice: { kind: 'process-degraded', notice: {
+        step: `${target} · ${diagnostic.code}`, mode: diagnostic.message,
+        restore: diagnostic.scope === 'operation' ? 'This original operation remains unresolved. Reconnecting does not by itself confirm its outcome.'
+          : 'This issue is separate from the tool connection. The original Agent and binding remain available.'
+      } } })
+  }
   async function refresh() {
     if (current.error) setObservationAttempt(value => value + 1)
     const original = latest.current
     const revision = original.revision
-    try { const value = await api.sessions.executionBinding(binding!.bindingId); if (latest.current === original && original.revision === revision) accept(value) }
-    catch (error) { if (latest.current === original && original.revision === revision) setRead(prior => ({ ...prior, identity, error: error instanceof Error ? error.message : String(error) })) }
+    const request = ++original.readRequest
+    try { const value = await api.sessions.executionBinding(binding!.bindingId); if (latest.current === original && original.readRequest === request && original.revision === revision) accept(value) }
+    catch (error) { if (latest.current === original && original.readRequest === request && original.revision === revision) setRead(prior => ({ ...prior, identity, error: error instanceof Error ? error.message : String(error) })) }
   }
+  async function rejoin() {
+    if (rejoining.current === identity) return
+    rejoining.current = identity
+    setRejoinState({ identity, pending: true })
+    const original = latest.current, revision = original.revision, request = ++original.readRequest
+    try {
+      const value = await api.sessions.rejoinExecutionBinding(binding!.bindingId)
+      if (latest.current === original) {
+        if (original.readRequest === request && original.revision === revision) accept(value)
+        setRejoinState({ identity, pending: false })
+      }
+    } catch (error) {
+      if (latest.current === original) setRejoinState({ identity, pending: false, error: error instanceof Error ? error.message : String(error) })
+    } finally { if (rejoining.current === identity) rejoining.current = null }
+  }
+  const recovery = rejoinState.identity === identity ? rejoinState : { identity, pending: false }
+  const connectionUnconfirmed = Boolean(current.error || !inspection || inspection.state === 'unavailable')
+  if (recovery.error) items.push({ id: 'rejoin', cause: recovery.error, notice: { kind: 'indeterminate', notice: {
+    step: 'Original tool connection could not be rejoined', mode: recovery.error,
+    restore: 'The original binding and pending operations are retained. Check the named cause before reconnecting again.'
+  } } })
+  const actions = <><button type="button" className="small-button" onClick={() => void refresh()}>Refresh observation</button>
+    {connectionUnconfirmed || recovery.pending || recovery.error ? <button type="button" className="small-button" disabled={recovery.pending} onClick={() => void rejoin()}>{recovery.pending ? 'Reconnecting…' : 'Reconnect original tools'}</button> : null}</>
+  const recoveryDetails = connectionUnconfirmed ? <p className="tool-execution-recovery-scope">Reconnect to the same Agent and tools. Pending tool work may continue, without sending your prompt again.</p> : null
   if (presentation === 'inline') return <section className="tool-execution-observation" aria-label="Tool execution observation">
     <header><strong>Tool connection · {current.error || !inspection ? 'Unconfirmed' : inspection.state === 'connected' ? 'Connected' : 'Unavailable'}</strong>
-      <button type="button" className="small-button" onClick={() => void refresh()}>Refresh observation</button></header>
+      <div className="tool-execution-actions">{actions}</div></header>
     {current.error && inspection ? <p>Last confirmed tool connection: {inspection.state}.</p> : null}
     {items.map(item => <ServiceWindowNotice key={item.id} notice={item.notice} />)}
     {!items.length ? <p>No capability notices in this observation. Tool connection does not establish support for every Provider feature.</p> : null}
+    {recoveryDetails}
   </section>
   return <ServiceNoticeDisclosure scope={`local:tool-execution:${identity}`} notices={items} visible={visible}
     available={inspection !== undefined && !current.error} persistentTitle title="Tool execution" detailsTitle={`Tools · ${resourceHost ?? binding.resourceHostId}`}
-    actions={<button type="button" className="small-button" onClick={() => void refresh()}>Refresh observation</button>}>
+    actions={actions}>
     <p className="tool-execution-resource">{binding.workspacePath}</p>
     {items.map(item => <ServiceWindowNotice key={item.id} notice={item.notice} />)}
+    {recoveryDetails}
   </ServiceNoticeDisclosure>
 }

@@ -30,6 +30,7 @@ import { CONTROL_RESPONSE_CHANNEL } from '../shared/contracts.js'
  */
 export const PRIVILEGED_SENDER_LABELS = {
   'sessions:executionBinding': 'original tool execution observation',
+  'sessions:rejoinExecutionBinding': 'explicit original tool connection recovery',
   'sessions:observeExecutionBinding': 'original tool execution observation',
   'sessions:releaseExecutionBinding': 'original tool execution reader release',
   'ui:readLoadedIdentity': 'loaded application identity',

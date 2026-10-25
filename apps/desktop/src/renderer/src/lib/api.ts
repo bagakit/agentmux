@@ -994,6 +994,7 @@ const mockApi: AgentMuxDesktopApi = {
     snapshot: async () => structuredClone(mockSnapshot),
     endpointWarnings: async () => structuredClone(mockSnapshot.runtimeEndpointWarnings ?? []),
     executionBinding: async () => null,
+    rejoinExecutionBinding: async () => { throw new Error('Original tool connection recovery requires the native Desktop.') },
     observeExecutionBinding: (_bindingId, listener) => { queueMicrotask(() => listener(null)); return () => {} },
     launchAgent: async (input) => {
       const executor = mockConfig.executors[input.executorId]
