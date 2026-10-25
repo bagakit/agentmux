@@ -78,9 +78,10 @@ const claude = { ...original('session-claude'), providerId: 'claude', executorId
 sessions.push(claude)
 catalog.agentPresentation![1]!.avatar = { tint: '#6d9ee7', badge: 'shield' }
 catalog.agentPresentation!.push({ ...catalog.agentPresentation![2]!, agentSessionId: claude.agentSessionId, name: '视觉方向评审', providerId: 'claude', avatar: { tint: '#ae55e8', badge: 'spark' }, recap: { text: '保留原身份图和颜色，核对手机上的实际观感。', source: 'native-hook' } })
+const goalCreatedAt = Date.now() - 60_000
 const goal: AgentMuxRpcGoal = { id: 'goal-original', title: '把两个想法变成一个小实验', description: '比较已有资料，选择本周可以开始的方向。', status: 'in_progress', priority: 'normal', projectId: null,
-  sessionIds: [main.agentSessionId, result.agentSessionId], source: 'session', activityLog: [], createdAt: 1, updatedAt: 2,
-  alignment: { revision: 1, summary: '给出小步可验证的建议，保留两种方案的依据。', criteria: [{ id: 'criterion-original', text: '形成可开始的实验步骤' }], openQuestions: [], confirmedAt: 1 },
+  sessionIds: [main.agentSessionId, result.agentSessionId], source: 'session', activityLog: [], createdAt: goalCreatedAt, updatedAt: goalCreatedAt + 60_000,
+  alignment: { revision: 1, summary: '给出小步可验证的建议，保留两种方案的依据。', criteria: [{ id: 'criterion-original', text: '形成可开始的实验步骤' }], openQuestions: [], confirmedAt: goalCreatedAt + 30_000 },
   grounding: { alignmentRevision: 1, submissionId: 'result-original', summary: '建议先做范围更清晰的方案 A；以下是依据和第一步。', acceptedAt: null,
     checks: [{ criterionId: 'criterion-original', outcome: 'met', note: '已整理步骤、比较依据与需要你决定的地方。', evidence: ['原资料/实验建议.md'] }] } }
 let connected = location.hash !== '#fixture-offline', unknownNext = false, promptReadFails = false, appearanceRevision = 0
@@ -103,7 +104,7 @@ const client = {
   agentSessions: () => { record('sdk.agentSessions'); return structuredClone(sessions) },
   catalog: () => { record('sdk.catalog'); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
   onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); record('sdk.onEvent'); return () => { listeners.delete(listener); record('sdk.releaseEvent') } },
-  runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', availability: connected ? 'connected' : 'disconnected' }),
+  runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', ownerInstanceId: 'owner-original', availability: connected ? 'connected' : 'disconnected' }),
   statusAgent: async (id: string) => {
     if (!densityScene) throw Error('Run status is not observed by this metadata fixture')
     record('sdk.statusAgent', { id })
@@ -219,6 +220,8 @@ const client = {
     if (method === 'file.upload' && holdFileUpload) return await new Promise(resolve => {
       releaseFileUpload = () => { const { dataBase64: _data, ...identity } = params; resolve({ ...identity, status: 'uploaded', path: '/opaque/原资料截图.png' }) }
     })
+    // The original Host confirms an explicit-input pause; capturing its unknown path is a separate scene.
+    if (method === 'agent.automation.pause') return { receipt: { ...params, status: 'confirmed', pausedLoopIds: [], disabledIntentIds: [], issues: [] } }
     if (method === 'skill.ls') {
       const original = sessions.find(session => session.agentSessionId === params.agentSessionId)!
       return { hostId: 'local', sourceHostId: original.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId,
