@@ -1263,6 +1263,8 @@ export type BrowserSnapshot = {
    * 页面上的一次点击。
    */
   appLinkPrompt: { url: string; scheme: string } | null
+  /** Main-owned original native certificate callback; never persisted or Agent-approved. */
+  certificateRequest?: import('@agentmux/core').AgentMuxBrowserCertificateRequest | null
   /** Latest bounded Browser operation projection; transient while the native page is live. */
   activity?: BrowserActivityState
   /** Explicit human recording or recovered durable draft; recovery never starts capture. */
@@ -2044,6 +2046,7 @@ export type AgentMuxDesktopApi = {
      * 让渲染进程回传 url 等于开了第二个事实源——页面可以在人回答之前又发起一次，两边就对不上了。
      */
     answerAppLink(id: string, allow: boolean, remember: boolean): Promise<BrowserSnapshot>
+    answerCertificate(id: string, input: { requestId: string; navigationId: string; fingerprint: string; allow: boolean }): Promise<BrowserSnapshot>
     cancelElementSelection(id: string): Promise<void>
     setAnnotationMarkers(id: string, navigationId: string, markers: BrowserAnnotationMarker[]): Promise<void>
     setBounds(id: string, bounds: BrowserBounds | null): Promise<void>
