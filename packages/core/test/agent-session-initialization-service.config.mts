@@ -5,14 +5,14 @@ import base from './hook-postcommit-observation.vitest.config.mts'
 const mutation = process.env.AGENTMUX_INITIALIZATION_SERVICE_MUTATION
 const transitionMutations = ['carry-start-initialization', 'carry-start-frontend', 'carry-reconciled-initialization', 'carry-reconciled-frontend']
 const recordMutations = ['carry-record-initialization', 'carry-record-frontend']
-if (mutation && !['trust-running', 'drop-native-record-discovery', 'old-initial-observation-order', 'skip-prepared-recovery', 'old-completed-merge', ...transitionMutations, ...recordMutations].includes(mutation)) throw new Error('Unknown initialization service mutation')
+if (mutation && !['trust-running', 'drop-native-record-discovery', 'old-initial-observation-order', 'skip-prepared-recovery', 'old-completed-merge', 'old-known-start-merge', ...transitionMutations, ...recordMutations].includes(mutation)) throw new Error('Unknown initialization service mutation')
 export default { ...base, resolve: { alias: [
   { find: '@agentmux/identity/runtime-source', replacement: resolve(import.meta.dirname, '../../identity/dist/runtime-source.js') },
   ...base.resolve.alias
 ] }, plugins: [{ name: 'actual-initialization-service-mutation', enforce: 'pre' as const,
   transform(code: string, id: string) {
     const owner = mutation && transitionMutations.includes(mutation) ? 'lifecycle.ts'
-      : mutation === 'trust-running' || mutation === 'skip-prepared-recovery' || mutation === 'old-completed-merge' || mutation && recordMutations.includes(mutation) ? 'continuity-attempt.ts' : 'reconciliation.ts'
+      : mutation === 'trust-running' || mutation === 'skip-prepared-recovery' || mutation === 'old-completed-merge' || mutation === 'old-known-start-merge' || mutation && recordMutations.includes(mutation) ? 'continuity-attempt.ts' : 'reconciliation.ts'
     if (id.split('?')[0] !== resolve(import.meta.dirname, '../src/agent-session-recovery/' + owner)) return
     let changed = code
     if (mutation && transitionMutations.includes(mutation)) {
@@ -24,6 +24,10 @@ export default { ...base, resolve: { alias: [
       const tail = code.slice(offset), after = tail.indexOf(before)
       if (after < 0) throw new Error('Run transition mutation must remove the actual cleanup')
       changed = code.slice(0, offset) + tail.slice(0, after) + `void next.continuity.${property}` + tail.slice(after + before.length)
+    } else if (mutation === 'old-known-start-merge') {
+      const before = 'receipt = structuredClone(known)'
+      if (code.split(before).length !== 2) throw new Error('Known Start receipt mutation must match its actual owner exactly once')
+      changed = code.replace(before, 'receipt.newRun = { ...known.newRun }')
     } else if (mutation === 'old-completed-merge') {
       const before = 'if (completed) receipt = structuredClone(completed)'
       if (code.split(before).length !== 2) throw new Error('Completed receipt mutation must match its actual owner exactly once')
