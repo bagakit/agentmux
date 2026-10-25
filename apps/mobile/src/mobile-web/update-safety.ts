@@ -125,7 +125,6 @@ export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prep
         if (signal?.aborted || checkOwners() || ownersRevision.current !== originalOwnersRevision || !finalConnectionStillOriginal() || !workfaceStillSaved()) {
           rollback?.(); return blocked('连接或工作面发生变化；当前页面保留，请核对后重试。')
         }
-        if (signal?.aborted) { rollback?.(); return blocked('本次网页重开已取消；当前页面保留。') }
         location.assign('/' + mobileUpdateFragment); return { status: 'navigating' }
       } catch { try { rollback?.() } catch { /* Retain any unresolved handoff. */ } return blocked('原身份交接或网页重开未确认；当前页面保留，请恢复设备存储后重试。') }
     }
