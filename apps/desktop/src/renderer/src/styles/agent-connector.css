@@ -45,6 +45,35 @@
 .agent-connector-disclosure > summary { cursor: pointer; padding-block: var(--sp-2); }
 .agent-connector-disclosure > .agent-connector-fields, .agent-connector-disclosure > .agent-connector-receipt { margin-top: var(--sp-3); }
 
+.connector-binding-recovery { display: grid; gap: var(--sp-4); min-width: 0; }
+.connector-binding-recovery__heading { display: flex; align-items: center; gap: var(--sp-3); }
+.connector-binding-recovery__heading > div { min-width: 0; }
+.connector-binding-recovery__icon { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-2); }
+.connector-binding-recovery[data-state=refused] .connector-binding-recovery__icon { color: var(--amber-text); background: color-mix(in srgb, var(--amber-text) 9%, var(--surface-1)); }
+.connector-binding-recovery__eyebrow, .connector-binding-recovery__label { color: var(--text-3); font-size: var(--fs-micro); }
+.connector-binding-recovery h3 { margin: var(--sp-1) 0 0; font-size: var(--fs-title); line-height: 1.4; font-weight: 550; color: var(--text); }
+.connector-binding-recovery h4, .connector-setup-section h4 { margin: 0; font-size: var(--fs-meta); font-weight: 550; color: var(--text); }
+.connector-binding-recovery__request { display: grid; gap: var(--sp-3); padding: var(--sp-4); background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: var(--radius-md); }
+.connector-binding-recovery__current { display: grid; gap: var(--sp-3); }
+.connector-binding-recovery__relationship { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-3) var(--sp-5); padding-block: var(--sp-3); border-bottom: 1px solid var(--line-soft); }
+.connector-binding-recovery__target { display: grid; align-content: start; gap: var(--sp-2); font-size: var(--fs-micro); color: var(--text-3); min-width: 0; }
+.connector-binding-recovery__target > strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
+.connector-binding-recovery__relationship > p { grid-column: 1 / -1; margin: 0; color: var(--text-2); font-size: var(--fs-meta); }
+.connector-binding-recovery__actions { align-items: center; }
+.connector-binding-recovery__actions > button { min-height: 32px; padding-inline: var(--sp-4); }
+.connector-binding-recovery__receipt { border-top: 1px solid var(--line-soft); }
+.connector-binding-recovery__receipt > summary { padding-block: var(--sp-3); color: var(--text-3); }
+.connector-setup-sections { display: grid; gap: 0; border-top: 1px solid var(--line); }
+.connector-setup-section { border-bottom: 1px solid var(--line-soft); }
+.connector-setup-section > summary { padding-block: var(--sp-4); color: var(--text-2); font-weight: 500; }
+.connector-setup-section[open] > summary { color: var(--text); }
+.connector-setup-section__body { display: grid; gap: var(--sp-4); min-width: 0; padding: var(--sp-2) var(--sp-3) var(--sp-5); }
+.connector-setup-section__body > section { display: grid; gap: var(--sp-3); min-width: 0; }
+.connector-setup-section__body > section + section { border-top: 1px solid var(--line-soft); padding-top: var(--sp-4); }
+.connector-setup-section__body .agent-connector-disclosure[open] { display: block; padding-bottom: var(--sp-3); }
+.connector-setup-section__body .agent-connector-disclosure > :not(summary) { margin-top: var(--sp-3); }
+.connector-setup-section__body .agent-connector-source { padding-top: 0; }
+
 .agent-connector-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); min-width: 0; padding-inline: var(--sp-3); }
 .agent-connector-status > div:not(.agent-connector-saved):not(.agent-connector-link-actions) { display: grid; gap: var(--sp-1); min-width: 0; margin-right: auto; }
 .agent-connector-status strong { color: var(--text); font-size: var(--fs-body); font-weight: 500; }
@@ -143,6 +172,7 @@
 .agent-connector-host-sync .connector-service-control__heading h3 { color: var(--text-3); }
 
 @media (max-width: 620px) {
+  .connector-binding-recovery__relationship { grid-template-columns: minmax(0, 1fr); }
   .agent-connector-section-grid { grid-template-columns: minmax(0, 1fr); }
   .agent-connector-room-overview .agent-connector-section-title { flex-wrap: wrap; }
 }
