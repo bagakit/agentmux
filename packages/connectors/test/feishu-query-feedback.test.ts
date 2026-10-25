@@ -10,7 +10,7 @@ import { feishuPublicationHttp, type FeishuHttpCall, type FeishuHttpResponse } f
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
-const stages = [['received', 'Get'], ['started', 'OnIt'], ['completed', 'DONE']] as const
+const stages = [['received', 'Get'], ['queued', 'OneSecond'], ['dispatched', 'CheckMark'], ['started', 'OnIt'], ['completed', 'DONE']] as const
 function operation(stage: typeof stages[number][0] = 'received'): PublicationOperation {
   return { operationId: 'query-' + stage, projectionId: 'original-query-projection', sourceRevision: 'original-query-revision', bindingId: 'original-binding', bindingRevision: 1,
     reference: { hostId: 'local', agentSessionId: 'original-session', source: { kind: 'ingress', ingressId: 'original-ingress' } },
@@ -74,13 +74,13 @@ it('uses the publication envelope to qualify current and retained reaction reque
   expect(f.remote.messageCalls()).toHaveLength(calls)
 })
 
-it('retains all three milestones and never withdraws the original user query while legacy cards remain usable', async () => {
+it('retains all five milestones and never withdraws the original user query while legacy cards remain usable', async () => {
   const f = await fixture(), signal = new AbortController().signal
   for (const [stage] of stages) {
     const original = operation(stage)
     expect((await f.publisher.dispatch(f.publisher.prepare(original), original.target, 'synthetic-credential', signal)).state).toBe('confirmed')
   }
-  expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['Get', 'OnIt', 'DONE'])
+  expect(f.retained.map(value => value.reaction_type.emoji_type)).toEqual(['Get', 'OneSecond', 'CheckMark', 'OnIt', 'DONE'])
   expect(() => f.publisher.prepare({ ...operation(), effect: 'withdraw', mapping: { messageId: 'original-user-query', reactionId: 'original-reaction-1' } })).toThrow()
   expect(() => f.publisher.prepare({ ...operation(), mapping: { messageId: 'another-user-query', reactionId: 'original-reaction-1' } })).toThrow()
   expect(() => f.publisher.prepare({ ...operation(), mapping: { messageId: 'original-user-query', threadId: 'another-thread' } })).toThrow()
