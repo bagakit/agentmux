@@ -270,7 +270,7 @@ export class DesktopSpatialPersistence {
     for (const zone of this.state?.graph.zones ?? []) if (zone.workspaceId === workspaceId) this.removed.add(zone.zoneId);
   }
   get removedEntities(): ReadonlySet<string> { return this.removed; }
-  private apply: ((state: AgentMuxSpatialState) => void) | null = null;
+  private apply: ((state: AgentMuxSpatialState, baseline: AgentMuxSpatialGraph | null) => void) | null = null;
   private unsubscribe: (() => void) | null = null;
   constructor(private readonly port: DesktopSpatialPort, private readonly warn: (error: unknown) => void) { }
   get ready(): boolean { return this.state !== null && this.readConfirmed; }
@@ -310,7 +310,7 @@ export class DesktopSpatialPersistence {
       this.state = remote;
       this.readConfirmed = true;
       this.startup = null;
-      if (sameSpatialValue(graph, remote.graph)) this.apply?.(remote);
+      if (sameSpatialValue(graph, remote.graph)) this.apply?.(remote, startup.graph);
       else this.pending = { baseline: remote, graph };
     } else {
       const graph = startup.graph;
@@ -318,11 +318,11 @@ export class DesktopSpatialPersistence {
       this.state = next;
       this.readConfirmed = true;
       this.startup = null;
-      if (startup.graph === graph) this.apply?.(next);
+      if (startup.graph === graph) this.apply?.(next, graph);
       else this.pending = { baseline: next, graph: reconcileSpatialGraphs(graph, startup.graph, next.graph) };
     }
   }
-  connect(apply: (state: AgentMuxSpatialState) => void, acknowledgeName?: (state: AgentMuxSpatialState) => void): () => void {
+  connect(apply: (state: AgentMuxSpatialState, baseline: AgentMuxSpatialGraph | null) => void, acknowledgeName?: (state: AgentMuxSpatialState) => void): () => void {
     this.apply = apply;
     this.unsubscribe = this.port.onChange(state => {
       // A pure read can arrive first at the same revision; only the producer ACK
@@ -332,8 +332,9 @@ export class DesktopSpatialPersistence {
         return;
       if (this.startup || this.pending || this.saving)
         return; // flush reconciles from the original revision.
+      const baseline = this.state?.graph ?? null;
       this.state = state;
-      apply(state);
+      apply(state, baseline);
     });
     return () => { this.unsubscribe?.(); this.unsubscribe = null; this.apply = null; };
   }
@@ -391,7 +392,7 @@ export class DesktopSpatialPersistence {
       for (const id of groupRemovals) this.removedProjectGroups.delete(id);
       if (this.pending === pending) {
         this.pending = null;
-        this.apply?.(next);
+        this.apply?.(next, local);
       }
       else if (this.pending) {
         // Later local edits were made against our in-flight graph. Preserve the
