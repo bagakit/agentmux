@@ -637,8 +637,9 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       return { ...summary, positionMessageId: null, observation: 'unavailable' }
     }
   }
-  async inspect(value: { ingressId: string }): Promise<ConnectionIngressInspection> {
+  async inspect(value: { ingressId: string }, context?: import('@agentmux/core/connections').ConnectionIngressReadContext): Promise<ConnectionIngressInspection> {
     const input = parseIngressParams('connection.ingress.inspect', value), ingress = this.read(input.ingressId)
+    await context?.authorize(ingress)
     if (!ingress?.input) return { ingress, inputReceipt: null, observation: 'not-started' }
     if (ingress.kind === 'action') {
       try {

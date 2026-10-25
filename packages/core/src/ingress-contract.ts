@@ -105,10 +105,13 @@ export type ConnectionIngressAuthority = {
 }
 export type ConnectionIngressAudienceInput = { application: ConnectionApplication; externalConversationId: string; beforeIngressId?: string; limit?: number }
 export type ConnectionIngressAudiencePage = { ingresses: ConnectionIngressRecord[]; nextBeforeIngressId: string | null }
+/** Internal read scope. The intake owner must authorize this exact snapshot before any
+ * no-input return or Core receipt lookup. Authorization failures must not become observation gaps. */
+export type ConnectionIngressReadContext = { authorize(ingress: ConnectionIngressRecord | null): void | Promise<void> }
 export interface ConnectionIngressReadPort {
   /** Local latest-first audience window across receiver aliases. Never dispatches or reads a platform. */
   listAudience?(input: ConnectionIngressAudienceInput): Promise<ConnectionIngressAudiencePage>
-  inspect(input: ConnectionIngressInspectInput): Promise<ConnectionIngressInspection>
+  inspect(input: ConnectionIngressInspectInput, context?: ConnectionIngressReadContext): Promise<ConnectionIngressInspection>
   list(input: ConnectionIngressListInput): Promise<ConnectionIngressPage>
   authority(input: { operationId: string }): Promise<ConnectionIngressAuthority>
   recordAuthority(input: import('./external-conversation.js').AgentExternalConversationReference): Promise<import('./external-conversation.js').AgentExternalConversationAuthority>
