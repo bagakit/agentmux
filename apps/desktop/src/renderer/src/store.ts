@@ -1790,6 +1790,8 @@ function projectRecoveredSession(
 function continuityFailureDetail(
   result: Extract<SessionRecoveryResult, { kind: 'unavailable' | 'conflict' }>
 ): string {
+  if (result.kind === 'unavailable' && result.reason === 'provider-unavailable' && result.continuity?.error) return result.continuity.errorCode
+    ? `${result.continuity.errorCode}: ${result.continuity.error}` : result.continuity.error
   if (result.kind === 'conflict') {
     // 按 Core 给的**类别**分，不按 currentRun 在不在场猜。这两件事本来就不是同一个判据：
     // run 已被换掉才有 currentRun，而「另一个操作占着」也可能带着它。此前这里按 currentRun 猜，
@@ -1853,6 +1855,7 @@ export function recoveryCandidateSession(
   candidate: AgentSessionRecoveryCandidate,
   recovery: Extract<SessionRecoveryResult, { kind: 'unavailable' | 'conflict' }> | { kind: 'pending'; detail: string }
 ): SessionSnapshot {
+  const continuity = recovery.kind === 'pending' ? candidate.continuity : recovery.continuity ?? candidate.continuity
   return {
     id: candidate.agentSessionId,
     kind: 'agent',
@@ -1862,8 +1865,10 @@ export function recoveryCandidateSession(
     capabilities: candidate.capabilities,
     agentSessionUpdatedAt: candidate.updatedAt,
     ...(candidate.semanticStatus ? { semanticStatus: structuredClone(candidate.semanticStatus) } : {}),
-    ...(candidate.continuity ? { continuity: structuredClone(candidate.continuity) } : {}),
-    ...(candidate.continuityOperations ? { continuityOperations: structuredClone(candidate.continuityOperations) } : {}),
+    ...(continuity ? { continuity: structuredClone(continuity) } : {}),
+    ...(candidate.continuityOperations || continuity
+      ? { continuityOperations: { ...structuredClone(candidate.continuityOperations),
+          ...(continuity ? { [continuity.operationId]: structuredClone(continuity) } : {}) } } : {}),
     ...(candidate.terminalCapability
       ? { terminalCapability: structuredClone(candidate.terminalCapability) }
       : {}),
@@ -11816,6 +11821,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             session.id === sessionId && sessionOwnsControl(session, current.control)
               ? {
                   ...session,
+                  ...(session.kind === 'agent' && recovery.continuity ? { continuity: structuredClone(recovery.continuity),
+                    continuityOperations: { ...session.continuityOperations, [recovery.continuity.operationId]: structuredClone(recovery.continuity) } } : {}),
                   status: {
                     ...session.status,
                     state: 'error' as const,
