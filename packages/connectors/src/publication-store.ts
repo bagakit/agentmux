@@ -3,7 +3,7 @@ import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { projectQueryFeedback, queueQueryFeedback, queryFeedbackOperationId, reconcileQueryFeedback } from './publication-query-feedback.js'
 import { externalConversationAuthor, externalConversationRecordId } from '@agentmux/core'
 import { createHash } from 'node:crypto'
-import type { PublicationImage, PublicationFile, ResourceUploadReceipt, ResolvedPublicationPart } from './publication-resource.js'
+import { publicationImage, type PublicationImage, type PublicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
 import { publicationContent, publicationPartKey, type PublicationContentPlan } from './publication-content.js'
 import { publicationInputAlias } from './publication-input-alias.js'
 import type { PublicationA2A, PublicationOriginalMessage } from './publication-a2a.js'
@@ -1065,14 +1065,17 @@ export class PublicationStore {
     return this.transaction(() => {
       const original = this.inspect(operationId)
       if (purpose === 'avatar') {
-        if (!authorized() || !original || original.state !== 'pending' || original.effect !== 'upsert' || !original.speaker?.avatar?.image ||
-          original.avatarSource || original.avatarUploads?.length || original.prepared || original.attempt !== undefined) return null
+        if (!authorized() || !original || original.effect !== 'upsert' || !original.speaker?.avatar || original.avatarSource || original.avatarUploads?.length ||
+          !(original.state === 'pending' && !original.prepared && original.attempt === undefined || this.pendingPortrait(original))) return null
+        // A prepared human profile's revision is the Core-validated original image hash.
+        const imageHash = original.speaker.avatar.image?.sha256 ?? (original.speaker.avatar.input ? original.speaker.avatar.revision?.slice('sha256:'.length) : undefined)
+        if (!imageHash) return null
         const previous = this.read(this.database.prepare(`SELECT operation_json,state FROM connector_publication_operation
           WHERE json_array_length(json_extract(operation_json,'$.avatarUploads'))>0
             AND json_extract(operation_json,'$.avatarUploads[#-1].state') IN ('confirmed','dispatching')
             AND json_extract(operation_json,'$.target.connectionId')=? AND json_extract(operation_json,'$.target.application.domain')=?
             AND json_extract(operation_json,'$.target.application.appId')=? AND json_extract(operation_json,'$.speaker.avatar.image.sha256')=?
-          ORDER BY CASE json_extract(operation_json,'$.avatarUploads[#-1].state') WHEN 'confirmed' THEN 0 ELSE 1 END, ordinal DESC LIMIT 1`).get(original.target.connectionId, original.target.application.domain, original.target.application.appId, original.speaker.avatar.image.sha256))
+          ORDER BY CASE json_extract(operation_json,'$.avatarUploads[#-1].state') WHEN 'confirmed' THEN 0 ELSE 1 END, ordinal DESC LIMIT 1`).get(original.target.connectionId, original.target.application.domain, original.target.application.appId, imageHash))
         if (previous && (previous.avatarUploads!.at(-1)!.state === 'confirmed' || inFlight?.(previous.operationId, previous.avatarUploads!.length))) {
           const receipt = previous.avatarUploads!.at(-1)!
           const { image: _bytes, ...avatar } = original.speaker.avatar
@@ -1080,6 +1083,7 @@ export class PublicationStore {
             ...(receipt.state === 'confirmed' ? { imageKey: receipt.imageKey } : {}) } }
           this.write(retained); return retained
         }
+        if (!original.speaker.avatar.image) return null
         const claimed: PublicationOperation = { ...original, avatarUploads: [{ state: 'dispatching' }] }
         this.write(claimed); return claimed
       }
@@ -1088,6 +1092,18 @@ export class PublicationStore {
       if (predecessor && (predecessor.state !== 'confirmed' || !predecessor.mapping)) return null
       const claimed = { ...original, uploads: [...(original.uploads ?? []), { state: 'dispatching' as const }] }
       this.write(claimed); return claimed
+    })
+  }
+  /** Late resource observation changes only its exact original optional presentation. */
+  settleAvatarResource(operationId: string, resource: import('@agentmux/core').AgentInputResourceResult): PublicationOperation | null {
+    return this.transaction(() => {
+      const original = this.inspect(operationId), avatar = original?.speaker?.avatar
+      if (!original?.speaker || !avatar?.input || !same(avatar.input, resource.key) || avatar.revision !== resource.revision) return null
+      const { code: _code, image: _image, ...retained } = avatar
+      const next: PublicationOperation = { ...original, speaker: { ...original.speaker, avatar: resource.status === 'available'
+        ? { ...retained, observation: 'available', image: publicationImage({ ...resource, status: 'read' }) }
+        : { ...retained, observation: 'unavailable', code: resource.code } } }
+      this.write(next); return next
     })
   }
   settleResourceUpload(operationId: string, attempt: number, receipt: ResourceUploadReceipt, purpose: 'content' | 'avatar' = 'content'): PublicationOperation {
@@ -1176,20 +1192,26 @@ export class PublicationStore {
       WHERE binding_id=? AND binding_revision=? AND ordinal>COALESCE((SELECT ordinal FROM connector_publication_operation WHERE operation_id=?),0)
       AND json_extract(operation_json,'$.portrait.state') IN ('pending','dispatching','unknown') ORDER BY ordinal LIMIT 1`).get(...scopeKey(boundary), after ?? ''))
   }
+  private pendingPortrait(original: PublicationOperation): PublicationOperation | null {
+    if (original.portrait?.state !== 'pending' || original.state !== 'confirmed' || !original.mapping?.nativeCard) return null
+    const latest = this.read(this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE projection_id=? AND fragment_ordinal=? ORDER BY ordinal DESC LIMIT 1').get(original.projectionId, original.fragment.ordinal))
+    if (latest?.operationId !== original.operationId) {
+      // Pending/unknown body has priority. Its eventual confirmed representation retires this intent.
+      if (latest?.state === 'confirmed' || latest?.state === 'cancelled') this.write({ ...original, portrait: { state: 'superseded' } })
+      return null
+    }
+    if (original.effect !== 'upsert' || !['speech', 'question'].includes(original.payload.kind) || !original.speaker?.avatar) {
+      this.write({ ...original, portrait: { state: 'superseded' } }); return null
+    }
+    return original
+  }
   claimPortrait(operationId: string, authorized: () => boolean, adapter: PublicationPreparer & { cards?: PublicationCardAdapter }): PublicationOperation | null {
     return this.transaction(() => {
-      let original = this.inspect(operationId)
-      if (!authorized() || !adapter.cards || !original || original.portrait?.state !== 'pending' || original.state !== 'confirmed' || !original.mapping?.nativeCard) return null
-      const latest = this.read(this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE projection_id=? AND fragment_ordinal=? ORDER BY ordinal DESC LIMIT 1').get(original.projectionId, original.fragment.ordinal))
-      if (latest?.operationId !== original.operationId) {
-        // Pending/unknown body has priority. Its eventual confirmed representation retires this intent.
-        if (latest?.state === 'confirmed' || latest?.state === 'cancelled') this.write({ ...original, portrait: { state: 'superseded' } })
-        return null
-      }
-      if (original.effect !== 'upsert' || !['speech', 'question'].includes(original.payload.kind) || !original.speaker?.avatar) {
-        this.write({ ...original, portrait: { state: 'superseded' } }); return null
-      }
-      original = this.withPortraitResource(original)
+      const retained = this.inspect(operationId)
+      if (!authorized() || !adapter.cards || !retained) return null
+      const pending = this.pendingPortrait(retained)
+      if (!pending) return null
+      const original = this.withPortraitResource(pending)
       if (!this.portraitAvailable(original)) return null
       const sequence = this.reserveCardSequence(original)
       const prepared = parsePreparedPublication(adapter.cards.preparePortrait(original, sequence), adapter)
@@ -1237,7 +1259,8 @@ export class PublicationStore {
       let candidate: unknown = original.prepared
       if (!candidate) {
         const upload = original.avatarSource ? this.inspect(original.avatarSource.operationId)?.avatarUploads?.[original.avatarSource.attempt - 1] : original.avatarUploads?.at(-1)
-        if (!original.mapping && original.cardPreparation?.receipt.state === 'confirmed' && upload?.state === 'dispatching') original.cardPreparation = { ...original.cardPreparation, useForMessage: true }
+        if (!original.mapping && original.cardPreparation?.receipt.state === 'confirmed' && (upload?.state === 'dispatching' ||
+          original.speaker?.avatar?.input && !original.speaker.avatar.image && !original.speaker.avatar.code)) original.cardPreparation = { ...original.cardPreparation, useForMessage: true }
         if (original.mapping?.nativeCard && original.effect === 'upsert') original.cardSequence = this.reserveCardSequence(original)
         try { candidate = adapter.prepare(JSON.parse(encode(original))) }
         catch { throw new AgentMuxError('The adapter could not prepare the original request. No platform effect was dispatched.', 'PUBLICATION_PREPARATION_UNCONFIRMED') }

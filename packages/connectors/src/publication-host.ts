@@ -369,23 +369,6 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const result = new Map<string, PublicationSpeaker>(), details = new Map<string, Promise<PublicationSpeakerDetails>>()
     for (const unit of units) {
       const speaker = publicationSpeaker(unit, reference)
-      if (speaker.avatar?.input && speaker.avatar.revision && this.options.conversation.inputResource) {
-        try {
-          const request = { key: speaker.avatar.input, purpose: 'author-avatar' as const, index: 0, revision: speaker.avatar.revision, maxBytes: 144 * 1024 }
-          const key = 'input-avatar:' + JSON.stringify([reference, request])
-          let reading = this.resourcePreparations.get(key)
-          if (!reading) {
-            // The journal RPC may not be cancellable. Retain its real promise
-            // until settlement; an observer deadline is not completion.
-            reading = Promise.resolve().then(() => this.options.conversation.inputResource!(reference, request, signal))
-              .finally(() => { this.resourcePreparations.delete(key) })
-            this.resourcePreparations.set(key, reading)
-          }
-          const resource = parseAgentInputResourceResult(await this.until(reading, AbortSignal.any([signal, AbortSignal.timeout(OPTIONAL_DISPLAY_WAIT_MS)])), request)
-          if (resource.status === 'available') speaker.avatar = { ...speaker.avatar, observation: 'available', image: publicationImage({ ...resource, status: 'read' }) }
-        } catch { signal.throwIfAborted() /* Optional original portrait never changes the accepted author. */ }
-      }
-
       if (speaker.kind === 'agent' && speaker.reference && this.options.speaker) {
         const target = speaker.reference, key = JSON.stringify(target)
         if (!details.has(key)) details.set(key, this.speakerDetails(target, signal))
@@ -587,6 +570,67 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (lane?.binding.revision === audience.revision) this.wake(lane)
     }
   }
+  /** Continue the exact original resource through the existing upload owner, before or after its body. */
+  private prepareAvatar(original: PublicationOperation, lane: Lane, adapter: PublicationAdapter, credential: string, authorized: () => boolean): Promise<unknown> | undefined {
+    if (this.closed || lane.abort.signal.aborted || !authorized() || !original.speaker?.avatar || !adapter.images?.upload) return
+    const attemptKey = (operationId: string, attempt: number) => `${operationId}:avatar:${attempt}`
+    const last = original.avatarUploads?.at(-1)
+    if (last?.state === 'dispatching' && !this.resourcePreparations.has(attemptKey(original.operationId, original.avatarUploads!.length))) {
+      this.store.settleResourceUpload(original.operationId, original.avatarUploads!.length, { state: 'unknown' }, 'avatar')
+      return
+    }
+    if (!last && !original.avatarSource && (!original.speaker.avatar.image || adapter.images.accepts(original.speaker.avatar.image))) {
+      const upload = this.store.claimResourceUpload(original.operationId, authorized, 'avatar', (operationId, attempt) => this.resourcePreparations.has(attemptKey(operationId, attempt)))
+      if (upload?.speaker?.avatar?.image && !upload.avatarSource) {
+        const uploadSignal = AbortSignal.any([lane.abort.signal, AbortSignal.timeout(30_000)])
+        const id = attemptKey(upload.operationId, upload.avatarUploads!.length)
+        const effect = Promise.resolve().then(() => authorized() && !uploadSignal.aborted
+          ? adapter.images!.upload!(upload.speaker!.avatar!.image!, upload.target, credential, uploadSignal)
+          : { state: 'unknown' as const })
+        const retained = effect.then(receipt => {
+          if (!this.closed) this.store.settleResourceUpload(upload.operationId, upload.avatarUploads!.length, receipt, 'avatar')
+          return receipt
+        }, () => {
+          const receipt = { state: 'unknown' as const }
+          if (!this.closed) this.store.settleResourceUpload(upload.operationId, upload.avatarUploads!.length, receipt, 'avatar')
+          return receipt
+        }).catch(() => ({ state: 'unknown' as const })).finally(() => { this.resourcePreparations.delete(id); this.wakePortraitUpload(upload.operationId) })
+        this.resourcePreparations.set(id, retained)
+      }
+    }
+    original = this.store.inspect(original.operationId)!
+    const sourceId = original.avatarSource?.operationId ?? original.operationId
+    const sourceAttempt = original.avatarSource?.attempt ?? original.avatarUploads?.length ?? 0
+    if (original.avatarSource || original.avatarUploads?.length) return this.resourcePreparations.get(attemptKey(sourceId, sourceAttempt))
+    const avatar = original.speaker!.avatar!
+    if (avatar.image || avatar.code || !avatar.input || !avatar.revision || !this.options.conversation.inputResource) return
+    const id = original.operationId + ':avatar-resource'
+    const pending = this.resourcePreparations.get(id)
+    if (pending) return pending
+    const reference = { hostId: lane.binding.executionHostId, agentSessionId: lane.binding.agentSessionId }
+    const request = { key: avatar.input, purpose: 'author-avatar' as const, index: 0, revision: avatar.revision, maxBytes: 144 * 1024 }
+    const key = 'input-avatar:' + JSON.stringify([reference, request])
+    let reading = this.resourcePreparations.get(key)
+    if (!reading) {
+      // The real shared read outlives a lane's observation deadline or release.
+      reading = Promise.resolve().then(() => this.options.conversation.inputResource!(reference, request, this.speakerLifetime.signal))
+        .finally(() => { this.resourcePreparations.delete(key) })
+      this.resourcePreparations.set(key, reading)
+    }
+    const work = reading.then(value => {
+      if (this.closed) return
+      const resource = parseAgentInputResourceResult(value, request)
+      const retained = this.store.settleAvatarResource(original.operationId, resource)
+      if (resource.status === 'available' && retained) {
+        const uploading = this.prepareAvatar(retained, lane, adapter, credential, authorized)
+        if (!uploading) this.wakePortraitUpload(original.operationId)
+        return uploading
+      }
+    }).catch(() => { /* An optional source read never changes the original body or input. */ })
+      .finally(() => { this.resourcePreparations.delete(id) })
+    this.resourcePreparations.set(id, work)
+    return work
+  }
   /** Optional native effects occupy no body-dispatch slot and never become its predecessor. */
   private completePortraits(lane: Lane, adapter: PublicationAdapter): void {
     if (!adapter.cards || this.closed || lane.abort.signal.aborted) return
@@ -604,6 +648,10 @@ export class PublicationHost implements ConnectionDeliveryPort {
         let current = this.store.inspect(original.operationId)!
         const authorized = () => this.authorized(lane.binding) && (current.payload.kind !== 'question' || this.options.permissions?.authorized(current) === true)
         if (!authorized()) return
+        if (current.portrait?.state === 'pending') {
+          await this.prepareAvatar(current, lane, adapter, credential, authorized)
+          current = this.store.inspect(original.operationId)!
+        }
         if (current.portrait?.state === 'dispatching') current = this.store.settlePortrait(current.operationId, { state: 'unknown', reason: 'effect-unconfirmed' })
         const claimed = current.portrait?.state === 'pending' ? this.store.claimPortrait(current.operationId, authorized, adapter) : null
         if (!claimed && (current.portrait?.state !== 'unknown' || !this.store.portraitInspectable(current))) return
@@ -676,34 +724,17 @@ export class PublicationHost implements ConnectionDeliveryPort {
         }
         qualified.add(frozen)
       }
-      if (original.effect === 'upsert' && original.speaker?.avatar?.image && !original.prepared && original.attempt === undefined) {
-        const attemptKey = (operationId: string, attempt: number) => `${operationId}:avatar:${attempt}`
-        const last = original.avatarUploads?.at(-1)
-        if (last?.state === 'dispatching' && !this.resourcePreparations.has(attemptKey(original.operationId, original.avatarUploads!.length)))
-          this.store.settleResourceUpload(original.operationId, original.avatarUploads!.length, { state: 'unknown' }, 'avatar')
-        else if (!last && !original.avatarSource && adapter.images?.upload && adapter.images.accepts(original.speaker.avatar.image)) {
-          const upload = this.store.claimResourceUpload(original.operationId, authorized, 'avatar', (operationId, attempt) => this.resourcePreparations.has(attemptKey(operationId, attempt)))
-          if (upload?.speaker?.avatar?.image && !upload.avatarSource) {
-            const uploadSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
-            const id = attemptKey(upload.operationId, upload.avatarUploads!.length)
-            const operation = upload
-            const effect = Promise.resolve().then(() => adapter.images!.upload!(operation.speaker!.avatar!.image!, operation.target, credential, uploadSignal))
-            const retained = effect.then(receipt => {
-              if (!this.closed) this.store.settleResourceUpload(operation.operationId, operation.avatarUploads!.length, receipt, 'avatar')
-              return receipt
-            }, () => {
-              const receipt = { state: 'unknown' as const }
-              if (!this.closed) this.store.settleResourceUpload(operation.operationId, operation.avatarUploads!.length, receipt, 'avatar')
-              return receipt
-            }).catch(() => ({ state: 'unknown' as const })).finally(() => { this.resourcePreparations.delete(id); this.wakePortraitUpload(operation.operationId) })
-            this.resourcePreparations.set(id, retained)
-          }
-        }
+      if (original.effect === 'upsert' && original.speaker?.avatar && !original.prepared && original.attempt === undefined) {
+        const optional = AbortSignal.any([signal, AbortSignal.timeout(OPTIONAL_DISPLAY_WAIT_MS)])
+        const effect = this.prepareAvatar(original, lane, adapter, credential, authorized)
+        if (effect) try {
+          // Let already-settled absence/cache results take their fast path; no second wait budget.
+          await this.until(Promise.race([effect, new Promise<void>(done => setImmediate(done))]), optional)
+        } catch { signal.throwIfAborted() }
         original = this.store.inspect(original.operationId)!
-        const sourceId = original.avatarSource?.operationId ?? original.operationId
-        const sourceAttempt = original.avatarSource?.attempt ?? original.avatarUploads?.length ?? 0
-        const effect = this.resourcePreparations.get(attemptKey(sourceId, sourceAttempt))
-        if (effect && adapter.cards && !original.cardPreparation) {
+        const preparing = this.resourcePreparations.has(original.operationId + ':avatar-resource') ||
+          this.resourcePreparations.has(`${original.avatarSource?.operationId ?? original.operationId}:avatar:${original.avatarSource?.attempt ?? original.avatarUploads?.length ?? 0}`)
+        if (preparing && adapter.cards && !original.cardPreparation) {
           const cardAuthorized = () => authorized() && (original!.payload.kind !== 'question' || this.options.permissions?.authorized(original!) === true)
           const preparation = this.store.claimCard(original.operationId, cardAuthorized, adapter, true)
           if (preparation?.cardPreparation) {
@@ -721,7 +752,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
         if (effect) try {
           // A short optional preparation belongs to this original unprepared wire,
           // not Agent input or a new background polling/decoration lifecycle.
-          await this.until(effect, AbortSignal.any([signal, AbortSignal.timeout(750)]))
+          await this.until(effect, optional)
         } catch { signal.throwIfAborted() /* The original body proceeds without a portrait. */ }
         original = this.store.inspect(original.operationId)!
         if (signal.aborted || !authorized()) return
