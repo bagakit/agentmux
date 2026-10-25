@@ -17,23 +17,23 @@ const mutants: Record<string, [string, string, string]> = {
   ],
   "first-native-wins": [
     "packages/core/src/conversation-stream.ts",
-    "candidates?.length === 1 && candidates[0]!.key && !unconfirmed && !ambiguous.has(key)",
+    "candidates?.length === 1 && candidates[0]!.key && !unconfirmed && !unconfirmedKeys.has(key) && !ambiguous.has(key)",
     "!!candidates?.length && !unconfirmed"
   ],
   "forget-retained-counterevidence": [
-    "packages/core/src/conversation-reader.ts",
-    "conversationInputAdoptionEdges(rows, view.inputAdoption)",
-    "conversationInputAdoptionEdges(rows)"
+    "packages/core/src/conversation-input-witness-index.ts",
+    "new ConversationInputWitnessIndex(this)",
+    "new ConversationInputWitnessIndex()"
   ],
   "witness-overflow": [
-    "packages/core/src/conversation-reader.ts",
-    "witnesses.length > MAX_VIEW_RECORDS",
-    "false"
+    "packages/core/src/conversation-input-witness-index.ts",
+    "return { witnesses, unconfirmedKeys }",
+    "return { witnesses, unconfirmedKeys, ...(this.records.size + (this.parent?.records.size ?? 0) > 1200 ? { unconfirmed: true as const } : {}) }"
   ],
   "changed-original-witness": [
     "packages/core/src/conversation-stream.ts",
-    "return !next || next.semanticItemId !== fact.semanticItemId || inputWitnessGroup(next) !== inputWitnessGroup(fact) ||\n      !!fact.key && conversationInputWitnessKey(next) !== conversationInputWitnessKey(fact)",
-    "return false"
+    "if (!next || next.semanticItemId !== fact.semanticItemId || conversationInputWitnessGroup(next) !== conversationInputWitnessGroup(fact) ||\n        !!fact.key && conversationInputWitnessKey(next) !== conversationInputWitnessKey(fact))",
+    "if (false)"
   ],
   "incomplete-window-validation": [
     "packages/core/src/conversation-changes.ts",
@@ -51,9 +51,9 @@ const mutants: Record<string, [string, string, string]> = {
     "!!adopted && !!conversationInputKey(record)"
   ],
   "forget-unconfirmed-retained": [
-    "packages/core/src/conversation-reader.ts",
-    "const witnesses = knownInputs.witnesses",
-    "const witnesses = knownInputs.witnesses.filter(witness => witness.key)"
+    "packages/core/src/conversation-input-witness-index.ts",
+    "if (!next) continue",
+    "if (!next?.key) continue"
   ],
   "drop-valid-diagnostic": [
     "packages/core/src/conversation-provenance.ts",
