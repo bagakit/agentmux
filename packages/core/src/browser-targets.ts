@@ -1,5 +1,20 @@
 export type AgentMuxBrowserMode = 'normal' | 'private'
 
+/** Original native TLS request awaiting the person. Discovery grants no approval. */
+export type AgentMuxBrowserCertificateRequest = {
+  requestId: string
+  navigationId: string
+  url: string
+  error: string
+  fingerprint: string
+  subject: string
+  issuer: string
+  validFrom: string
+  validTo: string
+  /** Native accepted connections can be reused by pages sharing this Profile. */
+  scope: 'profile-connections'
+}
+
 /** Original native page request. This provenance grants no input or navigation authority. */
 export type AgentMuxBrowserSource = {
   browserId: string
@@ -36,6 +51,7 @@ export type AgentMuxBrowserTarget = {
   /** Present when the target exposes a bounded CDP subset rather than all engine commands. */
   cdpMethods?: readonly string[]
   control?: AgentMuxBrowserControl
+  certificateRequest?: AgentMuxBrowserCertificateRequest | null
   resource?: AgentMuxBrowserResource
   warning?: string
 }
