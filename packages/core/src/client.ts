@@ -2890,7 +2890,10 @@ export class AgentMuxClient {
           if (pendingNative) onNative(pendingNative)
         } catch (error) {
           controller.signal.throwIfAborted()
-          unavailable(error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE', error instanceof Error ? error.message : 'Native observation is unavailable; explicit reading remains available.')
+          // Acquisition may close after reporting its original failure, before
+          // returning a handle. Its release reason cannot overwrite that fact.
+          if (nativeFailure && pendingNative?.kind === 'unavailable') onNative(pendingNative)
+          if (!observationFailureReported) unavailable(error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE', error instanceof Error ? error.message : 'Native observation is unavailable; explicit reading remains available.')
         }
       }
       if (pendingCaptured) captured()
