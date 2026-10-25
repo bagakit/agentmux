@@ -93,7 +93,9 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
     for (const directory of packageDirectories) await symlink(join(copy, directory), join(hostModules, '@agentmux', directory.split('/')[1]))
     const desktop = join(copy, 'apps/desktop')
     await mkdir(desktop, { recursive: true })
-    for (const file of ['src', 'resources', 'package.json', 'tsconfig.json']) await cp(join(root, 'apps/desktop', file), join(desktop, file), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
+    // Owning configs and real product tests import their original fixtures/helpers.
+    // Keep that graph intact rather than making each caller list its transitive imports.
+    for (const file of ['src', 'resources', 'package.json', 'tsconfig.json', 'test', 'scripts/fixtures', 'scripts/lib']) await cp(join(root, 'apps/desktop', file), join(desktop, file), { recursive: true, mode: fsConstants.COPYFILE_FICLONE })
     await mkdir(join(desktop, 'node_modules/@agentmux'), { recursive: true })
     for (const entry of await readdir(join(root, 'apps/desktop/node_modules'))) {
       if (entry !== '@agentmux') await symlink(join(root, 'apps/desktop/node_modules', entry), join(desktop, 'node_modules', entry))
