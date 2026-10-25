@@ -206,6 +206,8 @@ Desktop 的 [`desktop-host`](../../apps/desktop/src/main/desktop-host.ts) 启动
 
 [`publication-content`](../../packages/connectors/src/publication-content.ts) 只决定已授权内容怎样由现有平台能力表示。原 Outbox 保留准确 part/revision 的平台表示及已确认映射；Core 后续 coalescence 更新这些表示，无权重做 unknown effect。无法表示的资源、未确认 public span、失效原版本或缺少准确关系仍可由原 `connection.delivery.ls` 查询，其他可投内容继续流转。原平台 ingress 的表示只由准确 durable ingress 与 Core 原 writer 的 `inputRef` 对账；作者和正文相同不是关联证据。
 
+公开作者资料与头像媒体沿同一可复用链路接入：可信用户输入由 [`preparePublicUserProfile`](../../apps/host/src/public-author-profile.ts) 准备资料，原 Input 保存 `authorProfile`，头像字节沿 [`agent.input.resource`](../../packages/core/src/agent-input-resource.ts) 的 `author-avatar` 用途读取；[`publicationSpeaker`](../../packages/connectors/src/publication-speaker.ts) 消费准确原作者及资料，Agent／A2A 则读取其原作者 owner。`PublicationHost` 共用相关资料与媒体的真实在途准备，`PublicationStore` 在原连接、应用与原图内容范围内复用已确认上传回执；角色卡与 Question 只消费结果，不各自读取配置、上传头像或维护缓存。该接线复用原公开输入与资源合同，不扩展 Agent Provider 输入语义，也不新增身份或资源 Store；展示弱依赖与迟到补齐的行为边界见[共同来源与双向交付](../design/behavior/conversation-mode.md#共同来源与双向交付)。
+
 [`FeishuPublicationAdapter`](../../packages/connectors/src/adapters/feishu/publication.ts) 持有平台编码、请求容量、原 prepared bytes 和平台回执的解释，不持有 conversation merge。平台投递、原生采用与个人身份不互相代签；当前权限和 public-content producer 的能力边界见[公共协议](../specs/conversation-protocol.md#state-change-and-delivery)。
 
 ## 公共消费者与证据范围
