@@ -77,7 +77,9 @@ const workspacePackages = ['client-ui', 'connectors', 'native-desktop', 'layout'
 const workspacePackageFiles = (await Promise.all(workspacePackages.map(async name => {
   const packageRoot = path.join(root, 'packages', name)
   const exactRoot = await fs.realpath(packageRoot)
-  for (const consumer of ['apps/desktop', 'apps/host']) {
+  // Host imports client-ui and connectors; layout/native-desktop belong to Desktop.
+  const consumers = name === 'client-ui' || name === 'connectors' ? ['apps/desktop', 'apps/host'] : ['apps/desktop']
+  for (const consumer of consumers) {
     assert.equal(await fs.realpath(path.join(root, consumer, 'node_modules/@agentmux', name)), exactRoot,
       `${consumer} must consume this candidate's @agentmux/${name}, not another checkout`)
   }
