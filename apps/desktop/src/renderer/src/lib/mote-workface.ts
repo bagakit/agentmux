@@ -28,7 +28,7 @@ export function useMoteWorkfaceScope(workspaceId: string | undefined, explicitTo
   // remains the Topic/knowledge surface until the user chooses the Mote entrance.
   const categoryPresentation = useAppStore(state => {
     const choice = state.workbenchSpaceSelection
-    return !explicitTopicId && choice?.workspaceId === workspaceId && choice.topicId === topicId &&
+    return !explicitTopicId && choice !== null && choice.workspaceId === workspaceId && choice.topicId === topicId &&
       state.topicCategories.some(category => category.spaceId === choice.spaceId)
   })
   const workspace = useAppStore(state => topicId ? state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID) : undefined)
