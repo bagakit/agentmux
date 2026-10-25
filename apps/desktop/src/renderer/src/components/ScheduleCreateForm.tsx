@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { parseAgentScheduleCalendar, parseAgentScheduleAfterMs, parseAgentScheduleEveryMs } from '@agentmux/core/schedule'
 import type { ContinuousProgressLoop, ContinuousProgressTarget } from '@agentmux/core/continuous-progress-scheduler'
@@ -24,6 +24,7 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
   onShowSaved?: ((record: ContinuousProgressLoop) => void) | undefined
   embedded?: boolean
 }) {
+  const timingName = useId()
   const [fallback] = useState<ScheduleFormDraft>(() => {
     const defaults = resolveAutomationPreferences(useAppStore.getState().config?.automation)
     const timezone = automationCalendarTimezone(defaults)
@@ -116,10 +117,15 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
   }}>
     <summary>{embedded ? 'Scheduled message' : 'New arrangement'}</summary>
     <form className="calendar-schedules__form" onSubmit={event => { event.preventDefault(); create() }}>
-      <label>Timing<select aria-label="Arrangement timing" value={form.timing} disabled={locked}
+      {embedded ? <fieldset className="automation-choice automation-choice--timing" aria-label="Arrangement timing">
+        <legend>When</legend>
+        {([['everyMs', 'Repeat'], ['calendar', 'Calendar'], ['afterMs', 'Countdown']] as const).map(([value, label]) => <label key={value}>
+          <input type="radio" name={timingName} value={value} checked={form.timing === value} disabled={locked} onChange={() => update({ timing: value })} /><span>{label}</span>
+        </label>)}
+      </fieldset> : <label>Timing<select aria-label="Arrangement timing" value={form.timing} disabled={locked}
         onChange={event => update({ timing: event.target.value as ScheduleFormDraft['timing'] })}>
-        <option value="everyMs">Every few minutes</option><option value="calendar">Calendar time</option><option value="afterMs">Countdown</option></select></label>
-      {form.timing === 'everyMs' ? <label>Every (minutes)<TextInput aria-label="Repeat interval in minutes" type="number" min="1" step="1" value={form.delay} required disabled={locked} onChange={event => update({ delay: event.target.value })} /></label>
+        <option value="everyMs">Every few minutes</option><option value="calendar">Calendar time</option><option value="afterMs">Countdown</option></select></label>}
+      {form.timing === 'everyMs' ? <label className={embedded ? "automation-interval" : undefined}>Every (minutes)<TextInput aria-label="Repeat interval in minutes" type="number" min="1" step="1" value={form.delay} required disabled={locked} onChange={event => update({ delay: event.target.value })} /></label>
         : form.timing === 'afterMs' ? <div className="calendar-schedules__fields">
         <label>After<TextInput aria-label="Countdown duration" type="number" min="0.001" step="any" value={form.delay} required disabled={locked} onChange={event => update({ delay: event.target.value })} /></label>
         <label>Unit<select aria-label="Countdown unit" value={form.delayUnit} disabled={locked} onChange={event => update({ delayUnit: event.target.value as ScheduleFormDraft['delayUnit'] })}>
@@ -149,8 +155,8 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
       {form.target && !embedded ? <p className="continuous-progress-control__help">Original discussion · {form.target.agentSessionId}</p> : null}
       {target && form.target && JSON.stringify(target) !== JSON.stringify(form.target) ? <button type="button" className="small-button" disabled={locked} onClick={() => update({ target })}>Use selected discussion</button> : null}
       {notice ? <p className="calendar-schedules__notice" role="status">{notice}</p> : null}
-      <p className="continuous-progress-control__help">The Host must be running.{form.timing === 'afterMs' ? ' Countdown pause does not stop the clock.' : ''}</p>
-      <button type="submit" className="small-button" disabled={locked || !form.prompt.trim()}>Save arrangement</button>
+      <p className="continuous-progress-control__help automation-runtime-note">The Host must be running.{form.timing === 'afterMs' ? ' Countdown pause does not stop the clock.' : ''}</p>
+      <button type="submit" className={embedded ? "automation-button automation-button--primary automation-submit" : "small-button"} disabled={locked || !form.prompt.trim()}>Save arrangement</button>
     </form>
     <ScheduleOperationNotice operation={operation} />
   </details>{savedArrangement?.key === draftKey ? <div className="schedule-create__confirmation" role="status"><span>Arrangement saved.</span>{onShowSaved ? <button type="button" onClick={() => onShowSaved(savedArrangement.record)}>View arrangement</button> : null}</div> : null}</>

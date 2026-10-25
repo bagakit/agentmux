@@ -9,6 +9,7 @@
 .mote-calendar__zone, .mote-calendar__legend { color: var(--text-3); font-size: var(--fs-meta); }
 .calendar-schedules__list { display: grid; gap: var(--sp-5); margin: 0; padding: 0; list-style: none; }
 .schedule-arrangement { display: grid; gap: var(--sp-2); min-width: 0; padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.schedule-arrangement__overview { display: grid; gap: var(--sp-2); min-width: 0; }
 .schedule-arrangement__when { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-meta); color: var(--text-2); }
 .schedule-arrangement__when time { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 500; }
 .schedule-arrangement__when span { color: var(--text-3); }
