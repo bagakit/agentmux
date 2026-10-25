@@ -61,6 +61,8 @@ export function ConversationInputDetails({ messageId, source, publicContent, exe
         <dt>External application</dt><dd>{speaker.external.actor.application.domain} · {speaker.external.actor.application.appId}</dd>
         <dt>External actor</dt><dd>{speaker.external.actor.idType} · {speaker.external.actor.userId}</dd>
         <dt>External conversation</dt><dd>{speaker.external.externalConversationId}</dd>
+        {channelRead?.channelConversation ? <><dt>Current conversation</dt><dd>{channelRead.channelConversation.profile?.name ?? 'Name not observed'} · {channelRead.channelConversation.freshness}</dd></> : null}
+        {channelRead?.channelConversationReadIssue ? <><dt>Conversation profile observation</dt><dd>{channelRead.channelConversationReadIssue}</dd></> : null}
         <dt>External message</dt><dd>{speaker.external.externalMessageId}</dd>
         <dt>Original binding</dt><dd>{speaker.external.bindingId} · {speaker.external.bindingRevision}</dd>
         {'grantId' in speaker.external ? <><dt>Original grant</dt><dd>{speaker.external.grantId} · {speaker.external.grantRevision}</dd></> : <><dt>Processing permission</dt><dd>Recorded separately from message attribution</dd></>}

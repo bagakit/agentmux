@@ -349,7 +349,7 @@ export function ConversationMessage({
 
   const metadataInDetails = detailsOnlyMetadata || contextInDetails || continuation || Boolean(nativeCollaboration && !sources?.submissions?.length && !located)
   const card = {
-    avatar: nativeCollaboration ? null : described?.channelProfile?.profile?.avatarUrl ? <ChannelProfileAvatar url={described.channelProfile.profile.avatarUrl}>{platform.renderMessageAvatar({ speaker: avatarSpeaker!, name: displayName })}</ChannelProfileAvatar>
+    avatar: nativeCollaboration ? null : described?.channelProfile?.profile?.avatarUrl ? <ChannelProfileAvatar key={JSON.stringify([avatarSpeaker?.id, described.channelProfile.checkedAt])} url={described.channelProfile.profile.avatarUrl}>{platform.renderMessageAvatar({ speaker: avatarSpeaker!, name: displayName })}</ChannelProfileAvatar>
       : avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12),
     badges: <>
       {isPeerAgent && !detailsOnlyMetadata && !contextInDetails ? <span className="log-turn__sender-kind">Agent</span> : null}

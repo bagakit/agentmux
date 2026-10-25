@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import { inputMailboxItemKey, useAgentInputMailbox } from '@agentmux/client-ui/use-agent-input-mailbox'
 import { InputMailboxRecord, InputMailboxFrame, inputMailboxPresentation } from '@agentmux/client-ui/components/InputMailboxRecords'
 import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
+import { InputChannelSummary } from '@agentmux/client-ui/components/InputChannelSummary'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
@@ -94,7 +95,7 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
   const recent = useMemo(() => [...items].sort((a, b) => latestFirst(
     a.message.recordedAt, b.message.recordedAt)), [items])
   const identities = useMemo(() => {
-    const result = new Map<string, { speaker: ConversationSpeaker; name: string; avatar: ReactNode }>()
+    const result = new Map<string, { speaker: ConversationSpeaker; name: string; avatar: ReactNode; described: ReturnType<NonNullable<ConversationReadingProps['describeSpeaker']>> | undefined }>()
     for (const { message, group } of recent) {
       const author = group?.author.kind === 'system' ? { kind: 'unknown' as const } : group?.author ?? message.author
       const speaker = speakerOf({ ...message, author }) as ConversationSpeaker
@@ -104,7 +105,7 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
       const name = described?.name || (author.kind === 'agent' ? `Agent ${author.agentSessionId.slice(0, 8)}`
         : author.kind === 'external' ? `${author.actor.userId} · ${author.actor.application.domain}`
         : author.kind === 'human' ? 'Human' : 'Author unknown')
-      result.set(key, { speaker, name, avatar: <ChannelProfileAvatar url={described?.channelProfile?.profile?.avatarUrl} size={18}>
+      result.set(key, { speaker, name, described, avatar: <ChannelProfileAvatar key={JSON.stringify([key, described?.channelProfile?.checkedAt])} url={described?.channelProfile?.profile?.avatarUrl} size={18}>
         {described?.avatar ?? <ConversationMessageAvatar speaker={speaker} name={name}
           size={18} providerId={described?.providerId} project={described?.project} />}
       </ChannelProfileAvatar> })
@@ -114,7 +115,7 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
   const identity = (item: MailboxDisplayItem) => {
     const author = item.group?.author.kind === 'system' ? { kind: 'unknown' as const } : item.group?.author ?? item.message.author
     const speaker = speakerOf({ ...item.message, author }) as ConversationSpeaker
-    return identities.get(speakerIdentityKey(speaker))!
+    return { ...identities.get(speakerIdentityKey(speaker))!, speaker }
   }
   const authorLabel = (item: MailboxDisplayItem) => identity(item).name
   const time = (item: MailboxDisplayItem) => item.message.recordedAt
@@ -138,7 +139,7 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
       {...(isUserMessage(selected.original) ? { inputSource: selected.message.source } : {})}
       {...(selected.message.source.kind === 'native' ? { nativeResourceRecord: { source: { providerId: selected.message.source.providerId, nativeSessionId: selected.message.source.nativeSessionId }, recordId: selected.message.source.recordId, ...(selected.message.turnId ? { turnId: selected.message.turnId } : {}) }, ...(historyResourceReader ? { readHistoryResource: historyResourceReader } : {}) } : {})}
       {...(onCopy ? { onCopy } : {})}
-      messageDetails={<>{locationSummary}<dl className="composer-mailbox__record-facts">
+      messageDetails={<>{locationSummary}<InputChannelSummary speaker={identity(selected).speaker} described={identity(selected).described} inputs={selected.group?.mailbox} /><dl className="composer-mailbox__record-facts">
         {!isUserMessage(selected.original) ? <><dt>Source</dt><dd>Captured input</dd><dt>Recorded author</dt><dd>{authorLabel(selected)}</dd></> : null}
         <dt>Time</dt><dd><MailboxTime value={time(selected)} complete /></dd>
         <dt>Delivery</dt><dd>{selected.message.source.kind === 'native' ? 'Recorded · not a delivery receipt' : delivery ?? (state(selected) === 'complete' ? 'Submission confirmed · CLI acceptance and reply are separate' : 'Delivery not confirmed · Original receipt unavailable')}</dd>
@@ -152,6 +153,7 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
   </article>}</MailboxLocationContext>
   const records = recent.map(item => <li key={messageKey(item)}><MailboxRecordRow recordKey={messageKey(item)} label={authorLabel(item)} text={item.message.content}
     avatar={identity(item).avatar} source={<span title={describeConversationInputSource(item.message.source).title}>{describeConversationInputSource(item.message.source).caption}</span>}
+    context={identity(item).speaker.external ? <InputChannelSummary speaker={identity(item).speaker} described={identity(item).described} inputs={item.group?.mailbox} /> : null}
     metadata={time(item) === undefined ? null : <MailboxTime value={time(item)} />}
     status={submission(item) ? <span>{submission(item)!.title}</span>
       : state(item) !== 'complete' && item.message.source.kind !== 'native' ? <span className="composer-mailbox__risk">Delivery not confirmed</span> : null}

@@ -348,13 +348,19 @@
 .composer-mailbox__row { width: 100%; display: grid; gap: var(--sp-1); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-body); cursor: pointer; }
 .composer-mailbox__row:hover { background: var(--surface-3); }
 .composer-mailbox__row:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; background: var(--surface-3); }
-.composer-mailbox__row-head { order: 2; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text-3); }
-.composer-mailbox__row-head > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); font-weight: 400; }
+.composer-mailbox__row-head { order: 2; display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; color: var(--text-3); }
+.composer-mailbox__record-identity { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+.composer-mailbox__row-head > strong, .composer-mailbox__record-identity > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); font-weight: 400; }
 .composer-mailbox__row-head > :is(.agent-avatar, .conversation-speaker-avatar, .conversation-message-avatar, .space-object-icon) { flex-shrink: 0; }
 .composer-mailbox__record-avatar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 var(--sp-6); width: var(--sp-6); height: var(--sp-6); }
 .composer-mailbox__record-avatar > * { max-width: 100%; max-height: 100%; }
 .composer-mailbox__row-head > .composer-mailbox__metadata { margin-left: auto; flex-shrink: 0; }
 .composer-mailbox__source { display: none; }
+.composer-mailbox__record-context, .composer-mailbox__record-context > .composer-mailbox__channel-context { display: contents; }
+.composer-mailbox__channel-context { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-3); row-gap: var(--sp-1); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); }
+.composer-mailbox__channel-room { min-width: 0; overflow-wrap: anywhere; }
+.composer-mailbox__channel-quote { flex: none; }
+.composer-mailbox__channel-issue { flex-basis: 100%; overflow-wrap: anywhere; }
 .composer-mailbox__preview { order: 1; line-height: 1.55; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .composer-mailbox__metadata { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
 .composer-mailbox__detail { padding: var(--sp-3); font-size: var(--fs-body); overflow-wrap: anywhere; }

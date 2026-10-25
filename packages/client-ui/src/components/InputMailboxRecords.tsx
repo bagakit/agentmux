@@ -4,6 +4,7 @@ import { sessionInputMailboxAuthor, type SessionInputGroup } from '@agentmux/cor
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { ConversationMessage, type ConversationContentBoundary, type ConversationMessageProps, type ConversationReadingProps } from './ConversationMessage.js'
 import { ChannelProfileAvatar } from './ChannelProfileAvatar.js'
+import { InputChannelSummary } from './InputChannelSummary.js'
 import { MailboxRecordRow } from './MailboxRecordRow.js'
 import { MessageDeliveryFailure } from './MessageDeliveryFailure.js'
 import { presentMessageDeliveryFailure } from '../lib/message-delivery-presentation.js'
@@ -53,6 +54,7 @@ export function InputMailboxRecord({ item, hostId, failed, reading, onCopy, comp
   const author = view.speaker.role === 'external' ? externalSpeakerLabel(view.speaker) : view.speaker.role === 'agent' ? view.speaker.id : view.speaker.role === 'system' ? 'AgentMux' : view.speaker.role === 'human' ? 'Human' : 'Author unknown'
   const described = compact && view.speaker.role !== 'unknown' ? reading?.describeSpeaker?.(view.speaker, 18) : undefined
   const label = described?.name || author
+  const channelContext = <InputChannelSummary speaker={view.speaker} described={described} inputs={[item]} />
   const previewText = view.previewText ?? view.text ?? group?.primary?.content ?? null
   const prefix = compact ? previewText?.slice(0,240) ?? '' : ''
   const preview = compact && view.text !== null && view.contentBoundary === 'wire' ? parseAgentMuxMessagePrefix(prefix)?.body?.trim() || prefix : prefix
@@ -71,7 +73,7 @@ export function InputMailboxRecord({ item, hostId, failed, reading, onCopy, comp
       messageId={key} speaker={view.speaker} content={view.text} contentBoundary={view.contentBoundary} a2aNotificationId={view.a2aNotificationId} createdAt={item.recordedAt}
       inputContext={view.inputContext} inputContextSource={view.inputContextSource} {...(view.copyText === undefined ? {} : { copyText: view.copyText })} {...(onCopy ? { onCopy } : {})}
       {...(compact ? { name: label, messageDetails: <><dl className="composer-mailbox__record-facts">
-        <dt>Source</dt><dd>{view.source}</dd><dt>Recorded state</dt><dd>{view.state}</dd><dt>Time</dt><dd>{observed.toLocaleString()}</dd>
+        <dt>Source</dt><dd>{view.source}{channelContext}</dd><dt>Recorded state</dt><dd>{view.state}</dd><dt>Time</dt><dd>{observed.toLocaleString()}</dd>
       </dl>{originalFacts}</> } : {})} /> : null}
     {item.kind === 'controlled' ? <MessageDeliveryFailure compact error={item.failure ?? null}
       {...(item.receipt ? { inputReceipt: item.receipt } : {})} copyText={onCopy ?? (text => platform.copyText(text, () => {}))} /> : null}
@@ -84,7 +86,8 @@ export function InputMailboxRecord({ item, hostId, failed, reading, onCopy, comp
   return <li data-input-mailbox-key={key} data-input-mailbox-kind={item.kind}>
     {compact ? <>
       <MailboxRecordRow recordKey={key} label={label} preview={preview || (view.text === null ? '原正文未随本条观察返回' : 'No text recorded.')}
-        avatar={<span className="composer-mailbox__record-avatar"><ChannelProfileAvatar url={described?.channelProfile?.profile?.avatarUrl} size={18}>
+        context={view.speaker.external ? channelContext : null}
+        avatar={<span className="composer-mailbox__record-avatar"><ChannelProfileAvatar key={JSON.stringify([view.speaker.id, described?.channelProfile?.checkedAt])} url={described?.channelProfile?.profile?.avatarUrl} size={18}>
           {described?.avatar ?? platform.renderMessageAvatar({ speaker: view.speaker, name: label, providerId: described?.providerId, project: described?.project })}
         </ChannelProfileAvatar></span>}
         metadata={Number.isNaN(observed.getTime()) ? <span>Time not recorded</span> : <time dateTime={observed.toISOString()} title={observed.toLocaleString()}>{observed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}

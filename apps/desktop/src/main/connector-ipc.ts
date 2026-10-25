@@ -20,9 +20,9 @@ export function registerConnectorIpc(options: {
 }): { releaseReaders(): void; dispose(): void } {
   const readers = new Map<string, AbortController>()
   let closed = false
-  options.handleWithEvent('connections:hostingTarget', async (event, hostId?: string) => {
+  options.handleWithEvent('connections:hostingTarget', async (event, source?: string | { runtimeId: string }) => {
     options.assertTrusted('connections:hostingTarget', event)
-    return await options.runtime.connectionHostingTarget(hostId)
+    return await options.runtime.connectionHostingTarget(source)
   })
   options.handleWithEvent('connections:call', async (event, method: ConnectionMethod, params: unknown, target?: ConnectionHostingTarget) => {
     options.assertTrusted('connections:call', event)

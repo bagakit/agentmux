@@ -10,7 +10,7 @@
  */
 
 import type { AgentProviderId, AgentSessionUserMessage } from '@agentmux/core'
-import { channelActorKey, type ChannelActorProfileObservation } from '@agentmux/core/connections'
+import { channelActorKey, type ChannelActorProfileObservation, type ChannelConversationProfileObservation } from '@agentmux/core/connections'
 import { parseAgentMuxMessagePrefix, type AgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { ReactNode } from 'react'
 
@@ -71,6 +71,8 @@ export type DescribeSpeaker = (speaker: ConversationSpeaker, avatarSize?: number
   name: string
   channelProfile?: ChannelActorProfileObservation
   channelProfileReadIssue?: string
+  channelConversation?: ChannelConversationProfileObservation
+  channelConversationReadIssue?: string
   avatar?: ReactNode
   project?: ConversationSenderDetails['project']
   providerId?: AgentProviderId
@@ -83,7 +85,7 @@ export type DescribeSpeaker = (speaker: ConversationSpeaker, avatarSize?: number
  * 不用收件人当前资料代填发件人。
  */
 export function createSpeakerResolver(options?: {
-  lookupExternal?: (author: NonNullable<ConversationSpeaker['external']>) => { observation?: ChannelActorProfileObservation; issue?: string } | undefined
+  lookupExternal?: (author: NonNullable<ConversationSpeaker['external']>) => { observation?: ChannelActorProfileObservation; conversation?: ChannelConversationProfileObservation; issue?: string; conversationIssue?: string } | undefined
   lookupAgent?: (agentSessionId: string) => {
     label?: string
     project?: ConversationSenderDetails['project']
@@ -99,7 +101,12 @@ export function createSpeakerResolver(options?: {
       const read = speaker.external ? options?.lookupExternal?.(speaker.external) : undefined
       const observation = read?.observation
       const exact = observation && speaker.external && channelActorKey(observation.actor) === channelActorKey(speaker.external.actor) ? observation : undefined
-      return { name: exact?.profile?.name ?? externalSpeakerLabel(speaker), ...(exact ? { channelProfile: exact } : {}), ...(read?.issue ? { channelProfileReadIssue: read.issue } : {}) }
+      const room = read?.conversation, author = speaker.external
+      const conversation = room && author && room.application.domain === author.actor.application.domain &&
+        room.application.appId === author.actor.application.appId && room.externalConversationId === author.externalConversationId ? room : undefined
+      return { name: exact?.profile?.name ?? externalSpeakerLabel(speaker), ...(exact ? { channelProfile: exact } : {}),
+        ...(conversation ? { channelConversation: conversation } : {}), ...(read?.issue ? { channelProfileReadIssue: read.issue } : {}),
+        ...(read?.conversationIssue ? { channelConversationReadIssue: read.conversationIssue } : {}) }
     }
     if (speaker.role === 'system') return { name: speaker.id === AGENTMUX_SYSTEM_SPEAKER_ID ? 'AgentMux' : speaker.id }
     if (options?.lookupAgent) {
