@@ -1,9 +1,10 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { CtxmuxClient, PROTOCOL_VERSION, type RuntimeIdentity, type RunInfo } from '@ctxmux/sdk'
+import { CTXMUX_MANIFEST_SHA256, ctxmuxOwnerReceiptPath } from '../src/runtime-paths.js'
 import { CtxmuxRunAdapter, CTXMUX_COMMIT, CTXMUX_VERSION } from '../src/ctxmux-run-adapter.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -51,9 +52,8 @@ describe('Runtime compatibility independent of launch provenance', () => {
     expect(processSpies.spawn).not.toHaveBeenCalled()
   })
   it('reports the connected listener rather than assigning the new bundle source to a nonempty older Runtime', async () => {
-    const { directory } = await fixture()
+    const { directory, adapter } = await fixture()
     const original: RunInfo = {
-      native_service: null,
       id: '33333333-3333-4333-8333-333333333333', spec: null, lineage: null,
       backend: { type: 'native' },
       capabilities: { input: true, resize: true, signal: true, stop: true, fork_level_a: true, fork_level_b: false, replay: 'raw_from_start' },
@@ -77,7 +77,7 @@ describe('Runtime compatibility independent of launch provenance', () => {
         protocolVersion: runtime.protocolGeneration, instanceId: runtime.daemonInstanceId, sourceCommit: null })
       expect(diagnostics.ctxmux.bundled).toEqual({ version: CTXMUX_VERSION, sourceCommit: CTXMUX_COMMIT, artifactPlatform: 'darwin-arm64' })
       expect(processSpies.spawn).not.toHaveBeenCalled()
-      await expect(readFile(join(directory, 'owner.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(ctxmuxOwnerReceiptPath(adapter.socketPath, runtime, CTXMUX_MANIFEST_SHA256))).rejects.toMatchObject({ code: 'ENOENT' })
     } finally { await client.dispose() }
   })
 
@@ -100,7 +100,7 @@ describe('Runtime compatibility independent of launch provenance', () => {
 
   it.each(['missing', 'malformed', 'mismatch'] as const)('connects to the same compatible Runtime with a %s receipt without rewriting or stopping it', async (kind) => {
     const { directory, adapter } = await fixture()
-    const receipt = join(directory, 'owner.json')
+    const receipt = ctxmuxOwnerReceiptPath(adapter.socketPath, runtime, CTXMUX_MANIFEST_SHA256)
     if (kind !== 'missing') await writeFile(receipt, kind === 'malformed' ? '{broken' : '{}', { mode: 0o600 })
     const before = await readFile(receipt, 'utf8').catch(() => null)
     const client = new AgentMuxClient()
@@ -130,18 +130,21 @@ describe('Runtime compatibility independent of launch provenance', () => {
     expect(processSpies.spawn).not.toHaveBeenCalled()
   })
 
-  it('keeps a valid persistent launch record across app restarts and install relocation', async () => {
+  it('keeps the exact artifact receipt across app restarts, install relocation and a late old-artifact write', async () => {
     const { directory, adapter } = await fixture()
     const manifestBytes = await readFile(new URL('../vendor/ctxmux/darwin-arm64/manifest.json', import.meta.url))
     const manifest = JSON.parse(manifestBytes.toString())
     const { createHash } = await import('node:crypto')
-    await writeFile(join(directory, 'owner.json'), JSON.stringify({
+    await writeFile(ctxmuxOwnerReceiptPath(adapter.socketPath, runtime, CTXMUX_MANIFEST_SHA256), JSON.stringify({
       schema: 'agentmux.ctxmux-owner.v1', sourceCommit: manifest.source.commit, sourceTree: manifest.source.tree,
       manifestSha256: createHash('sha256').update(manifestBytes).digest('hex'),
       daemonSha256: manifest.binaries.find((b: { name: string }) => b.name === 'ctxmuxd').sha256,
       daemonPath: fixturePath("previous/installation/ctxmuxd"), socketPath: adapter.socketPath, stateDirectory: adapter.stateDirectory,
       daemonInstanceId: runtime.daemonInstanceId, runtimeId: runtime.runtimeId, runtimeBuildId: runtime.buildId
     }), { mode: 0o600 })
+    // The same daemon instance can survive an artifact exec upgrade. An old
+    // publisher still addresses only its old artifact proof.
+    await writeFile(ctxmuxOwnerReceiptPath(adapter.socketPath, runtime, '0'.repeat(64)), '{old artifact unavailable', { mode: 0o600 })
     try {
       await expect(adapter.connect()).resolves.toBeUndefined()
       expect(adapter.runtimeOwnership).toBe('owned')
@@ -152,6 +155,12 @@ describe('Runtime compatibility independent of launch provenance', () => {
         expect(restarted.runtimeOwnership).toBe('owned')
         expect(restarted.identity().daemonInstanceId).toBe(runtime.daemonInstanceId)
       } finally { restarted.disconnect() }
+      const legacy = join(directory, 'owner.json')
+      await rename(ctxmuxOwnerReceiptPath(adapter.socketPath, runtime, CTXMUX_MANIFEST_SHA256), legacy)
+      const originalProof = await readFile(legacy, 'utf8')
+      await adapter.connect()
+      expect(adapter.runtimeOwnership).toBe('unverified')
+      expect(await readFile(legacy, 'utf8')).toBe(originalProof)
       expect(processSpies.spawn).not.toHaveBeenCalled()
     } finally { adapter.disconnect() }
   })
