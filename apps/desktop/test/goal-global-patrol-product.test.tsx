@@ -12,7 +12,7 @@ import type { AgentMuxAgentSession } from '@agentmux/core'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from '@agentmux/core'
 import { rpcControlRequest, rpcControlResult, parseRpcControlResult, assertControlResultTarget } from '../../../packages/core/src/rpc-business-codec'
 import type { CtxmuxAdapterRun } from '../../../packages/core/src/ctxmux-run-adapter'
-import { MAX_AGENT_PROMPT_BYTES } from '../../../packages/core/src/agent-prompt-budget'
+import { AGENT_LAUNCH_CONTEXT_BUDGET_BYTES } from '../../../packages/core/src/agent-prompt-budget'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { requestGlobalGoalPatrol } from '../src/renderer/src/components/GlobalGoalPatrolControl'
 import { api } from '../src/renderer/src/lib/api'
@@ -262,11 +262,11 @@ describe('global PMO inspection uses one public creation/input owner and the ori
     const p = await prepared()
     for (let index = 0; index < 240; index++) await p.f.demands.create({ id: 'large-scope-' + index, title: '原目标完整范围'.repeat(40), status: index % 2 ? 'done' : 'todo' })
     const originals = (await p.f.demands.snapshot()).demands
-    expect(Buffer.byteLength(JSON.stringify(originals.map(({ id, title, status, updatedAt }) => ({ id, title, status, updatedAt }))))).toBeGreaterThan(MAX_AGENT_PROMPT_BYTES)
+    expect(Buffer.byteLength(JSON.stringify(originals.map(({ id, title, status, updatedAt }) => ({ id, title, status, updatedAt }))))).toBeGreaterThan(AGENT_LAUNCH_CONTEXT_BUDGET_BYTES)
     const result = await p.f.cli('owner', ['goal', 'patrol', 'all', '--operation-id', 'global-large-inventory'])
     expect(result.result.agent.initialPrompt).toBe('confirmed')
     const prompt = p.launches[0]!.input.prompt!
-    expect(Buffer.byteLength(prompt)).toBeLessThan(MAX_AGENT_PROMPT_BYTES)
+    expect(Buffer.byteLength(prompt)).toBeLessThan(AGENT_LAUNCH_CONTEXT_BUDGET_BYTES)
     expect(scope(prompt)).toMatchObject({ state: 'observed', totalCount: originals.length })
     expect(prompt).toContain('goal ls --all without filters or a limiting sample')
     expect(p.start).toHaveBeenCalledOnce()

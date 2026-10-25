@@ -7,10 +7,7 @@ import { AgentMuxClient as DefaultClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { composeAgentPrompt } from '../src/agent-outbound-message.js'
-import { MAX_AGENT_PROMPT_BYTES } from '../src/agent-prompt-budget.js'
-import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
-import { connectHostedAgentMux } from '../src/hosted-client.js'
-import type { AgentMuxHostedRpcPort } from '../src/hosted-client-contract.js'
+import { hostedTestClient } from './helpers/hosted-runtime-port.js'
 
 const Client: typeof DefaultClient = process.env.AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT
   ? (await import(process.env.AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT)).AgentMuxClient : DefaultClient
@@ -63,23 +60,16 @@ async function fixture() {
 const body = '  Keep <User> & &amp;\r\nLiteral </amux> and trailing whitespace.  \n'
 const note = 'Platform rules: <canonical Session ID> & literal </amux>.\r\nKeep the note.'
 
-async function hosted(core: DefaultClient, store: AgentMuxFileAgentSessionStore) {
+async function hosted(core: DefaultClient) {
   vi.spyOn(core, 'connect').mockResolvedValue()
-  const service = new AgentMuxHostedRuntimeService(core, store.path)
-  const port = { call: async (method: string, params: unknown, options?: { signal?: AbortSignal }) =>
-      JSON.parse(JSON.stringify(await service.call(method, JSON.parse(JSON.stringify(params)), options))),
-    subscribe: async (method: string, params: unknown, handlers: { onInitial(value: unknown): void; onEvent(value: unknown): void; signal?: AbortSignal }) => {
-      const stream = await service.subscribe(method, params, value => handlers.onEvent(JSON.parse(JSON.stringify(value))), handlers.signal ? { signal: handlers.signal } : {})
-      handlers.onInitial(JSON.parse(JSON.stringify(stream.initial))); return { dispose: async () => stream.dispose() }
-    } } as AgentMuxHostedRpcPort
-  const client = await connectHostedAgentMux({ rpc: port })
-  cleanups.push(async () => { await client.dispose(); await service.dispose() })
-  return client
+  const remote = await hostedTestClient(core)
+  cleanups.push(remote.dispose)
+  return remote.sdk
 }
 
 describe('explicit injected context shares public Core submission and durable provenance', () => {
   it('carries explicit context through actual Hosted RPC and records raw platform/user segments separately', async () => {
-    const f = await fixture(), remote = await hosted(f.core, f.store), input = f.intent()
+    const f = await fixture(), remote = await hosted(f.core), input = f.intent()
     await remote.submitAgentPrompt(input)
     const composed = composeAgentPrompt(body, note)
     expect(f.writes).toEqual([composed.text + '\r'])
@@ -87,11 +77,11 @@ describe('explicit injected context shares public Core submission and durable pr
       ['system_message', 'agentmux', composed.systemContext, undefined], ['user_message', 'user', body, true]
     ])
     const admission = (await new AgentMuxFileAgentSessionStore(f.store.path).load())[0]!.promptCompletionAdmission!
-    expect(admission.intent!.message).toEqual({ userContent: body, systemContext: composed.systemContext, authorHuman: true })
+    expect(admission.intent!.message).toEqual({ userContent: body, systemContext: composed.systemContext, authorHuman: true, sourceChannel: 'api' })
     expect(admission.acknowledged).toBe(true); expect(f.stop.mock.calls).toEqual([])
   })
 
-  it('supports standalone context and applies the existing byte budget to the complete serialized wire', async () => {
+  it('preserves standalone context and complete escaped wire above the former input cutoff', async () => {
     const f = await fixture()
     await f.core.submitAgentPrompt({ ...f.intent(), prompt: '', authorHuman: false })
     const composed = composeAgentPrompt('', note)
@@ -99,8 +89,16 @@ describe('explicit injected context shares public Core submission and durable pr
     expect(composed.text).not.toContain('Wait for the user.')
     expect(f.writes).toEqual([composed.text + '\r'])
     expect((await f.store.loadTimeline(f.session.agentSessionId)).items.map(item => [item.kind, item.content])).toEqual([['system_message', composed.systemContext]])
-    await expect(f.core.submitAgentPrompt({ ...f.intent(), operationId: 'oversized', agentMuxNote: '<'.repeat(MAX_AGENT_PROMPT_BYTES / 3) })).rejects.toMatchObject({ code: 'INVALID_AGENT_PROMPT' })
-    expect(f.requests).toHaveLength(1); expect(f.core.agentSession(f.session.agentSessionId).run).toEqual(f.session.run)
+    const large = await fixture()
+    const largeNote = '原始上下文<&>\n'.repeat(5000)
+    const complete = composeAgentPrompt(body, largeNote)
+    expect(Buffer.byteLength(complete.text)).toBeGreaterThan(65_536)
+    await large.core.submitAgentPrompt({ ...large.intent(), operationId: 'large-context', agentMuxNote: largeNote })
+    expect(large.writes).toEqual([complete.text + '\r'])
+    const original = (await new AgentMuxFileAgentSessionStore(large.store.path).load())[0]!.promptCompletionAdmission!
+    expect(original.intent!.prompt).toBe(complete.text)
+    expect(original.intent!.message).toEqual({ userContent: body, systemContext: largeNote, authorHuman: true, sourceChannel: 'api' })
+    expect(large.requests).toHaveLength(1); expect(large.core.agentSession(large.session.agentSessionId).run).toEqual(large.session.run)
   })
 
   it('does not promote a user-authored identical wire or replace its author during cold same-operation recovery', async () => {
@@ -128,7 +126,7 @@ describe('explicit injected context shares public Core submission and durable pr
     expect((await cold.store.loadTimeline(f.session.agentSessionId)).items.map(item => [item.kind, item.content, item.authorHuman])).toEqual([
       ['system_message', composed.systemContext, undefined], ['user_message', body, true]
     ])
-    expect(cold.core.agentSession(f.session.agentSessionId).promptCompletionAdmission!.intent!.message).toEqual({ userContent: body, systemContext: composed.systemContext, authorHuman: true })
+    expect(cold.core.agentSession(f.session.agentSessionId).promptCompletionAdmission!.intent!.message).toEqual({ userContent: body, systemContext: composed.systemContext, authorHuman: true, sourceChannel: 'api' })
     expect(f.stop.mock.calls).toEqual([])
   })
 
