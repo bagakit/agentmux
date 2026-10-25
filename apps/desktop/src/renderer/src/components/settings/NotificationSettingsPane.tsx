@@ -1,4 +1,5 @@
 import './notification-settings.css'
+import { FormRow } from '@agentmux/client-ui/components/FormRow'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useId, type CSSProperties } from 'react'
 import type { AppConfig, NotificationModeId } from '../../../../shared/contracts'
@@ -100,17 +101,14 @@ export function NotificationSettingsPane({ notifications, onSave }: {
       </section>
       <section className="settings-group" data-settings-field="notification-sound">
         <header><span>Sound</span><small>{sound ? 'On' : 'Off'}</small></header>
-        <label className="notification-sound-toggle">
-          <input
-            type="checkbox"
+        <FormRow className="notification-sound-toggle" label="Play the system notification sound"
+          description="Applies to Agent status banners and enabled A2A message alerts. Silent by default.">
+          {attributes => <input
+            {...attributes} type="checkbox" name="sound"
             checked={sound}
             onChange={(event) => setSound(event.target.checked)}
-          />
-          <span>
-            <strong>Play the system notification sound</strong>
-            <small>Applies to Agent status banners and enabled A2A message alerts. Silent by default.</small>
-          </span>
-        </label>
+          />}
+        </FormRow>
       </section>
       <SettingsSaveBar save={saveState} dirty={modeDraft.dirty || soundDraft.dirty} label="Save notifications" onSave={() => void save()} />
     </div>
