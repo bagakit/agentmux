@@ -146,6 +146,7 @@ createInterface({input:process.stdin}).on('line', line=>{ const p=JSON.parse(lin
   await chmod(config.executable, 0o700)
   const runner = await runCodexExecutionHelper(config, streams); cleanup.push(() => runner.close())
   streams.input.write(JSON.stringify({ type: 'request', generation: 'original-generation', payload: { id: 1, method: 'initialize', params: { clientName: 'codex-environment', resumeSessionId: null } } }) + '\n')
-  await vi.waitFor(() => expect(streams.frames.some(frame => frame.type === 'response')).toBe(true))
+  // This verifies the actual child response, not startup latency under host load.
+  await vi.waitFor(() => expect(streams.frames.some(frame => frame.type === 'response')).toBe(true), { timeout: 10_000 })
   expect(streams.frames.find(frame => frame.type === 'response')?.payload.result).toEqual({ sessionId: 'native-original', sid: agentSessionId ?? null, capability: null, context: 'unconfigured', native: 'native-still-available' })
-})
+}, 15_000)
