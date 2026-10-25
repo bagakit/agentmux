@@ -2966,6 +2966,9 @@ export class AgentMuxSessionDurabilityError extends AgentMuxError {
 
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
   private tail: Promise<void> = Promise.resolve()
+  // Exact reads join preceding writes to their own Session, using the original
+  // writer's settlement Promise. This index holds no metadata or receipt facts.
+  private readonly sessionWriteTails = new Map<string, Promise<void>>()
   private readonly timelineTails = new Map<string, Promise<void>>()
   private readonly capturedPreparations = new Map<string, Promise<AgentCapturedTimelinePage['stream']['gaps']>>()
   private pendingLockRelease: (() => Promise<void>) | null = null
@@ -3014,7 +3017,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         throw new AgentMuxError('Session snapshot changed before confirmation. Refresh the original binding and retry.', 'STALE_AGENT_SESSION')
       }
       this.dirty = true // A previous lost sync ACK must be confirmed, even without new rows.
-    })
+    }, undefined, agentSessionId)
   }
 
   async load(): Promise<readonly unknown[]> {
@@ -3030,12 +3033,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null> {
-    await this.tail
+    await this.sessionWriteTails.get(agentSessionId)
     return await this.withReadDatabase(db => this.sessionMetadata(db, agentSessionId),
       document => {
         const value = document.sessions.find(session => session.agentSessionId === agentSessionId)
         return value ? agentSessionMetadata(value) : null
-      })
+      }, undefined, true)
   }
 
   async listSpawns(input: AgentMuxSpawnQuery): Promise<AgentMuxSpawnPage> {
@@ -3074,11 +3077,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async readPromptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): Promise<AgentPromptSubmissionRecord | null> {
-    await this.tail
+    await this.sessionWriteTails.get(agentSessionId)
     return await this.withReadDatabase(db => this.promptAdmission(db, agentSessionId, run, submissionId), document => {
       return promptAdmissionRecords(document.sessions.find(s => s.agentSessionId === agentSessionId)).find(original => original.run.runId === run.runId &&
         [JSON.stringify(['submission', submissionId]), JSON.stringify(['original-slot', submissionId])].includes(promptRecordId(original))) ?? null
-    })
+    }, undefined, true)
   }
 
   async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {
@@ -3094,7 +3097,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       }
       this.savePromptAdmission(this.db, next, true)
       this.dirty = true
-    }, signal)
+    }, signal, expected.agentSessionId)
   }
 
   async readHistorySource(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor | null> {
@@ -3140,7 +3143,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
 
   async compareAndSwapMetadata(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
     signal?: AbortSignal, future?: AgentMuxSessionFutureChange, author?: Readonly<AgentCapabilityBinding>): Promise<void> {
-    await this.enqueue(async () => { await this.swapSession(expected, next, false, signal, future, author) }, signal)
+    await this.enqueue(async () => { await this.swapSession(expected, next, false, signal, future, author) }, signal, expected?.agentSessionId ?? next?.agentSessionId)
   }
 
   async loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]> {
@@ -3202,7 +3205,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async compareAndSwap(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null, signal?: AbortSignal): Promise<void> {
-    await this.enqueue(async () => { await this.swapSession(expected, next, true, signal) }, signal)
+    await this.enqueue(async () => { await this.swapSession(expected, next, true, signal) }, signal, expected?.agentSessionId ?? next?.agentSessionId)
   }
 
   private async swapSession(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
@@ -3268,7 +3271,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
           ? document.reservations.map(item => item.agentSessionId === reservation.agentSessionId ? reservation : item)
           : [...document.reservations, reservation]
       })
-    }) } catch (error) {
+    }, undefined, reservation.agentSessionId) } catch (error) {
       if (!admissionChecked) throw error
       const failure = agentCreationNotAppliedError(error, reservation.operationId)
       await finishAgentCreationCleanup(failure, [async () => { await this.releaseLifecycle(reservation) }])
@@ -3286,7 +3289,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       if (!session) throw new AgentMuxError('The original Session is unavailable.', 'STALE_AGENT_SESSION')
       result = restartAdmission(session, current, mode)
       if (result !== session) { this.saveSession(this.db, result, false); this.dirty = true }
-    })
+    }, undefined, reservation.agentSessionId)
     return structuredClone(result)
   }
 
@@ -3560,7 +3563,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         retiredRuns,
         retiredAgentSessions
       })
-    })
+    }, undefined, value.agentSessionId)
   }
 
   private async withCapturedRead<T>(read: (db: DatabaseSync) => T): Promise<T> {
@@ -4083,7 +4086,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return join(dirname(this.path), 'agent-timelines', `${filename}.jsonl`);
   }
 
-  private async enqueue(operation: () => Promise<void>, signal?: AbortSignal): Promise<void> {
+  private async enqueue(operation: () => Promise<void>, signal?: AbortSignal, sessionId?: string): Promise<void> {
     const current = this.tail.then(async () => {
       signal?.throwIfAborted()
       if (this.pendingLockRelease) {
@@ -4141,7 +4144,14 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         }
       }
     })
-    this.tail = current.then(() => {}, () => {})
+    const settled = current.then(() => {}, () => {})
+    this.tail = settled
+    if (sessionId !== undefined) {
+      this.sessionWriteTails.set(sessionId, settled)
+      void settled.then(() => {
+        if (this.sessionWriteTails.get(sessionId) === settled) this.sessionWriteTails.delete(sessionId)
+      })
+    }
     await current
   }
 
