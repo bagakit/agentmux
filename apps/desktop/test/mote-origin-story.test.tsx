@@ -28,7 +28,7 @@ it('the real Mote settings teaches two origins with member Agents and keeps its 
   images.add(story.querySelector('img')!.src)
   await dom.click('.mote-origin__path:nth-child(2) button:last-of-type')
   expect(story.querySelector('h4')?.textContent).toBe('让重要的方向，成为长期伙伴。')
-  expect(story.querySelector('.mote-origin__eyebrow')?.textContent).toContain('晋升构想')
+  expect(story.querySelector('.mote-origin__eyebrow')?.textContent).toContain('晋升为伙伴')
   expect(story.textContent).toContain('原来的 Agent 与积累一起延续')
   expect(story.querySelector('img')?.alt).toContain('相同的三位 Agent')
   images.add(story.querySelector('img')!.src)
