@@ -16,6 +16,7 @@ import {
 import { forwardAgentMuxRpcStdio } from './agentmux-rpc-stdio.js'
 import { isAgentMuxRpcMethod, isAgentMuxRpcStream } from './public-rpc.js'
 import { AgentMuxError } from './errors.js'
+import { assertAgentToolContextAvailable } from './agent-tool-context.js'
 import { parseFileWriteParams } from './public-rpc-files.js'
 import { AGENTMUX_RPC_MAX_MESSAGE_BYTES, rpcEncode } from './public-rpc-wire.js'
 import {
@@ -180,6 +181,7 @@ async function main(): Promise<number> {
     const result = await analyseLocalV8Profile(String(invocation.params.input))
     write({ ok: result.status === 'analysed', operation: method, result }); return result.status === 'analysed' ? 0 : 2
   }
+  assertAgentToolContextAvailable()
   const endpoint = agentMuxRpcEndpoint(invocation.endpoint)
   if (method === 'system.endpoint' && !invocation.params.inspect) {
     if (invocation.params.stdio) {

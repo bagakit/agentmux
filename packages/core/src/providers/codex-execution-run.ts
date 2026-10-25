@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import { isAbsolute, join, resolve } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
+import type { AgentToolContextState } from '../agent-tool-context.js'
 import type { AgentExecutionHelperContext } from '../agent-execution-helper.js'
 import { createAgentExecutionExecutor } from '../agent-execution-executor.js'
 import { AgentExecutionJournal } from '../agent-execution-journal.js'
@@ -14,6 +15,7 @@ const object = (value: unknown): value is Record<string, unknown> => value !== n
 
 export function validateCodexExecutionRunConfiguration(value: unknown): asserts value is AgentExecutionHelperContext {
   if (!object(value) || value.providerId !== 'codex' || !['frontend', 'executor'].includes(value.role as string) || !text(value.bindingId) || !text(value.createOperationId) || !text(value.workspacePath) || !isAbsolute(value.workspacePath) || !text(value.journalDirectory) || !isAbsolute(value.journalDirectory) || !text(value.executable) || !isAbsolute(value.executable)) throw new Error('Invalid fixed native execution helper configuration')
+  if (value.agentSessionId !== undefined && !text(value.agentSessionId)) throw new Error('The original Agent Session identity must be exact when supplied')
   if (value.role === 'executor' && (!object(value.grant) || value.grant.scope !== 'host-user' || value.grant.bindingId !== value.bindingId)) throw new Error('An exact Host-user resource grant is required for the native executor')
   if (value.role === 'executor' ? !text(value.journalIdentity) : value.journalIdentity !== undefined) throw new Error('The original executor journal identity is required only for its executor helper')
 }
@@ -54,7 +56,12 @@ export async function runCodexExecutionHelper(
   const executor = createAgentExecutionExecutor({
     bindingId,
     journal,
-    protocol: { parse: parseCodexExecutionMessage, parseServer: parseCodexExecutionServerMessage, executor: { command: spec.program, args: spec.args, cwd: spec.cwd } },
+    protocol: { parse: parseCodexExecutionMessage, parseServer: parseCodexExecutionServerMessage, executor: { command: spec.program, args: spec.args, cwd: spec.cwd,
+      // Resource-side native children must never borrow the helper Host's user
+      // route or an inherited Agent capability. The original Agent claim is
+      // retained when known; it cannot substitute for a current authenticated route.
+      env: { AGENTMUX_TOOL_CONTEXT: 'unconfigured' satisfies AgentToolContextState,
+        AGENTMUX_AGENT_SESSION_ID: context.agentSessionId, AGENTMUX_AGENT_CAPABILITY: undefined } } },
     input: io.input,
     output: io.output,
     stderr,

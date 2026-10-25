@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { isDeepStrictEqual } from 'node:util'
-import type { AgentExecutionHelperInput, AgentExecutionHelperPreparation } from './agent-execution-helper.js'
+import { parseAgentExecutionNotices, type AgentExecutionHelperInput, type AgentExecutionHelperPreparation } from './agent-execution-helper.js'
 import { durableWriteFile } from './durable-write.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
@@ -41,12 +41,13 @@ function recordValue(value: unknown): RecordValue {
   try {
     const r = rpcRecord(value, ['schemaVersion', 'input', 'preparation', 'frontend'])
     const input = inputValue(r.input)
-    const preparation = rpcRecord(r.preparation, ['bindingId', 'role', 'providerId', 'prepared', 'journalIdentity'])
+    const preparation = rpcRecord(r.preparation, ['bindingId', 'role', 'providerId', 'prepared', 'journalIdentity', 'notices'])
     const prepared = parsePreparedTerminal(preparation.prepared)
     if (r.schemaVersion !== 1 || preparation.bindingId !== input.bindingId || preparation.role !== input.role || preparation.providerId !== input.providerId || prepared.createOperationId !== input.createOperationId || prepared.workspacePath !== input.workspacePath) throw new Error('identity mismatch')
     if (input.role === 'executor' ? !text(preparation.journalIdentity) : preparation.journalIdentity !== undefined) throw new Error('journal identity mismatch')
     if (r.frontend !== undefined && input.role !== 'frontend') throw new Error('wrong endpoint role')
     return { schemaVersion: 1, input, preparation: { bindingId: input.bindingId, role: input.role, providerId: input.providerId, prepared,
+      ...(preparation.notices === undefined ? {} : { notices: parseAgentExecutionNotices(preparation.notices, { providerId: input.providerId, role: input.role }) }),
       ...(input.role === 'executor' ? { journalIdentity: preparation.journalIdentity as string } : {}) },
       ...(r.frontend === undefined ? {} : { frontend: frontendValue(r.frontend) }) }
   } catch { throw fail('The original private execution helper preparation is invalid; it was not replaced', 'AGENT_EXECUTION_HELPER_STORAGE_UNCONFIRMED') }
