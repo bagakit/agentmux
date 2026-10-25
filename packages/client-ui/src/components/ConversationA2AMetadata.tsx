@@ -51,7 +51,7 @@ export function ConversationA2ATiming(props: Props & { onRefresh?: (() => void) 
       <span>{notificationLabel(notice)}</span>
       {confirmedAt == null ? null : <RecordedTime at={confirmedAt} renderClock={renderClock} withDate={differentDay} />}
     </span>
-    <span className="conversation-a2a-timing__mode" title={notice?.mode === 'idle' ? '默认策略：入箱后等待确认空闲的机会' : notice?.mode === 'steer' ? '这次通知由用户或设备显式发起；不改写原信发送意图' : '这次通知的模式没有可核对记录'}>{modeLabel(notice)}</span>
+    <span className="conversation-a2a-timing__mode" title={notice?.mode === 'idle' ? '默认策略：入箱后等待确认空闲的机会' : notice?.mode === 'steer' ? '这次是显式立即通知；不改写原信发送意图' : '这次通知的模式没有可核对记录'}>{modeLabel(notice)}</span>
     {props.onRefresh && (notice?.state !== 'submitted' || props.readIssue) ? <button type="button" className="conversation-a2a-timing__refresh"
       aria-label="核对通知状态" aria-busy={props.refreshing || undefined} title="只读核对这次通知，不重发消息" onClick={props.onRefresh}>{props.refreshing ? '正在核对…' : '核对通知'}</button> : null}
     {props.readIssue ? <span className="conversation-a2a-timing__issue" role="status">通知核对失败 · {props.readIssue}</span> : null}
