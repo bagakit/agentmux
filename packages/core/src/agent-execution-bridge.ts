@@ -2,11 +2,19 @@ import { createHash } from 'node:crypto'
 import type { ClientFrame } from '@ctxmux/sdk'
 import { CTXMUX_MAX_FRAME_BYTES as MAX_FRAME_BYTES } from './ctxmux-run-adapter.js'
 import type { AgentMuxClient } from './client.js'
-import type { AgentMuxClientEvent, AgentMuxRunDataEvent, AgentMuxRunInputOperation } from './types.js'
+import type { AgentMuxClientEvent, AgentMuxRunDataEvent, AgentMuxRunInputOperation, AgentMuxNativeService, AgentMuxRunState } from './types.js'
 import { AgentMuxError } from './errors.js'
 import { EXECUTION_FRAME_LIMIT } from './agent-execution-channel.js'
 
-type Side = 'frontend' | 'executor'
+export type AgentExecutionBridgeSide = 'frontend' | 'executor'
+type Side = AgentExecutionBridgeSide
+export interface AgentExecutionBridgeConnection {
+  runId: string
+  process: AgentMuxRunState | 'removed' | 'unobserved'
+  reader: 'attached' | 'unavailable' | 'unobserved'
+  readerDiagnostic?: { code: string; message: string }
+  nativeService?: AgentMuxNativeService | null
+}
 export type AgentExecutionBridgePort = Pick<AgentMuxClient,
   'attachTerminal' | 'readRunReplay' | 'writeTerminal' | 'runtimeIdentity' | 'onRunEvent' | 'releaseRunAttachment'>
 export interface AgentExecutionBridgePosition {
@@ -54,6 +62,7 @@ export class AgentExecutionBridge {
   private tail: Promise<void> = Promise.resolve()
   private releases: (() => void)[] = []
   private stopped = false
+  private readonly connections: Record<Side, AgentExecutionBridgeConnection>
   private queuedBytes = 0
   private readonly partial: Record<Side, { parts: Buffer[]; bytes: number }> = { frontend: { parts: [], bytes: 0 }, executor: { parts: [], bytes: 0 } }
   private readonly readThrough: Record<Side, number>
@@ -65,12 +74,16 @@ export class AgentExecutionBridge {
     /** Idempotent observation only: replay may repeat frames; this callback grants no new action. */
     onFrame(side: Side, frame: unknown): Promise<void>
     onError(error: Error): void
+    /** Exact helper facts; no Session lifecycle or native operation inference. */
+    onConnection?(side: Side, connection: AgentExecutionBridgeConnection): void
   }) {
     this.state = structuredClone(options.state)
+    this.connections = Object.fromEntries((['frontend', 'executor'] as const).map(side => [side, { runId: this.state[side].runId, process: 'unobserved', reader: 'unobserved' }])) as Record<Side, AgentExecutionBridgeConnection>
     this.readThrough = { frontend: this.state.frontend.outputByte, executor: this.state.executor.outputByte }
     if (this.state.frontend.runId === this.state.executor.runId && options.ports.frontend === options.ports.executor)
       throw new AgentMuxError('Execution bridge requires distinct original helper Runs.', 'INVALID_EXECUTION_BINDING')
   }
+  private publishConnection(side: Side): void { this.options.onConnection?.(side, structuredClone(this.connections[side])) }
   snapshot(): AgentExecutionBridgeState { return structuredClone(this.state) }
   private async save(next: AgentExecutionBridgeState): Promise<void> {
     await this.options.persist(structuredClone(next))
@@ -102,18 +115,46 @@ export class AgentExecutionBridge {
       const identity = await port.runtimeIdentity()
       if (identity.instanceId !== position.ownerInstanceId) throw new AgentMuxError(
         'The original helper Runtime instance is unavailable. No replacement helper was started.', 'EXECUTION_RUNTIME_CHANGED')
-      let opening = true
+      let opening = true, processObserved = false, attachmentObserved = false
+      const connection = this.connections[side]
+      const service = (value: AgentMuxNativeService | null | undefined) => {
+        if (value !== undefined && (value === null ? connection.nativeService === undefined : !connection.nativeService || value.revision > connection.nativeService.revision)) connection.nativeService = structuredClone(value)
+      }
       const waiting: { startByte: number; endByte: number; dataBytes: Uint8Array }[] = []
       let waitingBytes = 0
-      const receive = (event: AgentMuxClientEvent) => {
-        if (event.type !== 'terminal-output' || event.run.runId !== position.runId) return
-        const range = event.evidence.outputByteRange
-        if (!range) { this.fail(new Error('Execution output has no authoritative byte range')); return }
-        const data = { ...range, dataBytes: event.dataBytes }
+      const receiveBytes = (data: { startByte: number; endByte: number; dataBytes: Uint8Array }) => {
         if (!opening) { this.enqueue(side, data); return }
         waitingBytes += data.dataBytes.byteLength
         if (waitingBytes > EXECUTION_FRAME_LIMIT * 2) { this.fail(new Error('Execution attachment replay exceeded its reader budget')); return }
         waiting.push({ ...data, dataBytes: Uint8Array.from(data.dataBytes) })
+      }
+      const receive = (event: AgentMuxClientEvent) => {
+        if (this.stopped || !('run' in event) || event.run?.runId !== position.runId) return
+        if (event.type === 'process-state' || event.type === 'run-removed') {
+          processObserved = true
+          // A restored reader cannot revive a Run with a confirmed terminal fact.
+          if (connection.process === 'unobserved' || connection.process === 'running') connection.process = event.type === 'run-removed' ? 'removed' : event.state
+          this.publishConnection(side); return
+        }
+        if (event.type === 'attachment-state') {
+          attachmentObserved = true; connection.reader = event.state === 'restored' ? 'attached' : 'unavailable'
+          if (event.state === 'unavailable') connection.readerDiagnostic = structuredClone(event.diagnostic)
+          else delete connection.readerDiagnostic
+          this.publishConnection(side); return
+        }
+        if (event.type === 'run-service') { service(event.nativeService); this.publishConnection(side); return }
+        if (event.type === 'terminal-snapshot') {
+          if (connection.process === 'unobserved' || connection.process === 'running') connection.process = event.run.state
+          processObserved = true; service(event.run.nativeService)
+          this.publishConnection(side)
+          if (event.gap) { this.fail(new AgentMuxError('The original helper snapshot contains an output Gap.', 'EXECUTION_PROTOCOL_GAP')); return }
+          for (const data of event.replay) receiveBytes(data)
+          return
+        }
+        if (event.type !== 'terminal-output') return
+        const range = event.evidence.outputByteRange
+        if (!range) { this.fail(new Error('Execution output has no authoritative byte range')); return }
+        receiveBytes({ ...range, dataBytes: event.dataBytes })
       }
       this.releases.push(port.onRunEvent(position.runId, receive, { observeMessages: false, onError: error => this.fail(new Error(error.message)) }))
       const attached = await port.attachTerminal(position.runId, position.outputByte, 'raw')
@@ -121,6 +162,9 @@ export class AgentExecutionBridge {
         'The original helper is not confirmed running. Historical output does not establish a live execution service.', 'EXECUTION_HELPER_UNAVAILABLE')
       if (attached.run.runId !== position.runId || attached.gap) throw new AgentMuxError(
         'The original execution protocol has an output Gap; its tool outcomes remain unknown.', 'EXECUTION_PROTOCOL_GAP')
+      if (!processObserved) connection.process = attached.run.state
+      if (!attachmentObserved) { connection.reader = 'attached'; delete connection.readerDiagnostic }
+      service(attached.run.nativeService); this.publishConnection(side)
       for (const data of attached.replay) this.enqueue(side, data)
       opening = false
       for (const data of waiting) this.enqueue(side, data)

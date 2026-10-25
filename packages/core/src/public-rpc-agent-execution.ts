@@ -64,14 +64,22 @@ export function parseAgentExecutionBinding(value: unknown): { bindingId: string 
 export function parseAgentExecutionInspection(value: unknown, expected: { bindingId: string } & Partial<Pick<AgentExecutionInspection,
   'agentHostId' | 'resourceHostId' | 'agentSessionId' | 'resourceWorkspacePath'>>): AgentExecutionInspection {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const result = rpcRecord(value, ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId', 'resourceWorkspacePath', 'state', 'diagnostic', 'notices'], code)
+  const result = rpcRecord(value, ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId', 'resourceWorkspacePath', 'state', 'diagnostic', 'diagnostics', 'notices'], code)
   for (const field of ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId']) identity(result[field], code)
   workspace(result.resourceWorkspacePath, code)
   for (const [field, original] of Object.entries(expected)) if (result[field] !== original) invalid('Execution observation belongs to another original binding.', code)
   if (result.state !== 'connected' && result.state !== 'unavailable' || (result.state === 'connected') === (result.diagnostic !== undefined)) invalid('Execution observation has inconsistent service state.', code)
   if (result.notices !== undefined) parseAgentExecutionNotices(result.notices, {}, code)
-  if (result.diagnostic !== undefined) {
-    const diagnostic = rpcRecord(result.diagnostic, ['code', 'message', 'generation', 'operation'], code)
+  const validateDiagnostic = (value: unknown, local: boolean): void => {
+    const diagnostic = rpcRecord(value, local ? ['code', 'message', 'generation', 'operation', 'scope', 'side', 'runId'] : ['code', 'message', 'generation', 'operation'], code)
+    if (local) {
+      if (!['unclassified', 'helper', 'request', 'generation', 'operation'].includes(String(diagnostic.scope))) invalid('A local diagnostic must declare its original scope.', code)
+      if (diagnostic.scope !== 'unclassified' || diagnostic.side !== undefined || diagnostic.runId !== undefined) {
+        if (diagnostic.side !== 'frontend' && diagnostic.side !== 'executor') invalid('A local diagnostic must name its original helper side.', code)
+        identity(diagnostic.runId, code)
+      }
+      if (diagnostic.scope === 'operation' && (diagnostic.side !== 'executor' || diagnostic.operation === undefined || diagnostic.generation === undefined)) invalid('Only an exact resource journal operation can carry operation scope.', code)
+    }
     identity(diagnostic.code, code); text(diagnostic.message, code)
     if (diagnostic.generation !== undefined) identity(diagnostic.generation, code)
     if (diagnostic.operation !== undefined) {
@@ -82,6 +90,11 @@ export function parseAgentExecutionInspection(value: unknown, expected: { bindin
         invalid('Execution diagnostic must retain its exact original operation identity.', code)
       }
     }
+  }
+  if (result.diagnostic !== undefined) validateDiagnostic(result.diagnostic, false)
+  if (result.diagnostics !== undefined) {
+    if (!Array.isArray(result.diagnostics)) invalid('Local execution diagnostics must be an array.', code)
+    for (const diagnostic of result.diagnostics as unknown[]) validateDiagnostic(diagnostic, true)
   }
   return structuredClone(result) as unknown as AgentExecutionInspection
 }
