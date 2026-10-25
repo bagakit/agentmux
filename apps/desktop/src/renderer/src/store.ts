@@ -1260,8 +1260,9 @@ export type AppState = {
     signal?: AbortSignal,
     options?: SpatialControlOptions & { admittedControlRequestId?: string }
   ): Promise<AgentMuxControlResult>
-  /** Whether the original display selection was committed. Refusal preserves the current context. */
-  selectSession(id: string, tabGroupId?: string): boolean
+  /** Whether the original display selection was committed. Refusal preserves the current context.
+   * `keepSurface` places and selects the same occurrence without leaving the current main surface (Focus shows it in place). */
+  selectSession(id: string, tabGroupId?: string, options?: { keepSurface?: boolean }): boolean
   prepareWorkbenchLayout(workspaceId: string): WorkspaceLayout
   createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
   setZoneSpaceRelation(zoneId: string, spaceId: string, linked: boolean): Promise<AgentMuxSpaceBindingReport>
@@ -6880,7 +6881,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       signal?.removeEventListener('abort', cancel)
     }
   },
-  selectSession(id, preferredTabGroupId) {
+  selectSession(id, preferredTabGroupId, options) {
+    // Placement and selection are one decision; only the visible main surface is the caller's choice.
+    const navigation = options?.keepSurface ? {} : { mainSurface: 'workbench' as const }
     if (!workbenchViewCloseAllowsSession(get().closingWorkbenchViews, id)) return false
     const current = get(), catalog = workbenchSelectionCatalog(current)
     const existing = Object.values(current.tabs).flatMap((tab) => (
@@ -6917,7 +6920,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set((state) => ({
         activeWorkspaceId: reference.displayWorkspaceId, workbenchSpaceSelection: choice,
         retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
-        mainSurface: 'workbench',
+        ...navigation,
         displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
       }))
       get().focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'pointer', reference.groupId)
@@ -6925,7 +6928,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const session = get().sessions.find((candidate) => candidate.id === id)
     const workspace = session ? workspaceForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)) : null
-    if (!session || !workspace) return false
+    if (!session || !workspace) {
+      get().reportError(new Error(!session
+        ? 'This Session is no longer confirmed. Its original workface is kept; refresh the Session observation before opening it.'
+        : 'The Session’s resource Workspace is not available. Its Run and input are kept; reconnect that Workspace and retry opening it.'),
+      { kind: 'indeterminate', ...(session ? { subject: session.control } : {}) })
+      return false
+    }
     const { tabId, regionId } = availableWorkbenchTabIdentity(current.tabs, incarnation => sessionTabId(id, incarnation))
     const layout = get().layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
     const existingTabGroupId = tabGroupForTab(layout, tabId)
@@ -6960,9 +6969,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     catch (error) { get().reportError(error, { kind: 'indeterminate' }); return false }
     set((state) => ({
       activeWorkspaceId: workspace.id,
-      mainSurface: 'workbench',
+      ...navigation,
       regionCaretFocus: null, workbenchSpaceSelection: choice, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null,
-      agentFocus: focusSessionContext(state, id),
+      agentFocus: focusSessionContext({ ...state, tabs: next.tabs, layouts: next.layouts }, id, session,
+        { displayWorkspaceId: workspace.id, groupId: targetTabGroupId, tabId: tab.id, regionId }),
       tabs: { ...state.tabs, [tab.id]: tab },
       layouts: { ...state.layouts, [workspace.id]: nextLayout },
       // Placement succeeded in this same commit; a later intentional close is not this old failure.

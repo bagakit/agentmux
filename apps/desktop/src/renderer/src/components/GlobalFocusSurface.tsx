@@ -134,6 +134,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const showWorkspace = workspaceOpen ?? Boolean(projection || presentation?.unselected || presentation?.issue || selectedId)
   const selectedSessionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : selectedSessionIds.flatMap(id => { const session = sessionPresentationById(state.sessions).get(id); return session ? [session] : [] })))
+  // A Session Core still lists, with no Region occurrence at all: the reachable recovery is to give it one.
+  // Placing it starts, stops, resumes and sends nothing; its own Region then owns any recovery.
+  const placeless = !projection && !directoryIssue && presentation?.issue && !presentation.references.length &&
+    sessions.length === 1 && sessions[0]!.id === selectedId ? sessions[0]! : null
   const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
   const timelines = useAppStore(useShallow(state => {
     const held: typeof state.timelines = {}
@@ -148,6 +152,11 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const focusExecutionSession = useCallback((id: string, reference?: WorkbenchProjectionSelection) => {
     clearReveal(); selectOriginalContext(id, reference)
   }, [clearReveal, selectOriginalContext])
+  const openPlaceless = useCallback((id: string) => {
+    // The original placement owner selects the new occurrence and reports its own refusal;
+    // the notice and this action stay available when it declines.
+    clearReveal(); useAppStore.getState().selectSession(id, undefined, { keepSurface: true })
+  }, [clearReveal])
   const revealedContext = useMemo(() => {
     if (!agentReveal) return null
     if (revealSessions.length > 1) return null
@@ -538,8 +547,11 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
           ? <div className="global-session-workspace__empty focus-location-recovery">
             <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
               step: 'Focus work surface', mode: directoryIssue ?? presentation!.issue!,
-              restore: 'Choose a confirmed location. The original Session and work surfaces are retained.'
-            } }} />
+              restore: placeless
+                ? `Its Run is ${placeless.processState}. Open it in a new Tab to continue here; its Session, Run and drafts are unchanged.`
+                : 'Choose a confirmed location. The original Session and work surfaces are retained.'
+            } }} actions={placeless ? <button type="button" className="small-button" data-focus-open-placeless=""
+              onClick={() => openPlaceless(placeless.id)}>Open in a new Tab</button> : null} />
             {presentation?.references.length ? <div className="focus-location-choices" aria-label="Choose Focus location">{presentation.references.map(reference => {
               const layout = layouts[reference.displayWorkspaceId], tab = tabs[reference.tabId]
               const groupIndex = layout ? groupIds(layout.root).indexOf(reference.groupId) : -1
