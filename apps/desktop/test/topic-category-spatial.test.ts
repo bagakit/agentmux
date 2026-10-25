@@ -99,7 +99,7 @@ describe('Topic Category uses original Core identities through local migration',
     expect((await f.state.read())!.graph.spaces.find(space => space.topicId === f.mote.id)?.kind).toBe('mote');
     const { soul: _soul, identityDirectoryPath: _identity, physicalDirectoryPath: _physical, ...metadata } = f.mote;
     const failed = { ...metadata, directoryPath: f.mote.id, readError: 'Original metadata temporarily unreadable' };
-    await expect(f.owner.inspect(failed)).rejects.toMatchObject({ code: 'TOPIC_TARGET_IS_MOTE' });
+    await expect(f.owner.inspect(failed)).resolves.toMatchObject({ contentKind: 'mote', zoneId: topicContentZoneId(f.workspace, f.mote) });
     expect(isKnowledgeTopicInBindings(failed, desktopBindingsFromSpatial((await f.state.read())!.graph))).toBe(false);
   })
   it('hydrates older descriptors from the exact Core Tab Zone without choosing a foreign display binding', async () => {

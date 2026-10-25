@@ -140,7 +140,7 @@ describe('Topic search consumes bounded original Files instead of a second knowl
     expect(all.documents).toHaveLength(2)
     expect(new Set(all.documents.map(item => item.target.zoneId + ':' + item.target.path)).size).toBe(2)
     expect(all.documents.map(item => item.topicId).sort()).toEqual([f.topic.topicId, second.topicId].sort())
-    await expect(f.owner.call('topic.knowledge.search', { topicId: mote.id, query: '共同词' })).rejects.toMatchObject({ code: 'TOPIC_TARGET_IS_MOTE' })
+    await expect(f.owner.call('topic.knowledge.search', { topicId: mote.id, query: '共同词' })).resolves.toMatchObject({ documents: [], entries: [], unavailable: [{ code: 'TOPIC_IDENTITY_UNCONFIRMED' }] })
     expect(await readFile(privatePath, 'utf8')).toBe('共同词私有')
   })
   it('keeps original topic.md and Wiki searchable, skips runtime/build and duplicate UUID backing files, and shares the result limit', async () => {
