@@ -389,7 +389,10 @@ const mockApi: AgentMuxDesktopApi = {
     observeConversation: async () => { throw new Error('Open Desktop to observe the original conversation.') },
     releaseConversationView: async () => { throw new Error('Open Desktop to release the original reading view.') }
   },
+  executeRendererCache: () => { throw new Error('Open Desktop to access the original Renderer platform cache.') },
   performance: {
+    inspectCache: async () => { throw new Error('Open Desktop to inspect the original Renderer platform cache.') },
+    reclaimCache: async () => { throw new Error('Open Desktop to reclaim the original Renderer platform cache.') },
     captureHeapSnapshot: async () => { throw new Error('Open Desktop to explicitly capture native heap material.') },
     inspectHeapSnapshot: async () => { throw new Error('Open Desktop to inspect original heap material.') },
     saveHeapSnapshot: async () => { throw new Error('Open Desktop to save the original heap file.') },
