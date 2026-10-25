@@ -45,6 +45,8 @@ const observers = new Set<(event: AgentSessionHistoryObservation) => void>()
 const readDispatches = api.sessions.dispatches
 let emptyViews = false
 let automationScene = false
+let progressActionsScene = false
+let pendingProgressAction: { held: import('@agentmux/core').ContinuousProgressLoop; resolve(loop: import('@agentmux/core').ContinuousProgressLoop): void; reject(error: Error): void } | undefined
 let automationUpdated: import('@agentmux/core').ContinuousProgressLoop | undefined
 const originalProgressList = api.continuousProgress.list
 api.continuousProgress.list = async target => {
@@ -54,6 +56,7 @@ api.continuousProgress.list = async target => {
 const originalScheduleList = api.schedule.list
 api.schedule.list = async query => {
   if (!automationScene || !original || original.kind !== 'agent') return originalScheduleList(query)
+  if (progressActionsScene) return { schedules: [], executionScope: 'connected-host' }
   const target = { hostId: original.hostId, agentSessionId: original.control.agentSessionId, providerId: original.providerId, workspacePath: original.workspacePath }
   const expected = query.target ?? query.scope
   if (expected && !Object.entries(expected).every(([key, value]) => target[key as keyof typeof target] === value))
@@ -85,7 +88,15 @@ api.sessions.observeHistory = async (_control, listener) => {
 }
 api.sessions.submitPrompt = async () => { calls.push({ action: 'dispatch' }); throw new Error('The private reading scene cannot submit input') }
 api.continuousProgress.create = async () => { calls.push({ action: 'automation-create' }); throw new Error('Reading cannot create automation') }
-api.continuousProgress.action = async () => { calls.push({ action: 'automation-action' }); throw new Error('Reading cannot operate automation') }
+api.continuousProgress.action = async (target, loopId, action, expectedLoop, operationId) => {
+  if (!progressActionsScene) { calls.push({ action: 'automation-action' }); throw new Error('Reading cannot operate automation') }
+  const [held] = await api.continuousProgress.list(target)
+  if (!held || held.loopId !== loopId || pendingProgressAction || JSON.stringify(held) !== JSON.stringify(expectedLoop) ||
+    JSON.stringify(target) !== JSON.stringify({ hostId: held.hostId, agentSessionId: held.agentSessionId, providerId: held.providerId, workspacePath: held.workspacePath }) ||
+    !operationId || action !== 'resume' && action !== 'check') throw new Error('The private action must use the exact original loop, target and request.')
+  calls.push({ action: 'fixture-progress-action', reference: target, query: { loopId, action, operationId, expectedLoop } })
+  return await new Promise<import('@agentmux/core').ContinuousProgressLoop>((resolve, reject) => { pendingProgressAction = { held: structuredClone(held), resolve, reject } })
+}
 api.continuousProgress.update = async request => {
   if (!automationScene) throw new Error('This private reading scene cannot update automation.')
   const [held] = await api.continuousProgress.list(request.target)
@@ -97,7 +108,9 @@ api.continuousProgress.update = async request => {
 }
 Object.assign(window, { messageWorkspace: {
   seed(theme: 'dark' | 'light', tag: string, empty = false, retainNotificationIntents = false) {
+    if (pendingProgressAction) throw new Error('Settle the original private progress action before changing scenes.')
     automationScene = false
+    progressActionsScene = false
     automationUpdated = undefined
     emptyViews = empty
     base.appearance(theme)
@@ -122,6 +135,15 @@ Object.assign(window, { messageWorkspace: {
     return { generation, ...a2a, journalWire, draft: '保留这份尚未发送的草稿。' }
   },
   automation() { automationScene = true; base.progress('paused', true) },
+  progressActions() { automationScene = true; progressActionsScene = true; base.progress('paused') },
+  settleProgressAction(outcome: 'skipped' | 'failure') {
+    const pending = pendingProgressAction
+    if (!pending) throw new Error('There is no original private progress action to settle.')
+    pendingProgressAction = undefined
+    if (outcome === 'failure') { pending.reject(new Error('The original check could not be confirmed. The Agent and manual input remain available.')); return }
+    automationUpdated = { ...pending.held, status: 'active', lastOutcome: 'skipped', lastDecision: 'working', lastTickAt: fixtureEpoch(0, 0, 10000) }
+    pending.resolve(structuredClone(automationUpdated))
+  },
   resumed() { resumedScene = true },
   forgetNotification(operationId: string) { notificationRecords.delete(operationId); localStorage.setItem(fixtureNoticeStorage, JSON.stringify([...notificationRecords])) },
   async restore(theme: 'dark' | 'light', tag: string) { await useAppStore.persist.rehydrate(); return this.seed(theme, tag, false, true) },
