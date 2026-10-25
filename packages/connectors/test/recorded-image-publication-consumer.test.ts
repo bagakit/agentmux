@@ -44,12 +44,15 @@ async function fixture(scope: 'future-shared-conversation' | 'future-native-user
   const server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'images.sock'), connections: new Proxy({} as typeof services.connections, { get: (_target, key) => Reflect.get(services.connections, key) }), spatialState: original.spatial, coreClients: original.coreClients })
   await server.start(); closes.push(() => server.stop())
   const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); closes.push(() => rpc.dispose())
-  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
+  const managed = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: original.credentials }); closes.push(() => managed.dispose())
+  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux'))
+  const retryCli = (operationId: string) => runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'connection', 'delivery', 'retry', '--operation-id', operationId],
+    objectCliEnvironment(original.root, { AGENTMUX_AGENT_SESSION_ID: original.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: original.credentials.capability }))
   const cli = async (operationId: string) => {
     const result = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'connection', 'delivery', 'inspect', '--operation-id', operationId], objectCliEnvironment(original.root))
     expect(result.code, result.stderr).toBe(0); return JSON.parse(result.stdout).result
   }
-  return { ...original, remote, get services() { return services }, port, binding: bound.binding, rpc, cli,
+  return { ...original, remote, get services() { return services }, port, binding: bound.binding, rpc, managed, cli, retryCli,
     async restart() { services.close(); services = await openServices(); closes.push(() => services.close()); return services } }
 }
 
@@ -353,7 +356,7 @@ it('an upload saved before message claim survives reopening the original Host wi
   expect(await f.cli(original.operationId)).toEqual(await f.rpc.call('connection.delivery.inspect', { operationId: original.operationId }))
 }, 20_000)
 
-it('a missing upload key stays upload-unknown, lets independent text pass, and only explicit original retry reuploads the same bytes', async () => {
+it('a missing upload key stays upload-unknown until the bound Agent explicitly retries through the CLI', async () => {
   const f = await fixture(); f.remote.controls.missingUploadKey = true
   await append(f, native('unknown-upload', [imageBlock(), { type: 'text', text: 'Independent text after unconfirmed upload' }]))
   f.services.publication!.refresh()
@@ -367,7 +370,14 @@ it('a missing upload key stays upload-unknown, lets independent text pass, and o
   await vi.waitFor(() => expect(f.services.publication!.observation(f.binding.bindingId, f.binding.revision).state).toBe('unavailable'))
   expect(f.remote.uploads).toHaveLength(1)
   f.remote.controls.missingUploadKey = false
-  await f.services.connections.delivery!.retry({ operationId: original.operationId }, context)
+  expect(await f.services.connections.ownsEnrollmentConnection?.(f.binding.connectionId, f.credentials.agentSessionId)).toBe(false)
+  const retry = vi.spyOn(f.services.connections.delivery!, 'retry')
+  const result = await f.retryCli(original.operationId)
+  expect(result.code, result.stdout + result.stderr).toBe(0)
+  expect(JSON.parse(result.stdout).result.delivery).toMatchObject({ operationId: original.operationId, state: 'pending' })
+  expect(retry).toHaveBeenCalledWith({ operationId: original.operationId }, expect.objectContaining({ actor: { kind: 'agent', id: f.credentials.agentSessionId } }))
+  const help = await runCompiledObjectCli(['connection', 'delivery', 'retry', '--help'], objectCliEnvironment(f.root))
+  expect(help.code, help.stderr).toBe(0); expect(help.stdout).toContain('without owning the bot enrollment')
   await vi.waitFor(() => expect(f.services.publication!.store.inspect(original.operationId)?.state).toBe('confirmed'))
   const recovered = f.services.publication!.store.inspect(original.operationId)!
   expect(recovered.uploads).toEqual([{ state: 'unknown' }, { state: 'confirmed', imageKey: 'original-image-key-2' }])
@@ -382,13 +392,58 @@ it('a possibly applied message keeps the exact uploaded key and prepared wire ac
   const original = imageOperation(f)!
   expect(original.uploads).toEqual([{ state: 'confirmed', imageKey: 'original-image-key-1' }]); expect(original.attempt).toBe(1)
   expect(imageWrites(f)).toHaveLength(1); expect([...f.remote.messages.values()].filter(contentMessage)).toHaveLength(1)
-  await expect(f.services.connections.delivery!.retry({ operationId: original.operationId }, context)).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
+  await expect(f.managed.call('connection.delivery.retry', { operationId: original.operationId })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
+  const retry = await f.retryCli(original.operationId)
+  expect(retry.code).not.toBe(0); expect(retry.stderr).toContain('PUBLICATION_RETRY_UNCONFIRMED')
   await f.restart(); f.services.publication!.refresh()
   await vi.waitFor(() => expect(f.services.publication!.observation(f.binding.bindingId, f.binding.revision).state).toBe('unknown'))
   const restored = f.services.publication!.store.inspect(original.operationId)!
   expect(restored.prepared).toEqual(original.prepared); expect(restored.uploads).toEqual(original.uploads); expect(restored.attempt).toBe(1)
   expect(f.remote.uploads).toHaveLength(1); expect(imageWrites(f)).toHaveLength(1)
   expect(await f.cli(original.operationId)).toMatchObject({ delivery: { state: 'unknown', resourceUpload: { state: 'confirmed', attempt: 1 } } })
+}, 20_000)
+
+it('managed retry checks the original receipt and current authority before changing a retained operation', async () => {
+  const f = await fixture(); f.remote.controls.missingUploadKey = true
+  await append(f, native('guarded-upload', [imageBlock()])); f.services.publication!.refresh()
+  await vi.waitFor(() => expect(imageOperation(f)?.state).toBe('not-applied'))
+  const original = imageOperation(f)!, request = { operationId: original.operationId }, owner = f.services.connections
+  const inspect = owner.delivery!.inspect.bind(owner.delivery), retry = vi.spyOn(owner.delivery!, 'retry')
+  const read = vi.spyOn(owner.delivery!, 'inspect')
+  const known = (await inspect(request)).delivery!
+  for (const [delivery, code] of [
+    [null, 'UNKNOWN_PUBLICATION_OPERATION'],
+    [{ ...known, operationId: 'another-operation' }, 'INVALID_CONNECTION_DELIVERY_DATA'],
+    [{ ...known, reference: { ...known.reference, agentSessionId: 'another-agent' } }, 'CONTROL_PERMISSION_DENIED'],
+    [{ ...known, target: { ...known.target, externalConversationId: 'another-room' } }, 'CONTROL_PERMISSION_DENIED']
+  ] as const) {
+    read.mockResolvedValueOnce({ delivery })
+    await expect(f.managed.call('connection.delivery.retry', request)).rejects.toMatchObject({ code })
+    expect(retry).not.toHaveBeenCalled()
+  }
+  read.mockRestore()
+  let readFinished = false
+  const observed = vi.spyOn(owner.delivery!, 'inspect').mockImplementation(async input => { const result = await inspect(input); readFinished = true; return result })
+  let currentOwner = 'original-owner'
+  const runtime = new core.AgentMuxHostedRuntimeService(f.client, null, () => ({ runtimeId: 'original-runtime', ownerInstanceId: currentOwner,
+    protocolVersion: 2, processId: 123, availability: 'connected', ctxmux: null }))
+  const service = new core.AgentMuxRpcService({ coreClients: f.coreClients, connections: owner, hostedRuntime: () => runtime })
+  closes.push(() => runtime.dispose()); closes.push(() => service.dispose())
+  await expect(service.call('connection.delivery.retry', request, { caller: f.credentials,
+    assertCurrent: () => { if (readFinished) throw new core.AgentMuxError('Original caller changed', 'CONTROL_PERMISSION_DENIED') }
+  })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  readFinished = false
+  await expect(service.call('connection.delivery.retry', request, { caller: f.credentials,
+    runtimeFence: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' },
+    assertCurrent: () => { if (readFinished) currentOwner = 'replacement-owner' }
+  })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
+  observed.mockRestore()
+  expect(f.services.publication!.store.inspect(original.operationId)).toEqual(original)
+  const paused = await owner.bindings!.pause({ operationId: 'pause-before-original-retry', bindingId: f.binding.bindingId, expectedRevision: f.binding.revision }, context)
+  expect(paused.state).toBe('applied')
+  await expect(f.managed.call('connection.delivery.retry', request)).rejects.toMatchObject({ code: 'PUBLICATION_NOT_AUTHORIZED' })
+  expect(f.remote.uploads).toHaveLength(1); expect(imageWrites(f)).toHaveLength(0)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
 }, 20_000)
 
 it('an interrupted in-flight upload stays unknown after reopening, without silently retrying or pretending a message was attempted', async () => {
@@ -486,7 +541,7 @@ it('invalid original image bytes and platform dimension bounds retain exact gaps
   expect(f.services.publication!.store.coverage(f.binding).gaps.filter(gap => gap.reason === 'resource-unavailable')).toHaveLength(2)
 }, 15_000)
 
-it('a rejected image message leaves independent text deliverable and explicit retry keeps its original uploaded key and frozen wire', async () => {
+it('a rejected image message lets the bound Agent retry through the SDK with its original uploaded key and frozen wire', async () => {
   const f = await fixture(); f.remote.controls.rejectImageMessage = true
   await append(f, native('rejected-image-message', [imageBlock(), { type: 'text', text: 'Independent text after rejected image message' }]))
   f.services.publication!.refresh()
@@ -495,7 +550,8 @@ it('a rejected image message leaves independent text deliverable and explicit re
   expect(original.attempt).toBe(1); expect(original.uploads?.at(-1)?.state).toBe('confirmed')
   await vi.waitFor(() => expect(JSON.stringify(posts(f))).toContain('Independent text after rejected image message'))
   f.remote.controls.rejectImageMessage = false
-  await f.services.connections.delivery!.retry({ operationId: original.operationId }, context)
+  expect(await f.services.connections.ownsEnrollmentConnection?.(f.binding.connectionId, f.credentials.agentSessionId)).toBe(false)
+  await f.managed.call('connection.delivery.retry', { operationId: original.operationId })
   await vi.waitFor(() => expect(f.services.publication!.store.inspect(original.operationId)?.state).toBe('confirmed'))
   const recovered = f.services.publication!.store.inspect(original.operationId)!
   expect(recovered.attempt).toBe(2); expect(recovered.uploads).toEqual(original.uploads); expect(recovered.prepared).toEqual(original.prepared)
