@@ -7,7 +7,7 @@
 @media (max-width: 560px) { .a2a-settings__global { align-items: flex-start; flex-direction: column; gap: var(--sp-2); } }
 .a2a-settings__choice-preview { display: grid; grid-template-columns: minmax(230px, .9fr) minmax(250px, 1.1fr); gap: var(--sp-5); align-items: start; }
 [data-a2a-settings] .settings-reading-width { margin: 0; }
-.a2a-settings__preview { min-width: 0; margin: 0; padding: var(--sp-4); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.a2a-settings__preview { min-width: 0; margin: 0; padding: var(--sp-4); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .a2a-settings__preview figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
 .a2a-settings__message { display: flex; align-items: flex-start; gap: var(--sp-3); }
 .a2a-settings__message > svg { flex: none; color: var(--text-2); margin-top: 2px; }

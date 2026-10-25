@@ -11,7 +11,7 @@
 .message-tool-layout-option { display: grid; gap: var(--sp-1); width: 100%; min-width: 0; }
 [data-message-tool-settings] .settings-group > .settings-pane-actions { position: static; min-height: 0; margin-top: var(--sp-3); padding: var(--sp-3) 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; }
 
-.message-tool-preview { margin: 0; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); }
+.message-tool-preview { margin: 0; padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); }
 .message-tool-preview figcaption { display: flex; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
 .message-tool-preview__composer { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); }
 .message-tool-preview__text { flex: 1; min-width: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }

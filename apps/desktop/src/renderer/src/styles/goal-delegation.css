@@ -1,7 +1,7 @@
 .goal-delegation { display: grid; gap: var(--sp-4); padding: var(--sp-4) 0; border-top: 1px solid var(--line-soft); }
 .goal-delegation__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .goal-delegation__heading > strong { color: var(--text-2); font-size: var(--fs-body); font-weight: 550; }
-.goal-delegation__item { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--surface-1); }
+.goal-delegation__item { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); }
 .goal-delegation__item > strong { color: var(--text-2); font-size: var(--fs-body); font-weight: 500; line-height: 1.5; }
 .goal-delegation__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .goal-delegation__source { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }

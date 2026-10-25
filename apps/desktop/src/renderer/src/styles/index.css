@@ -95,6 +95,7 @@
 @import '@agentmux/client-ui/styles/conversation-message-disclosure.css';
 @import '@agentmux/client-ui/styles/reading-find.css';
 @import '@agentmux/client-ui/styles/conversation-resource-text.css';
+@import '@agentmux/client-ui/styles/conversation-resource-file.css';
 @import '@agentmux/client-ui/styles/conversation-reactions.css';
 @import '@agentmux/client-ui/styles/markdown.css';
 @import '@agentmux/client-ui/styles/conversation-image.css';

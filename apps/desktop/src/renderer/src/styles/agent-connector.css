@@ -139,7 +139,7 @@
 .agent-connector-room-metadata { display: flex; flex-wrap: wrap; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-micro); }
 .agent-connector-room-metadata > span { padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
 .agent-connector-section-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: start; gap: var(--sp-4); }
-.agent-connector-section { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--surface-1); }
+.agent-connector-section { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); }
 .agent-connector-section > h3, .agent-connector-section .agent-connector-fields > h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: var(--fs-body); font-weight: 600; }
 
 .agent-connector-room-refresh { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--line-soft); }
@@ -150,7 +150,7 @@
 .agent-connector-dialog [data-connection-section] { scroll-margin-block: var(--sp-3); }
 .agent-connector-section-stack { display: grid; align-content: start; gap: var(--sp-4); min-width: 0; }
 .agent-connector-section-grid > .agent-connector-section-stack:only-child { grid-column: 1 / -1; }
-.agent-connector-dialog .connector-service-control { margin: 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: transparent; }
+.agent-connector-dialog .connector-service-control { margin: 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; }
 .agent-connector-dialog .connector-service-control__heading { gap: var(--sp-3); }
 .agent-connector-dialog .connector-service-control__heading h3 { font-size: var(--fs-meta); }
 .agent-connector-dialog .connector-service-control .settings-group-note { font-size: var(--fs-micro); }

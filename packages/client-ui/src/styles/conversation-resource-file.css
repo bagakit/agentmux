@@ -7,7 +7,7 @@
 .conversation-resource-file__reference summary { cursor: pointer; width: fit-content; }
 .conversation-resource-file__download { display: inline-flex; align-items: center; gap: var(--sp-2); padding: 4px 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); cursor: pointer; white-space: nowrap; }
 .conversation-resource-file__download:hover { color: var(--text); }
-.conversation-resource-file__download:focus-visible, .conversation-resource-file__reference summary:focus-visible { outline: 1px solid var(--text-2); outline-offset: 3px; }
+.conversation-resource-file__download:focus-visible, .conversation-resource-file__reference summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; }
 .conversation-resource-file__download:disabled { cursor: progress; }
 .conversation-resource-file__error { grid-column: 2 / -1; margin: 0; color: var(--text-2); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 @container (max-width: 360px) {

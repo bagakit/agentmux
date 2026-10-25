@@ -45,7 +45,7 @@
 .mobile-mote-quick-open { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 0 6px; color: var(--green); background: transparent; font-size: 11px; white-space: nowrap; }
 .mobile-mote-profile-action { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 44px; min-height: 44px; padding: 0 6px; background: transparent; color: var(--text-2); font-size: 12px; }
 .mobile-mote-rail { display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-inline: contain; padding: 2px 0 8px; scrollbar-width: thin; }
-.mobile-mote-choice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; flex: 0 0 72px; min-height: 68px; padding: 8px 5px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; color: var(--text-2); }
+.mobile-mote-choice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; flex: 0 0 72px; min-height: 68px; padding: 8px 5px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); }
 .mobile-mote-choice > span:last-child { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .mobile-mote-choice[aria-pressed='true'] { background: var(--surface-2); border-color: var(--line); color: var(--text); }
 .mobile-mote-choice:hover { background: var(--surface-1); }

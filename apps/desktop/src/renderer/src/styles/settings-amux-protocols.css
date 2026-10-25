@@ -2,7 +2,7 @@
 .amux-protocols__intro { display: flex; align-items: flex-start; gap: var(--sp-5); padding-bottom: var(--sp-4); }
 .amux-protocols__intro .settings-group-note { flex: 1; margin: 0; max-width: 74ch; font-size: var(--fs-meta); line-height: 1.6; }
 .amux-protocols__intro > button { flex: none; }
-.amux-protocols__list { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+.amux-protocols__list { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
 .amux-protocols__row { min-width: 0; border-top: 1px solid var(--line-soft); }
 .amux-protocols__row:first-child { border-top: 0; }
 .amux-protocols__row[open] { background: var(--surface-1); }

@@ -23,7 +23,7 @@
 .connector-identity-field__copy { grid-column: 2; grid-row: 1 / 3; align-self: center; }
 .connector-identity-field--compact { column-gap: var(--sp-1); }
 .connector-identity-field--compact .connector-identity-field__value { font-size: var(--fs-micro); }
-.connector-account-summary { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-3) var(--sp-4); background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: var(--radius-md); }
+.connector-account-summary { display: grid; gap: var(--sp-3); min-width: 0; padding: var(--sp-3) var(--sp-4); background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
 .connector-account-summary__identities { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--sp-4); min-width: 0; }
 .connector-account-summary__status { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
 @media (pointer: coarse) { .connector-entity__copy.content-copy { min-height: 44px; } }

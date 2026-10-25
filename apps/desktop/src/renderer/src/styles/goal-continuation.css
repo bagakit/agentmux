@@ -1,4 +1,4 @@
-.goals-supervisor-guide { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4); background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: var(--radius-md); }
+.goals-supervisor-guide { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4); background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
 .goals-supervisor-guide__orbit { display: flex; flex: 0 0 30px; align-items: center; justify-content: center; color: var(--text-3); }
 .goals-supervisor-guide > div { flex: 1; min-width: 0; }
 .goals-supervisor-guide strong { color: var(--text-2); font-size: var(--fs-body); font-weight: 550; }

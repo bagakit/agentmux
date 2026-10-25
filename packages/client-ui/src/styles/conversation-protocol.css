@@ -3,7 +3,7 @@
   margin-block: var(--sp-2);
   padding: var(--sp-3);
   border: 1px solid var(--line-soft);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--surface-1);
   color: var(--text-2);
 }
@@ -27,5 +27,5 @@
 .conversation-protocol[data-protocol-kind='a2a'] { border-inline-start-width: 2px; }
 .conversation-protocol[data-protocol-kind='a2a-reference'] { background: var(--surface-2); }
 .conversation-protocol[data-protocol-kind='continue'], .conversation-protocol[data-protocol-kind='reaction'] { padding-block: var(--sp-2); }
-.log-turn__declared-context { padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--surface-1); }
+.log-turn__declared-context { padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); }
 .log-turn__declared-context > summary { min-height: 24px; }
