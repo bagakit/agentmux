@@ -75,17 +75,20 @@ export class PublicationHost implements ConnectionDeliveryPort {
     }
   }
   /** Optional feedback has no network work on the ingress path; its durable effect wakes only this audience. */
-  receiveQuery(binding: RoomBinding, record: import('@agentmux/core/connections').ConnectionIngressMessage): void {
+  receiveQuery(binding: RoomBinding, record: import('@agentmux/core/connections').ConnectionIngressMessage, directAdmission?: () => boolean): void {
     const lane = this.lanes.get(binding.bindingId)
     try {
       if (!this.authorized(binding) || this.options.connections.publicationAdapter(binding.connectionId)?.queryFeedback !== true) return
+      // Direct intake is tied to its original ready admission, not today's latest audience.
+      if (record.conversationKind === 'direct' && !directAdmission?.()) return
       const original = readRoomPublicationBinding(this.options.bindings, binding)
       if (!original) { if (lane) lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }; return }
-      this.store.queueQueryReceived(original, record)
+      this.store.queueQueryReceived(original, record, record.conversationKind === 'direct' ? binding : undefined)
       if (lane) this.wake(lane)
     } catch {
       if (lane) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }
-      // The captured input/native adoption window recovers this same effect; input remains usable.
+      console.warn('[AgentMux] PUBLICATION_QUERY_FEEDBACK_STORAGE_UNCONFIRMED: optional feedback persistence could not be confirmed; the original input remains available.')
+      // Group history may recover feedback. Direct persistence failure stays an observation; input remains usable.
     }
   }
   /** A member rule changes only existing lanes for that original application; receiver configuration is unchanged. */

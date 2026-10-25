@@ -6,9 +6,15 @@ import { conversationInputAdoptionEdges, conversationInputIdentity, type Convers
 import type { PublicationBoundary, PublicationOperation, PublicationStore, QueryFeedbackPayload } from './publication-store.js'
 
 /** These effects use the existing Outbox. No separate input state, retry queue or Runtime. */
-export function queueQueryFeedback(store: PublicationStore, boundary: PublicationBoundary, query: ConnectionIngressMessage, stage: QueryFeedbackPayload['stage'], witness?: ConversationInputWitness, completion?: PublicationOperation['queryCompletion']): void {
-  const target = query.group?.target
-  if (query.conversationKind !== 'group' || query.state === 'refused' || !target ||
+export function queueQueryFeedback(store: PublicationStore, boundary: PublicationBoundary, query: ConnectionIngressMessage, stage: QueryFeedbackPayload['stage'], witness?: ConversationInputWitness, completion?: PublicationOperation['queryCompletion'], directBinding?: import('@agentmux/core/connections').RoomBinding): void {
+  // Only an explicit original ready admission can supply a direct received target.
+  // Native adoption/completion still use the existing group contract below.
+  const direct = query.conversationKind === 'direct' && stage === 'received' ? directBinding : undefined
+  const target = query.conversationKind === 'group' ? query.group?.target : direct ? {
+    bindingId: direct.bindingId, bindingRevision: direct.revision, connectionId: direct.connectionId,
+    hostId: direct.executionHostId, agentSessionId: direct.agentSessionId
+  } : undefined
+  if (query.state === 'refused' || !target || direct && (!isDeepStrictEqual(direct.application, query.application) || direct.externalConversationId !== query.externalConversationId) ||
     !store.publicationMember(boundary, target.bindingId, target.bindingRevision) || target.connectionId !== boundary.connectionId ||
     target.hostId !== boundary.executionHostId || target.agentSessionId !== boundary.agentSessionId ||
     query.connectionId !== boundary.connectionId || query.externalConversationId !== boundary.externalConversationId || !isDeepStrictEqual(query.application, boundary.application)) return
