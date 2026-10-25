@@ -3,7 +3,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { attentionAccentFor } from '../lib/attention-event'
 import {
   buildQuickSwitchIndex,
@@ -18,11 +18,13 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useAppStore } from '../store'
 import { QuickOpenFiles } from './QuickOpenFiles'
 import { desktopElementVisible } from '../lib/desktop-presentation'
+import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 const ThemeFileCodeIcon = semanticIconComponent('file.code')
+const ThemeGitCompareIcon = semanticIconComponent('git.compare')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeKeyEnterIcon = semanticIconComponent('control.key-enter')
 const ThemeKeyUpIcon = semanticIconComponent('control.key-up')
@@ -41,9 +43,23 @@ function KindGlyph({ item }: { item: QuickSwitchItem }) {
     if (item.providerId) return <AgentAvatar label={item.title} sessionId={item.target.kind === 'session' ? item.target.sessionId : undefined} state={item.state ?? undefined} providerId={item.providerId} size={14} />
     return <ThemeObjectTerminalIcon size={13} />
   }
-  // Non-session tab rows: file / browser / launcher get their own quiet kind glyph.
-  if (item.title === 'New Tab') return <ThemeObjectLauncherIcon size={13} />
-  return item.subtitle.includes('://') ? <ThemeObjectBrowserIcon size={13} /> : <ThemeFileCodeIcon size={13} />
+  // Non-session tab rows take their glyph from the typed surface kind, never from title or subtitle text.
+  switch (item.surfaceKind) {
+    case 'launcher': return <ThemeObjectLauncherIcon size={13} />
+    case 'browser': return <ThemeObjectBrowserIcon size={13} />
+    case 'git':
+    case 'git-diff': return <ThemeGitCompareIcon size={13} />
+    case 'file': return <ThemeFileCodeIcon size={13} />
+    case 'agent':
+    case 'terminal':
+    case null: return <ThemeObjectTerminalIcon size={13} />
+    default: {
+      const unhandled: never = item.surfaceKind
+      // Keep compile-time exhaustiveness without making an unknown glyph a navigation failure.
+      void unhandled
+      return <ThemeObjectTerminalIcon size={13} />
+    }
+  }
 }
 
 export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; onClose: () => void; returnFocus?: () => HTMLElement | null }) {
@@ -59,8 +75,10 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
   const [activeIndex, setActiveIndex] = useState(0)
   const [mode, setMode] = useState<'sessions' | 'files'>('sessions')
   const listRef = useRef<HTMLDivElement>(null)
+  const queryRef = useRef<HTMLInputElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const activated = useRef(false)
+  const optionId = useId()
 
   const items = useMemo(
     () => open && mode === 'sessions' ?
@@ -107,6 +125,10 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
           ref={contentRef}
           className="quick-switch dialog-surface"
           aria-label={mode === 'files' ? 'Open a project file' : 'Jump to a session or tab'}
+          onOpenAutoFocus={event => {
+            const field = contentRef.current?.querySelector<HTMLInputElement>('[role="combobox"]')
+            if (field) { event.preventDefault(); field.focus({ preventScroll: true }) }
+          }}
           onCloseAutoFocus={event => {
             event.preventDefault()
             if (activated.current) return
@@ -115,7 +137,7 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
                 (active === ownerDocument.body || active === target || !active?.isConnected || contentRef.current?.contains(active))) target.focus({ preventScroll: true })
           }}
           onKeyDown={(event) => {
-            if (mode === 'files') return
+            if (mode === 'files' || event.target !== queryRef.current) return
             // 组字确认用的 Enter（CJK 输入法）不能激活选中项，否则一次组字确认会误跳到某个会话/标签。
             if (isImeCompositionKeyDown(event)) return
             if (event.key === 'ArrowDown') {
@@ -134,31 +156,38 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
           <Dialog.Description className="quick-switch__description">
             {mode === 'files' ? 'Search project file names. Add a line and column to reveal source.' : 'Search by name or amux Agent ID. Agents that need you rank first.'}
           </Dialog.Description>
-          <div className="quick-switch__modes" aria-label="Quick switch mode">
-            <button type="button" aria-pressed={mode === 'sessions'} onClick={() => setMode('sessions')}>Sessions & tabs</button>
-            <button type="button" aria-pressed={mode === 'files'} onClick={() => setMode('files')}>Project files</button>
-          </div>
+          <SurfaceModeSwitch className="quick-switch__modes" ariaLabel="Quick switch mode" semantics="pressed" active={open} value={mode}
+            options={[{ value: 'sessions', label: 'Sessions & tabs' }, { value: 'files', label: 'Project files' }]} onChange={setMode} />
           {mode === 'files' ? open ? <QuickOpenFiles onClose={() => { activated.current = true; onClose() }} /> : null : <>
           <div className="quick-switch__input">
             <ThemeActionSearchIcon size={15} />
             {/* autoFocus is honest here: the dialog exists only to take this query. */}
             <TextInput
+              ref={queryRef}
               autoFocus
               value={query}
               placeholder="Search sessions, tabs or amux ID…"
               aria-label="Search sessions and tabs"
+              role="combobox"
+              aria-expanded={results.length > 0}
+              aria-autocomplete="list"
+              aria-activedescendant={results[activeIndex] ? `${optionId}-${activeIndex}` : undefined}
               aria-controls="quick-switch-list"
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
-          <div className="quick-switch__list" id="quick-switch-list" role="listbox" ref={listRef}>
-            {results.length === 0 ? (
-              <div className="quick-switch__empty">No open session or tab matches “{query}”.</div>
-            ) : (
-              results.map((item, index) => (
+          {results.length === 0 ? (
+            <div className="quick-switch__empty" role="status">
+              {query.trim() ? <>No open session or tab matches “{query.trim()}”.</> : 'No open sessions or tabs yet.'}
+            </div>
+          ) : null}
+          <div className="quick-switch__list" id="quick-switch-list" role="listbox" aria-label="Sessions and tabs" ref={listRef} hidden={results.length === 0}>
+            {results.map((item, index) => (
                 <button
                   key={item.id}
+                  id={`${optionId}-${index}`}
                   type="button"
+                  tabIndex={-1}
                   role="option"
                   aria-selected={index === activeIndex}
                   data-active={index === activeIndex}
@@ -174,8 +203,7 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
                   </span>
                   {item.state && !item.providerId ? <StatusDot status={{ state: item.state, source: 'native-hook' }} /> : null}
                 </button>
-              ))
-            )}
+              ))}
           </div>
           </>}
           <div className="quick-switch__footer">

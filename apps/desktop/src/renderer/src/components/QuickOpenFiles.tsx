@@ -1,6 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { FileNameListing } from '@agentmux/core'
 import { api } from '../lib/api'
 import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
@@ -22,6 +22,7 @@ export function QuickOpenFiles({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const [reading, setReading] = useState(false), [retry, setRetry] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
+  const optionId = useId()
   const recent = useMemo(() => Object.values(tabs).reverse()
     .flatMap(tab => Object.values(tab.regions).flatMap(surface => surface.kind === 'file' && surface.workspaceId === workspaceId ? [surface.path] : [])), [tabs, workspaceId])
   useEffect(() => {
@@ -53,7 +54,9 @@ export function QuickOpenFiles({ onClose }: { onClose: () => void }) {
   }
   return <div className="quick-file-picker">
     <div className="quick-switch__input"><ThemeActionSearchIcon size={15} /><TextInput autoFocus value={query} placeholder="Find project files…  path:line:column"
-      aria-label="Find project files" aria-controls="quick-file-list" onChange={event => setQuery(event.target.value)} onKeyDown={event => {
+      aria-label="Find project files" role="combobox" aria-expanded={results.length > 0} aria-autocomplete="list"
+      aria-controls={`${optionId}-list`} aria-activedescendant={results[activeIndex] ? `${optionId}-${activeIndex}` : undefined}
+      onChange={event => setQuery(event.target.value)} onKeyDown={event => {
     if (isImeCompositionKeyDown(event)) return
     if (event.key === 'ArrowDown') { event.preventDefault(); setActiveIndex(index => Math.min(index + 1, Math.max(0, results.length - 1))) }
     else if (event.key === 'ArrowUp') { event.preventDefault(); setActiveIndex(index => Math.max(0, index - 1)) }
@@ -64,14 +67,14 @@ export function QuickOpenFiles({ onClose }: { onClose: () => void }) {
       {listing && !listing.complete ? <span>Partial listing ({listing.partialReason}). <button onClick={() => setRetry(value => value + 1)}>Refresh</button></span> : null}
       {error ? <span>{error} <button onClick={() => setRetry(value => value + 1)}>Retry</button></span> : null}
     </div>
-    <div className="quick-switch__list" id="quick-file-list" role="listbox" ref={listRef}>
-      {results.map((path, index) => <button key={path} type="button" role="option" aria-selected={index === activeIndex} data-active={index === activeIndex}
+    {!results.length ? <div className="quick-switch__empty" role="status">{reading ? 'Looking for files. Recently opened files remain available.' : error ? 'Discovery is unavailable. Retry or open an exact path from the Explorer.' : parsed.query ? `No files match “${parsed.query}”.` : 'No project files are available in this listing.'}</div> : null}
+    <div className="quick-switch__list" id={`${optionId}-list`} role="listbox" aria-label="Project files" ref={listRef} hidden={!results.length}>
+      {results.map((path, index) => <button key={path} id={`${optionId}-${index}`} type="button" tabIndex={-1} role="option" aria-selected={index === activeIndex} data-active={index === activeIndex}
         className="quick-switch__row" onMouseMove={() => setActiveIndex(index)} onClick={() => activate(path)}>
         <span className="quick-switch__labels"><FilePathLabel path={path} /></span>
         {recent.includes(path) ? <span className="quick-file-picker__recent">Open</span> : null}
       </button>)}
-      {!results.length ? <div className="quick-switch__empty">{reading ? 'Looking for files. Recently opened files remain available.' : error ? 'Discovery is unavailable. Retry or open an exact path from the Explorer.' : 'No files match this listing.'}</div> : null}
-      {results.length === 100 ? <div className="quick-file-picker__scope">Showing the first 100 matches. Refine the path to narrow results.</div> : null}
     </div>
+    {results.length === 100 ? <div className="quick-file-picker__scope" role="status">Showing the first 100 matches. Refine the path to narrow results.</div> : null}
   </div>
 }

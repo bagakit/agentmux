@@ -5,6 +5,7 @@ import {
   activeWorkbenchSurface,
   titleWorkbenchSurface,
   workspaceForSession,
+  type WorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
 import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
@@ -38,6 +39,9 @@ export type QuickSwitchItem = {
   // How long the state has been observed — the tiebreaker inside an attention class, so the row that
   // has waited longest ranks first, matching the status bar's "jump to the earliest" contract.
   observedAt: number
+  // A tab row's typed surface kind, already resolved for its title. The row glyph reads only this;
+  // it is never derived from the visible title or subtitle text. Session rows carry null.
+  surfaceKind: WorkbenchSurface['kind'] | null
   target: QuickSwitchTarget
 }
 
@@ -142,6 +146,7 @@ export function buildQuickSwitchIndex(input: {
       providerId: session.kind === 'agent' ? session.providerId : null,
       state: session.kind === 'agent' ? session.status.state : null,
       observedAt: session.status.observedAt,
+      surfaceKind: null,
       target: { kind: 'session', sessionId: session.id }
     })
   }
@@ -164,6 +169,7 @@ export function buildQuickSwitchIndex(input: {
       providerId: null,
       state: null,
       observedAt: 0,
+      surfaceKind: surface.kind,
       target: { kind: 'tab', tabId: tab.id, workspaceId: tab.workspaceId, tabGroupId }
     })
   }
