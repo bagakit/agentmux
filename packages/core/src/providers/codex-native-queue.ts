@@ -14,6 +14,8 @@ import { runProcess } from '../process-runner.js'
 import { locateAppServerNativeSession } from './app-server-native-session.js'
 import { codexMainNativeRecord } from './codex-native-record-role.js'
 
+// Stable original queue contract, qualified on 0.163 and 0.165. This identifier
+// is retained by frozen claims and does not assert the running executable version.
 const PROTOCOL = 'codex-durable-queue-0.163'
 const unavailable = () => new AgentMuxError('The original native queue source is unconfirmed. The message, Agent and ordinary terminal input remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
 type FileObject = Pick<NativeProcessFile, 'path' | 'device' | 'inode'>
@@ -128,7 +130,7 @@ export const prepareCodexDurableQueueInput: NonNullable<AgentProvider['prepareNa
   const executable = await nativeProcessExecutable(owner, signal)
   await assertFile(executable)
   const version = await runProcess(executable.path, ['--version'], { signal, timeoutMs: 2_000, maxOutputBytes: 4096 })
-  if (version.exitCode !== 0 || version.stderr || version.stdout.trim() !== 'codex-cli 0.163.0') throw unavailable()
+  if (version.exitCode !== 0 || version.stderr || !['codex-cli 0.163.0', 'codex-cli 0.165.0'].includes(version.stdout.trim())) throw unavailable()
   const storage = stores(await nativeProcessFiles(owner, signal, 'process'))
   await assertFile(storage.queue); await assertFile(storage.state)
   const helper = await openQueueHelper(executable.path, dirname(storage.queue.path), context.workspacePath, signal)
